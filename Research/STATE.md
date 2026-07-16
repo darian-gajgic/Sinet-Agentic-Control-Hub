@@ -28,7 +28,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T03 | orchestration-and-multiagent | A2 | FULL | **held** | → (assigned at launch) | same hold as T02 |
 | T04 | context-engineering | A2 | FULL | **held** | → (assigned at launch) | same hold (weak coupling; held for cleanliness) |
 | T05 | intake-planning-spec-pipeline | A2 | FULL | **running (resumed in-place)** | → Research/03-intake-planning-spec-pipeline.md | transcript-resumed 2026-07-16; finishing verification (re-running killed verifiers) then synthesis |
-| T06 | verification-and-quality-loops | A2 | FULL | **running (resumed in-place)** | → Research/04-verification-and-quality-loops.md | transcript-resumed 2026-07-16; verification complete (30/30), writing report |
+| T06 | verification-and-quality-loops | A2 | FULL | **committed + validated** | Research/04-verification-and-quality-loops.md | PASS — 353 lines, 98 sources; survived pause/resume; spot-checks 3/3 verbatim |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
 | T08 | metering-quota-scheduling | B1 | FULL | pending | — | consumes G1 addendum |
 | T09 | sandboxing-confinement | B1 | FULL | pending | — | consumes G1 addendum |
@@ -49,6 +49,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 |---|---|---|
 | 01 | T01 | 01-execution-engines-and-adapters.md |
 | 02 | T17 | 02-provider-watchlist-and-onboarding-criteria.md |
+| 03 | T05 | 03-intake-planning-spec-pipeline.md (in progress) |
+| 04 | T06 | 04-verification-and-quality-loops.md |
 
 ## Session log
 
