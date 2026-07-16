@@ -62,6 +62,9 @@ Depth: **FULL** = deep-research run (multi-source, adversarially verified). **LI
 | T13 | platform-stack-architecture | C | LIGHT | S3, §13, 15.6 | — |
 | T14 | worker-ontology-and-domain-agents | C | FULL | §7, D8, D10, 5.7 | domain-specific agents |
 | T15 | local-models-layer | C | FULL | Operating reality (local tier), S2.7, 3.11, 1.10 | — |
+| T17 | provider-watchlist-and-onboarding-criteria | A1b | FULL (narrow) | 2.7, D3, 3.1/13.4, S2.8 | (operator ask 2026-07-16: xAI/Grok, DeepSeek, hosted open-weights, future-provider onboarding) |
+
+Added 2026-07-16 (operator directive during pilot review): **T17** extends T01's provider table (xAI and DeepSeek were absent; hosted open-weights subscriptions thin) and produces the provider-onboarding criteria checklist + watchlist process, resolving report 01's open question #8. Runs as an addendum during the Wave A2 hold; T15 keeps own-GPU open-weights depth.
 
 Numbering note: report files get the next free `NN` in `Research/` **in completion order** (README convention); `STATE.md` maps T## → NN. Briefs live in `Research/briefs/T##-<slug>.md`; the shared payload preamble is `Research/briefs/00-shared-context.md`.
 

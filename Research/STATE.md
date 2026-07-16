@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** HOLDING — operator is reading the pilot report (`Research/01-execution-engines-and-adapters.md`) before authorizing Wave A2. Pilot itself: validated PASS.
-**Next action:** when the operator says "continue the research campaign" / "launch Wave A2": launch T02–T06 (Mode A, 2 concurrent, max effort). If the operator requests brief/format adjustments from their read, apply those to briefs + runbook first, then launch.
+**Campaign status:** HOLDING for Wave A2 (operator reading pilot report) — **T17 addendum running in parallel** (operator-directed 2026-07-16: xAI/DeepSeek/hosted-open-weights coverage + provider onboarding criteria).
+**Next action:** (1) on T17 completion: validate → commit → digest to operator. (2) When the operator authorizes: launch Wave A2 T02–T06 (Mode A, 2 concurrent, max effort), applying any adjustments from their pilot read first.
 **Last updated:** 2026-07-16 (setup session, post-pilot).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -37,6 +37,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T12 | deliverables-review-git | B2 | FULL | pending | — | |
 | T16 | oss-harvest-validation | B2 | FULL | pending | — | deliberately after Wave A |
 | T13 | platform-stack-architecture | C | LIGHT | pending | — | |
+| T17 | provider-watchlist-and-onboarding-criteria | A1b | FULL (narrow) | **running** | → Research/02-provider-watchlist-and-onboarding-criteria.md | addendum to T01; launched 2026-07-16 during hold |
 | T14 | worker-ontology-and-domain-agents | C | FULL | pending | — | |
 | T15 | local-models-layer | C | FULL | pending | — | |
 
@@ -52,4 +53,5 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 
 - **2026-07-16 — setup session (Fable 5):** read all Docs/, probed subagent skill access (deep-research available in subagents → Mode A viable), built campaign plan, 16 briefs, gate template, coordinator skill. G0 presented to operator.
 - **2026-07-16 — same session:** G0 answered: pilot first. Max-effort rule recorded (skill §entry-0). T01 launched in Mode A; report target `Research/01-execution-engines-and-adapters.md`.
+- **2026-07-16 — same session, during hold:** operator directive: also cover xAI/Grok, DeepSeek, further Chinese providers, hosted open-weights subscriptions, and a future-provider onboarding process (xAI + DeepSeek were genuinely absent from report 01's table). Added T17 (brief + CAMPAIGN row), launched it as A1b addendum — Wave A2 hold unchanged. Architectural note recorded: future-provider extensibility is already fixed by D3 + report 01 §4 (adapter-only coupling, billing as data); T17 adds coverage + the standing onboarding/watchlist process.
 - **2026-07-16 — same session, pilot complete:** T01 finished in ~48 min / 51 tool uses / ~266k subagent tokens; deep-research harness ran fully (5-angle fan-out, adversarial pass 4×SUPPORT 1×PARTIAL-REFUTE). Research agent committed its own report (cfe4dd6) — benign runbook deviation; coordinator validated afterwards: checklist PASS, citation spot-checks 3/3 verbatim (Anthropic pause article, opencode server API, opencode V2 break). **Headline:** spec's "Agent SDK → credits ⇒ no option" claim is stale (paused 2026-06-15 before effect) and its implied remedy wrong — real risk class is "all headless subscription use repriceable on ~30 days notice"; recommendation = dual substrate (pinned opencode v1.x serve per user + wrapped `claude -p` per user), Agent SDK kept as in-adapter alternative for a G1 spike. 4 new platform problems filed (P-T01-1..4 → T07/T08/spec). Spec's Operating-reality bullet flagged stale — operator decides whether to amend Docs (read-only for sessions). Mode A validated for Wave A2.
