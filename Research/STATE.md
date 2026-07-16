@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** WAVE A2 — batch 1 COMPLETE. T05 + T06 both validated PASS and committed (reports 03 + 04). **T02–T04 remain held** for the operator's engine-direction nod from their report-01 read (§2.1/§4/§7 suffice; the nod is one sentence).
-**Next action:** on the operator's nod: launch T02 + T03 (2-concurrent), then T04 as a slot frees. Then gate G1 (memo template ready; includes report-02 §9 + report-03 §7 + report-04 §7 operator backlogs).
+**Campaign status:** WAVE A2 — batch 2 RUNNING. **Engine-direction nod GIVEN 2026-07-17** (dual substrate approved as working direction; final at G1). T02 + T03 launched (targets: reports 05 + 06); T04 released, queued for the next free slot.
+**Next action:** validate T02/T03 reports as they complete (checklist), commit each; launch T04 when a slot frees. Then gate G1 (memo template ready; includes report-02 §9 + report-03 §7 + report-04 §7 operator backlogs + spec operating-reality-bullet amendment, still undecided).
 **Last updated:** 2026-07-17 (operator report-01 review session; two G1-backlog decisions pre-registered).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -24,9 +24,9 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T | Slug | Wave | Depth | Status | Report file | Notes |
 |---|---|---|---|---|---|---|
 | T01 | execution-engines-and-adapters | A1 | FULL | **committed + validated** | Research/01-execution-engines-and-adapters.md | pilot PASS — 322 lines, 80 sources/158 URLs; ~48 min, ~266k tokens; commit cfe4dd6 |
-| T02 | agent-loop-and-harness-engineering | A2 | FULL | **held** | → Research/05-… (assigned at launch) | awaits operator engine-direction nod (leans on report 01) |
-| T03 | orchestration-and-multiagent | A2 | FULL | **held** | → (assigned at launch) | same hold as T02 |
-| T04 | context-engineering | A2 | FULL | **held** | → (assigned at launch) | same hold (weak coupling; held for cleanliness) |
+| T02 | agent-loop-and-harness-engineering | A2 | FULL | **running** | → Research/05-agent-loop-and-harness-engineering.md | launched 2026-07-17 on operator nod; background subagent, Mode A |
+| T03 | orchestration-and-multiagent | A2 | FULL | **running** | → Research/06-orchestration-and-multiagent.md | launched 2026-07-17; background subagent, Mode A |
+| T04 | context-engineering | A2 | FULL | ready | → (assigned at launch) | released 2026-07-17; launches when a T02/T03 slot frees |
 | T05 | intake-planning-spec-pipeline | A2 | FULL | **committed + validated** | Research/03-intake-planning-spec-pipeline.md | PASS — 298 lines, 90 sources; survived pause/resume (verifiers re-run); spot-checks pass |
 | T06 | verification-and-quality-loops | A2 | FULL | **committed + validated** | Research/04-verification-and-quality-loops.md | PASS — 353 lines, 98 sources; survived pause/resume; spot-checks 3/3 verbatim |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
@@ -53,6 +53,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 04 | T06 | 04-verification-and-quality-loops.md |
 
 ## Session log
+
+- **2026-07-17 — same session, nod given + batch 2 launch:** operator approved the engine direction after the report-01 discussion (reasoning noted: an Anthropic un-pause hits `claude -p` and Agent SDK identically, so the SDK stays in research as the in-adapter alternative — matches report 01 approach D). Coordinator checked reports 02/03/04 operator backlogs before launch: all items are G1-or-later by design, nothing blocks Wave A2. T02 + T03 launched Mode A (background subagents, max effort, targets Research/05 + 06); T04 released to `ready`, launches when a slot frees. Spec operating-reality-bullet amendment added to the G1 agenda (operator hasn't decided; briefs already carry the corrected facts).
 
 - **2026-07-17 — operator report-01 review (discussion session):** operator read and discussed report 01 in depth. **T02–T04 hold MAINTAINED** — no engine-direction nod yet; only the operator releases. Two report-01 G1-backlog items resolved early by explicit operator decision: **OQ#1 (un-pause response) = (b) interactive-only demotion** — if Anthropic revives the credit split, the Anthropic lane demotes to interactive-only and headless weight shifts to Z.AI-class/local lanes (T08 brief must treat this as pre-registered policy; note it raises the load-bearing-ness of the third-party-open lane). **OQ#2 (compliance posture) = gray zone as-is** — rely on D2/3.4 only; no additional household-sharing constraint. **OQ#5 (Codex lane) reaffirmed: skip** (matches report default; reopens only if a member holds a ChatGPT plan). Spec operating-reality bullet amendment: explained to operator, decision still open (Docs/ remains untouched). Side breadcrumb for T14/D8: SAW (github.com/bybren-llc/safe-agentic-workflow) logged in operator memory as STUDY input + post-build seed candidate for the software-dev domain.
 
