@@ -4,7 +4,7 @@
 
 **Campaign status:** WAVE A2 — batch 1 COMPLETE. T05 + T06 both validated PASS and committed (reports 03 + 04). **T02–T04 remain held** for the operator's engine-direction nod from their report-01 read (§2.1/§4/§7 suffice; the nod is one sentence).
 **Next action:** on the operator's nod: launch T02 + T03 (2-concurrent), then T04 as a slot frees. Then gate G1 (memo template ready; includes report-02 §9 + report-03 §7 + report-04 §7 operator backlogs).
-**Last updated:** 2026-07-16 (setup session, post-pilot).
+**Last updated:** 2026-07-17 (operator report-01 review session; two G1-backlog decisions pre-registered).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
@@ -53,6 +53,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 04 | T06 | 04-verification-and-quality-loops.md |
 
 ## Session log
+
+- **2026-07-17 — operator report-01 review (discussion session):** operator read and discussed report 01 in depth. **T02–T04 hold MAINTAINED** — no engine-direction nod yet; only the operator releases. Two report-01 G1-backlog items resolved early by explicit operator decision: **OQ#1 (un-pause response) = (b) interactive-only demotion** — if Anthropic revives the credit split, the Anthropic lane demotes to interactive-only and headless weight shifts to Z.AI-class/local lanes (T08 brief must treat this as pre-registered policy; note it raises the load-bearing-ness of the third-party-open lane). **OQ#2 (compliance posture) = gray zone as-is** — rely on D2/3.4 only; no additional household-sharing constraint. **OQ#5 (Codex lane) reaffirmed: skip** (matches report default; reopens only if a member holds a ChatGPT plan). Spec operating-reality bullet amendment: explained to operator, decision still open (Docs/ remains untouched). Side breadcrumb for T14/D8: SAW (github.com/bybren-llc/safe-agentic-workflow) logged in operator memory as STUDY input + post-build seed candidate for the software-dev domain.
 
 - **2026-07-16 — same session, A2 split launch:** operator chose split launch: T05 + T06 launched now (zero coupling to report 01; targets Research/03 + 04); T02–T04 held pending the operator's engine-direction confirmation from their report-01 read (§2.1/§4/§7 suffice). Coupling analysis recorded: T02 real, T03 moderate (sibling-sessions shape), T04 weak, T05/T06 none. If a future session resumes before the nod: keep the hold; only the operator releases T02–T04.
 
