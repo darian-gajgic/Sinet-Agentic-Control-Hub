@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** WAVE A1 COMPLETE — pilot report validated (checklist PASS, 3/3 citation spot-checks confirmed). Awaiting operator review of `Research/01-execution-engines-and-adapters.md` before Wave A2 (per G0).
-**Next action:** operator reviews the pilot report → on approval, launch Wave A2 (T02–T06, Mode A, 2 concurrent).
+**Campaign status:** HOLDING — operator is reading the pilot report (`Research/01-execution-engines-and-adapters.md`) before authorizing Wave A2. Pilot itself: validated PASS.
+**Next action:** when the operator says "continue the research campaign" / "launch Wave A2": launch T02–T06 (Mode A, 2 concurrent, max effort). If the operator requests brief/format adjustments from their read, apply those to briefs + runbook first, then launch.
 **Last updated:** 2026-07-16 (setup session, post-pilot).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
