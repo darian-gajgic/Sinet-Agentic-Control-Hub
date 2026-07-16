@@ -1,0 +1,31 @@
+# Secrets & credentials — never commit
+.env
+.env.*
+*.pem
+*.key
+secrets/
+credentials/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Common build/runtime artifacts (stack not yet decided — covers likely candidates)
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local scratch — anything here stays off the record
+scratch/
+
+# Claude Code local settings
+.claude/settings.local.json
