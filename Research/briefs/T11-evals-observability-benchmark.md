@@ -33,3 +33,5 @@ OTel GenAI spec status + adopters; self-hosted observability project docs and in
 
 ## Decisions this feeds
 G2: observability stack (adopt vs own-schema), watchdog design, benchmark protocol (pre-registered before v0 ships — it gates 15.3). Spec: trace schema, health monitors, benchmark section.
+
+**Addendum (2026-07-16, from report 02):** sub-question 5's S2.8 drift watch consumes `Research/02-provider-watchlist-and-onboarding-criteria.md` §6 as decided input — the 4-tier source list and weekly/monthly/quarterly cadence are settled there. T11 researches the watcher *architecture* that executes them (page-diff runner, feed ingestion, local-model classification, inbox routing). Resolves report 02 OQ#7.
