@@ -2,6 +2,8 @@
 
 Findings from the pre-implementation research sessions. One file per topic, prefixed with a two-digit sequence number in the order they were produced:
 
+> **Campaign machinery (added 2026-07-16):** the research runs as a coordinated campaign. `CAMPAIGN.md` is the master plan (topics, waves, gates), `STATE.md` the live progress pointer, `briefs/` the per-topic research briefs (with `00-shared-context.md` as the shared payload), `decisions/` the gate memos with operator decisions. Any Claude Code session resumes it by reading `STATE.md` — or via the `/research-campaign` skill. Topic reports keep the `NN-` numbering convention below; `STATE.md` maps topic IDs (T##) to report numbers.
+
 ```
 Research/
   01-execution-adapters.md
