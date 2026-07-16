@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** WAVE A2 — resumed from pause #2 IN-PLACE (operator "continue … where it stopped … quality most important", 2026-07-16): T05 and T06 resumed from their own transcripts via SendMessage — no research spend lost. T05 instructed to re-run any verifier its pause killed (quality over speed); T06 writing its report from completed verification. **T02–T04 still held** for the operator's engine-direction nod.
-**Next action:** (1) on T05/T06 completion: validate → commit → digest. (2) On operator's engine-direction nod: launch T02, then T03/T04 as slots free.
+**Campaign status:** WAVE A2 — batch 1 COMPLETE. T05 + T06 both validated PASS and committed (reports 03 + 04). **T02–T04 remain held** for the operator's engine-direction nod from their report-01 read (§2.1/§4/§7 suffice; the nod is one sentence).
+**Next action:** on the operator's nod: launch T02 + T03 (2-concurrent), then T04 as a slot frees. Then gate G1 (memo template ready; includes report-02 §9 + report-03 §7 + report-04 §7 operator backlogs).
 **Last updated:** 2026-07-16 (setup session, post-pilot).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -27,7 +27,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T02 | agent-loop-and-harness-engineering | A2 | FULL | **held** | → Research/05-… (assigned at launch) | awaits operator engine-direction nod (leans on report 01) |
 | T03 | orchestration-and-multiagent | A2 | FULL | **held** | → (assigned at launch) | same hold as T02 |
 | T04 | context-engineering | A2 | FULL | **held** | → (assigned at launch) | same hold (weak coupling; held for cleanliness) |
-| T05 | intake-planning-spec-pipeline | A2 | FULL | **running (resumed in-place)** | → Research/03-intake-planning-spec-pipeline.md | transcript-resumed 2026-07-16; finishing verification (re-running killed verifiers) then synthesis |
+| T05 | intake-planning-spec-pipeline | A2 | FULL | **committed + validated** | Research/03-intake-planning-spec-pipeline.md | PASS — 298 lines, 90 sources; survived pause/resume (verifiers re-run); spot-checks pass |
 | T06 | verification-and-quality-loops | A2 | FULL | **committed + validated** | Research/04-verification-and-quality-loops.md | PASS — 353 lines, 98 sources; survived pause/resume; spot-checks 3/3 verbatim |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
 | T08 | metering-quota-scheduling | B1 | FULL | pending | — | consumes G1 addendum |
@@ -49,7 +49,7 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 |---|---|---|
 | 01 | T01 | 01-execution-engines-and-adapters.md |
 | 02 | T17 | 02-provider-watchlist-and-onboarding-criteria.md |
-| 03 | T05 | 03-intake-planning-spec-pipeline.md (in progress) |
+| 03 | T05 | 03-intake-planning-spec-pipeline.md |
 | 04 | T06 | 04-verification-and-quality-loops.md |
 
 ## Session log
