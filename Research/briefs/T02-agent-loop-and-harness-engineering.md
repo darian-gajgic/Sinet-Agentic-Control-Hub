@@ -32,3 +32,5 @@ Anthropic engineering posts on harness/agent design; engine docs (hooks/permissi
 
 ## Decisions this feeds
 G1: platform-vs-engine responsibility boundary; session model direction. Spec: run lifecycle state machine, harness layer. T07 (state storage), T08 (limit-event handling hooks).
+
+**Addendum (2026-07-16):** read `Research/01-execution-engines-and-adapters.md` §2.3–§2.4 and §4 first — the standing engine direction (pinned `opencode serve` + wrapped `claude -p`), the field evidence on checkpoint/pause/cancel semantics, and problems P-T01-1/-2/-4 are settled inputs. Research the harness layer AROUND that direction (its hooks, permission endpoints, stream events are the raw material); do not re-open engine selection.

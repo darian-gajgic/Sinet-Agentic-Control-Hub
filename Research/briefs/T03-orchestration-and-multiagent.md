@@ -32,3 +32,5 @@ Anthropic engineering (multi-agent research system + successors); Cognition/Devi
 
 ## Decisions this feeds
 G1: default orchestration policy within D6 (when to spawn, context-passing contract, spawn budget defaults). Spec: coordinator/helper lifecycle. T14 (worker composition rides on this).
+
+**Addendum (2026-07-16):** report 01 §4.1 sets the working substrate assumption — helper delegation is orchestrated by Sinet's control plane as engine *sibling sessions* it spawns and logs itself (engine-native nesting stays at its safe one-level default; no global task permission). Research decomposition, spawn-decision, and context-passing best practice on top of that shape.

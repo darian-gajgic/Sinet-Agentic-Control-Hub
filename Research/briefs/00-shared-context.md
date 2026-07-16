@@ -23,7 +23,7 @@ Every research run consumes this file plus its topic brief (`T##-*.md`). Where t
 
 ## Operating-reality facts (bind your recommendations)
 
-- **All frontier-AI usage must be covered by each person's flat-rate consumer subscription.** Never pooled. The operator has recorded that Anthropic's Agent SDK is moving to credits-based billing and is therefore ruled out as the engine — T01 verifies this against primary sources; every other topic treats it as given. Pay-per-token is an explicit, deliberately enabled exception — never a default, never a silent fallback.
+- **All frontier-AI usage must be covered by each person's flat-rate consumer subscription.** Never pooled. Pay-per-token is an explicit, deliberately enabled exception — never a default, never a silent fallback. **Verified 2026-07-16 (report 01 §2.1):** the originally recorded "Agent SDK moving to credits ⇒ ruled out" claim is stale — the change was announced 2026-05-13 and paused 2026-06-15 before taking effect; Agent SDK, `claude -p`, and third-party use currently ride Pro/Max flat rate. The durable constraints: all non-interactive subscription use can be re-priced on ~30 days' notice (any engine), and Anthropic sanctions programmatic subscription use through its first-party surfaces. The standing engine direction (pending G1 ratification) is report 01's dual substrate: pinned `opencode serve` per user + wrapped `claude` CLI per user, behind Sinet's own adapter contract.
 - At least one major provider permits subscription-covered programmatic use **only through its own first-party tool** (hence D3's wrap-or-API split).
 - Providers do not reliably expose remaining-quota state; the platform meters its own consumption and reacts to limit events (D4).
 - A local GPU is a **permanent free tier**: the platform's own background intelligence (health watching, change detection, risk-ranking, routine classification) runs on local models only and keeps working when every paid window is empty.
@@ -38,6 +38,10 @@ Nexus proved control/execution-split resilience, race-proof scheduling, gate dis
 3. **Validate before breadth.** A pre-registered added-value benchmark gates every feature beyond the v0 core.
 
 Named traps your findings must not reintroduce: **P45** spec lock-in (verification amplifies whatever objective it's given — every verifier needs a second, spec-independent "is this actually good?" axis); **P46** escalation routes must exist AND be proven by tests (a finding that dies in a log is a platform defect); **P47** data-bearing tasks get live research injected by policy, never left to model initiative; multi-stage pipelines re-sending context per stage produced a measured ~15×-class token multiplication — cost structure is an architectural property, not a tuning knob.
+
+## Prior campaign reports
+
+Completed reports live at `Research/NN-*.md` (topic map in `Research/STATE.md`). Read any your brief names. Reports **01** (execution engines & adapters) and **02** (provider landscape, onboarding criteria, watchlist) are standing context for all engine/provider facts — do not re-research what they settle; cite them and spend your budget on your own topic. If your findings genuinely contradict a prior report, say so explicitly in Open questions — never silently diverge.
 
 ## How to treat prior art
 
