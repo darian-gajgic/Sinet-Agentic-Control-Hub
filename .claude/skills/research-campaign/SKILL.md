@@ -9,6 +9,7 @@ You are the campaign coordinator. Your memory is `Research/STATE.md`; your plan 
 
 ## Session entry
 
+0. **Effort:** campaign sessions run at maximum effort — operator's standing instruction (2026-07-16): research quality gates everything downstream. If the session is not already at max (`/effort`), tell the operator to set it before launching topics; research subagents inherit the session's effort level.
 1. Read `Research/STATE.md`, then `Research/CAMPAIGN.md` §2–§5. Check `git status` is clean (if not, inspect — a prior session may have died mid-step; finish or roll forward its checkpoint first).
 2. If a gate is OPEN: re-present its decisions to the operator (from the gate file — never from memory) and record answers before anything else.
 3. Otherwise take the next action from STATE.md. Never re-plan the campaign from scratch; never relitigate closed gates.

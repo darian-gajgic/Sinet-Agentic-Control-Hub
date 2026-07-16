@@ -2,15 +2,16 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** SETUP COMPLETE — awaiting G0 launch decision.
-**Next action:** operator answers G0 (launch mode). Then: run T01 pilot (Mode A, Mode B fallback).
-**Last updated:** 2026-07-16 (setup session).
+**Campaign status:** WAVE A1 — T01 pilot running (Mode A, launched 2026-07-16).
+**Next action:** on pilot completion: coordinator validates → commits → operator reviews the report (quality/depth/format) before Wave A2 launches.
+**Last updated:** 2026-07-16 (setup session, post-G0).
+**Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
 
 | Gate | Subject | Status | Decision | Recorded in |
 |---|---|---|---|---|
-| G0 | Launch: pilot-first vs review-first vs full Wave A | **OPEN** | — | (this file, below) |
+| G0 | Launch: pilot-first vs review-first vs full Wave A | CLOSED 2026-07-16 | **Pilot first** — T01 alone; operator reviews the report before Wave A2 | (this row) |
 | G1 | Architecture direction (after Wave A) | pending | — | decisions/GATE-1-*.md |
 | G2 | Substrate + adoption list (after Wave B) | pending | — | decisions/GATE-2-*.md |
 | G3 | Spec-readiness (after Wave C) | pending | — | decisions/GATE-3-*.md |
@@ -22,7 +23,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 
 | T | Slug | Wave | Depth | Status | Report file | Notes |
 |---|---|---|---|---|---|---|
-| T01 | execution-engines-and-adapters | A1 | FULL | **ready (pilot)** | — | blocked only by G0 |
+| T01 | execution-engines-and-adapters | A1 | FULL | **running** | → Research/01-execution-engines-and-adapters.md | pilot, Mode A, launched 2026-07-16 |
 | T02 | agent-loop-and-harness-engineering | A2 | FULL | pending | — | unblocks after pilot validated |
 | T03 | orchestration-and-multiagent | A2 | FULL | pending | — | |
 | T04 | context-engineering | A2 | FULL | pending | — | |
@@ -50,3 +51,4 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 ## Session log
 
 - **2026-07-16 — setup session (Fable 5):** read all Docs/, probed subagent skill access (deep-research available in subagents → Mode A viable), built campaign plan, 16 briefs, gate template, coordinator skill. G0 presented to operator.
+- **2026-07-16 — same session:** G0 answered: pilot first. Max-effort rule recorded (skill §entry-0). T01 launched in Mode A; report target `Research/01-execution-engines-and-adapters.md`.
