@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** WAVE A2 — SPLIT LAUNCH (operator decision 2026-07-16). T05 + T06 running now (zero engine coupling); **T02–T04 held** until the operator confirms report 01's engine direction from their read.
-**Next action:** (1) on T05/T06 completion: validate → commit → digest. (2) On operator's engine-direction nod: launch T02, then T03/T04 as slots free (2-concurrent cap). Operator decision backlog from report 02 §9 rides to G1 — none of it blocks A2.
+**Campaign status:** ⏸ PAUSED BY OPERATOR (2026-07-16, "stop it for a moment") — T05/T06 runs killed early (both still in read-in phase, no research spend lost, no report files written). T02–T04 hold unchanged.
+**Next action:** NOTHING until the operator says so. On resume: relaunch T05 + T06 from their briefs (fresh runs, same targets Research/03 + 04), then continue the split-launch plan. Do not auto-resume from a fresh session without an explicit operator instruction.
 **Last updated:** 2026-07-16 (setup session, post-pilot).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -27,8 +27,8 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T02 | agent-loop-and-harness-engineering | A2 | FULL | **held** | → Research/05-… (assigned at launch) | awaits operator engine-direction nod (leans on report 01) |
 | T03 | orchestration-and-multiagent | A2 | FULL | **held** | → (assigned at launch) | same hold as T02 |
 | T04 | context-engineering | A2 | FULL | **held** | → (assigned at launch) | same hold (weak coupling; held for cleanliness) |
-| T05 | intake-planning-spec-pipeline | A2 | FULL | **running** | → Research/03-intake-planning-spec-pipeline.md | split-launch batch 1, launched 2026-07-16 |
-| T06 | verification-and-quality-loops | A2 | FULL | **running** | → Research/04-verification-and-quality-loops.md | split-launch batch 1, launched 2026-07-16 |
+| T05 | intake-planning-spec-pipeline | A2 | FULL | **stopped (operator pause)** | → Research/03-intake-planning-spec-pipeline.md | killed in read-in phase 2026-07-16; relaunch fresh on resume |
+| T06 | verification-and-quality-loops | A2 | FULL | **stopped (operator pause)** | → Research/04-verification-and-quality-loops.md | killed in read-in phase 2026-07-16; relaunch fresh on resume |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
 | T08 | metering-quota-scheduling | B1 | FULL | pending | — | consumes G1 addendum |
 | T09 | sandboxing-confinement | B1 | FULL | pending | — | consumes G1 addendum |
