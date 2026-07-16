@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** ⏸ PAUSED BY OPERATOR again (2026-07-16, "stop it for a minute"). T05/T06 stopped — this time ~25 min in with REAL progress (T05 was mid-adversarial-verification, ~151k tokens spent). T02–T04 hold unchanged.
-**Next action:** NOTHING until the operator says so. On resume **in this same session**: prefer resuming the SAME two agents via SendMessage ("continue where you stopped — finish the harness and write the report") to preserve their spent research; a NEW session cannot reach those agents and must relaunch fresh from the briefs instead (accepting the lost spend). Never auto-resume without an explicit operator instruction.
+**Campaign status:** WAVE A2 — resumed from pause #2 IN-PLACE (operator "continue … where it stopped … quality most important", 2026-07-16): T05 and T06 resumed from their own transcripts via SendMessage — no research spend lost. T05 instructed to re-run any verifier its pause killed (quality over speed); T06 writing its report from completed verification. **T02–T04 still held** for the operator's engine-direction nod.
+**Next action:** (1) on T05/T06 completion: validate → commit → digest. (2) On operator's engine-direction nod: launch T02, then T03/T04 as slots free.
 **Last updated:** 2026-07-16 (setup session, post-pilot).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -27,8 +27,8 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T02 | agent-loop-and-harness-engineering | A2 | FULL | **held** | → Research/05-… (assigned at launch) | awaits operator engine-direction nod (leans on report 01) |
 | T03 | orchestration-and-multiagent | A2 | FULL | **held** | → (assigned at launch) | same hold as T02 |
 | T04 | context-engineering | A2 | FULL | **held** | → (assigned at launch) | same hold (weak coupling; held for cleanliness) |
-| T05 | intake-planning-spec-pipeline | A2 | FULL | **stopped (operator pause #2)** | → Research/03-intake-planning-spec-pipeline.md | killed mid-verification (~25 min, 1 of 3 verifiers done, real spend) — same-session SendMessage resume preferred |
-| T06 | verification-and-quality-loops | A2 | FULL | **stopped (operator pause #2)** | → Research/04-verification-and-quality-loops.md | killed at synthesis start (verification done 30/30, report unwritten) — same-session SendMessage resume very cheap |
+| T05 | intake-planning-spec-pipeline | A2 | FULL | **running (resumed in-place)** | → Research/03-intake-planning-spec-pipeline.md | transcript-resumed 2026-07-16; finishing verification (re-running killed verifiers) then synthesis |
+| T06 | verification-and-quality-loops | A2 | FULL | **running (resumed in-place)** | → Research/04-verification-and-quality-loops.md | transcript-resumed 2026-07-16; verification complete (30/30), writing report |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
 | T08 | metering-quota-scheduling | B1 | FULL | pending | — | consumes G1 addendum |
 | T09 | sandboxing-confinement | B1 | FULL | pending | — | consumes G1 addendum |
