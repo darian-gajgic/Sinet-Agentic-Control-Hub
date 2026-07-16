@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** HOLDING for Wave A2 (operator reading pilot report). T17 addendum COMPLETE + validated (reports 01 and 02 both available for the operator's read).
-**Next action:** when the operator authorizes: launch Wave A2 T02–T06 (Mode A, 2 concurrent, max effort), applying any adjustments from their read first. Operator decision backlog from report 02 (§9: xAI lane timing, Synthetic-vs-Cerebras purchase, StepFun experiment, BytePlus spike, class-2 posture, DeepSeek metered-designation) rides to G1 unless the operator acts earlier — none of it blocks Wave A2.
+**Campaign status:** WAVE A2 — SPLIT LAUNCH (operator decision 2026-07-16). T05 + T06 running now (zero engine coupling); **T02–T04 held** until the operator confirms report 01's engine direction from their read.
+**Next action:** (1) on T05/T06 completion: validate → commit → digest. (2) On operator's engine-direction nod: launch T02, then T03/T04 as slots free (2-concurrent cap). Operator decision backlog from report 02 §9 rides to G1 — none of it blocks A2.
 **Last updated:** 2026-07-16 (setup session, post-pilot).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -24,11 +24,11 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T | Slug | Wave | Depth | Status | Report file | Notes |
 |---|---|---|---|---|---|---|
 | T01 | execution-engines-and-adapters | A1 | FULL | **committed + validated** | Research/01-execution-engines-and-adapters.md | pilot PASS — 322 lines, 80 sources/158 URLs; ~48 min, ~266k tokens; commit cfe4dd6 |
-| T02 | agent-loop-and-harness-engineering | A2 | FULL | pending | — | unblocks after pilot validated |
-| T03 | orchestration-and-multiagent | A2 | FULL | pending | — | |
-| T04 | context-engineering | A2 | FULL | pending | — | |
-| T05 | intake-planning-spec-pipeline | A2 | FULL | pending | — | |
-| T06 | verification-and-quality-loops | A2 | FULL | pending | — | |
+| T02 | agent-loop-and-harness-engineering | A2 | FULL | **held** | → Research/05-… (assigned at launch) | awaits operator engine-direction nod (leans on report 01) |
+| T03 | orchestration-and-multiagent | A2 | FULL | **held** | → (assigned at launch) | same hold as T02 |
+| T04 | context-engineering | A2 | FULL | **held** | → (assigned at launch) | same hold (weak coupling; held for cleanliness) |
+| T05 | intake-planning-spec-pipeline | A2 | FULL | **running** | → Research/03-intake-planning-spec-pipeline.md | split-launch batch 1, launched 2026-07-16 |
+| T06 | verification-and-quality-loops | A2 | FULL | **running** | → Research/04-verification-and-quality-loops.md | split-launch batch 1, launched 2026-07-16 |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
 | T08 | metering-quota-scheduling | B1 | FULL | pending | — | consumes G1 addendum |
 | T09 | sandboxing-confinement | B1 | FULL | pending | — | consumes G1 addendum |
@@ -51,6 +51,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 02 | T17 | 02-provider-watchlist-and-onboarding-criteria.md |
 
 ## Session log
+
+- **2026-07-16 — same session, A2 split launch:** operator chose split launch: T05 + T06 launched now (zero coupling to report 01; targets Research/03 + 04); T02–T04 held pending the operator's engine-direction confirmation from their report-01 read (§2.1/§4/§7 suffice). Coupling analysis recorded: T02 real, T03 moderate (sibling-sessions shape), T04 weak, T05/T06 none. If a future session resumes before the nod: keep the hold; only the operator releases T02–T04.
 
 - **2026-07-16 — setup session (Fable 5):** read all Docs/, probed subagent skill access (deep-research available in subagents → Mode A viable), built campaign plan, 16 briefs, gate template, coordinator skill. G0 presented to operator.
 - **2026-07-16 — same session:** G0 answered: pilot first. Max-effort rule recorded (skill §entry-0). T01 launched in Mode A; report target `Research/01-execution-engines-and-adapters.md`.
