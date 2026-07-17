@@ -2,9 +2,9 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** **WAVE A COMPLETE** — all seven Wave-A reports committed + validated (01, 02, 03, 04, 05, 06, 07). **GATE G1 OPEN** — memo being written to decisions/GATE-1-architecture-direction.md.
-**Next action:** finish + commit the G1 memo, mark blocked-on-gate, present remaining decisions to operator (AskUserQuestion batches per gate protocol; pre-registered operator decisions from the review sessions are recorded in the memo, NOT re-asked). After G1 closes: append G1 addendum to briefs T07–T09, launch Wave B1.
-**Last updated:** 2026-07-17 (T04 validated PASS + committed as report 07; Wave A done; G1 memo in progress; report-03 operator backlog fully cleared pre-gate).
+**Campaign status:** **WAVE A COMPLETE — blocked-on-gate (G1).** Memo written: `decisions/GATE-1-architecture-direction.md` (12 pre-registered decisions P1–P12 recorded; 7 open decisions D1.1–D1.7; 12 defaults-unless-objected). Presenting to operator in 2 AskUserQuestion batches.
+**Next action:** record operator answers in the gate file + here, close G1, append G1 addendum (+ spike addendum #2 per D1.6) to briefs T07–T09, launch Wave B1 (T07+T08 2-concurrent, T09 next).
+**Last updated:** 2026-07-17 (G1 memo committed; gate presentation in progress).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
