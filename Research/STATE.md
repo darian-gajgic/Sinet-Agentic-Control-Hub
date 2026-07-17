@@ -57,6 +57,14 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 
 ## Session log
 
+- **2026-07-17 — operator backlog review, part 4 (discussion session; fold into G1 recording, do not re-ask):**
+  - **Report-04 OQ#4 (escalation SLAs) = RATIFIED at proposed defaults:** dead-man canary every 24 h (missed canary → backup-channel alert + freeze of approval-needing work); blocking approval cards remind at 4 h / push at 24 h; safety-anomaly alerts immediate push + hourly re-ping until acknowledged; FYI no SLA; full escalation drill quarterly.
+  - **Report-05 OQ#2 (freshness fingerprint) = RATIFIED, all four parts:** composition {repo HEAD, source hashes, spec/plan version, price-table version}; 24 h staleness default; sibling-accept trigger; price-table drift alone triggers re-validation.
+  - **Report-05 OQ#4 (systemd transient units per run) = ADOPT.**
+  - **Report-05 OQ#5 (maintenance drain grace) = RATIFIED: 15 minutes** (emergency-immediate override retained).
+  - **Report-06 OQ#3 (helper-report acceptance depth) = contract-conformance only at v0; local-model plausibility screen T15-gated** (enable when a local model passes the screening eval; report-as-data discipline + per-helper tool restriction are spec-mandatory regardless).
+  - **Report-06 OQ#2 (engine-native micro-fanout) = DEFERRED, operator posture recorded:** operator wants **Sinet as the sole agent controller** — all spawning control-plane-owned, per-task purpose-built harness/agents; engine-native subagents rejected for now (portability concern: "gets messy if we have to switch engines later"). Native subagents stay DISABLED; no spike commitment now; solution designed when actionable. **Operator asked to be actively reminded when this becomes actionable** (adapter-spec/spawning-implementation time). G1 carries it as noted-deferred, not open-for-decision.
+
 - **2026-07-17 — operator backlog review, part 3 (discussion session; fold into G1 recording, do not re-ask):**
   - **Report-04 OQ#1 (judge-lane pairing) = RATIFIED as proposed** — utility model stays default judge; dissimilar-lane swap permitted when executor family = judge family and another flat lane is connected; self-family judging always flagged on the receipt.
   - **Report-04 OQ#2 (outcome-sanity scope) = RATIFIED as proposed** — every deliverable in the two launch domains, stakes-gated in degraded domains.
