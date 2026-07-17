@@ -2,9 +2,9 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** **PAUSED by operator 2026-07-17 (3rd pause).** Wave A2 state at pause: T02 + T03 + T05 + T06 committed + validated (reports 05/06/03/04); **T04 stopped mid-run at a clean phase boundary — research fan-out complete, stopped just before launching its 3 adversarial verifiers** (target: report 07). Nothing else was running. Engine-direction nod stands (dual substrate; final at G1).
-**Next action:** NOTHING runs until the operator resumes. On resume: **same session** → SendMessage-revive the stopped T04 agent (context + spend preserved; it re-enters at the verifier-launch step). **New session** → relaunch T04 fresh per runbook Mode A (prior in-flight spend lost; report target stays Research/07-context-engineering.md). After T04 validates + commits: Wave A complete → write GATE G1 memo per gate protocol (template ready; bundles operator backlogs from reports 02 §9, 03 §7, 04 §7, 05 §7, 06 §7 + report-01 residuals (Z.AI tier, CLI-vs-SDK spike plan) + spec operating-reality-bullet amendment, still undecided) and present to operator.
-**Last updated:** 2026-07-17 (operator pause; T04 halted at verification boundary — see session log; operator backlog decisions from the parallel review session are recorded below and stand).
+**Campaign status:** WAVE A2 — **RESUMED on operator instruction 2026-07-17** (same session as 3rd pause). T04 revived via SendMessage with context intact — re-entered at the verifier-launch step, no spend lost (target: report 07). T02 + T03 + T05 + T06 committed + validated (reports 05/06/03/04). Engine-direction nod stands (dual substrate; final at G1).
+**Next action:** validate T04 on completion (checklist), commit. Wave A then complete → write GATE G1 memo per gate protocol (template ready; bundles operator backlogs from reports 02 §9, 03 §7, 04 §7, 05 §7, 06 §7 + report-01 residuals (Z.AI tier, CLI-vs-SDK spike plan) + spec operating-reality-bullet amendment, still undecided) and present to operator.
+**Last updated:** 2026-07-17 (operator resume; T04 back in flight at verification phase; operator backlog decisions from the parallel review session are recorded below and stand).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
@@ -26,7 +26,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T01 | execution-engines-and-adapters | A1 | FULL | **committed + validated** | Research/01-execution-engines-and-adapters.md | pilot PASS — 322 lines, 80 sources/158 URLs; ~48 min, ~266k tokens; commit cfe4dd6 |
 | T02 | agent-loop-and-harness-engineering | A2 | FULL | **committed + validated** | Research/05-agent-loop-and-harness-engineering.md | PASS — 342 lines, 81 sources; ~42 min, ~266k tokens; spot-checks 3/3 (one via installed-binary strings probe); freshness re-validation (4.3) confirmed novel |
 | T03 | orchestration-and-multiagent | A2 | FULL | **committed + validated** | Research/06-orchestration-and-multiagent.md | PASS — 297 lines, 67 sources; ~36 min, ~184k tokens; spot-checks 3/3; D6 exclusions re-validated stronger |
-| T04 | context-engineering | A2 | FULL | **paused** | → Research/07-context-engineering.md | operator pause 2026-07-17; stopped at verifier-launch boundary (research fan-out done); same-session revive preserves spend, cross-session = fresh relaunch |
+| T04 | context-engineering | A2 | FULL | **running** | → Research/07-context-engineering.md | resumed 2026-07-17 same-session (SendMessage revive, spend preserved); in verification phase |
 | T05 | intake-planning-spec-pipeline | A2 | FULL | **committed + validated** | Research/03-intake-planning-spec-pipeline.md | PASS — 298 lines, 90 sources; survived pause/resume (verifiers re-run); spot-checks pass |
 | T06 | verification-and-quality-loops | A2 | FULL | **committed + validated** | Research/04-verification-and-quality-loops.md | PASS — 353 lines, 98 sources; survived pause/resume; spot-checks 3/3 verbatim |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
@@ -55,6 +55,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 06 | T03 | 06-orchestration-and-multiagent.md |
 
 ## Session log
+
+- **2026-07-17 — same session, RESUMED:** operator instructed resume shortly after the pause. T04 revived in the same session via SendMessage (the stopped agent had no active task; resumed from transcript with context intact) — it re-enters exactly at the verifier-launch step, so the pause cost zero research spend. Board back to `running`; next milestone unchanged (T04 validate+commit → G1 memo).
 
 - **2026-07-17 — same session, PAUSED by operator (3rd pause):** operator asked to pause with clean resumability. T04 (only live work) stopped via TaskStop at a clean boundary — its final progress line: "Now launching the 3 adversarial verifiers in parallel, each with the same 34-claim list", i.e. research fan-out complete, verification not yet started. Same-session resume: SendMessage to the stopped T04 agent revives it with context intact (spend preserved — validated mechanism from the T05/T06 pause). Cross-session resume: relaunch T04 per runbook (fresh). All completed work is committed + pushed (reports 01–06); no uncommitted state beyond this file's pause record. Wave A remaining after resume: T04 validate+commit → G1 memo.
 
