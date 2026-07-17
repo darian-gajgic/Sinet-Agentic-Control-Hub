@@ -4,7 +4,7 @@
 
 **Campaign status:** WAVE A2 — batch 2 RUNNING. **Engine-direction nod GIVEN 2026-07-17** (dual substrate approved as working direction; final at G1). T02 + T03 launched (targets: reports 05 + 06); T04 released, queued for the next free slot.
 **Next action:** validate T02/T03 reports as they complete (checklist), commit each; launch T04 when a slot frees. Then gate G1 (memo template ready; includes report-02 §9 + report-03 §7 + report-04 §7 operator backlogs + spec operating-reality-bullet amendment, still undecided).
-**Last updated:** 2026-07-17 (operator report-01 review session; two G1-backlog decisions pre-registered).
+**Last updated:** 2026-07-17 (operator report-02 review session; report-02 OQ#5 decided — class-2 gray zone as-is, uniform policy).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
@@ -53,6 +53,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 04 | T06 | 04-verification-and-quality-loops.md |
 
 ## Session log
+
+- **2026-07-17 — operator report-02 review (discussion session):** operator read and discussed report 02. **Report-02 OQ#5 decided: class-2 gray-zone posture = gray zone as-is, one uniform policy** — class-2 lanes (Z.AI, Kimi, MiniMax, StepFun) run headless inside their whitelisted tools exactly as the vendors' own integration docs demonstrate; residual ambiguity accepted; no attended-only restriction. Generalizes the report-01 OQ#2 decision; write into the spec as a single household policy applied uniformly to all class-2 plans. Remaining report-02 §9 items (xAI lane, Synthetic-vs-Cerebras, StepFun experiment, BytePlus spike, DeepSeek metered-exception ratification) stay on the G1 backlog — all purchase/policy decisions, none block Wave A2.
 
 - **2026-07-17 — same session, nod given + batch 2 launch:** operator approved the engine direction after the report-01 discussion (reasoning noted: an Anthropic un-pause hits `claude -p` and Agent SDK identically, so the SDK stays in research as the in-adapter alternative — matches report 01 approach D). Coordinator checked reports 02/03/04 operator backlogs before launch: all items are G1-or-later by design, nothing blocks Wave A2. T02 + T03 launched Mode A (background subagents, max effort, targets Research/05 + 06); T04 released to `ready`, launches when a slot frees. Spec operating-reality-bullet amendment added to the G1 agenda (operator hasn't decided; briefs already carry the corrected facts).
 
