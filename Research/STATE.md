@@ -2,9 +2,9 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** **WAVE A COMPLETE — blocked-on-gate (G1).** Memo written: `decisions/GATE-1-architecture-direction.md` (12 pre-registered decisions P1–P12 recorded; 7 open decisions D1.1–D1.7; 12 defaults-unless-objected). Presenting to operator in 2 AskUserQuestion batches.
-**Next action:** record operator answers in the gate file + here, close G1, append G1 addendum (+ spike addendum #2 per D1.6) to briefs T07–T09, launch Wave B1 (T07+T08 2-concurrent, T09 next).
-**Last updated:** 2026-07-17 (G1 memo committed; gate presentation in progress).
+**Campaign status:** **G1 CLOSED 2026-07-17 — spike battery running.** All gate decisions answered (see gate file Decisions-taken + riders). D1.4 spec amendment applied to Docs. G1 addendum #1 appended to briefs T07–T09. Spikes S1–S3 launched as background agents (results → `Research/spikes/G1-S*.md`).
+**Next action:** validate spike reports as they complete → append spike addendum #2 to briefs T07–T09 → launch Wave B1 (T07 → Research/08, T08 → Research/09, 2-concurrent; T09 next free slot).
+**Last updated:** 2026-07-17 (G1 closed; operator said "lets start" — spikes + Wave B approved to run).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
@@ -12,7 +12,7 @@
 | Gate | Subject | Status | Decision | Recorded in |
 |---|---|---|---|---|
 | G0 | Launch: pilot-first vs review-first vs full Wave A | CLOSED 2026-07-16 | **Pilot first** — T01 alone; operator reviews the report before Wave A2 | (this row) |
-| G1 | Architecture direction (after Wave A) | pending | — | decisions/GATE-1-*.md |
+| G1 | Architecture direction (after Wave A) | **CLOSED 2026-07-17** | **Package ratified (D1.1-A)**; $0.50 trivial threshold; Z.AI tier moot (operator holds Max); spec amended; spikes S1–S3 (S4 dropped — sole-controller posture); all defaults adopted, 2 operator riders (settings-not-constants; Sinet sole agent controller) | decisions/GATE-1-architecture-direction.md |
 | G2 | Substrate + adoption list (after Wave B) | pending | — | decisions/GATE-2-*.md |
 | G3 | Spec-readiness (after Wave C) | pending | — | decisions/GATE-3-*.md |
 | G4 | Spec review → end research phase | pending | — | decisions/GATE-4-*.md |
@@ -56,6 +56,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 07 | T04 | 07-context-engineering.md |
 
 ## Session log
+
+- **2026-07-17 — G1 CLOSED (same discussion session; operator: "ok, lets start"):** report-07 defaults wave-through + D1.4 wording confirmed → gate file Decisions-taken table filled (D1.1–D1.7, Def.1–12, 3 operator riders), status CLOSED. D1.4 amendment applied to `Docs/agent-platform-feature-list-v1.md` (dated correction, original text preserved in-line; explicit operator approval for the Docs edit). G1 addendum #1 appended to briefs T07/T08/T09. Spike battery S1–S3 launched as background agents per D1.6-C (probe-level, ≤$0.50 API-equiv each, budget-capped `claude` probes; opencode user-space install allowed for S3, no new accounts, no sudo; results → `Research/spikes/G1-S{1,2,3}-*.md`). Wave B1 launches after spike validation + addendum #2 (T07 → Research/08, T08 → Research/09; T09 next slot). Reminder standing: R06-OQ2 (native micro-fanout) resurfaces at adapter-spec drafting.
 
 - **2026-07-17 — operator backlog review, part 5 — G1 OPEN DECISIONS ANSWERED (discussion session; fold into gate close, do not re-ask):**
   - **D1.1 (architecture-direction package) = RATIFIED, option A** — dual substrate; run FSM + SQLite-WAL event log + fresh-context-per-stage on the Task Context Ledger; single-agent-first D6 orchestration (with operator's sole-controller posture from part 4); two-axis verification cascade.

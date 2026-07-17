@@ -1,6 +1,6 @@
 # GATE-1 — Architecture direction
 
-**Opened:** 2026-07-17 · **Wave covered:** A (A1 + A1b + A2) · **Status:** OPEN
+**Opened:** 2026-07-17 · **Wave covered:** A (A1 + A1b + A2) · **Status:** **CLOSED 2026-07-17** (all decisions answered by operator in same-day review sessions; see Decisions taken)
 **Reports in scope:** Research/01 (T01 engines/adapters), 02 (T17 provider watchlist), 03 (T05 intake/planning), 04 (T06 verification), 05 (T02 harness/loop), 06 (T03 orchestration), 07 (T04 context engineering)
 
 ## Findings digest
@@ -121,6 +121,19 @@
 | # | Decision | Chosen | By | Date | Notes |
 |---|---|---|---|---|---|
 | P1–P12 | (pre-registered, above) | as tabled | operator | 07-17 | recorded from review sessions |
+| D1.1 | Architecture-direction package | **A — ratified in full** | operator | 07-17 | dual substrate; FSM + SQLite-WAL event log; fresh-context-per-stage on Task Context Ledger; single-agent-first D6 orchestration; two-axis verification |
+| D1.2 | Outcome-sanity scope | **A** — every deliverable in launch domains, stakes-gated elsewhere | operator | 07-17 | |
+| D1.3 | Runaway containment | **A — pause-and-flag** (no auto-kill) | operator | 07-17 | |
+| D1.4 | Spec operating-reality amendment | **A — amend now**; wording previewed + approved in-session | operator | 07-17 | executed same day (see Docs commit) |
+| D1.5 | Z.AI tier at v0 | **MOOT — operator already holds GLM Coding Max** (top tier) | operator | 07-17 | v0 lane config uses Max quota shape (~1,600 prompts/5 h, 2+ concurrent); T08 consumes real tier data |
+| D1.6 | Spike battery | **C, amended: S1–S3 now; S4 REMOVED; S5 at P3** | operator | 07-17 | S4 (native micro-fanout) dropped — operator posture: **Sinet is the sole agent controller**, engine-native subagents disabled; deferred with active reminder at adapter-spec time |
+| D1.7 | Zero-interaction cost threshold | **A — $0.50 API-equivalent** | operator | 07-17 | per-user 13.4 setting |
+| Def.1–12 | Defaults unless objected | **All adopted** — Def.1/3–9 explicitly ratified; Def.2/10–12 waved through | operator | 07-17 | Def.3 superseded by richer in-session SLA set (4 h remind / 24 h push on approval cards; safety = immediate + hourly re-ping; canary daily; drill quarterly). Def.8/9 carry operator riders: all ⚙ numbers ship as operator-editable settings, auto-scaled per task complexity **only within operator-set ceilings**, auto-raises on receipts; helper screen = conformance-only at v0, local-model plausibility T15-gated |
+
+**Operator riders recorded at close (bind the spec):**
+1. **Settings-not-constants (platform-wide):** every ⚙ number ratified at this gate is an operator-editable setting with the ratified value as default; changes audit-trailed; complexity-based auto-adjustment permitted only within operator ceilings and always visible on receipts.
+2. **Sole-controller posture (D6 sharpening):** all agent spawning is control-plane-owned; engine-native subagent features stay disabled on every substrate. Revisit only with an explicit operator reminder when the adapter spawning section is drafted (R06-OQ2 deferred, not open).
+3. **Lane roadmap:** v0 = Anthropic + Z.AI only; all other lanes parked/deferred join post-v0 via the report-02 §5 onboarding checklist, config-only.
 
 ## Follow-ups spawned
 
