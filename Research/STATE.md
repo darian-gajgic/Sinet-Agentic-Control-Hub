@@ -2,9 +2,10 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** **G1 CLOSED 2026-07-17 — spike battery running.** All gate decisions answered (see gate file Decisions-taken + riders). D1.4 spec amendment applied to Docs. G1 addendum #1 appended to briefs T07–T09. Spikes S1–S3 launched as background agents (results → `Research/spikes/G1-S*.md`).
-**Next action:** validate spike reports as they complete → append spike addendum #2 to briefs T07–T09 → launch Wave B1 (T07 → Research/08, T08 → Research/09, 2-concurrent; T09 next free slot).
-**Last updated:** 2026-07-17 (G1 closed; operator said "lets start" — spikes + Wave B approved to run).
+**Campaign status:** **WAVE B1 RUNNING.** G1 closed; spike battery S1–S3 complete (all validated PASS + committed, `Research/spikes/G1-S{1,2,3}-*.md`); spike addendum #2 appended to briefs T07–T09. **T07 + T08 launched** (background subagents, Mode A; targets Research/08 + Research/09). T09 `ready`, launches when a slot frees.
+**Next action:** validate T07/T08 reports on completion (checklist), commit each; launch T09 into the freed slot. Then G2 memo (substrate + adoption).
+**Standing follow-ups:** (a) S3 live-auth park tests await operator provisioning the Z.AI key into opencode (literal steps in S3 report §Blocked) — re-run is a ≤$0.50 mini-spike, not wave-blocking; (b) serialize-by-deny fallback probe (S2 verdict #2) + optional N≈10 live parallel-rate battery (~$2) → next spike batch (P3 or with T07 validation); (c) REMINDER for operator (their explicit request): R06-OQ2 native micro-fanout resurfaces when the adapter spawning section is drafted.
+**Last updated:** 2026-07-17 (spikes validated: S1 CLI-wrap verdict w/ SDK fallback verified; S2 defer PASS, 20.2% fallback rate, R05 [S41] corrected; S3 XDG isolation PASS, ask volatility source-confirmed. Wave B1 in flight).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
@@ -29,9 +30,9 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T04 | context-engineering | A2 | FULL | **committed + validated** | Research/07-context-engineering.md | PASS — 317 lines, ~98 sources; survived pause/resume (verifier boundary); spot-checks 3/3 verbatim; fresh-per-stage + ledger recommended |
 | T05 | intake-planning-spec-pipeline | A2 | FULL | **committed + validated** | Research/03-intake-planning-spec-pipeline.md | PASS — 298 lines, 90 sources; survived pause/resume (verifiers re-run); spot-checks pass |
 | T06 | verification-and-quality-loops | A2 | FULL | **committed + validated** | Research/04-verification-and-quality-loops.md | PASS — 353 lines, 98 sources; survived pause/resume; spot-checks 3/3 verbatim |
-| T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
-| T08 | metering-quota-scheduling | B1 | FULL | pending | — | consumes G1 addendum |
-| T09 | sandboxing-confinement | B1 | FULL | pending | — | consumes G1 addendum |
+| T07 | durable-state-checkpointing-recovery | B1 | FULL | **running** | → Research/08-durable-state-checkpointing-recovery.md | launched 2026-07-17 post-spikes; brief carries G1 addendum + spike addendum #2 |
+| T08 | metering-quota-scheduling | B1 | FULL | **running** | → Research/09-metering-quota-scheduling.md | launched 2026-07-17 post-spikes; brief carries G1 addendum + spike addendum #2 |
+| T09 | sandboxing-confinement | B1 | FULL | ready | → (assigned at launch) | brief primed (both addenda); launches when a T07/T08 slot frees |
 | T10 | memory-and-knowledge-architecture | B2 | FULL | pending | — | |
 | T11 | evals-observability-benchmark | B2 | FULL | pending | — | |
 | T12 | deliverables-review-git | B2 | FULL | pending | — | |
@@ -56,6 +57,8 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 07 | T04 | 07-context-engineering.md |
 
 ## Session log
+
+- **2026-07-17 — same session, SPIKES COMPLETE → WAVE B1 LAUNCHED:** all three G1 spikes finished and validated PASS (adapted checklist: sections complete, measured data verbatim, verdicts traceable, costs disclosed, hard rules honored). **S1** ($0.10): CLI-wrap kept for v0, SDK verified near-drop-in fallback — parity on schema/resume/cache/gating; SDK rides subscription auth; both surfaces cache-faithful on resume (#39732 stale); settings-leak hygiene finding → adapter must isolate. **S2** ($0.49): defer park/resume contract PASS on 2.1.212 (exit JSON carries `deferred_tool_use`; same-id resume; $0 poll-resume); engine restores NOTHING on resume (R05 §2.3 [S41] permission-mode claim CORRECTED); **parallel-call fallback = 20.2% of gated turns (N=7,325 corpus, fable-5; opus 8.5%)** → fallback path first-class; budget ceilings pre-empt parks; cleanup default 30d confirmed. **S3** ($0.00): XDG per-user isolation PASS (zero strays/cross-leak; R01-OQ6 answered); opencode 1.18.3 = SQLite WAL, sessions durable, pending asks in-memory (source-verified) → P-T02-1 confirmed; park verbs + schemas quoted; prefer `permission.reply` (reject-with-feedback); plaintext-token + `/global/upgrade` security notes → T09; live-auth tests BLOCKED on Z.AI key (operator steps in report). Spike addendum #2 appended to T07/T08/T09 briefs; T07 + T08 launched (Mode A, targets Research/08 + 09); T09 ready. Total battery spend ~$0.60 API-equivalent, all disclosed.
 
 - **2026-07-17 — G1 CLOSED (same discussion session; operator: "ok, lets start"):** report-07 defaults wave-through + D1.4 wording confirmed → gate file Decisions-taken table filled (D1.1–D1.7, Def.1–12, 3 operator riders), status CLOSED. D1.4 amendment applied to `Docs/agent-platform-feature-list-v1.md` (dated correction, original text preserved in-line; explicit operator approval for the Docs edit). G1 addendum #1 appended to briefs T07/T08/T09. Spike battery S1–S3 launched as background agents per D1.6-C (probe-level, ≤$0.50 API-equiv each, budget-capped `claude` probes; opencode user-space install allowed for S3, no new accounts, no sudo; results → `Research/spikes/G1-S{1,2,3}-*.md`). Wave B1 launches after spike validation + addendum #2 (T07 → Research/08, T08 → Research/09; T09 next slot). Reminder standing: R06-OQ2 (native micro-fanout) resurfaces at adapter-spec drafting.
 
