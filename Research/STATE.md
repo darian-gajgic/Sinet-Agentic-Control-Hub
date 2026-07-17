@@ -15,7 +15,7 @@
 | G0 | Launch: pilot-first vs review-first vs full Wave A | CLOSED 2026-07-16 | **Pilot first** — T01 alone; operator reviews the report before Wave A2 | (this row) |
 | G1 | Architecture direction (after Wave A) | **CLOSED 2026-07-17** | **Package ratified (D1.1-A)**; $0.50 trivial threshold; Z.AI tier moot (operator holds Max); spec amended; spikes S1–S3 (S4 dropped — sole-controller posture); all defaults adopted, 2 operator riders (settings-not-constants; Sinet sole agent controller) | decisions/GATE-1-architecture-direction.md |
 | G2 | Substrate + adoption list (after Wave B) | **CLOSED 2026-07-17** | **All recommendations adopted:** substrate package (D2.1) + adoption list w/ Crush patterns-only (D2.2); sandbox ratified contingent on host probes (D2.3); idempotent effect channels (D2.4); daily/keep-30/rotate backups, Litestream deferred (D2.5); operator signs, no Pro at v0 (D2.6); memory proposals at v1 (D2.7); done-directly two-stage + P2 pre-registration (D2.8); spike battery at P2 entry (D2.9); Wave C launched (D2.10); Def.1–16 all adopted | decisions/GATE-2-substrate-and-adoption.md |
-| G3 | Spec-readiness (after Wave C) | pending | — | decisions/GATE-3-*.md |
+| G3 | Spec-readiness (after Wave C) | **OPEN 2026-07-17** | presenting | decisions/GATE-3-spec-readiness.md |
 | G4 | Spec review → end research phase | pending | — | decisions/GATE-4-*.md |
 
 ## Topic board
