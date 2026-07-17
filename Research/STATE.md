@@ -2,9 +2,9 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** WAVE A2 — **RESUMED on operator instruction 2026-07-17** (same session as 3rd pause). T04 revived via SendMessage with context intact — re-entered at the verifier-launch step, no spend lost (target: report 07). T02 + T03 + T05 + T06 committed + validated (reports 05/06/03/04). Engine-direction nod stands (dual substrate; final at G1).
-**Next action:** validate T04 on completion (checklist), commit. Wave A then complete → write GATE G1 memo per gate protocol (template ready; bundles operator backlogs from reports 02 §9, 03 §7, 04 §7, 05 §7, 06 §7 + report-01 residuals (Z.AI tier, CLI-vs-SDK spike plan) + spec operating-reality-bullet amendment, still undecided) and present to operator.
-**Last updated:** 2026-07-17 (T04 in flight at verification phase; operator review session: report-03 OQ#2 + OQ#4 also decided — report-03 operator backlog cleared for G1).
+**Campaign status:** **WAVE A COMPLETE** — all seven Wave-A reports committed + validated (01, 02, 03, 04, 05, 06, 07). **GATE G1 OPEN** — memo being written to decisions/GATE-1-architecture-direction.md.
+**Next action:** finish + commit the G1 memo, mark blocked-on-gate, present remaining decisions to operator (AskUserQuestion batches per gate protocol; pre-registered operator decisions from the review sessions are recorded in the memo, NOT re-asked). After G1 closes: append G1 addendum to briefs T07–T09, launch Wave B1.
+**Last updated:** 2026-07-17 (T04 validated PASS + committed as report 07; Wave A done; G1 memo in progress; report-03 operator backlog fully cleared pre-gate).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
 ## Gate log
@@ -26,7 +26,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T01 | execution-engines-and-adapters | A1 | FULL | **committed + validated** | Research/01-execution-engines-and-adapters.md | pilot PASS — 322 lines, 80 sources/158 URLs; ~48 min, ~266k tokens; commit cfe4dd6 |
 | T02 | agent-loop-and-harness-engineering | A2 | FULL | **committed + validated** | Research/05-agent-loop-and-harness-engineering.md | PASS — 342 lines, 81 sources; ~42 min, ~266k tokens; spot-checks 3/3 (one via installed-binary strings probe); freshness re-validation (4.3) confirmed novel |
 | T03 | orchestration-and-multiagent | A2 | FULL | **committed + validated** | Research/06-orchestration-and-multiagent.md | PASS — 297 lines, 67 sources; ~36 min, ~184k tokens; spot-checks 3/3; D6 exclusions re-validated stronger |
-| T04 | context-engineering | A2 | FULL | **running** | → Research/07-context-engineering.md | resumed 2026-07-17 same-session (SendMessage revive, spend preserved); in verification phase |
+| T04 | context-engineering | A2 | FULL | **committed + validated** | Research/07-context-engineering.md | PASS — 317 lines, ~98 sources; survived pause/resume (verifier boundary); spot-checks 3/3 verbatim; fresh-per-stage + ledger recommended |
 | T05 | intake-planning-spec-pipeline | A2 | FULL | **committed + validated** | Research/03-intake-planning-spec-pipeline.md | PASS — 298 lines, 90 sources; survived pause/resume (verifiers re-run); spot-checks pass |
 | T06 | verification-and-quality-loops | A2 | FULL | **committed + validated** | Research/04-verification-and-quality-loops.md | PASS — 353 lines, 98 sources; survived pause/resume; spot-checks 3/3 verbatim |
 | T07 | durable-state-checkpointing-recovery | B1 | FULL | pending | — | consumes G1 addendum |
@@ -53,8 +53,11 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 04 | T06 | 04-verification-and-quality-loops.md |
 | 05 | T02 | 05-agent-loop-and-harness-engineering.md |
 | 06 | T03 | 06-orchestration-and-multiagent.md |
+| 07 | T04 | 07-context-engineering.md |
 
 ## Session log
+
+- **2026-07-17 — same session, T04 complete → WAVE A COMPLETE:** T04 finished ~17 min after resume (total ~192k tokens; pause/resume cost zero — re-entered exactly at verifier launch). Validated PASS (checklist; all 9 brief SQs covered; spot-checks 3/3 verbatim: arXiv 2505.06120 −39% + "get lost and do not recover"; ConstraintRot 0%→30/59% + pinning-restores-0%; Claude Code caching docs 1h-subscription-TTL/subagent-5min/cwd-scope exact wording). **Headline:** fresh-context-per-stage on a platform-owned Task Context Ledger (pinned objective/AC/constraints, append-only decisions, restorable artifact refs) — CONCAT 95.1% restoration is the controlled anchor; compaction demoted to audited safety net (constraints silently dropped 0%→30–59%, ≈53pp loss over 3 cascades; Claude compactor undisableable + version-unstable); deterministic registry injection with a Sinet-owned trace manifest; AGENTS.md won (CLAUDE.md shim for the Claude lane); subscription cache-quota weighting confirmed unpublished (⚙0.1× proposed). Harvest: A4 CONFIRM+promote to default session model; N18 REVISE (AGENTS.md target, drop architecture map, human-prune gate); deepclaude boundary CONFIRM. 6 OQs + 4 platform problems → G1 backlog. **Wave A complete (7/7 reports). G1 opened.**
 
 - **2026-07-17 — same session, RESUMED:** operator instructed resume shortly after the pause. T04 revived in the same session via SendMessage (the stopped agent had no active task; resumed from transcript with context intact) — it re-enters exactly at the verifier-launch step, so the pause cost zero research spend. Board back to `running`; next milestone unchanged (T04 validate+commit → G1 memo).
 
