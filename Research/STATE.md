@@ -2,8 +2,8 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** WAVE A2 — batch 2 RUNNING. **Engine-direction nod GIVEN 2026-07-17** (dual substrate approved as working direction; final at G1). **T03 COMPLETE** (report 06 validated PASS + committed). T02 still running (target: report 05); T04 launched into the freed slot (target: report 07).
-**Next action:** validate T02/T04 reports as they complete (checklist), commit each. Then gate G1 (memo template ready; includes report-02 §9 + report-03 §7 + report-04 §7 + report-06 §7 operator backlogs + spec operating-reality-bullet amendment, still undecided).
+**Campaign status:** WAVE A2 — batch 2 RUNNING. **Engine-direction nod GIVEN 2026-07-17** (dual substrate approved as working direction; final at G1). **T02 + T03 COMPLETE** (reports 05 + 06 validated PASS + committed). **T04 is the last A2 topic still running** (target: report 07).
+**Next action:** validate T04 on completion (checklist), commit. Wave A then complete → write GATE G1 memo per gate protocol (template ready; bundles operator backlogs from reports 02 §9, 03 §7, 04 §7, 05 §7, 06 §7 + report-01 residuals (Z.AI tier, CLI-vs-SDK spike plan) + spec operating-reality-bullet amendment, still undecided) and present to operator.
 **Last updated:** 2026-07-17 (operator report-02 review session; report-02 OQ#5 decided — class-2 gray zone as-is, uniform policy).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -24,7 +24,7 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T | Slug | Wave | Depth | Status | Report file | Notes |
 |---|---|---|---|---|---|---|
 | T01 | execution-engines-and-adapters | A1 | FULL | **committed + validated** | Research/01-execution-engines-and-adapters.md | pilot PASS — 322 lines, 80 sources/158 URLs; ~48 min, ~266k tokens; commit cfe4dd6 |
-| T02 | agent-loop-and-harness-engineering | A2 | FULL | **running** | → Research/05-agent-loop-and-harness-engineering.md | launched 2026-07-17 on operator nod; background subagent, Mode A |
+| T02 | agent-loop-and-harness-engineering | A2 | FULL | **committed + validated** | Research/05-agent-loop-and-harness-engineering.md | PASS — 342 lines, 81 sources; ~42 min, ~266k tokens; spot-checks 3/3 (one via installed-binary strings probe); freshness re-validation (4.3) confirmed novel |
 | T03 | orchestration-and-multiagent | A2 | FULL | **committed + validated** | Research/06-orchestration-and-multiagent.md | PASS — 297 lines, 67 sources; ~36 min, ~184k tokens; spot-checks 3/3; D6 exclusions re-validated stronger |
 | T04 | context-engineering | A2 | FULL | **running** | → Research/07-context-engineering.md | launched 2026-07-17 into freed slot; background subagent, Mode A |
 | T05 | intake-planning-spec-pipeline | A2 | FULL | **committed + validated** | Research/03-intake-planning-spec-pipeline.md | PASS — 298 lines, 90 sources; survived pause/resume (verifiers re-run); spot-checks pass |
@@ -51,9 +51,12 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 02 | T17 | 02-provider-watchlist-and-onboarding-criteria.md |
 | 03 | T05 | 03-intake-planning-spec-pipeline.md |
 | 04 | T06 | 04-verification-and-quality-loops.md |
+| 05 | T02 | 05-agent-loop-and-harness-engineering.md |
 | 06 | T03 | 06-orchestration-and-multiagent.md |
 
 ## Session log
+
+- **2026-07-17 — same session, T02 complete:** T02 finished ~42 min / 25 tool uses / ~266k tokens; validated PASS (checklist; brief cross-check exact — SQ1–8 ↔ §2.1–2.8, harvest A3/A4/N1/K1 all verdicted, engine direction not reopened; spot-checks 3/3: #34629 resume-cache ~20x regression verbatim incl. exact cost table; opencode pending-permission in-memory `Map` verified at source; PreToolUse `defer` verified via docs decision-table + strings probe of the installed v2.1.211 binary — `tool_deferred` ×13, `tool_deferred_unavailable` ×8). Method disclosure: the research agent ran two sub-cent live headless probes on the operator subscription (~$0.02 API-equivalent total) to verify `--max-budget-usd`/`--max-turns` enforcement — precedent: T01's local CLI probe. **Headline:** two-tier harness is field consensus (engines own loop/permissions/compaction; durable checkpoints/inbox/ceilings/watchdogs/receipts are outer-harness = Sinet); engine state expires/corrupts/regresses → platform store authoritative (P-T01-1 reinforced); `defer` = the exit-park primitive with two traps (single-tool-call-only, cleanup-sweep evaporation); **freshness re-validation on stale resume ships nowhere — spec 4.3 is genuinely novel**; recommendation = Sinet-owned SQLite-WAL event log + run FSM, durable-execution runtimes + LangGraph rejected as spine. 5 operator items + 3 G1 spikes → G1 backlog; P-T02-1..5 filed. T04 (last A2 topic) still running.
 
 - **2026-07-17 — same session, T03 complete:** T03 finished ~36 min / 28 tool uses / ~184k tokens; validated PASS (checklist + spot-checks 3/3: Google scaling-study headline range verbatim on the arXiv abstract with body numbers attested by the report's 3-vote adversarial pass; opencode #18100 — 47-session/20-level runaway, depth limit closed-not-planned — verbatim; Cognition 2026-04 revision all four claims verbatim). **Headline:** the field converged on D6's exact shape; delegation wins only on context-protection / read-fan-out / clean-context review; designed cost ≈2–4x single-agent (15x-class only without a context contract); **no engine enforces D6** → control-plane spawn API with trigger rubric (T-CTX/T-PAR/T-SPEC), brief/report firewall, spawn_log schema — ⚙ defaults proposed for G1 ratification. 3 operator items → G1 backlog; 4 new platform problems filed (caching-vs-subscription-quota semantics, sibling-failure containment as tested behavior, D6 conformance-by-violation tests, helper-report injection surface). T04 launched into the freed slot (target report 07).
 
