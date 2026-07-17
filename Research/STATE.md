@@ -57,6 +57,15 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 
 ## Session log
 
+- **2026-07-17 — operator backlog review, part 5 — G1 OPEN DECISIONS ANSWERED (discussion session; fold into gate close, do not re-ask):**
+  - **D1.1 (architecture-direction package) = RATIFIED, option A** — dual substrate; run FSM + SQLite-WAL event log + fresh-context-per-stage on the Task Context Ledger; single-agent-first D6 orchestration (with operator's sole-controller posture from part 4); two-axis verification cascade.
+  - **D1.7 (zero-interaction cost threshold) = $0.50 API-equivalent** (recommended default accepted; per-user 13.4 setting, changeable anytime).
+  - **D1.5 (Z.AI tier) = RESOLVED — MOOT: operator ALREADY HOLDS GLM Coding Max (top tier, ~1,600 prompts/5 h, 2+ concurrent).** No purchase decision; v0 Z.AI lane config uses the Max quota shape; T08 consumes the real tier data (prompt-count quota, 15–20 calls/prompt, peak 3×/off-peak 2× multipliers).
+  - **D1.4 (spec operating-reality amendment) = A, amend now** — dated one-line correction citing report 01 §2.1 + P1; wording previewed to operator in-session; execute on wording OK (Docs/ edit explicitly operator-approved).
+  - **D1.6 (spike battery) = C, as amended by part 4:** S1–S3 (CLI-wrap-vs-SDK, defer drill, opencode park conformance) in a dedicated spike session feeding T07–T09 briefs; **S4 removed** (native micro-fanout deferred — Sinet sole controller, reminder registered); S5 at P3.
+  - Report-07 defaults-unless-objected (cache-read 0.1×, stage budgets 50%/70%, ledger v0 sections): operator advised wave-through is safe; **confirmation pending**.
+  - **G1 status: all 7 open decisions answered (D1.2/D1.3 in part 3; defaults 1,3–9 explicitly ratified parts 3–4, two with operator riders — orchestration numbers settings-editable + complexity-scaled within ceilings; helper screen conformance-only at v0, T15-gated).** Gate closes on wave-through confirm + D1.4 wording OK. **Wave B launch waits for explicit operator go** (operator: "don't start the next research yet").
+
 - **2026-07-17 — operator backlog review, part 4 (discussion session; fold into G1 recording, do not re-ask):**
   - **Report-04 OQ#4 (escalation SLAs) = RATIFIED at proposed defaults:** dead-man canary every 24 h (missed canary → backup-channel alert + freeze of approval-needing work); blocking approval cards remind at 4 h / push at 24 h; safety-anomaly alerts immediate push + hourly re-ping until acknowledged; FYI no SLA; full escalation drill quarterly.
   - **Report-05 OQ#2 (freshness fingerprint) = RATIFIED, all four parts:** composition {repo HEAD, source hashes, spec/plan version, price-table version}; 24 h staleness default; sibling-accept trigger; price-table drift alone triggers re-validation.
