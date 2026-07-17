@@ -2,9 +2,9 @@
 
 > Any session resuming the campaign: read this file first, then `CAMPAIGN.md`, then follow `.claude/skills/research-campaign/SKILL.md`. Update this file before and after every action. This file is the single source of truth for progress.
 
-**Campaign status:** **WAVE B COMPLETE (14 reports, 01–14) — G2 OPEN.** Hold lifted (operator: "Continue CAMPAIGN.md", 2026-07-17). Memo written: `decisions/GATE-2-substrate-and-adoption.md` (10 decisions + 16 defaults + 6 pre-registered items).
-**Next action:** present G2 decisions in-session (AskUserQuestion, 3 batches); record answers in the gate file + here; then close mechanics: G2 addenda to briefs T13/T14/T15 → launch Wave C per D2.10 (default: T14 + T15 first, T13 LIGHT into freed slot).
-**Standing follow-ups:** (a) S3 live-auth park tests await operator provisioning the Z.AI key into opencode (literal steps in S3 report §Blocked) — re-run is a ≤$0.50 mini-spike, not wave-blocking; (b) serialize-by-deny fallback probe (S2 verdict #2) + optional N≈10 live parallel-rate battery (~$2) → next spike batch (P3 or with T07 validation); (c) REMINDER for operator (their explicit request): R06-OQ2 native micro-fanout resurfaces when the adapter spawning section is drafted.
+**Campaign status:** **G2 CLOSED 2026-07-17 — WAVE C RUNNING.** All 10 decisions + 16 defaults adopted as recommended (see gate file Decisions-taken). G2 addenda appended to briefs T13/T14/T15. T14 + T15 launched (targets Research/15 + 16); T13 (LIGHT) launches into the first freed slot.
+**Next action:** validate + commit T14/T15 reports as they complete; launch T13 into the freed slot; when all three are committed → G3 memo (spec-readiness).
+**Standing follow-ups:** (a) **P2-entry spike battery** (D2.9): engine credential-injection probe per lane (R10-OQ1), systemd harvest matrix (R08-OQ8), serialize-by-deny + optional ~$2 parallel-rate battery (S2 carry), S3 live-auth re-run + Z.AI prompt-unit calibration (R09-OQ4), `anthropic-ratelimit-unified-*` header probe (R09-OQ6), logprob probe (R12-OQ7); **operator prerequisites, whenever convenient before P2:** provision Z.AI key into opencode (S3 report §Blocked steps) + the report-10 §7.3 host-probe afternoon (D2.3 contingency). (b) REMINDER for operator (their explicit request): R06-OQ2 native micro-fanout resurfaces when the adapter spawning section is drafted at P2. (c) P2 also owes: benchmark pre-registration session (D2.8, report 12 §4.6 draft) + frontend workshop (report 14 §3.3 shortlist).
 **Last updated:** 2026-07-17 (spikes validated: S1 CLI-wrap verdict w/ SDK fallback verified; S2 defer PASS, 20.2% fallback rate, R05 [S41] corrected; S3 XDG isolation PASS, ask volatility source-confirmed. Wave B1 in flight).
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
 
@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | G0 | Launch: pilot-first vs review-first vs full Wave A | CLOSED 2026-07-16 | **Pilot first** — T01 alone; operator reviews the report before Wave A2 | (this row) |
 | G1 | Architecture direction (after Wave A) | **CLOSED 2026-07-17** | **Package ratified (D1.1-A)**; $0.50 trivial threshold; Z.AI tier moot (operator holds Max); spec amended; spikes S1–S3 (S4 dropped — sole-controller posture); all defaults adopted, 2 operator riders (settings-not-constants; Sinet sole agent controller) | decisions/GATE-1-architecture-direction.md |
-| G2 | Substrate + adoption list (after Wave B) | **OPEN 2026-07-17** | presenting | decisions/GATE-2-substrate-and-adoption.md |
+| G2 | Substrate + adoption list (after Wave B) | **CLOSED 2026-07-17** | **All recommendations adopted:** substrate package (D2.1) + adoption list w/ Crush patterns-only (D2.2); sandbox ratified contingent on host probes (D2.3); idempotent effect channels (D2.4); daily/keep-30/rotate backups, Litestream deferred (D2.5); operator signs, no Pro at v0 (D2.6); memory proposals at v1 (D2.7); done-directly two-stage + P2 pre-registration (D2.8); spike battery at P2 entry (D2.9); Wave C launched (D2.10); Def.1–16 all adopted | decisions/GATE-2-substrate-and-adoption.md |
 | G3 | Spec-readiness (after Wave C) | pending | — | decisions/GATE-3-*.md |
 | G4 | Spec review → end research phase | pending | — | decisions/GATE-4-*.md |
 
@@ -37,10 +37,10 @@ Statuses: `pending` → `ready` (brief final, wave unblocked) → `running` (age
 | T11 | evals-observability-benchmark | B2 | FULL | **committed + validated** | Research/12-evals-observability-benchmark.md | PASS — 447 lines, 114 sources; survived usage-limit interruption (SendMessage revival ×2); 36 votes 0 REFUTE, stats independently recomputed; spot-checks 3/3 (opencode #25657, Gemini CLI thresholds in source, changedetection.io 0.55.x LLM features via gh API); D7 event log IS the observability stack; watchlist executor = changedetection.io + native poller + Sinet canaries; pre-registered small-n benchmark protocol; P-T11-1..5 |
 | T12 | deliverables-review-git | B2 | FULL | **committed + validated** | Research/13-deliverables-review-git.md | PASS — 427 lines, 169 sources; survived usage-limit + operator-stop (synthesis agent completed from salvaged handoff — all research/verification preserved, 24 votes 0 REFUTE); spot-checks 3/3 verbatim (PAT collaborator gap, age scrypt-stanza exclusivity + X-Wing, CC checkpointing bash-blind); N15/N19 confirmed vs report 14 (no reconciliation needed); P-T12-1..4; Angle-5 provenance honestly marked |
 | T16 | oss-harvest-validation | B2 | FULL | **committed + validated** | Research/14-oss-harvest-validation.md | PASS — 411 lines, 120 sources; spot-checks 3/3 (Anthropic legal doc all 3 quotes verbatim — SDK-ban press claim killed by primary; genai-prices MIT/Pydantic/historic-prices confirmed; opencode task-deny subagent disable confirmed); full map consolidated, supersedes Docs harvest proposal as citable reference; control-plane cohort dead (~14mo half-life); 3 new ADOPTs; P-T16-1..4 |
-| T13 | platform-stack-architecture | C | LIGHT | pending | — | |
+| T13 | platform-stack-architecture | C | LIGHT | ready | — | G2 addendum appended; launches into first freed slot (target report 17) |
 | T17 | provider-watchlist-and-onboarding-criteria | A1b | FULL (narrow) | **committed + validated** | Research/02-provider-watchlist-and-onboarding-criteria.md | PASS — 336 lines, 72 sources; ~34 min, ~201k tokens; xAI = sanctioned lane, DeepSeek = metered-only; report 01 recommendation unchanged |
-| T14 | worker-ontology-and-domain-agents | C | FULL | pending | — | |
-| T15 | local-models-layer | C | FULL | pending | — | |
+| T14 | worker-ontology-and-domain-agents | C | FULL | running | — | launched 2026-07-17 post-G2; target Research/15-worker-ontology-and-domain-agents.md |
+| T15 | local-models-layer | C | FULL | running | — | launched 2026-07-17 post-G2; target Research/16-local-models-layer.md |
 
 ## Report numbering
 
@@ -62,8 +62,12 @@ Reports take the next free `NN` in `Research/` in completion order. Map:
 | 12 | T11 | 12-evals-observability-benchmark.md (in flight) |
 | 13 | T12 | 13-deliverables-review-git.md |
 | 14 | T16 | 14-oss-harvest-validation.md |
+| 15 | T14 | 15-worker-ontology-and-domain-agents.md (in flight) |
+| 16 | T15 | 16-local-models-layer.md (in flight) |
 
 ## Session log
+
+- **2026-07-17 (afternoon) — G2 PRESENTED + CLOSED; WAVE C LAUNCHED:** operator asked for a plain-language walkthrough (findings per report + each decision's effect and options) before answering — delivered in-session, then answered all three AskUserQuestion batches: **every recommendation adopted** (D2.1–D2.10 + Def.1–16; details in the gate file's Decisions-taken table). Notable commitments: sandbox ratified *contingent* on the operator's report-10 §7.3 host-probe afternoon (pre-P2); consolidated spike battery at P2 entry (operator provisions Z.AI key beforehand); benchmark pre-registration session + frontend workshop owed at P2; GitHub Pro deferred until a second member joins; memory auto-proposals deferred to v1. Close mechanics executed: Decisions-taken table filled + status CLOSED; G2 addenda appended to briefs T13/T14/T15 (settled-inputs digests + routed problems: T14 owns config-poisoning + no-public-registry-imports; T15 gets the six-duty list with acceptance bars + GPU-broker interface + VRAM measurement method; T13 gets P-T11-4/P-T16-1 adoption criteria + SSE-settled real-time + frontend-shortlist-as-candidates). **T14 + T15 launched Mode A** (max effort, background; targets Research/15 + 16); T13 ready for the first freed slot (target report 17). Next milestone: validate+commit 15/16 → launch T13 → G3 memo.
 
 - **2026-07-17 (afternoon) — hold lifted; G2 memo written:** operator returned with "Continue CAMPAIGN.md" — the explicit go the hold required. Coordinator read all seven Wave B reports' §4 + §7 (plus report 14 §6 full), wrote `decisions/GATE-2-substrate-and-adoption.md`: 7 findings digests; 6 pre-registered/coordinator-closed items (incl. R14-OQ3/OQ8 closures); 10 decisions (D2.1 substrate package, D2.2 adoption list incl. Crush patterns-only, D2.3 sandbox ratify-contingent-on-host-probes, D2.4 effect-channel policy, D2.5 backup posture, D2.6 git signing + GitHub Pro, D2.7 v0 memory surface, D2.8 done-directly formula + benchmark pre-registration, D2.9 P2-entry spike battery, D2.10 Wave C launch); 16 defaults-unless-objected (the ⚙ number sets from reports 08–13 + two report-14 nods); follow-ups routed (Wave C brief addenda table, watchlist adds, platform problems → spec). Note: the two entries below stamped "2026-07-18" were the same overnight session; system date today is 2026-07-17. Presenting decisions next.
 

@@ -1,6 +1,6 @@
 # GATE-2 — Substrate + adoption
 
-**Opened:** 2026-07-17 · **Wave covered:** B (B1 + B2) · **Status:** OPEN
+**Opened:** 2026-07-17 · **Wave covered:** B (B1 + B2) · **Status:** **CLOSED 2026-07-17** (operator answered all decisions in-session, every recommendation adopted; see Decisions taken)
 **Reports in scope:** Research/08 (T07 durable state), 09 (T08 metering/quota/scheduling), 10 (T09 sandboxing), 11 (T10 memory), 12 (T11 evals/observability), 13 (T12 deliverables/review/git), 14 (T16 OSS harvest validation)
 
 ## Findings digest
@@ -136,6 +136,18 @@
 
 | # | Decision | Chosen | By | Date | Notes |
 |---|---|---|---|---|---|
+| P1–P6 | Pre-registered / coordinator-closed | as tabled above | — | 07-17 | recorded at open |
+| D2.1 | Substrate package | **A — ratified in full** | operator | 07-17 | state (08), metering (09), memory (11), observability (12), deliverables/git (13) settled for Wave C + P2 |
+| D2.2 | Adoption list | **A — ratified; Crush patterns-only as policy** | operator | 07-17 | report 14 §6.1 = the citable harvest reference; P-T16-1 component-onboarding checklist = spec requirement |
+| D2.3 | Sandbox stack | **A — ratified contingent on host probes** | operator | 07-17 | operator runs the report-10 §7.3 probe afternoon before P2; fallbacks auto-apply; surprises return as cards |
+| D2.4 | Effect-channel policy | **A — idempotent-capable providers required** | operator | 07-17 | email-class effects need key-capable providers; plain SMTP only as explicit per-channel exception |
+| D2.5 | Backup posture | **A — daily, keep-30 ⚙, annual repo rotation; Litestream deferred** | operator | 07-17 | Litestream re-decided at implementation once #1083 is triaged |
+| D2.6 | Git identity hardening | **A — operator signs from day one, members opt-in at enrollment; no Pro at v0** | operator | 07-17 | Pro revisited when a second member joins |
+| D2.7 | v0 memory surface | **A — proposal pipeline at v1** | operator | 07-17 | v0 = knowledge injection + L0 + manual L2 |
+| D2.8 | Done-directly + benchmark pre-registration | **A — two-stage formula ratified; P2 pre-registration session committed** | operator | 07-17 | report 12 §4.6 is the draft package; formula text goes into the signed commit |
+| D2.9 | Spike battery | **A — consolidated battery at P2 entry** | operator | 07-17 | operator prerequisite: Z.AI key into opencode (S3 report steps), whenever convenient |
+| D2.10 | Wave C launch | **A — T14 + T15 now; T13 (LIGHT) into first freed slot** | operator | 07-17 | G2 addenda appended to all three briefs before launch |
+| Def.1–16 | Defaults unless objected | **All 16 adopted** | operator | 07-17 | every number ships as an operator-editable setting with audit trail (G1 rider 1) |
 
 ## Follow-ups spawned
 
