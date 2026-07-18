@@ -4,20 +4,21 @@
 >
 > **Full operational detail + the chronological session log live in [`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)** — read it only when auditing a specific past decision. Keeping this layer terse is deliberate: it lets a Fable 5 session resume without loading security-research operational prose into context (see the Safeguard note).
 
-**Campaign status:** **P1 (research waves) COMPLETE — 17/17 topics; gates G0–G3 CLOSED. P2 (core-architecture spec) APPROVED. P2-entry spike battery (S1–S5) COMPLETE, validated, committed, pushed (2026-07-18).** The autonomous-research portion is finished; the remaining P2 work is interactive and non-security.
+**Campaign status:** **P1 (research waves) COMPLETE — 17/17 topics; gates G0–G3 CLOSED. P2 (core-architecture spec) APPROVED. P2-entry spike battery (S1–S5) COMPLETE. Benchmark pre-registration v1 REGISTERED — signed commit `5fb7082` (2026-07-18), `Spec/benchmark-preregistration-v1.md`; discharges R12-OQ1/OQ2; `Spec/` now exists.** The autonomous-research portion is finished; the remaining P2 work is interactive and non-security.
 
 **Safeguard note:** the security-flavored spike work tripped Fable 5's intentionally-broad dual-use safeguard (false positive; auto-falls-back to Opus 4.8, lossless). Mitigation in force: this live layer is kept terse + neutral, and any task that must deep-read a security report (09 metering, 10 sandboxing, the spike reports) is delegated to an **Opus-pinned subagent** returning a neutral deliverable. See the coordinator skill (§Security-content isolation) and memory `fable5-safeguard-false-positive`.
 
 **Next action (all INTERACTIVE — operator-driven):**
-- (a) **Benchmark pre-registration session** (D2.8) — report 12 §4.6 is the draft package: freeze per-domain metrics, gate mins (⚙20 pairs / P≥0.90), done-directly formula text; signed commit.
-- (b) **Frontend workshop** — binding component picks incl. settings-form renderer (RJSF vs JSON-Forms); report 14 §3.3 shortlist + R14-OQ4.
-- (c) Create `Spec/`, draft `core-architecture-v1.md` per the G3 memo's section↔report map; per-section workshops consuming reports 01–17 + spikes. **Raise R06-OQ2 native micro-fanout when the adapter-spawning section is drafted** (operator standing request). G4 reviews the finished spec; only the operator ends the research phase.
+- (a) **Frontend workshop** — binding component picks incl. settings-form renderer (RJSF vs JSON-Forms); report 14 §3.3 shortlist + R14-OQ4.
+- (b) Draft `Spec/core-architecture-v1.md` per the G3 memo's section↔report map; per-section workshops consuming reports 01–17 + spikes + the benchmark registration (`5fb7082`). **Raise R06-OQ2 native micro-fanout when the adapter-spawning section is drafted** (operator standing request). G4 reviews the finished spec; only the operator ends the research phase.
+- Done 2026-07-18: benchmark pre-registration session (D2.8) — registered + signed, see status line. Amendments only via the §17 procedure (dated, signed, additive).
 
 **Operator action items still open (whenever convenient):**
 1. **Z.AI dashboard prompt-unit calibration** (R09-OQ4 residual) — 5-step recipe in the P2-S1 report §Blocked items.
 2. **ts.net hostname pick** (G3 Def.5 — bland + permanent, before the first cert).
 3. **Deferred host probes** needing root/reboot/suspend — batched in the P2-S2 report §Deferred (reboot-survival + one suspend session: user.slice freeze/thaw + R09-OQ7 `Persistent=` catch-up).
 4. **Week-one push drill** (G3 Def.6, at first deploy).
+5. **(Optional, cosmetic)** GitHub "Verified" badge for registration commits: `gh auth refresh -h github.com -s admin:ssh_signing_key` then `gh ssh-key add ~/.ssh/git-signing-ed25519.pub --type signing --title "sinep-git-signing-sinet"`. Local `git verify-commit` already works without it.
 
 **Provisioned:** Z.AI GLM Coding Max key at `zai-api-key.txt` (repo root; gitignored via `*-api-key.txt`, chmod 600, never committed or printed).
 
@@ -107,4 +108,4 @@ Reports take the next free `NN` in `Research/` in completion order:
 Full chronological session log + spike-battery operational detail (probe measurements, teardown / secret-hygiene records, reconciliation notes, pause/resume history, task-id tables) → **[`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)**.
 
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
-**Last updated:** 2026-07-18 — STATE.md slimmed to a terse live layer; full history archived verbatim to STATE-ARCHIVE.md; Opus-delegation rule for security reports added to the coordinator skill.
+**Last updated:** 2026-07-18 — benchmark pre-registration v1 registered (signed `5fb7082`); Spec/ created; next: frontend workshop.
