@@ -15,11 +15,35 @@
 |---|---|---|---|
 | P2-S1 | S3 live-auth blocked list + Z.AI prompt-unit calibration (R09-OQ4) + Z.AI/local logprob probe (R12-OQ7) | **running** — ⚠ possibly duplicated (see reconciliation note) | Research/spikes/P2-S1-opencode-live-auth-zai-calibration.md |
 | P2-S2 | systemd harvest matrix (R08-OQ8) + read-only host sandbox prereqs (R10-OQ3 read-only parts) | **DONE + validated** (delegated agent + coordinator-inline corroboration; report reconciled — delegated run went deeper, corrected the suspend-freeze reading) | Research/spikes/P2-S2-systemd-harvest-host-probes.md ✅ |
-| P2-S3 | engine credential-injection per lane (R10-OQ1) + `anthropic-ratelimit-unified-*` header capture (R09-OQ6 — folded in: same wire access) | queued (batch 2 — needs user-space mitmproxy) | Research/spikes/P2-S3-credential-injection-wire-probes.md |
-| P2-S4 | serialize-by-deny fallback probe (R08-OQ6, S2 carry) | **running** (Opus 4.8, bg agent) | Research/spikes/P2-S4-serialize-by-deny.md |
+| P2-S3 | engine credential-injection per lane (R10-OQ1) + `anthropic-ratelimit-unified-*` header capture (R09-OQ6 — folded in: same wire access) | **running** (Opus 4.8, bg agent; user-space mitmproxy, no system trust-store change) | Research/spikes/P2-S3-credential-injection-wire-probes.md |
+| P2-S4 | serialize-by-deny fallback probe (R08-OQ6, S2 carry) | **DONE + validated** (VIABLE on claude-haiku-4-5; $0.1665; reframes S2 — see follow-up) | Research/spikes/P2-S4-serialize-by-deny.md ✅ |
 | P2-S5 | engine-lowering probes (R15-OQ6): Claude agent-artifact injection path; opencode agent registration + `.claude/` cross-read disable + `permission.task` deny-all spawn kill | **running** (Opus 4.8, bg agent) | Research/spikes/P2-S5-engine-lowering.md |
 
 **⚠ RECONCILIATION NOTE (task-tracking glitch, 2026-07-18):** the Fable→Opus model switch hid the tool calls of the flagged pre-switch turn from the coordinator's reconstructed context, AND `TaskList` returned empty all session (unreliable — a completed agent proved otherwise). Net effect: the pre-flag turn had already launched **P2-S2** (`ad57b868…`, since completed — its report is the deeper of the two runs) **and a P2-S1** (`ad3126bf…`), then the coordinator re-launched P2-S1/S4/S5 in the recovery turn believing nothing was running. **Consequence: P2-S1 may be running twice.** Harm is low — Z.AI is subscription-metered (no marginal cash; a handful of prompts) and both would write the same report path (last-writer-wins, both cover the same OQs). Decision: **do NOT blind-stop** (TaskList can't identify which is which; killing the wrong one loses good work) — let them finish, validate whichever P2-S1 report lands, note the dup. P2-S2 was also done twice (delegated + inline) → treated as independent corroboration; report reconciled from the deeper delegated run. Live process check confirmed 3 `opencode serve` instances (the S1 battery working) with **no key in argv** (secret hygiene holding).
+
+### RESUME RECORD (checkpoint 2026-07-18, session on Opus 4.8 — "pause & make safe")
+
+**Durable now (committed + pushed — cannot be lost):** P2-S2 ✅ (22fcc46) · P2-S4 ✅ (this commit). All 17 research reports + G0–G3 gate memos + G1 spikes were already committed/pushed before today.
+
+**In-flight background agents** (each writes its report to the path in the table on completion, then auto-notifies the coordinator; nothing to poll):
+
+| Spike | Agent task id | Model | Report target (Research/spikes/) |
+|---|---|---|---|
+| P2-S1 | `aeeb289d6b138d637` | Opus 4.8 | P2-S1-opencode-live-auth-zai-calibration.md |
+| P2-S5 | `ab7141ec600c1f43e` | Opus 4.8 | P2-S5-engine-lowering.md |
+| P2-S3 | `aca0185ce5c3464d4` | Opus 4.8 | P2-S3-credential-injection-wire-probes.md |
+| P2-S1 dup? | `ad3126bfd233e94b4` (+child `ab72483960c387730`) | pre-flag (Fable?) | may also target the P2-S1 file — reconcile on completion |
+
+Agent transcripts (recoverable): `/tmp/claude-1000/-home-sinep-…/c8abf96d-…/tasks/<id>.output` (JSONL — never bulk-read; bounded `grep` or SendMessage-revive only).
+
+**Resume mechanics:**
+- *Same session:* `SendMessage` to an agent id revives it with context intact (spend preserved).
+- *New session:* for each in-flight spike, **check `Research/spikes/` for its report file first** — if present, validate (spike checklist) + commit; if absent, relaunch that spike fresh (scope is in the table above + the named OQs in reports 08/09/10/12/15; prompts are reconstructable). Then continue the Next-action line.
+- *Orphaned probe processes* (safe to kill; scratchpad is disposable): `pkill -f 'opencode serve --port 142'` (ports 14200/14201/14210 seen) and any `mitmdump`/`mitmproxy` from S3. The Z.AI key lives at `zai-api-key.txt` (gitignored, chmod 600).
+
+**Loss analysis:** if the session dies right now, **zero committed work is lost**; worst case is relaunching the 3–4 in-flight spikes fresh (each ≤$0.50-API-equivalent-class + subscription prompts). The completed P2-S2/S4 findings are safe.
+
+---
 
 **Skipped with reasons:** the optional ~$2 live parallel-rate battery (S2 carry) — S2's own report states the N=7,325 corpus measurement is the *stronger* estimator; run later only if the operator asks. R09-OQ7 `Persistent=` suspend test — requires a real suspend cycle, operator-assisted, implementation phase.
 **Standing follow-ups:** (a) REMINDER for operator (their explicit request): R06-OQ2 native micro-fanout resurfaces when the adapter spawning section is drafted at P2 — coordinator must actively raise it there. (b) G3 Def.6 push drill = week-one real-device drill at first deploy (P3 item). (c) v1+ parked list: G3 memo §Follow-ups.
