@@ -22,7 +22,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S00 | front-matter | coordinator | saved (this commit) |
 | S01 | process-architecture-shell | inherit | committed ✅ |
 | S02 | durable-state-recovery | opus | running |
-| S03 | engines-adapters | opus | running |
+| S03 | engines-adapters | opus | committed ✅ (R06-OQ2 ask → operator) |
 | S04 | orchestration | inherit | committed ✅ |
 | S05 | context-ledger | inherit | committed ✅ |
 | S06 | intake-pipeline | inherit | running |

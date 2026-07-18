@@ -116,6 +116,8 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **duty alias** — a named local-tier capability slot (e.g. watchdog-disambiguator) mapping to a swappable model; swaps are invisible to workers [R16].
 - **broker** — the credential broker process; holds provider/git secrets outside every sandbox (D2); performs signing and pushes [R10, R13].
 - **seam** — one of five named replacement boundaries: storage, process, API, adapter, adoption [R17].
+- **engine lowering** — compiling a run down to the exact per-lane invocation so Sinet-compiled config is the only config the engine sees [S03].
+- **config channel** — one independent path (settings, MCP, skills, tools, cross-read files, cwd config, env) through which ambient environment could reach a worker; each has its own closing knob [S03].
 - **confinement class** — a rung C0–C4 of the isolation ladder, declared per worker (S5); v0 ships C0–C2.
 - **worker / template / overlay / instance** — the D8 ontology; workers = rows + git-versioned files in a Sinet-owned superset schema, compiled per engine per invocation [R15].
 - **coordinator / helper** — the D6 topology roles; helpers are earned, isolated, brief-in/report-out.
