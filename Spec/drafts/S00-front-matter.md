@@ -133,6 +133,9 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **task-class ceiling table** — the per-(domain, task family) maximum-powers table enforced by the permission audit; 4.4's instrument [S08].
 - **effort mode** — Eco / Balanced / Smart (3.5), implemented as disclosed depletion ladders [R09].
 - **done-directly figure** — the receipt's honesty comparison: what this work would have cost run directly [G2 D2.8].
+- **deliverable / revision** — the long-lived reviewable entity a task produces, and its immutable numbered snapshots 1..N [S13].
+- **orphan / drain point** — the explicit anchor state of a comment that no longer attaches; and the single code path handing review feedback to a retry [S13].
+- **snapshot ledger / escrow identity** — the SHA-256 integrity record of every 11.3 snapshot; the off-host recovery copy of the operator's age identity [S13].
 - **watchlist** — the S2.8 external-change watch: canary suites, feed poller, changedetection.io [R12].
 - **workspace** — a run's isolated working directory/clone (4.1, S1.6).
 - **approval inbox** — the single queue of pending human decisions (S3.2), risk-tiered Low/Medium/High.

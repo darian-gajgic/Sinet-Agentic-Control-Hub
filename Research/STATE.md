@@ -32,7 +32,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S10 | metering-scheduling | opus | committed ✅ |
 | S11 | sandboxing-confinement | opus | running |
 | S12 | local-models-tier | inherit | running |
-| S13 | deliverables-review-git-backup | inherit | running |
+| S13 | deliverables-review-git-backup | inherit | committed ✅ |
 | S14 | observability-evals-watch | inherit | committed ✅ |
 | S15 | frontend-api | inherit | running |
 | S16 | adoption-manifest | inherit | running |
