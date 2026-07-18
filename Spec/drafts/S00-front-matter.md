@@ -104,6 +104,7 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **`platform.db`** — the single SQLite-WAL database; control plane sole writer.
 - **event log** — the append-only event table in `platform.db`; the observability substrate [R12].
 - **run** — one FSM-governed execution of task work on a lane, checkpointed per paid call.
+- **run unit** — the per-run transient systemd unit hosting one run's engine process inside its sandbox; streams to the control plane, never touches the DB [S01].
 - **checkpoint** — the durable record written after every paid model call (D7); payload includes the Task Context Ledger state.
 - **Task Context Ledger** — platform-owned per-task context artifact: pinned objective/AC/constraints; append-only decisions; verified-status state; restorable artifact refs [R07; G1 Def.12].
 - **effect journal** — two-phase journal of outward effects; entries exist as proposals until approved; idempotency-registry backed [R08].
@@ -118,6 +119,9 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **confinement class** — a rung C0–C4 of the isolation ladder, declared per worker (S5); v0 ships C0–C2.
 - **worker / template / overlay / instance** — the D8 ontology; workers = rows + git-versioned files in a Sinet-owned superset schema, compiled per engine per invocation [R15].
 - **coordinator / helper** — the D6 topology roles; helpers are earned, isolated, brief-in/report-out.
+- **brief / helper report / spawn record** — the D6 delegation artifacts: structured context down, size-capped report up, logged spawn row with trigger + reason [S04].
+- **stage brief** — the assembled context package a stage's fresh engine session starts from (ledger projection + injected slices + stage instructions + compiled worker equipment) [S05].
+- **trace manifest** — the per-assembly record of every injected item (source, hash, version, selector rule, precedence label) [S05].
 - **composer** — the machinery that drafts new workers (7.1) through the 4-station validation battery [R15].
 - **effort mode** — Eco / Balanced / Smart (3.5), implemented as disclosed depletion ladders [R09].
 - **done-directly figure** — the receipt's honesty comparison: what this work would have cost run directly [G2 D2.8].
