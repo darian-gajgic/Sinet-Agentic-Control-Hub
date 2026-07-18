@@ -20,11 +20,11 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | § | Slug | Model | Status |
 |---|---|---|---|
 | S00 | front-matter | coordinator | saved (this commit) |
-| S01 | process-architecture-shell | inherit | running |
+| S01 | process-architecture-shell | inherit | committed ✅ |
 | S02 | durable-state-recovery | opus | running |
 | S03 | engines-adapters | opus | running |
 | S04 | orchestration | inherit | committed ✅ |
-| S05 | context-ledger | inherit | running |
+| S05 | context-ledger | inherit | committed ✅ |
 | S06 | intake-pipeline | inherit | running |
 | S07 | verification-quality | inherit | pending |
 | S08 | workers-composition-routing | inherit | pending |
