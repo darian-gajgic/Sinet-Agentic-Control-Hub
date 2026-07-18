@@ -112,7 +112,10 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **park / parked** — the run state on limit events; resumes on provider signal or schedule (3.2).
 - **consumption pressure** — measured consumption against (person, lane) budgets; the flat-rate routing currency (D5).
 - **ceremony** — the platform's own thinking around a task (interviewing, restating, plan critique, verification review, lesson proposal), run on the requester's utility model (1.10), itemized on receipts.
-- **utility model** — a person's designated model for ceremony duties; v0: local, ≤8B [G1 P9].
+- **utility model** — a person's designated local model (≤8B at v0) for light ceremony duties [G1 P9].
+- **planning model** — a person's designated frontier-class model for the planning session and critique pass; heavyweight ceremony per the G3 cut line [S06].
+- **harvest** — recovering the *result* of work that finished during an outage instead of re-running it [S02].
+- **generation** — a per-run monotonic fencing counter bumped on every takeover/resume; stale-generation appends are rejected [S02].
 - **duty alias** — a named local-tier capability slot (e.g. watchdog-disambiguator) mapping to a swappable model; swaps are invisible to workers [R16].
 - **broker** — the credential broker process; holds provider/git secrets outside every sandbox (D2); performs signing and pushes [R10, R13].
 - **seam** — one of five named replacement boundaries: storage, process, API, adapter, adoption [R17].

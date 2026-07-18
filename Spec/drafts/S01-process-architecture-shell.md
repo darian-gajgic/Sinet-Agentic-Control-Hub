@@ -84,7 +84,7 @@ Planned restarts and deploys SHOULD pass through maintenance mode; the deploy sc
 
 The host is a laptop that sleeps and travels; the shell owns suspend/resume as a lifecycle event, not an anomaly [feature list Operating reality; R17 §2.11].
 
-**Pre-sleep.** `sinet-control` holds a **delay-mode inhibitor lock** on `sleep` (the sanctioned mechanism; hook scripts are "hacks" per systemd) [R17 §4.9]. On `PrepareForSleep(true)`: stop queue claiming, checkpoint, `wal_checkpoint(TRUNCATE)`, mark in-flight run units parked. This is an **O(1) flush designed to fit the default 5 s inhibitor window** — recovery work is wake-side, never pre-sleep [R17 §4.9; G2 D2.1]. Raising the window is a deliberate operator act: ⚙ `shell.inhibit_delay_max` = 5 s (applied as host logind configuration; restart-required).
+**Pre-sleep.** `sinet-control` holds a **delay-mode inhibitor lock** on `sleep` (the sanctioned mechanism; hook scripts are "hacks" per systemd) [R17 §4.9]. On `PrepareForSleep(true)`: stop queue claiming, checkpoint, `wal_checkpoint(TRUNCATE)`, mark in-flight run units parked. This is an **O(1) flush designed to fit even the stock 5 s inhibitor window** — recovery work is wake-side, never pre-sleep [R17 §4.9; G2 D2.1]. The v0 host's measured logind state is already 30 s via an existing drop-in [SPIKE P2-S2]; ⚙ `shell.inhibit_delay_max` = 30 s records that reality (applied as host logind configuration; restart-required; the flush never depends on more than 5 s).
 
 **Post-resume.** Resume is detected by `PrepareForSleep(false)` plus wall-vs-monotonic clock-jump detection as backup (the Tailscale netmon pattern) [R17 §4.9]. Then, in order:
 
@@ -153,7 +153,7 @@ This section defines the architecture only; the full settings index is S18's swe
 |---|---|---|---|
 | `shell.drain_grace` | 15 min | (1 min, 24 h) [coordinator-draft] | G1 Def.7 |
 | `shell.watchdog_sec` | 30 s [coordinator-draft] | (10 s, 300 s) [coordinator-draft] | R17 §4.1 (⚙ flagged unnumbered) |
-| `shell.inhibit_delay_max` | 5 s (logind default) | (5 s, 30 s) [coordinator-draft]; restart-required | R17 §4.9 |
+| `shell.inhibit_delay_max` | 30 s (v0 host measured [SPIKE P2-S2]; logind stock default 5 s) | (5 s, 60 s) [coordinator-draft]; restart-required | R17 §4.9; SPIKE P2-S2 |
 | `shell.journal_max_use` | 4 GB [coordinator-draft] | (512 MB, 32 GB) [coordinator-draft]; restart-required | R17 §4.8 (⚙ flagged unnumbered) |
 
 **Known problems owned here:**
