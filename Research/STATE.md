@@ -28,12 +28,12 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S06 | intake-pipeline | inherit | committed ✅ (R03-OQ5/P47 list discharged) |
 | S07 | verification-quality | inherit | running |
 | S08 | workers-composition-routing | inherit | running |
-| S09 | memory-knowledge | inherit | running |
+| S09 | memory-knowledge | inherit | committed ✅ |
 | S10 | metering-scheduling | opus | running |
 | S11 | sandboxing-confinement | opus | running |
 | S12 | local-models-tier | inherit | running |
 | S13 | deliverables-review-git-backup | inherit | running |
-| S14 | observability-evals-watch | inherit | running |
+| S14 | observability-evals-watch | inherit | committed ✅ |
 | S15 | frontend-api | inherit | running |
 | S16 | adoption-manifest | inherit | running |
 
