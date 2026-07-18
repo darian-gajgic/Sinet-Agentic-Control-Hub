@@ -27,7 +27,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S05 | context-ledger | inherit | committed ✅ |
 | S06 | intake-pipeline | inherit | committed ✅ (R03-OQ5/P47 list discharged) |
 | S07 | verification-quality | inherit | running |
-| S08 | workers-composition-routing | inherit | running |
+| S08 | workers-composition-routing | inherit | committed ✅ (R15-OQ4 discharged) |
 | S09 | memory-knowledge | inherit | committed ✅ |
 | S10 | metering-scheduling | opus | committed ✅ |
 | S11 | sandboxing-confinement | opus | running |

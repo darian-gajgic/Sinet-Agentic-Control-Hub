@@ -128,6 +128,9 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **stage brief** — the assembled context package a stage's fresh engine session starts from (ledger projection + injected slices + stage instructions + compiled worker equipment) [S05].
 - **trace manifest** — the per-assembly record of every injected item (source, hash, version, selector rule, precedence label) [S05].
 - **composer** — the machinery that drafts new workers (7.1) through the 4-station validation battery [R15].
+- **gap record** — the persistent record of a no-fit routing outcome; accumulation earns a composition proposal [S08].
+- **composer playbook** — the versioned L2 house-knowledge object steering the composer [S08].
+- **task-class ceiling table** — the per-(domain, task family) maximum-powers table enforced by the permission audit; 4.4's instrument [S08].
 - **effort mode** — Eco / Balanced / Smart (3.5), implemented as disclosed depletion ladders [R09].
 - **done-directly figure** — the receipt's honesty comparison: what this work would have cost run directly [G2 D2.8].
 - **watchlist** — the S2.8 external-change watch: canary suites, feed poller, changedetection.io [R12].
