@@ -29,3 +29,8 @@ scratch/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Provider API keys — never committed (zai = Z.AI GLM coding plan; xai kept in case a real xAI key lands later)
+zai-api-key.txt
+xai-api-key.txt
+*-api-key.txt
