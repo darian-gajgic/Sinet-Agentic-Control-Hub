@@ -8,10 +8,9 @@
 
 **Safeguard note:** the security-flavored spike work tripped Fable 5's intentionally-broad dual-use safeguard (false positive; auto-falls-back to Opus 4.8, lossless). Mitigation in force: this live layer is kept terse + neutral, and any task that must deep-read a security report (09 metering, 10 sandboxing, the spike reports) is delegated to an **Opus-pinned subagent** returning a neutral deliverable. See the coordinator skill (§Security-content isolation) and memory `fable5-safeguard-false-positive`.
 
-**Next action (all INTERACTIVE — operator-driven):**
-- (a) **Frontend workshop** — binding component picks incl. settings-form renderer (RJSF vs JSON-Forms); report 14 §3.3 shortlist + R14-OQ4.
-- (b) Draft `Spec/core-architecture-v1.md` per the G3 memo's section↔report map; per-section workshops consuming reports 01–17 + spikes + the benchmark registration (`5fb7082`). **Raise R06-OQ2 native micro-fanout when the adapter-spawning section is drafted** (operator standing request). G4 reviews the finished spec; only the operator ends the research phase.
-- Done 2026-07-18: benchmark pre-registration session (D2.8) — registered + signed, see status line. Amendments only via the §17 procedure (dated, signed, additive).
+**Next action (INTERACTIVE — operator-driven):**
+- Draft `Spec/core-architecture-v1.md` per the G3 memo's section↔report map; per-section workshops consuming reports 01–17 + spikes + the benchmark registration (`5fb7082`) + the component picks (`Spec/frontend-components-v1.md`). **Raise R06-OQ2 native micro-fanout when the adapter-spawning section is drafted** (operator standing request). G4 reviews the finished spec; only the operator ends the research phase.
+- Done 2026-07-18: benchmark pre-registration session (D2.8) — registered + signed `5fb7082`; amendments only via its §17 procedure. Frontend workshop — 4 binding picks in `Spec/frontend-components-v1.md` (R14-OQ4 discharged; two Nexus carry-over conditionals resolved by code assessment: patterns carried, code not).
 
 **Operator action items still open (whenever convenient):**
 1. **Z.AI dashboard prompt-unit calibration** (R09-OQ4 residual) — 5-step recipe in the P2-S1 report §Blocked items.
@@ -108,4 +107,4 @@ Reports take the next free `NN` in `Research/` in completion order:
 Full chronological session log + spike-battery operational detail (probe measurements, teardown / secret-hygiene records, reconciliation notes, pause/resume history, task-id tables) → **[`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)**.
 
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
-**Last updated:** 2026-07-18 — benchmark pre-registration v1 registered (signed `5fb7082`); Spec/ created; next: frontend workshop.
+**Last updated:** 2026-07-18 — benchmark pre-registration v1 registered (signed `5fb7082`); frontend workshop complete (4 binding picks). Next: spec drafting (`Spec/core-architecture-v1.md`).

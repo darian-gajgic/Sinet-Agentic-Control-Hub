@@ -1,0 +1,49 @@
+# Frontend component picks — v1 (P2 frontend workshop)
+
+**Session:** 2026-07-18 · **Authority:** GATE-3 Decision 3.3 (React 19 + Vite SPA ratified; workshop scope = binding component picks only) · **Discharges:** R14-OQ4 · **Consumed by:** `core-architecture-v1.md` frontend section (S1.3 board, S3.5 review surface, S3.6 chat, 13.4/13.5 settings UI).
+
+All library facts below were **live-verified 2026-07-18** from primary sources (registry.npmjs.org dist-tags/time/peerDependencies JSON; GitHub repos/releases; official docs), per the campaign's no-model-memory rule. Coordinator re-fetched the two decision-flipping registry entries independently before binding. Every candidate's latest stable admits `react@19` in its peer range; no deprecations, archives, or license changes found.
+
+## Binding picks
+
+| Surface | Pick | Version at binding | License | Pre-registered fallback |
+|---|---|---|---|---|
+| Board drag-drop (S1.3) | **@hello-pangea/dnd** | 18.0.1 (peers `react ^18\|\|^19`) | Apache-2.0 | pinned @dnd-kit/core 6.3.1 |
+| Diff review surface (S3.5) | **react-diff-view** + gitdiff-parser, rendering the ported N15 review loop | 3.3.3 (2026-03-30) | MIT | monaco diff via @monaco-editor/react 4.7.0 (upgrade path) |
+| Chat surface (S3.6) | **@assistant-ui/react** via LocalRuntime/ExternalStoreRuntime (no assistant-cloud), carrying the Jarvis-tab behavior patterns | 0.14.27 (2026-07-16), pinned | MIT | owned chat primitives on the same SSE cursor |
+| Settings-form renderer (13.4/13.5) | **JSON Forms** (@jsonforms/core+react + custom renderer set) | 3.8.0 (react peer `…\|\|^19.0.0`) | MIT | RJSF v6 (documented runner-up) |
+
+AG-UI stays **PATTERN-only** (settled): mirror its event vocabulary in the SSE contract; adopt no runtime.
+
+## Decision notes (what the evidence showed)
+
+### 1. Board — T16 preference REVISED with cause
+T16's shortlist preferred dnd-kit ("very active"). Live verification found the activity is a **fork-in-the-road**: stable `@dnd-kit/core` 6.3.1 has had **no release since 2024-12-05** (~19 months); all 2026 releases are an incompatible pre-1.0 rewrite family (`@dnd-kit/react` 0.5.0, 2026-06-11, open React-19/`"use client"` issue #1654). A frozen stable + moving 0.x target fails the decade posture. `@hello-pangea/dnd` — the react-beautiful-dnd continuation, purpose-built for exactly the kanban list-to-list shape — has explicit `^18||^19` peers, active stewardship (README maintainer note; repo pushed 2026-07-18), Apache-2.0. Its documented "lists only, no grids" limit is immaterial for S1.3. **The 0.x rewrite is excluded outright; re-visit only at its 1.0 with a dated note.**
+
+### 2. Diff surface — operator conditional resolved by evidence
+Operator: *"I implemented something in Nexus already, we could copy it from there if it's good. If not choose what you recommend."* A read of the Nexus code (fact-sheet in session log) found **both halves true**:
+
+- **The design is good — and is carried.** Nexus Review v2's behavior is the hard-won part, and it becomes the **behavior spec** over the adopted widget (this is exactly harvest-map N15's PORT verdict, confirmed by T16 §6.2 and report 13): the anchor data model (`file_path + side(old|new) + line_no + line_text`, server-side re-validation with ±2-line drift tolerance, degrade-to-file-anchor), the comment lifecycle (`open → consumed` with batch `consumed_at` = an auditable "what did that rework receive"), the single findings→retry drain point, round-over-round diff as the default rework view, the synthetic render surface for unanchorable findings (born from a real 44-invisible-comments failure), and escape-first rendering with exactly one sanctioned raw-HTML channel.
+- **The code is not portable — and is not carried.** ~396 lines of untyped vanilla JS inside the 11.7k-line monolith (innerHTML template strings, global mutable state, inline `onclick`, full-modal re-renders) — the exact anti-pattern report 17 §4.3 corrects — plus server-side Pygments highlighting that cannot follow a Go backend. Porting means rewriting; rewriting lands on a widget anyway.
+
+**Resolution: react-diff-view renders; ported N15 behavior governs.** react-diff-view is purpose-fit (parses unified git diffs natively; gutter/widget hooks are its designed use-case for anchored review comments; MIT; v3.3.3 Mar-2026). Honest risk: single-maintainer, slow — bounded by version pin, MIT forkability, and the swap being contained to one view; **monaco diff** (Microsoft, very active, wrapper `@monaco-editor/react` 4.7.0 admits React 19 + monaco <1) is the pre-registered upgrade if editor-grade needs emerge. Highlighting moves client-side (react-diff-view tokenizer), replacing Pygments.
+
+### 3. Chat — operator conditional resolved by evidence
+Operator: *"The Jarvis Tab in Nexus has a nice chat frontend, we could use that, but only if it works properly."* The read found the Jarvis tab's **error-handling polish is real** (non-2xx surfaced with real status/body; empty-stream vs transport-error distinguished; 429/overload humanized; model-fallback announced in-feed) — but as a platform chat surface it has structural gaps that "works properly" must honestly fail: **no markdown rendering in chat** (plain-text messages only), **no tool-call detail** (a one-line "⚙ TOOL · name"), **no live-transcript restore on reload**, full-feed innerHTML rebuild per token batch (O(n) per delta), the block marked "unchanged from v2", and the deepest backend coupling in the SPA (Hermes gateway event dialects, voice/vision interleaved inline). Closing those gaps inside ported vanilla JS is strictly more work than adopting the component that has them natively.
+
+**Resolution: assistant-ui is the widget; the Jarvis tab's genuinely good behaviors are carried as the behavior spec:** stream-survives-navigation (explicit inventory of what a view switch may shed vs what must survive, with a separate hard-stop), the SSE alias/error-humanization table (months of real provider edge cases), post-turn produced-files chips (exchange-folder diff around the turn), server-side per-user fail-closed session registry, first-message auto-titling. Clause-latency progressive TTS (`_spoken` sentence cursor) is **parked v1+** with the rest of JARVIS voice breadth (14.5/15.3, T16 confirmed). assistant-ui's backend-agnostic claim was verified from its own docs ("LocalRuntime is the simplest way to connect a custom backend" — one ChatModelAdapter; ExternalStoreRuntime for platform-owned state; cloud optional): R14-OQ4's doubt is closed. Risks: 0.x (no stability promise — pinned lockfile + quarterly pass + a `/docs/runtimes/concepts/stability` page exists; extremely active: 3 releases in the last month, 1.36M weekly downloads).
+
+### 4. Settings renderer — JSON Forms over RJSF
+Report 17 §4.5 requires grouping/categorization/conditional visibility generated from the registry's JSON Schema. **JSON Forms** has `Group`/`Categorization` (tabs) and SHOW/HIDE/ENABLE/DISABLE rules as **core, theme-independent UISchema vocabulary** — the doc describes Sinet's settings shape in its own terms — with Eclipse Foundation backing, MIT, explicit `^19.0.0` react peer (3.8.0, 2026-06-16), steady ~2 releases/yr since 3.0. **RJSF v6** is faster-moving (12 releases in 2026) but its new grouping (`LayoutGridField`) carries its own doc's warning ("will most likely not work for any other theme") and conditional visibility needs schema tricks. For a generated UI that must live a decade at bus factor 1, institutional-stable beats fast-and-theme-coupled. **RJSF re-entry condition:** JSON Forms stalls (>18 months without a maintenance release) or a registry need its rule/layout vocabulary cannot express.
+
+## Discipline riders (bind from G3 D3.3, restated)
+Lockfile-pinned minimal tree; every component above enters the **P-T16-1 components manifest** (`components.lock`, report 17 §4.8) with pinned version + license + funeral plan (the fallbacks column); scheduled ⚙ quarterly dependency pass; Vite majors on a lag. All four picks are organ-grade: replaceable, pinnable, no orchestration opinions.
+
+## What would change these picks
+- @hello-pangea/dnd archived/unmaintained → pinned @dnd-kit/core 6.3.1 (frozen-but-working); @dnd-kit/react reaching 1.0 with React-19-clean peers → re-evaluate with a dated note.
+- react-diff-view abandoned or intra-line/large-file needs outgrow it → monaco diff path (already manifest-listed).
+- assistant-ui 0.x churn exceeding the quarterly pass's absorption, or a hostile 1.0 → owned primitives fallback (the ExternalStoreRuntime boundary keeps message state platform-owned either way, so the swap loses no data).
+- JSON Forms stall per re-entry condition → RJSF v6.
+
+## Sources
+registry.npmjs.org JSON for @dnd-kit/core, @dnd-kit/react, @hello-pangea/dnd, react-diff-view, monaco-editor, @monaco-editor/react, @assistant-ui/react, @rjsf/core, @jsonforms/core, @jsonforms/react (dist-tags/time/peerDependencies/license; accessed 2026-07-18; pangea + jsonforms/react + dnd-kit/core re-fetched independently by coordinator same day) · github.com repos + /releases for the seven projects (archived=false all; dnd-kit issue #1654) · assistant-ui.com/docs/runtimes/pick-a-runtime + /custom/local-runtime · jsonforms.io/docs/uischema/layouts · rjsf-team.github.io layout-grid doc · api.npmjs.org last-week downloads for @assistant-ui/react · Nexus code assessment: `~/Nexus-Agentic-Coding-Setup` (`app/static/app.js` review block 3359–3754, Jarvis block ~7316–8752; `app/review.py`; `app/server.py` anchor-validation 5380–5458, drain 6275–6306; `app/database.py` 339–363) — full fact sheet in STATE-ARCHIVE session log 2026-07-18.
