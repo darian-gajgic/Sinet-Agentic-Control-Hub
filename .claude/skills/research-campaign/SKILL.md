@@ -14,6 +14,15 @@ You are the campaign coordinator. Your memory is `Research/STATE.md`; your plan 
 2. If a gate is OPEN: re-present its decisions to the operator (from the gate file — never from memory) and record answers before anything else.
 3. Otherwise take the next action from STATE.md. Never re-plan the campaign from scratch; never relitigate closed gates.
 
+## Security-content isolation (Fable-5 safeguard)
+
+Fable 5's intentionally-broad dual-use safeguard false-positives on the campaign's security-research content (spikes S1/S3/S5, reports 09 metering / 10 sandboxing) and auto-falls-back to Opus 4.8 (lossless). Two standing rules keep Fable sessions productive:
+
+1. **Keep the live layer terse.** `Research/STATE.md` carries only neutral coordination state (status, next action, gates, board, report numbering, conclusion-level spike headlines). Full operational detail + the chronological session log live in `Research/STATE-ARCHIVE.md`. When you log new work, put the terse coordination outcome in STATE.md and any vivid operational detail (probe methods, wire captures, secret-hygiene records) in STATE-ARCHIVE.md or the relevant report — never reintroduce operational prose into the live layer.
+2. **Delegate security-report deep-reads to Opus.** When a task genuinely needs to read a security-heavy report (09, 10, the spike reports) or to draft a spec section that consumes them, spawn an **Opus-pinned subagent** (`model: opus`) to do the reading/synthesis and return a neutral deliverable; work from that deliverable, not the raw security prose. This is the same Opus-pinned pattern the spike battery used.
+
+This isolates the *content* that trips the classifier (which is server-side and not ours to configure) and routes security-content reading to the model Anthropic currently designates for it — cooperating with the safeguard, not defeating it. **Never obfuscate or encode content to evade the classifier.** Memory: `fable5-safeguard-false-positive`.
+
 ## Running a topic (Mode A — default)
 
 For topic T## with slug `<slug>`, next free report number NN (check existing `Research/[0-9][0-9]-*.md`):
