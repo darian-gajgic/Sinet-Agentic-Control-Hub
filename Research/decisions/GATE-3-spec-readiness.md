@@ -1,6 +1,6 @@
 # GATE-3 — Spec readiness
 
-**Opened:** 2026-07-17 · **Wave covered:** C (final research wave) · **Status:** OPEN
+**Opened:** 2026-07-17 · **Wave covered:** C (final research wave) · **Status:** **CLOSED 2026-07-18**
 **Reports in scope:** Research/15 (T14 worker ontology), 16 (T15 local models), 17 (T13 platform stack). Campaign totality: **all 17 topics researched and committed (reports 01–17)**; gates G0–G2 closed.
 
 ## Findings digest
@@ -67,6 +67,12 @@
 
 | # | Decision | Chosen | By | Date | Notes |
 |---|---|---|---|---|---|
+| 3.1 | P2 start | **A — approved** | operator | 2026-07-18 | entry sequence: spike battery → benchmark pre-registration → frontend workshop → spec drafting in `Spec/`; operator prerequisites whenever convenient |
+| 3.2 | Backend language | **A — Go** | operator | 2026-07-18 | R17-OQ1 closed. Coordinator offered a two-language taste spike (Go vs Litestar thin slice) and recommended defer+spike; **operator declined the spike and decided outright** ("no need to spend extra time to try python"). Python/Litestar fallback posture stays documented in report 17 §4.2 |
+| 3.3 | Frontend architecture | **A — React 19 + Vite SPA ratified** | operator | 2026-07-18 | R17-OQ2 closed; P2 workshop scope = binding component picks only (incl. settings-form renderer); HTMX re-entry only via report 17 §4.10 conditions; discipline riders (pinned lockfile, quarterly pass, Vite-major lag) bind |
+| 3.4 | Composition triggers + first-N | **A — compose-when-earned; first-N = 3, count-based** | operator | 2026-07-18 | R15-OQ1/OQ2 closed; both ⚙ operator-editable settings; reset on body/equipment version change |
+| 3.5 | Layer-2 open SQL at v0 | **A — enabled on Arctic-Text2SQL-R1-7B** | operator | 2026-07-18 | R16-OQ10 closed; flagged lower-confidence; settled guardrail stack (read-only, allowlisted views, single-statement, LIMIT+timeout, audit log); measured by bring-up battery; canned queries stay the reliability floor |
+| Def.1–8 | Defaults unless objected | **all adopted unopposed** | operator | 2026-07-18 | operator: "I agree to all." Def.5 (ts.net hostname pick) + Def.6 (week-one push drill) are operator action items; Def.8 scripted at bring-up (Qwen3.5-9B default unless bakeoff flips) |
 
 ## Follow-ups spawned
 
