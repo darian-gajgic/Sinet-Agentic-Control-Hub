@@ -115,7 +115,7 @@ The platform's job is **prefix hygiene, not cache management** [R07 §4.5]:
 - tool sets never churn mid-stage — mask, don't remove; enforced at the compiled-config layer [XREF:S03];
 - `cache_read_input_tokens` / `cache_creation_input_tokens` recorded per paid call into the metering ledger and receipts (D4) [XREF:S10].
 
-**Weighting.** Consumption pressure counts uncached input at 1.0 and cache reads at ⚙ `context.cache_read_weight` (default 0.1×) [G1 Def.10]. Receipts always keep raw counts, and the weighting carries a visible **"assumed"** label wherever it is shown, until the provider publishes subscription quota semantics [G1 Def.10; R07 §2.8]. The pressure gauge consuming this weight, and per-lane normalization of heterogeneous consumption units (tokens vs prompts vs requests), are owned by S10 [XREF:S10]. Lane meanings differ by design [R07 §2.8]: Anthropic-subscription caching is automatic and free (probable window-headroom benefit, unverified); Z.AI-lane caching buys latency only (quota is prompt-count); metered exceptions follow published cache-aware limit rules — moot at v0 while the metered-exception list is empty [G1 P7].
+**Weighting.** Consumption pressure counts uncached input at 1.0 and cache reads at ⚙ `pressure.cache_read_weight` (default 0.1×; the setting is owned by the pressure gauge [XREF:S10]) [G1 Def.10]. Receipts always keep raw counts, and the weighting carries a visible **"assumed"** label wherever it is shown, until the provider publishes subscription quota semantics [G1 Def.10; R07 §2.8]. The pressure gauge consuming this weight, and per-lane normalization of heterogeneous consumption units (tokens vs prompts vs requests), are owned by S10 [XREF:S10]. Lane meanings differ by design [R07 §2.8]: Anthropic-subscription caching is automatic and free (probable window-headroom benefit, unverified); Z.AI-lane caching buys latency only (quota is prompt-count); metered exceptions follow published cache-aware limit rules — moot at v0 while the metered-exception list is empty [G1 P7].
 
 **Settings introduced (⚙):** — every value operator-editable with audit trail; auto-adjust only within operator ceilings, visible on receipts [G1 rider 1]
 
@@ -123,7 +123,7 @@ The platform's job is **prefix hygiene, not cache management** [R07 §4.5]:
 |---|---|---|---|
 | `context.stage_fit_target` | 0.50 of lane window | 0.20–0.70; must be < overflow threshold [coordinator-draft clamp] | [G1 Def.11] |
 | `context.stage_overflow_threshold` | 0.70 of lane window | (target+0.05)–0.85 [coordinator-draft clamp] | [G1 Def.11] |
-| `context.cache_read_weight` | 0.1× | 0.0–1.0; label "assumed" until provider semantics publish | [G1 Def.10] |
+| `pressure.cache_read_weight` † | 0.1× | 0.0–1.0; label "assumed" until provider semantics publish | [G1 Def.10]; owned by [XREF:S10], listed here for the S05.8 consumer |
 | `context.conventions_max_lines` | 150 | 50–400 [coordinator-draft clamp] | [R07 §4.4] |
 | `context.recitation_interval_turns` | 10 | 5–50; 0 = off | [coordinator-draft] |
 
