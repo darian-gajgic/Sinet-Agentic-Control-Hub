@@ -122,6 +122,10 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 - **engine lowering** — compiling a run down to the exact per-lane invocation so Sinet-compiled config is the only config the engine sees [S03].
 - **config channel** — one independent path (settings, MCP, skills, tools, cross-read files, cwd config, env) through which ambient environment could reach a worker; each has its own closing knob [S03].
 - **confinement class** — a rung C0–C4 of the isolation ladder, declared per worker (S5); v0 ships C0–C2.
+- **per-run sandbox** — the composed kernel-primitive jail (systemd→bwrap→seccomp→Landlock) wrapping one run's engine process [S11].
+- **credential-injection proxy** — the host-side TLS-terminating proxy that substitutes the real subscription token only on the pinned model-egress request, keeping engine credentials outside the sandbox [S11].
+- **auth-profile** — a named, broker-resolved credential reference in a worker's control-plane record; never a secret [S11].
+- **GPU broker** — the control-plane-mediated local-inference data plane (distinct from the credential broker) [S12].
 - **worker / template / overlay / instance** — the D8 ontology; workers = rows + git-versioned files in a Sinet-owned superset schema, compiled per engine per invocation [R15].
 - **coordinator / helper** — the D6 topology roles; helpers are earned, isolated, brief-in/report-out.
 - **brief / helper report / spawn record** — the D6 delegation artifacts: structured context down, size-capped report up, logged spawn row with trigger + reason [S04].
