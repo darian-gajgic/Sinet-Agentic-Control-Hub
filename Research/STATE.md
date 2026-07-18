@@ -26,12 +26,12 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S04 | orchestration | inherit | committed ✅ |
 | S05 | context-ledger | inherit | committed ✅ |
 | S06 | intake-pipeline | inherit | committed ✅ (R03-OQ5/P47 list discharged) |
-| S07 | verification-quality | inherit | running |
+| S07 | verification-quality | inherit | committed ✅ (rework-cap tension coordinator-resolved: 3 per R04 §4) |
 | S08 | workers-composition-routing | inherit | committed ✅ (R15-OQ4 discharged) |
 | S09 | memory-knowledge | inherit | committed ✅ |
 | S10 | metering-scheduling | opus | committed ✅ |
 | S11 | sandboxing-confinement | opus | running |
-| S12 | local-models-tier | inherit | running |
+| S12 | local-models-tier | inherit | committed ✅ (R10-OQ4 broker interface bound) |
 | S13 | deliverables-review-git-backup | inherit | committed ✅ |
 | S14 | observability-evals-watch | inherit | committed ✅ |
 | S15 | frontend-api | inherit | running |
