@@ -10,7 +10,7 @@
 
 **Next action (P2 spec drafting — IN PROGRESS):**
 - Sections draft as `Spec/drafts/S00…S19` under `Spec/drafts/CONTRACT.md`; `core-architecture-v1.md` is assembled (concatenation, drafts canonical) once all sections pass coordinator review. Tracker below. As drafts return: coordinator review → bounded revision if needed → commit → next launches.
-- **Operator asks:** (a) R06-OQ2 native micro-fanout — **CLOSED 2026-07-18: keep disabled** (operator, at S03 review; recorded in S03 Open-items box; standing G1-rider-2 reminder discharged). (b) workspace-storage sub-choice (from the P2-S2 storage-seam finding) — presented with the S02 review.
+- **Operator asks (both CLOSED 2026-07-18):** (a) R06-OQ2 native micro-fanout — **keep disabled** (recorded in S03 Open-items box; G1-rider-2 standing reminder discharged). (b) workspace storage — **git-worktree + overlayfs at v0**; loopback-XFS pre-registered upgrade; repartition reserved for host rebuild (recorded in S02.10).
 - Done 2026-07-18 (earlier): benchmark pre-registration signed `5fb7082`; frontend workshop picks in `Spec/frontend-components-v1.md`.
 
 ## Spec section tracker
@@ -21,11 +21,11 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 |---|---|---|---|
 | S00 | front-matter | coordinator | saved (this commit) |
 | S01 | process-architecture-shell | inherit | committed ✅ |
-| S02 | durable-state-recovery | opus | running |
+| S02 | durable-state-recovery | opus | committed ✅ (storage DECIDED: overlayfs+worktree) |
 | S03 | engines-adapters | opus | committed ✅ (R06-OQ2 CLOSED: keep disabled) |
 | S04 | orchestration | inherit | committed ✅ |
 | S05 | context-ledger | inherit | committed ✅ |
-| S06 | intake-pipeline | inherit | running |
+| S06 | intake-pipeline | inherit | committed ✅ (R03-OQ5/P47 list discharged) |
 | S07 | verification-quality | inherit | pending |
 | S08 | workers-composition-routing | inherit | pending |
 | S09 | memory-knowledge | inherit | pending |
