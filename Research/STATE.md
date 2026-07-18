@@ -35,7 +35,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S13 | deliverables-review-git-backup | inherit | committed ✅ |
 | S14 | observability-evals-watch | inherit | committed ✅ |
 | S15 | frontend-api | inherit | running |
-| S16 | adoption-manifest | inherit | running |
+| S16 | adoption-manifest | inherit | committed ✅ |
 
 **Volley-2 pause/resume note (2026-07-18):** the ten S07–S16 agents were paused on operator hold during their reading phase (no files written), then **resumed in place with context intact** on operator "continue" — same agents, same assignments, no work lost.
 | S17 | known-problems-register | inherit | pending (after S01–S16) |
