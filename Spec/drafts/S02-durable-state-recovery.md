@@ -88,7 +88,7 @@ One level-triggered reconcile pass — the same code at platform start, at wake,
 
 "Blocked is not failed" — an answered run resumes from its checkpoint; but if it slept past a threshold or its target moved, the remaining plan is re-validated against current reality at low cost **before spending anything significant**, then continues, adjusts-with-a-note, or escalates as an explicit decision. S02 owns the durable *inputs* to that decision; the low-cost re-plan *action* is [XREF:S06], and the hold-vs-park mechanics are [XREF:S03].
 
-- **Freshness fingerprint (the durable set)** [G1 Def.5]: `{repo HEAD, source content hashes/ETags, spec+plan version, price-table version}`. The checkpoint's version fields (S02.4e) plus these are what a resume compares against.
+- **Freshness fingerprint (the durable set)** [G1 Def.5]: `{repo HEAD, source content hashes/ETags, spec+plan version, price-table version}` — plus, when a plan's assumptions cite project-truth knowledge entries, the **cited entry versions** (ratified extension [R11 §4.7; XREF:S09]). The checkpoint's version fields (S02.4e) plus these are what a resume compares against.
 - **Triggers:** age `> ⚙ freshness.max_age = 24 h` **OR** any fingerprint drift **OR** a sibling-accept event in the project (S02.8). **Price-table drift alone triggers** — it re-prices the remaining plan, so a changed price table is a first-class staleness cause, not a cosmetic one [G1 Def.5].
 - **Hold-vs-park:** a pause shorter than `⚙ freshness.hold_vs_park = 10 min` holds the process (cheap resume, no staleness); past it the run parks and is therefore subject to the freshness pass on resume [G1 Def.4].
 
