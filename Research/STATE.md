@@ -26,16 +26,18 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S04 | orchestration | inherit | committed ✅ |
 | S05 | context-ledger | inherit | committed ✅ |
 | S06 | intake-pipeline | inherit | committed ✅ (R03-OQ5/P47 list discharged) |
-| S07 | verification-quality | inherit | pending |
-| S08 | workers-composition-routing | inherit | pending |
-| S09 | memory-knowledge | inherit | pending |
-| S10 | metering-scheduling | opus | pending |
-| S11 | sandboxing-confinement | opus | pending |
-| S12 | local-models-tier | inherit | pending |
-| S13 | deliverables-review-git-backup | inherit | pending |
-| S14 | observability-evals-watch | inherit | pending |
-| S15 | frontend-api | inherit | pending |
-| S16 | adoption-manifest | inherit | pending |
+| S07 | verification-quality | inherit | ⏸ paused (operator hold) |
+| S08 | workers-composition-routing | inherit | ⏸ paused (operator hold) |
+| S09 | memory-knowledge | inherit | ⏸ paused (operator hold) |
+| S10 | metering-scheduling | opus | ⏸ paused (operator hold) |
+| S11 | sandboxing-confinement | opus | ⏸ paused (operator hold) |
+| S12 | local-models-tier | inherit | ⏸ paused (operator hold) |
+| S13 | deliverables-review-git-backup | inherit | ⏸ paused (operator hold) |
+| S14 | observability-evals-watch | inherit | ⏸ paused (operator hold) |
+| S15 | frontend-api | inherit | ⏸ paused (operator hold) |
+| S16 | adoption-manifest | inherit | ⏸ paused (operator hold) |
+
+**Volley-2 pause note (2026-07-18):** all ten S07–S16 drafting agents were launched, then stopped on operator request while still in their reading phase — **no draft files written**. Resume paths: (a) same session — the coordinator resumes each stopped agent in place with its context intact; (b) new session — relaunch each section fresh from this tracker (lossless: prompts are re-derivable from the runbook + this tracker; only partial reading is redone).
 | S17 | known-problems-register | inherit | pending (after S01–S16) |
 | S18 | settings-registry | inherit | pending (after S01–S16) |
 | S19 | v0-boundary-buildorder | coordinator | pending (last) |
@@ -135,4 +137,4 @@ Reports take the next free `NN` in `Research/` in completion order:
 Full chronological session log + spike-battery operational detail (probe measurements, teardown / secret-hygiene records, reconciliation notes, pause/resume history, task-id tables) → **[`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)**.
 
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
-**Last updated:** 2026-07-18 — P2 spec drafting started: contract + S00 front matter written, section tracker live, volley 1 (S01–S06) launched.
+**Last updated:** 2026-07-18 — volley 1 (S00–S06) fully committed; both operator asks CLOSED (R06-OQ2 keep-disabled; storage overlayfs+worktree); volley 2 (S07–S16) launched then **paused on operator hold** before any files were written (see pause note).
