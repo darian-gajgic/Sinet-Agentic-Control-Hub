@@ -135,7 +135,7 @@ Sweep findings, each resolved by the reading the ratified record implies; none r
 
 **Deferred / parked:**
 
-- Id-tag backfill into the owning drafts — P-T17-2 tag in S03.6; owned-block acknowledgments for P-T02-2 (S03) and P-T04-3 (S10) → coordinator at assembly, alongside the queued S11.8↔S01.2 run-unit wording alignment (STATE.md).
+- Id-tag backfill into the owning drafts — P-T17-2 tag in S03.6; owned-block acknowledgments for P-T02-2 (S03) and P-T04-3 (S10) → **APPLIED 2026-07-19** by the coordinator, together with the S11.8↔S01.2 run-unit wording alignment; R4 needed no edit (the deliberate split was already recorded on both sides).
 - Register upkeep → post-G4 S00.9 amendment mechanics (S17.7 maintenance rule); no standing schedule of its own.
 
 **Coverage:**
