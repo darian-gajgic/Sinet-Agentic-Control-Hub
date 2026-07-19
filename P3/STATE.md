@@ -41,6 +41,8 @@ Statuses: `pending` → `running` → `review` → `done`.
 | 3 | Root/reboot/suspend probe batch (reboot-survival; `Persistent=` catch-up; user.slice freeze/thaw) | B0/B1 gate |
 | 4 | Week-one push drill on household phones | first deploy |
 | 5 | (Optional) GitHub Verified badge — signing-key upload | anytime |
+| 6 | age identity escrow — paper copy + passphrase-encrypted copy off-host (S13.10; found missing from this table 2026-07-19) | **B4, before first snapshot push** |
+| 7 | Observables-register sign-off — one signature on the S01.8 register (deferred at G4) | first deploy |
 
 ## Log
 
