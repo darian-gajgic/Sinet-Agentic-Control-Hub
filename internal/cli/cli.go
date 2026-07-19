@@ -2,16 +2,23 @@
 //
 // Spec S01.5: the control plane, the credential broker, and the port-pool
 // daemon are one static binary invoked in dedicated modes. This package owns
-// the mode table; the daemon modes are reserved stubs until their owning
-// build packets land, so the invocation shape and future unit ExecStart
-// lines are stable from the first build.
+// the mode table; daemon modes not yet built are reserved stubs, so the
+// invocation shape and future unit ExecStart lines are stable from the
+// first build. Non-daemon subcommands (version, units, help) are tools of
+// the same binary, not modes: they never get a unit file.
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
 )
 
 // Exit codes.
@@ -29,9 +36,13 @@ Usage:
 
 Modes:
 
-  control    platform control plane (sinet-control.service)    [not yet implemented]
+  control    platform control plane (sinet-control.service)
   broker     credential broker (sinet-broker.service)          [not yet implemented]
   portpool   preview port-pool daemon (sinet-portpool.service) [not yet implemented]
+
+Tools:
+
+  units      render the systemd unit set (generated, never installed)
   version    print build and version information
   help       print this usage text
 `
@@ -39,7 +50,6 @@ Modes:
 // reserved names the daemon modes of Spec S01.2 ahead of their
 // implementations.
 var reserved = map[string]string{
-	"control":  "sinet-control",
 	"broker":   "sinet-broker",
 	"portpool": "sinet-portpool",
 }
@@ -52,6 +62,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	mode := args[0]
 	switch mode {
+	case "control":
+		return shell.Main(args[1:], stdout, stderr)
+	case "units":
+		return runUnits(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintf(stdout, "sinet %s\n", buildinfo.String())
 		return exitOK
@@ -66,4 +80,57 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stderr, "sinet: unknown mode %q\n\n", mode)
 	fmt.Fprint(stderr, usage)
 	return exitUsage
+}
+
+// runUnits renders the Spec S01.2 unit set to stdout, or to an
+// operator-chosen directory with --out. It never touches the host:
+// installation (files under /etc, systemctl) is a B0-gate operator decision.
+func runUnits(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sinet units", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("out", "", "write one file per unit into this directory (created if absent); default: stdout")
+	binary := fs.String("binary", units.DefaultBinaryPath, "installed binary path rendered into ExecStart= lines")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "sinet units: unexpected argument %q\n", fs.Arg(0))
+		return exitUsage
+	}
+	// ⚙ values render from the declared defaults (registry unattached):
+	// no DB is opened — sinet-control is the sole writer of a live
+	// platform.db (Spec S02.1) and generation must never contend with it.
+	files, err := units.Files(settings.New(), units.Params{BinaryPath: *binary})
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet units: %v\n", err)
+		return exitError
+	}
+	if *out == "" {
+		for _, f := range files {
+			draft := ""
+			if f.Draft {
+				draft = " (DRAFT — not installable until B1)"
+			}
+			fmt.Fprintf(stdout, "# ── %s%s ──\n%s\n", f.Name, draft, f.Content)
+		}
+		return exitOK
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fmt.Fprintf(stderr, "sinet units: %v\n", err)
+		return exitError
+	}
+	for _, f := range files {
+		path := filepath.Join(*out, f.Name)
+		if err := os.WriteFile(path, []byte(f.Content), 0o644); err != nil {
+			fmt.Fprintf(stderr, "sinet units: %v\n", err)
+			return exitError
+		}
+		draft := ""
+		if f.Draft {
+			draft = "  (DRAFT — not installable until B1)"
+		}
+		fmt.Fprintf(stdout, "wrote %s%s\n", path, draft)
+	}
+	fmt.Fprintln(stdout, "generated only — installing units is a B0-gate operator decision")
+	return exitOK
 }

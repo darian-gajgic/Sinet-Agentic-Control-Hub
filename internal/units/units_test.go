@@ -1,0 +1,170 @@
+package units_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
+)
+
+func gen(t *testing.T, p units.Params) map[string]units.File {
+	t.Helper()
+	files, err := units.Files(settings.New(), p)
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	out := make(map[string]units.File, len(files))
+	for _, f := range files {
+		out[f.Name] = f
+	}
+	return out
+}
+
+func TestUnitSetIsComplete(t *testing.T) {
+	files, err := units.Files(settings.New(), units.Params{})
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	// The owned S01.2 unit set plus the journald cap drop-in (Spec S01.11).
+	want := []string{
+		"sinet-control.service",
+		"sinet-broker.service",
+		"sinet-engine@.service",
+		"sinet-run@.service",
+		"sinet-portpool.service",
+		"journald-sinet.conf",
+	}
+	if len(files) != len(want) {
+		t.Fatalf("%d files, want %d", len(files), len(want))
+	}
+	for i, name := range want {
+		if files[i].Name != name {
+			t.Errorf("file %d = %s, want %s (deterministic order)", i, files[i].Name, name)
+		}
+	}
+}
+
+func TestControlUnitDirectives(t *testing.T) {
+	f := gen(t, units.Params{})["sinet-control.service"]
+	if f.Draft {
+		t.Fatal("control unit marked draft")
+	}
+	for _, want := range []string{
+		"Type=notify",
+		"ExecStart=/usr/local/bin/sinet control",
+		"WatchdogSec=30", // ⚙ shell.watchdog_sec declared default
+		"Restart=on-failure",
+		"StateDirectory=sinet",
+		"ConfigurationDirectory=sinet",
+		"After=network.target sinet-broker.service",
+		"TimeoutStopSec=90",
+		"User=sinet",
+		"ProtectSystem=strict",
+		"NoNewPrivileges=yes",
+		"PrivateTmp=yes",
+		"SystemCallFilter=@system-service",
+		"WantedBy=multi-user.target",
+		units.FQDN, // A1 hostname in the front-chain header
+	} {
+		if !strings.Contains(f.Content, want) {
+			t.Errorf("sinet-control.service lacks %q", want)
+		}
+	}
+}
+
+func TestEveryUnitStaticUserNeverDynamic(t *testing.T) {
+	for name, f := range gen(t, units.Params{}) {
+		if name == "journald-sinet.conf" {
+			continue
+		}
+		if !strings.Contains(f.Content, "User=sinet") {
+			t.Errorf("%s lacks User=sinet (Spec S01.1 static user)", name)
+		}
+		if strings.Contains(f.Content, "DynamicUser") {
+			t.Errorf("%s uses DynamicUser (NEVER, Spec S01.1)", name)
+		}
+	}
+}
+
+func TestBrokerAndPortpoolUnits(t *testing.T) {
+	files := gen(t, units.Params{})
+	broker := files["sinet-broker.service"]
+	if broker.Draft {
+		t.Error("broker unit marked draft (ExecStart is stable from B0-1)")
+	}
+	for _, want := range []string{"ExecStart=/usr/local/bin/sinet broker", "Before=sinet-control.service", "Restart=on-failure"} {
+		if !strings.Contains(broker.Content, want) {
+			t.Errorf("sinet-broker.service lacks %q", want)
+		}
+	}
+	pool := files["sinet-portpool.service"]
+	if pool.Draft {
+		t.Error("portpool unit marked draft")
+	}
+	if !strings.Contains(pool.Content, "ExecStart=/usr/local/bin/sinet portpool") {
+		t.Error("sinet-portpool.service lacks its ExecStart")
+	}
+}
+
+func TestDraftTemplates(t *testing.T) {
+	files := gen(t, units.Params{})
+
+	engine := files["sinet-engine@.service"]
+	if !engine.Draft {
+		t.Error("engine template not marked draft (ExecStart is Spec S03's, B1)")
+	}
+	if strings.Contains(engine.Content, "\nExecStart=") {
+		t.Error("engine template invents an ExecStart")
+	}
+	if !strings.Contains(engine.Content, "After=sinet-broker.service") {
+		t.Error("engine template lacks After=sinet-broker.service (Spec S01.2)")
+	}
+
+	run := files["sinet-run@.service"]
+	if !run.Draft {
+		t.Error("run template not marked draft (fixed-ExecStart is Spec S11.8's, B1)")
+	}
+	if strings.Contains(run.Content, "\nExecStart=") {
+		t.Error("run template invents an ExecStart")
+	}
+	for _, want := range []string{
+		"Restart=no",          // never auto-restarted by PID 1 (Spec S01.2)
+		"RemainAfterExit=yes", // harvest lane recipe (Spec S02.5)
+		"ExitType=cgroup",
+		"Type=exec",
+	} {
+		if !strings.Contains(run.Content, want) {
+			t.Errorf("sinet-run@.service lacks %q", want)
+		}
+	}
+}
+
+func TestJournaldDropInCarriesCap(t *testing.T) {
+	f := gen(t, units.Params{})["journald-sinet.conf"]
+	// ⚙ shell.journal_max_use declared default: 4 GB in bytes.
+	if !strings.Contains(f.Content, "SystemMaxUse=4294967296") {
+		t.Error("journald drop-in lacks the ⚙ shell.journal_max_use cap")
+	}
+	if !strings.Contains(f.Content, "[Journal]") {
+		t.Error("journald drop-in lacks its section header")
+	}
+}
+
+func TestBinaryPathOverride(t *testing.T) {
+	f := gen(t, units.Params{BinaryPath: "/opt/sinet/bin/sinet"})["sinet-control.service"]
+	if !strings.Contains(f.Content, "ExecStart=/opt/sinet/bin/sinet control") {
+		t.Error("BinaryPath override not rendered")
+	}
+}
+
+func TestEveryFileCarriesGeneratedHeader(t *testing.T) {
+	for name, f := range gen(t, units.Params{}) {
+		if !strings.Contains(f.Content, "Generated by 'sinet units'") {
+			t.Errorf("%s lacks the generated header", name)
+		}
+		if !strings.Contains(f.Content, "B0-gate operator decision") {
+			t.Errorf("%s lacks the never-installed notice", name)
+		}
+	}
+}
