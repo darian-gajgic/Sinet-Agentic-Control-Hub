@@ -361,6 +361,45 @@ func (s *Store) TransitionTx(ctx context.Context, tx *sql.Tx, runID string, to S
 	return s.getTx(ctx, tx, runID)
 }
 
+// SetLeaseTx sets the run's lease block (holder, wall-clock deadline,
+// heartbeat cursor) inside the caller's transaction — the S02.2 lease the
+// scheduler establishes when it CAS-claims a run (Spec S10.7: "claimed,
+// lease held"). The lease is a set of wall-clock columns, not a state change,
+// so it carries no run_events append; the queued→claimed transition (which
+// does) composes with it in the same claim transaction. Deadlines are
+// evaluated suspend-aware at reconcile (Spec S02.5 step 4); a zero deadline
+// clears the lease.
+func (s *Store) SetLeaseTx(ctx context.Context, tx *sql.Tx, runID, holder string, deadline time.Time, heartbeatSeq int64) error {
+	var (
+		deadlineArg any
+		holderArg   any
+		hbArg       any
+	)
+	if holder != "" {
+		holderArg = holder
+	}
+	if !deadline.IsZero() {
+		deadlineArg = deadline.UTC().Format(time.RFC3339Nano)
+	}
+	if heartbeatSeq > 0 {
+		hbArg = heartbeatSeq
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE runs SET lease_holder = ?, lease_deadline_ts = ?, heartbeat_event_seq = ?, updated_ts = ?
+		 WHERE run_id = ?`,
+		holderArg, deadlineArg, hbArg, now, runID)
+	if err != nil {
+		return fmt.Errorf("run: set lease %q: %w", runID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("run: set lease %q: %w", runID, err)
+	} else if n != 1 {
+		return fmt.Errorf("%w: %q", ErrNotFound, runID)
+	}
+	return nil
+}
+
 // BumpGenerationTx bumps the run's fencing counter without a state change —
 // the takeover fence at fork-from-checkpoint: after the bump, a zombie
 // holder of the previous generation is stale and its appends are rejected

@@ -45,8 +45,8 @@ type RecoveryLadder interface {
 // Admission is the scheduler admission seam the lifecycle drives (Spec
 // S01.6): resumed at startup step 5 and on maintenance exit, stopped at
 // shutdown and on maintenance enter, with parked-at-grace-expiry as the
-// drain terminal. scheduler.StubAdmission implements it until B1 (Spec S10).
-// Implementations must not call back into the shell.
+// drain terminal. *scheduler.Scheduler implements it (B1-2, Spec S10.7);
+// tests inject their own. Implementations must not call back into the shell.
 type Admission interface {
 	ResumeAdmission(ctx context.Context) error
 	StopAdmission(ctx context.Context) error

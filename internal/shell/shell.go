@@ -32,11 +32,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
@@ -114,10 +116,6 @@ func Run(ctx context.Context, opts Options) error {
 	if notifier == nil {
 		notifier = sdnotify.FromEnv()
 	}
-	admission := opts.Admission
-	if admission == nil {
-		admission = &scheduler.StubAdmission{Logger: logger}
-	}
 
 	// ── S01.6 step 1: bootstrap config + settings registry, then the
 	// composition order of P3/CONVENTIONS.md §6.
@@ -158,6 +156,8 @@ func Run(ctx context.Context, opts Options) error {
 
 	// The S02 run machinery over the open DB: FSM store, checkpoint store,
 	// effect journal, and the recovery ladder they feed (Spec S02.3–S02.7).
+	runs := run.NewStore(db, log)
+	checkpoints := gates.NewCheckpoints(db, log)
 	ladder := opts.Ladder
 	if ladder == nil {
 		effects, err := gates.NewJournal(gates.JournalConfig{DB: db, Settings: reg})
@@ -167,8 +167,8 @@ func Run(ctx context.Context, opts Options) error {
 		ladder, err = recovery.New(recovery.Config{
 			DB:          db,
 			Log:         log,
-			Runs:        run.NewStore(db, log),
-			Checkpoints: gates.NewCheckpoints(db, log),
+			Runs:        runs,
+			Checkpoints: checkpoints,
 			Effects:     effects,
 			Settings:    reg,
 			Logger:      logger,
@@ -179,6 +179,41 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// The S10 scheduler + metering over the open DB (Spec S10). It replaces
+	// the B0 admission stub: the claim loop (started below, after step 5)
+	// CAS-claims queued runs under per-(user, lane) slots and dispatches them,
+	// owner-attributed — fire-and-forget is banned (S16.6). The price table
+	// ships EMPTY at v0 (its genai-prices seed is a vendored S16.3 adoption,
+	// Spec S10.3), so receipts render UNPRICED — the S10.1 honest posture. No
+	// adapters are registered in the control plane yet: confined execution
+	// (sandbox + broker) lands at B1-3 (Spec S11), and the ingress that would
+	// enqueue runs (intake, Spec S06) lands at B2, so the dev-mode queue stays
+	// empty and no engine is ever spawned from the control plane here.
+	var sched *scheduler.Scheduler
+	admission := opts.Admission
+	if admission == nil {
+		priceTable := metering.NewEffectiveDatedTable("empty-v0")
+		exceptions := metering.NoMeteredExceptions()
+		ledger := metering.NewLedger(db, priceTable, exceptions, reg)
+		dispatcher := &runDispatcher{
+			driver:   &adapters.Driver{Runs: runs, Checkpoints: checkpoints, Log: log, DB: db},
+			adapters: map[string]adapters.Adapter{}, // registered at B1-3 (S11)
+		}
+		sched, err = scheduler.New(scheduler.Config{
+			DB:         db,
+			Runs:       runs,
+			Settings:   reg,
+			Dispatcher: dispatcher,
+			Pressure:   metering.NewPressureGauge(db, reg),
+			Receipts:   metering.NewReceipts(db, ledger, exceptions),
+			Logger:     logger,
+		})
+		if err != nil {
+			return err
+		}
+		admission = sched
 	}
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
@@ -266,6 +301,14 @@ func Run(ctx context.Context, opts Options) error {
 	// own clock-jump grace covers the wake case until the S01.7 logind
 	// wiring lands.
 	go recoverySweepLoop(procCtx, reg, ladder, logger)
+
+	// The scheduler claim loop — a process-lifetime goroutine (Spec S10.7),
+	// the same shape as the WAL/recovery loops. It claims only while
+	// admission is open (opened at step 5 above). An injected admission
+	// (tests) is not a scheduler and brings its own driving; sched is nil then.
+	if sched != nil {
+		go sched.Run(procCtx)
+	}
 
 	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,
 	// PrepareForSleep(true) O(1) flush, PrepareForSleep(false) driving an
@@ -459,4 +502,27 @@ func shutdownHTTP(srv *http.Server, logger *slog.Logger) {
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Warn("http shutdown on failed startup", "err", err)
 	}
+}
+
+// runDispatcher is the composition-root realization of scheduler.Dispatcher
+// (Spec S01.3): it drives a CAS-claimed run through the adapter Driver (Spec
+// S03), selected by runs.substrate. At B1-2 NO adapters are registered in the
+// control plane — confined execution (sandbox + broker) lands at B1-3 (Spec
+// S11), and the compiled-worker + model selection is Spec S08's (B3) — so this
+// path is a wired seam, never a live route in dev mode: no engine is spawned
+// from the control plane, upholding B1-1's dev-mode confinement posture. B1-3
+// registers adapters here without touching the scheduler.
+type runDispatcher struct {
+	driver   *adapters.Driver
+	adapters map[string]adapters.Adapter
+}
+
+// Dispatch implements scheduler.Dispatcher.
+func (d *runDispatcher) Dispatch(ctx context.Context, r run.Run) error {
+	a, ok := d.adapters[r.Substrate]
+	if !ok {
+		return fmt.Errorf("shell: no confined adapter registered for substrate %q (B1-3, Spec S11)", r.Substrate)
+	}
+	_, err := d.driver.Drive(ctx, a, adapters.StartRequest{RunID: r.ID, UserID: r.UserID})
+	return err
 }
