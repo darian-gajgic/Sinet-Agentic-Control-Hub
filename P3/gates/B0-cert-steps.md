@@ -1,0 +1,146 @@
+# B0 gate — first cert + front chain on `sinet.tailfd0b1e.ts.net`
+
+Operator runbook, documented at P3-B0-5 and **executed only at the B0 gate** — nothing here has been run. It performs the two host-side steps the spec staged for this gate: the first TLS cert on the A1 hostname and the S01.4 front chain (`tailscale serve` → Caddy → `sinet-control` on 127.0.0.1). Spec anchors: S01.4 (chain shape, `/events` unbuffered, HTTP/2 at serve), S01.8 (hostname `sinet` = amendment A1; observables register), S01.9 (identity headers), S16.3 (Caddy row: pin + path-scoped license recorded at onboarding).
+
+Command syntax below was verified against the host's installed CLI (`tailscale` **1.98.8**, checked 2026-07-19, read-only). Ports carry no spec meaning (S01.4): this doc uses **8482** for `sinet-control` (the existing dev default) and **8481** for Caddy.
+
+**Before you start — two acknowledgements:**
+
+- **Step 4 publishes `sinet.tailfd0b1e.ts.net` to the public Certificate Transparency logs, permanently** (S01.8 register rows 1 and 3). This is by design and why the bland hostname was chosen first. Operator item 7 (observables-register sign-off) covers exactly this; sign it no later than first deploy.
+- The tailnet must have **MagicDNS + HTTPS Certificates enabled**: https://login.tailscale.com/admin/dns → "HTTPS Certificates" → Enable. `tailscale serve` fails with a clear message if this is off.
+
+## A. First cert + serve, verified against the bare API
+
+1. Confirm the machine name is `sinet` (settled 2026-07-19):
+
+   ```
+   tailscale status --self | head -1
+   ```
+
+   Expected: the first line shows `sinet` and its tailnet IP. If not, stop — the A1 hostname must be live before any cert exists.
+
+2. Start `sinet-control` if it is not already running. At this gate it may still be the dev-mode invocation (the chain does not care how control is started; after the unit install is approved, `http_addr = 127.0.0.1:8482` moves into `/etc/sinet/bootstrap.conf`):
+
+   ```
+   ./sinet control --http-addr 127.0.0.1:8482
+   ```
+
+   Expected: log line `http: serving loopback-only addr=127.0.0.1:8482`, then `sinet-control: ready`.
+
+3. Confirm the API answers locally:
+
+   ```
+   curl -s http://127.0.0.1:8482/api/health
+   ```
+
+   Expected: `{"ready":true,"mode":"running",...}`.
+
+4. **The cert step.** Point `tailscale serve` at the backend in the background (persists across tailscaled restarts). The first HTTPS request makes tailscaled obtain the Let's Encrypt cert for `sinet.tailfd0b1e.ts.net` automatically — no key files land on disk, TLS terminates inside tailscaled (S01.4):
+
+   ```
+   sudo tailscale serve --bg 8481
+   ```
+
+   Expected output names `https://sinet.tailfd0b1e.ts.net/` proxying to `http://127.0.0.1:8481`. (8481 is Caddy's future port — configured now so the chain shape never changes; until section B is done, requests will 502, which is fine and expected. If you prefer to verify serve before Caddy exists, temporarily use `sudo tailscale serve --bg 8482` and re-run this step with 8481 after B.)
+
+   Note: `tailscale cert sinet.tailfd0b1e.ts.net` also exists (verified in the host CLI) but is NOT used — it writes cert/key files to disk for self-terminated TLS, which this chain deliberately avoids.
+
+5. Inspect the serve config:
+
+   ```
+   tailscale serve status
+   ```
+
+   Expected: `https://sinet.tailfd0b1e.ts.net (tailnet only)` → `http://127.0.0.1:8481`. "tailnet only" is the D1 wall — never enable `funnel`.
+
+## B. Caddy onboarding + the full chain
+
+6. Install Caddy from the Ubuntu 26.04 archive (adopted organ, own unit, own journal identity — S01.2):
+
+   ```
+   sudo apt install caddy
+   caddy version
+   ```
+
+   Expected: a version string. **Record it** — the S16.3 Caddy row's `TBD-P3(pin at onboarding)` resolves to exactly this version, and the coordinator must add the `components.lock` entry (pin + path-scoped Apache-2.0 license check at that version + funeral plan per S16.4) in the same sitting. The lock entry is a coordinator task, not an operator command; flag it when reporting this runbook done.
+
+7. Replace `/etc/caddy/Caddyfile` with the router config (routing only — TLS stays at serve, assets stay in the control binary, S01.4):
+
+   ```
+   {
+   	# TLS terminates at tailscale serve (Spec S01.4); Caddy is a plain-HTTP
+   	# loopback router and must never fetch certs of its own.
+   	auto_https off
+   }
+
+   http://127.0.0.1:8481 {
+   	# The one SSE endpoint rides unbuffered (Spec S01.4: "/events unbuffered").
+   	@sse path /events
+   	handle @sse {
+   		reverse_proxy 127.0.0.1:8482 {
+   			flush_interval -1
+   		}
+   	}
+   	handle {
+   		reverse_proxy 127.0.0.1:8482
+   	}
+   }
+   ```
+
+8. Apply and confirm Caddy binds loopback only (P-T13-2: the only non-loopback listener on this host stays `tailscaled`):
+
+   ```
+   sudo systemctl reload caddy
+   ss -tlnp | grep -E '8481|8482'
+   ```
+
+   Expected: both ports bound on `127.0.0.1` only.
+
+## C. Verification through the chain
+
+9. Health through the full chain — run from any tailnet device (phone browser works: `https://sinet.tailfd0b1e.ts.net/api/health`):
+
+   ```
+   curl -s https://sinet.tailfd0b1e.ts.net/api/health
+   ```
+
+   Expected: the same health JSON as step 3. The first run of this step is what mints the cert — allow a few extra seconds once.
+
+10. **Identity-header check** (S01.4 injection → S01.9 parse). From a tailnet device:
+
+    ```
+    curl -s https://sinet.tailfd0b1e.ts.net/api/auth/session
+    ```
+
+    Expected: `"hint":{"device_login":"<your tailscale account login>"}` in the response — proof that serve injects `Tailscale-User-Login` and the platform parses it. `authenticated` is `false` until step 11.
+
+11. **First real login** (this is also the production household bootstrap — the users table starts empty). Pick your operator id and PIN:
+
+    ```
+    curl -s -X POST -H 'Content-Type: application/json' \
+      -d '{"user_id":"<you>","display_name":"<Name>","role":"operator","pin":"<PIN>"}' \
+      https://sinet.tailfd0b1e.ts.net/api/auth/users
+    curl -s -c /tmp/sinet-jar -X POST -H 'Content-Type: application/json' \
+      -d '{"user_id":"<you>","pin":"<PIN>"}' \
+      https://sinet.tailfd0b1e.ts.net/api/auth/login
+    ```
+
+    Expected: `{"user_id":"<you>"}` then a login body with a 30-day `expires`; the jar now holds the `sinet_session` cookie (Secure, HttpOnly, SameSite=Lax).
+
+12. **SSE through the chain, unbuffered** (session required in production — that is the S01.9 wall working):
+
+    ```
+    curl -s -N -m 5 -b /tmp/sinet-jar 'https://sinet.tailfd0b1e.ts.net/events?after_seq=0'
+    ```
+
+    Expected: `id:/event:/data:` frames arrive immediately (`platform.started`, `auth.user_created`, `auth.login`, …), not after a buffer delay; the same URL without the cookie returns 401.
+
+13. Optional observation for the register record: within a day, `https://crt.sh/?q=sinet.tailfd0b1e.ts.net` shows the issuance — register rows 1 and 3 now exist in the world, as signed off under operator item 7.
+
+## Deferred beyond this gate (spec-staged)
+
+- **systemd unit installs** for the sinet unit set (`sinet units` output) — a separate B0-gate approval item; this runbook works against a dev-mode control process.
+- **Preview subdomain routes via Caddy's admin API** — S13, arrives at B4; today's Caddyfile deliberately contains no admin-API usage.
+- **SPA serving through this chain** — the assets embed into the control binary at B6 (S01.5); nothing to configure here when they land.
+- **P-T13-1 post-wake serve health-check + remediation path** — S01.7 duty, designed with S11's privileged-surface work (B1+).
+- **Device grants** (trusted auto-login for personal devices) — machinery is live now via `POST /api/auth/grants`, but granting is a deliberate per-device operator decision; the default for every device is shared (PIN required), and nothing at this gate requires any grant.

@@ -12,6 +12,26 @@ import (
 	"time"
 )
 
+// TestDevPostureDetection: dev posture is the absence of systemd env —
+// NOTIFY_SOCKET, STATE_DIRECTORY, CONFIGURATION_DIRECTORY — and any one
+// present reads as production (fail toward the stricter posture).
+func TestDevPostureDetection(t *testing.T) {
+	for _, v := range []string{"NOTIFY_SOCKET", "STATE_DIRECTORY", "CONFIGURATION_DIRECTORY"} {
+		t.Setenv(v, "") // scrub, restore after
+	}
+	if !devPosture() {
+		t.Fatal("no systemd env set: want dev posture")
+	}
+	for _, v := range []string{"NOTIFY_SOCKET", "STATE_DIRECTORY", "CONFIGURATION_DIRECTORY"} {
+		t.Run(v, func(t *testing.T) {
+			t.Setenv(v, "/something")
+			if devPosture() {
+				t.Fatalf("%s set: want production posture", v)
+			}
+		})
+	}
+}
+
 func TestLoadBootstrapDefaultsWhenAbsent(t *testing.T) {
 	b, err := loadBootstrap(t.TempDir()) // empty dir, no bootstrap.conf
 	if err != nil {

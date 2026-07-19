@@ -5,11 +5,13 @@
 // front chain (tailscale serve → Caddy → here); the loopback posture is
 // asserted fail-closed by the shell's listener-binding lint (P-T13-2).
 //
-// B0-3 ships the skeleton: the health/readiness surface and the SSE stream
-// over the event log's event_seq cursor. Endpoint families beyond these
-// (Spec S15.2 table) land with their data owners. The API is unversioned at
-// v0 — no /v1 prefix; SPA and API ship in one binary and evolution is
-// additive-first (Spec S15.2).
+// B0-3 shipped the skeleton (health + the SSE stream over the event log's
+// event_seq cursor); B0-5 makes identity real: the S01.9 session/PIN stack
+// behind the identity-middleware seam, plus the login/session endpoints
+// (S15.2: "Login/session endpoints are S01.9's"). Endpoint families beyond
+// these (Spec S15.2 table) land with their data owners. The API is
+// unversioned at v0 — no /v1 prefix; SPA and API ship in one binary and
+// evolution is additive-first (Spec S15.2).
 package api
 
 import (
@@ -19,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
@@ -47,10 +50,19 @@ type Health struct {
 	EventHead int64 `json:"event_head"`
 }
 
-// Config assembles a Server. Log, Auth, Settings and HealthFn are
+// Config assembles a Server. Log, Sessions, Settings and HealthFn are
 // mandatory; the rest have defaults.
 type Config struct {
-	Log      *eventlog.Log
+	Log *eventlog.Log
+	// Sessions is the S01.9 auth data layer (sessions, PINs, grants).
+	Sessions *auth.Store
+	// DevPosture marks the dev-mode process (the shell keys it off the
+	// absence of systemd env, P3/CONVENTIONS.md §7): the identity
+	// middleware falls back to the fixed dev identity and cookies drop the
+	// Secure attribute (dev serves plain HTTP on loopback).
+	DevPosture bool
+	// Auth overrides the identity-middleware seam implementation; nil =
+	// SessionAuthenticator over Sessions/DevPosture (the production stack).
 	Auth     Authenticator
 	Settings Settings
 	// HealthFn returns the current readiness snapshot.
@@ -68,27 +80,34 @@ type Config struct {
 
 // Server is the HTTP API of the control plane.
 type Server struct {
-	log      *eventlog.Log
-	auth     Authenticator
-	settings Settings
-	healthFn func() Health
-	stopping <-chan struct{}
-	poll     time.Duration
-	logger   *slog.Logger
-	nudge    *broadcast
+	log        *eventlog.Log
+	sessions   *auth.Store
+	devPosture bool
+	auth       Authenticator
+	settings   Settings
+	healthFn   func() Health
+	stopping   <-chan struct{}
+	poll       time.Duration
+	logger     *slog.Logger
+	nudge      *broadcast
 }
 
 // New assembles the Server.
 func New(cfg Config) *Server {
 	s := &Server{
-		log:      cfg.Log,
-		auth:     cfg.Auth,
-		settings: cfg.Settings,
-		healthFn: cfg.HealthFn,
-		stopping: cfg.Stopping,
-		poll:     cfg.PollInterval,
-		logger:   cfg.Logger,
-		nudge:    newBroadcast(),
+		log:        cfg.Log,
+		sessions:   cfg.Sessions,
+		devPosture: cfg.DevPosture,
+		auth:       cfg.Auth,
+		settings:   cfg.Settings,
+		healthFn:   cfg.HealthFn,
+		stopping:   cfg.Stopping,
+		poll:       cfg.PollInterval,
+		logger:     cfg.Logger,
+		nudge:      newBroadcast(),
+	}
+	if s.auth == nil {
+		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}
 	}
 	if s.poll <= 0 {
 		s.poll = 250 * time.Millisecond
@@ -102,12 +121,34 @@ func New(cfg Config) *Server {
 	return s
 }
 
-// Handler returns the routed HTTP handler, every route wrapped in the
-// identity middleware (Spec S01.9 seam; authoritative stack lands at B0-5).
+// Handler returns the routed HTTP handler. Every route runs behind the
+// identity-resolving middleware (the Spec S01.9 seam). The pre-session
+// surface — readiness, session state, the user picker, login, and the
+// bootstrap-window user create — serves without a session (reaching it
+// already proves tailnet membership, Spec S01.9 layer 1); everything else
+// requires an authenticated identity, enforced fail-closed.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	// Pre-session surface.
 	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.HandleFunc("GET /events", s.handleEvents)
+	mux.HandleFunc("GET /api/auth/session", s.handleAuthSession)
+	mux.HandleFunc("GET /api/auth/users", s.handleAuthUsers)
+	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /api/auth/users", s.handleAuthUserCreate)
+
+	// Session-required surface.
+	protected := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, s.requireIdentity(h))
+	}
+	protected("GET /events", s.handleEvents)
+	protected("POST /api/auth/logout", s.handleAuthLogout)
+	protected("POST /api/auth/verify-pin", s.handleAuthVerifyPIN)
+	protected("POST /api/auth/pin", s.handleAuthSetPIN)
+	protected("GET /api/auth/grants", s.handleAuthGrants)
+	protected("POST /api/auth/grants", s.handleAuthGrantCreate)
+	protected("POST /api/auth/grants/revoke", s.handleAuthGrantRevoke)
+
 	return s.identity(mux)
 }
 

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
@@ -200,13 +201,18 @@ func Run(ctx context.Context, opts Options) error {
 	// startup sequence completes (Spec S01.6).
 	st := newState()
 	maint := NewMaintenance(reg, admission, logger)
+	// The S01.9 authentication stack (B0-5): sessions + PIN over
+	// platform.db behind the identity-middleware seam. Dev posture keeps
+	// the fixed dev fallback identity so the process works without
+	// tailscale, certs, or a login; production requires sessions.
 	srv := api.New(api.Config{
-		Log:      log,
-		Auth:     api.DevAuthenticator{},
-		Settings: reg,
-		HealthFn: healthFn(st, maint, log),
-		Stopping: st.stopping,
-		Logger:   logger,
+		Log:        log,
+		Sessions:   auth.New(db, log),
+		DevPosture: devPosture(),
+		Settings:   reg,
+		HealthFn:   healthFn(st, maint, log),
+		Stopping:   st.stopping,
+		Logger:     logger,
 	})
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),

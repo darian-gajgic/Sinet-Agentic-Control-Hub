@@ -14,14 +14,19 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
-// newLog builds a real event log over a temp platform.db with registry
-// defaults.
-func newLog(t *testing.T) *eventlog.Log {
+// backend is a real migrated platform.db with its event log and auth store.
+type backend struct {
+	log   *eventlog.Log
+	store *auth.Store
+}
+
+func newBackend(t *testing.T) *backend {
 	t.Helper()
 	ctx := context.Background()
 	reg := settings.New()
@@ -33,7 +38,8 @@ func newLog(t *testing.T) *eventlog.Log {
 	if _, err := db.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return eventlog.New(db, reg)
+	log := eventlog.New(db, reg)
+	return &backend{log: log, store: auth.New(db, log)}
 }
 
 func appendEvents(t *testing.T, log *eventlog.Log, types ...string) []int64 {
@@ -60,7 +66,8 @@ type fixedSettings struct{ d time.Duration }
 func (f fixedSettings) Duration(string) (time.Duration, error) { return f.d, nil }
 
 type serverOpts struct {
-	log      *eventlog.Log
+	b        *backend
+	prod     bool // true = production posture (no dev identity fallback)
 	auth     api.Authenticator
 	settings api.Settings
 	health   func() api.Health
@@ -70,11 +77,8 @@ type serverOpts struct {
 
 func newTestServer(t *testing.T, o serverOpts) (*api.Server, *httptest.Server) {
 	t.Helper()
-	if o.log == nil {
-		o.log = newLog(t)
-	}
-	if o.auth == nil {
-		o.auth = api.DevAuthenticator{}
+	if o.b == nil {
+		o.b = newBackend(t)
 	}
 	if o.settings == nil {
 		o.settings = fixedSettings{d: 20 * time.Second}
@@ -86,24 +90,36 @@ func newTestServer(t *testing.T, o serverOpts) (*api.Server, *httptest.Server) {
 		o.poll = 10 * time.Millisecond
 	}
 	srv := api.New(api.Config{
-		Log:          o.log,
+		Log:          o.b.log,
+		Sessions:     o.b.store,
+		DevPosture:   !o.prod,
 		Auth:         o.auth,
 		Settings:     o.settings,
 		HealthFn:     o.health,
 		Stopping:     o.stopping,
 		PollInterval: o.poll,
 	})
-	ts := httptest.NewServer(srv.Handler())
+	// Production posture serves the browser leg over TLS (terminated at
+	// tailscale serve in the real chain, Spec S01.4), and its session
+	// cookie is Secure — so prod-posture tests must speak https for the
+	// cookie jar to behave like a browser. Dev posture is plain loopback
+	// HTTP, exactly like `sinet control` in dev.
+	var ts *httptest.Server
+	if o.prod {
+		ts = httptest.NewTLSServer(srv.Handler())
+	} else {
+		ts = httptest.NewServer(srv.Handler())
+	}
 	t.Cleanup(ts.Close)
 	return srv, ts
 }
 
 func TestHealthReadyAndStarting(t *testing.T) {
 	ready := false
-	log := newLog(t)
-	appendEvents(t, log, "a", "b")
+	b := newBackend(t)
+	appendEvents(t, b.log, "a", "b")
 	_, ts := newTestServer(t, serverOpts{
-		log: log,
+		b: b,
 		health: func() api.Health {
 			return api.Health{Ready: ready, Mode: "running", Version: "test", EventHead: 2}
 		},
@@ -135,32 +151,70 @@ func TestHealthReadyAndStarting(t *testing.T) {
 	}
 }
 
+// TestProdPostureRequiresSession: in production posture an anonymous
+// request reaches the pre-session surface (health, session state) but never
+// a session-required route — fail-closed 401 (Spec S01.9, S15.2).
+func TestProdPostureRequiresSession(t *testing.T) {
+	_, ts := newTestServer(t, serverOpts{prod: true})
+
+	for path, want := range map[string]int{
+		"/api/health":       http.StatusOK,
+		"/api/auth/session": http.StatusOK,
+		"/api/auth/users":   http.StatusOK,
+		"/events":           http.StatusUnauthorized,
+		"/api/auth/grants":  http.StatusUnauthorized,
+	} {
+		resp, err := ts.Client().Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("GET %s = %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+}
+
+// failAuth simulates an internal identity-resolution failure (not
+// anonymity): the middleware must fail closed with 500, never downgrade to
+// anonymous.
 type failAuth struct{}
 
 func (failAuth) Authenticate(*http.Request) (api.Identity, error) {
-	return api.Identity{}, fmt.Errorf("no identity")
+	return api.Identity{}, fmt.Errorf("store unavailable")
 }
 
-func TestIdentityMiddlewareFailsClosed(t *testing.T) {
+func TestIdentityResolutionFailureFailsClosed(t *testing.T) {
 	_, ts := newTestServer(t, serverOpts{auth: failAuth{}})
 	resp, err := http.Get(ts.URL + "/api/health")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status %d, want 401", resp.StatusCode)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500 (fail closed, no anonymous downgrade)", resp.StatusCode)
 	}
 }
 
-func TestDevAuthenticatorDefaultIdentity(t *testing.T) {
-	id, err := api.DevAuthenticator{}.Authenticate(nil)
-	if err != nil || id.UserID != "dev" {
-		t.Fatalf("dev identity = %+v, %v", id, err)
+// TestDevFallbackIdentity: dev posture resolves an unauthenticated request
+// to the fixed dev identity — resolution only, so dev flows and the SSE
+// demo work without a login (P3/CONVENTIONS.md §7).
+func TestDevFallbackIdentity(t *testing.T) {
+	_, ts := newTestServer(t, serverOpts{}) // default = dev posture
+	resp, err := http.Get(ts.URL + "/api/auth/session")
+	if err != nil {
+		t.Fatalf("get: %v", err)
 	}
-	id, _ = api.DevAuthenticator{UserID: "op"}.Authenticate(nil)
-	if id.UserID != "op" {
-		t.Fatalf("dev identity override = %+v", id)
+	defer resp.Body.Close()
+	var got struct {
+		Authenticated bool `json:"authenticated"`
+		Dev           bool `json:"dev"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.Authenticated || !got.Dev {
+		t.Fatalf("session state = %+v, want authenticated dev fallback", got)
 	}
 }
 
@@ -261,9 +315,9 @@ func testCtx(t *testing.T) context.Context {
 }
 
 func TestSSEBacklogOrderAndShape(t *testing.T) {
-	log := newLog(t)
-	seqs := appendEvents(t, log, "t.one", "t.two", "t.three")
-	_, ts := newTestServer(t, serverOpts{log: log})
+	b := newBackend(t)
+	seqs := appendEvents(t, b.log, "t.one", "t.two", "t.three")
+	_, ts := newTestServer(t, serverOpts{b: b})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events?after_seq=0", nil)
 	defer done()
@@ -288,14 +342,14 @@ func TestSSEBacklogOrderAndShape(t *testing.T) {
 }
 
 func TestSSEBacklogCrossesBatchBoundary(t *testing.T) {
-	log := newLog(t)
+	b := newBackend(t)
 	const n = 300 // > one 256-event read batch (Spec S02.1 short-batch hygiene)
 	types := make([]string, n)
 	for i := range types {
 		types[i] = "bulk.event"
 	}
-	appendEvents(t, log, types...)
-	_, ts := newTestServer(t, serverOpts{log: log})
+	appendEvents(t, b.log, types...)
+	_, ts := newTestServer(t, serverOpts{b: b})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events?after_seq=0", nil)
 	defer done()
@@ -316,9 +370,9 @@ func TestSSEBacklogCrossesBatchBoundary(t *testing.T) {
 }
 
 func TestSSEResumeCursors(t *testing.T) {
-	log := newLog(t)
-	appendEvents(t, log, "a", "b", "c", "d")
-	_, ts := newTestServer(t, serverOpts{log: log})
+	b := newBackend(t)
+	appendEvents(t, b.log, "a", "b", "c", "d")
+	_, ts := newTestServer(t, serverOpts{b: b})
 	ctx := testCtx(t)
 
 	// ?after_seq resumes past the cursor.
@@ -349,13 +403,13 @@ func TestSSEBadCursorRejected(t *testing.T) {
 }
 
 func TestSSEDefaultCursorTailsFromHead(t *testing.T) {
-	log := newLog(t)
-	appendEvents(t, log, "old.one", "old.two")
-	srv, ts := newTestServer(t, serverOpts{log: log})
+	b := newBackend(t)
+	appendEvents(t, b.log, "old.one", "old.two")
+	srv, ts := newTestServer(t, serverOpts{b: b})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events", nil)
 	defer done()
-	appendEvents(t, log, "new.one")
+	appendEvents(t, b.log, "new.one")
 	srv.Nudge()
 	if f := readEvent(t, r); f.event != "new.one" {
 		t.Fatalf("first frame %q, want new.one (backlog must not replay without a cursor)", f.event)
@@ -363,12 +417,12 @@ func TestSSEDefaultCursorTailsFromHead(t *testing.T) {
 }
 
 func TestSSELiveAppendViaPoll(t *testing.T) {
-	log := newLog(t)
-	_, ts := newTestServer(t, serverOpts{log: log, poll: 10 * time.Millisecond})
+	b := newBackend(t)
+	_, ts := newTestServer(t, serverOpts{b: b, poll: 10 * time.Millisecond})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events?after_seq=0", nil)
 	defer done()
-	appendEvents(t, log, "live.event") // no nudge: the poll baseline must deliver
+	appendEvents(t, b.log, "live.event") // no nudge: the poll baseline must deliver
 	if f := readEvent(t, r); f.event != "live.event" {
 		t.Fatalf("frame %q, want live.event", f.event)
 	}
@@ -388,16 +442,16 @@ func TestSSEKeepaliveComment(t *testing.T) {
 }
 
 func TestSSEStopDrainsFinalBatchThenEnds(t *testing.T) {
-	log := newLog(t)
+	b := newBackend(t)
 	stopping := make(chan struct{})
-	srv, ts := newTestServer(t, serverOpts{log: log, stopping: stopping, poll: time.Hour})
+	srv, ts := newTestServer(t, serverOpts{b: b, stopping: stopping, poll: time.Hour})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events?after_seq=0", nil)
 	defer done()
 
 	// Appended before the stop signal: must be delivered by the final
 	// drain even though the poll baseline never fires (poll = 1h).
-	appendEvents(t, log, "final.event")
+	appendEvents(t, b.log, "final.event")
 	closeOnce(stopping)
 	srv.Nudge()
 

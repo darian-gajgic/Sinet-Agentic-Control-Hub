@@ -99,6 +99,31 @@
         "github.com/remyoudompheng/bigfft"
       ],
       "notes": "S16.3 'TBD-P3(driver pin)' resolved at P3-B0-2. Landscape LIVE-verified 2026-07-19 via proxy.golang.org: modernc.org/sqlite v1.54.0 (tagged 2026-07-15 at gitlab.com/cznic/sqlite, hash 693ff386) vs github.com/ncruces/go-sqlite3 v0.35.2 (also cgo-free, but WASM-under-wazero and still 0.x — no stable release line to pin). modernc picked per the S01.5 grounds: it IS the pure-Go (cgo-free) translation of the SQLite amalgamation, database/sql-native, longest-lived v1 line. Embeds SQLite 3.53.3 on linux/amd64. Pin coupling: modernc.org/libc MUST stay exactly at the version in the driver's own go.mod (v1.74.1 here; upstream issue #177) — bump driver and libc together, never independently. S16.4 checklist walked at P3-B0-2 (niche/seam #1: storage seam S01.3; organ-grade #2: library, no orchestration opinions; health #3: active release cadence v1.49→v1.54 observed on the proxy; license #4: path-scoped above; behavior #5: WAL/FULL/BEGIN IMMEDIATE/foreign_keys/user_version/multi-statement exec + append-only triggers asserted by internal/storage + internal/eventlog unit tests at the pin; unmodified #6: config-only via DSN; runner-never-store #7: n/a, it IS the store engine; pin+funeral #8: this entry; watch #9: rows above; #10: operator ratification queued for the B0 gate report per P3-B0-1 precedent)"
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "kind": "library",
+      "pin": "v0.54.0",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "scope": "module root at v0.54.0 (single LICENSE + PATENTS at the module root, verified in the hash-verified module cache; no enterprise/ee carve-out directories). Companion bump: golang.org/x/sys v0.46.0 -> v0.47.0 (MVS, required by x/crypto), same single root BSD-3-Clause LICENSE verified at v0.47.0 — module coverage for x/sys remains with the SQLite driver entry",
+        "checked": "2026-07-19"
+      },
+      "role": {
+        "summary": "argon2id PIN/password hashing for the S01.9 person-identity layer (sole consumer: internal/auth; only the argon2 + blake2b packages are linked)",
+        "section": "S01.9"
+      },
+      "replacement": "credentials are self-describing PHC strings (params ride the stored hash), and the KDF sits behind internal/auth's hashPIN/verifyPINHash pair — replacement = any maintained argon2id implementation (or a vendored copy of x/crypto/argon2; BSD-3 permits) behind those two functions, with stored credentials surviving the swap unchanged",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "golang.org/x repos ride the Go project's release cadence and security policy (same upstream as the toolchain entry)",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-19",
+      "modules": [
+        "golang.org/x/crypto"
+      ],
+      "notes": "Adopted at P3-B0-5 because Spec S01.9 names argon2id for the per-user PIN/password and the stdlib has no argon2id; golang.org/x/crypto is the Go team's reference implementation. Pin LIVE-verified 2026-07-19 as @latest on proxy.golang.org (v0.54.0). S16.4 checklist walked at P3-B0-5 (niche/seam #1: one KDF behind the S01.9 data layer, API seam S01.3 untouched; organ-grade #2: leaf library, no orchestration/store opinions; health #3: Go-team maintained x-repo, monthly tag cadence observed through v0.54.0, security handling under the Go project's policy; license #4: path-scoped above; behavior #5: argon2id derivation pinned by an in-tree golden vector generated at adoption (internal/auth TestPHCGoldenVector) plus PHC round-trip/param tests — upstream's suite carries the RFC 9106 known-answer vectors; unmodified #6: import-only; runner-never-store #7: n/a, computes hashes, platform.db stays the store; pin+funeral #8: this entry; watch #9: rows above; #10: operator ratification queued for the B0 gate report per the B0-1/B0-2 precedent)"
     }
   ]
 }

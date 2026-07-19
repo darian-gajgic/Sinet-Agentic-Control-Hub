@@ -32,6 +32,17 @@ const DefaultHTTPAddr = "127.0.0.1:8482"
 // populated via ConfigurationDirectory=, Spec S01.11).
 const BootstrapFileName = "bootstrap.conf"
 
+// devPosture reports the dev-mode process posture: the absence of systemd
+// env — NOTIFY_SOCKET, STATE_DIRECTORY, CONFIGURATION_DIRECTORY — never a
+// build flag (the B0-3 rule, P3/CONVENTIONS.md §7). Any of the three
+// present reads as production: posture ambiguity fails toward the stricter
+// side (no dev identity fallback, Secure cookies).
+func devPosture() bool {
+	return os.Getenv("NOTIFY_SOCKET") == "" &&
+		os.Getenv("STATE_DIRECTORY") == "" &&
+		os.Getenv("CONFIGURATION_DIRECTORY") == ""
+}
+
 // resolveConfigDir returns the configuration directory: the explicit
 // override, else $CONFIGURATION_DIRECTORY (systemd ConfigurationDirectory=;
 // first entry of a colon list), else /etc/sinet.
