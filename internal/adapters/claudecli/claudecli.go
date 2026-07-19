@@ -174,23 +174,47 @@ func (a *Adapter) spawn(ctx context.Context, req adapters.StartRequest, l *lower
 		return nil, fmt.Errorf("claudecli: reset fires log: %w", err)
 	}
 
-	cmd := exec.Command(l.argv[0], l.argv[1:]...)
-	cmd.Dir = req.Cwd
-	cmd.Env = l.env
+	// Broker credential injection at spawn (Spec S11.5; S01.6 "engines
+	// receive credentials at start"): resolved FRESH, never stored. For a
+	// confined engine the injected model-channel value is a sentinel; the
+	// real token rides the injection proxy (D2/S11.5).
+	env := l.env
+	if req.CredInject != nil {
+		injected, err := req.CredInject(env)
+		if err != nil {
+			return nil, fmt.Errorf("claudecli: inject credentials (S11.5): %w", err)
+		}
+		env = injected
+	}
+
+	// Confinement seam (Spec S11): with a Confiner set the engine runs inside
+	// the composed per-run sandbox; without one it spawns unconfined (the
+	// B1-1 dev posture, CONVENTIONS §10). Either way the process is its own
+	// group leader so the S03.1 cancel ladder can signal the whole tree.
+	cmd, cleanup, err := a.buildCmd(req, l, env)
+	if err != nil {
+		return nil, err
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("claudecli: stdout pipe: %w", err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("claudecli: stdin pipe: %w", err)
 	}
 	stderr := &boundedBuffer{cap: adapters.ExcerptCap}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("claudecli: spawn %s: %w", l.argv[0], err)
+		cleanup()
+		return nil, fmt.Errorf("claudecli: spawn %s: %w", cmd.Path, err)
 	}
+	// The child holds its own copy of any passed fd (seccomp); the parent's
+	// is disposable once bwrap has forked.
+	cleanup()
 
 	s := &session{
 		a: a, req: req, low: l, cmd: cmd, stderr: stderr,
@@ -244,6 +268,42 @@ func (a *Adapter) spawn(ctx context.Context, req adapters.StartRequest, l *lower
 
 	go s.pump(stdout)
 	return s, nil
+}
+
+// buildCmd builds the engine *exec.Cmd — confined through the S11 Confiner
+// when one is set, or the unconfined B1-1 dev spawn otherwise (CONVENTIONS
+// §10). It always returns a non-nil cleanup (the confined path's seccomp fd
+// close). SysProcAttr/pipes/Start remain the caller's (spawn), so the cancel
+// ladder and stream plumbing are identical for confined and unconfined runs.
+func (a *Adapter) buildCmd(req adapters.StartRequest, l *lowered, env []string) (*exec.Cmd, func(), error) {
+	noop := func() {}
+	if req.Confiner == nil {
+		cmd := exec.Command(l.argv[0], l.argv[1:]...)
+		cmd.Dir = req.Cwd
+		cmd.Env = env
+		return cmd, noop, nil
+	}
+	// Lowered config is bound read-only (the engine reads its compiled
+	// settings but can never rewrite them — S11.7 P-T09-1); the gate control
+	// dir, when gated tools are declared, is the read-write exchange channel
+	// (S03.4). A later rw bind of the ctl subdir shadows the ro WorkDir bind.
+	spec := adapters.SpawnSpec{
+		Argv:      l.argv,
+		Env:       env,
+		Workspace: req.Cwd,
+		ROConfig:  []string{req.WorkDir},
+	}
+	if len(req.Worker.GatedTools) > 0 {
+		spec.RWExchange = []string{l.ctlDir}
+	}
+	cmd, cleanup, err := req.Confiner.Confine(req, spec)
+	if err != nil {
+		return nil, noop, fmt.Errorf("claudecli: confine (S11): %w", err)
+	}
+	if cleanup == nil {
+		cleanup = noop
+	}
+	return cmd, cleanup, nil
 }
 
 // session is one live engine invocation.

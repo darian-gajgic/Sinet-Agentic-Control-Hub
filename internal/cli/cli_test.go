@@ -59,13 +59,30 @@ func TestUnknownMode(t *testing.T) {
 }
 
 func TestReservedModesReportUnimplemented(t *testing.T) {
-	for _, mode := range []string{"broker", "portpool"} {
+	// broker (S11.5) and run-launch (S11.8) are implemented at B1-3 and left the
+	// reserved table; only portpool remains a reserved daemon stub.
+	for _, mode := range []string{"portpool"} {
 		code, _, errOut := run(t, mode)
 		if code != exitError {
 			t.Errorf("%s: exit %d, want %d", mode, code, exitError)
 		}
 		if !strings.Contains(errOut, "not implemented") {
 			t.Errorf("%s: stderr %q lacks not-implemented notice", mode, errOut)
+		}
+	}
+}
+
+// TestBrokerAndRunLaunchWired proves the B1-3 modes are recognized (not
+// "unknown mode") without starting the broker daemon (which would block): a
+// bad flag returns the usage exit code from each mode's flag parser.
+func TestBrokerAndRunLaunchWired(t *testing.T) {
+	for _, mode := range []string{"broker", "run-launch"} {
+		code, _, errOut := run(t, mode, "--definitely-not-a-flag")
+		if code != exitUsage {
+			t.Errorf("%s --badflag: exit %d, want %d (stderr: %q)", mode, code, exitUsage, errOut)
+		}
+		if strings.Contains(errOut, "unknown mode") {
+			t.Errorf("%s: reported as unknown mode (should be wired)", mode)
 		}
 	}
 }

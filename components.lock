@@ -147,6 +147,28 @@
       ],
       "last_review": "2026-07-19",
       "notes": "S16.3 engine row materialized at P3-B1-1 (first consumption: the Anthropic-lane adapter). Pin 2.1.214 is the S16.3 BINDING row value and the behavioral contract the adapter targets (claudecli.Pin, coupled by test). LIVE delta recorded 2026-07-19: the host-installed binary reports 2.1.215 (`claude --version`) — one patch AHEAD of the pin; tier-R conformance (version notice, enum rejection, full-argv dry probe) passed against 2.1.215 with `--max-turns` observed dropped from --help while still parse-accepted (why tier-R asserts parse behavior, never help text, per S03.3 rule 4). NOT silently retargeted: reconciling host to pin (downgrade) or pin to host (S03.3 deliberate bump with conformance + quality probes) is an operator decision reported at B1. Engine runs unmodified as a per-run subprocess, own process group, per-user CLAUDE_CONFIG_DIR as the credential root (S03.2; D2); `--dangerously-skip-permissions` never emitted; native-spawn Task* family excluded from every allowlist (S03.5 sole-controller). Not a Go module: no modules claim; no npm-side bundling (engine invoked from PATH/explicit path)."
+    },
+    {
+      "name": "OS mechanisms: bubblewrap/seccomp/Landlock/netns+nftables",
+      "kind": "os-mechanism",
+      "pin": "ubuntu-26.04-lts",
+      "license": {
+        "spdx": "LGPL-2.0-or-later AND GPL-2.0-only",
+        "scope": "OS-packaged host mechanisms consumed UNMODIFIED through their kernel/CLI interfaces, never vendored or linked: bubblewrap (LGPL-2.0-or-later, /usr/bin/bwrap), the kernel seccomp-BPF and Landlock LSM (GPL-2.0-only, syscall interfaces), and netns + nftables (kernel + /usr/sbin/nft). CI cannot pin the kernel (S16.2 os-mechanism rule); tracked by host-OS release + probe result/date below.",
+        "checked": "2026-07-20"
+      },
+      "role": {
+        "summary": "composed per-run sandbox stack (S11.1): bubblewrap namespaces + empty netns are the boundary; seccomp-BPF + Landlock are defense-in-depth; plus the broker-injection egress substrate",
+        "section": "S11"
+      },
+      "replacement": "per-mechanism ratified fallbacks (G2 D2.3; S11.2): per-binary AppArmor profile for userns (shipped and proven), nftables-only egress (which is the boundary anyway), plain-copy workspaces where reflink-CoW is absent; the composed stack is the direct composition of these primitives (srt's own funeral-plan rebuild path)",
+      "abandonment": "an OS-release upgrade is a deliberate event that re-runs the S11.2/S16.3 probe set (internal/sandbox.Probe) before normal admission resumes; a mechanism removed upstream activates its ratified fallback as a dated lock edit",
+      "watch": [
+        "re-probe on OS upgrade + quarterly dependency pass (S16.7)",
+        "S2.8 sandbox-runtime (srt) watch — srt is the ratified wrapper for this core (S16.3 library row); not consumed at B1 (direct composition)"
+      ],
+      "last_review": "2026-07-20",
+      "notes": "S16.3 os-mechanism row materialized at P3-B1-3 (first consumption: internal/sandbox composes /usr/bin/bwrap for per-run confinement). Host = Ubuntu 26.04 LTS, kernel 7.0.0-27-generic. Probe CLEARED 2026-07-20 (internal/sandbox.Probe, re-verifying SPIKE P2-S2 at runtime): bubblewrap 0.11.1 at /usr/bin/bwrap — MUST invoke the system path (the shipped AppArmor profile /etc/apparmor.d/bwrap-userns-restrict attaches to it; S11.2 rider); unprivileged user+net namespace FORMS under apparmor_restrict_unprivileged_userns=1 (functional probe, not a sysctl read); seccomp SECCOMP_MODE_FILTER available, profile loaded via bwrap --seccomp fd (kills ptrace/process_vm_readv/process_vm_writev — proven live: PTRACE_TRACEME denied EPERM inside the sandbox); Landlock present at ABI 8 (landlock_create_ruleset = syscall 444) — ruleset composed as data, live ENFORCEMENT is a B1 seam (x/sys v0.47.0 exposes no Landlock wrappers; the boundary is bwrap+netns regardless); netns present (empty per-run netns, no route = the S11.4 primary default-drop), nftables at /usr/sbin/nft. DECISIONS (reported, gate-flagged): srt (sandbox-runtime, S16.3 library row) NOT consumed at B1 — the composed stack rebuilds the same kernel primitives directly, exactly srt's ratified replacement path, so its lock entry does NOT materialize. sops + age (S16.3 rows) NOT consumed at B1 — the dev-mode broker store encrypts at rest with stdlib AES-256-GCM (zero new deps); the ratified systemd-creds + sops/age host-integrated format lands with broker key management at a host-install gate (age adoption + sops decision queued for the B1 gate, operator #10; coheres with operator age-identity-escrow item 6). Host egress substrate (nftables default-DROP + host proxy, S11.4/S11.8 sinet-egress-setup.service) is a boot-time root install — DEFERRED (no host changes at B1); the empty netns is delivered. Not a Go dependency (no modules claim); no CI running-unit assertion yet (activates with unit install, CONVENTIONS §4)."
     }
   ]
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sdnotify"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -197,9 +198,20 @@ func Run(ctx context.Context, opts Options) error {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
 		exceptions := metering.NoMeteredExceptions()
 		ledger := metering.NewLedger(db, priceTable, exceptions, reg)
+		// B1-3 confined path (Spec S11): the composer is the S11 Confiner wired
+		// onto every dispatch, so a run reaching an engine runs INSIDE the
+		// composed per-run sandbox. It probes the host once at startup (probe-
+		// at-compose, S16.3) and logs the result; it does not fail startup if
+		// the boundary is absent (the dev queue is empty until intake, S06/B2,
+		// so nothing is dispatched). Adapters + the compiled-worker/model
+		// selection (S08/B3) are still absent, so this stays a wired seam,
+		// never a live route in dev mode.
+		composer := sandbox.NewComposer(reg, logger)
+		logger.Info("sandbox: host probe (S11.2/S16.3)", "available", composer.Caps().Available(), "notes", composer.Caps().Notes)
 		dispatcher := &runDispatcher{
 			driver:   &adapters.Driver{Runs: runs, Checkpoints: checkpoints, Log: log, DB: db},
-			adapters: map[string]adapters.Adapter{}, // registered at B1-3 (S11)
+			adapters: map[string]adapters.Adapter{}, // registered with their worker compiler (S08, B3)
+			confiner: composer,                      // S11 confinement, wired now
 		}
 		sched, err = scheduler.New(scheduler.Config{
 			DB:         db,
@@ -515,14 +527,29 @@ func shutdownHTTP(srv *http.Server, logger *slog.Logger) {
 type runDispatcher struct {
 	driver   *adapters.Driver
 	adapters map[string]adapters.Adapter
+	// confiner is the S11 per-run sandbox wrapped around every engine spawn
+	// (B1-3). Attached to the StartRequest so the adapter builds its engine
+	// process INSIDE the composed sandbox (the S11 admission rule: no engine
+	// reaches real work unconfined).
+	confiner adapters.Confiner
 }
 
-// Dispatch implements scheduler.Dispatcher.
+// Dispatch implements scheduler.Dispatcher. It attaches the S11 confiner (and
+// the run's compiled confinement class) to the StartRequest so any engine it
+// spawns runs inside the per-run sandbox. The compiled worker, model, cwd, and
+// broker-resolved credential injection are Spec S08's (B3) — until they land
+// no adapter is registered, so this returns before any spawn and the confined
+// route is proven-wired but never live in dev mode.
 func (d *runDispatcher) Dispatch(ctx context.Context, r run.Run) error {
 	a, ok := d.adapters[r.Substrate]
 	if !ok {
-		return fmt.Errorf("shell: no confined adapter registered for substrate %q (B1-3, Spec S11)", r.Substrate)
+		return fmt.Errorf("shell: no confined adapter registered for substrate %q (worker compiler is S08, B3)", r.Substrate)
 	}
-	_, err := d.driver.Drive(ctx, a, adapters.StartRequest{RunID: r.ID, UserID: r.UserID})
+	_, err := d.driver.Drive(ctx, a, adapters.StartRequest{
+		RunID:    r.ID,
+		UserID:   r.UserID,
+		Class:    string(sandbox.C1), // strongest default until the worker record carries the class (S08)
+		Confiner: d.confiner,
+	})
 	return err
 }

@@ -16,7 +16,9 @@ import (
 	"path/filepath"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
@@ -38,12 +40,15 @@ Usage:
 Modes:
 
   control    platform control plane (sinet-control.service)
-  broker     credential broker (sinet-broker.service)          [not yet implemented]
+  broker     credential broker (sinet-broker.service; Spec S11.5)
   portpool   preview port-pool daemon (sinet-portpool.service) [not yet implemented]
 
 Tools:
 
   units        render the systemd unit set (generated, never installed)
+  run-launch   per-run sandbox launcher — the fixed ExecStart of the
+               sinet-run@ template (Spec S11.8); reads a spool record and
+               composes the S11.1 stack. System-invoked, never by hand.
   engine-hook  PreToolUse gate hook for the Claude lane (invoked by the
                engine per Sinet-lowered settings, never by hand; Spec S03.4)
   version      print build and version information
@@ -51,9 +56,9 @@ Tools:
 `
 
 // reserved names the daemon modes of Spec S01.2 ahead of their
-// implementations.
+// implementations. The broker mode is implemented at B1-3 (Spec S11.5) and
+// left the table.
 var reserved = map[string]string{
-	"broker":   "sinet-broker",
 	"portpool": "sinet-portpool",
 }
 
@@ -67,6 +72,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	switch mode {
 	case "control":
 		return shell.Main(args[1:], stdout, stderr)
+	case "broker":
+		return broker.Main(args[1:], stdout, stderr)
+	case "run-launch":
+		return sandbox.RunLaunch(args[1:], stdout, stderr)
 	case "units":
 		return runUnits(args[1:], stdout, stderr)
 	case "engine-hook":

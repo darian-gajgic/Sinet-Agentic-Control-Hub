@@ -121,18 +121,22 @@ func TestDraftTemplates(t *testing.T) {
 		t.Error("engine template lacks After=sinet-broker.service (Spec S01.2)")
 	}
 
-	run := files["sinet-run@.service"]
-	if !run.Draft {
-		t.Error("run template not marked draft (fixed-ExecStart is Spec S11.8's, B1)")
-	}
-	if strings.Contains(run.Content, "\nExecStart=") {
-		t.Error("run template invents an ExecStart")
+}
+
+// TestRunTemplateExecStart: the run@ ExecStart lands at B1-3 (Spec S11.8) — the
+// fixed run launcher — so the template is no longer a draft.
+func TestRunTemplateExecStart(t *testing.T) {
+	run := gen(t, units.Params{})["sinet-run@.service"]
+	if run.Draft {
+		t.Error("run template still marked draft after B1-3 (S11.8 ExecStart lands)")
 	}
 	for _, want := range []string{
+		"ExecStart=/usr/local/bin/sinet run-launch --job /run/sinet/jobs/%i.json", // S11.8 launcher, multi-call binary
 		"Restart=no",          // never auto-restarted by PID 1 (Spec S01.2)
 		"RemainAfterExit=yes", // harvest lane recipe (Spec S02.5)
 		"ExitType=cgroup",
 		"Type=exec",
+		"S11.8", // provenance in the header comment
 	} {
 		if !strings.Contains(run.Content, want) {
 			t.Errorf("sinet-run@.service lacks %q", want)

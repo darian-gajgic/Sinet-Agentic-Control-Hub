@@ -29,6 +29,7 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"time"
 )
 
@@ -219,6 +220,30 @@ type StartRequest struct {
 	// posture); broker-mediated injection is Spec S11 (B1-3).
 	OwnerCredRef string
 
+	// Class is the run's compiled confinement class (Spec S11.6: "C0".."C2"
+	// at v0), carried declaratively from the control-plane record. Empty +
+	// a Confiner defaults to C1 (the strongest, simplest class). Consumed by
+	// the Confiner; opaque to the adapter (the class is enforcement state a
+	// worker can never alter, 14.2).
+	Class string
+
+	// Confiner, when set, wraps the engine spawn in the composed per-run
+	// sandbox (Spec S11): the adapter builds its *exec.Cmd through it instead
+	// of spawning the engine directly. Nil = unconfined dev spawn (the B1-1
+	// posture; CONVENTIONS §10). Never serialized (json:"-"): confinement is
+	// recompiled every run from control-plane data, never read from a park
+	// record (S11.6/S11.7).
+	Confiner Confiner `json:"-"`
+
+	// CredInject, when set, resolves and injects owner/engine credentials
+	// into the engine environment at spawn — the S11.5 broker injection,
+	// S01.6 "engines receive credentials at start". Resolved FRESH per spawn
+	// from the broker: the secret is NEVER stored on this struct, in a park
+	// record, in the event log, or in the DB (json:"-"). For a confined
+	// (in-sandbox) engine the injected value on the model channel is a
+	// sentinel; the real token rides the S11.5 injection proxy.
+	CredInject func(base []string) ([]string, error) `json:"-"`
+
 	// Cwd is the isolated run working directory (S03.5: cwd is a config
 	// channel; the engine must never walk up into ambient project config).
 	Cwd string
@@ -321,6 +346,40 @@ type Outcome struct {
 
 	// Detail is a short human-readable cause (crash reason, cancel stage).
 	Detail string
+}
+
+// SpawnSpec is the engine's own lowered spawn — argv, environment, and the
+// platform-owned paths that must be visible inside the sandbox — that a
+// Confiner wraps in the per-run sandbox (Spec S11). Defined here so the
+// adapter seam owns the type and internal/sandbox implements the seam
+// (sandbox → adapters is the only import direction; no cycle).
+type SpawnSpec struct {
+	// Argv is the engine command (Argv[0] = binary); Env is the lowered
+	// engine environment (empty-env base; a sentinel on the credential
+	// channel for a confined engine — D2/S11.5).
+	Argv []string
+	Env  []string
+	// Workspace is the per-run workspace host path (bound at the same path
+	// inside; ro for C1, rw for C2; the chdir target — Spec S11.3).
+	Workspace string
+	// ROConfig are platform-owned config paths bound read-only (the lowered
+	// settings dir; the engine can never rewrite its own config — S11.7
+	// P-T09-1 deny-writes-to-config).
+	ROConfig []string
+	// RWExchange are platform-owned exchange dirs bound read-write (the S03.4
+	// gate control dir: the in-sandbox hook appends fires.log).
+	RWExchange []string
+	// EnginePrefix is an extra host tree bound read-only so a real engine
+	// installed outside /usr is reachable inside the sandbox. Empty for
+	// system-path binaries.
+	EnginePrefix string
+}
+
+// Confiner wraps an engine spawn in the composed per-run sandbox (Spec S11).
+// It returns the *exec.Cmd to start (bwrap prepended) and a cleanup to run
+// after Start. The implementation is internal/sandbox.Composer.
+type Confiner interface {
+	Confine(req StartRequest, spec SpawnSpec) (*exec.Cmd, func(), error)
 }
 
 // Adapter is the per-substrate implementation of the D3 contract. One

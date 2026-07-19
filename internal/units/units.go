@@ -110,7 +110,7 @@ func Files(settings Settings, p Params) ([]File, error) {
 		controlService(bin, watchdogSec),
 		brokerService(bin),
 		engineTemplate(),
-		runTemplate(),
+		runTemplate(bin),
 		portpoolService(bin),
 		journaldDropIn(journalMaxUse),
 	}, nil
@@ -200,16 +200,21 @@ Restart=on-failure
 	return File{Name: "sinet-engine@.service", Content: b.String(), Draft: true}
 }
 
-func runTemplate() File {
+func runTemplate(bin string) File {
 	var b strings.Builder
 	b.WriteString(header())
-	b.WriteString(`# DRAFT — not installable until B1: the fixed-ExecStart sandbox
-# composition (root-installed template + name-scoped polkit grant, Shape B)
-# is Spec S11.8's design; per-run properties (RuntimeMaxSec= time ceiling,
-# cgroup accounting) are set per instance at dispatch (Spec S01.2, S10).
-# Directives below are the ones Spec S01.2/S02.5 fix for this template.
+	b.WriteString(`# The fixed-ExecStart sandbox composition of Spec S11.8 Shape B: a
+# root-installed template + a single name-scoped polkit grant. ExecStart is
+# the run launcher (Spec S11.8) — fixed and non-agent-reachable; the control
+# plane, as unprivileged sinet, writes only DATA (the per-run confinement/
+# spawn record) to the spool file and starts the instance. Installing this
+# template (root) and the ^sinet-run@.*\.service$ polkit rule is the operator
+# gate step (no host changes at B1); per-run properties (RuntimeMaxSec= time
+# ceiling, cgroup accounting) are set per instance at dispatch (Spec S01.2,
+# S10). Wording reconciled to the multi-call binary (Spec S01.5): S11.8's
+# /usr/lib/sinet/run-launch is this binary in the run-launch mode.
 [Unit]
-Description=Sinet run unit %i (one run's engine process in its sandbox; Spec S01.2)
+Description=Sinet run unit %i (one run's engine process in its sandbox; Spec S01.2/S11.8)
 
 [Service]
 # Harvest lane recipe (Spec S02.5): unit corpses must outlive the process
@@ -218,16 +223,18 @@ Description=Sinet run unit %i (one run's engine process in its sandbox; Spec S01
 Type=exec
 RemainAfterExit=yes
 ExitType=cgroup
-# Run units are never auto-restarted by PID 1: a dead run is recovered by
+`)
+	fmt.Fprintf(&b, "ExecStart=%s run-launch --job /run/sinet/jobs/%%i.json\n", bin)
+	b.WriteString(`# Run units are never auto-restarted by PID 1: a dead run is recovered by
 # the S02 recovery ladder (fork-from-checkpoint), a control-plane decision
 # (Spec S01.2).
 Restart=no
 # Per-unit journald rate-limit overrides for chatty workers
-# (LogRateLimitIntervalSec=/LogRateLimitBurst=) land with the B1 template
+# (LogRateLimitIntervalSec=/LogRateLimitBurst=) are set per instance
 # (Spec S01.11).
 `)
 	b.WriteString(staticUser)
-	return File{Name: "sinet-run@.service", Content: b.String(), Draft: true}
+	return File{Name: "sinet-run@.service", Content: b.String()}
 }
 
 func portpoolService(bin string) File {
