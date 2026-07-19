@@ -11,7 +11,7 @@
 **Next action (P2 spec drafting — IN PROGRESS):**
 - Sections draft as `Spec/drafts/S00…S19` under `Spec/drafts/CONTRACT.md`; drafts remain canonical after assembly. Tracker below.
 - **ASSEMBLED 2026-07-19:** `Spec/core-architecture-v1.md` = ordered byte-move concatenation of S00–S19 (awk, one seam newline between files; verified by counts: 3816 lines = 3797 draft lines + 19 seams, bytes exact +19, S01–S19 headings once each in order, fence parity even; body never entered model context).
-- **Remaining (Fable-safe): G4 review memo** from neutral inputs (this STATE, gate memos, S17/S18/S19, the flag census) → present G4 with AskUserQuestion. Only the operator's G4 approval ends the research phase.
+- **G4 OPEN (2026-07-19) — blocked-on-gate.** Memo: `decisions/GATE-4-spec-review.md` (assembly integrity + flag census: 49 enumerated judgment calls; zero open items; decisions 4.1 ratify-spec / 4.2 end-research + 4 defaults). Present per memo, record answers there + here. Only the operator's G4 approval ends the research phase.
 - **Fable-max method (operator goal 2026-07-19):** the safeguard scores *loaded context*, not intent — so keep the coordinator's reads neutral. (a) route any deep-read of security-dense content (S11/S10 bodies, reports 09/10, spikes) to an **Opus-pinned subagent** returning a neutral digest; (b) **assembly = byte move**, Fable-safe; (c) finished spec prose reviews fine on Fable (S17 proved it). The lone Opus-needing step was S19 (it aggregates S11) — now done. Everything left runs on Fable. Memory `fable5-safeguard-false-positive` carries the assembly-phase wrinkle.
 - **Operator asks (both CLOSED 2026-07-18):** (a) R06-OQ2 native micro-fanout — **keep disabled** (recorded in S03 Open-items box; G1-rider-2 standing reminder discharged). (b) workspace storage — **git-worktree + overlayfs at v0**; loopback-XFS pre-registered upgrade; repartition reserved for host rebuild (recorded in S02.10).
 - Done 2026-07-18 (earlier): benchmark pre-registration signed `5fb7082`; frontend workshop picks in `Spec/frontend-components-v1.md`.
@@ -91,7 +91,7 @@ All five spikes done, validated (spike checklist), committed, pushed. Operationa
 | G1 | Architecture direction (after Wave A) | CLOSED 2026-07-17 | Package ratified (D1.1-A); $0.50 trivial threshold; Z.AI tier moot (operator holds Max); spikes S1–S3; defaults adopted + 2 operator riders | decisions/GATE-1-architecture-direction.md |
 | G2 | Substrate + adoption list (after Wave B) | CLOSED 2026-07-17 | All recommendations adopted; sandbox ratified contingent on host probes; done-directly two-stage + P2 pre-registration; spike battery at P2 entry; Def.1–16 adopted | decisions/GATE-2-substrate-and-adoption.md |
 | G3 | Spec-readiness (after Wave C) | CLOSED 2026-07-18 | P2 approved; backend = Go; React 19 + Vite SPA; compose-when-earned + first-N=3; Layer-2 SQL at v0 on the 7B; Def.1–8 adopted | decisions/GATE-3-spec-readiness.md |
-| G4 | Spec review → end research phase | pending | — | decisions/GATE-4-*.md |
+| G4 | Spec review → end research phase | **OPEN 2026-07-19** | — | decisions/GATE-4-spec-review.md |
 
 ## Topic board
 
@@ -146,4 +146,4 @@ Reports take the next free `NN` in `Research/` in completion order:
 Full chronological session log + spike-battery operational detail (probe measurements, teardown / secret-hygiene records, reconciliation notes, pause/resume history, task-id tables) → **[`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)**.
 
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
-**Last updated:** 2026-07-19 — **all 20 sections S00–S19 committed** (S17/S18 reviewed; S19 drafted on Opus + assembly touch-ups applied). Remaining = assembly (byte-move, Fable-safe) + G4 memo (Fable). Switch back to Fable to finish.
+**Last updated:** 2026-07-19 — spec **assembled + integrity-verified** (`f3694a9`; crash-audit on operator request: no truncation anywhere, hash-exact concatenation), **G4 memo committed, gate OPEN — blocked-on-gate.**
