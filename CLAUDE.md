@@ -9,6 +9,7 @@ The research campaign is complete: 17 topics, spike batteries, gates G0–G4 all
 - **Build from the spec, not from memory or the reports.** P3 sessions implement per the S19.5 build order (B0 spine → B1 substrate → B2 pipeline → B3 workforce/memory → B4 deliverables/local tier → B5 observability → B6 frontend) and the S19.6 bring-up measurement sequence. Every load-bearing statement in the spec carries a provenance tag; the spec wins over any report.
 - **Post-freeze spec changes** follow S00.9 amendment mechanics (dated changelog entry + operator approval); any amendment touching a ⚙ setting re-runs the S18 sweep.
 - `Research/` is the closed evidence archive (`Research/STATE.md` is historical; gate records in `Research/decisions/`).
+- **Implementation process:** coordinator runbook `.claude/skills/p3-implementation/SKILL.md` + live state `P3/STATE.md`. Any session continues the build via "continue implementation" (or /p3-implementation); work runs in spec-referenced packets executed by fresh-context subagents, with operator gates at each B-phase boundary.
 
 ## Source documents (`Docs/` — read-only reference)
 
