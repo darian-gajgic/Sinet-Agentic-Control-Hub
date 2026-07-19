@@ -10,6 +10,7 @@
 
 **Next action (P2 spec drafting — IN PROGRESS):**
 - Sections draft as `Spec/drafts/S00…S19` under `Spec/drafts/CONTRACT.md`; `core-architecture-v1.md` is assembled (concatenation, drafts canonical) once all sections pass coordinator review. Tracker below. As drafts return: coordinator review → bounded revision if needed → commit → next launches.
+- **S00–S16 ALL COMMITTED (2026-07-19).** Now running: S17 + S18 sweep sections (concurrent). Then S19 (coordinator, last) → assembly (incl. the parked S11.8↔S01.2 run-unit wording alignment) → G4 review memo → present G4.
 - **Operator asks (both CLOSED 2026-07-18):** (a) R06-OQ2 native micro-fanout — **keep disabled** (recorded in S03 Open-items box; G1-rider-2 standing reminder discharged). (b) workspace storage — **git-worktree + overlayfs at v0**; loopback-XFS pre-registered upgrade; repartition reserved for host rebuild (recorded in S02.10).
 - Done 2026-07-18 (earlier): benchmark pre-registration signed `5fb7082`; frontend workshop picks in `Spec/frontend-components-v1.md`.
 
@@ -19,7 +20,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 
 | § | Slug | Model | Status |
 |---|---|---|---|
-| S00 | front-matter | coordinator | saved (this commit) |
+| S00 | front-matter | coordinator | committed ✅ (rode in commit 338b79b) |
 | S01 | process-architecture-shell | inherit | committed ✅ |
 | S02 | durable-state-recovery | opus | committed ✅ (storage DECIDED: overlayfs+worktree) |
 | S03 | engines-adapters | opus | committed ✅ (R06-OQ2 CLOSED: keep disabled) |
@@ -34,18 +35,18 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 | S12 | local-models-tier | inherit | committed ✅ (R10-OQ4 broker interface bound) |
 | S13 | deliverables-review-git-backup | inherit | committed ✅ |
 | S14 | observability-evals-watch | inherit | committed ✅ |
-| S15 | frontend-api | inherit | ⚠ NEEDS RELAUNCH — agent failed on session limit (no file written) |
+| S15 | frontend-api | inherit | committed ✅ (volley-2 draft recovered on disk; coordinator review PASS 2026-07-19 — no relaunch) |
 | S16 | adoption-manifest | inherit | committed ✅ |
 
 **Volley-2 pause/resume note (2026-07-18):** the ten S07–S16 agents were paused on operator hold during their reading phase (no files written), then **resumed in place with context intact** on operator "continue" — same agents, same assignments, no work lost.
 
-**Volley-2 outcome (2026-07-18):** 9 of 10 committed (S07, S08, S09, S10, S11, S12, S13, S14, S16). **S15 (frontend-api) FAILED on the session limit before writing its file** — relaunch it next session with the exact same assignment (prompt is re-derivable from the runbook + this tracker; it consumes R17 frontend portions + `Spec/frontend-components-v1.md` + committed S01). Session limit resets ~02:20 Europe/Berlin.
+**Volley-2 outcome (2026-07-18, CLOSED 2026-07-19):** 9 of 10 committed same-day (S07–S14 minus S15, plus S16). The S15 agent died on the session limit, but its **complete 202-line draft had flushed to disk** (21:46, after the failure was recorded) — found as an untracked file at next session start, coordinator-reviewed PASS (full input verification; detail in STATE-ARCHIVE), committed. **Volley 2 fully closed: all 16 numbered sections S00–S16 committed.**
 
 **Pending assembly reconciliation (not blocking):** S11.8 refines S01.2's run-unit realization from `systemd-run` transient `sinet-run-<id>` to a root-installed **template instance** `sinet-run@<id>.service` (so the polkit grant is property-safe). Functionally identical to S01's intent; the coordinator aligns S01.2's wording at assembly. Flagged `[coordinator-draft]` in both S11.8 and its Open-items.
 
 **Remaining after S15:** S17 (known-problems register — consolidates all P-* incl. the ids coined in drafting: P-T03-1..4, P-T04-1..4, P-T10-1..3, P-T15-1..2, P-T09-1..2), S18 (settings-registry index — sweep every ⚙ table, dedup cross-section settings), S19 (v0 boundary + coverage + build-order); then assembly of `core-architecture-v1.md` and the G4 review memo.
-| S17 | known-problems-register | inherit | pending (after S01–S16) |
-| S18 | settings-registry | inherit | pending (after S01–S16) |
+| S17 | known-problems-register | inherit | running (launched 2026-07-19) |
+| S18 | settings-registry | inherit | running (launched 2026-07-19) |
 | S19 | v0-boundary-buildorder | coordinator | pending (last) |
 
 **Operator action items still open (whenever convenient):**
@@ -143,4 +144,4 @@ Reports take the next free `NN` in `Research/` in completion order:
 Full chronological session log + spike-battery operational detail (probe measurements, teardown / secret-hygiene records, reconciliation notes, pause/resume history, task-id tables) → **[`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)**.
 
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
-**Last updated:** 2026-07-18 — S00–S14 + S16 committed (15 sections). **S15 failed on session limit — relaunch next session** (see volley-2 outcome note). Remaining: S15, then S17/S18/S19 sweeps, assembly, G4 memo.
+**Last updated:** 2026-07-19 — S15 recovered from disk + reviewed + committed → **all of S00–S16 in**. S17 + S18 launched concurrently; then S19 (coordinator), assembly, G4 memo.
