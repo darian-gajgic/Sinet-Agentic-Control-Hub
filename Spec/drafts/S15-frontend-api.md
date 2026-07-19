@@ -30,6 +30,7 @@ Every surface is a client of the same HTTP API and the one SSE endpoint — the 
 | deliverables | `/api/deliverables` | immutable numbered revisions, diffs, anchored comments, preview sessions | comment CRUD (own comments); request bounded revision; accept (6.3 → S13 flow) | S13 |
 | settings | `/api/settings` | registry schema + values, price table, per-setting audit history | validated set/reset (clamped [XREF:S01]); price-table edits | S01.10; price table S10 |
 | meters | `/api/meters` | consumption, pressure, budgets, burn rates, limit-event status per (person, lane, period) | budget edits (own); pause-my-automation switch (3.3) | S10 |
+| memory [coordinator-draft] | `/api/memory` | scoped memory/knowledge entries (person / project / house) with provenance and gate status | manual entry create/edit — S09's write gate applies (own-store writes tier Medium; house promotion operator-only, D10) | S09 |
 | events | `/events` (SSE) + `/api/events` (history) | the live stream; filterable history (S2.10) through the S14 query layers | — (append is control-plane-internal) | S14 |
 
 Login/session endpoints are S01.9's and are not restated here [XREF:S01]. Contract rules binding every family:
@@ -82,7 +83,7 @@ Pick-level riders [FC-v1 §1–4]:
 
 ### S15.6 Approval inbox
 
-The single queue where "the platform needs you" lives (S3.2); the deep-link target of every push (S15.11). Cards arrive ranked by risk and carry the 13.5 help fields — what this decision does, what could go wrong, what the platform recommends and why; for settings-class approvals that text is registry-sourced [XREF:S01].
+The single queue where "the platform needs you" lives (S3.2); the deep-link target of every push (S15.11). Cards arrive ranked by risk — proposals, questions (incl. the S14 blind-pair verdict forms with their mandatory arm-guess field [XREF:S14; coordinator-draft]), sign-offs, escalations — and carry the 13.5 help fields — what this decision does, what could go wrong, what the platform recommends and why; for settings-class approvals that text is registry-sourced [XREF:S01].
 
 **Risk tiers and batching (ratified rules, S3.2):**
 
@@ -121,7 +122,7 @@ Generated, never hand-built: JSON Forms consumes the registry-emitted JSON Schem
 
 ### S15.10 Workforce map (view-only at v0)
 
-A readable graphical view of the machinery (9.4, S3.3): every worker, what each is equipped with (tools, knowledge, permissions, helpers), and how multi-stage procedures connect, rendered from the S08 worker registry [XREF:S08]. Its purpose is audit and understanding; identity rules apply (personal workers to their owner, the shared roster to all). **Editing through the map is parked to 15.5** — the v0 surface has no mutation affordances. Rendering uses owned components at v0; a dedicated graph-layout dependency may enter only through the manifest: TBD-P3(workforce-map rendering approach — owned rendering vs manifest-admitted layout library).
+A readable graphical view of the machinery (9.4, S3.3): every worker, what each is equipped with (tools, knowledge, permissions, helpers), and how multi-stage procedures connect, rendered from the S08 worker registry [XREF:S08]. The map also surfaces S08's per-version quality/cost views (the version→outcome joins) alongside each worker [XREF:S08; coordinator-draft]. Its purpose is audit and understanding; identity rules apply (personal workers to their owner, the shared roster to all). **Editing through the map is parked to 15.5** — the v0 surface has no mutation affordances. Rendering uses owned components at v0; a dedicated graph-layout dependency may enter only through the manifest: TBD-P3(workforce-map rendering approach — owned rendering vs manifest-admitted layout library).
 
 ### S15.11 Notifications: Declarative Web Push
 
@@ -199,4 +200,4 @@ Sockets the architecture leaves open: **multi-channel ingress (S3.8, 10.3)** at 
 | S3.8 multi-channel ingress (parked 15.5; socket noted) | S15.13 |
 | 12.4 / 14.5 parked satellite set | S15.13 |
 
-**Open items for G4:** none. Three drafting-time sub-choices are flagged inline as [coordinator-draft] for G4 attention: the unversioned-lockstep API posture (S15.2), the sanctioned board-drag interaction — reordering one's own queued tasks only (S15.5), and the `frontend.dependency_pass_interval` clamp range (⚙ table).
+**Open items for G4:** none. Six drafting-time sub-choices are flagged inline as [coordinator-draft] for G4 attention — three from the original draft: the unversioned-lockstep API posture (S15.2), the sanctioned board-drag interaction — reordering one's own queued tasks only (S15.5), and the `frontend.dependency_pass_interval` clamp range (⚙ table); three interlock refinements added at coordinator review (2026-07-19), each closing a committed sibling's expectation into this section: the `/api/memory` resource family (S15.2 ↔ S09's manual-L2 workspace-UI seam), the S14 blind-pair verdict forms as inbox question cards (S15.6 ↔ S14), and the per-version quality/cost views on the workforce map (S15.10 ↔ S08).
