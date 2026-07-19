@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "governed_by": "Spec/drafts/S16-adoption-manifest.md (normative fields, S16.2) + P3/CONVENTIONS.md §4 (serialization, extension fields, gate mechanics)",
+  "components": [
+    {
+      "name": "Go toolchain",
+      "kind": "toolchain",
+      "pin": "1.26.5",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "scope": "entire distribution (single LICENSE + PATENTS at distribution root; verified in the installed artifact at ~/.local/go)",
+        "checked": "2026-07-19"
+      },
+      "role": {
+        "summary": "backend build toolchain for the single static release binary",
+        "section": "S01.5"
+      },
+      "replacement": "none live — the Python/Litestar posture is documentation only (S01.5; G3 D3.2)",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7; settings registry lands in P3-B0-2)",
+      "watch": [
+        "go1compat",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-19",
+      "notes": "pin cross-checked against the go directive in go.mod by tools/lockgate; S16.3 'TBD-P3(pin at scaffold)' resolved at P3-B0-1"
+    },
+    {
+      "name": "actions/checkout",
+      "kind": "toolchain",
+      "pin": "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+      "license": {
+        "spdx": "MIT",
+        "scope": "repo root (single LICENSE at the pinned ref; no enterprise/ee carve-out directories present)",
+        "checked": "2026-07-19"
+      },
+      "role": {
+        "summary": "CI checkout step of the S01.11 GitHub Actions pipeline",
+        "section": "S01.11"
+      },
+      "replacement": "explicit git clone/fetch run steps in the workflow (convenience wrapper, no exclusive capability)",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-19",
+      "notes": "sha = tag v7.0.0, verified 2026-07-19; CI-only — never a running unit or bundled dependency of the release artifact"
+    },
+    {
+      "name": "actions/setup-go",
+      "kind": "toolchain",
+      "pin": "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "license": {
+        "spdx": "MIT",
+        "scope": "repo root (single LICENSE at the pinned ref; no enterprise/ee carve-out directories present)",
+        "checked": "2026-07-19"
+      },
+      "role": {
+        "summary": "CI Go installation step (reads the pinned version from go.mod) of the S01.11 pipeline",
+        "section": "S01.11"
+      },
+      "replacement": "install the pinned Go release from the official tarball with checksum verification in a run step (same procedure as the host toolchain install)",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-19",
+      "notes": "sha = tag v7.0.0, verified 2026-07-19; CI-only — never a running unit or bundled dependency of the release artifact"
+    }
+  ]
+}

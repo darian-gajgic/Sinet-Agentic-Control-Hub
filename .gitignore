@@ -13,6 +13,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Go build artifacts (the sinet binary when built at repo root)
+/sinet
+
 # Common build/runtime artifacts (stack not yet decided — covers likely candidates)
 node_modules/
 dist/

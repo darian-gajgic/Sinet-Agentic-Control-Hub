@@ -1,0 +1,43 @@
+# CI per Spec S01.11 (build + test) and S16.2 (components.lock gate).
+# Every action is pinned to a full commit SHA and carries a components.lock
+# entry; tools/lockgate enforces both. The release pipeline (on tag: artifact
+# + SHA256SUMS + signed tag, S01.11) is a later P3 packet — do not bolt
+# release steps onto this workflow.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # no module dependencies yet; enable when the first go.sum lands
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt required for:"; echo "$unformatted"; exit 1
+          fi
+      - name: vet
+        run: go vet ./...
+      - name: build
+        run: go build ./...
+      - name: test
+        run: go test ./...
+      - name: lock-gate
+        run: go run ./tools/lockgate
