@@ -45,7 +45,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 **Pending assembly reconciliation (not blocking):** S11.8 refines S01.2's run-unit realization from `systemd-run` transient `sinet-run-<id>` to a root-installed **template instance** `sinet-run@<id>.service` (so the polkit grant is property-safe). Functionally identical to S01's intent; the coordinator aligns S01.2's wording at assembly. Flagged `[coordinator-draft]` in both S11.8 and its Open-items.
 
 **Remaining after S15:** S17 (known-problems register — consolidates all P-* incl. the ids coined in drafting: P-T03-1..4, P-T04-1..4, P-T10-1..3, P-T15-1..2, P-T09-1..2), S18 (settings-registry index — sweep every ⚙ table, dedup cross-section settings), S19 (v0 boundary + coverage + build-order); then assembly of `core-architecture-v1.md` and the G4 review memo.
-| S17 | known-problems-register | inherit | running (launched 2026-07-19) |
+| S17 | known-problems-register | inherit | committed ✅ (64 P-* zero-orphan; P-T17-2 restored; R1–R4 tag backfills queued for assembly) |
 | S18 | settings-registry | inherit | running (launched 2026-07-19) |
 | S19 | v0-boundary-buildorder | coordinator | pending (last) |
 
