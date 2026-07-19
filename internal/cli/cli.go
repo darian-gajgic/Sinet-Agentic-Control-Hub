@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
@@ -42,9 +43,11 @@ Modes:
 
 Tools:
 
-  units      render the systemd unit set (generated, never installed)
-  version    print build and version information
-  help       print this usage text
+  units        render the systemd unit set (generated, never installed)
+  engine-hook  PreToolUse gate hook for the Claude lane (invoked by the
+               engine per Sinet-lowered settings, never by hand; Spec S03.4)
+  version      print build and version information
+  help         print this usage text
 `
 
 // reserved names the daemon modes of Spec S01.2 ahead of their
@@ -66,6 +69,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return shell.Main(args[1:], stdout, stderr)
 	case "units":
 		return runUnits(args[1:], stdout, stderr)
+	case "engine-hook":
+		return runEngineHook(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintf(stdout, "sinet %s\n", buildinfo.String())
 		return exitOK
@@ -80,6 +85,28 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stderr, "sinet: unknown mode %q\n\n", mode)
 	fmt.Fprint(stderr, usage)
 	return exitUsage
+}
+
+// runEngineHook executes one PreToolUse gate-hook invocation (Spec
+// S03.4): the engine runs `sinet engine-hook --ctl <dir>` per the
+// Sinet-lowered settings; stdin carries the hook payload, stdout the
+// decision JSON. A tool subcommand, not a mode (no unit file).
+func runEngineHook(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sinet engine-hook", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ctl := fs.String("ctl", "", "gate control directory compiled into the lowered settings")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "sinet engine-hook: unexpected argument %q\n", fs.Arg(0))
+		return exitUsage
+	}
+	if err := claudecli.RunHook(os.Stdin, stdout, *ctl); err != nil {
+		fmt.Fprintf(stderr, "sinet engine-hook: %v\n", err)
+		return exitError
+	}
+	return exitOK
 }
 
 // runUnits renders the Spec S01.2 unit set to stdout, or to an

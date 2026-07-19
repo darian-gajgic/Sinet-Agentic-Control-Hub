@@ -124,6 +124,29 @@
         "golang.org/x/crypto"
       ],
       "notes": "Adopted at P3-B0-5 because Spec S01.9 names argon2id for the per-user PIN/password and the stdlib has no argon2id; golang.org/x/crypto is the Go team's reference implementation. Pin LIVE-verified 2026-07-19 as @latest on proxy.golang.org (v0.54.0). S16.4 checklist walked at P3-B0-5 (niche/seam #1: one KDF behind the S01.9 data layer, API seam S01.3 untouched; organ-grade #2: leaf library, no orchestration/store opinions; health #3: Go-team maintained x-repo, monthly tag cadence observed through v0.54.0, security handling under the Go project's policy; license #4: path-scoped above; behavior #5: argon2id derivation pinned by an in-tree golden vector generated at adoption (internal/auth TestPHCGoldenVector) plus PHC round-trip/param tests — upstream's suite carries the RFC 9106 known-answer vectors; unmodified #6: import-only; runner-never-store #7: n/a, computes hashes, platform.db stays the store; pin+funeral #8: this entry; watch #9: rows above; #10: operator ratification queued for the B0 gate report per the B0-1/B0-2 precedent)"
+    },
+    {
+      "name": "claude CLI (engine)",
+      "kind": "engine",
+      "pin": "2.1.214",
+      "license": {
+        "spdx": "LicenseRef-Anthropic-Consumer-Terms",
+        "scope": "proprietary binary distribution (npm @anthropic-ai/claude-code), consumed as an unmodified subprocess only — never linked, never vendored; Consumer ToS with the gray-zone-as-is posture ratified at G1 P2 (compliance quotes per R14 §7-OQ8)",
+        "checked": "2026-07-19"
+      },
+      "role": {
+        "summary": "Anthropic-lane execution engine behind the D3 adapter (wrapped `claude -p` stream-json; adapter internal/adapters/claudecli)",
+        "section": "S03.2"
+      },
+      "replacement": "Agent SDK as the verified in-adapter alternative, flip conditions pre-registered [S03.2/SPIKE G1-S1 §4]; billing un-pause response pre-registered [G1 P1]: Anthropic lane demotes to interactive-only, headless weight shifts to Z.AI-class/local lanes — policy/data flip, no architecture change",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7); plus the S03.3 bump gate: a pin bump lands only as an operator-gated release event with conformance + quality probes, and every bump is a worker-revalidation trigger (P-T14-1)",
+      "watch": [
+        "S2.8 drift canary + legal-text watch [XREF:S14; registered when S14 machinery lands, B5]",
+        "conformance suite internal/adapters/claudecli (tier R runs whenever the binary is present; tier F on every test run)",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-19",
+      "notes": "S16.3 engine row materialized at P3-B1-1 (first consumption: the Anthropic-lane adapter). Pin 2.1.214 is the S16.3 BINDING row value and the behavioral contract the adapter targets (claudecli.Pin, coupled by test). LIVE delta recorded 2026-07-19: the host-installed binary reports 2.1.215 (`claude --version`) — one patch AHEAD of the pin; tier-R conformance (version notice, enum rejection, full-argv dry probe) passed against 2.1.215 with `--max-turns` observed dropped from --help while still parse-accepted (why tier-R asserts parse behavior, never help text, per S03.3 rule 4). NOT silently retargeted: reconciling host to pin (downgrade) or pin to host (S03.3 deliberate bump with conformance + quality probes) is an operator decision reported at B1. Engine runs unmodified as a per-run subprocess, own process group, per-user CLAUDE_CONFIG_DIR as the credential root (S03.2; D2); `--dangerously-skip-permissions` never emitted; native-spawn Task* family excluded from every allowlist (S03.5 sole-controller). Not a Go module: no modules claim; no npm-side bundling (engine invoked from PATH/explicit path)."
     }
   ]
 }

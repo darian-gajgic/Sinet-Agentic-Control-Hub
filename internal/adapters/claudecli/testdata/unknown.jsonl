@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","cwd":"/tmp/run-cwd","session_id":"e5d4c3b2-0a9f-4e87-d643-1b0a9f8e7d6c","model":"claude-haiku-4-5","permissionMode":"default","apiKeySource":"none"}
+{"type":"totally_new_event_kind","payload":{"future":"schema"},"session_id":"e5d4c3b2-0a9f-4e87-d643-1b0a9f8e7d6c"}
+{this line is not valid json at all
+{"type":"system","subtype":"some_future_subtype","detail":"ignored"}
+{"type":"assistant","message":{"id":"msg_01UnkA","model":"claude-haiku-4-5","content":[{"type":"text","text":"still fine"}],"usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"stream_event","session_id":"e5d4c3b2-0a9f-4e87-d643-1b0a9f8e7d6c","event":{"type":"message_stop"}}
+{"type":"result","subtype":"success","is_error":false,"result":"still fine","session_id":"e5d4c3b2-0a9f-4e87-d643-1b0a9f8e7d6c","stop_reason":"end_turn","terminal_reason":"end_turn","num_turns":1,"total_cost_usd":0.0007,"usage":{"input_tokens":5,"output_tokens":2},"uuid":"7b0a2ad0-0000-4000-8000-000000000005"}

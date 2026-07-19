@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","cwd":"/tmp/run-cwd","session_id":"d4c3b2a1-9f8e-4d76-c532-0a9f8e7d6c5b","model":"claude-haiku-4-5","permissionMode":"default","apiKeySource":"none","tools":[],"mcp_servers":[],"slash_commands":[]}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1784270400,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false}}
+{"type":"assistant","message":{"id":"msg_01RateA","model":"claude-haiku-4-5","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":8,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"stream_event","session_id":"d4c3b2a1-9f8e-4d76-c532-0a9f8e7d6c5b","event":{"type":"message_stop"}}
+{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"d4c3b2a1-9f8e-4d76-c532-0a9f8e7d6c5b","stop_reason":"end_turn","terminal_reason":"end_turn","num_turns":1,"total_cost_usd":0.001,"usage":{"input_tokens":8,"output_tokens":1},"uuid":"7b0a2ad0-0000-4000-8000-000000000004"}

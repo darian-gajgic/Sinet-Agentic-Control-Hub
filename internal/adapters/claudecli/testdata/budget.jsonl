@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/tmp/run-cwd","session_id":"c3b2a190-8e7d-4c65-b421-9f8e7d6c5b4a","model":"claude-haiku-4-5","permissionMode":"default","apiKeySource":"none","tools":["Bash"],"mcp_servers":[],"slash_commands":[]}
+{"type":"result","subtype":"error_max_budget_usd","is_error":true,"result":"","session_id":"c3b2a190-8e7d-4c65-b421-9f8e7d6c5b4a","stop_reason":"tool_use","terminal_reason":"budget_exhausted","num_turns":1,"total_cost_usd":0.05,"usage":{"input_tokens":40,"output_tokens":22},"uuid":"7b0a2ad0-0000-4000-8000-000000000003"}
