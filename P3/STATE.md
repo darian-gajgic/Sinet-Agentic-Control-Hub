@@ -2,7 +2,7 @@
 
 > Any session advancing the build: read this file, then follow `.claude/skills/p3-implementation/SKILL.md`. Update this file before and after every step — it is the single source of truth for build coordination. The contract is `Spec/core-architecture-v1.md` (v1, frozen, tag `spec-v1`); the campaign record in `Research/` is a closed archive.
 
-**Phase status:** **B0 (spine) OPEN — P3-B0-1 done (validated); P3-B0-2 is next.** Scaffold, adoption rail, and `P3/CONVENTIONS.md` exist; conventions in that file bind all later packets.
+**Phase status:** **B0 (spine) OPEN — P3-B0-2 running** (B0-1 done; CI green on GitHub, run 29695989125). Conventions in `P3/CONVENTIONS.md` bind all packets.
 
 **Model routing:** packets consuming S11 (sandbox/broker) or S10-internals content run Opus-pinned per memory `fable5-safeguard-false-positive`; everything else inherits. First Opus-pinned work arrives at B1 (sandbox stack).
 
@@ -25,7 +25,7 @@ Statuses: `pending` → `running` → `review` → `done`.
 | Packet | Title | Read-first sections | Acceptance (headline) | Status |
 |---|---|---|---|---|
 | P3-B0-1 | Repo scaffold + adoption rail + CONVENTIONS | S01 (esp. S01.5 release artifact), S16, S19.5 | Go module builds a stub `sinet` binary; CI (build + test + lock-gate) green; initial `components.lock`; `P3/CONVENTIONS.md` authored from the sections | done |
-| P3-B0-2 | platform.db + settings registry + event log | S01.9–S01.10, S02 (schema/tables), S18 (key index) | DB bootstrap with ratified pragmas + migrations; declare-once registry (clamps, audit events, schema emission); append-only event log with `event_seq`; unit tests | pending |
+| P3-B0-2 | platform.db + settings registry + event log | S01.9–S01.10, S02 (schema/tables), S18 (key index) | DB bootstrap with ratified pragmas + migrations; declare-once registry (clamps, audit events, schema emission); append-only event log with `event_seq`; unit tests | running |
 | P3-B0-3 | sinet-control shell + API/SSE skeleton + five seams | S01 full | Dev-mode process serves health + the one SSE endpoint; watchdog wiring; seams as package boundaries; systemd unit files *generated, not installed* (host changes wait for the gate) | pending |
 | P3-B0-4 | Run FSM + checkpoint/effect journal + recovery ladder | S02 full | FSM with derived-not-stored stalled state; checkpoint rows; two-phase effect journal; recovery ladder + leases/generation fencing; **kill-9 harness v1** in the test suite | pending |
 | P3-B0-5 | Auth stack (tailnet wall → header hint → sessions + PIN) | S01 (auth), S15.2 (API posture) | Session + PIN machinery with tests; identity-header parsing in dev mode; cert/hostname steps documented for the B0 gate (needs operator item 2) | pending |
