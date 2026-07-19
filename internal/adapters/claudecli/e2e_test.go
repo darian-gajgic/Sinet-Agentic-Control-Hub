@@ -243,7 +243,7 @@ func TestE2EDeferParkThenResume(t *testing.T) {
 	if out.Kind != adapters.OutcomeParked || out.Ask == nil {
 		t.Fatalf("outcome = %q ask=%v", out.Kind, out.Ask)
 	}
-	if out.Ask.ID != "toolu_01LaHFdefer0000000000001" {
+	if out.Ask.ID != "toolu_01JwN5WHtxKWbHoLyfaRdifh" {
 		t.Fatalf("ask id = %q", out.Ask.ID)
 	}
 	r, _ := e.runs.Get(ctx, "r2")
@@ -277,7 +277,7 @@ func TestE2EDeferParkThenResume(t *testing.T) {
 		t.Fatalf("argv dump: %v", err)
 	}
 	argv := strings.ReplaceAll(string(argvRaw), "\n", " ")
-	if !strings.Contains(argv, "--resume 9a447c2e-6d5b-4f21-8c33-1e2d3c4b5a69") {
+	if !strings.Contains(argv, "--resume 44baeb68-1f97-4310-bb19-3bba41f482eb") {
 		t.Errorf("resume argv missing --resume <reported id>: %s", argv)
 	}
 	if strings.Contains(argv, "--session-id") {

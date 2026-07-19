@@ -8,10 +8,16 @@ package claudecli
 //	         reproduce RECORDED engine behavior: happy.jsonl re-recorded
 //	         live 2026-07-19 against the installed 2.1.215 (tier-L smoke:
 //	         terminal_reason "completed", extended usage fields);
-//	         defer/budget shapes verbatim from the pinned-family spike
-//	         records [SPIKE G1-S2 F1/F4], rate_limit from [SPIKE G1-S1
-//	         F1] (live-confirmed in-band by the smoke) — defer/budget
-//	         re-record live at the B1-4 spike battery (paid defer calls).
+//	         defer.jsonl re-recorded live 2026-07-20 at the B1-4 spike
+//	         battery (paid defer on 2.1.215: real deferred_tool_use +
+//	         permission_denials/iterations/context_management drift fields);
+//	         budget.jsonl remains the pinned-family shape [SPIKE G1-S2 F4]
+//	         (live budget-preempt re-record deferred — rationale in
+//	         P3/measurements/2026-07-20-serialize-by-deny-reconfirm.md);
+//	         rate_limit from [SPIKE G1-S1 F1] (live-confirmed in-band by
+//	         the smoke). parallel.jsonl models the completed-silent-fallback
+//	         DETECTION case (defense-in-depth); live 2.1.215+haiku instead
+//	         parks via an honored first-defer — see the measurement file.
 //	tier R — real-engine, zero-cost (run when the engine binary is on
 //	         PATH; otherwise skipped-with-notice — the one sanctioned
 //	         skip class, CONVENTIONS §10).
@@ -333,7 +339,7 @@ func TestParseDeferFixture(t *testing.T) {
 		t.Fatalf("parseDeferred: %v", err)
 	}
 	// The ask record comes from the exit JSON alone (SPIKE G1-S2 F1).
-	if d.ID != "toolu_01LaHFdefer0000000000001" || d.Name != "Bash" {
+	if d.ID != "toolu_01JwN5WHtxKWbHoLyfaRdifh" || d.Name != "Bash" {
 		t.Errorf("deferred_tool_use = %+v", d)
 	}
 	var input struct {
@@ -551,7 +557,7 @@ func TestOutcomeDeferParksWithAskRecord(t *testing.T) {
 	if out.Kind != adapters.OutcomeParked {
 		t.Fatalf("outcome = %q, want parked", out.Kind)
 	}
-	if out.Ask == nil || out.Ask.ID != "toolu_01LaHFdefer0000000000001" || out.Ask.ToolName != "Bash" {
+	if out.Ask == nil || out.Ask.ID != "toolu_01JwN5WHtxKWbHoLyfaRdifh" || out.Ask.ToolName != "Bash" {
 		t.Fatalf("ask = %+v", out.Ask)
 	}
 	if out.Park == nil || out.Park.Reason != adapters.ParkReasonGateAsk {
