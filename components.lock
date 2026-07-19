@@ -65,6 +65,40 @@
       ],
       "last_review": "2026-07-19",
       "notes": "sha = tag v7.0.0, verified 2026-07-19; CI-only — never a running unit or bundled dependency of the release artifact"
+    },
+    {
+      "name": "SQLite via pure-Go driver",
+      "kind": "library",
+      "pin": "v1.54.0",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "scope": "module root at v1.54.0 (single LICENSE; SQLITE-LICENSE public-domain notice alongside, matching the S16.3 row; no enterprise/ee carve-out directories). Bundled transitive modules verified per-module in the hash-verified module cache: BSD-3-Clause (modernc.org/libc, modernc.org/mathutil, modernc.org/memory, golang.org/x/sys, github.com/google/uuid, github.com/remyoudompheng/bigfft), MIT (github.com/dustin/go-humanize, github.com/mattn/go-isatty, github.com/ncruces/go-strftime)",
+        "checked": "2026-07-19"
+      },
+      "role": {
+        "summary": "platform.db engine + database/sql driver behind the storage seam (sole consumer: internal/storage)",
+        "section": "S02"
+      },
+      "replacement": "driver swap inside the storage module (storage seam, S01.3); schema and API untouched",
+      "abandonment": "default (⚙ adoption.abandonment_months = 6 mo, settings registry)",
+      "watch": [
+        "currency policy: pin the release line, take patch releases deliberately (R17 §4.7)",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-19",
+      "modules": [
+        "modernc.org/sqlite",
+        "modernc.org/libc",
+        "modernc.org/mathutil",
+        "modernc.org/memory",
+        "golang.org/x/sys",
+        "github.com/dustin/go-humanize",
+        "github.com/google/uuid",
+        "github.com/mattn/go-isatty",
+        "github.com/ncruces/go-strftime",
+        "github.com/remyoudompheng/bigfft"
+      ],
+      "notes": "S16.3 'TBD-P3(driver pin)' resolved at P3-B0-2. Landscape LIVE-verified 2026-07-19 via proxy.golang.org: modernc.org/sqlite v1.54.0 (tagged 2026-07-15 at gitlab.com/cznic/sqlite, hash 693ff386) vs github.com/ncruces/go-sqlite3 v0.35.2 (also cgo-free, but WASM-under-wazero and still 0.x — no stable release line to pin). modernc picked per the S01.5 grounds: it IS the pure-Go (cgo-free) translation of the SQLite amalgamation, database/sql-native, longest-lived v1 line. Embeds SQLite 3.53.3 on linux/amd64. Pin coupling: modernc.org/libc MUST stay exactly at the version in the driver's own go.mod (v1.74.1 here; upstream issue #177) — bump driver and libc together, never independently. S16.4 checklist walked at P3-B0-2 (niche/seam #1: storage seam S01.3; organ-grade #2: library, no orchestration opinions; health #3: active release cadence v1.49→v1.54 observed on the proxy; license #4: path-scoped above; behavior #5: WAL/FULL/BEGIN IMMEDIATE/foreign_keys/user_version/multi-statement exec + append-only triggers asserted by internal/storage + internal/eventlog unit tests at the pin; unmodified #6: config-only via DSN; runner-never-store #7: n/a, it IS the store engine; pin+funeral #8: this entry; watch #9: rows above; #10: operator ratification queued for the B0 gate report per P3-B0-1 precedent)"
     }
   ]
 }
