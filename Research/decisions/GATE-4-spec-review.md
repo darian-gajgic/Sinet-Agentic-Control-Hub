@@ -1,6 +1,6 @@
 # GATE-4 — Spec review (freeze v1, end the research phase)
 
-**Opened:** 2026-07-19 · **Wave covered:** P2 (core-architecture spec) · **Status:** OPEN
+**Opened:** 2026-07-19 · **Wave covered:** P2 (core-architecture spec) · **Status:** **CLOSED 2026-07-19**
 **Review object:** `Spec/core-architecture-v1.md` @ commit `f3694a9` (3,816 lines; deterministic concatenation of the 20 committed drafts `Spec/drafts/S00…S19`, drafts canonical) + binding siblings `Spec/benchmark-preregistration-v1.md` (signed `5fb7082`; untouched — its numbers change only via its own §17) and `Spec/frontend-components-v1.md`.
 
 ## Findings digest
@@ -44,7 +44,15 @@
 
 | # | Decision | Chosen | By | Date | Notes |
 |---|---|---|---|---|---|
+| 4.1 | Ratify spec as binding v1 | **A — ratified as-is** | operator | 2026-07-19 | Free-text close ("I agree to your recommendations, we can continue") after (a) the findings-and-consequences briefing, (b) the full 39-line inventory of every open call (49 flags bundled + 2 phase decisions) — **no item pulled for change**, and (c) the schema-harness coverage check (below). All 49 `[coordinator-draft]` calls, S17 R1–R4, S18 R1–R10, the 9 coverage dispositions, and the GitHub-Pro reconciliation are hereby ratified; this record is the ratification instrument (Default 1). |
+| 4.2 | End the research phase | **A — ended 2026-07-19** | operator | 2026-07-19 | The operator's explicit act per CLAUDE.md / G3 D3.1 / S00.9. **v1 frozen** (tag `spec-v1`); P3 implementation authorized per S19.5 build order + S19.6 bring-up sequence. |
+| Def.1–4 | Defaults unless objected | **all adopted unopposed** | operator | 2026-07-19 | Tags stay as provenance; `freshness.max_age` fold stands; amendment re-sweep rule binds; post-gate housekeeping executed (CLAUDE.md phase flip, STATE close-out, memory update). |
+
+**Pre-close diligence recorded:** operator challenged (a) assembly completeness after the prior session's crash — resolved by hash re-derivation + per-draft truncation audit (see Findings digest); (b) agent-engineering research currency vs `schema-harness.github.io` — verified live 2026-07-19: [schema] is an ARC-AGI-3 **evaluation harness** (Haven Feng et al., announced mid-July 2026; self-reported ~99% on the public set, unverified by ARC Prize; official no-scaffold scores <1%), not an agent-definition/composition framework; post-dates the T02/T14 research passes; changes no recommendation — it *corroborates* the harness-owns-capability tenet the spec is built on.
 
 ## Follow-ups spawned
 
-- (filled at close)
+- **Watch row (STUDY-class), onboard at S14 watch setup (build phase B5):** [schema] ARC-AGI-3 harness — world-model-as-code (mechanism-as-executable-program) as a candidate future skill/technique pattern for domain workers; treat its numbers per report-12 discipline (self-reported, public-set, scaffold-specific). Source: schema-harness.github.io.
+- **Operator hands-on items carried into P3 at their S19-named slots:** Z.AI dashboard prompt-unit calibration; ts.net hostname pick (before first cert, B0); root/reboot/suspend probe batch (B0/B1); week-one push drill (first deploy); optional GitHub "Verified" badge upload.
+- **P3 entry:** begin at B0 (spine) per S19.5; TBD-P3 spikes and TBD-BRINGUP measurements attach to their phases per S19.5–S19.6; results recorded in the platform repo (G3 Def.8 discipline).
+- **Register upkeep post-freeze:** S00.9 amendment mechanics; any ⚙-touching amendment re-runs the S18 sweep (Def.3).

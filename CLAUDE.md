@@ -2,14 +2,13 @@
 
 Self-hosted AI agent platform for the operator plus a small trusted household, over LAN/Tailscale. Successor to Nexus (`Docs/nexus-post-mortem.md`). One maintainer, personal infrastructure, must run reliably unattended while the host is up.
 
-## Current phase: RESEARCH — do not implement
+## Current phase: P3 — IMPLEMENTATION (research phase ended at G4, 2026-07-19)
 
-No application code exists and none may be written yet. The order is:
+The research campaign is complete: 17 topics, spike batteries, gates G0–G4 all closed. **The binding build contract is `Spec/core-architecture-v1.md` (v1, frozen at G4 — git tag `spec-v1`)**, assembled from `Spec/drafts/S00…S19` (drafts canonical), plus binding siblings `Spec/benchmark-preregistration-v1.md` (signed; its registered numbers change only via its own §17) and `Spec/frontend-components-v1.md`.
 
-1. Research sessions work through `Docs/agent-platform-feature-list-v1.md` and write findings to `Research/`.
-2. Implementation starts only after the operator explicitly ends the research phase.
-
-If asked to do something implementation-shaped during the research phase, flag it and confirm before proceeding.
+- **Build from the spec, not from memory or the reports.** P3 sessions implement per the S19.5 build order (B0 spine → B1 substrate → B2 pipeline → B3 workforce/memory → B4 deliverables/local tier → B5 observability → B6 frontend) and the S19.6 bring-up measurement sequence. Every load-bearing statement in the spec carries a provenance tag; the spec wins over any report.
+- **Post-freeze spec changes** follow S00.9 amendment mechanics (dated changelog entry + operator approval); any amendment touching a ⚙ setting re-runs the S18 sweep.
+- `Research/` is the closed evidence archive (`Research/STATE.md` is historical; gate records in `Research/decisions/`).
 
 ## Source documents (`Docs/` — read-only reference)
 
