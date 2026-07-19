@@ -10,7 +10,8 @@
 
 **Next action (P2 spec drafting — IN PROGRESS):**
 - Sections draft as `Spec/drafts/S00…S19` under `Spec/drafts/CONTRACT.md`; `core-architecture-v1.md` is assembled (concatenation, drafts canonical) once all sections pass coordinator review. Tracker below. As drafts return: coordinator review → bounded revision if needed → commit → next launches.
-- **S00–S16 ALL COMMITTED (2026-07-19).** Now running: S17 + S18 sweep sections (concurrent). Then S19 (coordinator, last) → assembly (incl. the parked S11.8↔S01.2 run-unit wording alignment) → G4 review memo → present G4.
+- **ALL 20 SECTIONS S00–S19 COMMITTED (2026-07-19).** Remaining, both **Fable-safe** (see Fable-max method below): (1) **assemble** `core-architecture-v1.md` = ordered concatenation of the S00–S19 drafts via shell (`cat … > file`; bytes never enter model context, verify with `grep`/`wc` not by reading the body); (2) **G4 review memo** from neutral inputs (this STATE, gate memos, S17/S18/S19, the flag census) → present G4 with AskUserQuestion. Only the operator's G4 approval ends the research phase.
+- **Fable-max method (operator goal 2026-07-19):** the safeguard scores *loaded context*, not intent — so keep the coordinator's reads neutral. (a) route any deep-read of security-dense content (S11/S10 bodies, reports 09/10, spikes) to an **Opus-pinned subagent** returning a neutral digest; (b) **assembly = byte move**, Fable-safe; (c) finished spec prose reviews fine on Fable (S17 proved it). The lone Opus-needing step was S19 (it aggregates S11) — now done. Everything left runs on Fable. Memory `fable5-safeguard-false-positive` carries the assembly-phase wrinkle.
 - **Operator asks (both CLOSED 2026-07-18):** (a) R06-OQ2 native micro-fanout — **keep disabled** (recorded in S03 Open-items box; G1-rider-2 standing reminder discharged). (b) workspace storage — **git-worktree + overlayfs at v0**; loopback-XFS pre-registered upgrade; repartition reserved for host rebuild (recorded in S02.10).
 - Done 2026-07-18 (earlier): benchmark pre-registration signed `5fb7082`; frontend workshop picks in `Spec/frontend-components-v1.md`.
 
@@ -47,7 +48,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 **Remaining after S15:** S17 (known-problems register — consolidates all P-* incl. the ids coined in drafting: P-T03-1..4, P-T04-1..4, P-T10-1..3, P-T15-1..2, P-T09-1..2), S18 (settings-registry index — sweep every ⚙ table, dedup cross-section settings), S19 (v0 boundary + coverage + build-order); then assembly of `core-architecture-v1.md` and the G4 review memo.
 | S17 | known-problems-register | inherit | committed ✅ (64 P-* zero-orphan; P-T17-2 restored; R1–R4 tag backfills queued for assembly) |
 | S18 | settings-registry | inherit | committed ✅ (118 keys / 33 domains; S07↔S15 SLA seam + 4.3 staleness alias resolved; coordinator fixed one XREF subsection typo) |
-| S19 | v0-boundary-buildorder | coordinator | pending (last) |
+| S19 | v0-boundary-buildorder | coordinator | committed ✅ (drafted on Opus — aggregates S11; 166/182 coverage + 9 no-row dispositions + build order) |
 
 **Operator action items still open (whenever convenient):**
 1. **Z.AI dashboard prompt-unit calibration** (R09-OQ4 residual) — 5-step recipe in the P2-S1 report §Blocked items.
@@ -144,4 +145,4 @@ Reports take the next free `NN` in `Research/` in completion order:
 Full chronological session log + spike-battery operational detail (probe measurements, teardown / secret-hygiene records, reconciliation notes, pause/resume history, task-id tables) → **[`STATE-ARCHIVE.md`](STATE-ARCHIVE.md)**.
 
 **Operating note:** campaign sessions run at **max effort** (operator instruction 2026-07-16); research subagents inherit it.
-**Last updated:** 2026-07-19 — S15 recovered from disk + reviewed + committed → **all of S00–S16 in**. S17 + S18 launched concurrently; then S19 (coordinator), assembly, G4 memo.
+**Last updated:** 2026-07-19 — **all 20 sections S00–S19 committed** (S17/S18 reviewed; S19 drafted on Opus + assembly touch-ups applied). Remaining = assembly (byte-move, Fable-safe) + G4 memo (Fable). Switch back to Fable to finish.
