@@ -2,7 +2,7 @@
 
 > Any session advancing the build: read this file, then follow `.claude/skills/p3-implementation/SKILL.md`. Update this file before and after every step — it is the single source of truth for build coordination. The contract is `Spec/core-architecture-v1.md` (v1, frozen, tag `spec-v1`); the campaign record in `Research/` is a closed archive.
 
-**Phase status:** **B0 (spine) OPEN — packet P3-B0-1 is next.** No application code exists yet; P3-B0-1 creates the scaffold and authors `P3/CONVENTIONS.md` (derived from S01/S16 — layout is NOT to be guessed before that packet runs).
+**Phase status:** **B0 (spine) OPEN — packet P3-B0-1 running.** No application code exists yet; P3-B0-1 creates the scaffold and authors `P3/CONVENTIONS.md` (derived from S01/S16 — layout is NOT to be guessed before that packet runs).
 
 **Model routing:** packets consuming S11 (sandbox/broker) or S10-internals content run Opus-pinned per memory `fable5-safeguard-false-positive`; everything else inherits. First Opus-pinned work arrives at B1 (sandbox stack).
 
@@ -24,7 +24,7 @@ Statuses: `pending` → `running` → `review` → `done`.
 
 | Packet | Title | Read-first sections | Acceptance (headline) | Status |
 |---|---|---|---|---|
-| P3-B0-1 | Repo scaffold + adoption rail + CONVENTIONS | S01 (esp. S01.5 release artifact), S16, S19.5 | Go module builds a stub `sinet` binary; CI (build + test + lock-gate) green; initial `components.lock`; `P3/CONVENTIONS.md` authored from the sections | pending |
+| P3-B0-1 | Repo scaffold + adoption rail + CONVENTIONS | S01 (esp. S01.5 release artifact), S16, S19.5 | Go module builds a stub `sinet` binary; CI (build + test + lock-gate) green; initial `components.lock`; `P3/CONVENTIONS.md` authored from the sections | running |
 | P3-B0-2 | platform.db + settings registry + event log | S01.9–S01.10, S02 (schema/tables), S18 (key index) | DB bootstrap with ratified pragmas + migrations; declare-once registry (clamps, audit events, schema emission); append-only event log with `event_seq`; unit tests | pending |
 | P3-B0-3 | sinet-control shell + API/SSE skeleton + five seams | S01 full | Dev-mode process serves health + the one SSE endpoint; watchdog wiring; seams as package boundaries; systemd unit files *generated, not installed* (host changes wait for the gate) | pending |
 | P3-B0-4 | Run FSM + checkpoint/effect journal + recovery ladder | S02 full | FSM with derived-not-stored stalled state; checkpoint rows; two-phase effect journal; recovery ladder + leases/generation fencing; **kill-9 harness v1** in the test suite | pending |
@@ -45,3 +45,4 @@ Statuses: `pending` → `running` → `review` → `done`.
 ## Log
 
 - 2026-07-19 — P3 machinery created (skill + this STATE + CLAUDE.md pointer) in the G4-closing session; B0 opened, queue cut from S19.5 + S01/S02/S16 scopes. First build packet deliberately left for a fresh session.
+- 2026-07-19 — **Host toolchain:** operator reported Go 1.26 installed, but no Go existed anywhere on the host (PATH, /usr/local, snap, dpkg, version managers all checked). Coordinator installed **Go 1.26.5** user-level: sha256-verified official tarball → `~/.local/go`, wrapper scripts `~/.local/bin/{go,gofmt}` (already on PATH). No root, no host-level change; reversible by deleting those paths. P3-B0-1 launched.
