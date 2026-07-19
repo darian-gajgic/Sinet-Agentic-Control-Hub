@@ -46,7 +46,7 @@ Statuses: `pending` → `running` → `saved` → `reviewed` → `committed`. Mo
 
 **Remaining after S15:** S17 (known-problems register — consolidates all P-* incl. the ids coined in drafting: P-T03-1..4, P-T04-1..4, P-T10-1..3, P-T15-1..2, P-T09-1..2), S18 (settings-registry index — sweep every ⚙ table, dedup cross-section settings), S19 (v0 boundary + coverage + build-order); then assembly of `core-architecture-v1.md` and the G4 review memo.
 | S17 | known-problems-register | inherit | committed ✅ (64 P-* zero-orphan; P-T17-2 restored; R1–R4 tag backfills queued for assembly) |
-| S18 | settings-registry | inherit | running (launched 2026-07-19) |
+| S18 | settings-registry | inherit | committed ✅ (118 keys / 33 domains; S07↔S15 SLA seam + 4.3 staleness alias resolved; coordinator fixed one XREF subsection typo) |
 | S19 | v0-boundary-buildorder | coordinator | pending (last) |
 
 **Operator action items still open (whenever convenient):**
