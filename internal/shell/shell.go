@@ -35,6 +35,9 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sdnotify"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -110,10 +113,6 @@ func Run(ctx context.Context, opts Options) error {
 	if notifier == nil {
 		notifier = sdnotify.FromEnv()
 	}
-	ladder := opts.Ladder
-	if ladder == nil {
-		ladder = stubLadder{logger: logger}
-	}
 	admission := opts.Admission
 	if admission == nil {
 		admission = &scheduler.StubAdmission{Logger: logger}
@@ -155,6 +154,31 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	logger.Info("state: platform.db open", "path", dbPath)
+
+	// The S02 run machinery over the open DB: FSM store, checkpoint store,
+	// effect journal, and the recovery ladder they feed (Spec S02.3–S02.7).
+	ladder := opts.Ladder
+	if ladder == nil {
+		effects, err := gates.NewJournal(gates.JournalConfig{DB: db, Settings: reg})
+		if err != nil {
+			return err
+		}
+		ladder, err = recovery.New(recovery.Config{
+			DB:          db,
+			Log:         log,
+			Runs:        run.NewStore(db, log),
+			Checkpoints: gates.NewCheckpoints(db, log),
+			Effects:     effects,
+			Settings:    reg,
+			Logger:      logger,
+			// Units/Harvest default to the B0 probes: real systemd and
+			// engine-store observation arrive with run units and adapters
+			// (B1, Spec S02.5 step 1, S03).
+		})
+		if err != nil {
+			return err
+		}
+	}
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
 	if err := assertLoopbackAddr(cfg.HTTPAddr); err != nil {
@@ -231,10 +255,19 @@ func Run(ctx context.Context, opts Options) error {
 	// S02.1; ⚙ state.wal_truncate_interval).
 	go walTruncateLoop(procCtx, reg, db, logger)
 
-	// TODO(S01.7, lands with B0-4's ladder): sleep/wake seam — logind
-	// delay-mode inhibitor, PrepareForSleep(true) O(1) flush,
-	// PrepareForSleep(false) + clock-jump wake detection driving
-	// ladder.Reconcile and the P-T13-1 network-identity reconcile.
+	// Periodic recovery sweep — the same level-triggered Reconcile as
+	// startup step 3 (Spec S02.5; ⚙ recovery.sweep_interval). The ladder's
+	// own clock-jump grace covers the wake case until the S01.7 logind
+	// wiring lands.
+	go recoverySweepLoop(procCtx, reg, ladder, logger)
+
+	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,
+	// PrepareForSleep(true) O(1) flush, PrepareForSleep(false) driving an
+	// immediate ladder.Reconcile plus the P-T13-1 network-identity
+	// reconcile. The ladder (B0-4) is level-triggered and already applies
+	// ⚙ recovery.wake_grace on first-pass/clock-jump evidence; the D-Bus
+	// wiring is a later packet (needs an adoption-rail decision — no
+	// stdlib D-Bus).
 
 	logger.Info("sinet-control: ready", "version", buildinfo.Version(), "mode", maint.Mode())
 	if opts.ReadyFunc != nil {
@@ -381,6 +414,32 @@ func walTruncateLoop(ctx context.Context, settings Settings, db truncater, logge
 				// A busy reader can block truncation; the next cycle
 				// retries (Spec S02.1).
 				logger.Warn("wal truncate", "err", err)
+			}
+		}
+	}
+}
+
+// recoverySweepLoop runs the level-triggered recovery pass every ⚙
+// recovery.sweep_interval (Spec S02.5). The interval is re-read each cycle
+// — the key is live-apply. A failing sweep is logged and retried next
+// cycle (level-triggered); only startup treats a ladder error as fatal.
+func recoverySweepLoop(ctx context.Context, settings Settings, ladder RecoveryLadder, logger *slog.Logger) {
+	for {
+		interval, err := settings.Duration(keyRecoverySweepInterval)
+		if err != nil {
+			// The key is declared (Spec S18); failure here is a build
+			// defect, not a runtime condition to limp through.
+			logger.Error("recovery sweep: read ⚙ "+keyRecoverySweepInterval, "err", err)
+			return
+		}
+		t := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+			if err := ladder.Reconcile(ctx); err != nil {
+				logger.Warn("recovery sweep", "err", err)
 			}
 		}
 	}

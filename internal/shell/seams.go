@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
@@ -27,25 +26,20 @@ const (
 	// state.wal_truncate_interval), the scheduling duty is the shell's
 	// (Spec S02.1 read hygiene).
 	keyWALTruncateInterval = "state.wal_truncate_interval"
+	// keyRecoverySweepInterval schedules the periodic recovery sweep — the
+	// same level-triggered Reconcile as startup and wake (Spec S02.5,
+	// ⚙ recovery.sweep_interval); the interval is owned by Spec S02, the
+	// scheduling duty is the shell's.
+	keyRecoverySweepInterval = "recovery.sweep_interval"
 )
 
 // RecoveryLadder is the S01.6 step-3 seam: one level-triggered reconcile
 // pass over runs, effects, and leases — the same code at platform start, at
-// wake, and on the periodic sweep (Spec S02.5). The ladder itself is
-// P3-B0-4's; the shell only owns when it runs.
+// wake, and on the periodic sweep (Spec S02.5). recovery.Ladder implements
+// it since B0-4; the shell only owns when it runs (startup step 3 and the
+// ⚙ recovery.sweep_interval loop).
 type RecoveryLadder interface {
 	Reconcile(ctx context.Context) error
-}
-
-// stubLadder is the B0-3 stand-in: the startup sequence invokes the seam,
-// and nothing exists to reconcile until the run FSM lands (Spec S02, B0-4).
-type stubLadder struct {
-	logger *slog.Logger
-}
-
-func (s stubLadder) Reconcile(ctx context.Context) error {
-	s.logger.InfoContext(ctx, "recovery ladder: stub — no run machinery until B0-4 (Spec S02.5)")
-	return nil
 }
 
 // Admission is the scheduler admission seam the lifecycle drives (Spec
