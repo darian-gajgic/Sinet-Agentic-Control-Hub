@@ -109,7 +109,7 @@ The host is a laptop that sleeps and travels; the shell owns suspend/resume as a
 
 Adding any fourth observable requires amending this register through the S00.9 amendment mechanics — silence would violate the platform's own honesty standard [R17 §7]. Operator sign-off: TBD-OPERATOR(observables-register sign-off — one signature, at G4 or first deploy).
 
-**Hostname prerequisite.** TBD-OPERATOR(ts.net hostname pick — bland + permanent, chosen before the first cert) [G3 Def.5]. Rationale: the name lands in the public CT ledger the moment the first cert is issued (register row 1) and anchors the WebAuthn RP-ID for any future passkeys; renaming later strands credentials and re-publishes the name [R17 §2.8, §7].
+**Hostname prerequisite.** **DECIDED — operator, 2026-07-19: the ts.net machine hostname is `sinet`** (bland + permanent; set as the Tailscale machine name before the first cert — the rename itself is a B0-gate step) [G3 Def.5 closed; amendment A1, S00.9]. Rationale: the name lands in the public CT ledger the moment the first cert is issued (register row 1) and anchors the WebAuthn RP-ID for any future passkeys; renaming later strands credentials and re-publishes the name [R17 §2.8, §7].
 
 ### S01.9 Identity: the authentication stack (15.6)
 

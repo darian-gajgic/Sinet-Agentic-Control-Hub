@@ -173,3 +173,9 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 ## S00.9 Amendment mechanics
 
 Pre-G4: sections are amended by the campaign coordinator through workshops; every change is committed with its reason. At G4 the operator reviews the assembled document; approval freezes **v1** and ends the research phase (the operator's explicit act). Post-G4: changes require a dated changelog entry and operator approval; the benchmark pre-registration's numbers change only via its own §17. The `Docs/` feature list remains operator-gated and is never edited from this document.
+
+### Post-G4 changelog
+
+| # | Date | Change | Approval |
+|---|---|---|---|
+| A1 | 2026-07-19 | S01.8: `TBD-OPERATOR(ts.net hostname pick)` closed — machine hostname is **`sinet`** (bland + permanent; to be set as the Tailscale machine name before the first cert, per the S01.8 rationale). Closes G3 Def.5. No ⚙ setting touched → no S18 re-sweep. | operator, 2026-07-19 session |

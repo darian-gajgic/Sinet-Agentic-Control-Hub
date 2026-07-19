@@ -174,6 +174,12 @@ As defined in the drafting contract and used document-wide: provenance tags (S00
 
 Pre-G4: sections are amended by the campaign coordinator through workshops; every change is committed with its reason. At G4 the operator reviews the assembled document; approval freezes **v1** and ends the research phase (the operator's explicit act). Post-G4: changes require a dated changelog entry and operator approval; the benchmark pre-registration's numbers change only via its own §17. The `Docs/` feature list remains operator-gated and is never edited from this document.
 
+### Post-G4 changelog
+
+| # | Date | Change | Approval |
+|---|---|---|---|
+| A1 | 2026-07-19 | S01.8: `TBD-OPERATOR(ts.net hostname pick)` closed — machine hostname is **`sinet`** (bland + permanent; to be set as the Tailscale machine name before the first cert, per the S01.8 rationale). Closes G3 Def.5. No ⚙ setting touched → no S18 re-sweep. | operator, 2026-07-19 session |
+
 ## S01 — Process architecture & platform shell
 
 **Scope:** The process/unit topology of the owned core and its adopted organs, the five replacement seams, backend language and release artifact, platform lifecycle (startup, shutdown, maintenance/drain, sleep/wake), deploy/CI/logs, the authentication stack, and the settings-registry architecture.
@@ -285,7 +291,7 @@ The host is a laptop that sleeps and travels; the shell owns suspend/resume as a
 
 Adding any fourth observable requires amending this register through the S00.9 amendment mechanics — silence would violate the platform's own honesty standard [R17 §7]. Operator sign-off: TBD-OPERATOR(observables-register sign-off — one signature, at G4 or first deploy).
 
-**Hostname prerequisite.** TBD-OPERATOR(ts.net hostname pick — bland + permanent, chosen before the first cert) [G3 Def.5]. Rationale: the name lands in the public CT ledger the moment the first cert is issued (register row 1) and anchors the WebAuthn RP-ID for any future passkeys; renaming later strands credentials and re-publishes the name [R17 §2.8, §7].
+**Hostname prerequisite.** **DECIDED — operator, 2026-07-19: the ts.net machine hostname is `sinet`** (bland + permanent; set as the Tailscale machine name before the first cert — the rename itself is a B0-gate step) [G3 Def.5 closed; amendment A1, S00.9]. Rationale: the name lands in the public CT ledger the moment the first cert is issued (register row 1) and anchors the WebAuthn RP-ID for any future passkeys; renaming later strands credentials and re-publishes the name [R17 §2.8, §7].
 
 ### S01.9 Identity: the authentication stack (15.6)
 

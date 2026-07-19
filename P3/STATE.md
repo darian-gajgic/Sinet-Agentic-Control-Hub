@@ -30,14 +30,14 @@ Statuses: `pending` → `running` → `review` → `done`.
 | P3-B0-4 | Run FSM + checkpoint/effect journal + recovery ladder | S02 full | FSM with derived-not-stored stalled state; checkpoint rows; two-phase effect journal; recovery ladder + leases/generation fencing; **kill-9 harness v1** in the test suite | pending |
 | P3-B0-5 | Auth stack (tailnet wall → header hint → sessions + PIN) | S01 (auth), S15.2 (API posture) | Session + PIN machinery with tests; identity-header parsing in dev mode; cert/hostname steps documented for the B0 gate (needs operator item 2) | pending |
 
-**B0 gate (when queue done):** phase report + demo; propose host-side installs (systemd units) for approval; operator items due: **ts.net hostname pick** (before first cert) and the **root/reboot/suspend probe batch** (S19.6 B0/B1 measurements — suspend-session probe records to `P3/measurements/`).
+**B0 gate (when queue done):** phase report + demo; propose host-side installs (systemd units) for approval; operator items due: **Tailscale machine rename to `sinet`** (name already picked — amendment A1; rename before first cert) and the **root/reboot/suspend probe batch** (S19.6 B0/B1 measurements — suspend-session probe records to `P3/measurements/`).
 
 ## Operator hands-on items (carried from G4)
 
 | # | Item | Due at |
 |---|---|---|
 | 1 | Z.AI dashboard prompt-unit calibration (5-step recipe in P2-S1 report §Blocked) | B1 (metering trust) |
-| 2 | ts.net hostname pick — bland + permanent | **B0 gate, before first cert** |
+| 2 | ts.net hostname pick — **DONE 2026-07-19: `sinet`** (spec amendment A1, S00.9 changelog). Remaining B0-gate step: rename the Tailscale machine (`sudo tailscale set --hostname=sinet`; currently `sinep-predator`) before the first cert | **B0 gate, before first cert** |
 | 3 | Root/reboot/suspend probe batch (reboot-survival; `Persistent=` catch-up; user.slice freeze/thaw) | B0/B1 gate |
 | 4 | Week-one push drill on household phones | first deploy |
 | 5 | (Optional) GitHub Verified badge — signing-key upload | anytime |
@@ -46,4 +46,5 @@ Statuses: `pending` → `running` → `review` → `done`.
 
 - 2026-07-19 — P3 machinery created (skill + this STATE + CLAUDE.md pointer) in the G4-closing session; B0 opened, queue cut from S19.5 + S01/S02/S16 scopes. First build packet deliberately left for a fresh session.
 - 2026-07-19 — **Host toolchain:** operator reported Go 1.26 installed, but no Go existed anywhere on the host (PATH, /usr/local, snap, dpkg, version managers all checked). Coordinator installed **Go 1.26.5** user-level: sha256-verified official tarball → `~/.local/go`, wrapper scripts `~/.local/bin/{go,gofmt}` (already on PATH). No root, no host-level change; reversible by deleting those paths. P3-B0-1 launched.
+- 2026-07-19 — **Operator item 2 closed: ts.net hostname = `sinet`** (operator pick, chat session). Recorded as spec amendment **A1** (S00.9 post-G4 changelog started; S01.8 TBD-OPERATOR closed in draft + assembled spec). The actual Tailscale rename is deliberately deferred to the B0 gate with the first cert — the machine stays `sinep-predator` until then so existing device references keep working. All build code/config referencing the ts.net name uses `sinet` from now on.
 - 2026-07-19 — **P3-B0-1 done** (commit `3577f77`, validated). Scaffold per S01.5 (single multi-call binary, `cmd/sinet` + `internal/`), `components.lock` + `internal/lockfile` + `tools/lockgate`, SHA-pinned CI, `P3/CONVENTIONS.md`. Coordinator re-ran the battery independently: build/test/gofmt/vet/lockgate all green; action SHA pins independently verified against the GitHub API (both = tag v7.0.0). **Readings logged** (runbook ambiguity rule — each clearly implied by spec text): (1) lock serialization = strict pretty-printed JSON — S16.2 explicitly makes serialization "P3's choice", exercised now because B0 requires the manifest from the first dependency; dated in CONVENTIONS §4. (2) CI actions (`actions/checkout`, `actions/setup-go`) recorded as SHA-pinned `toolchain` lock entries — constituents of the ratified S01.11 CI mechanism, not running units/bundled deps; extra rigor beyond the S16.2 CI rule's scope. Formal S16.4 #10 operator ratification of both readings queued for the **B0 gate report**. (3) CI runner pinned `ubuntu-24.04` (26.04 runner image still preview — floating/preview labels never used).
