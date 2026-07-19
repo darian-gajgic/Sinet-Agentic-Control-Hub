@@ -52,3 +52,9 @@ curl -N 'http://127.0.0.1:8482/events?after_seq=0'                          # st
 - `P3/measurements/` empty until item-3 probes run.
 
 **To close:** answer §4 (free text is fine); the coordinator records answers here + STATE, then opens B1.
+
+---
+
+## Gate record (operator answers, as given)
+
+- **2026-07-19 — Decision 1: RATIFIED** (operator free text, step-by-step walkthrough). Covers: modernc.org/sqlite v1.54.0 (S16.3 driver row pin resolved), golang.org/x/crypto v0.54.0 (S01.9 argon2id), and the three B0-1 posture readings (strict-JSON lock serialization per S16.2 delegation; CI actions as SHA-pinned lock entries; `ubuntu-24.04` exact runner pin). All five now operator-approved per S16.4 #10 / D10; upkeep owned by the S16.7 quarterly pass.
