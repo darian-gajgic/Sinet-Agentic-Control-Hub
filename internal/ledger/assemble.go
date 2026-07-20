@@ -56,6 +56,12 @@ var precedenceOrder = map[Precedence]int{
 	PrecedenceTask: 3, PrecedenceStage: 4,
 }
 
+// DispositionOverBudgetDropped marks an item a source selected but the
+// per-scope injection budget excluded (Spec S09.8): the item is recorded
+// in the trace manifest — silent truncation is banned — and injected
+// nowhere.
+const DispositionOverBudgetDropped = "over_budget_dropped"
+
 // Item is one injectable context item. Sources return items with their
 // selection provenance filled; the assembly computes the content hash.
 type Item struct {
@@ -65,6 +71,16 @@ type Item struct {
 	Version      string
 	SelectorRule string
 	Precedence   Precedence
+
+	// Disposition non-empty makes the item manifest-only: it appears in
+	// the trace manifest under that marker and never becomes a brief block
+	// (Spec S09.8 over_budget_dropped).
+	Disposition string
+
+	// ConflictsWith lists item ids in the same frame this item holds an
+	// open conflict edge with (Spec S09.7: a known-conflicting pair
+	// entering one frame is flagged in the trace manifest).
+	ConflictsWith []string
 }
 
 // Block is one assembled brief block: the item plus its pinned marker
@@ -76,7 +92,8 @@ type Block struct {
 
 // ManifestEntry is the S05.4 trace-manifest schema, Sinet-owned:
 // {item_id, source_path, content_hash, version, selector_rule,
-// precedence_label}.
+// precedence_label} — extended with the S09.8 disposition marker and the
+// S09.7 conflict-pair flag (both empty on plain injected entries).
 type ManifestEntry struct {
 	ItemID          string `json:"item_id"`
 	SourcePath      string `json:"source_path"`
@@ -84,6 +101,13 @@ type ManifestEntry struct {
 	Version         string `json:"version"`
 	SelectorRule    string `json:"selector_rule"`
 	PrecedenceLabel string `json:"precedence_label"`
+
+	// Disposition records why a manifested item was not injected
+	// (over_budget_dropped, Spec S09.8).
+	Disposition string `json:"disposition,omitempty"`
+	// ConflictsWith flags a known-conflicting pair entering one frame
+	// (Spec S09.7).
+	ConflictsWith []string `json:"conflicts_with,omitempty"`
 }
 
 // FindingKind classifies assembly findings.
@@ -110,8 +134,12 @@ const CanonicalShim = "@AGENTS.md"
 
 // SliceQuery carries the platform-owned facts a Source may select on —
 // registry keys and stage identity only, per the S05.4 deterministic-
-// selection rule.
+// selection rule. RunID is the assembling run's identity, resolved by
+// Assemble itself (never caller/agent-supplied): sources use it for their
+// own bookkeeping acts (e.g. the S09.8 curation card), not as a selection
+// key.
 type SliceQuery struct {
+	RunID  string
 	TaskID string
 	Owner  string
 	Stage  string
@@ -229,7 +257,8 @@ func (s *Store) Assemble(ctx context.Context, in AssembleInput) (Brief, error) {
 		return Brief{}, fmt.Errorf("%w: task %q", ErrNoLedger, pre.taskID)
 	}
 	sourceItems, err := collectSourceItems(ctx, in, SliceQuery{
-		TaskID: preDoc.TaskID, Owner: preDoc.Owner, Stage: in.Stage, Clean: in.Clean,
+		RunID: in.RunID, TaskID: preDoc.TaskID, Owner: preDoc.Owner,
+		Stage: in.Stage, Clean: in.Clean,
 	})
 	if err != nil {
 		return Brief{}, err
@@ -255,7 +284,7 @@ func (s *Store) Assemble(ctx context.Context, in AssembleInput) (Brief, error) {
 			}
 		}
 
-		blocks, err := assembleBlocks(sourceItems, in, doc)
+		blocks, manifestOnly, err := assembleBlocks(sourceItems, in, doc)
 		if err != nil {
 			return err
 		}
@@ -268,9 +297,14 @@ func (s *Store) Assemble(ctx context.Context, in AssembleInput) (Brief, error) {
 			return precedenceOrder[blocks[i].Precedence] < precedenceOrder[blocks[j].Precedence]
 		})
 
-		manifest := make([]ManifestEntry, len(blocks))
-		for i, b := range blocks {
-			manifest[i] = entryFor(b.Item)
+		// Injected entries first, then manifest-only entries (dropped items,
+		// Spec S09.8) in collection order — recorded, never injected.
+		manifest := make([]ManifestEntry, 0, len(blocks)+len(manifestOnly))
+		for _, b := range blocks {
+			manifest = append(manifest, entryFor(b.Item))
+		}
+		for _, it := range manifestOnly {
+			manifest = append(manifest, entryFor(it))
 		}
 		payload, err := json.Marshal(manifestPayload{
 			Kind: "assembly", Stage: in.Stage, TaskID: doc.TaskID,
@@ -361,34 +395,41 @@ func collectSourceItems(ctx context.Context, in AssembleInput, q SliceQuery) ([]
 }
 
 // assembleBlocks builds the frame from the pre-collected source items, the
-// in-transaction ledger projection (task bucket), then Extra.
-func assembleBlocks(sourceItems []Item, in AssembleInput, doc Document) ([]Block, error) {
+// in-transaction ledger projection (task bucket), then Extra. The second
+// return carries the manifest-only items (non-empty Disposition): recorded
+// in the trace manifest, injected nowhere (Spec S09.8).
+func assembleBlocks(sourceItems []Item, in AssembleInput, doc Document) ([]Block, []Item, error) {
 	var blocks []Block
-	for _, it := range sourceItems {
-		b, err := blockFor(it, in.Clean)
-		if err != nil {
-			return nil, err
+	var manifestOnly []Item
+	add := func(items []Item) error {
+		for _, it := range items {
+			b, err := blockFor(it, in.Clean)
+			if err != nil {
+				return err
+			}
+			switch {
+			case b == nil && it.Disposition != "" && !(in.Clean && it.Precedence == PrecedenceUser):
+				manifestOnly = append(manifestOnly, it)
+			case b != nil:
+				blocks = append(blocks, *b)
+			}
 		}
-		if b != nil {
-			blocks = append(blocks, *b)
-		}
+		return nil
+	}
+	if err := add(sourceItems); err != nil {
+		return nil, nil, err
 	}
 	blocks = append(blocks, projectLedger(doc, in.Clean)...)
-	for _, it := range in.Extra {
-		b, err := blockFor(it, in.Clean)
-		if err != nil {
-			return nil, err
-		}
-		if b != nil {
-			blocks = append(blocks, *b)
-		}
+	if err := add(in.Extra); err != nil {
+		return nil, nil, err
 	}
-	return blocks, nil
+	return blocks, manifestOnly, nil
 }
 
 // blockFor validates one source item and applies the clean-mode firewall:
 // user-overlay items never reach a verification brief (Spec S05.4
-// clean-context exception).
+// clean-context exception). A nil, nil return means the item yields no
+// block (clean-mode drop, or manifest-only disposition).
 func blockFor(it Item, clean bool) (*Block, error) {
 	if it.ItemID == "" || it.SelectorRule == "" {
 		return nil, fmt.Errorf("%w: injected item requires item_id and selector_rule (S05.4 manifest)", ErrInvalidWrite)
@@ -397,6 +438,9 @@ func blockFor(it Item, clean bool) (*Block, error) {
 		return nil, fmt.Errorf("%w: item %q precedence %q", ErrInvalidWrite, it.ItemID, it.Precedence)
 	}
 	if clean && it.Precedence == PrecedenceUser {
+		return nil, nil
+	}
+	if it.Disposition != "" {
 		return nil, nil
 	}
 	return &Block{Item: it}, nil
@@ -476,6 +520,8 @@ func entryFor(it Item) ManifestEntry {
 		Version:         it.Version,
 		SelectorRule:    it.SelectorRule,
 		PrecedenceLabel: string(it.Precedence),
+		Disposition:     it.Disposition,
+		ConflictsWith:   it.ConflictsWith,
 	}
 }
 

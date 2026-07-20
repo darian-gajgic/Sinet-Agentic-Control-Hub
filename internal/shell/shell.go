@@ -40,6 +40,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -225,6 +226,24 @@ func Run(ctx context.Context, opts Options) error {
 			engineConfiner = composer
 		}
 		stateDir := filepath.Dir(dbPath)
+
+		// The S09 knowledge store over the same DB plus the git-versioned
+		// knowledge dirs (Spec S09.2), its S05.4 assembly source, and the
+		// B2 seed-object governance re-homing (Spec S09.10) — skipped until
+		// an operator account exists (house scope needs its D10 holder).
+		memStore, err := memory.NewStore(db, log, reg, filepath.Join(stateDir, "knowledge"))
+		if err != nil {
+			return err
+		}
+		switch n, err := memory.NewGate(memStore).EnsureB2SeedGovernance(ctx); {
+		case errors.Is(err, memory.ErrNoOperator):
+			logger.Info("memory: B2 seed governance deferred — no operator account yet (Spec S09.10, D10)")
+		case err != nil:
+			return fmt.Errorf("shell: B2 seed governance: %w", err)
+		case n > 0:
+			logger.Info("memory: B2 seed objects re-homed under S09.10 governance", "created", n)
+		}
+
 		sk, err := stage.New(stage.Config{
 			DB:          db,
 			Log:         log,
@@ -232,6 +251,7 @@ func Run(ctx context.Context, opts Options) error {
 			Checkpoints: checkpoints,
 			Ledger:      taskLedger,
 			Settings:    reg,
+			Knowledge:   &memory.Source{S: memStore},
 			Adapters: map[string]adapters.Adapter{
 				// The Anthropic lane (Spec S03.2): the pinned `claude` CLI
 				// resolved via PATH; conformance vs the components.lock pin

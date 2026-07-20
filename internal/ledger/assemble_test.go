@@ -160,14 +160,16 @@ func TestAssembleFullBrief(t *testing.T) {
 	}
 
 	// The selection firewall: sources were queried with platform-owned
-	// facts only (S05.4 — no agent-supplied identifiers).
+	// facts only (S05.4 — no agent-supplied identifiers; RunID is the
+	// assembly's own resolution, for source-side bookkeeping acts).
 	src := fullSources()
 	if _, err := f.store.Assemble(ctx, ledger.AssembleInput{RunID: r.ID, Stage: "execute-2", Sources: src}); err != nil {
 		t.Fatalf("Assemble 2: %v", err)
 	}
 	ks := src.Knowledge.(*fakeSource)
-	if len(ks.got) != 1 || ks.got[0] != (ledger.SliceQuery{TaskID: "t1", Owner: "u1", Stage: "execute-2"}) {
-		t.Fatalf("source query = %+v", ks.got)
+	wantQuery := ledger.SliceQuery{RunID: r.ID, TaskID: "t1", Owner: "u1", Stage: "execute-2"}
+	if len(ks.got) != 1 || ks.got[0] != wantQuery {
+		t.Fatalf("source query = %+v, want %+v", ks.got, wantQuery)
 	}
 }
 

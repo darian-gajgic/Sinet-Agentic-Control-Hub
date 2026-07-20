@@ -364,7 +364,7 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 			RunID:          r.ID,
 			Stage:          step.ID,
 			Assemble:       true,
-			Sources:        ledger.Sources{Plan: &intake.PlanSource{P: s.pipe}},
+			Sources:        ledger.Sources{Plan: &intake.PlanSource{P: s.pipe}, Knowledge: s.cfg.Knowledge},
 			Instructions:   instructions,
 			Class:          step.Class,
 			Tools:          execTools,

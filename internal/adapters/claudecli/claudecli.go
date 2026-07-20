@@ -167,6 +167,15 @@ func (a *Adapter) spawn(ctx context.Context, req adapters.StartRequest, l *lower
 	if err := os.WriteFile(l.settingsPath, l.settingsJSON, 0o600); err != nil {
 		return nil, fmt.Errorf("claudecli: write lowered settings: %w", err)
 	}
+	// S09.9 auto-memory containment: every session START begins with an
+	// empty config-root memory/ dir (fail-closed — an unwipeable dir would
+	// leave the 8.1-bypass channel open). Resume continues the same run
+	// and keeps its own scratch (containment.go).
+	if !l.resume {
+		if err := wipeEngineMemoryDir(req.OwnerCredRef); err != nil {
+			return nil, err
+		}
+	}
 	if err := writeCtlConfig(l.ctlDir, l.gateFallback); err != nil {
 		return nil, fmt.Errorf("claudecli: gate ctl: %w", err)
 	}

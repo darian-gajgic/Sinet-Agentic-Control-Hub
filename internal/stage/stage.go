@@ -204,6 +204,14 @@ type Config struct {
 	Judge   verify.Judge
 	Revise  func(ctx context.Context, pkg verify.RetryPackage) (verify.Deliverable, error)
 
+	// Knowledge is the S05.4 knowledge slice source (Spec S09.3, B3-1):
+	// house/project/user knowledge selected by pure registry lookup within
+	// per-scope ⚙ budgets. Nil = the seam is absent and briefs assemble
+	// without knowledge slices. It feeds planning and execute-stage
+	// briefs; the judge's clean slice stays the S07-fixed input set
+	// (CONVENTIONS §15) and the critic stays artifact-only (§14).
+	Knowledge ledger.Source
+
 	Logger *slog.Logger
 	Now    func() time.Time
 }

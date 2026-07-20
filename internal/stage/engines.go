@@ -155,10 +155,12 @@ func (p *EnginePlanner) pairSession(ctx context.Context, taskID, owner string, t
 	extra ledger.Item, instructions string, specV, planV int) (intake.Pair, error) {
 	var pair intake.Pair
 	err := p.s.jsonSession(ctx, SessionInput{
-		RunID:        taskID + RunSuffixIntake,
-		Stage:        "plan",
-		Assemble:     true,
-		Sources:      ledger.Sources{}, // knowledge/conventions/worker sources are B3/B4 seams
+		RunID:    taskID + RunSuffixIntake,
+		Stage:    "plan",
+		Assemble: true,
+		// Knowledge wired at B3-1 (Spec S09.3 house/project/user slices);
+		// conventions/worker sources remain B4/B3-2 seams.
+		Sources:      ledger.Sources{Knowledge: p.s.cfg.Knowledge},
 		Extra:        []ledger.Item{extra},
 		Instructions: instructions,
 		Class:        "C1", // read-only planning sandbox (Spec S06.6, P-T05-1)
