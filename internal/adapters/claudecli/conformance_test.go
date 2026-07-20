@@ -47,7 +47,7 @@ import (
 // Pin is the binding engine version (components.lock "claude CLI
 // (engine)"; Spec S16.3). TestPinMatchesLock keeps the two mechanically
 // coupled.
-const Pin = "2.1.214"
+const Pin = "2.1.215"
 
 func testAdapter(t *testing.T) *Adapter {
 	t.Helper()

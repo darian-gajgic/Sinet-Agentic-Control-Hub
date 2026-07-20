@@ -128,7 +128,7 @@
     {
       "name": "claude CLI (engine)",
       "kind": "engine",
-      "pin": "2.1.214",
+      "pin": "2.1.215",
       "license": {
         "spdx": "LicenseRef-Anthropic-Consumer-Terms",
         "scope": "proprietary binary distribution (npm @anthropic-ai/claude-code), consumed as an unmodified subprocess only — never linked, never vendored; Consumer ToS with the gray-zone-as-is posture ratified at G1 P2 (compliance quotes per R14 §7-OQ8)",
@@ -145,8 +145,8 @@
         "conformance suite internal/adapters/claudecli (tier R runs whenever the binary is present; tier F on every test run)",
         "quarterly dependency pass (S16.7)"
       ],
-      "last_review": "2026-07-19",
-      "notes": "S16.3 engine row materialized at P3-B1-1 (first consumption: the Anthropic-lane adapter). Pin 2.1.214 is the S16.3 BINDING row value and the behavioral contract the adapter targets (claudecli.Pin, coupled by test). LIVE delta recorded 2026-07-19: the host-installed binary reports 2.1.215 (`claude --version`) — one patch AHEAD of the pin; tier-R conformance (version notice, enum rejection, full-argv dry probe) passed against 2.1.215 with `--max-turns` observed dropped from --help while still parse-accepted (why tier-R asserts parse behavior, never help text, per S03.3 rule 4). NOT silently retargeted: reconciling host to pin (downgrade) or pin to host (S03.3 deliberate bump with conformance + quality probes) is an operator decision reported at B1. Engine runs unmodified as a per-run subprocess, own process group, per-user CLAUDE_CONFIG_DIR as the credential root (S03.2; D2); `--dangerously-skip-permissions` never emitted; native-spawn Task* family excluded from every allowlist (S03.5 sole-controller). Not a Go module: no modules claim; no npm-side bundling (engine invoked from PATH/explicit path)."
+      "last_review": "2026-07-20",
+      "notes": "S16.3 engine row materialized at P3-B1-1. PIN BUMPED 2.1.214 -> 2.1.215 on 2026-07-20 via the S03.3 deliberate-bump procedure, operator-approved at the B1 gate. The S16.3 row states 2.1.214 (the value at spec-freeze); S16.2 records engine pins in this lock and S03.3 governs their movement, so this is the first sanctioned in-band bump, NOT a spec amendment (S16.3 row text is unchanged; this lock is the living pin). Gate evidence: conformance suite green at the new pin — tier F fixtures were re-recorded live against 2.1.215 (2026-07-19/20), tier R real-engine passed (installed version now MATCHES the pin, enum rejection, full-argv dry probe). The 2.1.215 change is a FIX: it honors first-defer on parallel gated turns, closing the S03.4 ~20% silent-fallback trap (B1-4 spike measurement). Worker-revalidation trigger (P-T14-1) fires against an EMPTY worker set (workforce is B3), so the bump is cheapest now. claudecli.Pin (conformance_test.go) bumped in lockstep (coupled by TestPinMatchesLock). Engine runs unmodified as a per-run subprocess, own process group, per-user CLAUDE_CONFIG_DIR as the credential root (S03.2; D2); --dangerously-skip-permissions never emitted; native-spawn Task* family excluded from every allowlist (S03.5 sole-controller). Not a Go module: no modules claim; no npm-side bundling (engine invoked from PATH/explicit path)."
     },
     {
       "name": "OS mechanisms: bubblewrap/seccomp/Landlock/netns+nftables",
