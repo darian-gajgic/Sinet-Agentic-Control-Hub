@@ -87,9 +87,12 @@ func TestShipPathRecordsAndVerifies(t *testing.T) {
 	}
 }
 
-func TestPartialACFailureVerifiesNothing(t *testing.T) {
-	// w1 cites AC-1 and AC-2; a judge Unknown on AC-1 leaves the item
-	// unverified even on a notes-only verdict path.
+func TestUnknownACNeverShips(t *testing.T) {
+	// w1 cites AC-1 and AC-2; a judge Unknown on AC-1 is the S07.5 Unknown
+	// escape: it synthesizes a blocker citing AC-1, so the round is REVISE,
+	// and with no executor seam the drain terminates in a CAP-HIT card —
+	// never SHIP, never silent, nothing verified. (Corrected at the B2 gate
+	// demo, 2026-07-20: an all-Unknown round had shipped clean.)
 	f := newFix(t)
 	f.seedTask("t1", "r1")
 	j := &fakeJudge{
@@ -105,11 +108,62 @@ func TestPartialACFailureVerifiesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if out.Verdict != verify.VerdictShip { // Unknown alone is no blocker; V3 still gates
-		t.Fatalf("verdict %s", out.Verdict)
+	if out.Verdict == verify.VerdictShip || out.Verdict == verify.VerdictShipWithNotes {
+		t.Fatalf("undecided criterion shipped: verdict %s", out.Verdict)
 	}
 	if len(out.VerifiedItems) != 0 {
 		t.Fatalf("item verified on an Unknown criterion: %v", out.VerifiedItems)
+	}
+	if out.Card == nil || out.Card.Category != verify.CatCapHit {
+		t.Fatalf("want the drain to terminate in a CAP-HIT card, got %+v", out.Card)
+	}
+	found := false
+	for _, fd := range out.Rounds[0].Findings {
+		if fd.Criterion == "AC-1" && fd.Anchor == "unknown:AC-1" && fd.Severity == verify.SeverityBlocker {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no synthesized unknown-escape blocker citing AC-1: %+v", out.Rounds[0].Findings)
+	}
+}
+
+func TestUnknownResolvedByReworkShips(t *testing.T) {
+	// The escape gives rework its chance: round 1's Unknown on AC-1 drives
+	// a REVISE round; the round-2 judge decides every criterion → SHIP with
+	// the item verified. The unknown-escape key resolves instead of
+	// recurring.
+	f := newFix(t)
+	f.seedTask("t1", "r1")
+	round := 0
+	j := &fakeJudge{
+		compliance: func(in verify.JudgeInput) (verify.Axis1Result, error) {
+			round++
+			res := passAll(in)
+			if round == 1 {
+				res.Verdicts[0].Pass = false
+				res.Verdicts[0].Unknown = true
+			}
+			return res, nil
+		},
+	}
+	v := f.verifier(j, &scriptRunner{}, passPack())
+	v.Revise = func(_ context.Context, pkg verify.RetryPackage) (verify.Deliverable, error) {
+		d := pkg.Deliverable
+		d.PrevContent = d.Content
+		d.Content = d.Content + "// decidable now\n"
+		d.Revision++
+		return d, nil
+	}
+	out, err := v.Verify(context.Background(), input(deliverable("t1", "r1")))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if out.Verdict != verify.VerdictShip {
+		t.Fatalf("verdict %s, want SHIP once the criterion is decided", out.Verdict)
+	}
+	if len(out.VerifiedItems) != 1 || out.VerifiedItems[0] != "w1" {
+		t.Fatalf("verified items %v, want [w1]", out.VerifiedItems)
 	}
 }
 

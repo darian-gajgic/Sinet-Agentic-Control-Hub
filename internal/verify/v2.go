@@ -295,6 +295,39 @@ func ValidateAxis1(res Axis1Result, acs []ledger.AcceptanceCriterion, v1 map[str
 	return out, integrity
 }
 
+// UnknownEscapes synthesizes the round's Unknown-escape findings (Spec
+// S07.5): every criterion whose validated verdict is Unknown becomes a
+// blocker-class AC-BLOCKER finding citing that criterion. An undecided
+// criterion never dissolves into SHIP — every verification finding
+// terminates in a human-visible sink (Spec S07.7), and an agreed criterion
+// never disappears silently, at intake or ever after (Spec S06). The
+// finding key (criterion + anchor + category) is round-independent: a
+// criterion the judge can never decide recurs unresolved and trips the
+// S07.6 convergence stop into a CAP-HIT card, while a rework that makes it
+// decidable resolves the key. (Rule added at the B2 gate demo, 2026-07-20:
+// an all-Unknown round had computed a clean SHIP.)
+func UnknownEscapes(verdicts []ACVerdict) []Finding {
+	var fs []Finding
+	for _, v := range verdicts {
+		if !v.Unknown {
+			continue
+		}
+		reason := v.Forced
+		if reason == "" {
+			reason = "judge returned unknown"
+		}
+		fs = append(fs, Finding{
+			Severity:  SeverityBlocker,
+			Category:  CatACBlocker,
+			Criterion: v.Key,
+			Anchor:    "unknown:" + v.Key,
+			Text: fmt.Sprintf("%s could not be verified (%s): an undecided criterion cannot ship (Spec S07.5 Unknown escape) — make the deliverable decidable against it, or the drain escalates",
+				v.Key, reason),
+		})
+	}
+	return fs
+}
+
 // validateFindings numbers a round's findings [F1..Fn] and enforces the
 // citation rule (Spec S07.5): a blocker must cite a frozen criterion or an
 // axis-2 rubric item; one that cites none (or cites outside the frozen set)

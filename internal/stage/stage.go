@@ -11,7 +11,8 @@
 //     stage (Spec S05.3 fresh-context-per-stage — a continued transcript is
 //     never the mechanism for crossing a stage boundary), built from the
 //     ledger's assembled stage brief (Spec S05.4: BriefText prompt assembly
-//     + PlacePinned + the SessionStart re-injection channel), driven through
+//
+//   - PlacePinned + the SessionStart re-injection channel), driven through
 //     the adapter Driver so every paid call checkpoints (D7, Spec S02.4)
 //     with the live ledger-revision block, and watched by the stage-fit
 //     budget machinery (⚙ context.stage_fit_target / ⚙

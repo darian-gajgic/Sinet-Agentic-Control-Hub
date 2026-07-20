@@ -341,6 +341,7 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 		// + requester comments, validated and numbered (Spec S07.5/S07.6).
 		var raw []Finding
 		raw = append(raw, ax1.Findings...)
+		raw = append(raw, UnknownEscapes(verdicts)...)
 		raw = append(raw, integrity...)
 		if ax2 != nil {
 			raw = append(raw, ax2.Findings...)

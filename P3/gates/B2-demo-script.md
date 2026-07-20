@@ -44,9 +44,9 @@
    ```
    curl -s -X POST http://127.0.0.1:8420/api/auth/users \
      -H 'Content-Type: application/json' \
-     -d '{"user_id":"sinep","pin":"<YOUR-PIN>"}'
+     -d '{"user_id":"sinep","display_name":"Sinep","role":"operator","pin":"<YOUR-PIN>"}'
    ```
-   Expected: JSON user object, role operator.
+   Expected: HTTP 201, `{"user_id":"sinep"}`. The `role` field is mandatory and must be `operator` in the bootstrap window — the platform never defaults a role silently (S01.9; B0-5 contract). *(Script fix 2026-07-20: the original step omitted `role` and mis-stated the response shape — caught live at the gate demo; code behavior was correct.)*
 
 6. **Log in (session cookie into a jar):**
    ```

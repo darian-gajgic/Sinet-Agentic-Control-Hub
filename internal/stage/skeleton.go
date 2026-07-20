@@ -70,10 +70,10 @@ func New(cfg Config) (*Skeleton, error) {
 	}
 	s := &Skeleton{cfg: cfg}
 	s.driver = &adapters.Driver{
-		Runs:        cfg.Runs,
-		Checkpoints: cfg.Checkpoints,
-		Log:         cfg.Log,
-		DB:          cfg.DB,
+		Runs:         cfg.Runs,
+		Checkpoints:  cfg.Checkpoints,
+		Log:          cfg.Log,
+		DB:           cfg.DB,
 		CopyAsideDir: cfg.CopyAsideDir,
 		// The S02.4(c) ledger-revision block goes LIVE here (B2-1 seam →
 		// B2-4 wiring): every paid-call checkpoint embeds the current
@@ -281,6 +281,15 @@ func (s *Skeleton) launchRole(ctx context.Context, taskID, owner string, rl role
 // change, Spec S11.4). Worker-template toolsets are Spec S08's (B3).
 var execTools = []string{"Read", "Write", "Edit"}
 
+// execPermissionMode is the engine-side consent matching exactly that
+// toolset in headless sessions: "acceptEdits" auto-accepts workspace-local
+// file writes/edits, everything else still denies. Without it a
+// non-interactive session's Write permission prompt auto-denies and the
+// executor can only plead for access (found live at the B2 gate demo,
+// 2026-07-20). Consent is cooperation, not the boundary — enforcement is
+// the confinement class (Spec S11.1).
+const execPermissionMode = "acceptEdits"
+
 func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateRunning, run.TransitionOptions{
 		Reason: "execute stage sessions (S05.3)", Actor: run.ActorPlatform,
@@ -332,6 +341,7 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 			Instructions:   instructions,
 			Class:          step.Class,
 			Tools:          execTools,
+			PermissionMode: execPermissionMode,
 			PriorOverflows: overflows,
 		})
 		if err != nil {

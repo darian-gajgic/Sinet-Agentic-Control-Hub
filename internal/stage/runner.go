@@ -53,6 +53,14 @@ type SessionInput struct {
 	Class string
 	Tools []string
 
+	// PermissionMode is the engine-side permission posture for the session
+	// ("" = the lane default, under which a headless session's tool
+	// permission prompts auto-deny). Part of the S03.4 invocation snapshot,
+	// lowered by the adapter. This is the cooperation layer only — the
+	// enforcement boundary is the confinement class (Spec S11.1), never
+	// engine consent.
+	PermissionMode string
+
 	// Model overrides the configured model for this session ("" = config).
 	Model string
 
@@ -156,6 +164,7 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		Worker: adapters.CompiledWorker{
 			Prompt:                  prompt,
 			ToolAllowlist:           in.Tools,
+			PermissionMode:          in.PermissionMode,
 			SessionStartContextPath: sessionStartPath,
 		},
 		Model:          s.modelFor(in.Model),
