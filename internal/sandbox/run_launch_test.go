@@ -13,6 +13,11 @@ import (
 // spool job record is composed into the sandbox and the engine runs isolated.
 // Sanctioned skip when the boundary cannot be composed (S16.3).
 func TestRunLaunchMode(t *testing.T) {
+	// Hermetic pin to the native funeral-plan path: an unusable srt override
+	// reports srt absent without falling through to PATH, so a host srt
+	// install cannot steer this test. The live srt wrap is the deferred
+	// hardening-gate smoke (CONVENTIONS §12).
+	t.Setenv(EnvSrtPath, filepath.Join(t.TempDir(), "srt-absent"))
 	if !Probe().Available() {
 		t.Skipf("SANCTIONED SKIP (S16.3): host cannot compose the boundary")
 	}

@@ -163,10 +163,14 @@ func TestSrtInvocation(t *testing.T) {
 // fallback), present via SINET_SRT_PATH override, and override-set-but-unusable
 // (falls back to native, not an error).
 func TestProbeSrtDiscovery(t *testing.T) {
-	// Absent: no override, srt not installed on the host/CI → native fallback.
+	// Absent: no override and nothing on PATH → native fallback. PATH is
+	// pointed at an empty dir so a host srt install cannot leak in (only the
+	// srt lookup consults PATH; the boundary probes use absolute paths and
+	// syscalls).
+	t.Setenv("PATH", t.TempDir())
 	t.Setenv(EnvSrtPath, "")
 	if c := Probe(); c.Srt {
-		t.Errorf("srt reported present with no override and no install: %v", c.Notes)
+		t.Errorf("srt reported present with no override and no PATH install: %v", c.Notes)
 	}
 
 	// Present via override (a stub executable).

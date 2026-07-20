@@ -52,9 +52,14 @@ func TestEgressPolicyReadsSettings(t *testing.T) {
 
 // TestConfineRunsLive drives the full adapters.Confiner path: NewComposer →
 // Confine → a runnable *exec.Cmd whose engine executes INSIDE the sandbox. It
-// asserts isolation on the real composition. Sanctioned skip when the host
-// cannot compose the boundary (S16.3 / CONVENTIONS §10).
+// asserts isolation on the real composition, pinned to the native
+// funeral-plan path (an unusable srt override reports srt absent without
+// falling through to PATH, so a host srt install cannot steer the test; the
+// live srt wrap is the deferred hardening-gate smoke, CONVENTIONS §12).
+// Sanctioned skip when the host cannot compose the boundary (S16.3 /
+// CONVENTIONS §10).
 func TestConfineRunsLive(t *testing.T) {
+	t.Setenv(EnvSrtPath, filepath.Join(t.TempDir(), "srt-absent"))
 	co := NewComposer(settings.New(), nil)
 	if !co.Caps().Available() {
 		t.Skipf("SANCTIONED SKIP (S16.3): host cannot compose the boundary — %v", co.Caps().Notes)
