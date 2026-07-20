@@ -52,6 +52,51 @@ func parseJSONOutput(text string, into any) error {
 	return nil
 }
 
+// jsonRetryLimit bounds the re-asks of a JSON-contract session whose
+// reply failed to parse — the house bounce-once pattern (cf. intake's
+// autofix bounds and verify's v0RegenerationLimit). Engines occasionally
+// answer prose instead of the contracted object; one fresh session with
+// the contract restated recovers that, and a second violation errors up
+// to the caller's ladder — never absorbed, never an unbounded loop.
+// (Found live at the B2 gate demo, 2026-07-20: the axis-1 judge opened
+// with prose and the whole verify run crashed for it.)
+const jsonRetryLimit = 1
+
+const jsonRetryNote = "\nYour previous reply was rejected: it was not the contracted JSON object. " +
+	"Reply with ONLY the JSON object — no prose, no preamble, no trailing text.\n"
+
+// jsonWithRetry drives a JSON-contract session through runSession (called
+// with a retry note to append on re-asks) and parses the reply into
+// `into`, re-asking at most jsonRetryLimit times on parse failure.
+func jsonWithRetry(runSession func(retryNote string) (string, error), into any) error {
+	text, err := runSession("")
+	if err != nil {
+		return err
+	}
+	perr := parseJSONOutput(text, into)
+	for try := 0; perr != nil && try < jsonRetryLimit; try++ {
+		if text, err = runSession(jsonRetryNote); err != nil {
+			return err
+		}
+		perr = parseJSONOutput(text, into)
+	}
+	return perr
+}
+
+// jsonSession runs one stage session under the JSON output contract with
+// the bounded re-ask.
+func (s *Skeleton) jsonSession(ctx context.Context, in SessionInput, into any) error {
+	return jsonWithRetry(func(retryNote string) (string, error) {
+		att := in
+		att.Instructions = in.Instructions + retryNote
+		res, err := s.Session(ctx, att)
+		if err != nil {
+			return "", err
+		}
+		return res.Text, nil
+	}, into)
+}
+
 // ---- intake.Planner (Spec S06.10: planning-model duty; wired B2-4) ----
 
 // EnginePlanner drives the Stage-1 drafting/revision sessions on the
@@ -108,7 +153,8 @@ func (p *EnginePlanner) Revise(ctx context.Context, in intake.ReviseInput) (inta
 
 func (p *EnginePlanner) pairSession(ctx context.Context, taskID, owner string, tier intake.Tier,
 	extra ledger.Item, instructions string, specV, planV int) (intake.Pair, error) {
-	res, err := p.s.Session(ctx, SessionInput{
+	var pair intake.Pair
+	err := p.s.jsonSession(ctx, SessionInput{
 		RunID:        taskID + RunSuffixIntake,
 		Stage:        "plan",
 		Assemble:     true,
@@ -116,13 +162,9 @@ func (p *EnginePlanner) pairSession(ctx context.Context, taskID, owner string, t
 		Extra:        []ledger.Item{extra},
 		Instructions: instructions,
 		Class:        "C1", // read-only planning sandbox (Spec S06.6, P-T05-1)
-	})
+	}, &pair)
 	if err != nil {
 		return intake.Pair{}, fmt.Errorf("planner session: %w", err)
-	}
-	var pair intake.Pair
-	if err := parseJSONOutput(res.Text, &pair); err != nil {
-		return intake.Pair{}, fmt.Errorf("planner output: %w", err)
 	}
 	// Platform-owned bookkeeping fields are stamped here, not trusted from
 	// the engine (the spine re-validates content; identity/version
@@ -240,19 +282,16 @@ func (c *EngineCritic) session(ctx context.Context, pair intake.Pair, recheck []
 	b.Write(pairJSON)
 	b.WriteString("\n\n" + verdictSchema + "\n")
 
-	res, err := c.s.Session(ctx, SessionInput{
+	var v intake.Verdict
+	err = c.s.jsonSession(ctx, SessionInput{
 		RunID:        pair.Spec.TaskID + RunSuffixIntake,
 		Stage:        "critique",
 		Assemble:     false, // artifact-only (Spec S06.8)
 		Instructions: b.String(),
 		Class:        "C1",
-	})
+	}, &v)
 	if err != nil {
 		return intake.Verdict{}, fmt.Errorf("critic session: %w", err)
-	}
-	var v intake.Verdict
-	if err := parseJSONOutput(res.Text, &v); err != nil {
-		return intake.Verdict{}, fmt.Errorf("critic output: %w", err)
 	}
 	switch v.Kind {
 	case intake.VerdictPass, intake.VerdictRevise, intake.VerdictSpecDoubt, intake.VerdictTierUp:
@@ -318,18 +357,15 @@ func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, instruc
 	// appended); the brief is re-used for pinned placement so a compaction
 	// inside the judge session re-injects the frozen ACs (Spec S05.7).
 	brief := in.Brief
-	res, err := j.s.Session(ctx, SessionInput{
+	err := j.s.jsonSession(ctx, SessionInput{
 		RunID:        in.Brief.TaskID + RunSuffixVerify,
 		Stage:        "verify",
 		Assemble:     false,
 		PlaceBrief:   &brief,
 		Instructions: in.BriefText + "\n" + instructions,
 		Class:        "C1",
-	})
+	}, out)
 	if err != nil {
-		return fmt.Errorf("judge session: %w", err)
-	}
-	if err := parseJSONOutput(res.Text, out); err != nil {
 		return fmt.Errorf("judge output: %w", err)
 	}
 	return nil

@@ -133,15 +133,42 @@ const (
 )
 
 func runRole(runID string) (role, bool) {
+	// Recovery forks append .g<generation> segments to the parent run id
+	// (Spec S02.5 fork lineage, B0-4), so the role must survive any number
+	// of fork suffixes — verify.g1 dispatches exactly like verify. Without
+	// this, every recovery fork of a pipeline run was unroutable and
+	// crashed at dispatch, burning the ladder to tombstone (found live at
+	// the B2 gate demo, 2026-07-20).
+	id := runID
+	for {
+		i := strings.LastIndexByte(id, '.')
+		if i < 0 {
+			return "", false
+		}
+		if seg := id[i+1:]; len(seg) >= 2 && seg[0] == 'g' && allDigits(seg[1:]) {
+			id = id[:i]
+			continue
+		}
+		break
+	}
 	switch {
-	case strings.HasSuffix(runID, RunSuffixIntake):
+	case strings.HasSuffix(id, RunSuffixIntake):
 		return roleIntake, true
-	case strings.HasSuffix(runID, RunSuffixExecute):
+	case strings.HasSuffix(id, RunSuffixExecute):
 		return roleExecute, true
-	case strings.HasSuffix(runID, RunSuffixVerify):
+	case strings.HasSuffix(id, RunSuffixVerify):
 		return roleVerify, true
 	}
 	return "", false
+}
+
+func allDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 // ---- scheduler.Dispatcher ----

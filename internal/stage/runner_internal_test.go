@@ -133,3 +133,101 @@ func TestBudgetWatcherOverweightBriefIsAPlanShapeDefect(t *testing.T) {
 		t.Fatalf("events = %v, want one re-plan proposal", evs)
 	}
 }
+
+// TestRunRoleSurvivesForkSuffixes pins the role parse against the S02.5
+// fork-lineage naming: forks (.g1, .g1.g2, ...) dispatch like their
+// ancestor; non-role and non-fork suffixes stay unroutable. (B2 gate demo
+// find, 2026-07-20: verify.g1 was unroutable and recovery burned to
+// tombstone.)
+func TestRunRoleSurvivesForkSuffixes(t *testing.T) {
+	cases := []struct {
+		id   string
+		want role
+		ok   bool
+	}{
+		{"t-x.intake", roleIntake, true},
+		{"t-x.execute", roleExecute, true},
+		{"t-x.verify", roleVerify, true},
+		{"t-x.verify.g1", roleVerify, true},
+		{"t-x.verify.g1.g2", roleVerify, true},
+		{"t-x.execute.g12", roleExecute, true},
+		{"t-x", "", false},
+		{"t-x.g1", "", false},
+		{"t-x.verify.gg1", "", false},
+		{"t-x.verify.g", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, ok := runRole(c.id)
+		if got != c.want || ok != c.ok {
+			t.Errorf("runRole(%q) = (%q, %v), want (%q, %v)", c.id, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// TestJSONWithRetry pins the bounded re-ask: one prose reply recovers via
+// a single retry carrying the restated contract; persistent prose errors
+// up after jsonRetryLimit re-asks; session errors propagate immediately.
+func TestJSONWithRetry(t *testing.T) {
+	type out struct {
+		A int `json:"a"`
+	}
+	t.Run("prose then JSON recovers", func(t *testing.T) {
+		var calls []string
+		var v out
+		err := jsonWithRetry(func(note string) (string, error) {
+			calls = append(calls, note)
+			if len(calls) == 1 {
+				return "I'll now evaluate the deliverable.", nil
+			}
+			return `{"a": 7}`, nil
+		}, &v)
+		if err != nil || v.A != 7 {
+			t.Fatalf("err=%v v=%+v", err, v)
+		}
+		if len(calls) != 2 || calls[0] != "" || calls[1] != jsonRetryNote {
+			t.Fatalf("calls %q", calls)
+		}
+	})
+	t.Run("persistent prose errors after the bound", func(t *testing.T) {
+		n := 0
+		var v out
+		err := jsonWithRetry(func(string) (string, error) { n++; return "still prose", nil }, &v)
+		if err == nil {
+			t.Fatal("want parse error")
+		}
+		if n != 1+jsonRetryLimit {
+			t.Fatalf("sessions %d, want %d", n, 1+jsonRetryLimit)
+		}
+	})
+	t.Run("session error propagates", func(t *testing.T) {
+		var v out
+		wantErr := context.DeadlineExceeded
+		err := jsonWithRetry(func(string) (string, error) { return "", wantErr }, &v)
+		if err != wantErr {
+			t.Fatalf("err %v", err)
+		}
+	})
+}
+
+// TestDeriveKanban pins the derived-not-stored attention overlay: a
+// tombstoned run in the lineage forces "attention" over whatever the
+// pipeline last stored; otherwise the stored column stands.
+func TestDeriveKanban(t *testing.T) {
+	rs := func(states ...string) []runSummary {
+		var out []runSummary
+		for _, s := range states {
+			out = append(out, runSummary{State: s})
+		}
+		return out
+	}
+	if got := deriveKanban("verifying", rs("completed", "crashed", "tombstoned")); got != "attention" {
+		t.Fatalf("tombstoned lineage: %q", got)
+	}
+	if got := deriveKanban("executing", rs("completed", "running")); got != "executing" {
+		t.Fatalf("live lineage: %q", got)
+	}
+	if got := deriveKanban("done", nil); got != "done" {
+		t.Fatalf("no runs: %q", got)
+	}
+}

@@ -243,9 +243,28 @@ func (u *Surface) taskView(ctx context.Context, taskID string) (json.RawMessage,
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	v.Kanban = deriveKanban(v.Kanban, v.Runs)
 	out, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// deriveKanban overlays the stored kanban with what the run lineage
+// proves — derived, not stored (the S02.3 stalled pattern). A tombstoned
+// run means the recovery ladder exhausted ⚙ recovery.max_attempts (Spec
+// S02.5 step 3): the task needs eyes NOW, whatever phase the pipeline
+// last recorded — a dead lineage under a green column is a finding dying
+// in a log (Spec S07.7). The rich tombstone-review card remains the
+// recorded B0-4 deferral (B5/B6, Spec S15); this keeps the column honest
+// until then. (Found live at the B2 gate demo, 2026-07-20: a tombstoned
+// verify lineage sat under kanban "verifying" indefinitely.)
+func deriveKanban(stored string, runs []runSummary) string {
+	for _, r := range runs {
+		if r.State == "tombstoned" {
+			return "attention"
+		}
+	}
+	return stored
 }
