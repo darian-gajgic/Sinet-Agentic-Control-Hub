@@ -1,6 +1,6 @@
 # B0 gate — first cert + front chain on `sinet.tailfd0b1e.ts.net`
 
-Operator runbook, documented at P3-B0-5 and **executed only at the B0 gate** — nothing here has been run. It performs the two host-side steps the spec staged for this gate: the first TLS cert on the A1 hostname and the S01.4 front chain (`tailscale serve` → Caddy → `sinet-control` on 127.0.0.1). Spec anchors: S01.4 (chain shape, `/events` unbuffered, HTTP/2 at serve), S01.8 (hostname `sinet` = amendment A1; observables register), S01.9 (identity headers), S16.3 (Caddy row: pin + path-scoped license recorded at onboarding).
+Operator runbook, documented at P3-B0-5 for gate execution. **EXECUTED 2026-07-20 at the B2 gate (D2.2) — see the Execution record at the end**; the step-7 Caddyfile below is the corrected version applied to the host. It performs the two host-side steps the spec staged for this gate: the first TLS cert on the A1 hostname and the S01.4 front chain (`tailscale serve` → Caddy → `sinet-control` on 127.0.0.1). Spec anchors: S01.4 (chain shape, `/events` unbuffered, HTTP/2 at serve), S01.8 (hostname `sinet` = amendment A1; observables register), S01.9 (identity headers), S16.3 (Caddy row: pin + path-scoped license recorded at onboarding).
 
 Command syntax below was verified against the host's installed CLI (`tailscale` **1.98.8**, checked 2026-07-19, read-only). Ports carry no spec meaning (S01.4): this doc uses **8482** for `sinet-control` (the existing dev default) and **8481** for Caddy.
 
@@ -73,7 +73,13 @@ Command syntax below was verified against the host's installed CLI (`tailscale` 
    	auto_https off
    }
 
-   http://127.0.0.1:8481 {
+   # Any-host site on 8481: tailscale serve forwards the original ts.net Host
+   # header, so the site address must not host-match; bind pins the listener
+   # to loopback (P-T13-2: the only non-loopback listener on this host is
+   # tailscaled).
+   http://:8481 {
+   	bind 127.0.0.1
+
    	# The one SSE endpoint rides unbuffered (Spec S01.4: "/events unbuffered").
    	@sse path /events
    	handle @sse {
@@ -86,6 +92,8 @@ Command syntax below was verified against the host's installed CLI (`tailscale` 
    	}
    }
    ```
+
+   *(Corrected at execution — the originally documented `http://127.0.0.1:8481` site address bound `*:8481`: a Caddy site-address host is host-**matched**, not bound, and would also have missed requests carrying the forwarded ts.net Host header. See the Execution record.)*
 
 8. Apply and confirm Caddy binds loopback only (P-T13-2: the only non-loopback listener on this host stays `tailscaled`):
 
@@ -144,3 +152,14 @@ Command syntax below was verified against the host's installed CLI (`tailscale` 
 - **SPA serving through this chain** — the assets embed into the control binary at B6 (S01.5); nothing to configure here when they land.
 - **P-T13-1 post-wake serve health-check + remediation path** — S01.7 duty, designed with S11's privileged-surface work (B1+).
 - **Device grants** (trusted auto-login for personal devices) — machinery is live now via `POST /api/auth/grants`, but granting is a deliberate per-device operator decision; the default for every device is shared (PIN required), and nothing at this gate requires any grant.
+
+## Execution record — 2026-07-20 (B2 gate, D2.2; coordinator-driven, operator sudo window + explicit CT-acknowledgement "go")
+
+Steps 1–10 executed and verified; steps 11–12 pending the operator's production bootstrap login; step 13 due within a day. Findings and deviations, in execution order:
+
+- **Pre-step-4 discovery:** a stale Nexus-era serve entry (`/` → `https+insecure://127.0.0.1:8777`, dead backend — nothing listening) had survived the 2026-07-19 machine rename. Cleared with `sudo tailscale serve reset` before configuring 8481.
+- **The cert predates this gate.** Step 9 answered in 15 ms — TLS was already warm. Inspection: issued **2026-07-19 21:27:21 UTC** (Let's Encrypt, CN/SAN `sinet.tailfd0b1e.ts.net`, notAfter 2026-10-17, auto-renewed inside tailscaled). The leftover serve config minted it the moment the renamed FQDN went live — CT publication therefore happened 2026-07-19, a day before the operator's item-7 signature, which covers it retroactively (signed 2026-07-20, this session). STATE's 2026-07-19 "nothing is in CT logs yet" was already stale minutes after it was written. MagicDNS + the HTTPS-Certificates toggle were confirmed on (the pre-existing cert proves the latter).
+- **Step 7 defect, fixed in place:** the documented Caddyfile produced a **wildcard** listener (`*:8481`) and would have host-match-missed the forwarded ts.net Host header. Corrected to `http://:8481` + `bind 127.0.0.1` (the block above is the applied config); `ss` re-verified both 8481/8482 loopback-only (P-T13-2 ✓). Recorded in the Caddy lock entry too.
+- **Step 6 done:** caddy **2.6.2-14** from Ubuntu resolute/universe (apt install simulation-vetted first: +libnss3-tools only, nothing removed/upgraded). S16.3 `TBD-P3(pin at onboarding)` + path-scoped license resolved in the `components.lock` organ-unit entry — Apache-2.0 per the installed package's Debian copyright record (one vendored file dual Apache-2.0/BSD-3-Clause, a Go-stdlib borrow).
+- **Posture changed mid-execution (benign, coordinated):** steps 2–3 ran against a coordinator-started dev-mode process (`~/.local/state/sinet`, dev-default 8482) until the **parallel D2.1 session** installed the production units and cleanly SIGTERM'd it; the chain was then re-verified end-to-end against `sinet-control.service` (`/var/lib/sinet`, `bootstrap.conf` → 127.0.0.1:8482). Production-posture results match the runbook exactly: step 9 health ✓; step 10 `{"authenticated":false,"hint":{"device_login":"dariannixda@gmail.com"}}` ✓ (serve injection + S01.9 parse proven); `/events` without a cookie → **401** ✓. The superseded dev leftovers (`~/.local/state/sinet` empty bootstrap DB, `~/.local/bin/sinet` scratch binary) were left in place at operator preference — note `~/.local/bin` precedes `/usr/local/bin` on PATH, so a stale `sinet` CLI resolves to the scratch binary until it is removed.
+- **Serve config final state:** `https://sinet.tailfd0b1e.ts.net (tailnet only)` → `http://127.0.0.1:8481` (Caddy) → `127.0.0.1:8482` (the unit). "tailnet only" confirmed — funnel never enabled (D1 wall).
