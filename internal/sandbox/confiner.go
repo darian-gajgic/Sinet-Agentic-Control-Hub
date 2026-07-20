@@ -3,7 +3,6 @@ package sandbox
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
@@ -116,19 +115,24 @@ func (co *Composer) EgressPolicyFor(c Class, singleHost []string) (EgressPolicy,
 
 // Confine implements adapters.Confiner: it composes the sandbox for the run's
 // class around the engine's lowered spawn and returns the *exec.Cmd to start
-// plus a cleanup. The engine env is set INSIDE the sandbox via bwrap
-// --clearenv/--setenv (empty-env deny-by-default, S11.1); on the claude lane
-// the value on the credential channel is a sentinel, never the real model
-// token (D2/S11.5 — the real token rides the injection proxy). Class comes
-// from the run's compiled confinement (req.Class); dev-mode default is C1, the
-// strongest and simplest class.
+// plus a cleanup. It selects the ADOPTED srt path when the host has srt (the
+// ratified S11.1 primary — srt wraps the engine externally, adopt-don't-fork)
+// and falls back to the native direct composition (the S16.3 funeral plan)
+// when srt is absent, LOGGING which path is active. srt is a host-deferred
+// install (batches at the B2 gate, S16.3), so at B1 the native fallback
+// normally runs — dev-mode confinement keeps working, no regression.
+//
+// Either way the engine sees only a sentinel on the credential channel, never
+// the real model token (D2/S11.5 — the real token rides the injection proxy):
+// on the native path the lowered env is injected inside the sandbox via
+// --clearenv/--setenv (empty-env deny-by-default, S11.1); on the srt path srt
+// forwards the lowered env to the engine child. Class comes from the run's
+// compiled confinement (req.Class); dev-mode default is C1, the strongest and
+// simplest class.
 func (co *Composer) Confine(req adapters.StartRequest, spec adapters.SpawnSpec) (*exec.Cmd, func(), error) {
 	class := Class(req.Class)
 	if class == "" {
 		class = C1
-	}
-	if err := co.caps.require(); err != nil {
-		return nil, nil, err // fail closed: the boundary cannot be composed (S16.3)
 	}
 	sp := Spawn{
 		Argv:         spec.Argv,
@@ -138,33 +142,40 @@ func (co *Composer) Confine(req adapters.StartRequest, spec adapters.SpawnSpec) 
 		RWExchange:   spec.RWExchange,
 		EnginePrefix: spec.EnginePrefix,
 	}
-	argv, seccomp, err := Compose(class, sp, co.caps)
+	egress, err := co.egressForClass(class)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	cmd := exec.Command(SystemBwrap, argv...)
-	// bwrap itself needs almost no environment (it is given an absolute path
-	// and every sandbox var via --setenv); a bare PATH keeps it robust.
-	cmd.Env = []string{"PATH=/usr/bin:/bin"}
-
-	var cleanup func()
-	if len(seccomp) > 0 {
-		// Pass the compiled BPF on fd 3 (seccompFD) via a pipe — no disk
-		// artifact. The child inherits its own copy at fork; the parent's read
-		// end is disposable after Start. A tiny program never blocks the pipe.
-		r, w, err := os.Pipe()
-		if err != nil {
-			return nil, nil, fmt.Errorf("sandbox: seccomp pipe: %w", err)
-		}
-		cmd.ExtraFiles = []*os.File{r} // → child fd 3
-		go func() {
-			_, _ = w.Write(seccomp)
-			_ = w.Close()
-		}()
-		cleanup = func() { _ = r.Close() }
-	} else {
-		cleanup = func() {}
+	// req.WorkDir (platform-owned scratch, S03.5) holds the srt config file when
+	// the srt path is active; empty falls back to a fresh temp dir in BuildPlan.
+	plan, err := BuildPlan(co.caps, class, sp, egress, req.WorkDir)
+	if err != nil {
+		return nil, nil, err // fail closed: the boundary cannot be composed (S16.3)
 	}
-	return cmd, cleanup, nil
+	co.log.Info("per-run sandbox composed",
+		"run_id", req.RunID, "class", string(class),
+		"path", plan.Path, "srt_path", co.caps.SrtPath)
+
+	cmd := exec.Command(plan.Bin, plan.Argv...)
+	cmd.Env = plan.Env
+	cmd.ExtraFiles = plan.ExtraFiles
+	return cmd, plan.Cleanup, nil
+}
+
+// egressForClass compiles the egress policy that feeds srt's domain allow-list
+// (the S11.4 convenience layer). C1 has no egress and needs no ⚙ read; egress
+// classes read the four ⚙ keys via EgressPolicyFor. The C0 single-host list is
+// not carried on the B1 confiner seam (it arrives with the worker record when
+// that seam widens), so C0's srt allow-list is empty here — inert anyway until
+// the deferred host egress substrate lands (S11.4/S11.8), and fully covered by
+// the pure SrtConfigFor unit test.
+func (co *Composer) egressForClass(c Class) (EgressPolicy, error) {
+	prof, err := Profile(c)
+	if err != nil {
+		return EgressPolicy{}, err
+	}
+	if !prof.Network.needsEgressSubstrate() {
+		return EgressPolicy{Mode: prof.Network}, nil // C1: deny-all, no ⚙ read
+	}
+	return co.EgressPolicyFor(c, nil)
 }

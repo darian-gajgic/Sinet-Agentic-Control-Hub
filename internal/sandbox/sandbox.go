@@ -20,12 +20,22 @@
 // compose without privilege (S11.8) — verified on the v0 host (S11.2).
 //
 // Adopt-don't-fork (S16.1): the engines are configured, never modified. srt
-// (Anthropic's sandbox-runtime) is the ratified wrapper for this core
-// [S16.3], but its dev-mode realization here is the direct composition of
-// the same kernel primitives the stack already ratifies — exactly srt's own
-// funeral-plan rebuild path [S16.3 sandbox-runtime row]. srt is therefore
-// NOT consumed at B1 and materializes no lock entry; the OS-mechanism entry
-// (bubblewrap/seccomp/Landlock/netns) does, since the stack consumes those.
+// (Anthropic's Apache-2.0 sandbox-runtime) is ADOPTED as the ratified PRIMARY
+// composition path for this core [S11.1 "Adoption"; G2 D2.2; S16.3
+// sandbox-runtime row] — it wraps the engine EXTERNALLY (see srt.go), supplying
+// bwrap+seccomp + the S11.4 netns-removed UDS-to-host-proxy egress shape + a
+// Node-safe positive syscall allow-list. This native direct composition
+// (Compose → bwrap argv) is RETAINED but relabeled to its correct spec role:
+// the S16.3 funeral-plan / FALLBACK — the ratified "direct composition of the
+// same kernel primitives" replacement path — selected only when srt is absent.
+// srt is a host-deferred install (its activation batches at the B2 gate with
+// the egress substrate + run@ install, S16.3), so at B1 the native fallback
+// normally runs: dev-mode confinement keeps working, no regression. The
+// confiner (confiner.go) / launcher (run_launch.go) select srt-when-present via
+// BuildPlan and log which path is active. srt carries a `library`
+// components.lock entry (a Node CLI — no `modules` claim); the OS-mechanism
+// entry (bubblewrap/seccomp/Landlock/netns) also does, since both paths ride
+// those kernel primitives.
 package sandbox
 
 import (

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -76,43 +77,46 @@ func RunLaunch(args []string, stdout, stderr io.Writer) int {
 	}
 
 	caps := Probe()
-	if err := caps.require(); err != nil {
-		fmt.Fprintf(stderr, "sinet run-launch: %v\n", err)
-		return 1
-	}
+	class := Class(rec.Class)
 	sp := Spawn{
 		Argv: rec.Argv, Env: rec.Env, Workspace: rec.Workspace,
 		ROConfig: rec.ROConfig, RWExchange: rec.RWExchange, EnginePrefix: rec.EnginePrefix,
 	}
-	argv, seccomp, err := Compose(Class(rec.Class), sp, caps)
+	// Egress for the srt path: the host launcher has no settings registry, so
+	// the per-class domain allow-list (C0 single host / C2 registries) is
+	// carried by the compiled spool record when the DEFERRED host egress
+	// substrate lands at B2 — until then the class profile's mode is enough
+	// (C1 deny-all; C0/C2 an empty allow-list, inert without the substrate).
+	prof, err := Profile(class)
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet run-launch: %v\n", err)
+		return 1
+	}
+	// The srt config file (srt path only) lives beside the spool record.
+	plan, err := BuildPlan(caps, class, sp, EgressPolicy{Mode: prof.Network}, filepath.Dir(*job))
 	if err != nil {
 		fmt.Fprintf(stderr, "sinet run-launch: compose: %v\n", err)
 		return 1
 	}
+	defer plan.Cleanup()
 
 	if *printOnly {
 		// Inspection aid: show the exact composed sandbox invocation without
-		// running it (the operator can audit a job's confinement).
-		fmt.Fprintf(stdout, "class=%s seccomp=%d bytes landlock-abi=%d\n", rec.Class, len(seccomp), caps.LandlockABI)
-		fmt.Fprintf(stdout, "%s %s\n", SystemBwrap, strings.Join(argv, " "))
+		// running it (the operator can audit a job's confinement + which path).
+		fmt.Fprintf(stdout, "path=%s class=%s landlock-abi=%d\n", plan.Path, rec.Class, caps.LandlockABI)
+		fmt.Fprintf(stdout, "%s %s\n", plan.Bin, strings.Join(plan.Argv, " "))
 		return 0
 	}
 
-	cmd := exec.Command(SystemBwrap, argv...)
-	cmd.Env = []string{"PATH=/usr/bin:/bin"}
+	// Host evidence: which composition path is active (srt primary / native
+	// fallback) is recorded to the unit's journal.
+	fmt.Fprintf(stderr, "sinet run-launch: composed via %s path (S11.1 srt primary / S16.3 native fallback)\n", plan.Path)
+	cmd := exec.Command(plan.Bin, plan.Argv...)
+	cmd.Env = plan.Env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if len(seccomp) > 0 {
-		r, w, err := os.Pipe()
-		if err != nil {
-			fmt.Fprintf(stderr, "sinet run-launch: seccomp pipe: %v\n", err)
-			return 1
-		}
-		cmd.ExtraFiles = []*os.File{r}
-		go func() { _, _ = w.Write(seccomp); _ = w.Close() }()
-		defer r.Close()
-	}
+	cmd.ExtraFiles = plan.ExtraFiles
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

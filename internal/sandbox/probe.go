@@ -49,6 +49,17 @@ type Capabilities struct {
 	// the enforcement path when it lands.
 	LandlockABI int
 
+	// Srt is set when the adopted `sandbox-runtime` CLI (S11.1 Adoption; S16.3
+	// library row) is present — SrtPath is its resolved binary, SrtVersion the
+	// best-effort `srt --version`. When set, the confiner composes VIA srt (the
+	// ratified primary); when clear, it falls back to the native direct
+	// composition (the S16.3 funeral plan). srt is a host-deferred install
+	// (batches at the B2 gate), so at B1 this is normally clear and the native
+	// fallback runs — no regression.
+	Srt        bool
+	SrtPath    string
+	SrtVersion string
+
 	// Notes accumulates human-readable probe outcomes for the packet
 	// evidence and the lock entry's probe record.
 	Notes []string
@@ -86,6 +97,18 @@ func Probe() Capabilities {
 		c.Notes = append(c.Notes, "Landlock ABI "+strconv.Itoa(c.LandlockABI)+" (enforcement is a B1 seam; boundary is bwrap+netns)")
 	} else {
 		c.Notes = append(c.Notes, "Landlock unsupported — SANCTIONED SKIP")
+	}
+	if p, v, ok := probeSrt(); ok {
+		c.Srt = true
+		c.SrtPath = p
+		c.SrtVersion = v
+		vs := v
+		if vs == "" {
+			vs = "version unknown"
+		}
+		c.Notes = append(c.Notes, "sandbox-runtime (srt) present at "+p+" ("+vs+") — ADOPTED primary composition path (S11.1)")
+	} else {
+		c.Notes = append(c.Notes, "sandbox-runtime (srt) absent — native direct composition is the active funeral-plan fallback (S16.3); srt install batches at the B2 host gate")
 	}
 	return c
 }

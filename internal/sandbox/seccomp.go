@@ -12,17 +12,21 @@ import (
 // emitted as a classic-BPF sock_filter program and loaded into the sandbox by
 // bwrap --seccomp <fd>. It is defense-in-depth, not the boundary (S11.1).
 //
-// Reading, section-cited (S11.1; CONVENTIONS new-convention rule): the S11.1
-// "allowlist-only, never denylist" STRUCTURAL rule is scoped to "Mounts,
-// tools, and egress" (S11.1 second structural bullet) — not to the syscall
-// profile, which S11.1 separately describes by the dangerous calls it "kills".
-// A full positive syscall allowlist safe for a Node engine is exactly srt's
-// contribution (S16.3 sandbox-runtime), which is NOT consumed at B1 (direct
-// composition per srt's funeral-plan rebuild path). So the B1 dev-mode profile
-// is a default-ALLOW filter that KILLS the S11.1-named cross-process-inspection
-// and tracing calls — safe for the engine, testable, and a real defense-in-
-// depth layer. The generator also supports a positive allow-set (allowOnly)
-// so the srt-equivalent profile drops in behind the same seam later.
+// SECCOMP-PARITY DISPOSITION (this is the FALLBACK's profile). srt — the
+// ADOPTED primary composition path (S11.1 Adoption; srt.go) — supplies its own
+// Node-safe POSITIVE syscall allow-list via its apply-seccomp binary, so when
+// srt is active this native profile is not used. This file is the seccomp of
+// the S16.3 funeral-plan / NATIVE FALLBACK path (bwrap direct composition).
+// Does S11 demand the fallback be brought to positive-allowlist parity? No:
+// reading, section-cited (S11.1) — the "allowlist-only, never denylist"
+// STRUCTURAL rule is scoped to "Mounts, tools, and egress" (S11.1 second
+// structural bullet), NOT to the syscall profile, which S11.1 separately
+// describes by the dangerous calls it "kills". So the fallback is faithfully a
+// default-ALLOW filter that KILLS the S11.1-named cross-process-inspection and
+// tracing calls — a real defense-in-depth layer, and spec-sufficient for the
+// fallback without a full native positive allow-list (not gold-plated). The
+// generator still supports a positive allow-set (allowProgram) behind the same
+// seam, so parity can be added later if S11 ever demands it of the fallback.
 
 // Classic-BPF opcodes (linux/filter.h). Hardcoded: x/sys/unix does not export
 // the BPF_* class/mode constants, only the seccomp return actions and the
@@ -50,8 +54,9 @@ type sockFilter = unix.SockFilter
 
 // deniedSyscalls is the S11.1-named kill set: ptrace and the cross-process
 // memory-inspection pair. These are the concrete "kills ptrace/
-// process_vm_readv" calls; "odd execve" arg-inspection needs the srt allowlist
-// (deferred). Same set for every v0 class — the profile is structural, not ⚙.
+// process_vm_readv" calls; "odd execve" arg-inspection is covered by srt's
+// positive allow-list on the adopted primary path (srt.go). Same set for every
+// v0 class — the fallback profile is structural, not ⚙.
 func deniedSyscalls() []uint32 {
 	return []uint32{
 		uint32(unix.SYS_PTRACE),
@@ -96,8 +101,10 @@ func denyProgram(denied []uint32) []sockFilter {
 }
 
 // allowProgram builds a positive allow-list filter (default EPERM) — the
-// srt-equivalent shape, wired behind the same seam for when srt's audited
-// Node-safe allow-set is adopted. Unused at B1; kept so the profile can flip
+// srt-equivalent shape. srt's own audited Node-safe allow-set governs the
+// ADOPTED primary path; this seam mirrors it for the native fallback if S11
+// ever demands fallback parity (it does not today — see the parity disposition
+// at the top of this file). Unused at B1; kept so the fallback profile can flip
 // without touching the composer.
 func allowProgram(allowed []uint32) []sockFilter {
 	errnoEPERM := uint32(unix.SECCOMP_RET_ERRNO) | (uint32(unix.EPERM) & uint32(unix.SECCOMP_RET_DATA))

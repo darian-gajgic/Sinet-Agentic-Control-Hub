@@ -20,9 +20,10 @@
 // At-rest encryption (reading, section-cited — S11.5; CONVENTIONS
 // new-convention rule): S11.5's ratified at-rest format is systemd-creds +
 // sops/age. systemd-creds is host-integrated (a DEFERRED host change — no host
-// changes at B1) and filippo.io/age v1.3.1 pulls a non-trivial module tree,
-// so — mirroring the srt decision (compose directly; adopt the wrapper when
-// consumed) — sops/age are NOT consumed at B1 and materialize no lock entry.
+// changes at B1) and filippo.io/age v1.3.1 pulls a non-trivial module tree, so
+// — like the other host-integrated changes that batch at the B2 gate (the srt
+// install, the egress substrate) — sops/age are NOT consumed at B1 and
+// materialize no lock entry.
 // The dev-mode store is real per-person encryption at rest via stdlib
 // AES-256-GCM under a per-broker master key in a 0700 host-only dir (S11.5:
 // "0700, host-only, never in any sandbox"). Adopting age (+ deciding sops) is
