@@ -110,7 +110,7 @@
     curl -s -b ~/sinet-demo/cookies http://127.0.0.1:8420/api/runs/$T.execute/receipt
     curl -s -b ~/sinet-demo/cookies http://127.0.0.1:8420/api/runs/$T.verify/receipt
     ```
-    Expected: three receipts, purpose-tagged **ceremony / execution / verification** respectively (S06.10/S07.11 itemization), full measured token breakdowns, priced **UNPRICED tier-5** (empty price table — the S10.1 honest posture; the genai-prices seed is a flagged follow-up).
+    Expected: three receipts, purpose-tagged **ceremony / execution / verification** respectively (S06.10/S07.11 itemization), full measured token breakdowns at **approximation tier 1 (measured)**, and every call **unpriced** (`UnpricedCalls` = all, `PricedUSD` 0, price table `empty-v0` — the S10.1 honest posture; the genai-prices seed is a flagged follow-up). *(Script fix 2026-07-20: the original line said "UNPRICED tier-5", conflating the S10 approximation tier — token-count provenance — with pricing; measured tokens are tier 1 even when unpriced.)*
 
 15. **Durability leg:** Ctrl+C in Terminal A (clean shutdown log, exit 0) → start it again (same command). Expected: `integrity_check ok`, recovery-ladder pass classifies nothing (all runs terminal), the task view and receipts read back identically — the whole walk lives in `platform.db`, not in any process memory.
 
