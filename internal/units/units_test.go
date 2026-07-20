@@ -93,7 +93,7 @@ func TestBrokerAndPortpoolUnits(t *testing.T) {
 	if broker.Draft {
 		t.Error("broker unit marked draft (ExecStart is stable from B0-1)")
 	}
-	for _, want := range []string{"ExecStart=/usr/local/bin/sinet broker", "Before=sinet-control.service", "Restart=on-failure"} {
+	for _, want := range []string{"ExecStart=/usr/local/bin/sinet broker", "Before=sinet-control.service", "Restart=on-failure", "StateDirectory=sinet"} {
 		if !strings.Contains(broker.Content, want) {
 			t.Errorf("sinet-broker.service lacks %q", want)
 		}

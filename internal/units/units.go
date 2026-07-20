@@ -169,6 +169,12 @@ After=network.target
 Type=exec
 ExecStart=%s broker
 Restart=on-failure
+# Broker state root (socket + per-person stores): systemd provisions
+# /var/lib/sinet and exports $STATE_DIRECTORY, which the broker's
+# defaultStateDir honors — without it, ProtectSystem=strict leaves the
+# broker no writable path and it dies at first mkdir (found at the B2-gate
+# host install; Spec S01.2/S01.11 zero-custom-path-code posture).
+StateDirectory=sinet
 `, bin)
 	b.WriteString(staticUser)
 	b.WriteString(hardening)
