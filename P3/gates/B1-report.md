@@ -1,6 +1,8 @@
 # B1 phase gate — report
 
-**Status: OPEN — awaiting operator.** Written 2026-07-20 at B1 queue completion (4/4 packets done, coordinator-validated, CI green on every push). Contract: `Spec/core-architecture-v1.md` v1 (tag `spec-v1`) + amendment A1. Build record: `P3/STATE.md`; per-packet readings in commit bodies; spike results in `P3/measurements/`.
+**Status: ANSWERED 2026-07-20 (all 5 decisions, operator, step-by-step) — CLOSING PENDING one remediation.** Engine bump done; srt-adoption remediation packet **P3-B1-3R** in flight; B1 formally closes and B2 opens once it lands + validates. Gate record at the bottom of this file.
+
+**(historical) Status: OPEN — awaiting operator.** Written 2026-07-20 at B1 queue completion (4/4 packets done, coordinator-validated, CI green on every push). Contract: `Spec/core-architecture-v1.md` v1 (tag `spec-v1`) + amendment A1. Build record: `P3/STATE.md`; per-packet readings in commit bodies; spike results in `P3/measurements/`.
 
 ## 1. What shipped (execution substrate, S19.5 B1)
 
@@ -55,3 +57,15 @@ go test ./internal/adapters/claudecli/ -run E2E -tags engine -v
 - Deferred at B2 from the B0 gate: all host installs (units, cert runbook, Caddy) + logind sleep-inhibitor wiring.
 
 **To close:** answer §4 (free text is fine); the coordinator records answers here + STATE, then opens B2. B2 is the walking-skeleton phase — its gate is the live intake→execute→checkpoint→receipt demo on this machine, which is also the natural moment the §4/§5 host-side items come due.
+
+---
+
+## Gate record (operator answers, as given — step-by-step, 2026-07-20)
+
+1. **Engine pin — BUMP to 2.1.215. DONE** (commit `fef17c0`). S03.3 deliberate-bump procedure: conformance green at the new pin (`TestPinMatchesLock` + tier-R real-engine now matches; enum rejection + full-argv dry probe); `claudecli.Pin` + lock entry moved in lockstep; the S16.3 row text (2.1.214) is the freeze-time value, the lock is the living pin per S16.2. 2.1.215 fixes the S03.4 parallel-gate trap; worker-revalidation trigger fires against an empty set (workforce is B3).
+2. **`sandbox-runtime` — PATH A: adopt srt per spec.** Reclassified from a bogus "ratify the deviation" to a conformance defect; operator chose adoption over a spec amendment. srt live-verified healthy (Apache-2.0, v0.0.66-line, TS/Node CLI, 0.0.x rapid preview). Remediation packet **P3-B1-3R** (opus) running: srt becomes the ratified primary composition core; the native direct-composition is retained **relabeled to its correct S16.3 funeral-plan/fallback role** (no dev-mode confinement regression); srt lock entry materialized; live srt activation deferred to the B2 host batch. **This is what gates B1's formal close.**
+3. **At-rest broker crypto — DEFER to B2** (option b). Dev keeps stdlib AES-256-GCM; `age` adoption (+`sops` decision) lands at B2 with the host-install batch and coheres with operator age-escrow item 6.
+4. **Non-⚙ structural constants — KEEP as constants now**, folded into the **standing operator directive** ("settings tab shows/edits everything") recorded at the top of STATE + auto-memory `settings-tab-see-change-everything`; the later clamped-S18 amendment makes them (and the auth numbers) operator-editable. Interim, not final.
+5. **Packet readings — RATIFIED EN BLOC** (~24 across B1-1..B1-4; section-cited in commit bodies; durable ones in CONVENTIONS §10/§12 — §12's srt mislabeling is corrected by P3-B1-3R).
+
+**Hands-on items:** probe batch (`PROBES.md`) stays open homework, due before B2's gate relies on the reboot-survival answer. Z.AI calibration (item 1) formally **deferred until a Z.AI lane exists** (a later adapter packet) — nothing to calibrate before then.
