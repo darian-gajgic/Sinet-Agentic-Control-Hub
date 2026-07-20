@@ -44,6 +44,18 @@ func spikeGuard(t *testing.T) string {
 	return hook
 }
 
+// spikeModel is the reconfirm target model. B1-4 ran the B1-1 cheapest
+// ("haiku") while the spec left "the default worker model" unpinned; S08
+// fixed it at B3-3 (worker.DefaultDutyMap execution seat), so the B3-3
+// re-run passes it explicitly via SINET_B1_4_MODEL (see
+// P3/measurements/2026-07-21-serialize-by-deny-reconfirm-s08.md).
+func spikeModel() string {
+	if m := os.Getenv("SINET_B1_4_MODEL"); m != "" {
+		return m
+	}
+	return "haiku"
+}
+
 // spikeAdapter builds the shipped adapter wired to the real gate hook.
 func spikeAdapter(t *testing.T, hookBin string) *Adapter {
 	t.Helper()
@@ -102,7 +114,7 @@ func TestSpikeSingleGatedDefer(t *testing.T) {
 	a := spikeAdapter(t, hook)
 	req := adapters.StartRequest{
 		RunID: "b14-single", UserID: "op",
-		Model:   "haiku",
+		Model:   spikeModel(),
 		Cwd:     t.TempDir(),
 		WorkDir: t.TempDir(),
 		Worker: adapters.CompiledWorker{
@@ -147,7 +159,7 @@ func TestSpikeParallelSerializeByDeny(t *testing.T) {
 		}
 		req := adapters.StartRequest{
 			RunID: "b14-par", UserID: "op",
-			Model:   "haiku",
+			Model:   spikeModel(),
 			Cwd:     cwd,
 			WorkDir: t.TempDir(),
 			Worker: adapters.CompiledWorker{
@@ -195,7 +207,7 @@ func TestSpikeDeferResumeRoundTrip(t *testing.T) {
 
 	req := adapters.StartRequest{
 		RunID: "b14-resume", UserID: "op",
-		Model:   "haiku",
+		Model:   spikeModel(),
 		Cwd:     t.TempDir(),
 		WorkDir: t.TempDir(),
 		Worker: adapters.CompiledWorker{
@@ -258,7 +270,7 @@ func TestSpikeCaptureRawFixtures(t *testing.T) {
 			}
 		}
 		req := adapters.StartRequest{
-			RunID: "raw-" + name, UserID: "op", Model: "haiku",
+			RunID: "raw-" + name, UserID: "op", Model: spikeModel(),
 			Cwd: cwd, WorkDir: t.TempDir(),
 			Worker: adapters.CompiledWorker{
 				Prompt: prompt, ToolAllowlist: gated, GatedTools: gated,

@@ -48,6 +48,12 @@ type Pipeline struct {
 	Utility    Utility
 	SpotCheck  SpotCheck
 
+	// Router is the S08.8 selection seam (B3-3): the approval card carries
+	// the selected worker + plain-language reason PRE-execution, with
+	// re-route/pin on the answer (route.go). Nil = test-only posture (no
+	// routing block; the composition root always wires it).
+	Router Router
+
 	// Fingerprint supplies the current freshness fingerprint for the
 	// approval staleness check (G1 Def.5; S02 owns the durable set).
 	// Optional; nil restricts staleness to the age trigger.
@@ -658,6 +664,13 @@ func (p *Pipeline) phaseApproval(ctx context.Context, st *State, pair *Pair) (bo
 	if len(pair.Spec.Clarifications) > 0 {
 		return false, pair, ErrMarkersOpen
 	}
+	// S08.8 selection runs BEFORE the card is built so the selected worker
+	// and its plain-language reason are visible pre-execution (the no-fit
+	// two-stage offer rides the same card; a pinned selection survives
+	// re-planning recomputes).
+	if err := p.computeRouting(ctx, st, pair); err != nil {
+		return false, pair, err
+	}
 	if st.Band {
 		// Zero-interaction band: the pipeline still ran — SPEC and
 		// degenerate PLAN exist in the ledger, ungated; no blocking gate,
@@ -868,8 +881,12 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 		Estimate: pair.Plan.Est, SpecRef: st.SpecRef, PlanRef: st.PlanRef,
 	}
 	return &Card{Kind: CardApproval, Approval: &ApprovalBody{
-		Layer1:  l1,
-		Layer2:  l2,
+		Layer1: l1,
+		Layer2: l2,
+		// The S08.8 selection block: worker + plain-language reason, the
+		// re-route candidates, and the no-fit two-stage offer — visible and
+		// overridable pre-execution.
+		Routing: st.Routing,
 		Actions: []string{ActionApprove, ActionRePlan, ActionReInterview, ActionCancel},
 	}}, nil
 }

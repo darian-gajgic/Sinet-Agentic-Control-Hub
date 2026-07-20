@@ -97,6 +97,12 @@ func (c Class) ladderRank() (int, bool) {
 // isV0 reports whether the class ships at v0 (C0–C2 — S11.6; 15.1).
 func (c Class) isV0() bool { return c == C0 || c == C1 || c == C2 }
 
+// LadderRank exposes the S5 ladder position for the S08.8 selection
+// comparison ("confinement compatibility with the plan's declared class —
+// equal or tighter only", whose mechanics S11 owns). False = unknown class
+// (never passes a comparison).
+func (c Class) LadderRank() (int, bool) { return c.ladderRank() }
+
 // NetMode is the per-class egress posture (Spec S11.6 network column).
 type NetMode string
 

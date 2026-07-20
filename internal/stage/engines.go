@@ -398,12 +398,21 @@ func (s *Skeleton) engineRevise(ctx context.Context, pkg verify.RetryPackage) (v
 			"Fix EXACTLY the named problems; never regenerate blind; change nothing already correct.\n"+
 			"Output ONLY the complete corrected deliverable content — no commentary, no JSON wrapper.\n\n=== retry package ===\n%s\n",
 		pkg.Round, pkgJSON)
+	// Rework regenerates the DELIVERABLE — it rides the task's recorded
+	// S08.8 selection (the execution seat), not the ceremony seat; absent a
+	// record (test posture) modelFor falls through as documented.
+	reviseModel, reviseWindow := "", int64(0)
+	if st, err := s.pipe.LoadState(ctx, pkg.Deliverable.TaskID); err == nil && st.Routing != nil {
+		reviseModel, reviseWindow = st.Routing.Model, st.Routing.WindowTokens
+	}
 	res, err := s.Session(ctx, SessionInput{
 		RunID:        pkg.Deliverable.RunID,
 		Stage:        fmt.Sprintf("revise-r%d", pkg.Round),
 		Assemble:     false,
 		Instructions: instructions,
 		Class:        "C1",
+		Model:        reviseModel,
+		WindowTokens: reviseWindow,
 	})
 	if err != nil {
 		return verify.Deliverable{}, fmt.Errorf("revise session: %w", err)

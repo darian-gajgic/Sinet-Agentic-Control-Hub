@@ -59,6 +59,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // The stage-runtime ⚙ keys (Spec S05.3; declared in the S18 registry since
@@ -91,22 +92,12 @@ const (
 // channel exists would fake the mechanism.
 const keyRecitationInterval = "context.recitation_interval_turns"
 
-// anthropicContextWindowTokens is the Anthropic-lane model context window
-// the stage-fit budget measures against (Spec S05.3 "the lane's
-// pinned-model context window"). A model FACT, not an operator ⚙ (S18
-// declares no window key); the per-model window record is Spec S08's worker
-// registry (B3) — until it lands, the current Anthropic production models
-// all carry a 200k window and this single documented constant is the
-// honest dev posture (flagged to the B2 gate; the standing settings-tab
-// directive applies). Recalibration per model generation is the S14 eval
-// machinery's (Spec S05.3).
-const anthropicContextWindowTokens = 200_000
-
-// DefaultModel is the dev-mode execution/ceremony model until Spec S08
-// worker/model selection lands (B3). The cheap frontier model of the B1-1
-// live-smoke precedent; overridable per Config.Model. A documented seam
-// stub, not a routing decision — S08 owns selection.
-const DefaultModel = "claude-haiku-4-5"
+// The B2-4 model/window constants are RETIRED (B3-3): the model comes from
+// Spec S08.8 selection (worker execution profiles resolved against the
+// duty map — worker.DefaultDutyMap at v0), and the per-model context-window
+// record rides the duty-map seat rows (worker.Seat.WindowTokens — the
+// "worker registry" home the B2-4 constant's comment named). Config.Model
+// remains as the dev/test override only.
 
 // Run-role suffixes (the walking-skeleton run-naming convention; intake
 // fixed `<task>.intake` at B2-2 — CONVENTIONS §14; the skeleton fixes
@@ -157,12 +148,30 @@ type Config struct {
 	// deferred since B1-2, CONVENTIONS §11).
 	Adapters map[string]adapters.Adapter
 
-	// Substrate/Lane/Model select the engine for skeleton-created runs
-	// until Spec S08 routing lands (B3). Defaults: claude-cli / anthropic /
-	// DefaultModel.
+	// Substrate/Lane name the ceremony substrate (Spec S03.2). Model, when
+	// set, is a dev/test OVERRIDE of every duty seat and selection result —
+	// production leaves it empty and Spec S08.8 selection + the duty map
+	// decide (B3-3).
 	Substrate string
 	Lane      string
 	Model     string
+
+	// Workers is the S08 worker store; wiring it activates S08.8 selection
+	// (the Router built by New over DutyMap/Coverage below). NIL IS A
+	// TEST-ONLY POSTURE — the composition root always wires it at B3-3 —
+	// under which cards carry no routing block and dispatch runs the
+	// generalist duty-map default, loudly logged.
+	Workers *worker.Store
+	// DutyMap is the requester duty-map view (S06.10 recommended default +
+	// per-user override at its surface, B6/v1). Nil = worker.DefaultDutyMap.
+	DutyMap worker.DutyMap
+	// RoutePressure is the D5 flat-lane ordering input (consumption
+	// pressure, never dollars); nil short-circuits with a single covered
+	// lane. metering.PressureGauge adapts to it at the composition root.
+	RoutePressure worker.PressureReader
+	// TieBreak is the S12 local-duty tie-break seam (B4; nil = the
+	// deterministic degraded order with the absence recorded).
+	TieBreak worker.TieBreaker
 
 	// Confiner wraps engine spawns in the composed per-run sandbox (Spec
 	// S11). NIL IS THE SANCTIONED DEV POSTURE (the B1-1 unconfined dev

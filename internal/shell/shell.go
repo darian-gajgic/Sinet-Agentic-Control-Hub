@@ -269,6 +269,13 @@ func Run(ctx context.Context, opts Options) error {
 			Ledger:      taskLedger,
 			Settings:    reg,
 			Knowledge:   &memory.Source{S: memStore},
+			// S08.8 selection goes live (B3-3): the router over the worker
+			// store, duty-map recommended defaults, flat-rate coverage on
+			// the configured lane, consumption pressure as the flat-lane
+			// ordering input (D5: never dollars), the S12 tie-break seam
+			// absent until B4.
+			Workers:       workStore,
+			RoutePressure: routePressure{g: metering.NewPressureGauge(db, reg)},
 			Adapters: map[string]adapters.Adapter{
 				// The Anthropic lane (Spec S03.2): the pinned `claude` CLI
 				// resolved via PATH; conformance vs the components.lock pin
@@ -619,4 +626,22 @@ func (m memoryOverlays) OverlaySlice(ctx context.Context, owner, templateID stri
 		})
 	}
 	return items, nil
+}
+
+// routePressure adapts the S10.4 consumption-pressure gauge to the S08.8
+// flat-lane ordering seam (D5: among flat-rate lanes selection uses
+// consumption pressure, never dollars). Dev-mode budget posture is
+// undeclared (S10.4), under which the weighted consumption itself is the
+// comparable figure.
+type routePressure struct{ g *metering.PressureGauge }
+
+func (p routePressure) Pressure(ctx context.Context, owner, lane string) (float64, error) {
+	gauge, err := p.g.Read(ctx, owner, lane, metering.UndeclaredBudget())
+	if err != nil {
+		return 0, err
+	}
+	if gauge.Applicable {
+		return gauge.Pressure, nil
+	}
+	return gauge.WeightedConsumption, nil
 }

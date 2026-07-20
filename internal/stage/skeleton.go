@@ -21,6 +21,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // Admitter is the scheduler surface the skeleton drives: the sole run
@@ -34,10 +35,18 @@ type Admitter interface {
 
 // Skeleton is the walking-skeleton composition (see the package comment).
 type Skeleton struct {
-	cfg    Config
-	driver *adapters.Driver
-	pipe   *intake.Pipeline
-	sched  Admitter
+	cfg     Config
+	driver  *adapters.Driver
+	pipe    *intake.Pipeline
+	sched   Admitter
+	dutyMap worker.DutyMap
+	// router is the S08.8 selection engine (nil in the test-only
+	// no-Workers posture; router.go documents the degraded default).
+	router *worker.Router
+	// helpers tracks live helper sessions per coordinator run (S04.4 ⚙
+	// orchestration.max_concurrent_helpers; in-process — helper sessions
+	// die with the process, and death is salvage, S04.5).
+	helpers helperCounter
 }
 
 var _ scheduler.Dispatcher = (*Skeleton)(nil)
@@ -69,6 +78,25 @@ func New(cfg Config) (*Skeleton, error) {
 		return nil, fmt.Errorf("stage: configured substrate %q has no registered adapter", cfg.Substrate)
 	}
 	s := &Skeleton{cfg: cfg}
+	s.dutyMap = cfg.DutyMap
+	if s.dutyMap == nil {
+		s.dutyMap = worker.DefaultDutyMap()
+	}
+	if cfg.Workers != nil {
+		// The S08.8 selection engine over the worker store. Coverage at v0:
+		// the configured lane is the owner's flat-rate lane; the local tier
+		// is absent until B4; the metered-exception list is EMPTY (G1 P7) —
+		// MeteredAllowed stays nil so the metered branch structurally
+		// refuses. Pressure orders multiple flat lanes (D5: consumption
+		// pressure, never dollars) — moot with one lane, wired regardless.
+		s.router = &worker.Router{
+			Store:    cfg.Workers,
+			DutyMap:  s.dutyMap,
+			Coverage: worker.Coverage{FlatRateLanes: []string{cfg.Lane}},
+			TieBreak: cfg.TieBreak,
+			Pressure: cfg.RoutePressure,
+		}
+	}
 	s.driver = &adapters.Driver{
 		Runs:         cfg.Runs,
 		Checkpoints:  cfg.Checkpoints,
@@ -96,6 +124,9 @@ func New(cfg Config) (*Skeleton, error) {
 	}
 	if s.pipe.Critic == nil {
 		s.pipe.Critic = &EngineCritic{s: s}
+	}
+	if s.router != nil {
+		s.pipe.Router = &skeletonRouter{s: s}
 	}
 	return s, nil
 }
@@ -330,6 +361,17 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 		return fmt.Errorf("stage: execute without approved plan: %w", err)
 	}
 
+	// S08.8: the dispatch consumes the recorded selection (approval-card
+	// decision incl. any re-route/pin) and emits the settled routing.decided
+	// event on THIS run — worker + version per run, the version→outcome
+	// join key (7.7; S2.6). Recording failure fails the dispatch: silent
+	// routing is banned (14.3).
+	er := s.executeRouting(ctx, r)
+	if err := s.emitRoutingDecided(ctx, r, er); err != nil {
+		s.crash(ctx, r.ID, "routing record: "+err.Error())
+		return err
+	}
+
 	// Ledger work items for the plan steps (Spec S05.1 §4): the platform
 	// records the stage sessions' claims — the session-verb TOOL channel
 	// (engine-called verbs) is S04 orchestration machinery (B3).
@@ -360,7 +402,7 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 				"Work in your working directory. When the step is complete, output the step's "+
 				"complete deliverable content as your final message — full content, no commentary wrapper.\n",
 			step.ID, r.TaskID, step.Title, step.DoneWhen)
-		res, err := s.Session(ctx, SessionInput{
+		in := SessionInput{
 			RunID:          r.ID,
 			Stage:          step.ID,
 			Assemble:       true,
@@ -370,7 +412,28 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 			Tools:          execTools,
 			PermissionMode: execPermissionMode,
 			PriorOverflows: overflows,
-		})
+			Model:          er.Decision.Model,
+			WindowTokens:   er.Decision.WindowTokens,
+		}
+		if er.Decision.TemplateID != "" && s.cfg.Workers != nil {
+			// Worker-backed execution: per-invocation hash-pinned compile
+			// (Spec S08.3 via CompileForRun; instance refs make it per-run/
+			// per-stage). The session runs at the TIGHTER of the step's
+			// declared class and the worker's granted class — neither the
+			// approved plan envelope nor the approved guardrails ever widen.
+			compiled, err := s.cfg.Workers.CompileForRun(ctx, er.Decision.TemplateID, r.UserID, worker.InstanceRefs{
+				RunID: r.ID, TaskID: r.TaskID, Stage: step.ID,
+			})
+			if err != nil {
+				s.crash(ctx, r.ID, fmt.Sprintf("compile worker %s: %v", er.Decision.TemplateID, err))
+				return fmt.Errorf("stage: compile worker for step %s: %w", step.ID, err)
+			}
+			in.Compiled = &compiled
+			in.Class = worker.TighterClass(step.Class, compiled.Class)
+			in.Tools = nil // the compiled unit carries the granted toolset
+			in.PermissionMode = ""
+		}
+		res, err := s.Session(ctx, in)
 		if err != nil {
 			s.crash(ctx, r.ID, fmt.Sprintf("step %s session: %v", step.ID, err))
 			return fmt.Errorf("stage: execute step %s: %w", step.ID, err)

@@ -97,6 +97,11 @@ type CompiledSkillRef struct {
 
 // Compiled is the compiled invocation unit.
 type Compiled struct {
+	// TemplateID/VersionID identify the compiled definition (the S08.3
+	// recorded-on-the-run join: which compiled configuration produced which
+	// outcome).
+	TemplateID string
+	VersionID  string
 	// Worker is the S03.5 compile target the adapter lowers.
 	Worker adapters.CompiledWorker
 	// Class/Egress are the compiled confinement data (Spec S11.6: carried
@@ -187,6 +192,8 @@ func CompileInvocation(in CompileInput) (Compiled, error) {
 	}
 
 	out := Compiled{
+		TemplateID: in.TemplateID,
+		VersionID:  in.VersionID,
 		Worker: adapters.CompiledWorker{
 			AgentsJSON:              agentsJSON,
 			AgentName:               agentName,

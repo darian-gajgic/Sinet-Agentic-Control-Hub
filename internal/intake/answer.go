@@ -305,6 +305,27 @@ func (p *Pipeline) applySpecDoubtAnswer(ctx context.Context, st *State, ans Answ
 }
 
 func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Card, ans Answer, raw json.RawMessage) (*State, error) {
+	// S08.8 re-route/pin rides the approval answer — the pre-execution
+	// override surface (validated against the card's offered set and
+	// recorded with its actor). With Approve it binds the execution; with
+	// Re-plan / Re-interview the pin survives into the recomputed card
+	// (computeRouting keeps pinned selections).
+	if ans.Route != nil {
+		switch ans.Action {
+		case ActionApprove, ActionRePlan, ActionReInterview:
+			if err := applyRouteOverride(st, ans.Route, st.Owner); err != nil {
+				return nil, err
+			}
+			if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "approval",
+				fmt.Sprintf("routing override (S08.8 re-route/pin): %s (pin=%v)", st.Routing.PlainReason, st.Routing.Pinned),
+				"approval card routing block (S08.8; override recorded with its actor)", 0); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("%w: a route override rides approve, replan, or reinterview", ErrBadAnswer)
+		}
+	}
+
 	switch ans.Action {
 	case ActionApprove:
 		pair, err := p.ensurePair(st, nil)

@@ -84,6 +84,24 @@ func stageFakeMain() int {
 	case marker("revise"):
 		sid = "0000f00d-0000-4000-8000-000000000006"
 		payload = fakeReviseOutput(prompt)
+	case marker("helper"):
+		sid = "0000f00d-0000-4000-8000-000000000007"
+		switch {
+		case strings.Contains(prompt, "DIE-NOW"):
+			// Mid-run death: init frame then a hard exit without a result —
+			// the S04.5 salvage leg.
+			raw, _ := json.Marshal(map[string]any{"type": "system", "subtype": "init",
+				"cwd": "/tmp/fake-cwd", "session_id": sid, "model": "claude-haiku-4-5",
+				"permissionMode": "default", "tools": []string{}})
+			fmt.Println(string(raw))
+			return 3
+		case strings.Contains(prompt, "BAD-REPORT"):
+			payload = "here are some words with none of the mandatory sections"
+		default:
+			payload = "FINDINGS: the archive holds 3 relevant entries.\n" +
+				"EVIDENCE: notes/a.md, notes/b.md\n" +
+				"GAPS: none\n"
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "fake engine: no SINET-STAGE marker in prompt\n")
 		return 7

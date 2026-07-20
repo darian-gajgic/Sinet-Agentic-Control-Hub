@@ -144,6 +144,11 @@ type State struct {
 	ClaimStatus string          `json:"claim_status,omitempty"` // "active" | "waiting" | ""
 	Deltas      []DeltaRecord   `json:"deltas,omitempty"`
 
+	// Routing is the S08.8 selection surfaced on the approval card
+	// (route.go), including any recorded override — the execute dispatch
+	// consumes it (worker + version per run, the version→outcome join).
+	Routing *RouteBlock `json:"routing,omitempty"`
+
 	Clearance float64 `json:"clearance"`
 }
 

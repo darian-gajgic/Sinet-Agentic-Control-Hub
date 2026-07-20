@@ -270,6 +270,18 @@ func (s *Store) Approve(ctx context.Context, actor, versionID string, opts Appro
 		}
 	}
 
+	// The version becoming active feeds the S08.8 selection index; parse
+	// the hash-verified file now so the index refresh rides the same tx
+	// (search.go; migration 0006).
+	src, err := s.readTemplateFile(v)
+	if err != nil {
+		return Guardrails{}, err
+	}
+	def, _, err := ParseTemplate(src)
+	if err != nil {
+		return Guardrails{}, err
+	}
+
 	pm, err := json.Marshal(map[string]any{
 		"gated_tools": v.Requested.GatedTools, "permission_mode": v.Requested.PermissionMode,
 	})
@@ -318,6 +330,9 @@ func (s *Store) Approve(ctx context.Context, actor, versionID string, opts Appro
 			`UPDATE worker_templates SET status = ?, active_version = ?, updated_ts = ? WHERE template_id = ?`,
 			string(StatusActive), v.ID, now, t.ID); err != nil {
 			return fmt.Errorf("worker: activate version: %w", err)
+		}
+		if err := refreshSearchTx(ctx, tx, t.ID, def); err != nil {
+			return err
 		}
 		_, err := s.log.AppendTx(ctx, tx, s.event(actor, evApproved, map[string]any{
 			"template": t.ID, "version": v.ID, "approver": actor,
@@ -448,12 +463,25 @@ func (s *Store) Repoint(ctx context.Context, actor, templateID, versionID string
 	if !rec.Green {
 		return fmt.Errorf("%w: target version's latest battery pass is red", ErrNotValidated)
 	}
+	// The repoint target's definition feeds the S08.8 selection index
+	// (search.go; the same-tx refresh discipline as Approve).
+	src, err := s.readTemplateFile(v)
+	if err != nil {
+		return err
+	}
+	def, _, err := ParseTemplate(src)
+	if err != nil {
+		return err
+	}
 	now := rfc3339(s.now())
 	return s.db.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE worker_templates SET active_version = ?, status = ?, updated_ts = ? WHERE template_id = ?`,
 			versionID, string(StatusActive), now, templateID); err != nil {
 			return fmt.Errorf("worker: repoint: %w", err)
+		}
+		if err := refreshSearchTx(ctx, tx, templateID, def); err != nil {
+			return err
 		}
 		_, err := s.log.AppendTx(ctx, tx, s.event(actor, evRepointed, map[string]any{
 			"template": templateID, "version": versionID, "actor": actor,

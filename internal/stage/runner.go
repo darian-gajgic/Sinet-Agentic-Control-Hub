@@ -12,6 +12,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // SessionInput names one stage engine session on an already-RUNNING run
@@ -61,8 +62,23 @@ type SessionInput struct {
 	// engine consent.
 	PermissionMode string
 
-	// Model overrides the configured model for this session ("" = config).
+	// Model is the session model ("" = the planning duty seat — ceremony
+	// sessions; execute sessions receive the S08.8 selection explicitly).
 	Model string
+
+	// WindowTokens is the selected model's context-window record (the
+	// worker.Seat row fact the stage-fit budget measures against, Spec
+	// S05.3); 0 = the duty-map default.
+	WindowTokens int64
+
+	// Compiled is the S08.3 per-invocation compiled unit for worker-backed
+	// sessions (CompileForRun output): its CompiledWorker carries the agent
+	// definition, granted toolset, gated tools and permission mode; the
+	// stage brief still arrives through Prompt assembly (Spec S08.3: the
+	// instance's L0 reaches the engine through the S05 stage brief, not the
+	// agent definition). Nil = the generalist path (Tools/PermissionMode
+	// above apply).
+	Compiled *worker.Compiled
 
 	// PriorOverflows counts context.overflow proposals earlier sessions of
 	// this PLANNED stage already raised: a crossing with a prior overflow
@@ -157,24 +173,40 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		sessionStartPath = path
 	}
 
-	watcher := s.newBudgetWatcher(ctx, r, in.Stage, in.PriorOverflows)
+	watcher := s.newBudgetWatcher(ctx, r, in.Stage, in.PriorOverflows, in.WindowTokens)
+	cw := adapters.CompiledWorker{
+		Prompt:                  prompt,
+		ToolAllowlist:           in.Tools,
+		PermissionMode:          in.PermissionMode,
+		SessionStartContextPath: sessionStartPath,
+	}
+	ceilUSD, ceilSteps := r.CeilingCostUSD, r.CeilingSteps
+	if in.Compiled != nil {
+		// Worker-backed session (Spec S08.3): the compiled unit IS the
+		// enforcement surface — agent definition, granted toolset, gated
+		// tools, permission mode all recompiled from control-plane rows;
+		// the stage brief rides Prompt assembly on top.
+		cw = in.Compiled.Worker
+		cw.Prompt = prompt
+		cw.SessionStartContextPath = sessionStartPath
+		ceilUSD = tighterCeilingF(ceilUSD, in.Compiled.CeilingCostUSD)
+		ceilSteps = tighterCeilingI(ceilSteps, in.Compiled.CeilingSteps)
+		// The per-spawn compiled unit is recorded on the run (Spec S08.3
+		// "recorded on the run"; the version→outcome join's config half).
+		s.recordCompiled(ctx, r, in.Stage, in.Compiled)
+	}
 	req := adapters.StartRequest{
-		RunID:  in.RunID,
-		UserID: r.UserID,
-		Worker: adapters.CompiledWorker{
-			Prompt:                  prompt,
-			ToolAllowlist:           in.Tools,
-			PermissionMode:          in.PermissionMode,
-			SessionStartContextPath: sessionStartPath,
-		},
+		RunID:          in.RunID,
+		UserID:         r.UserID,
+		Worker:         cw,
 		Model:          s.modelFor(in.Model),
 		OwnerCredRef:   s.ownerCredRef(ctx, r.UserID),
 		Class:          in.Class,
 		Confiner:       s.cfg.Confiner,
 		Cwd:            cwd,
 		WorkDir:        workDir,
-		CeilingCostUSD: r.CeilingCostUSD,
-		CeilingSteps:   r.CeilingSteps,
+		CeilingCostUSD: ceilUSD,
+		CeilingSteps:   ceilSteps,
 		OnEvent:        watcher.observe,
 	}
 	if s.cfg.CredInject != nil {
@@ -223,6 +255,12 @@ func sanitizePathComponent(s string) string {
 	}, s)
 }
 
+// modelFor resolves a session model: an explicit selection wins (execute
+// sessions carry the S08.8 decision), the Config.Model dev/test override
+// next, then the PLANNING duty seat — ceremony sessions (planner, critic,
+// judge, revise) are S06.10 planning-model duties; the judge in particular
+// is the ratified planning-model class (Spec S07.5). Selection of the
+// EXECUTION model never lands here — dispatch passes it explicitly.
 func (s *Skeleton) modelFor(override string) string {
 	if override != "" {
 		return override
@@ -230,7 +268,64 @@ func (s *Skeleton) modelFor(override string) string {
 	if s.cfg.Model != "" {
 		return s.cfg.Model
 	}
-	return DefaultModel
+	return s.seat(worker.DutyPlanning).Model
+}
+
+// seat reads a duty-map row (fallback: the execution seat — the duty map
+// always carries one; worker.DefaultDutyMap is the shipped default).
+func (s *Skeleton) seat(duty string) worker.Seat {
+	if st, ok := s.dutyMap[duty]; ok {
+		return st
+	}
+	return s.dutyMap[worker.DutyExecution]
+}
+
+// tighterCeiling* compose the run ceiling with a worker guardrail ceiling —
+// the tighter bound wins; zero means "no bound from this side".
+func tighterCeilingF(a, b float64) float64 {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	}
+	return a
+}
+
+func tighterCeilingI(a, b int64) int64 {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	}
+	return a
+}
+
+// recordCompiled appends the S08.3 per-spawn compile record (config hash on
+// the run — worker.EventWorkerCompiled; best-effort: a failed append is
+// loud, the session still runs on the compiled unit).
+func (s *Skeleton) recordCompiled(ctx context.Context, r run.Run, stg string, c *worker.Compiled) {
+	payload, err := json.Marshal(struct {
+		Template   string `json:"template"`
+		Version    string `json:"version"`
+		Stage      string `json:"stage"`
+		ConfigHash string `json:"config_hash"`
+	}{c.TemplateID, c.VersionID, stg, c.ConfigHash})
+	if err != nil {
+		s.logger().Error("stage: marshal worker.compiled", "err", err)
+		return
+	}
+	if _, err := s.cfg.Log.Append(ctx, eventlog.Append{
+		RunID: r.ID, Generation: r.Generation, UserID: r.UserID,
+		Type: worker.EventWorkerCompiled, SchemaVersion: worker.RoutingSchemaVersion, Payload: payload,
+	}); err != nil {
+		s.logger().Error("stage: append worker.compiled", "run", r.ID, "err", err)
+	}
 }
 
 // ownerCredRef reads the run owner's credential-store ref (Spec S02.2
@@ -343,10 +438,19 @@ type budgetWatcher struct {
 	prior     int
 }
 
-func (s *Skeleton) newBudgetWatcher(ctx context.Context, r run.Run, stg string, prior int) *budgetWatcher {
+func (s *Skeleton) newBudgetWatcher(ctx context.Context, r run.Run, stg string, prior int, window int64) *budgetWatcher {
+	if window <= 0 {
+		// The duty-map seat row carries the model's window record (Spec
+		// S05.3 "the lane's pinned-model context window" — the retired B2-4
+		// constant's home, worker.Seat.WindowTokens).
+		window = s.seat(worker.DutyPlanning).WindowTokens
+		if window <= 0 {
+			window = worker.DefaultWindowTokens
+		}
+	}
 	w := &budgetWatcher{
 		s: s, ctx: ctx, runID: r.ID, gen: r.Generation, owner: r.UserID,
-		stage: stg, window: anthropicContextWindowTokens, prior: prior,
+		stage: stg, window: window, prior: prior,
 	}
 	fit, err1 := s.cfg.Settings.Float(keyStageFitTarget)
 	over, err2 := s.cfg.Settings.Float(keyStageOverflow)

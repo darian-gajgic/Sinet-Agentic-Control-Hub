@@ -83,6 +83,12 @@ type DecisionBody struct {
 type ApprovalBody struct {
 	Layer1 ApprovalLayer1 `json:"layer1"`
 	Layer2 ApprovalLayer2 `json:"layer2"`
+	// Routing is the S08.8 selection block (B3-3): the selected worker and
+	// its plain-language reason, visible and overridable PRE-execution —
+	// re-route/pin ride the approval answer. On no-fit it is the two-stage
+	// offer card content (generalist default / compose-when-earned / gap
+	// advice). Nil only in the test-only no-router posture.
+	Routing *RouteBlock `json:"routing,omitempty"`
 	// Actions: Approve · Re-plan (structured contest) · Re-interview;
 	// Cancel is always available (4.5).
 	Actions []string `json:"actions"`
@@ -187,6 +193,9 @@ type Answer struct {
 	// Approval / delta cards.
 	Action  string      `json:"action,omitempty"`
 	Contest *ContestRef `json:"contest,omitempty"`
+	// Route is the S08.8 re-route/pin entry, applied with Approve (the
+	// pre-execution override surface; recorded with its actor).
+	Route *RouteOverride `json:"route,omitempty"`
 }
 
 // SlotAnswer answers or assumes one slot/marker.

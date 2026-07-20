@@ -72,7 +72,7 @@ func overflowEvents(t *testing.T, s *Skeleton, runID string) []map[string]any {
 
 func TestBudgetWatcherUnderThresholdsIsSilent(t *testing.T) {
 	s, r := newWatcherHarness(t)
-	w := s.newBudgetWatcher(context.Background(), r, "S-1", 0)
+	w := s.newBudgetWatcher(context.Background(), r, "S-1", 0, 0)
 	w.observe(usageEvent(50_000, 1_000))
 	w.observe(usageEvent(90_000, 2_000))
 	rep := w.report()
@@ -86,7 +86,7 @@ func TestBudgetWatcherUnderThresholdsIsSilent(t *testing.T) {
 
 func TestBudgetWatcherOverflowProposesStageSplit(t *testing.T) {
 	s, r := newWatcherHarness(t)
-	w := s.newBudgetWatcher(context.Background(), r, "S-1", 0)
+	w := s.newBudgetWatcher(context.Background(), r, "S-1", 0, 0)
 	w.observe(usageEvent(80_000, 1_000))  // fine at start
 	w.observe(usageEvent(150_000, 5_000)) // crosses 140k
 	w.observe(usageEvent(160_000, 5_000)) // still over: no second event per session
@@ -108,7 +108,7 @@ func TestBudgetWatcherSecondOverflowEscalatesToReplan(t *testing.T) {
 	// PriorOverflows=1: an earlier session of this planned stage already
 	// proposed a split (Spec S05.3 "a second overflow within one planned
 	// stage escalates to a re-plan proposal").
-	w := s.newBudgetWatcher(context.Background(), r, "S-1", 1)
+	w := s.newBudgetWatcher(context.Background(), r, "S-1", 1, 0)
 	w.observe(usageEvent(80_000, 0))
 	w.observe(usageEvent(150_000, 0))
 	rep := w.report()
@@ -119,7 +119,7 @@ func TestBudgetWatcherSecondOverflowEscalatesToReplan(t *testing.T) {
 
 func TestBudgetWatcherOverweightBriefIsAPlanShapeDefect(t *testing.T) {
 	s, r := newWatcherHarness(t)
-	w := s.newBudgetWatcher(context.Background(), r, "S-1", 0)
+	w := s.newBudgetWatcher(context.Background(), r, "S-1", 0, 0)
 	// The FIRST call's footprint already exceeds the fit target: the brief
 	// cannot fit — a plan-shape defect raising a re-plan proposal
 	// (Spec S05.3, G1 Def.11).
