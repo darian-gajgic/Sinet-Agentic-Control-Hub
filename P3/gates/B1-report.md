@@ -1,6 +1,6 @@
 # B1 phase gate — report
 
-**Status: ANSWERED 2026-07-20 (all 5 decisions, operator, step-by-step) — CLOSING PENDING one remediation.** Engine bump done; srt-adoption remediation packet **P3-B1-3R** in flight; B1 formally closes and B2 opens once it lands + validates. Gate record at the bottom of this file.
+**Status: CLOSED 2026-07-20.** All 5 decisions answered (operator, step-by-step) and acted: engine bump done (`fef17c0`); srt-adoption remediation **P3-B1-3R** landed + validated (`55b80bd` — srt pin independently re-verified, battery/lock-gate green, clean boot); crypto/constants/readings recorded. **B2 opened.** Gate record at the bottom of this file. Outstanding hands-on: probe batch (`PROBES.md`), due before the B2 gate.
 
 **(historical) Status: OPEN — awaiting operator.** Written 2026-07-20 at B1 queue completion (4/4 packets done, coordinator-validated, CI green on every push). Contract: `Spec/core-architecture-v1.md` v1 (tag `spec-v1`) + amendment A1. Build record: `P3/STATE.md`; per-packet readings in commit bodies; spike results in `P3/measurements/`.
 
