@@ -51,6 +51,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // shutdownTimeout bounds the S01.6 shutdown path (stop admission, flush,
@@ -243,6 +244,22 @@ func Run(ctx context.Context, opts Options) error {
 		case n > 0:
 			logger.Info("memory: B2 seed objects re-homed under S09.10 governance", "created", n)
 		}
+
+		// The S08 worker store: registry rows + git-versioned template
+		// files under the guardrail split, with the overlay slice read
+		// through the S09 machinery (empty at v0 by the S09.4 dormancy).
+		// Composed here so the store, file root, and battery substrate are
+		// live platform state; selection wires it into dispatch at B3-3
+		// (Spec S08.8).
+		workStore, err := worker.NewStore(worker.Config{
+			DB: db, Log: log, Settings: reg,
+			Root:     filepath.Join(stateDir, "workers"),
+			Overlays: memoryOverlays{s: memStore},
+		})
+		if err != nil {
+			return err
+		}
+		logger.Info("worker: store open (Spec S08.1)", "root", workStore.Root())
 
 		sk, err := stage.New(stage.Config{
 			DB:          db,
@@ -583,3 +600,23 @@ func shutdownHTTP(srv *http.Server, logger *slog.Logger) {
 // dispatched runs by role (intake → execute → verify) and chains the
 // walking skeleton. The B1-2/B1-3 runDispatcher this replaced lives on in
 // the skeleton's Dispatch shape.
+
+// memoryOverlays adapts memory.Store to the worker.OverlaySource seam:
+// the S08.4 instance compile reads the requester's overlay L2 slice
+// through the settled S09 machinery — no second system. Structurally
+// empty at v0 (worker-overlay scope is write-dormant, Spec S09.4).
+type memoryOverlays struct{ s *memory.Store }
+
+func (m memoryOverlays) OverlaySlice(ctx context.Context, owner, templateID string) ([]worker.OverlayItem, error) {
+	entries, err := m.s.OverlaySlice(ctx, owner, templateID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]worker.OverlayItem, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, worker.OverlayItem{
+			EntryID: e.ID, Title: e.Title, Content: e.Content, Version: e.Version,
+		})
+	}
+	return items, nil
+}
