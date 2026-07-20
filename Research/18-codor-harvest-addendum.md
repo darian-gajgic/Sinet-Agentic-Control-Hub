@@ -112,13 +112,50 @@ A one-author project, built in the same season against the same engines, indepen
 
 ## 6. Recommendation and open questions
 
-**Recommendation:** copy **C1** (per-turn channel pattern + scoped-token companion, with the small pre-registered PostToolUse spike) into the B3 packet cut, and **C2** (projection hygiene) into B5/B6 acceptance criteria. Take C3 as conformance-suite rows/evidence now, shelf C4/C5. Adopt nothing as a dependency. Everything in §4 stays un-copied with the stated decision anchors.
+**Recommendation:** copy **C1** (per-turn channel pattern, with the small pre-registered PostToolUse spike) into the B3 packet cut, and **C2** (projection hygiene) into B5/B6 acceptance criteria. Take C3 as conformance-suite rows/evidence now, shelf C4/C5. Adopt nothing as a dependency. Everything in §4 stays un-copied with the stated decision anchors.
 
-Open questions for the operator (none block the B2 gate):
+> **Operator direction (2026-07-20, chat):** adopt the copy rows, but only after verifying coherence with the architecture. The verification was run the same day — results in §7 below. OQ1 is thereby answered (yes, C1 into the B3 cut, per §7's conditions). OQ2 remains open (default: constant-on, no ⚙). OQ3 stands as proposed (informal re-reads, no watch row).
 
-1. **OQ1 — C1 into B3?** The coordinator should fold C1 into the B3 packet cut (it consumes the already-ratified recitation ⚙ and the B1-4 injection spike result). Approve treating this file as the B3-cut input for that packet?
-2. **OQ2 — C2 posture:** constant-on redaction at the serving edge (no ⚙, no amendment) — or operator-toggleable, which folds into the planned settings-tab amendment as one clamped S18 row?
-3. **OQ3 — informal watch:** no S16 watch row is created (nothing adopted). Agree to simply re-read Codor at two future decision points — the S03 CLI→SDK flip (their adapter is the fallback-path case study) and the B3 cut (C1 mechanics)?
+## 7. Coherence check (2026-07-20, operator-directed) — verdicts and binding conditions
+
+Method: line-reads of S03 and S05 in full, the B1-4 spike result (`P3/measurements/2026-07-20-precompact-injection-mechanics.md`), targeted greps of S01/S04/S13/S14/S15/S18, and an S11 full-read slice (Opus-routed per the safeguard memory) covering confinement classes, sanctioned host↔sandbox channels, and Rule-of-Two admission.
+
+### C1 — VERDICT: COHERENT, with a better transport than the Codor sketch, and a narrowed v0 scope
+
+The coherence check **supersedes the §3 C1 transport sketch** (loopback/UDS + scoped token). Sinet already owns a sanctioned, spike-proven equivalent of every moving part, and using it removes the need for any new socket, credential, or principal class:
+
+- **Injection half — already built.** `sinet engine-hook` is the compiled hook subprocess (S03.4 plumbing; CONVENTIONS §10/§13), and B1-4 **proved `hookSpecificOutput.additionalContext` reaches the model live on the pinned engine family** (token-echo test, `--settings`-wired, compatible with the lowering). S05.7's post-compaction re-injection already uses exactly this.
+- **Transport half — the existing airlock, not a socket.** The S03.4 gate control directory is *"the one read-write exchange bind"* into the sandbox (CONVENTIONS §12). Recitation delivery rides it: the platform writes a pending-notice file host-side; the PostToolUse hook reads-and-consumes it (atomic rename) and prints `additionalContext`; an empty dir prints nothing — Codor's "quiet inbox" contract on Sinet's own airlock. **No IP route, no new UDS bind, no per-run token** — which also means no new Rule-of-Two "communicate externally" property and no change to any confinement class's declared posture (S11.6). If a socket channel is ever genuinely needed (e.g. richer C0 connector flows), the broker's SO_PEERCRED typed-operation template (S11.5) is the sanctioned shape — recorded here as the fallback, not the plan.
+- **Spec anchoring:** recitation is ratified behavior awaiting a mechanism (S05.3, ⚙ `context.recitation_interval_turns`), and S05.4 already requires manifest entries for *"any mid-stage injection"* — so C1-recitation is a **within-spec implementation reading** for the B3 packet (per the P3 runbook's readings rule), not an amendment.
+
+**Binding conditions for the B3 packet** (each traceable to spec text):
+1. **Scope v0 = recitation only.** The S11 read confirmed the extended uses (soft cancel-notice, operator note into a running run) have **no existing spec mechanism** — they would touch S03.1 cancel semantics / S15.6 steering semantics and require an S00.9 amendment if ever wanted. They are explicitly NOT adopted now.
+2. **Content is platform-authored only** — the ledger's `state`/`next_actions` at a pinned `ledger_version`, assembled by pure lookup (S05.4); the verb/file is recipient-fixed to the run; **no free-form message passing** (that would re-create the lateral channel D6 bans — Sinet's inbox is deliberately NOT Codor's inbox).
+3. **Every delivery is manifested** (S05.4 mid-stage injection manifest + fires-log → manifest events, the CONVENTIONS §13 pattern) and journaled as run events; nothing silent.
+4. **PreToolUse stays single-purpose** (gating/defer — S03.4, P-T02-4 "PreToolUse-hook gating, never `canUseTool`"); the new trigger is PostToolUse only.
+5. **Pre-registered probe first** (~$0.02, B1-4 method): PostToolUse appears **nowhere** in spec or P3 today, and Codor's proof runs on the SDK path, not `-p`. Probe: settings-compiled PostToolUse command hook honors `additionalContext` mid-turn in `-p` stream-json at the pin. On PASS, add the PostToolUse hook contract to the per-pin canary (S14/S2.8) beside the SessionStart rows B1-4 registered. On FAIL, fallback is recitation at stage boundaries only (weaker, still spec-satisfying at 0-off).
+6. **Cadence reading:** the ⚙ interval is in *turns*; the platform computes dueness from run events; the hook is only the delivery valve at tool boundaries (a turn without tool calls delivers at the next boundary). Logged as a packet reading.
+7. **Settings stay engine-unwritable** (the S11.7 CVE-2026-25725 row is about in-sandbox settings creation): compiled settings remain platform-placed and ro — unchanged, but the packet re-asserts it in the leak-test suite when adding the hook.
+
+### C2 — VERDICT: COHERENT (additive; spec confirmed silent)
+
+Synonym sweep (secret/mask/scrub/leak/sanitize/redact) over S01/S02/S13/S14/S15/S18 confirms: the spec's only secret handling is **prevention** (D2 broker isolation; S13.10 secrets-never-in-snapshots). No serve-side masking exists. Conditions: applies to **observability projections only** (run-event payloads on SSE/REST, S14 query layers, any search — with redact-before-match) and **never to deliverable file content** (S13's product) or broker internals; constant-on, no ⚙ (revisitable as one clamped S18 row under the standing settings-tab amendment if the operator wants a toggle); presented in code and docs as **defense-in-depth for incidentally captured secrets in tool output** — it must never be argued as a substitute for the D2 prevention story. Lands: B5 (query layers) + B6 (API projection), as acceptance-criteria lines in those cuts.
+
+### C3 — VERDICT: COHERENT (evidence + test rows, additive)
+
+The conformance suite (B1-1) and kill-9 harness (B0-4) exist; adding (a) interaction-boundary crash cases shaped like Codor's kill-point matrix, (b) an "error output never becomes stage output" negative row, and (c) the dated engine facts from §3-C3 as evidence notes is ordinary suite growth under S03.3 rule 4 ("assert behavior, never docs"). The SDK-flip case study stays an informal note at the S03.2 flip-conditions paragraph — no watch row, nothing adopted.
+
+### C4 — VERDICT: COHERENT as a shelf entry only
+
+S04 line "Mass mechanical fan-out (≥50 items) | out of v0 scope — parked" with re-entry post-benchmark-gate is the exact slot. This file is the STUDY pointer; no other action, and any future landing is an amendment by definition (post-v0 scope).
+
+### C5 — VERDICT: COHERENT (advisory-only, optional)
+
+Peek reads Sinet's **own copy-aside** transcript tail (P-T01-1 forbids depending on the engine store), result marked estimated, **never overrides engine-reported usage** (D4), consumed only as an advisory input to the S05.6/S02 resume freshness pass and a pre-spend stage-fit cross-check. Discretionary B3/B4 scope; drop without loss if packets run tight.
+
+### Net outcome
+
+No S00.9 amendment is required for the adopted set (C1-recitation, C2, C3, C5). The explicitly-not-adopted remainder: C1-ext (cancel-notice / operator-note — amendment territory), C4 (post-v0 shelf). Handed to P3 via `P3/STATE.md` standing directive dated 2026-07-20 so the B3/B5/B6 cuts inherit the conditions above.
 
 ## Sources
 
