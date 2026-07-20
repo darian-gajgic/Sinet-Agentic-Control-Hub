@@ -33,6 +33,17 @@ Note: the optional pre-gate tier-L live smoke was **not run** (the permission pr
 7. `sinet-run@` template install + name-scoped polkit grant (S11.8 Shape B).
 Coordinator recommendation: 1+2 now (cheap, reversible, immediately useful), 3+4 as the next dedicated session (they interact), 5 with item 6's escrow, 6+7 whenever the suspend probe happens. Free-text answers per item are fine.
 
+### D2 record (answered 2026-07-20, operator free-text; items 1+3 executed same day)
+
+Operator preamble: the host-untouched posture is lifted — "the host does not need to be untouched." Coordinator explained the rule's origin (operator's own machine-safety gates + the spec's batch-at-gates discipline + early-build reversibility); agreed it was always a deferral, not a prohibition, and this gate is where it ends.
+
+1. **Units — YES, executed.** Binary → `/usr/local/bin/sinet`; system user `sinet`; `sinet-control` + `sinet-broker` installed+enabled+**active** (portpool unit installed, NOT enabled — its mode is still a reserved stub); journald cap drop-in applied; `/etc/sinet/bootstrap.conf` → loopback `127.0.0.1:8482`; production state at `/var/lib/sinet`, watchdog armed, health green, recovery-ladder pass clean. **Found+fixed by the install: P3-B2-fix4** — the broker unit lacked `StateDirectory=` and died read-only under `ProtectSystem=strict`. A stray fresh dev instance holding 8482 (started by the parallel cert session for testing) was SIGTERM'd cleanly; the unit owns 8482 now. **Operator to-do: the production instance starts with an empty `users` table — bootstrap your operator user against 8482 (same two curls as demo steps 5–6).**
+2. **Cert — YES; operator executing `B0-cert-steps.md` in a parallel session** (backend port = **8482**, the unit — not the demo's 8420).
+3. **srt — YES, executed.** `@anthropic-ai/sandbox-runtime@0.0.66` npm-global (root prefix `/usr/local`); package.json verified 0.0.66 post-install; probe now logs "ADOPTED primary composition path". CLI `--version` prints a commander fallback `1.0.0` outside npm context — documented in the lock entry, not pin drift. Engine confinement itself still activates with item 4's proxy.
+4. **+ 7. Egress substrate + run@ — coordinator's recommendation adopted**: dedicated hardening session, soon. **NEW MANDATORY ITEM for that session, found at install:** unprivileged user namespaces are **blocked by AppArmor for the systemd service context** on this Ubuntu (probe: available=false as the `sinet` service; functional as the desktop user) — the hardening session must grant the userns profile for the service before confined runs can compose from it.
+5. **age crypto — recommendation adopted:** bundled with the escrow act, before B4's first snapshot push.
+6. **Inhibitor — recommendation adopted:** wired right after the suspend-leg probe (D6), measured-then-fixed.
+
 **D3 — Seed-content ratification** (all versioned, operator-editable, strict-JSON loadable): interview taxonomies (software = ClarifyCodeBench 10-type, live-verified from arXiv:2607.00711; generic fallback), the P47 trigger table (11 rules), the software rubric bundle, the golden set (26 cases), the entailment calibration set (10 pairs). Formal 8.3-gate entry re-runs at B3 when S09 lands; this ratification covers their use until then.
 
 **D4 — Readings en bloc:** 49 section-cited clearly-implied readings across the four packets (12+10+14+13), full text in the commit bodies + CONVENTIONS §13–§15 and `e578f83`. Standing offer: walk through any subset in plain language before you ratify.
