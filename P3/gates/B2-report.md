@@ -1,6 +1,6 @@
 # B2 phase gate — walking skeleton
 
-**Status: OPEN — awaiting the live demo + the operator decisions below.** Written 2026-07-20 by the coordinator at the end of the overnight-autonomous run (operator directive in STATE log). B2's gate criterion per STATE/S19.5: **the walking-skeleton live demo on this machine** plus the host-install batch deferred here from the B0/B1 gates.
+**Status: OPEN — demo DONE (§6), D2 answered+executed, D1 readings ratified + close-mode chosen + D6 re-deferred (§7); awaiting D3+D4 verdicts (detail walkthrough delivered).** Written 2026-07-20 by the coordinator at the end of the overnight-autonomous run (operator directive in STATE log). B2's gate criterion per STATE/S19.5: **the walking-skeleton live demo on this machine** plus the host-install batch deferred here from the B0/B1 gates.
 
 ## 1. What shipped (4 packets, all validated at full line-read depth, all pushed)
 
@@ -90,3 +90,12 @@ The attention ending is the script's sanctioned branch — and the *correct* one
 **Cosmetic/deferred notes** (recorded, none blocking): approval-card `cost_time` renders "~0.00 USD (API-equivalent)" instead of an explicit UNPRICED word (the unpriced side IS surfaced in `size_note`); planner sometimes emits `structured_kind` with no structured text (dangling marker, zero binding effect); run-3's planner folded force-proceed slot conversions into its own assumption phrasing (deterministic conversion record stays in the ledger; run 1 proved the labeled path); receipt JSON leaks Go field casing (B6 API-shape pass); unknown-escape rework detour on judge-undecidable ACs (disappears for software at B4; acceptable for generic); demo-script steps 5/14 corrected in place (role field mandatory; tier wording); B2-4's "gofmt green" was stale on 3 files (formatted in `8f89677`).
 
 **Spend:** ~29 haiku-class calls across the three runs (incl. 1 wasted on run-2's crashed judge), all subscription-lane, utilization steady at ~36% of the 7-day window, no overage — within the script's posture. Run-1/run-2 state dirs preserved as traces (`~/sinet-demo-run1-failed`, `-run2-failed`); run-3 dir live with the open card.
+
+---
+
+## 7. Gate answers — running record (2026-07-20, gate-close session; operator free-text "D1 ok. D2 ok. D3, D4 more details. D5 do it later.", mapping = the session's presented Decisions 1–5)
+
+- **D1 — RATIFIED.** Demo criterion done (§6); all three demo-driven readings (Unknown escape / derived attention kanban / bounded JSON re-ask) ratified as presented.
+- **Close mode — CLOSE B2 NOW, P3-B2-5 first in B3** (presented Decision 2, coordinator recommendation adopted). Executes the moment D3+D4 land. Demo-dir plan: failed-run trace dirs (`~/sinet-demo-run1-failed`, `-run2-failed`) delete at gate close; `~/sinet-demo` (run 3, open CAP-HIT card) kept until P3-B2-5 validates as a live resume-in-place fixture.
+- **D6 — RE-DEFERRED with intent** (presented Decision 5, "do it later"): suspend leg pairs with the battery-drain unplugged hour whenever that happens (probe timer stays installed); user.slice freeze/thaw alongside the hardening session; explicitly NOT a B3 blocker; logind inhibitor wiring stays sequenced after the suspend leg (D2.6). The D5 constants note likewise stays parked for the clamped-S18 amendment — both "later" items, neither blocking.
+- **D3 + D4 — details requested before ratification; walkthrough delivered in-session** (all five seed files item-by-item; all 49 readings one line each). Verdicts pending — **the gate stays OPEN until these two land.** Note for the record: B2-3's superseded Unknown-handling reading is NOT part of the D4 set — it was replaced live at the demo by D1 reading 1, already ratified above.
