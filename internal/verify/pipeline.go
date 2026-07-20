@@ -182,27 +182,62 @@ func (v *Verifier) entailmentPosture(domain string) string {
 	return "idle (v0 launch domain is software; activates with web-research at v0.1 behind the TBD-BRINGUP calibration bar)"
 }
 
-// Verify runs the full drain for one deliverable revision.
-func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) {
-	d := in.Deliverable
+// validateInput checks the drain's structural preconditions and resolves
+// the rubric bundle (shared by the fresh entry and the S07.7 resume entry).
+func (v *Verifier) validateInput(d Deliverable) (*RubricBundle, error) {
 	if d.TaskID == "" || d.RunID == "" || d.Domain == "" || d.Revision < 1 {
-		return Outcome{}, fmt.Errorf("%w: deliverable requires task, run, domain, revision", ErrBadInput)
+		return nil, fmt.Errorf("%w: deliverable requires task, run, domain, revision", ErrBadInput)
 	}
 	if v.Judge == nil {
-		return Outcome{}, fmt.Errorf("%w: V2 requires the Judge seam (Spec S07.5)", ErrSeamMissing)
+		return nil, fmt.Errorf("%w: V2 requires the Judge seam (Spec S07.5)", ErrSeamMissing)
 	}
 	rubric := v.Rubric
 	if rubric == nil {
 		rubric = SeedSoftwareRubric()
 	}
 	if LaunchDomain(d.Domain) && v.Pack == nil {
-		return Outcome{}, ErrNoCheckPack
+		return nil, ErrNoCheckPack
 	}
 	if v.Pack != nil && v.Runner == nil {
-		return Outcome{}, fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing)
+		return nil, fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing)
 	}
+	return rubric, nil
+}
 
-	rec := v.recorder()
+// drainSeed carries a drain invocation's starting state. The fresh entry
+// (Verify) seeds only research notes and requester comments; the S07.7
+// resume entry (ResumeWithGuidance) additionally carries the answered
+// card's round history, its finding keys, the pre-park convergence state,
+// and the guidance findings for the judge's prior-findings scope.
+type drainSeed struct {
+	// rounds is the carried round history: numbering continues from it and
+	// every card the drain raises carries the FULL history (Spec S07.6
+	// "never a silent stop"; the resume re-park keeps the whole record).
+	rounds []RoundRecord
+	// seenKeys seeds the note-suppression key set (Spec S07.6: after round
+	// 1, new note-class findings are suppressed to a count — structurally
+	// past round 1, a resumed drain suppresses from its first round).
+	seenKeys map[FindingKey]bool
+	// stop seeds the convergence state from the pre-park final round, so
+	// model inertia across the park still trips the stop rule.
+	stop stopState
+	// guidance rides the judge input's prior-findings scope (Spec S07.6
+	// "prior findings in scope") without counting as current-round findings
+	// — the guidance described the PRE-rework artifact and already fed the
+	// retry package; re-merging it into post-rework rounds would force
+	// REVISE unconditionally.
+	guidance      []Finding
+	researchNotes []Finding
+	comments      []RequesterComment
+}
+
+// Verify runs the full drain for one deliverable revision.
+func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) {
+	d := in.Deliverable
+	rubric, err := v.validateInput(d)
+	if err != nil {
+		return Outcome{}, err
+	}
 	esc := v.escalator()
 	owner, err := v.runOwner(ctx, d.RunID)
 	if err != nil {
@@ -218,7 +253,17 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 	if card != nil {
 		return Outcome{Verdict: VerdictEscalate, Card: card}, nil
 	}
+	return v.drain(ctx, in, d, drainSeed{researchNotes: researchNotes, comments: in.Comments}, esc, owner, rubric)
+}
 
+// drain is the one S07.6 rework loop, entered fresh (Verify) or resumed
+// with carried state (ResumeWithGuidance). The ⚙ rework cap counts THIS
+// invocation's judged rounds — a resume is the requester's explicit grant
+// of a fresh bounded budget (the intake coverage-card "one more round"
+// precedent) — while round NUMBERING continues across the carried history
+// so the durable record stays one coherent progression.
+func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, seed drainSeed, esc *Escalator, owner string, rubric *RubricBundle) (Outcome, error) {
+	rec := v.recorder()
 	cap64, err := v.Settings.Int(keyReworkRounds)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("verify: read ⚙ %s: %w", keyReworkRounds, err)
@@ -230,17 +275,22 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 
 	var (
 		out             Outcome
-		stop            stopState
-		seenKeys        = map[FindingKey]bool{}
+		stop            = seed.stop
+		seenKeys        = seed.seenKeys
 		raisedIntegrity = map[FindingKey]bool{}
 		regenerations   int
-		reviseComments  = in.Comments
+		reviseComments  = seed.comments
 	)
+	out.Rounds = append([]RoundRecord(nil), seed.rounds...)
+	if seenKeys == nil {
+		seenKeys = map[FindingKey]bool{}
+	}
+	startRound := len(seed.rounds) + 1
 	// Round 0 is not a thing: rounds are 1-based; the hard cap counts
 	// judged rounds (Spec S07.6: ⚙ verification.rework_rounds bounds the
 	// drain; blockers-only re-entry makes late rounds rare).
-	for round := 1; ; round++ {
-		record := RoundRecord{Round: round, ContentSHA: d.SHA256()}
+	for round := startRound; ; round++ {
+		record := RoundRecord{Round: round, ContentSHA: d.SHA256(), Revision: d.Revision}
 
 		// ---- V0 (Spec S07.2): hard kill before any paid call. ----
 		v0 := RunV0(v.preGates(), d)
@@ -306,7 +356,8 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 
 		// ---- V2 (Spec S07.5): one compliance call, at most one sanity
 		// call. ----
-		input, err := BuildJudgeInput(ctx, v.Ledger, d, rubric, v1res, priorFindings(out.Rounds), round)
+		input, err := BuildJudgeInput(ctx, v.Ledger, d, rubric, v1res,
+			append(priorFindings(out.Rounds), seed.guidance...), round)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -349,8 +400,8 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 		if v1res != nil {
 			raw = append(raw, v1res.Findings...)
 		}
-		if round == 1 {
-			raw = append(raw, researchNotes...)
+		if round == startRound {
+			raw = append(raw, seed.researchNotes...)
 		}
 		raw = AddRequesterFindings(raw, reviseComments)
 		reviseComments = nil
@@ -440,9 +491,9 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 		}
 
 		// verdict == REVISE: apply the S07.6 stop rules before another
-		// round.
+		// round. The cap counts this invocation's judged rounds (see drain).
 		converged, why := stop.observe(findings, d.Content, patience)
-		atCap := int64(round) >= cap64
+		atCap := int64(round-startRound+1) >= cap64
 		if atCap || converged || v.Revise == nil {
 			reason := why
 			switch {
@@ -472,21 +523,28 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 		if err != nil {
 			return Outcome{}, fmt.Errorf("verify: rework round %d: %w", round+1, err)
 		}
-		if nd.Revision <= d.Revision {
-			nd.Revision = d.Revision + 1
-		}
-		nd.PrevContent = d.Content
-		if nd.TaskID == "" {
-			nd.TaskID = d.TaskID
-		}
-		if nd.RunID == "" {
-			nd.RunID = d.RunID
-		}
-		if nd.Domain == "" {
-			nd.Domain = d.Domain
-		}
-		d = nd
+		d = fixupRevision(nd, d)
 	}
+}
+
+// fixupRevision applies the platform-owned bookkeeping to an executor's
+// rework output: identity, monotone revision, and the diff basis are never
+// trusted from the session.
+func fixupRevision(nd, prev Deliverable) Deliverable {
+	if nd.Revision <= prev.Revision {
+		nd.Revision = prev.Revision + 1
+	}
+	nd.PrevContent = prev.Content
+	if nd.TaskID == "" {
+		nd.TaskID = prev.TaskID
+	}
+	if nd.RunID == "" {
+		nd.RunID = prev.RunID
+	}
+	if nd.Domain == "" {
+		nd.Domain = prev.Domain
+	}
+	return nd
 }
 
 // researchGate runs the 1.9 check with its bounded re-run, terminating in a

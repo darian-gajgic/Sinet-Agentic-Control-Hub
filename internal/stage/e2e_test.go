@@ -74,13 +74,16 @@ func stageFakeMain() int {
 		payload = `{"kind":"pass"}`
 	case marker("judge-compliance"):
 		sid = "0000f00d-0000-4000-8000-000000000004"
-		payload = fakeAxis1JSON()
+		payload = fakeAxis1For(os.Getenv("SINET_STAGE_FAKE_JUDGE"), prompt)
 	case marker("judge-sanity"):
 		sid = "0000f00d-0000-4000-8000-000000000005"
 		payload = fakeAxis2JSON()
 	case marker("execute"):
 		sid = "0000f00d-0000-4000-8000-000000000003"
 		payload = fakeDeliverable
+	case marker("revise"):
+		sid = "0000f00d-0000-4000-8000-000000000006"
+		payload = fakeReviseOutput(prompt)
 	default:
 		fmt.Fprintf(os.Stderr, "fake engine: no SINET-STAGE marker in prompt\n")
 		return 7
@@ -153,6 +156,49 @@ func fakeAxis1JSON() string {
 	return string(raw)
 }
 
+// fakeAxis1For applies the judge knob (SINET_STAGE_FAKE_JUDGE): "" passes;
+// "always-fail" fails AC-1 forever; "fail-unless-guidance" fails AC-1 until
+// the artifact (riding the judge prompt) carries the guidance marker the
+// fake revise session applies.
+func fakeAxis1For(mode, prompt string) string {
+	pass := true
+	switch mode {
+	case "always-fail":
+		pass = false
+	case "fail-unless-guidance":
+		pass = strings.Contains(prompt, "GUIDANCE-APPLIED")
+	}
+	if pass {
+		return fakeAxis1JSON()
+	}
+	res := map[string]any{
+		"verdicts": []map[string]any{
+			{"key": "AC-1", "pass": false},
+			{"key": "AC-2", "pass": true, "evidence": "A short note"},
+		},
+		"findings": []map[string]any{{
+			"severity": "blocker", "category": "AC-BLOCKER", "criterion": "AC-1",
+			"anchor": "note:1", "text": "AC-1 is not met by this revision",
+		}},
+	}
+	raw, _ := json.Marshal(res)
+	return string(raw)
+}
+
+// fakeReviseOutput rebuilds the deliverable from the base (fresh
+// non-cumulative revision), applies the guidance marker exactly when the
+// retry package carries requester findings, and appends a unique touch line
+// so revisions are byte-distinct (the V0 diff-empty gate sees real edits).
+func fakeReviseOutput(prompt string) string {
+	out := fakeDeliverable
+	// The fake reads the raw stream-json user frame, so the retry-package
+	// JSON arrives once-escaped: match both forms of the requester flag.
+	if strings.Contains(prompt, `"requester": true`) || strings.Contains(prompt, `\"requester\": true`) {
+		out += "GUIDANCE-APPLIED\n"
+	}
+	return out + fmt.Sprintf("touch-%d\n", time.Now().UnixNano())
+}
+
 func fakeAxis2JSON() string {
 	res := map[string]any{
 		"probe_notes": map[string]any{
@@ -169,18 +215,19 @@ func fakeAxis2JSON() string {
 // ---- harness ----
 
 type harness struct {
-	t     *testing.T
-	db    *storage.DB
-	log   *eventlog.Log
-	runs  *run.Store
-	cps   *gates.Checkpoints
-	led   *ledger.Store
-	sk    *stage.Skeleton
-	sched *scheduler.Scheduler
-	sur   *stage.Surface
+	t            *testing.T
+	db           *storage.DB
+	log          *eventlog.Log
+	runs         *run.Store
+	cps          *gates.Checkpoints
+	led          *ledger.Store
+	sk           *stage.Skeleton
+	sched        *scheduler.Scheduler
+	sur          *stage.Surface
+	artifactRoot string
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, extraEnv ...string) *harness {
 	t.Helper()
 	ctx := context.Background()
 	reg := settings.New()
@@ -209,7 +256,7 @@ func newHarness(t *testing.T) *harness {
 				Binary:      self,
 				HookCmd:     "/opt/sinet/bin/sinet engine-hook",
 				Settings:    reg,
-				Env:         append(os.Environ(), "SINET_STAGE_FAKE=1"),
+				Env:         append(append(os.Environ(), "SINET_STAGE_FAKE=1"), extraEnv...),
 				CancelGrace: 500 * time.Millisecond,
 			},
 		},
@@ -233,7 +280,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	sk.Bind(sched)
 	return &harness{t: t, db: db, log: log, runs: runs, cps: cps, led: led,
-		sk: sk, sched: sched, sur: sk.Surface()}
+		sk: sk, sched: sched, sur: sk.Surface(), artifactRoot: filepath.Join(root, "artifacts")}
 }
 
 // tick runs one synchronous admission cycle and waits for its dispatches.

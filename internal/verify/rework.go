@@ -82,6 +82,11 @@ type RequesterComment struct {
 type RoundRecord struct {
 	Round   int     `json:"round"`
 	Verdict Verdict `json:"verdict"`
+	// Revision is the deliverable revision this round judged. Together with
+	// ContentSHA it is the card's best-effort pin: the resume path (Spec
+	// S07.7 "answering resumes the pipeline in place") reads the pinned
+	// revision back from the artifact store and verifies the hash.
+	Revision int `json:"revision,omitempty"`
 
 	V0    *V0Result    `json:"v0,omitempty"`
 	V1    *V1Result    `json:"v1,omitempty"`

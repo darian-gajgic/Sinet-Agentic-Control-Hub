@@ -12,6 +12,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // Surface adapts the skeleton to the api.IntakeSurface transport contract
@@ -51,6 +52,24 @@ func mapIntakeErr(err error) error {
 	}
 }
 
+// mapVerifyErr maps the S07.7 answer-path errors onto transport statuses.
+func mapVerifyErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, verify.ErrNotRequester):
+		return surfaceErr(http.StatusForbidden, "not_requester", err)
+	case errors.Is(err, verify.ErrUnknownAsk), errors.Is(err, sql.ErrNoRows):
+		return surfaceErr(http.StatusNotFound, "not_found", err)
+	case errors.Is(err, verify.ErrBadAnswer), errors.Is(err, verify.ErrUnsupportedAnswer):
+		return surfaceErr(http.StatusBadRequest, "bad_answer", err)
+	case errors.Is(err, verify.ErrNotResumable):
+		return surfaceErr(http.StatusConflict, "not_resumable", err)
+	default:
+		return err
+	}
+}
+
 // submitBody is the POST /api/intake/requests payload.
 type submitBody struct {
 	Title string `json:"title"`
@@ -85,7 +104,22 @@ func (u *Surface) Submit(ctx context.Context, userID string, body json.RawMessag
 // Answer implements api.IntakeSurface. High-tier approval answers demand a
 // same-request PIN re-verification (Spec S01.9 step-up; the api layer
 // verified it — pinVerified reports the fact).
+//
+// Verify-minted asks (the `ask-verify-`/`canary-` prefixes, CONVENTIONS
+// §15) route to the S07.7 answer path: the three-verb cards resume the
+// parked verify run in place; every other verify category rejects loudly
+// until its verbs land. S01.9's approvals-family step-up stays scoped to
+// the intake approval/delta cards — the verify decision cards release
+// nothing (the effects gate is untouched, Spec S07.1), and V3 accept
+// mechanics with their own gating are Spec S13's (B4).
 func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.RawMessage, pinVerified bool) (json.RawMessage, error) {
+	if verify.IsVerifyAskID(askID) {
+		taskID, err := u.sk.AnswerVerifyAsk(ctx, userID, askID, answer)
+		if err != nil {
+			return nil, mapVerifyErr(err)
+		}
+		return u.taskView(ctx, taskID)
+	}
 	kind, tier, err := u.askCardMeta(ctx, askID)
 	if err != nil {
 		return nil, mapIntakeErr(err)
@@ -226,9 +260,10 @@ func (u *Surface) taskView(ctx context.Context, taskID string) (json.RawMessage,
 		// keyed by run (verify escalations, Spec S07.7 sinks) — the view
 		// shows the task's oldest open ask wherever it came from, so an
 		// attention column is never reasonless. The risk-ranked inbox is
-		// B6's surface (Spec S15; FC-v1); answering non-intake asks lands
-		// with the S07.7 resume packet. (Found live at the B2 gate demo,
-		// 2026-07-20: a CAP-HIT card sat invisible under "attention".)
+		// B6's surface (Spec S15; FC-v1); verify-class asks answer through
+		// this same surface (Answer above, the S07.7 resume path). (Found
+		// live at the B2 gate demo, 2026-07-20: a CAP-HIT card sat
+		// invisible under "attention".)
 		var askID, snapshot string
 		err := u.sk.cfg.DB.QueryRowContext(ctx, `
 			SELECT a.ask_id, a.snapshot FROM asks a

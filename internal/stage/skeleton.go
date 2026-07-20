@@ -492,18 +492,22 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 	}); err != nil {
 		return err
 	}
-	pair, st, err := s.pipe.ApprovedPair(ctx, r.TaskID)
-	if err != nil {
-		s.crash(ctx, r.ID, "no approved plan: "+err.Error())
-		return fmt.Errorf("stage: verify without approved plan: %w", err)
-	}
-	content, err := s.readDeliverable(r.TaskID, 1)
+	in, err := s.verifyInput(ctx, r.ID, r.TaskID, 1)
 	if err != nil {
 		s.crash(ctx, r.ID, err.Error())
 		return err
 	}
-	domain := domainFor(st.Family)
+	out, err := s.newVerifier(in.Deliverable.Domain).Verify(ctx, in)
+	if err != nil {
+		s.crash(ctx, r.ID, "verification drain: "+err.Error())
+		return fmt.Errorf("stage: verify: %w", err)
+	}
+	return s.verifyTerminal(ctx, r.ID, r.TaskID, out)
+}
 
+// newVerifier assembles the S07 Verifier over the skeleton's seams for one
+// domain (shared by the dispatch leg and the S07.7 resume leg).
+func (s *Skeleton) newVerifier(domain string) *verify.Verifier {
 	judge := s.cfg.Judge
 	if judge == nil {
 		judge = &EngineJudge{s: s}
@@ -512,7 +516,7 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 	if revise == nil {
 		revise = s.engineRevise
 	}
-	v := &verify.Verifier{
+	return &verify.Verifier{
 		DB:       s.cfg.DB,
 		Log:      s.cfg.Log,
 		Ledger:   s.cfg.Ledger,
@@ -527,22 +531,35 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 		Revise: revise,
 		Now:    s.cfg.Now,
 	}
-	execCwd := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(r.TaskID+RunSuffixExecute), "cwd")
-	evidence := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(r.ID), "evidence")
-	if err := os.MkdirAll(evidence, 0o700); err != nil {
-		return err
+}
+
+// verifyInput builds the drain input for one persisted deliverable
+// revision of a task's verify run.
+func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revision int) (verify.VerifyInput, error) {
+	pair, st, err := s.pipe.ApprovedPair(ctx, taskID)
+	if err != nil {
+		return verify.VerifyInput{}, fmt.Errorf("stage: verify without approved plan: %w", err)
 	}
-	out, err := v.Verify(ctx, verify.VerifyInput{
+	content, err := s.readDeliverable(taskID, revision)
+	if err != nil {
+		return verify.VerifyInput{}, err
+	}
+	execCwd := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(taskID+RunSuffixExecute), "cwd")
+	evidence := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(runID), "evidence")
+	if err := os.MkdirAll(evidence, 0o700); err != nil {
+		return verify.VerifyInput{}, err
+	}
+	return verify.VerifyInput{
 		Deliverable: verify.Deliverable{
-			TaskID: r.TaskID,
+			TaskID: taskID,
 			// The drain's events, judge assemblies and checkpoints ride
 			// THIS run: it is running through the drain (Spec S02.4
 			// checkpoint writability) and its consumption is the
 			// verification tax (Spec S07.11).
-			RunID:    r.ID,
-			Domain:   domain,
+			RunID:    runID,
+			Domain:   domainFor(st.Family),
 			Type:     "markdown",
-			Revision: 1,
+			Revision: revision,
 			Content:  content,
 		},
 		Spec:          pair.Spec,
@@ -551,30 +568,55 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 		Tier:          st.Tier,
 		Workspace:     execCwd,
 		EvidenceDir:   evidence,
-	})
-	if err != nil {
-		s.crash(ctx, r.ID, "verification drain: "+err.Error())
-		return fmt.Errorf("stage: verify: %w", err)
-	}
+	}, nil
+}
 
+// verifyTerminal lands a drain outcome on the run FSM (shared by the
+// dispatch leg and the S07.7 resume leg, on a RUNNING verify run):
+//
+//   - SHIP / SHIP-with-notes → the run completes and settles. The walking
+//     skeleton ends at the verified deliverable + its receipts; V3 (human
+//     accept) and delivery mechanics are Spec S13's (B4).
+//   - every card terminal → the run PARKS on the durable ask (Spec S02.3:
+//     parked = suspended on an open gate/ask; Spec S07.7: escalations are
+//     structured, RESUMABLE asks — answering resumes the pipeline in
+//     place). Parked-on-gate is "blocked, not failed" (Spec S02.6); the
+//     queue row stays claimed until a later answer completes or finalizes
+//     the run (the intake gate pattern).
+func (s *Skeleton) verifyTerminal(ctx context.Context, runID, taskID string, out verify.Outcome) error {
 	switch out.Verdict {
 	case verify.VerdictShip, verify.VerdictShipWithNotes:
-		// The walking skeleton ends at the verified deliverable + its
-		// receipts; V3 (human accept) and delivery mechanics are Spec
-		// S13's (B4).
-		s.setKanban(ctx, r.TaskID, "done")
-		s.logger().Info("stage: deliverable verified", "task", r.TaskID,
+		s.setKanban(ctx, taskID, "done")
+		s.logger().Info("stage: deliverable verified", "task", taskID,
 			"verdict", string(out.Verdict), "verified_items", out.VerifiedItems, "rounds", len(out.Rounds))
+		if _, err := s.cfg.Runs.Transition(ctx, runID, run.StateCompleted, run.TransitionOptions{
+			Reason: "verification drain finished: " + string(out.Verdict), Actor: run.ActorPlatform,
+		}); err != nil {
+			return err
+		}
+		s.settle(ctx, runID)
+		return nil
 	default:
-		// The drain ended on a card (escalation/REOPEN-SPEC/cap-hit): the
-		// durable ask waits for the human — the run's drain work is done.
-		s.setKanban(ctx, r.TaskID, "attention")
-		s.logger().Warn("stage: verification escalated", "task", r.TaskID, "verdict", string(out.Verdict))
+		s.setKanban(ctx, taskID, "attention")
+		s.logger().Warn("stage: verification escalated", "task", taskID, "verdict", string(out.Verdict))
+		_, err := s.cfg.Runs.Transition(ctx, runID, run.StateParked, run.TransitionOptions{
+			Reason: "verification card open: parked on the resumable ask (S07.7; S02.3 gate park)",
+			Actor:  run.ActorPlatform,
+		})
+		return err
 	}
-	_, err = s.cfg.Runs.Transition(ctx, r.ID, run.StateCompleted, run.TransitionOptions{
-		Reason: "verification drain finished: " + string(out.Verdict), Actor: run.ActorPlatform,
-	})
-	return err
+}
+
+// settle settles a terminal run's queue row + receipt outside a dispatch
+// (the finishIntake pattern; SettleRun is idempotent, so the dispatch
+// path's automatic settle composes safely).
+func (s *Skeleton) settle(ctx context.Context, runID string) {
+	if s.sched == nil {
+		return
+	}
+	if err := s.sched.SettleRun(ctx, runID); err != nil {
+		s.logger().Warn("stage: settle run", "run", runID, "err", err)
+	}
 }
 
 // ---- shared ----

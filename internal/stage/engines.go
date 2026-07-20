@@ -355,10 +355,12 @@ func (j *EngineJudge) Sanity(ctx context.Context, in verify.JudgeInput) (verify.
 func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, instructions string, out any) error {
 	// BuildJudgeInput already ran the clean-context assembly (manifest
 	// appended); the brief is re-used for pinned placement so a compaction
-	// inside the judge session re-injects the frozen ACs (Spec S05.7).
+	// inside the judge session re-injects the frozen ACs (Spec S05.7). The
+	// session rides the brief's own run id — never a suffix-composed one,
+	// which would name the superseded parent on a recovery-fork verify run.
 	brief := in.Brief
 	err := j.s.jsonSession(ctx, SessionInput{
-		RunID:        in.Brief.TaskID + RunSuffixVerify,
+		RunID:        in.Brief.RunID,
 		Stage:        "verify",
 		Assemble:     false,
 		PlaceBrief:   &brief,
@@ -395,7 +397,7 @@ func (s *Skeleton) engineRevise(ctx context.Context, pkg verify.RetryPackage) (v
 			"Output ONLY the complete corrected deliverable content — no commentary, no JSON wrapper.\n\n=== retry package ===\n%s\n",
 		pkg.Round, pkgJSON)
 	res, err := s.Session(ctx, SessionInput{
-		RunID:        pkg.Deliverable.TaskID + RunSuffixVerify,
+		RunID:        pkg.Deliverable.RunID,
 		Stage:        fmt.Sprintf("revise-r%d", pkg.Round),
 		Assemble:     false,
 		Instructions: instructions,
@@ -409,5 +411,12 @@ func (s *Skeleton) engineRevise(ctx context.Context, pkg verify.RetryPackage) (v
 	d.Content = res.Text
 	d.Revision = pkg.Deliverable.Revision + 1
 	d.Diff = "" // revision diff mechanics are Spec S13's (B4); the judge receives the full artifact
+	// Every rework revision persists to the artifact store: the round
+	// record's (revision, sha256) pin must denote retrievable content — the
+	// card's best-effort state is durable and the S07.7 resume retry
+	// package reads it back (B2-5; full revision mechanics are Spec S13's).
+	if _, _, err := s.writeDeliverable(d.TaskID, d.Revision, d.Content); err != nil {
+		return verify.Deliverable{}, fmt.Errorf("stage: persist rework revision: %w", err)
+	}
 	return d, nil
 }
