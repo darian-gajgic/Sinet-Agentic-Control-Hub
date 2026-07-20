@@ -221,6 +221,27 @@ func (u *Surface) taskView(ctx context.Context, taskID string) (json.RawMessage,
 			}
 		}
 	}
+	if v.OpenAskID == "" {
+		// Pipeline stages beyond intake park their durable cards in asks
+		// keyed by run (verify escalations, Spec S07.7 sinks) — the view
+		// shows the task's oldest open ask wherever it came from, so an
+		// attention column is never reasonless. The risk-ranked inbox is
+		// B6's surface (Spec S15; FC-v1); answering non-intake asks lands
+		// with the S07.7 resume packet. (Found live at the B2 gate demo,
+		// 2026-07-20: a CAP-HIT card sat invisible under "attention".)
+		var askID, snapshot string
+		err := u.sk.cfg.DB.QueryRowContext(ctx, `
+			SELECT a.ask_id, a.snapshot FROM asks a
+			  JOIN runs r ON r.run_id = a.run_id
+			 WHERE r.task_id = ? AND a.status = 'open'
+			 ORDER BY a.observed_ts LIMIT 1`, taskID).Scan(&askID, &snapshot)
+		if err == nil {
+			v.OpenAskID = askID
+			v.OpenCard = json.RawMessage(snapshot)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
 	rows, err := u.sk.cfg.DB.QueryContext(ctx, `
 		SELECT r.run_id, r.state, EXISTS (SELECT 1 FROM receipts rc WHERE rc.run_id = r.run_id)
 		  FROM runs r WHERE r.task_id = ? ORDER BY r.created_ts`, taskID)
