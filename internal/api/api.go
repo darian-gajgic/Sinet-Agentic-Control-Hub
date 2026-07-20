@@ -71,6 +71,9 @@ type Config struct {
 	// drain their final batch and return so the graceful HTTP shutdown can
 	// complete (Spec S01.6 shutdown).
 	Stopping <-chan struct{}
+	// Intake is the walking-skeleton pipeline surface (intake_handlers.go);
+	// nil leaves those routes answering 503 (surface not wired).
+	Intake IntakeSurface
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -90,6 +93,7 @@ type Server struct {
 	poll       time.Duration
 	logger     *slog.Logger
 	nudge      *broadcast
+	intake     IntakeSurface
 }
 
 // New assembles the Server.
@@ -105,6 +109,7 @@ func New(cfg Config) *Server {
 		poll:       cfg.PollInterval,
 		logger:     cfg.Logger,
 		nudge:      newBroadcast(),
+		intake:     cfg.Intake,
 	}
 	if s.auth == nil {
 		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}
@@ -148,6 +153,13 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/auth/grants", s.handleAuthGrants)
 	protected("POST /api/auth/grants", s.handleAuthGrantCreate)
 	protected("POST /api/auth/grants/revoke", s.handleAuthGrantRevoke)
+
+	// Walking-skeleton surface (B2-4; provisional pending S15.2/B6).
+	protected("POST /api/intake/requests", s.handleIntakeSubmit)
+	protected("GET /api/tasks/{task}", s.handleTask)
+	protected("POST /api/tasks/{task}/advance", s.handleTaskAdvance)
+	protected("POST /api/asks/{ask}/answer", s.handleAskAnswer)
+	protected("GET /api/runs/{run}/receipt", s.handleRunReceipt)
 
 	return s.identity(mux)
 }

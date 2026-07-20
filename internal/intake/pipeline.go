@@ -916,6 +916,28 @@ func (p *Pipeline) loadPair(st *State) (*Pair, error) {
 	return &Pair{Spec: spec, Plan: plan}, nil
 }
 
+// ApprovedPair loads a task's APPROVED artifact pair plus its pipeline
+// state — the read seam execution and verification build from (B2-4
+// walking skeleton): work proceeds from the durable approved artifacts,
+// never from conversation (D7; Spec S06.1), and the load re-verifies
+// sha256 + byte-identical re-render (resume-from-artifact integrity, Spec
+// S06.6). ErrPhase when no approved plan exists — D10: nothing executes
+// unapproved.
+func (p *Pipeline) ApprovedPair(ctx context.Context, taskID string) (Pair, *State, error) {
+	st, err := p.LoadState(ctx, taskID)
+	if err != nil {
+		return Pair{}, nil, err
+	}
+	if st.Phase != PhaseApproved {
+		return Pair{}, nil, fmt.Errorf("%w: task %s is %s, not approved (D10)", ErrPhase, taskID, st.Phase)
+	}
+	pair, err := p.loadPair(st)
+	if err != nil {
+		return Pair{}, nil, err
+	}
+	return *pair, st, nil
+}
+
 func (p *Pipeline) currentGen(ctx context.Context, runID string) (int64, error) {
 	r, err := p.Runs.Get(ctx, runID)
 	if err != nil {

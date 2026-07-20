@@ -159,6 +159,44 @@ func (d *Driver) DriveResume(ctx context.Context, a Adapter, rec ParkRecord, ans
 	return d.pump(ctx, sess, r, rec.Start)
 }
 
+// DriveStage runs ONE engine stage session inside an already-running run —
+// the fresh-context-per-stage session model of Spec S05.3: a run whose work
+// spans several stage sessions (intake ceremony, execute-N, verification)
+// stays `running` across them, and each session is one engine invocation
+// whose paid calls checkpoint against that run (D7 per paid call; the
+// checkpoint store enforces the running/draining writability rule, Spec
+// S02.4). No FSM transition happens here: session outcomes are stage
+// results the CALLER disposes of — the run-level terminal mapping belongs
+// to the dispatch path (Drive) or the owning pipeline. Stage sessions
+// carry no gated tools, so a parked outcome is a caller-handled defect,
+// never a run park.
+func (d *Driver) DriveStage(ctx context.Context, a Adapter, req StartRequest) (Outcome, error) {
+	r, err := d.Runs.Get(ctx, req.RunID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if r.State != run.StateRunning && r.State != run.StateDraining {
+		return Outcome{}, fmt.Errorf("%w: stage session on %q in %s (want running/draining, S02.4)", ErrNotDrivable, r.ID, r.State)
+	}
+	sess, err := a.Start(ctx, req)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("adapters: stage session spawn: %w", err)
+	}
+	var pumpErr error
+	for ev := range sess.Events() {
+		if err := d.persistEvent(ctx, sess, r, req, ev); err != nil && pumpErr == nil {
+			// Same discipline as pump: never wedge the engine subprocess on
+			// a persistence failure; drain, remember the first error.
+			pumpErr = err
+		}
+	}
+	out, err := sess.Wait(ctx)
+	if err != nil {
+		return out, err
+	}
+	return out, pumpErr
+}
+
 // pump consumes the session's event stream, persisting as it goes, then
 // maps the Outcome onto the run FSM.
 func (d *Driver) pump(ctx context.Context, sess Session, r run.Run, req StartRequest) (Outcome, error) {
@@ -211,8 +249,18 @@ func (d *Driver) pump(ctx context.Context, sess Session, r run.Run, req StartReq
 // persistEvent lands one contract event durably: the run_events append
 // (fenced at the run's generation), plus the per-kind side effects —
 // checkpoint row + engine_sessions upkeep on a paid call, ask row on a
-// gate ask.
+// gate ask. The invocation's OnEvent observer (Spec S05.3 stage-runtime
+// seam) fires after the durable write succeeded — observers see only
+// persisted facts.
 func (d *Driver) persistEvent(ctx context.Context, sess Session, r run.Run, req StartRequest, ev Event) error {
+	err := d.persistEventInner(ctx, sess, r, req, ev)
+	if err == nil && req.OnEvent != nil {
+		req.OnEvent(ev)
+	}
+	return err
+}
+
+func (d *Driver) persistEventInner(ctx context.Context, sess Session, r run.Run, req StartRequest, ev Event) error {
 	payload := ev.Payload
 	if len(payload) == 0 {
 		payload = json.RawMessage("{}")

@@ -244,6 +244,14 @@ type StartRequest struct {
 	// sentinel; the real token rides the S11.5 injection proxy.
 	CredInject func(base []string) ([]string, error) `json:"-"`
 
+	// OnEvent, when set, observes every contract event of this invocation
+	// AFTER the Driver has persisted it — the stage-runtime seam (Spec
+	// S05.3): the budget watcher reads usage accounting here and the stage
+	// runner collects session evidence. Never serialized (json:"-", the
+	// Confiner precedent): observers are per-invocation wiring, not park
+	// state. Observers must not block; persistence never depends on them.
+	OnEvent func(Event) `json:"-"`
+
 	// Cwd is the isolated run working directory (S03.5: cwd is a config
 	// channel; the engine must never walk up into ambient project config).
 	Cwd string
@@ -345,6 +353,14 @@ type Outcome struct {
 	Totals *Usage
 	// Result is the bounded terminal envelope (cross-check material).
 	Result json.RawMessage
+	// ResultText is the FULL terminal result text (the engine's final
+	// message body), reported to the in-process caller only: stage runners
+	// parse structured session output from it (Spec S06.10/S07.5 engine
+	// duties). Everything PERSISTED stays bounded (refs-not-blobs,
+	// P-T07-5) — full content durability rides the engine transcript and
+	// its copy-aside, as before; this field is never written to the DB or
+	// an event payload.
+	ResultText string
 
 	// GateFallback reports the S03.4 detection contract: more than one
 	// gated-tool fire in a single turn without a defer exit ⇒ the engine

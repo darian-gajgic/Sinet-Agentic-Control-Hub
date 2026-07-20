@@ -453,6 +453,26 @@ func (s *Scheduler) dispatch(ctx context.Context, r run.Run) {
 	}()
 }
 
+// SettleRun settles a run that reached a terminal state OUTSIDE a dispatch:
+// queue row done + receipt materialized, one transaction, idempotent. The
+// dispatch path settles automatically when Dispatch returns; runs whose
+// terminal transition happens later — the intake pattern, where a dispatch
+// returns at a parked gate and the card answer (API path) later completes
+// the run (Spec S06.1 "gates wait"; S10.1 receipts per run-end) — are
+// settled by their pipeline through this. A non-terminal run is an error
+// (nothing to settle).
+func (s *Scheduler) SettleRun(ctx context.Context, runID string) error {
+	r, err := s.runs.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !run.IsTerminal(r.State) {
+		return fmt.Errorf("scheduler: settle non-terminal run %q (state %s)", runID, r.State)
+	}
+	s.settleTerminal(ctx, r)
+	return nil
+}
+
 // settleTerminal marks the queue row done and materializes the receipt for a
 // finished run, atomically in one write transaction (Spec S10.1/S10.10:
 // receipts materialize per run-end). Receipt materialization is idempotent, so

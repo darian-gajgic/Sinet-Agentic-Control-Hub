@@ -542,6 +542,10 @@ func (s *session) assembleOutcome(p *parser, waitErr error) (adapters.Outcome, [
 		out := adapters.Outcome{
 			Kind: adapters.OutcomeCompleted, Totals: totals,
 			Result: bounded(rawResult(p.result)), GateFallback: gateFallback,
+			// Full result text for the in-process caller (stage runners
+			// parse structured output from it); persisted payloads stay
+			// bounded — see adapters.Outcome.ResultText.
+			ResultText: p.result.Result,
 		}
 		if paused {
 			// Pause raced completion: the engine finished first — the

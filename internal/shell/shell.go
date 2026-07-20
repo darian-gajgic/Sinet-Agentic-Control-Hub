@@ -33,11 +33,13 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -45,7 +47,9 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sdnotify"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // shutdownTimeout bounds the S01.6 shutdown path (stop admission, flush,
@@ -156,9 +160,11 @@ func Run(ctx context.Context, opts Options) error {
 	logger.Info("state: platform.db open", "path", dbPath)
 
 	// The S02 run machinery over the open DB: FSM store, checkpoint store,
-	// effect journal, and the recovery ladder they feed (Spec S02.3–S02.7).
+	// effect journal, and the recovery ladder they feed (Spec S02.3–S02.7);
+	// the S05 Task Context Ledger store beside them (B2-1).
 	runs := run.NewStore(db, log)
 	checkpoints := gates.NewCheckpoints(db, log)
+	taskLedger := ledger.NewStore(db, log)
 	ladder := opts.Ladder
 	if ladder == nil {
 		effects, err := gates.NewJournal(gates.JournalConfig{DB: db, Settings: reg})
@@ -182,50 +188,84 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	// The S10 scheduler + metering over the open DB (Spec S10). It replaces
-	// the B0 admission stub: the claim loop (started below, after step 5)
-	// CAS-claims queued runs under per-(user, lane) slots and dispatches them,
-	// owner-attributed — fire-and-forget is banned (S16.6). The price table
-	// ships EMPTY at v0 (its genai-prices seed is a vendored S16.3 adoption,
-	// Spec S10.3), so receipts render UNPRICED — the S10.1 honest posture. No
-	// adapters are registered in the control plane yet: confined execution
-	// (sandbox + broker) lands at B1-3 (Spec S11), and the ingress that would
-	// enqueue runs (intake, Spec S06) lands at B2, so the dev-mode queue stays
-	// empty and no engine is ever spawned from the control plane here.
+	// The S10 scheduler + metering over the open DB (Spec S10): the claim
+	// loop (started below, after step 5) CAS-claims queued runs under
+	// per-(user, lane) slots and dispatches them, owner-attributed —
+	// fire-and-forget is banned (S16.6). The price table ships EMPTY at v0
+	// (its genai-prices seed is a vendored S16.3 adoption, Spec S10.3), so
+	// receipts render UNPRICED — the S10.1 honest posture.
+	//
+	// B2-4 closes the walking skeleton: the claude-cli adapter registers
+	// behind the Dispatcher seam (the registration deferred at B1-2), the
+	// stage skeleton routes dispatched runs (intake → execute → verify,
+	// Spec S19.5 B2), and the intake API surface goes live.
 	var sched *scheduler.Scheduler
+	var intakeSurface api.IntakeSurface
 	admission := opts.Admission
 	if admission == nil {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
 		exceptions := metering.NoMeteredExceptions()
-		ledger := metering.NewLedger(db, priceTable, exceptions, reg)
-		// B1-3 confined path (Spec S11): the composer is the S11 Confiner wired
-		// onto every dispatch, so a run reaching an engine runs INSIDE the
-		// composed per-run sandbox. It probes the host once at startup (probe-
-		// at-compose, S16.3) and logs the result; it does not fail startup if
-		// the boundary is absent (the dev queue is empty until intake, S06/B2,
-		// so nothing is dispatched). Adapters + the compiled-worker/model
-		// selection (S08/B3) are still absent, so this stays a wired seam,
-		// never a live route in dev mode.
+		meterLedger := metering.NewLedger(db, priceTable, exceptions, reg)
+		// The S11 composer probes the host once at startup (probe-at-
+		// compose, S16.3) and logs the result. ENGINE spawns run through it
+		// only OUTSIDE dev posture: a confined engine holds a credential
+		// SENTINEL and cannot authenticate until the S11.5 credential-
+		// injection proxy lands (B2-gate host batch with srt activation +
+		// the egress substrate), so dev mode keeps the sanctioned B1-1
+		// unconfined dev spawn (CONVENTIONS §10/§12) — loudly logged.
+		// Verification CHECK runs (no credentials by construction) use the
+		// composer in every posture.
 		composer := sandbox.NewComposer(reg, logger)
 		logger.Info("sandbox: host probe (S11.2/S16.3)", "available", composer.Caps().Available(), "notes", composer.Caps().Notes)
-		dispatcher := &runDispatcher{
-			driver:   &adapters.Driver{Runs: runs, Checkpoints: checkpoints, Log: log, DB: db},
-			adapters: map[string]adapters.Adapter{}, // registered with their worker compiler (S08, B3)
-			confiner: composer,                      // S11 confinement, wired now
+		var engineConfiner adapters.Confiner
+		if devPosture() {
+			logger.Warn("stage: dev posture — engine spawns UNCONFINED (B1-1 sanctioned dev posture; " +
+				"confined+authenticated engines need the S11.5 injection proxy, a B2-gate host component)")
+		} else {
+			engineConfiner = composer
+		}
+		stateDir := filepath.Dir(dbPath)
+		sk, err := stage.New(stage.Config{
+			DB:          db,
+			Log:         log,
+			Runs:        runs,
+			Checkpoints: checkpoints,
+			Ledger:      taskLedger,
+			Settings:    reg,
+			Adapters: map[string]adapters.Adapter{
+				// The Anthropic lane (Spec S03.2): the pinned `claude` CLI
+				// resolved via PATH; conformance vs the components.lock pin
+				// is the adapter suite's duty (S03.3).
+				adapters.SubstrateClaudeCLI: &claudecli.Adapter{Settings: reg, Log: logger},
+			},
+			Confiner:     engineConfiner,
+			ArtifactRoot: filepath.Join(stateDir, "artifacts"),
+			RunRoot:      filepath.Join(stateDir, "runs"),
+			CopyAsideDir: filepath.Join(stateDir, "copy-aside"),
+			// CheckPacks ships empty: the software pack is per-project
+			// registry machinery (Spec S13, B4) — software-domain verifies
+			// fail LOUDLY rather than run a degraded launch domain.
+			CheckRunner: &verify.SandboxCheckRunner{Confiner: composer, WorkDir: filepath.Join(stateDir, "check-work")},
+			Logger:      logger,
+		})
+		if err != nil {
+			return err
 		}
 		sched, err = scheduler.New(scheduler.Config{
 			DB:         db,
 			Runs:       runs,
 			Settings:   reg,
-			Dispatcher: dispatcher,
+			Dispatcher: sk,
 			Pressure:   metering.NewPressureGauge(db, reg),
-			Receipts:   metering.NewReceipts(db, ledger, exceptions),
+			Receipts:   metering.NewReceipts(db, meterLedger, exceptions),
 			Logger:     logger,
 		})
 		if err != nil {
 			return err
 		}
+		sk.Bind(sched)
 		admission = sched
+		intakeSurface = sk.Surface()
 	}
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
@@ -259,6 +299,7 @@ func Run(ctx context.Context, opts Options) error {
 		Settings:   reg,
 		HealthFn:   healthFn(st, maint, log),
 		Stopping:   st.stopping,
+		Intake:     intakeSurface,
 		Logger:     logger,
 	})
 	httpSrv := &http.Server{
@@ -516,40 +557,9 @@ func shutdownHTTP(srv *http.Server, logger *slog.Logger) {
 	}
 }
 
-// runDispatcher is the composition-root realization of scheduler.Dispatcher
-// (Spec S01.3): it drives a CAS-claimed run through the adapter Driver (Spec
-// S03), selected by runs.substrate. At B1-2 NO adapters are registered in the
-// control plane — confined execution (sandbox + broker) lands at B1-3 (Spec
-// S11), and the compiled-worker + model selection is Spec S08's (B3) — so this
-// path is a wired seam, never a live route in dev mode: no engine is spawned
-// from the control plane, upholding B1-1's dev-mode confinement posture. B1-3
-// registers adapters here without touching the scheduler.
-type runDispatcher struct {
-	driver   *adapters.Driver
-	adapters map[string]adapters.Adapter
-	// confiner is the S11 per-run sandbox wrapped around every engine spawn
-	// (B1-3). Attached to the StartRequest so the adapter builds its engine
-	// process INSIDE the composed sandbox (the S11 admission rule: no engine
-	// reaches real work unconfined).
-	confiner adapters.Confiner
-}
-
-// Dispatch implements scheduler.Dispatcher. It attaches the S11 confiner (and
-// the run's compiled confinement class) to the StartRequest so any engine it
-// spawns runs inside the per-run sandbox. The compiled worker, model, cwd, and
-// broker-resolved credential injection are Spec S08's (B3) — until they land
-// no adapter is registered, so this returns before any spawn and the confined
-// route is proven-wired but never live in dev mode.
-func (d *runDispatcher) Dispatch(ctx context.Context, r run.Run) error {
-	a, ok := d.adapters[r.Substrate]
-	if !ok {
-		return fmt.Errorf("shell: no confined adapter registered for substrate %q (worker compiler is S08, B3)", r.Substrate)
-	}
-	_, err := d.driver.Drive(ctx, a, adapters.StartRequest{
-		RunID:    r.ID,
-		UserID:   r.UserID,
-		Class:    string(sandbox.C1), // strongest default until the worker record carries the class (S08)
-		Confiner: d.confiner,
-	})
-	return err
-}
+// The composition-root Dispatcher is the stage skeleton since B2-4
+// (internal/stage): it registers the claude-cli adapter behind the
+// scheduler's Dispatcher seam (the registration deferred at B1-2), routes
+// dispatched runs by role (intake → execute → verify) and chains the
+// walking skeleton. The B1-2/B1-3 runDispatcher this replaced lives on in
+// the skeleton's Dispatch shape.

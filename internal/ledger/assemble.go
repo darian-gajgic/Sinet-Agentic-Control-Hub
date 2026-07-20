@@ -199,17 +199,44 @@ type manifestPayload struct {
 }
 
 // Assemble builds the stage brief for one run's next stage and appends its
-// trace-manifest event, in one write transaction. The ledger projection —
-// pinned sections verbatim and whole, current decisions/state/artifacts
-// view, learned_this_task for this task only — always comes from this
-// run's task ledger, which is what makes the §6 never-into-another-task
-// firewall structural.
+// trace-manifest event. The ledger projection — pinned sections verbatim
+// and whole, current decisions/state/artifacts view, learned_this_task for
+// this task only — always comes from this run's task ledger, which is what
+// makes the §6 never-into-another-task firewall structural.
+//
+// Source items are collected BEFORE the write transaction: the pool is one
+// connection (Spec S02.1), so foreign code doing its own DB reads (e.g.
+// the S06 Plan source) inside an open WriteTx would self-deadlock — the
+// inverse of the never-nest rule intake already observes toward this
+// package (CONVENTIONS §14). The authoritative doc read, the projection,
+// and the manifest append stay one atomic transaction; the manifest hashes
+// exactly the content injected.
 func (s *Store) Assemble(ctx context.Context, in AssembleInput) (Brief, error) {
 	if in.Stage == "" {
 		return Brief{}, fmt.Errorf("%w: assembly without stage", ErrInvalidWrite)
 	}
+	// Pre-transaction: resolve the query facts and collect source items
+	// (pure lookup over platform-owned facts, Spec S05.4).
+	pre, err := readRun(ctx, s.db, in.RunID)
+	if err != nil {
+		return Brief{}, err
+	}
+	preDoc, _, found, err := currentDoc(ctx, s.db, pre.taskID)
+	if err != nil {
+		return Brief{}, err
+	}
+	if !found {
+		return Brief{}, fmt.Errorf("%w: task %q", ErrNoLedger, pre.taskID)
+	}
+	sourceItems, err := collectSourceItems(ctx, in, SliceQuery{
+		TaskID: preDoc.TaskID, Owner: preDoc.Owner, Stage: in.Stage, Clean: in.Clean,
+	})
+	if err != nil {
+		return Brief{}, err
+	}
+
 	var brief Brief
-	err := s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
 		r, err := readRun(ctx, tx, in.RunID)
 		if err != nil {
 			return err
@@ -228,7 +255,7 @@ func (s *Store) Assemble(ctx context.Context, in AssembleInput) (Brief, error) {
 			}
 		}
 
-		blocks, err := s.collectBlocks(ctx, in, r, doc)
+		blocks, err := assembleBlocks(sourceItems, in, doc)
 		if err != nil {
 			return err
 		}
@@ -307,31 +334,11 @@ func (s *Store) atVersionTx(ctx context.Context, tx *sql.Tx, taskID string, vers
 	return Document{}, fmt.Errorf("%w: task %q version %d", ErrVersionNotFound, taskID, version)
 }
 
-// collectBlocks gathers the frame in deterministic collection order:
-// source items (Knowledge, Conventions, Worker, Plan — each bucketed by its
-// own precedence labels), the ledger projection (task bucket), then Extra.
-func (s *Store) collectBlocks(ctx context.Context, in AssembleInput, r runRow, doc Document) ([]Block, error) {
-	q := SliceQuery{TaskID: doc.TaskID, Owner: doc.Owner, Stage: in.Stage, Clean: in.Clean}
-	var blocks []Block
-	add := func(name string, src Source) error {
-		if src == nil {
-			return nil
-		}
-		items, err := src.Items(ctx, q)
-		if err != nil {
-			return fmt.Errorf("ledger: %s source: %w", name, err)
-		}
-		for _, it := range items {
-			b, err := blockFor(it, in.Clean)
-			if err != nil {
-				return err
-			}
-			if b != nil {
-				blocks = append(blocks, *b)
-			}
-		}
-		return nil
-	}
+// collectSourceItems gathers the source items in deterministic collection
+// order (Knowledge, Conventions, Worker, Plan). Runs OUTSIDE the assembly
+// transaction — sources may do their own DB reads (see Assemble).
+func collectSourceItems(ctx context.Context, in AssembleInput, q SliceQuery) ([]Item, error) {
+	var items []Item
 	for _, src := range []struct {
 		name string
 		s    Source
@@ -341,8 +348,29 @@ func (s *Store) collectBlocks(ctx context.Context, in AssembleInput, r runRow, d
 		{"worker", in.Sources.Worker},
 		{"plan", in.Sources.Plan},
 	} {
-		if err := add(src.name, src.s); err != nil {
+		if src.s == nil {
+			continue
+		}
+		got, err := src.s.Items(ctx, q)
+		if err != nil {
+			return nil, fmt.Errorf("ledger: %s source: %w", src.name, err)
+		}
+		items = append(items, got...)
+	}
+	return items, nil
+}
+
+// assembleBlocks builds the frame from the pre-collected source items, the
+// in-transaction ledger projection (task bucket), then Extra.
+func assembleBlocks(sourceItems []Item, in AssembleInput, doc Document) ([]Block, error) {
+	var blocks []Block
+	for _, it := range sourceItems {
+		b, err := blockFor(it, in.Clean)
+		if err != nil {
 			return nil, err
+		}
+		if b != nil {
+			blocks = append(blocks, *b)
 		}
 	}
 	blocks = append(blocks, projectLedger(doc, in.Clean)...)

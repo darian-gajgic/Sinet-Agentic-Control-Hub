@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -148,7 +149,7 @@ func (l *Ledger) fold(runID, userID string, rows []checkpointRow) RunConsumption
 
 	for _, r := range rows {
 		acc := normalize(r.usageJSON)
-		purpose := derivePurpose(r)
+		purpose := derivePurpose(runID, r)
 		cur := l.exceptions.Currency(r.lane)
 		k := key{r.model, r.lane, purpose}
 		li := agg[k]
@@ -188,11 +189,58 @@ func (l *Ledger) fold(runID, userID string, rows []checkpointRow) RunConsumption
 	return rc
 }
 
-// derivePurpose classifies a usage row's purpose. At B1-2 a run is a single
-// engine invocation and there is no pipeline stage to read, so every row is
-// execution; the ceremony/verification tags populate when the intake (Spec
-// S06) and verification (Spec S07) stages land at B2 and tag their calls.
-func derivePurpose(checkpointRow) PurposeTag { return PurposeExecution }
+// derivePurpose classifies a usage row's purpose — still in ONE place (the
+// B1-2 shape), with the input the B2 pipeline changed: a task's engine work
+// now runs under ROLE-named runs (the B2-4 walking-skeleton convention,
+// extending intake's fixed `<task>.intake`, CONVENTIONS §14): intake
+// ceremony sessions ride `<task>.intake`, verification sessions ride
+// `<task>.verify`, everything else is execution. So ceremony and
+// verification itemize separately on receipts (1.10/3.4, Spec S06.10/
+// S07.11) without a schema change. Per-SESSION purpose splits inside one
+// run (e.g. a rework executor round inside the verify run, Spec S07.6)
+// arrive when sessions get first-class identity (S08/S13); until then the
+// verify run's whole consumption is the verification tax and the per-round
+// itemization lives in the verify.round records.
+func derivePurpose(runID string, _ checkpointRow) PurposeTag {
+	base := stripForkSuffix(runID)
+	switch {
+	case strings.HasSuffix(base, RunSuffixIntake):
+		return PurposeCeremony
+	case strings.HasSuffix(base, RunSuffixVerify):
+		return PurposeVerification
+	default:
+		return PurposeExecution
+	}
+}
+
+// stripForkSuffix removes trailing `.g<n>` recovery-fork segments (Spec
+// S02.5: successor run ids are `<parent>.g<newGen>`) so a forked role run
+// keeps its role's purpose.
+func stripForkSuffix(runID string) string {
+	for {
+		i := strings.LastIndex(runID, ".g")
+		if i < 0 || i+2 >= len(runID) {
+			return runID
+		}
+		digits := runID[i+2:]
+		for _, r := range digits {
+			if r < '0' || r > '9' {
+				return runID
+			}
+		}
+		runID = runID[:i]
+	}
+}
+
+// Role-run suffixes (the B2 walking-skeleton run-naming convention; intake
+// fixed `.intake` at B2-2, the skeleton fixed `.execute`/`.verify` at
+// B2-4). Owned here because purpose derivation is this package's duty
+// (S10.1); the skeleton names its runs with these same constants.
+const (
+	RunSuffixIntake  = ".intake"
+	RunSuffixExecute = ".execute"
+	RunSuffixVerify  = ".verify"
+)
 
 // readCheckpointsTx reads a run's checkpoint rows (usage + model) joined to the
 // run lane, in checkpoint order (event_seq is the sole ordering authority,
