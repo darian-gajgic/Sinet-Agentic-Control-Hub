@@ -253,12 +253,13 @@ func TestConfineSelectsSrtWhenPresentNativeWhenAbsent(t *testing.T) {
 // anywhere with /bin/sh (loopback/tempdir only).
 func TestSrtStubReceivesConfigAndArgv(t *testing.T) {
 	stub := writeSrtStub(t)
-	t.Setenv(EnvSrtPath, stub)
 
-	co := NewComposer(settings.New(), nil) // probes → finds the stub
-	if !co.Caps().Srt {
-		t.Fatalf("stub srt not discovered: %v", co.Caps().Notes)
-	}
+	// Boundary caps are faked (bwrap+userns are the mandatory gate, but srt
+	// itself invokes bwrap at runtime — the stub does not, so this test stays
+	// hermetic and runs where bwrap is absent, e.g. CI). Confine execs the stub
+	// at SrtPath; srt discovery itself is covered by TestProbeSrtDiscovery.
+	co := NewComposer(settings.New(), nil)
+	co.caps = Capabilities{Bwrap: true, Userns: true, Srt: true, SrtPath: stub}
 	ws := t.TempDir()
 	req := adapters.StartRequest{RunID: "run-1", UserID: "u", Class: string(C2), WorkDir: t.TempDir()}
 	spec := adapters.SpawnSpec{
