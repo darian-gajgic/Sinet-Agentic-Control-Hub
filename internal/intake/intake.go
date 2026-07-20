@@ -1,0 +1,368 @@
+// Package intake is the Spec S06 intake pipeline: everything between "a
+// request arrives" and "an approved plan exists" — triage, the
+// clarity-driven interview, the specification-with-numbered-AC contract,
+// the plan artifact, the deterministic spine, plan self-attack, and the
+// approval/freshness contract, with ceremony scaled by stakes (Spec S06.1).
+//
+// The pipeline is platform code composed over the landed seams: durable
+// state and the run FSM (internal/run, Spec S02), the event log
+// (internal/eventlog), and the Task Context Ledger (internal/ledger, Spec
+// S05) — spec confirmation and plan approval enter the ledger through its
+// control-plane ops, per the S05/S06 boundary (S06 owns HOW they enter).
+// Model duties stay behind named seams per the S06.10 engine table:
+// Classifier and SpotCheck (local duty aliases, Spec S12, B4), Planner and
+// Critic (planning model, wired to real engine sessions at B2-4), Utility
+// (utility model), Registry (project registry, Spec S13/S1.6). Absent
+// seams degrade exactly as the spec directs: classifier failure fails
+// closed to high stakes (S06.2); optional duties are skipped, never faked.
+//
+// Pipeline control state is event-sourced as `intake.state` run-events
+// (full-state payloads, current = latest by event_seq — the ledger_update
+// precedent of Spec S02.2); SPEC/PLAN artifacts are durable files under the
+// artifact root (Spec S06.6), referenced from the ledger. An interrupted
+// intake therefore resumes from its last artifact, never by replaying
+// conversation (D7; Spec S06.1).
+package intake
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+// Tier is the S06.4 stakes tier. Automatic adjustments are monotone upward
+// within a task; lowering happens only by explicit requester action and
+// never below a floor.
+type Tier string
+
+const (
+	TierTrivial  Tier = "trivial" // the zero-interaction band (G1 P11)
+	TierLow      Tier = "low"
+	TierStandard Tier = "standard"
+	TierHigh     Tier = "high"
+)
+
+var tierRank = map[Tier]int{TierTrivial: 0, TierLow: 1, TierStandard: 2, TierHigh: 3}
+
+// ValidTier reports whether t is one of the four S06.4 tiers.
+func ValidTier(t Tier) bool { _, ok := tierRank[t]; return ok }
+
+// maxTier returns the higher-stakes of a and b (monotone-upward merges).
+func maxTier(a, b Tier) Tier {
+	if tierRank[b] > tierRank[a] {
+		return b
+	}
+	return a
+}
+
+// Family is the S06.2 task family (feature 2.3). v0 ships the software
+// question set plus the generic fallback; further family sets arrive with
+// their domains (Spec S00.2, S19).
+type Family string
+
+const (
+	FamilySoftware Family = "software"
+	FamilyResearch Family = "research"
+	FamilyContent  Family = "content"
+	FamilyData     Family = "data"
+	FamilyChore    Family = "chore"
+	FamilyGeneric  Family = "generic" // unmatched requests (S06.5 fallback set)
+)
+
+// Request is one arriving request (feature 1.1: natural-language intake).
+type Request struct {
+	TaskID string `json:"task_id,omitempty"` // generated when empty
+	UserID string `json:"user_id"`           // the requester — the D10 approver
+	Title  string `json:"title"`
+	Text   string `json:"text"`
+}
+
+// Deterministic floor classes (Spec S06.2): any of these forces the high
+// tier regardless of classifier output and requester convenience settings.
+// Floors size ceremony only — D7 gates every outward effect regardless.
+const (
+	FloorOutwardEffect    = "outward_effect"
+	FloorNewSpend         = "new_spend"
+	FloorCredentialTouch  = "credential_touch"
+	FloorSharedAssetWrite = "shared_asset_write"
+	FloorRegulatedDomain  = "regulated_domain"
+)
+
+// FloorReason is one tripped deterministic floor.
+type FloorReason struct {
+	Class  string `json:"class"`
+	Source string `json:"source"` // "request" | "registry" | "classifier" | "plan"
+	Detail string `json:"detail"`
+}
+
+// TriggerHit is one P47 research-trigger hit (Spec S06.3). Hits set the
+// data-bearing flag and oblige research nodes in the PLAN; a hit is
+// dismissible only by the requester supplying or owning the fact.
+type TriggerHit struct {
+	RuleID string `json:"rule_id"`
+	Class  string `json:"class"`
+	Cue    string `json:"cue"`
+	Source string `json:"source"` // "rule" | "classifier" — the classifier may only ADD
+}
+
+// SuppliedFact is a requester-supplied input dismissing a P47 hit,
+// recorded on the SPEC (Spec S06.3).
+type SuppliedFact struct {
+	RuleID string `json:"rule_id"`
+	Fact   string `json:"fact"`
+	TS     string `json:"ts"`
+}
+
+// Estimate is a size/cost guess in API-equivalent USD (D5 reporting
+// currency; pricing is Spec S10's — an absent price table leaves Known
+// false, the UNPRICED honesty posture, never a silent $0).
+type Estimate struct {
+	SizeClass string  `json:"size_class,omitempty"`
+	USD       float64 `json:"usd,omitempty"`
+	Known     bool    `json:"known"`
+	Basis     string  `json:"basis,omitempty"`
+}
+
+// RegistrySlice is the matched project/repository registry entry injected
+// at triage (S1.6): conventions, commands, danger zones — so the interview
+// never asks what the platform already knows; danger zones feed the stakes
+// floor (Spec S06.2). The registry home is Spec S13 (B4); this is the
+// consuming shape.
+type RegistrySlice struct {
+	Project       string            `json:"project"`
+	Ref           string            `json:"ref"`              // registry-slice ref for the intake record
+	Family        Family            `json:"family,omitempty"` // the registered project's task family
+	Conventions   []string          `json:"conventions,omitempty"`
+	Commands      []string          `json:"commands,omitempty"`
+	DangerZones   []DangerZone      `json:"danger_zones,omitempty"`
+	ResolvedSlots map[string]string `json:"resolved_slots,omitempty"` // taxonomy slot id → registry-supplied value
+}
+
+// DangerZone mirrors the registry danger-zone row consumed at triage and
+// pinned into ledger §2 at approval (Spec S06.9, G1 Def.12).
+type DangerZone struct {
+	Path       string `json:"path"`
+	Rule       string `json:"rule"`
+	SourceHash string `json:"source_hash,omitempty"`
+}
+
+// TriageProposal is the local classifier's Stage-0 proposal (Spec S06.2).
+// Floors and data-bearing hits are add-only: the deterministic layers run
+// first and a classifier can never remove what a rule found.
+type TriageProposal struct {
+	Family   Family
+	Tier     Tier
+	Est      Estimate
+	ReadOnly bool // conservative band input: no writes outside the run workspace expected
+	NewNeeds bool // new tools, workers, grants, or automations expected (band condition 4)
+	Floors   []FloorReason
+	DataHits []TriggerHit
+}
+
+// Classifier is the S06.10 "local duty aliases" seam for family, stakes,
+// size, and data-bearing classification (Spec S12, B4). A nil classifier
+// or a classify error fails closed: the task is treated as high-stakes
+// with an unknown estimate and no band membership (Spec S06.2).
+type Classifier interface {
+	Classify(ctx context.Context, req Request, reg *RegistrySlice) (TriageProposal, error)
+}
+
+// Registry is the project-registry match seam (S1.6; registry home Spec
+// S13, B4). ok=false means no registry entry matched.
+type Registry interface {
+	Match(ctx context.Context, req Request) (RegistrySlice, bool, error)
+}
+
+// SlotResolution resolves one must-know slot (Spec S06.5): a slot is
+// resolved when registry-supplied, requester-answered, or converted to an
+// explicit assumption.
+type SlotResolution struct {
+	SlotID     string `json:"slot_id"`
+	How        string `json:"how"` // "registry" | "answered" | "assumption"
+	Value      string `json:"value,omitempty"`
+	Assumption string `json:"assumption,omitempty"`
+}
+
+const (
+	ResolvedRegistry   = "registry"
+	ResolvedAnswered   = "answered"
+	ResolvedAssumption = "assumption"
+)
+
+// EscalationAnswer records one answered 1.7 single-question escalation.
+type EscalationAnswer struct {
+	From     string `json:"from"` // "draft" | "revise" | "critique"
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+	TS       string `json:"ts"`
+}
+
+// DraftInput is everything the Stage-1 planning session receives to emit
+// the artifact pair (Spec S06.5–S06.6). The taxonomy carries the interview
+// coverage; the resolutions carry its outcome. Data-bearing hits oblige
+// research nodes by policy — present before any model drafted the plan.
+type DraftInput struct {
+	Request     Request
+	Family      Family
+	Tier        Tier
+	Registry    *RegistrySlice
+	Taxonomy    *Taxonomy
+	Resolutions []SlotResolution
+	DataHits    []TriggerHit
+	Supplied    []SuppliedFact
+	Escalations []EscalationAnswer
+	SpecVersion int   // version the emitted SPEC must carry
+	PlanVersion int   // version the emitted PLAN must carry
+	Prior       *Pair // set on re-interview: artifacts stay intact (S06.9 Re-interview)
+}
+
+// Revision reasons (ReviseInput.Reason).
+const (
+	ReviseCoverage  = "coverage_autofix" // S06.7(a): uncovered ACs named in Findings
+	ReviseResearch  = "research_node"    // S06.7(d): missing research nodes named in Findings
+	ReviseCritique  = "critique_revise"  // S06.8 REVISE: numbered findings
+	ReviseContest   = "replan_contest"   // S06.9 Re-plan: contested item named in Findings
+	ReviseMarkers   = "markers"          // S06.6: NEEDS-CLARIFICATION resolutions attached
+	ReviseInterview = "interview_update" // new interview answers after a pair exists
+	ReviseDrop      = "drop_criterion"   // coverage decision card: explicit requester drop
+)
+
+// ReviseInput is one bounded revision round against the existing pair.
+// Criteria do not drift: a revision addresses exactly the named findings
+// or resolutions (Spec S06.7(a), S06.8).
+type ReviseInput struct {
+	Pair        Pair
+	Reason      string
+	Findings    []string
+	Resolutions []SlotResolution
+	Escalations []EscalationAnswer
+	SpecVersion int
+	PlanVersion int
+}
+
+// Planner is the Stage-1 seam: the requester's designated planning model
+// (Spec S06.10). At B2-4 the implementation drives a real engine session
+// in a C1 read-only sandbox (S06.6, P-T05-1); the pipeline validates
+// whatever comes back — trust is in the spine, not the seam.
+type Planner interface {
+	Draft(ctx context.Context, in DraftInput) (Pair, error)
+	Revise(ctx context.Context, in ReviseInput) (Pair, error)
+}
+
+// VerdictKind is the S06.8 terminal verdict set.
+type VerdictKind string
+
+const (
+	VerdictPass      VerdictKind = "pass"
+	VerdictRevise    VerdictKind = "revise"
+	VerdictSpecDoubt VerdictKind = "spec_doubt" // the P45 antidote — never absorbed
+	VerdictTierUp    VerdictKind = "tier_up"
+)
+
+// Verdict is one critique outcome (Spec S06.8).
+type Verdict struct {
+	Kind         VerdictKind `json:"kind"`
+	Findings     []string    `json:"findings,omitempty"` // numbered blocker findings (REVISE)
+	Doubt        string      `json:"doubt,omitempty"`    // plain-language why (SPEC-DOUBT)
+	ProposedTier Tier        `json:"proposed_tier,omitempty"`
+}
+
+// Critic is the Stage-3 self-attack seam: planning-model class, fresh
+// context, artifact-only input — the signature admits nothing but the
+// pair, making context separation structural (Spec S06.8). Local models
+// never hold this duty. Recheck re-judges only the named findings.
+type Critic interface {
+	Critique(ctx context.Context, pair Pair) (Verdict, error)
+	Recheck(ctx context.Context, pair Pair, findings []string) (Verdict, error)
+}
+
+// HelpBlock is the 13.5 help content of the approval card (Spec S06.9):
+// what this decision does, what could go wrong, what the platform
+// recommends and why — non-IT reading level.
+type HelpBlock struct {
+	What      string `json:"what"`
+	Wrong     string `json:"wrong"`
+	Recommend string `json:"recommend"`
+}
+
+// Utility is the utility-model phrasing seam (Spec S06.10). Optional: a
+// nil Utility falls back to deterministic text drafted from the artifacts.
+type Utility interface {
+	Help(ctx context.Context, pair Pair) (HelpBlock, error)
+}
+
+// SpotCheck is the advisory local-model semantic coverage check of Spec
+// S06.7(a) — advisory-only, never a gate. Optional.
+type SpotCheck interface {
+	Check(ctx context.Context, pair Pair) ([]string, error)
+}
+
+// Escalation is the 1.7 ask-don't-assume escalation: a seam call may
+// return it (as an error) to raise exactly one clarifying question as a
+// single-question card; the run blocks-not-fails and the call is re-issued
+// after the answer (Spec S06.5). Consequential means: would change an AC,
+// the declared write-set, an outward effect, the stakes tier, or the cost
+// estimate beyond the S06.7 size-delta factor.
+type Escalation struct {
+	Question string
+}
+
+func (e *Escalation) Error() string { return "intake: consequential ambiguity: " + e.Question }
+
+// Settings is this package's view of the settings registry (CONVENTIONS
+// §6: ⚙ values are read by dotted key, never hardcoded).
+type Settings interface {
+	Int(key string) (int64, error)
+	Float(key string) (float64, error)
+	FloatFor(key, userID string) (float64, error)
+	Duration(key string) (time.Duration, error)
+	String(key string) (string, error)
+}
+
+// ⚙ keys consumed here. intake.approval_stale_hours (Spec S06.9) is the
+// folded alias of freshness.max_age per S18.4 R2 — the registry declares
+// the freshness key; this package consumes it for pending-approval
+// staleness.
+const (
+	keyZeroInteractionCost   = "intake.zero_interaction_cost_usd" // per-user (G1 P11 + D1.7)
+	keyClearanceFloorLow     = "intake.clearance_floor.low"
+	keyClearanceFloorStd     = "intake.clearance_floor.standard"
+	keyClearanceFloorHigh    = "intake.clearance_floor.high"
+	keySizeRecheckFactor     = "intake.size_recheck_factor"
+	keyCoverageAutofixRounds = "intake.coverage_autofix_rounds"
+	keyCritiqueReviseRounds  = "intake.critique_revise_rounds"
+	keyApprovalStale         = "freshness.max_age"    // folded alias (S18.4 R2)
+	keyClaimsDefaultWrite    = "claims.default_write" // consumed at plan approval (Spec S02.8)
+)
+
+// Errors callers branch on.
+var (
+	// ErrNotRunning rejects stage work while the intake run is not running:
+	// admission is the scheduler's (Spec S10); intake never self-admits.
+	ErrNotRunning = errors.New("intake: run is not running")
+	// ErrNoState is returned for a task with no intake pipeline state.
+	ErrNoState = errors.New("intake: task has no intake state")
+	// ErrGateOpen rejects advancing while a card waits — gates wait, at
+	// every tier (Spec S06.1); answering resumes the pipeline in place.
+	ErrGateOpen = errors.New("intake: a gate is open and waiting (S06.1: gates wait)")
+	// ErrUnknownAsk is returned for an answer to an unknown or closed ask.
+	ErrUnknownAsk = errors.New("intake: unknown or closed ask")
+	// ErrBadAnswer covers answers that do not match the card's contract.
+	ErrBadAnswer = errors.New("intake: answer does not match the card")
+	// ErrNotRequester enforces D10: the requester approves their own spec
+	// and plan; nothing self-approves (5.8).
+	ErrNotRequester = errors.New("intake: only the requester may answer this card (D10)")
+	// ErrMarkersOpen enforces S06.6: an artifact with open
+	// NEEDS-CLARIFICATION markers cannot reach approval.
+	ErrMarkersOpen = errors.New("intake: open NEEDS-CLARIFICATION markers cannot reach approval (S06.6)")
+	// ErrPhase rejects an operation invalid in the current pipeline phase.
+	ErrPhase = errors.New("intake: operation invalid in this pipeline phase")
+	// ErrSeamMissing reports a required seam absent for the tier's ceremony
+	// (e.g. no Critic at standard tier, where critique is mandatory).
+	ErrSeamMissing = errors.New("intake: required seam not configured")
+	// ErrBelowFloor rejects an explicit tier lowering below a deterministic
+	// floor (Spec S06.2/S06.4).
+	ErrBelowFloor = errors.New("intake: tier cannot drop below a deterministic floor")
+	// ErrTaxonomy covers invalid taxonomy or trigger files.
+	ErrTaxonomy = errors.New("intake: invalid taxonomy")
+)
