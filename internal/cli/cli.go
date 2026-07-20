@@ -49,8 +49,10 @@ Tools:
   run-launch   per-run sandbox launcher — the fixed ExecStart of the
                sinet-run@ template (Spec S11.8); reads a spool record and
                composes the S11.1 stack. System-invoked, never by hand.
-  engine-hook  PreToolUse gate hook for the Claude lane (invoked by the
-               engine per Sinet-lowered settings, never by hand; Spec S03.4)
+  engine-hook  engine hook for the Claude lane (invoked by the engine per
+               Sinet-lowered settings, never by hand): PreToolUse gate
+               (Spec S03.4), or with --session-start the SessionStart
+               pinned-context re-injection (Spec S05.7)
   version      print build and version information
   help         print this usage text
 `
@@ -96,14 +98,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	return exitUsage
 }
 
-// runEngineHook executes one PreToolUse gate-hook invocation (Spec
-// S03.4): the engine runs `sinet engine-hook --ctl <dir>` per the
-// Sinet-lowered settings; stdin carries the hook payload, stdout the
-// decision JSON. A tool subcommand, not a mode (no unit file).
+// runEngineHook executes one engine-hook invocation for the Claude lane:
+// the PreToolUse gate (Spec S03.4, `sinet engine-hook --ctl <dir>`), or —
+// with --session-start — the SessionStart pinned-context re-injection
+// (Spec S05.7 step 3; B1-4 spike mechanics). Stdin carries the hook
+// payload, stdout the hook JSON. A tool subcommand, not a mode (no unit
+// file).
 func runEngineHook(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sinet engine-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ctl := fs.String("ctl", "", "gate control directory compiled into the lowered settings")
+	sessionStart := fs.String("session-start", "", "pinned-context file to re-emit as SessionStart additionalContext (Spec S05.7)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -111,7 +116,13 @@ func runEngineHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sinet engine-hook: unexpected argument %q\n", fs.Arg(0))
 		return exitUsage
 	}
-	if err := claudecli.RunHook(os.Stdin, stdout, *ctl); err != nil {
+	var err error
+	if *sessionStart != "" {
+		err = claudecli.RunSessionStartHook(os.Stdin, stdout, *ctl, *sessionStart)
+	} else {
+		err = claudecli.RunHook(os.Stdin, stdout, *ctl)
+	}
+	if err != nil {
 		fmt.Fprintf(stderr, "sinet engine-hook: %v\n", err)
 		return exitError
 	}

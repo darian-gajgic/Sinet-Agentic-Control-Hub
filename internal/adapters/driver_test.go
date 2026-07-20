@@ -2,6 +2,7 @@ package adapters_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -441,4 +443,70 @@ func eventTypes(t *testing.T, e *env, runID string) []string {
 		types = append(types, typ)
 	}
 	return types
+}
+
+// TestCheckpointLedgerRevisionSeam fills the S02.4(c) block through the
+// real ledger machinery: the checkpoint row records the ledger_version +
+// content hash of the run's task ledger (Spec S05.2 duty 1), resolvable
+// back to the exact revision — the D7 context payload.
+func TestCheckpointLedgerRevisionSeam(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	// A task-bearing run (the ledger is a per-task artifact, Spec S05.1).
+	err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO tasks (task_id, user_id, title, created_ts) VALUES ('t1', 'u1', 't', '2026-07-20T00:00:00Z')`)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	if _, err := e.runs.Create(ctx, run.NewRun{ID: "r-led", UserID: "u1", TaskID: "t1", Substrate: adapters.SubstrateClaudeCLI, Lane: adapters.LaneAnthropic}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, st := range []run.State{run.StateQueued, run.StateClaimed} {
+		if _, err := e.runs.Transition(ctx, "r-led", st, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+			t.Fatalf("Transition to %s: %v", st, err)
+		}
+	}
+
+	led := ledger.NewStore(e.db, e.log)
+	if _, err := led.SetObjective(ctx, "r-led", "platform", ledger.ObjectiveAC{
+		Objective:          "checkpointed objective",
+		AcceptanceCriteria: []ledger.AcceptanceCriterion{{N: 1, Plain: "done"}},
+		SpecVersion:        "spec-v1",
+	}); err != nil {
+		t.Fatalf("SetObjective: %v", err)
+	}
+	e.drv.LedgerRevision = led.CheckpointRef
+
+	fa := &fakeAdapter{
+		cursor:  adapters.Cursor{Substrate: adapters.SubstrateClaudeCLI, SessionID: "sid"},
+		script:  []adapters.Event{usageEvent("msg_1", 1)},
+		outcome: adapters.Outcome{Kind: adapters.OutcomeCompleted},
+	}
+	if _, err := e.drv.Drive(ctx, fa, adapters.StartRequest{RunID: "r-led", UserID: "u1", Model: "m"}); err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+
+	cp, ok, err := e.cps.Last(ctx, "r-led")
+	if err != nil || !ok {
+		t.Fatalf("Last: %v ok=%v", err, ok)
+	}
+	ref, ok, err := ledger.ParseRevisionRef(cp.LedgerRevision)
+	if err != nil || !ok {
+		t.Fatalf("checkpoint ledger_revision %q: %v ok=%v", cp.LedgerRevision, err, ok)
+	}
+	if ref.LedgerVersion != 1 || len(ref.SHA256) != 64 {
+		t.Fatalf("revision ref = %+v", ref)
+	}
+	// The ref resolves to the exact revision content (D7 self-containment).
+	doc, err := led.AtVersion(ctx, "t1", ref.LedgerVersion)
+	if err != nil {
+		t.Fatalf("AtVersion: %v", err)
+	}
+	if doc.ObjectiveAC.Objective != "checkpointed objective" {
+		t.Fatalf("resolved revision = %+v", doc.ObjectiveAC)
+	}
 }

@@ -151,6 +151,23 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec, newSessionID
 			}},
 		}
 	}
+	if req.Worker.SessionStartContextPath != "" {
+		// Pinned-section re-injection channel (Spec S05.7 step 3; B1-4
+		// spike M3/M4): SessionStart matched on the observed source enum,
+		// emitting the placed pinned-context file as additionalContext.
+		hookCmd := a.hookCommand()
+		if hookCmd == "" {
+			return nil, fmt.Errorf("claudecli: session-start context declared but no hook command available")
+		}
+		if es.Hooks == nil {
+			es.Hooks = map[string][]hookMatcher{}
+		}
+		es.Hooks["SessionStart"] = []hookMatcher{{
+			Matcher: sessionStartMatcher,
+			Hooks: []hookEntry{{Type: "command", Command: fmt.Sprintf("%s --ctl '%s' --session-start '%s'",
+				hookCmd, ctlDir, req.Worker.SessionStartContextPath)}},
+		}}
+	}
 	settingsJSON, err := json.Marshal(es)
 	if err != nil {
 		return nil, fmt.Errorf("claudecli: marshal engine settings: %w", err)

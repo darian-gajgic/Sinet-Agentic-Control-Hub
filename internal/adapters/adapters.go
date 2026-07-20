@@ -283,6 +283,14 @@ type CompiledWorker struct {
 	// PermissionMode is part of the invocation snapshot (S03.4: measured
 	// NOT restored by the engine on resume; always re-supplied).
 	PermissionMode string
+	// SessionStartContextPath, when set, wires the lane's deterministic
+	// re-injection channel (Spec S05.4/S05.7 step 3; resolved by the B1-4
+	// spike, 2026-07-20): a SessionStart hook matched on source
+	// startup|resume|compact re-emits this platform-placed pinned-context
+	// file (the ledger's pinned sections, verbatim) as additionalContext.
+	// The file is placed by the S05 assembly and manifested like every
+	// injection; empty = no re-injection hook.
+	SessionStartContextPath string
 	// Schema versions for the S02.4(e) checkpoint block.
 	ToolSchemaVersion   string
 	PromptSchemaVersion string

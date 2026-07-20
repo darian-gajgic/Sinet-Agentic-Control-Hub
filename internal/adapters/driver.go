@@ -45,6 +45,15 @@ type Driver struct {
 	// the block empty (the lane genuinely provides none yet).
 	Snapshot func(ctx context.Context, runID string) (string, error)
 
+	// LedgerRevision is the S02.4(c) ledger-revision seam: the Task Context
+	// Ledger revision ref (ledger_version + content hash) recorded on every
+	// checkpoint (Spec S05.2 duty 1 — every checkpoint embeds the current
+	// ledger state by ledger_version; the full content is self-contained in
+	// run_events as ledger_update revisions, Spec S02.2). Wired to
+	// (*ledger.Store).CheckpointRef; nil, or a run without a task ledger,
+	// leaves the block empty.
+	LedgerRevision func(ctx context.Context, runID string) (string, error)
+
 	// Now is the clock seam (tests). Nil = time.Now.
 	Now func() time.Time
 }
@@ -254,6 +263,14 @@ func (d *Driver) checkpoint(ctx context.Context, sess Session, r run.Run, req St
 		}
 		snapshotRef = ref
 	}
+	ledgerRev := ""
+	if d.LedgerRevision != nil {
+		rev, err := d.LedgerRevision(ctx, r.ID)
+		if err != nil {
+			return fmt.Errorf("adapters: ledger revision (S02.4c): %w", err)
+		}
+		ledgerRev = rev
+	}
 	var cp gates.Checkpoint
 	err := d.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		// The usage event append rides the checkpoint write transaction
@@ -276,9 +293,8 @@ func (d *Driver) checkpoint(ctx context.Context, sess Session, r run.Run, req St
 			CwdKey:           cur.CwdKey,
 			TranscriptPath:   cur.TranscriptPath,
 
-			// (c) Ledger revision: the Task Context Ledger is Spec S05's
-			// (B2); the block stays empty until the ledger exists.
-			LedgerRevision: "",
+			// (c) Ledger revision via the LedgerRevision seam (Spec S05.2).
+			LedgerRevision: ledgerRev,
 			// (d) artifact snapshot ref via the Snapshot seam.
 			ArtifactSnapshotRef: snapshotRef,
 
