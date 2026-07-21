@@ -299,6 +299,17 @@ type CompiledWorker struct {
 	// The file is placed by the S05 assembly and manifested like every
 	// injection; empty = no re-injection hook.
 	SessionStartContextPath string
+	// Recitation, when true, wires the lane's per-turn recitation delivery
+	// valve (Spec S05.3 recitation over the S03.4 ctl-dir airlock;
+	// Research/18 §7-C1, scope = recitation ONLY): a PostToolUse hook that
+	// read-and-consumes a platform-written pending file and emits it as
+	// additionalContext at the next tool boundary — quiet (zero stdout, zero
+	// injected context) when nothing is pending. The PLATFORM computes
+	// turns-dueness and authors the content (ledger state/next_actions at a
+	// pinned ledger_version); the hook is a delivery valve only, never a
+	// decision-maker. Probe-proven on the installed engine
+	// (P3/measurements/2026-07-21-posttooluse-additionalcontext-probe.md).
+	Recitation bool
 	// Schema versions for the S02.4(e) checkpoint block.
 	ToolSchemaVersion   string
 	PromptSchemaVersion string

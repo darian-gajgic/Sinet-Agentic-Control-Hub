@@ -51,8 +51,10 @@ Tools:
                composes the S11.1 stack. System-invoked, never by hand.
   engine-hook  engine hook for the Claude lane (invoked by the engine per
                Sinet-lowered settings, never by hand): PreToolUse gate
-               (Spec S03.4), or with --session-start the SessionStart
-               pinned-context re-injection (Spec S05.7)
+               (Spec S03.4), with --session-start the SessionStart
+               pinned-context re-injection (Spec S05.7), or with
+               --post-tool-use the PostToolUse recitation delivery valve
+               (Spec S05.3)
   version      print build and version information
   help         print this usage text
 `
@@ -99,16 +101,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 // runEngineHook executes one engine-hook invocation for the Claude lane:
-// the PreToolUse gate (Spec S03.4, `sinet engine-hook --ctl <dir>`), or —
-// with --session-start — the SessionStart pinned-context re-injection
-// (Spec S05.7 step 3; B1-4 spike mechanics). Stdin carries the hook
-// payload, stdout the hook JSON. A tool subcommand, not a mode (no unit
-// file).
+// the PreToolUse gate (Spec S03.4, `sinet engine-hook --ctl <dir>`), with
+// --session-start the SessionStart pinned-context re-injection (Spec S05.7
+// step 3; B1-4 spike mechanics), or with --post-tool-use the PostToolUse
+// recitation delivery valve (Spec S05.3 over the S03.4 ctl-dir airlock;
+// Research/18 §7-C1). Stdin carries the hook payload, stdout the hook
+// JSON. A tool subcommand, not a mode (no unit file).
 func runEngineHook(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sinet engine-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ctl := fs.String("ctl", "", "gate control directory compiled into the lowered settings")
 	sessionStart := fs.String("session-start", "", "pinned-context file to re-emit as SessionStart additionalContext (Spec S05.7)")
+	postToolUse := fs.Bool("post-tool-use", false, "recitation delivery valve: consume the pending recitation, if any, as PostToolUse additionalContext (Spec S05.3)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -116,10 +120,17 @@ func runEngineHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sinet engine-hook: unexpected argument %q\n", fs.Arg(0))
 		return exitUsage
 	}
+	if *sessionStart != "" && *postToolUse {
+		fmt.Fprintf(stderr, "sinet engine-hook: --session-start and --post-tool-use are exclusive (one hook event per invocation)\n")
+		return exitUsage
+	}
 	var err error
-	if *sessionStart != "" {
+	switch {
+	case *sessionStart != "":
 		err = claudecli.RunSessionStartHook(os.Stdin, stdout, *ctl, *sessionStart)
-	} else {
+	case *postToolUse:
+		err = claudecli.RunPostToolUseHook(os.Stdin, stdout, *ctl)
+	default:
 		err = claudecli.RunHook(os.Stdin, stdout, *ctl)
 	}
 	if err != nil {

@@ -81,15 +81,12 @@ const (
 
 // keyRecitationInterval is the ⚙ in-stage recitation cadence of Spec S05.3
 // ("the coordinator re-reads the ledger's state/next_actions every N
-// turns"). DELIBERATELY UNCONSUMED at B2-4 — a named seam, never faked
-// (packet rule): the Claude lane's stage sessions are single `-p`
-// invocations and the platform has NO mid-session turn-injection channel
-// (the B1-4 spike mapped the channels: prompt assembly at start,
-// SessionStart re-injection on startup|resume|compact, PreToolUse for gated
-// tools — none is a per-N-turns recitation writer). The channel arrives
-// with the S04 orchestration layer (B3, helper/coordinator sessions) or an
-// engine-side hook that fires per turn; consuming the key before the
-// channel exists would fake the mechanism.
+// turns"; 0 = off). CONSUMED since B3-4 (Research/18 §7-C1; the B2-4
+// "no per-turn channel" seam closed): the platform reciter (recite.go)
+// counts turns from persisted run events and authors due recitations onto
+// the S03.4 ctl-dir airlock; the lowering-compiled PostToolUse hook is the
+// delivery valve — probe-proven on the installed engine
+// (P3/measurements/2026-07-21-posttooluse-additionalcontext-probe.md).
 const keyRecitationInterval = "context.recitation_interval_turns"
 
 // The B2-4 model/window constants are RETIRED (B3-3): the model comes from

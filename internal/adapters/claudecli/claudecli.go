@@ -182,6 +182,23 @@ func (a *Adapter) spawn(ctx context.Context, req adapters.StartRequest, l *lower
 	if err := truncateFires(l.ctlDir); err != nil {
 		return nil, fmt.Errorf("claudecli: reset fires log: %w", err)
 	}
+	// Recitation state (Spec S05.3; Research/18 §7-C1): a NON-resume spawn
+	// starts un-recited — stale pending/delivered/fires from a dead prior
+	// invocation of the same stage workdir must neither deliver nor
+	// double-manifest (reset runs regardless of Recitation so a
+	// recitation-off session cannot inherit a predecessor's state); a
+	// resume continues the same invocation and an undelivered pending
+	// stays deliverable.
+	if !l.resume {
+		if err := resetRecite(l.ctlDir); err != nil {
+			return nil, err
+		}
+	}
+	if req.Worker.Recitation {
+		if err := ensureReciteDir(l.ctlDir); err != nil {
+			return nil, fmt.Errorf("claudecli: recite dir: %w", err)
+		}
+	}
 
 	// Broker credential injection at spawn (Spec S11.5; S01.6 "engines
 	// receive credentials at start"): resolved FRESH, never stored. For a
@@ -294,15 +311,18 @@ func (a *Adapter) buildCmd(req adapters.StartRequest, l *lowered, env []string) 
 	}
 	// Lowered config is bound read-only (the engine reads its compiled
 	// settings but can never rewrite them — S11.7 P-T09-1); the gate control
-	// dir, when gated tools are declared, is the read-write exchange channel
-	// (S03.4). A later rw bind of the ctl subdir shadows the ro WorkDir bind.
+	// dir — needed by the PreToolUse gate (S03.4) and by the recitation
+	// delivery valve (S05.3: the in-sandbox hook renames/append-writes there)
+	// — stays the ONE read-write exchange channel; recitation adds no new
+	// bind (Research/18 §7-C1: no new socket, credential, or principal). A
+	// later rw bind of the ctl subdir shadows the ro WorkDir bind.
 	spec := adapters.SpawnSpec{
 		Argv:      l.argv,
 		Env:       env,
 		Workspace: req.Cwd,
 		ROConfig:  []string{req.WorkDir},
 	}
-	if len(req.Worker.GatedTools) > 0 {
+	if len(req.Worker.GatedTools) > 0 || req.Worker.Recitation {
 		spec.RWExchange = []string{l.ctlDir}
 	}
 	cmd, cleanup, err := req.Confiner.Confine(req, spec)

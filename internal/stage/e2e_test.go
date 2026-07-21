@@ -36,6 +36,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// The hook re-exec branch is checked FIRST and by argv: a hook
+	// subprocess spawned by the fake engine inherits SINET_STAGE_FAKE=1,
+	// and the engine argv never carries "engine-hook" (argv[1] is "-p").
+	if len(os.Args) > 1 && os.Args[1] == "engine-hook" {
+		os.Exit(fakeHookMain(os.Args[2:]))
+	}
 	if os.Getenv("SINET_STAGE_FAKE") == "1" {
 		os.Exit(stageFakeMain())
 	}
@@ -84,6 +90,11 @@ func stageFakeMain() int {
 	case marker("revise"):
 		sid = "0000f00d-0000-4000-8000-000000000006"
 		payload = fakeReviseOutput(prompt)
+	case marker("recite"):
+		// Multi-turn engine faithful to the probed PostToolUse contract:
+		// streams turns, then runs the REAL compiled delivery valve from
+		// the lowered settings at the last tool boundary (recite e2e).
+		return reciteFakeEngine("0000f00d-0000-4000-8000-000000000008")
 	case marker("helper"):
 		sid = "0000f00d-0000-4000-8000-000000000007"
 		switch {

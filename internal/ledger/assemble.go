@@ -215,13 +215,14 @@ type Brief struct {
 
 // manifestPayload is the context.manifest event payload.
 type manifestPayload struct {
-	Kind          string          `json:"kind"` // assembly | reinjection
+	Kind          string          `json:"kind"` // assembly | reinjection | recitation
 	Stage         string          `json:"stage"`
 	TaskID        string          `json:"task_id"`
 	LedgerVersion int64           `json:"ledger_version"`
 	Clean         bool            `json:"clean,omitempty"`
-	Source        string          `json:"source,omitempty"`     // reinjection: SessionStart source
-	SessionID     string          `json:"session_id,omitempty"` // reinjection: engine session
+	Source        string          `json:"source,omitempty"`      // reinjection: SessionStart source
+	SessionID     string          `json:"session_id,omitempty"`  // reinjection/recitation: engine session
+	ToolUseID     string          `json:"tool_use_id,omitempty"` // recitation: the delivering tool boundary
 	Items         []ManifestEntry `json:"items"`
 	Findings      []Finding       `json:"findings,omitempty"`
 }

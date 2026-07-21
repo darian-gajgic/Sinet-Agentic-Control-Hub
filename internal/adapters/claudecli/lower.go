@@ -168,6 +168,29 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec, newSessionID
 				hookCmd, ctlDir, req.Worker.SessionStartContextPath)}},
 		}}
 	}
+	if req.Worker.Recitation {
+		// Per-turn recitation delivery valve (Spec S05.3 over the S03.4
+		// ctl-dir airlock; Research/18 §7-C1; probe-proven 2026-07-21):
+		// PostToolUse matched on the FULL tool allowlist — every allowed
+		// tool call is a delivery boundary — read-and-consuming the
+		// platform-written pending file. PostToolUse only fires at tool
+		// boundaries, so a tool-less session has no delivery channel and
+		// wiring one would silently never deliver: refused loudly instead.
+		if len(req.Worker.ToolAllowlist) == 0 {
+			return nil, fmt.Errorf("claudecli: recitation requires a tool allowlist (PostToolUse delivers only at tool boundaries)")
+		}
+		hookCmd := a.hookCommand()
+		if hookCmd == "" {
+			return nil, fmt.Errorf("claudecli: recitation declared but no hook command available")
+		}
+		if es.Hooks == nil {
+			es.Hooks = map[string][]hookMatcher{}
+		}
+		es.Hooks["PostToolUse"] = []hookMatcher{{
+			Matcher: strings.Join(req.Worker.ToolAllowlist, "|"),
+			Hooks:   []hookEntry{{Type: "command", Command: fmt.Sprintf("%s --ctl '%s' --post-tool-use", hookCmd, ctlDir)}},
+		}}
+	}
 	settingsJSON, err := json.Marshal(es)
 	if err != nil {
 		return nil, fmt.Errorf("claudecli: marshal engine settings: %w", err)

@@ -195,6 +195,18 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		// "recorded on the run"; the version→outcome join's config half).
 		s.recordCompiled(ctx, r, in.Stage, in.Compiled)
 	}
+	// Recitation (Spec S05.3; Research/18 §7-C1): ledger-backed working
+	// sessions get the per-turn channel — the reciter computes dueness and
+	// authors, the compiled PostToolUse valve delivers (recite.go).
+	recite := s.newReciter(ctx, in, brief, workDir, cw.ToolAllowlist)
+	cw.Recitation = recite != nil
+	onEvent := watcher.observe
+	if recite != nil {
+		onEvent = func(ev adapters.Event) {
+			watcher.observe(ev)
+			recite.observe(ev)
+		}
+	}
 	req := adapters.StartRequest{
 		RunID:          in.RunID,
 		UserID:         r.UserID,
@@ -207,7 +219,7 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		WorkDir:        workDir,
 		CeilingCostUSD: ceilUSD,
 		CeilingSteps:   ceilSteps,
-		OnEvent:        watcher.observe,
+		OnEvent:        onEvent,
 	}
 	if s.cfg.CredInject != nil {
 		req.CredInject = s.cfg.CredInject(r.UserID)
@@ -216,6 +228,12 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 	out, err := s.driver.DriveStage(ctx, adapter, req)
 	if err != nil {
 		return SessionResult{}, err
+	}
+	// Recitation deliveries become manifest events for EVERY session
+	// disposition — a delivery into a session that then failed still
+	// happened and must not vanish from the trace (§7-C1 condition 3).
+	if recite != nil {
+		s.recordRecitations(ctx, in)
 	}
 	res := SessionResult{Outcome: out, Text: out.ResultText, Brief: brief, Budget: watcher.report()}
 	if out.Kind != adapters.OutcomeCompleted {
