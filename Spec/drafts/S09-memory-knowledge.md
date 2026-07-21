@@ -107,7 +107,7 @@ Expiry, pruning, and supersession are **scheduled platform duties** on the ratif
 
 Engine memory features are never the memory system [R11 §4.9; G2 D2.1]. An engine-native store that persists agent-written state across sessions is, structurally, an ungated L2 — an 8.1 bypass — so the posture is disable-or-contain, implemented through the compiled-config guarantee: Sinet-compiled config is the only config an engine sees, per-channel [SPIKE P2-S5; XREF:S03].
 
-- **Claude lane:** auto-memory (MEMORY.md-class) is **disabled where the pinned version allows; otherwise contained** — the memory dir is workspace-scoped, treated as L0, wiped with the task workspace; from v1, its task-end content is *harvested* into the station-1 evidence pool. It never persists as behavior-steering memory. The GA memory tool stays off at v0. Exact disable/redirect mechanics: TBD-P3(Claude-lane auto-memory containment, R11-OQ6) — carried identically in S03 [XREF:S03].
+- **Claude lane:** auto-memory (MEMORY.md-class) is **disabled where the pinned version allows; otherwise contained** — the memory dir is workspace-scoped, treated as L0, wiped with the task workspace; from v1, its task-end content is *harvested* into the station-1 evidence pool. It never persists as behavior-steering memory. The GA memory tool stays off at v0. Exact disable/redirect mechanics: settled — **closed A2 (2026-07-22, P3-B3-1)**: config-root `memory/` wipe at session start, resume exempt; carried identically in S03 [XREF:S03].
 - **Z.AI lane (opencode):** no native auto-memory on the pinned version; community memory plugins are not adopted (adopt-don't-fork; young third-party code) [R11 §4.9].
 - **Convention files** (AGENTS.md/CLAUDE.md) remain a *projection* surface generated from the registry — never a store [XREF:S05].
 
@@ -145,14 +145,14 @@ A knowledge object's removal or supersession follows S09.5 exactly — including
 | `memory.vector_gate.corpus_entries` | 5,000 | 1,000–50,000; pre-registered trigger | [G2 Def.8] |
 
 **Known problems owned here:** *(ids assigned in R11 §7.8–7.10 order, per the P-T##-N convention; S17 consolidates)*
-- **P-T10-1 — engine-native memory drift (8.1 bypass class):** disable-or-contain posture in S09.9; standing canary-suite entry re-checked per engine pin bump [XREF:S14]; mechanics TBD-P3(Claude-lane auto-memory containment, R11-OQ6).
+- **P-T10-1 — engine-native memory drift (8.1 bypass class):** disable-or-contain posture in S09.9; standing canary-suite entry re-checked per engine pin bump [XREF:S14]; mechanics settled — closed A2 (2026-07-22, P3-B3-1).
 - **P-T10-2 — proposal-noise economics unmeasured field-wide:** accept/dismiss rates instrumented from the pipeline's first day (v1); sustained low acceptance is a station-2 defect proposing drafter/cap retune, never a reason to weaken the gate; metrics owned by the eval practice [XREF:S14], reviewed at 11.2 checkpoints.
 - **P-T10-3 — knowledge-injection budget pressure:** per-scope budgets with visible over-budget handling (S09.8) inside [S05]'s stage-fit target; conformance-level enforcement [XREF:S14].
 
 **Deferred / parked:**
 - Auto-proposal pipeline (stations 1–2, 5 automation; L1 writers; worker-overlay injection; sharing UI) → activates at v1 per [G2 D2.7]/15.4; architecture fixed here (S09.4), activation is config + UI.
 - Embedding lane (local model + sqlite-vec, RRF with FTS5) → re-entry: a `memory.vector_gate.*` trigger fires post-15.3; rank-candidates-only rule binds regardless [G2 Def.8].
-- Claude-lane auto-memory disable/redirect mechanics → TBD-P3(Claude-lane auto-memory containment, R11-OQ6), rides adapter build [XREF:S03].
+- Claude-lane auto-memory disable/redirect mechanics → settled, closed A2 (2026-07-22, P3-B3-1) (rode the adapter+memory builds) [XREF:S03].
 - Engine-native cross-session memory absorbing L0/L1 mechanics → re-entry: configurable, gateable primitives on *both* lanes behind the Sinet contract; the gate and L2 stay Sinet-owned regardless [R11 §4 change-triggers].
 - Graph/temporal supersession store → re-entry: a real household-scale temporal-supersession need; met first by `supersedes_id` + status fields in plain SQL [R11 §4 change-trigger 3].
 - Memory-sidecar re-evaluation → re-entry: a system shipping schema-level write authorization + human-gated writes + text-first storage as first-class features; none exists mid-2026 [R11 §4 change-trigger 2].
