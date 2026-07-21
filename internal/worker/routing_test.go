@@ -59,7 +59,7 @@ func TestRouteSelectsActiveWorkerDeterministically(t *testing.T) {
 	// Step 3: the duty map resolves the execution seat under flat-rate
 	// coverage; the seat row carries the window record (the retired B2-4
 	// constant's home).
-	if d1.Model != "claude-haiku-4-5" || d1.Lane != "anthropic" || d1.WindowTokens != worker.DefaultWindowTokens {
+	if d1.Model != "claude-opus-4-8" || d1.Lane != "anthropic" || d1.WindowTokens != worker.DefaultWindowTokens {
 		t.Fatalf("seat = %s/%s/%d", d1.Model, d1.Lane, d1.WindowTokens)
 	}
 	if d1.Effort != "standard" {
@@ -138,7 +138,7 @@ func TestRouteTieBreakSeamAndDegradedOrder(t *testing.T) {
 	dry := &fakeDry{}
 	if _, err := f.store.RunBattery(context.Background(), v2.ID, worker.BatteryInput{
 		Actor: "alice", SampleTask: "review the sample diff", Engine: dry,
-		Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.215",
+		Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.216",
 	}); err != nil {
 		t.Fatalf("RunBattery: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestRouteModelPinCoverageGapAdvice(t *testing.T) {
 	dry := &fakeDry{}
 	if _, err := f.store.RunBattery(context.Background(), v.ID, worker.BatteryInput{
 		Actor: "alice", SampleTask: "review the sample diff", Engine: dry,
-		Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.215",
+		Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.216",
 	}); err != nil {
 		t.Fatalf("RunBattery: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestRouteMechanicalHelperDegradesLocalAbsence(t *testing.T) {
 	if !strings.Contains(d.PlainReason, "local free tier") || !strings.Contains(d.PlainReason, "B4") {
 		t.Fatalf("local-tier absence not recorded: %q", d.PlainReason)
 	}
-	if d.Model != "claude-haiku-4-5" {
+	if d.Model != "claude-opus-4-8" {
 		t.Fatalf("degraded mechanical duty must ride the paid execution seat, got %q", d.Model)
 	}
 	found := false
@@ -384,13 +384,20 @@ func TestTighterClass(t *testing.T) {
 
 func TestDefaultDutyMapShape(t *testing.T) {
 	m := worker.DefaultDutyMap()
-	for _, duty := range []string{worker.DutyExecution, worker.DutyPlanning, worker.DutyJudge} {
+	// Seat mix ratified at the B3 gate 2026-07-22 (operator D3): frontier
+	// ceremony + execution, cross-model judge (P3/gates/B3-report.md §7).
+	want := map[string]string{
+		worker.DutyExecution: "claude-opus-4-8",
+		worker.DutyPlanning:  "claude-opus-4-8",
+		worker.DutyJudge:     "claude-sonnet-5",
+	}
+	for duty, model := range want {
 		seat, ok := m[duty]
 		if !ok {
 			t.Fatalf("duty %s has no seat", duty)
 		}
-		if seat.Model != "claude-haiku-4-5" || seat.Lane != "anthropic" || seat.WindowTokens != 200_000 {
-			t.Fatalf("seat %s = %+v", duty, seat)
+		if seat.Model != model || seat.Lane != "anthropic" || seat.WindowTokens != 200_000 {
+			t.Fatalf("seat %s = %+v, want model %s on anthropic at the 200k budgeting floor", duty, seat, model)
 		}
 	}
 	if _, ok := m[worker.DutyUtility]; ok {

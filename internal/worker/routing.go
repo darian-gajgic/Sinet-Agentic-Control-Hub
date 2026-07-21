@@ -88,33 +88,42 @@ type Seat struct {
 // map as DATA.
 type DutyMap map[string]Seat
 
-// DefaultWindowTokens is the documented per-model context-window default
-// when a seat row carries none: every current Anthropic-lane production
-// model carries a 200k window (the B2-4 stage constant, retired here into
-// the seat-row data; recalibration per model generation is S14's).
+// DefaultWindowTokens is the BUDGETING window a seat row carries: the
+// number the S05.3 stage-fit machinery measures against (fit target and
+// overflow threshold are fractions of it). 200k is the verified-safe floor
+// across every seated model on this lane (haiku's hard window; the B2-4
+// stage constant, retired here into seat-row data). The 1M-class models
+// (opus-4-8, sonnet-5 — API-documented windows, live-verified 2026-07-22)
+// deliberately keep the floor: UNDERSTATING a window only splits stages
+// earlier (safe, and aligned with fresh-context-per-stage), while
+// overstating one would disarm overflow protection entirely. Per-seat
+// uplift is an S14 recalibration with a CLI-lane-measured window (B5).
 const DefaultWindowTokens = 200_000
 
 // DefaultDutyMap is the v0 recommended platform-wide duty map (S06.10
-// "uniform recommended default"). Reading, section-cited: every paid seat
-// resolves to claude-haiku-4-5 on the Anthropic lane — the model the B1-1
-// live smoke, the B1-4 spike battery, and the ratified B2 gate demo ran the
-// whole pipeline on (planner/critic/judge included), i.e. the demonstrated
-// "best result per unit of allowance" posture on this subscription
-// (S06.10; D5 — the binding budget is the flat-rate window, and selection
-// never prices). Recording the de-facto model as the map default is NOT a
-// judge version bump (no model changes), so the P-T06-5 golden-set gate is
-// not triggered; any FUTURE retarget of the judge/planning seat is a
-// version bump gated on a golden-set re-run (CONVENTIONS §15). The utility
-// seat is deliberately ABSENT: S06.10 pins it to the local tier (S12, B4)
-// — an absent duty degrades with a recorded reason, never fakes a local
-// model onto a paid lane. No S18 key covers the map (the §7/§9/§11
-// constant precedent; the standing settings-tab directive applies).
+// "uniform recommended default"), seat mix RATIFIED at the B3 gate
+// 2026-07-22 (operator D3, free-text; record P3/gates/B3-report.md §7):
+// frontier-class ceremony AND execution (claude-opus-4-8 — satisfies
+// S06.10's "paid frontier-class" bar for interviewing/critique and
+// S08.6's frontier-class composer ceremony, closing the dormant mismatch
+// the all-haiku map carried), with the V2 judge on claude-sonnet-5 — a
+// paid frontier-class model per the S07.5 class bar, deliberately a
+// DIFFERENT model than the executor (the operator's pick; serves S07.5's
+// independence intent — same-family judges inflate own-style output).
+// P-T06-5: this judge retarget IS a version bump — the golden-set re-run
+// on the sonnet-5 judge is pre-registered at the B4 judge-calibration
+// measurement row (B2-3 deferral record); verdicts before that run are
+// bring-up-grade. The utility seat is deliberately ABSENT: S06.10 pins it
+// to the local tier (S12, B4) — an absent duty degrades with a recorded
+// reason, never fakes a local model onto a paid lane. No S18 key covers
+// the map (the §7/§9/§11 constant precedent; the standing settings-tab
+// directive applies). D5 unchanged: all seats subscription-covered,
+// metered list EMPTY, selection never prices.
 func DefaultDutyMap() DutyMap {
-	anthropicSeat := Seat{Model: "claude-haiku-4-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens}
 	return DutyMap{
-		DutyExecution: anthropicSeat,
-		DutyPlanning:  anthropicSeat,
-		DutyJudge:     anthropicSeat, // the ratified planning-model class (S07.5)
+		DutyExecution: Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyPlanning:  Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyJudge:     Seat{Model: "claude-sonnet-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
 	}
 }
 

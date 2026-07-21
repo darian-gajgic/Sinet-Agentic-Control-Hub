@@ -162,8 +162,8 @@ func TestComposerPlaybookGovernance(t *testing.T) {
 		e.Status != memory.StatusActive || e.Origin != memory.OriginImported {
 		t.Fatalf("entry = %+v", e)
 	}
-	if !strings.Contains(e.OriginRef, "B3") || !strings.Contains(e.OriginRef, "pending") {
-		t.Fatalf("provenance = %q, want the pending B3-gate ratification record", e.OriginRef)
+	if !strings.Contains(e.OriginRef, "B3") || !strings.Contains(e.OriginRef, "ratified at the B3 gate 2026-07-22") {
+		t.Fatalf("provenance = %q, want the B3-gate ratification record (operator D4, P3/gates/B3-report.md §7)", e.OriginRef)
 	}
 	if e.TopicKey != worker.ComposerPlaybookTopicKey {
 		t.Fatalf("topic key = %q", e.TopicKey)

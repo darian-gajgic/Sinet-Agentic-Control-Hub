@@ -193,8 +193,8 @@ func (g *Gate) EnsureComposerPlaybook(ctx context.Context) (created bool, err er
 		return false, nil
 	}
 	originRef, err := json.Marshal(b2GateProvenance{
-		Gate: "B3", Record: "P3/STATE.md B3 gate items", Decision: "composer-playbook seed ratification",
-		Ratified: "pending (seeded at P3-B3-5; flagged to the B3 gate)",
+		Gate: "B3", Record: "P3/gates/B3-report.md §7", Decision: "composer-playbook seed ratification",
+		Ratified: "ratified at the B3 gate 2026-07-22 (operator D4, free-text)",
 	})
 	if err != nil {
 		return false, fmt.Errorf("memory: marshal playbook provenance: %w", err)
