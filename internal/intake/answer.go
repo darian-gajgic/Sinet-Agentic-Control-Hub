@@ -327,6 +327,33 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 	}
 
 	switch ans.Action {
+	case ActionCompose:
+		// The no-fit compose verb (Spec S08.6 compose-when-earned): valid
+		// only while the card offers it. The card stays OPEN — the
+		// requester still owes the approval decision; the composition
+		// ceremony runs as its own billed run (launched by the stage layer
+		// from the recorded request), its product entering service only
+		// through the battery + station-4 approval.
+		if st.Routing == nil || !st.Routing.ComposeEarned || st.Routing.GapSignature == "" {
+			return nil, fmt.Errorf("%w: compose is offered only when the gap has earned it (S08.6)", ErrBadAnswer)
+		}
+		if st.Compose != nil {
+			return nil, fmt.Errorf("%w: a composition for this task was already requested", ErrBadAnswer)
+		}
+		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "approval",
+			fmt.Sprintf("requester chose compose-a-worker on the no-fit card (gap %s)", st.Routing.GapSignature),
+			"compose-when-earned (S08.6); the ceremony bills to the requester, the battery still gates adoption", 0); err != nil {
+			return nil, err
+		}
+		st.Compose = &ComposeState{
+			RequestedBy:  st.Owner,
+			RequestedTS:  p.nowRFC3339(),
+			GapSignature: st.Routing.GapSignature,
+		}
+		if err := p.appendState(ctx, st); err != nil {
+			return nil, err
+		}
+		return st, nil
 	case ActionApprove:
 		pair, err := p.ensurePair(st, nil)
 		if err != nil {

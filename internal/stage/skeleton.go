@@ -161,6 +161,7 @@ const (
 	roleIntake  role = "intake"
 	roleExecute role = "execute"
 	roleVerify  role = "verify"
+	roleCompose role = "compose"
 )
 
 func runRole(runID string) (role, bool) {
@@ -189,6 +190,8 @@ func runRole(runID string) (role, bool) {
 		return roleExecute, true
 	case strings.HasSuffix(id, RunSuffixVerify):
 		return roleVerify, true
+	case strings.HasSuffix(id, RunSuffixCompose):
+		return roleCompose, true
 	}
 	return "", false
 }
@@ -210,14 +213,16 @@ func allDigits(s string) bool {
 func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 	rl, ok := runRole(r.ID)
 	if !ok {
-		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s)", r.ID,
-			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify)
+		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s|*%s)", r.ID,
+			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify, RunSuffixCompose)
 	}
 	switch rl {
 	case roleIntake:
 		return s.dispatchIntake(ctx, r)
 	case roleExecute:
 		return s.dispatchExecute(ctx, r)
+	case roleCompose:
+		return s.dispatchCompose(ctx, r)
 	default:
 		return s.dispatchVerify(ctx, r)
 	}
@@ -263,8 +268,15 @@ func (s *Skeleton) dispatchIntake(ctx context.Context, r run.Run) error {
 
 // afterIntake continues from an intake state: an open card waits (the run
 // is parked — gates wait, Spec S06.1); an approved plan completes the
-// intake run and launches execution.
+// intake run and launches execution. A recorded compose request launches
+// its ceremony run FIRST — it runs while the card stays open (Spec S08.6:
+// composition never rides approval), and the ensure is idempotent.
 func (s *Skeleton) afterIntake(ctx context.Context, st *intake.State) error {
+	if st.Compose != nil {
+		if err := s.ensureComposeRun(ctx, st); err != nil {
+			return err
+		}
+	}
 	switch {
 	case st.OpenAskID != "":
 		s.logger().Info("stage: intake gate open", "task", st.TaskID, "card", string(st.OpenAskKind), "ask", st.OpenAskID)
@@ -392,54 +404,16 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 
 	// One fresh engine session per plan step (Spec S05.3 execute-N): the
 	// stage name IS the step id, so the assembly's Plan source injects
-	// that step's contract (Spec S05.4).
+	// that step's contract (Spec S05.4). An overflow stage-split continues
+	// the planned stage in successor sub-stage sessions (split.go); the
+	// overflow count is scoped PER PLANNED STAGE per S05.3 ("a second
+	// overflow within one planned stage escalates to a re-plan proposal").
 	deliverable := ""
-	overflows := 0
 	for i, step := range pair.Plan.Steps {
-		instructions := stageMarker(markerExecute) + fmt.Sprintf(
-			"You are executing plan step %s of task %s: %s\n"+
-				"Done when: %s\n"+
-				"Work in your working directory. When the step is complete, output the step's "+
-				"complete deliverable content as your final message — full content, no commentary wrapper.\n",
-			step.ID, r.TaskID, step.Title, step.DoneWhen)
-		in := SessionInput{
-			RunID:          r.ID,
-			Stage:          step.ID,
-			Assemble:       true,
-			Sources:        ledger.Sources{Plan: &intake.PlanSource{P: s.pipe}, Knowledge: s.cfg.Knowledge},
-			Instructions:   instructions,
-			Class:          step.Class,
-			Tools:          execTools,
-			PermissionMode: execPermissionMode,
-			PriorOverflows: overflows,
-			Model:          er.Decision.Model,
-			WindowTokens:   er.Decision.WindowTokens,
-		}
-		if er.Decision.TemplateID != "" && s.cfg.Workers != nil {
-			// Worker-backed execution: per-invocation hash-pinned compile
-			// (Spec S08.3 via CompileForRun; instance refs make it per-run/
-			// per-stage). The session runs at the TIGHTER of the step's
-			// declared class and the worker's granted class — neither the
-			// approved plan envelope nor the approved guardrails ever widen.
-			compiled, err := s.cfg.Workers.CompileForRun(ctx, er.Decision.TemplateID, r.UserID, worker.InstanceRefs{
-				RunID: r.ID, TaskID: r.TaskID, Stage: step.ID,
-			})
-			if err != nil {
-				s.crash(ctx, r.ID, fmt.Sprintf("compile worker %s: %v", er.Decision.TemplateID, err))
-				return fmt.Errorf("stage: compile worker for step %s: %w", step.ID, err)
-			}
-			in.Compiled = &compiled
-			in.Class = worker.TighterClass(step.Class, compiled.Class)
-			in.Tools = nil // the compiled unit carries the granted toolset
-			in.PermissionMode = ""
-		}
-		res, err := s.Session(ctx, in)
+		res, err := s.runPlannedStage(ctx, r, er, step)
 		if err != nil {
 			s.crash(ctx, r.ID, fmt.Sprintf("step %s session: %v", step.ID, err))
 			return fmt.Errorf("stage: execute step %s: %w", step.ID, err)
-		}
-		if res.Budget.Overflowed {
-			overflows++
 		}
 		deliverable = res.Text
 		next := ""

@@ -135,6 +135,13 @@ const (
 	ActionRePlan      = "replan"
 	ActionReInterview = "reinterview"
 	ActionCancel      = "cancel"
+	// ActionCompose is the no-fit stage-2 compose-a-worker verb (Spec
+	// S08.6 compose-when-earned; offered only while the routing block
+	// reports the gap earned and no composition ran for this task). It
+	// does NOT close the card: the composition ceremony runs as its own
+	// billed run while the approval stays open — composition never rides
+	// approval, and never the zero-interaction band.
+	ActionCompose = "compose"
 )
 
 // DeltaKind is the S06.9 delta vocabulary (OpenSpec pattern).

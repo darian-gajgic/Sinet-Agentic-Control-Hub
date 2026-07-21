@@ -46,10 +46,11 @@ type DryRunResult struct {
 }
 
 // DryEngine runs a compiled draft against the requester's lane inside the
-// composed sandbox. This is a NAMED SELECTION SEAM: lane/model selection
-// is Spec S08.8 (B3-3) — the production implementation dispatches through
-// the S03 adapters with StartRequest.CeilingCostUSD = the ⚙ cap and the
-// Confiner composing the capped class; tests use fakes (zero paid calls).
+// composed sandbox. A named engine seam: the production implementation is
+// the stage layer's EngineDryRun (B3-5) — one stage session on the
+// composition ceremony run through the S03 adapters, the compiled draft as
+// the invocation, ceilings and class from the battery's DryRunRequest;
+// tests use fakes (zero paid calls).
 type DryEngine interface {
 	DryRun(ctx context.Context, req DryRunRequest) (DryRunResult, error)
 }

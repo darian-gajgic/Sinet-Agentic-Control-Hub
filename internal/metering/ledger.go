@@ -206,6 +206,11 @@ func derivePurpose(runID string, _ checkpointRow) PurposeTag {
 	switch {
 	case strings.HasSuffix(base, RunSuffixIntake):
 		return PurposeCeremony
+	case strings.HasSuffix(base, RunSuffixCompose):
+		// The S08.6 composer runs as ceremony (drafting is heavyweight
+		// ceremony under the G3 cut line), billed and itemized to the
+		// requester (1.10/3.4).
+		return PurposeCeremony
 	case strings.HasSuffix(base, RunSuffixVerify):
 		return PurposeVerification
 	default:
@@ -240,6 +245,9 @@ const (
 	RunSuffixIntake  = ".intake"
 	RunSuffixExecute = ".execute"
 	RunSuffixVerify  = ".verify"
+	// RunSuffixCompose names a task's S08.6 composition ceremony run
+	// (B3-5); its consumption itemizes as ceremony to the requester.
+	RunSuffixCompose = ".compose"
 )
 
 // readCheckpointsTx reads a run's checkpoint rows (usage + model) joined to the

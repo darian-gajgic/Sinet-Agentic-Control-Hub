@@ -97,6 +97,14 @@ type SessionResult struct {
 	Brief ledger.Brief
 	// Budget is the watcher's session summary.
 	Budget BudgetReport
+	// Split: the session ended at a checkpoint boundary because an
+	// auto-accepted stage-split proposal executed (Spec S05.3) — not a
+	// completion and not an error. The caller consolidates to the ledger
+	// and continues the planned stage in a successor sub-stage session; the
+	// engine park record is deliberately DISCARDED: the successor is a
+	// fresh brief from the updated ledger, never a resumed transcript
+	// (Spec S05.3 fresh-context rule, G1 D1.1).
+	Split bool
 }
 
 // ErrStageSession reports a stage session that ended short of completion.
@@ -174,6 +182,22 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 	}
 
 	watcher := s.newBudgetWatcher(ctx, r, in.Stage, in.PriorOverflows, in.WindowTokens)
+	// Stage-split execution (Spec S05.3): a first overflow's stage-split
+	// proposal is auto-accepted (risk-free platform-internal scheduling,
+	// fully logged by the context.overflow event) and executes at the next
+	// checkpoint boundary — the watcher observes the persisted usage event
+	// (the checkpoint's own boundary) and requests the S03.1 pause verb, an
+	// interrupt at the engine's next safe message boundary (never
+	// mid-tool-call, P-T01-4). Only ledger-backed working sessions split
+	// (Assemble && !Clean): artifact-only and clean-context sessions have
+	// input contracts that exclude the ledger projection (Spec S06.8/S07.5–
+	// S07.6, CONVENTIONS §14/§15), so no successor brief could carry their
+	// consolidated state — for them the overflow event stays a proposal
+	// record.
+	split := &splitRequester{s: s, runID: in.RunID, stage: in.Stage}
+	if in.Assemble && !in.Clean {
+		watcher.onStageSplit = split.request
+	}
 	cw := adapters.CompiledWorker{
 		Prompt:                  prompt,
 		ToolAllowlist:           in.Tools,
@@ -220,6 +244,7 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		CeilingCostUSD: ceilUSD,
 		CeilingSteps:   ceilSteps,
 		OnEvent:        onEvent,
+		OnSession:      split.capture,
 	}
 	if s.cfg.CredInject != nil {
 		req.CredInject = s.cfg.CredInject(r.UserID)
@@ -236,8 +261,28 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		s.recordRecitations(ctx, in)
 	}
 	res := SessionResult{Outcome: out, Text: out.ResultText, Brief: brief, Budget: watcher.report()}
-	if out.Kind != adapters.OutcomeCompleted {
+	switch {
+	case split.requested && out.Kind == adapters.OutcomeParked && out.Ask == nil:
+		// The stage split executed: the boundary interrupt ended the session
+		// (Spec S05.3 "end session"); the caller consolidates and continues
+		// in a successor sub-stage. The park record is discarded — a
+		// resumed transcript is never the mechanism for crossing a stage
+		// boundary (Spec S05.3, G1 D1.1).
+		res.Split = true
+		s.logger().Info("stage: stage split executed at checkpoint boundary",
+			"run", in.RunID, "stage", in.Stage, "overflow_seq", res.Budget.OverflowSeq)
+		// Mid-session pinned re-injections that happened before the split
+		// still happened — manifested like every injection (Spec S05.4).
+		s.recordReinjections(ctx, in, brief, workDir)
+		return res, nil
+	case out.Kind != adapters.OutcomeCompleted:
 		return res, &stageError{Kind: out.Kind, Detail: out.Detail}
+	case split.requested:
+		// The pause raced completion and lost (the adapter's race rule):
+		// the engine finished the stage first, so the split is moot — the
+		// overflow event remains the proposal record.
+		s.logger().Info("stage: stage-split pause raced completion; result stands",
+			"run", in.RunID, "stage", in.Stage)
 	}
 	// Mid-stage pinned re-injections (SessionStart fires on resume/compact)
 	// become manifest entries (Spec S05.4); best-effort read of the ctl
@@ -409,6 +454,44 @@ func readSessionStartFires(ctlDir string) ([]sessionStartFire, error) {
 	return out, nil
 }
 
+// ---- Stage-split execution (Spec S05.3) ----
+
+// splitRequester carries the auto-accepted stage-split execution for one
+// session: it captures the live engine session at spawn (the OnSession
+// control seam) and, when the budget watcher's stage-split proposal lands,
+// requests the S03.1 pause verb — an interrupt at the engine's next safe
+// message boundary. All calls happen on the one DriveStage goroutine
+// (OnSession before the pump, the watcher callback inside it, the reads
+// after it), so plain fields suffice.
+type splitRequester struct {
+	s     *Skeleton
+	runID string
+	stage string
+
+	sess      adapters.Session
+	requested bool
+}
+
+// capture receives the live session (adapters.StartRequest.OnSession).
+func (sr *splitRequester) capture(sess adapters.Session) { sr.sess = sess }
+
+// request executes the auto-accepted split: pause at the next safe
+// boundary. Idempotent; the disposition arrives through the session's
+// Outcome (a pause that races completion loses, per the adapter contract —
+// the overflow event then stays a proposal record).
+func (sr *splitRequester) request() {
+	if sr.requested || sr.sess == nil {
+		return
+	}
+	sr.requested = true
+	if err := sr.sess.Pause(context.Background()); err != nil {
+		sr.s.logger().Error("stage: stage-split pause request", "run", sr.runID, "stage", sr.stage, "err", err)
+		return
+	}
+	sr.s.logger().Info("stage: stage-split accepted — pause requested at safe boundary (S05.3)",
+		"run", sr.runID, "stage", sr.stage)
+}
+
 // ---- Stage-fit budgets & overflow (Spec S05.3) ----
 
 // BudgetReport is one session's context-budget summary.
@@ -434,10 +517,9 @@ type BudgetReport struct {
 
 // budgetWatcher consumes a session's usage events and emits the S05.3
 // overflow machinery: run-scoped context.overflow events proposing a stage
-// split (auto-accepted platform-internal scheduling — the split EXECUTION
-// at the next checkpoint boundary is the S04 stage-sequencing layer's, B3)
-// or a re-plan (second overflow in one planned stage / an overweight
-// brief).
+// split (auto-accepted platform-internal scheduling; onStageSplit executes
+// it at the next checkpoint boundary — the split executor, this packet) or
+// a re-plan (second overflow in one planned stage / an overweight brief).
 type budgetWatcher struct {
 	s     *Skeleton
 	ctx   context.Context
@@ -450,6 +532,11 @@ type budgetWatcher struct {
 	fitTokens  int64
 	overTokens int64
 	misread    bool
+
+	// onStageSplit, when set, executes an emitted stage-split proposal
+	// (Spec S05.3 auto-accept). Nil = the session class does not split; the
+	// event stays a proposal record.
+	onStageSplit func()
 
 	firstSeen bool
 	rep       BudgetReport
@@ -526,13 +613,14 @@ func (w *budgetWatcher) emit(proposal, why string, tokens int64) {
 		FitTokens      int64  `json:"fit_target_tokens"`
 		OverflowTokens int64  `json:"overflow_tokens"`
 		PriorOverflows int    `json:"prior_overflows,omitempty"`
-		// The split executes at the next checkpoint boundary
-		// (consolidate-to-ledger → end session → successor brief); the
-		// EXECUTION machinery is the S04 stage-sequencing layer's (B3) —
-		// this event is the ratified proposal record (Spec S05.3).
+		// A stage-split proposal is auto-accepted and executes at the next
+		// checkpoint boundary: consolidate-to-ledger (stage-close gate) →
+		// end session → successor sub-stage brief from the updated ledger
+		// (Spec S05.3; the split executor is the stage runner). A re-plan
+		// proposal stays a record for the re-plan machinery.
 		ExecutesAt string `json:"executes_at"`
 	}{w.stage, proposal, why, tokens, w.window, w.fitTokens, w.overTokens, w.prior,
-		"next checkpoint boundary (execution: S04 stage sequencing, B3)"})
+		"next checkpoint boundary (auto-accepted; split executor, S05.3)"})
 	if err != nil {
 		w.s.logger().Error("stage: marshal context.overflow", "err", err)
 		return
@@ -553,6 +641,11 @@ func (w *budgetWatcher) emit(proposal, why string, tokens int64) {
 	w.rep.Proposal = proposal
 	w.s.logger().Warn("stage: context overflow", "run", w.runID, "stage", w.stage,
 		"proposal", proposal, "tokens", tokens, "window", w.window)
+	// Auto-accepted execution (Spec S05.3): the proposal event is durably
+	// logged FIRST, then the split executes — fully logged scheduling.
+	if proposal == "stage-split" && w.onStageSplit != nil {
+		w.onStageSplit()
+	}
 }
 
 func (w *budgetWatcher) report() BudgetReport { return w.rep }

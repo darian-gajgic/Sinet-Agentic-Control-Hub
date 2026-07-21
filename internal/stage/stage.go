@@ -35,11 +35,12 @@
 //     claim → dispatch (S16.6), and receipts materialize per run-end
 //     (Spec S10.1).
 //
-// Boundary discipline (Spec S19.5): worker/model selection is Spec S08's
-// (B3) — the model here is a documented dev default behind the Config
-// seams; orchestration/helpers are Spec S04's (B3) — the stage-split
-// EXECUTION of an overflow proposal waits there, the proposal events land
-// now; deliverable/revision mechanics are Spec S13's (B4) — the deliverable
+// Boundary discipline (Spec S19.5): worker/model selection is Spec S08.8's
+// (live since B3-3; Config.Model remains the dev/test override);
+// stage-split EXECUTION of an overflow proposal is live since B3-5
+// (split.go — consolidate-to-ledger → end session → successor sub-stage
+// brief, Spec S05.3), as is the S08.6 composition leg (compose.go);
+// deliverable/revision mechanics are Spec S13's (B4) — the deliverable
 // at B2-4 is the execute session's result text, captured as a durable
 // artifact; the local tier is Spec S12's (B4) — the Utility duty stays
 // unwired rather than faked onto a paid engine (S06.10 pins it local).
@@ -105,6 +106,9 @@ const (
 	RunSuffixIntake  = metering.RunSuffixIntake
 	RunSuffixExecute = metering.RunSuffixExecute
 	RunSuffixVerify  = metering.RunSuffixVerify
+	// RunSuffixCompose names the S08.6 composition ceremony run (B3-5);
+	// metering itemizes it as ceremony to the requester.
+	RunSuffixCompose = metering.RunSuffixCompose
 )
 
 // EventContextOverflow is the S05.3 overflow event type: emitted run-scoped
@@ -217,6 +221,21 @@ type Config struct {
 	// briefs; the judge's clean slice stays the S07-fixed input set
 	// (CONVENTIONS §15) and the critic stays artifact-only (§14).
 	Knowledge ledger.Source
+
+	// ComposerPlaybook reads the CURRENT APPROVED composer playbook — the
+	// governed S09.10 house object the S08.6 composer consumes by policy.
+	// A seam (this package never imports the memory store, CONVENTIONS
+	// §17): the composition root adapts memory.Store.HouseObject. Nil, or
+	// an absent object, makes composition refuse LOUDLY — the playbook is
+	// a required policy input, never silently skipped.
+	ComposerPlaybook func(ctx context.Context) (worker.Playbook, error)
+
+	// EnginePin keys the validation records the composition leg writes
+	// (Spec S08.1: a record per version × model × engine pin) — the
+	// composition root supplies the consuming lane's pinned engine version
+	// (the adapter's exported Pin; this package never imports substrate
+	// packages, CONVENTIONS §10).
+	EnginePin string
 
 	Logger *slog.Logger
 	Now    func() time.Time

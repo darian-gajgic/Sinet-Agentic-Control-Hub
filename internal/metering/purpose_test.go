@@ -13,8 +13,10 @@ func TestDerivePurposeByRunRole(t *testing.T) {
 		{"t-abc.intake", PurposeCeremony},
 		{"t-abc.verify", PurposeVerification},
 		{"t-abc.execute", PurposeExecution},
-		{"r-plain", PurposeExecution},        // B1-2-era shape: a run is execution
-		{"t-abc.intake.g2", PurposeCeremony}, // recovery-fork successor keeps its role (S02.5 `<parent>.g<n>`)
+		{"t-abc.compose", PurposeCeremony},    // S08.6 composer = ceremony (B3-5)
+		{"t-abc.compose.g2", PurposeCeremony}, // fork successor keeps it
+		{"r-plain", PurposeExecution},         // B1-2-era shape: a run is execution
+		{"t-abc.intake.g2", PurposeCeremony},  // recovery-fork successor keeps its role (S02.5 `<parent>.g<n>`)
 		{"t-abc.verify.g2.g3", PurposeVerification},
 		{"t-abc.gadget", PurposeExecution}, // `.g` followed by non-digits is not a fork suffix
 		{"t-abc" + RunSuffixVerify, PurposeVerification},

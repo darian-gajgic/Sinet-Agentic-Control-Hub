@@ -114,6 +114,9 @@ func (d *Driver) Drive(ctx context.Context, a Adapter, req StartRequest) (Outcom
 		}
 		return Outcome{Kind: OutcomeCrashed, Detail: err.Error()}, nil
 	}
+	if req.OnSession != nil {
+		req.OnSession(sess)
+	}
 	return d.pump(ctx, sess, r, req)
 }
 
@@ -156,6 +159,9 @@ func (d *Driver) DriveResume(ctx context.Context, a Adapter, rec ParkRecord, ans
 		}
 		return Outcome{Kind: OutcomeCrashed, Detail: err.Error()}, nil
 	}
+	if rec.Start.OnSession != nil {
+		rec.Start.OnSession(sess)
+	}
 	return d.pump(ctx, sess, r, rec.Start)
 }
 
@@ -181,6 +187,9 @@ func (d *Driver) DriveStage(ctx context.Context, a Adapter, req StartRequest) (O
 	sess, err := a.Start(ctx, req)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("adapters: stage session spawn: %w", err)
+	}
+	if req.OnSession != nil {
+		req.OnSession(sess)
 	}
 	var pumpErr error
 	for ev := range sess.Events() {

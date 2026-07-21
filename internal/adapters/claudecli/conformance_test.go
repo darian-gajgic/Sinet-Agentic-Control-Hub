@@ -44,10 +44,9 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
-// Pin is the binding engine version (components.lock "claude CLI
-// (engine)"; Spec S16.3). TestPinMatchesLock keeps the two mechanically
-// coupled.
-const Pin = "2.1.215"
+// Pin (claudecli.go since B3-5 — the composition root consumes it as the
+// validation-record key, Spec S08.1) stays mechanically coupled to
+// components.lock by TestPinMatchesLock below.
 
 func testAdapter(t *testing.T) *Adapter {
 	t.Helper()

@@ -49,7 +49,10 @@ func (s *PlanSource) Items(ctx context.Context, q ledger.SliceQuery) ([]ledger.I
 		SelectorRule: "approved plan for task " + q.TaskID,
 		Precedence:   ledger.PrecedenceTask,
 	})
-	if step := pair.Plan.Step(q.Stage); step != nil {
+	// A sub-stage of an executed stage split (Spec S05.3) receives its
+	// PLANNED stage's step contract: the split never changes what the plan
+	// assigned, only how many sessions carry it.
+	if step := pair.Plan.Step(ledger.PlannedStage(q.Stage)); step != nil {
 		items = append(items, ledger.Item{
 			ItemID:       "plan-step-" + step.ID,
 			SourcePath:   st.PlanRef.Path,

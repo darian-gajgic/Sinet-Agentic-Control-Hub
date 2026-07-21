@@ -252,6 +252,14 @@ type StartRequest struct {
 	// state. Observers must not block; persistence never depends on them.
 	OnEvent func(Event) `json:"-"`
 
+	// OnSession, when set, receives the live Session right after a
+	// successful spawn — the stage-runtime CONTROL seam (Spec S05.3): the
+	// overflow machinery uses it to request the pause verb (interrupt at a
+	// safe boundary) when an auto-accepted stage-split proposal executes at
+	// the next checkpoint boundary. Same posture as OnEvent (json:"-",
+	// per-invocation wiring, never park state); callbacks must not block.
+	OnSession func(Session) `json:"-"`
+
 	// Cwd is the isolated run working directory (S03.5: cwd is a config
 	// channel; the engine must never walk up into ambient project config).
 	Cwd string

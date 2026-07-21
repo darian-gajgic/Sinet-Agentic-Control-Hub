@@ -880,6 +880,13 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 		Verdicts: st.Verdicts, ResearchNodes: pair.Plan.ResearchNodes,
 		Estimate: pair.Plan.Est, SpecRef: st.SpecRef, PlanRef: st.PlanRef,
 	}
+	actions := []string{ActionApprove, ActionRePlan, ActionReInterview, ActionCancel}
+	if st.Routing != nil && st.Routing.ComposeEarned && st.Compose == nil {
+		// The no-fit stage-2 compose offer is an ANSWERABLE verb exactly
+		// when composition is earned (Spec S08.6 compose-when-earned) and
+		// no composition ran for this task yet.
+		actions = append(actions, ActionCompose)
+	}
 	return &Card{Kind: CardApproval, Approval: &ApprovalBody{
 		Layer1: l1,
 		Layer2: l2,
@@ -887,7 +894,7 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 		// re-route candidates, and the no-fit two-stage offer — visible and
 		// overridable pre-execution.
 		Routing: st.Routing,
-		Actions: []string{ActionApprove, ActionRePlan, ActionReInterview, ActionCancel},
+		Actions: actions,
 	}}, nil
 }
 
@@ -931,6 +938,20 @@ func (p *Pipeline) loadPair(st *State) (*Pair, error) {
 		return nil, err
 	}
 	return &Pair{Spec: spec, Plan: plan}, nil
+}
+
+// CurrentPair loads a task's CURRENT drafted artifact pair regardless of
+// approval — the read seam for consumers of the specification content
+// itself (the S08.6 composer's task-spec policy input reads it while the
+// approval card is still open). Nothing EXECUTES from this read (D10:
+// execution still demands ApprovedPair); the artifact loads carry the same
+// sha256 + re-render integrity checks.
+func (p *Pipeline) CurrentPair(ctx context.Context, taskID string) (*Pair, error) {
+	st, err := p.LoadState(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return p.loadPair(st)
 }
 
 // ApprovedPair loads a task's APPROVED artifact pair plus its pipeline

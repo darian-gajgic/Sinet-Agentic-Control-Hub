@@ -61,6 +61,17 @@ type ApprovalRecord struct {
 	Ungated     bool            `json:"ungated,omitempty"` // zero-interaction band (S06.4)
 }
 
+// ComposeState records the one compose-a-worker request of a task (Spec
+// S08.6: the compose verb answered on the no-fit card). One composition
+// per task: the composed draft's adoption is the battery + approval's; a
+// RECURRING need earns further compositions through new tasks' gap
+// occurrences, never by re-running the shot on the same task.
+type ComposeState struct {
+	RequestedBy  string `json:"requested_by"`
+	RequestedTS  string `json:"requested_ts"`
+	GapSignature string `json:"gap_signature"`
+}
+
 // DeltaRecord tracks one post-approval delta through its card.
 type DeltaRecord struct {
 	ID             string      `json:"id"`
@@ -148,6 +159,10 @@ type State struct {
 	// (route.go), including any recorded override — the execute dispatch
 	// consumes it (worker + version per run, the version→outcome join).
 	Routing *RouteBlock `json:"routing,omitempty"`
+
+	// Compose records the task's compose-a-worker request (Spec S08.6);
+	// the stage layer launches the composition ceremony run from it.
+	Compose *ComposeState `json:"compose,omitempty"`
 
 	Clearance float64 `json:"clearance"`
 }

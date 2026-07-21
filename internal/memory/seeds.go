@@ -8,6 +8,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // B2 seed governance (Spec S09.10): every knowledge object another section
@@ -157,4 +158,60 @@ func (g *Gate) EnsureB2SeedGovernance(ctx context.Context) (created int, err err
 		created++
 	}
 	return created, nil
+}
+
+// ComposerPlaybookEntryID is the stable governance id of the composer
+// playbook house object (Spec S09.10 "Composer best-practice playbook";
+// declared in Spec S08.6, content owned by internal/worker).
+const ComposerPlaybookEntryID = "seed-composer-playbook"
+
+// EnsureComposerPlaybook seeds the composer playbook as a governed S09.10
+// house object, idempotently — the EnsureB2SeedGovernance discipline: an
+// entry that exists in ANY status (active, retired, removed, tombstoned)
+// is left alone, so a removal or supersession is never resurrected by a
+// boot; without an operator account the call returns ErrNoOperator and the
+// caller retries at a later boot (house scope needs its D10 holder).
+// Unlike the B2 seeds, this content's ratification is PENDING — a B3 gate
+// item — which the recorded provenance states; post-ratification edits are
+// ordinary gated new versions (Spec S09.10: no private update path).
+func (g *Gate) EnsureComposerPlaybook(ctx context.Context) (created bool, err error) {
+	var operator string
+	err = g.s.db.QueryRowContext(ctx,
+		`SELECT user_id FROM users WHERE role = 'operator' ORDER BY created_ts, user_id LIMIT 1`).Scan(&operator)
+	if err == sql.ErrNoRows {
+		return false, ErrNoOperator
+	}
+	if err != nil {
+		return false, fmt.Errorf("memory: resolve operator: %w", err)
+	}
+	var n int
+	if err := g.s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM knowledge_entries WHERE entry_id = ?`, ComposerPlaybookEntryID).Scan(&n); err != nil {
+		return false, fmt.Errorf("memory: playbook existence check: %w", err)
+	}
+	if n > 0 {
+		return false, nil
+	}
+	originRef, err := json.Marshal(b2GateProvenance{
+		Gate: "B3", Record: "P3/STATE.md B3 gate items", Decision: "composer-playbook seed ratification",
+		Ratified: "pending (seeded at P3-B3-5; flagged to the B3 gate)",
+	})
+	if err != nil {
+		return false, fmt.Errorf("memory: marshal playbook provenance: %w", err)
+	}
+	d := Draft{
+		Scope: ScopeHouse, Kind: KindPlaybook, Title: worker.ComposerPlaybookTitle,
+		Content:  worker.ComposerPlaybookSeed(),
+		TopicKey: worker.ComposerPlaybookTopicKey,
+		// Machinery consumer: the S08.6 composer reads it by topic key; it
+		// never injects into stage briefs.
+		Selectors:  Selectors{TaskType: "machinery:worker-composer"},
+		FileBacked: true, FileName: "composer-playbook.md",
+	}
+	if _, err := g.writeEntry(ctx, operator, d, writeOpts{
+		origin: OriginImported, originRef: string(originRef), fixedID: ComposerPlaybookEntryID,
+	}); err != nil {
+		return false, fmt.Errorf("memory: govern composer playbook: %w", err)
+	}
+	return true, nil
 }

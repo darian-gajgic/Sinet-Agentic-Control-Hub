@@ -11,6 +11,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // Spec S09.10: the B2 seed objects live as governed house-scope L2 entries
@@ -129,5 +130,74 @@ func TestB2SeedGovernance(t *testing.T) {
 	}
 	if !sawSeed {
 		t.Fatalf("governed seeds unsearchable: %+v", hits)
+	}
+}
+
+// Spec S09.10 (B3-5): the composer playbook as a governed house object —
+// idempotent seeding pending the B3-gate ratification, and HouseObject
+// serving the CURRENT approved version to the composer seam.
+func TestComposerPlaybookGovernance(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+
+	if _, err := f.gate.EnsureComposerPlaybook(ctx); !errors.Is(err, memory.ErrNoOperator) {
+		t.Fatalf("without operator: %v, want ErrNoOperator", err)
+	}
+	f.user("darian", "operator")
+
+	created, err := f.gate.EnsureComposerPlaybook(ctx)
+	if err != nil || !created {
+		t.Fatalf("EnsureComposerPlaybook: created=%v err=%v", created, err)
+	}
+	// Idempotent: a second boot creates nothing.
+	if created, err := f.gate.EnsureComposerPlaybook(ctx); err != nil || created {
+		t.Fatalf("second ensure: created=%v err=%v", created, err)
+	}
+
+	e, err := f.store.Get(ctx, memory.ComposerPlaybookEntryID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if e.Scope != memory.ScopeHouse || e.Kind != memory.KindPlaybook ||
+		e.Status != memory.StatusActive || e.Origin != memory.OriginImported {
+		t.Fatalf("entry = %+v", e)
+	}
+	if !strings.Contains(e.OriginRef, "B3") || !strings.Contains(e.OriginRef, "pending") {
+		t.Fatalf("provenance = %q, want the pending B3-gate ratification record", e.OriginRef)
+	}
+	if e.TopicKey != worker.ComposerPlaybookTopicKey {
+		t.Fatalf("topic key = %q", e.TopicKey)
+	}
+
+	// HouseObject returns the current approved version WITH file content.
+	cur, err := f.store.HouseObject(ctx, worker.ComposerPlaybookTopicKey)
+	if err != nil {
+		t.Fatalf("HouseObject: %v", err)
+	}
+	if cur.ID != memory.ComposerPlaybookEntryID || !strings.Contains(cur.Content, "one-shot") {
+		t.Fatalf("house object = id %q, content %d bytes", cur.ID, len(cur.Content))
+	}
+
+	// A gated new version supersedes; the composer reads the NEW current
+	// approved version (Spec S09.10: edits operator-gated, no private path).
+	v2, err := f.gate.NewVersion(ctx, "darian", cur.ID, memory.Draft{
+		Scope: memory.ScopeHouse, Kind: memory.KindPlaybook,
+		Title:    worker.ComposerPlaybookTitle + " (v2)",
+		Content:  "# Composer playbook v2\nRevised practice.\n",
+		TopicKey: worker.ComposerPlaybookTopicKey,
+	})
+	if err != nil {
+		t.Fatalf("NewVersion: %v", err)
+	}
+	cur2, err := f.store.HouseObject(ctx, worker.ComposerPlaybookTopicKey)
+	if err != nil {
+		t.Fatalf("HouseObject v2: %v", err)
+	}
+	if cur2.ID != v2.ID || !strings.Contains(cur2.Content, "Revised practice") {
+		t.Fatalf("current approved version = %q, want the superseding %q", cur2.ID, v2.ID)
+	}
+	// Never resurrected after supersession (the retired seed stays retired).
+	if created, err := f.gate.EnsureComposerPlaybook(ctx); err != nil || created {
+		t.Fatalf("ensure after supersession: created=%v err=%v", created, err)
 	}
 }

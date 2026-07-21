@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -198,6 +200,36 @@ func getEntry(ctx context.Context, q queryer, id string) (Entry, error) {
 // surface, Spec S09.5).
 func (s *Store) Get(ctx context.Context, id string) (Entry, error) {
 	return getEntry(ctx, s.db, id)
+}
+
+// HouseObject returns the CURRENT APPROVED version of a governed house
+// knowledge object by topic key (Spec S09.10: consumers such as the S08.6
+// composer "read the current approved version"): the ACTIVE house-scope
+// entry — supersession retires the old version in the same tx (CONVENTIONS
+// §17), so active-by-topic-key IS the current version; the newest version
+// number breaks a would-be tie defensively. File-backed content is loaded
+// from the knowledge dir into Content.
+func (s *Store) HouseObject(ctx context.Context, topicKey string) (Entry, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+entryColumns+` FROM knowledge_entries
+		  WHERE scope = ? AND topic_key = ? AND status = ? AND tombstone = 0
+		  ORDER BY version DESC, created_ts DESC LIMIT 1`,
+		string(ScopeHouse), topicKey, string(StatusActive))
+	e, err := scanEntry(row)
+	if err == sql.ErrNoRows {
+		return Entry{}, fmt.Errorf("%w: no active house object for topic %q", ErrNotFound, topicKey)
+	}
+	if err != nil {
+		return Entry{}, fmt.Errorf("memory: read house object %q: %w", topicKey, err)
+	}
+	if e.Content == "" && e.FilePath != "" {
+		raw, err := os.ReadFile(filepath.Join(s.root, e.FilePath))
+		if err != nil {
+			return Entry{}, fmt.Errorf("memory: read house object file %q: %w", e.FilePath, err)
+		}
+		e.Content = string(raw)
+	}
+	return e, nil
 }
 
 // ListOwned lists every row stored about one person, across the scopes

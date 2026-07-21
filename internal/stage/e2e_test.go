@@ -86,7 +86,26 @@ func stageFakeMain() int {
 		payload = fakeAxis2JSON()
 	case marker("execute"):
 		sid = "0000f00d-0000-4000-8000-000000000003"
+		if os.Getenv("SINET_STAGE_FAKE_OVERFLOW") == "1" && !strings.Contains(prompt, "after a stage split") {
+			// The stage-split leg (split e2e): a first execute session whose
+			// second paid call crosses the overflow threshold, then keeps
+			// streaming — the platform's boundary interrupt (SIGTERM at the
+			// message boundary) ends it mid-sleep. The successor sub-stage
+			// session ("after a stage split" in its instructions) completes
+			// normally through the branch above, under its own session id.
+			return overflowExecuteEngine("0000f00d-0000-4000-8000-00000000000b")
+		}
 		payload = fakeDeliverable
+	case marker("compose"):
+		// The S08.6 composer ceremony (compose e2e): one-shot JSON output —
+		// template draft + requested grants + dry-run sample + golden note.
+		sid = "0000f00d-0000-4000-8000-000000000009"
+		payload = fakeComposeJSON()
+	case marker("dryrun"):
+		// Station-3 witness run of the composed draft (S08.6): the session
+		// runs the COMPILED draft; the reply is the witnessed output.
+		sid = "0000f00d-0000-4000-8000-00000000000a"
+		payload = "witnessed: a short appreciation note mentioning SQLite.\n"
 	case marker("revise"):
 		sid = "0000f00d-0000-4000-8000-000000000006"
 		payload = fakeReviseOutput(prompt)
@@ -141,6 +160,85 @@ func stageFakeMain() int {
 		"result": payload, "session_id": sid, "stop_reason": "end_turn",
 		"terminal_reason": "completed", "num_turns": 1, "total_cost_usd": 0.003,
 		"usage": usage})
+	return 0
+}
+
+// composedTemplateSrc is the fake composer's template draft — a valid
+// S08.1 file inside the software·implement-fix ceiling whose triggers
+// match the e2e request text (so post-approval selection finds it).
+const composedTemplateSrc = `---
+name: note-composer
+description: Writes short appreciation notes about software topics
+kind: agentic
+domain: software
+selectors:
+  family: implement-fix
+  triggers: [appreciation note]
+profile:
+  duty: execution
+equipment:
+  tools: [Read, Write, Edit]
+---
+Write the requested appreciation note faithfully and completely.
+`
+
+// fakeComposeJSON is the composer session's one-shot output.
+func fakeComposeJSON() string {
+	out := map[string]any{
+		"template": composedTemplateSrc,
+		"grants": map[string]any{
+			"tools": []string{"Read", "Write", "Edit"}, "class": "C1", "egress": "none",
+		},
+		"sample_task": "write a two-line appreciation note about SQLite",
+		"golden_note": "a complete note naming SQLite, two lines, no commentary",
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+// overflowExecuteEngine streams the split leg: msg1 small, msg2 crossing
+// the overflow threshold at seat window 500 (fit 250 / overflow 350: msg1
+// prompt 140 fits, msg2 footprint 440 crosses), then sleeps at the message
+// boundary so the platform's pause SIGTERM lands before any result
+// envelope — the parked-no-result outcome the split executor consumes.
+func overflowExecuteEngine(sid string) int {
+	emit := func(v any) {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(raw))
+	}
+	usage1 := map[string]any{
+		"input_tokens": 100, "output_tokens": 20,
+		"cache_read_input_tokens": 0, "cache_creation_input_tokens": 40,
+	}
+	usage2 := map[string]any{
+		"input_tokens": 400, "output_tokens": 40,
+		"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+	}
+	emit(map[string]any{"type": "system", "subtype": "init", "cwd": "/tmp/fake-cwd",
+		"session_id": sid, "model": "claude-haiku-4-5", "permissionMode": "default", "tools": []string{}})
+	emit(map[string]any{"type": "assistant", "message": map[string]any{
+		"id": "msg_ovf1", "model": "claude-haiku-4-5",
+		"content": []map[string]any{{"type": "text", "text": "working on part one"}},
+		"usage":   usage1,
+	}})
+	emit(map[string]any{"type": "stream_event", "session_id": sid, "event": map[string]any{"type": "message_stop"}})
+	emit(map[string]any{"type": "assistant", "message": map[string]any{
+		"id": "msg_ovf2", "model": "claude-haiku-4-5",
+		"content": []map[string]any{{"type": "text", "text": "context is filling up"}},
+		"usage":   usage2,
+	}})
+	emit(map[string]any{"type": "stream_event", "session_id": sid, "event": map[string]any{"type": "message_stop"}})
+	os.Stdout.Sync()
+	time.Sleep(5 * time.Second) // the boundary interrupt lands here
+	emit(map[string]any{"type": "result", "subtype": "success", "is_error": false,
+		"result": "should never be reached", "session_id": sid, "stop_reason": "end_turn",
+		"terminal_reason": "completed", "num_turns": 2, "total_cost_usd": 0.003})
 	return 0
 }
 

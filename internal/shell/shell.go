@@ -244,6 +244,17 @@ func Run(ctx context.Context, opts Options) error {
 		case n > 0:
 			logger.Info("memory: B2 seed objects re-homed under S09.10 governance", "created", n)
 		}
+		// The composer playbook as a governed S09.10 house object (B3-5;
+		// seed-content ratification is a B3 gate item — the recorded
+		// provenance says so). Same D10 deferral as the B2 seeds.
+		switch created, err := memory.NewGate(memStore).EnsureComposerPlaybook(ctx); {
+		case errors.Is(err, memory.ErrNoOperator):
+			logger.Info("memory: composer-playbook governance deferred — no operator account yet (Spec S09.10, D10)")
+		case err != nil:
+			return fmt.Errorf("shell: composer playbook governance: %w", err)
+		case created:
+			logger.Info("memory: composer playbook seeded under S09.10 governance (ratification = B3 gate item)")
+		}
 
 		// The S08 worker store: registry rows + git-versioned template
 		// files under the guardrail split, with the overlay slice read
@@ -276,6 +287,11 @@ func Run(ctx context.Context, opts Options) error {
 			// absent until B4.
 			Workers:       workStore,
 			RoutePressure: routePressure{g: metering.NewPressureGauge(db, reg)},
+			// The S08.6 composer's policy-input seams: the current approved
+			// composer playbook (the governed S09.10 house object) and the
+			// lane's pinned engine version keying validation records.
+			ComposerPlaybook: composerPlaybook(memStore),
+			EnginePin:        claudecli.Pin,
 			Adapters: map[string]adapters.Adapter{
 				// The Anthropic lane (Spec S03.2): the pinned `claude` CLI
 				// resolved via PATH; conformance vs the components.lock pin
@@ -626,6 +642,21 @@ func (m memoryOverlays) OverlaySlice(ctx context.Context, owner, templateID stri
 		})
 	}
 	return items, nil
+}
+
+// composerPlaybook adapts memory.Store.HouseObject to the S08.6 composer's
+// playbook seam: the CURRENT APPROVED version of the governed S09.10 house
+// object (stage never imports the memory store, CONVENTIONS §17). An
+// absent object surfaces as an error — the playbook is a required policy
+// input and composition refuses without it.
+func composerPlaybook(s *memory.Store) func(ctx context.Context) (worker.Playbook, error) {
+	return func(ctx context.Context) (worker.Playbook, error) {
+		e, err := s.HouseObject(ctx, worker.ComposerPlaybookTopicKey)
+		if err != nil {
+			return worker.Playbook{}, err
+		}
+		return worker.Playbook{EntryID: e.ID, Version: e.Version, Content: e.Content}, nil
+	}
 }
 
 // routePressure adapts the S10.4 consumption-pressure gauge to the S08.8

@@ -31,6 +31,15 @@ type Settings interface {
 // adapter is not configured with an explicit path.
 const DefaultBinary = "claude"
 
+// Pin is the binding engine version (components.lock "claude CLI
+// (engine)"; Spec S16.3) — the adapter's exported pin per CONVENTIONS §10.
+// TestPinMatchesLock keeps it mechanically coupled to the lock entry; a
+// pin↔installed delta is reported loudly and never silently retargeted
+// (the S03.3 deliberate-bump procedure moves both in lockstep). Consumed
+// by the composition root as the engine-pin key of validation records
+// (Spec S08.1).
+const Pin = "2.1.215"
+
 // cancelGrace is the TERM→KILL grace of the cancel ladder (S03.1:
 // process-group TERM→KILL). Not a ⚙ — S18 ratifies no such key (the
 // sseBatchSize precedent, CONVENTIONS §7).
