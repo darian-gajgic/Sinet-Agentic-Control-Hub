@@ -272,7 +272,7 @@ Write the requested note faithfully.
 	}
 	if _, err := h.workers.RunBattery(ctx, v.ID, worker.BatteryInput{
 		Actor: owner, SampleTask: "write a sample note", Engine: passDry{},
-		Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.215",
+		Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.216",
 	}); err != nil {
 		t.Fatalf("RunBattery: %v", err)
 	}
