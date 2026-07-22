@@ -266,13 +266,17 @@ func TestTierLLiveSmoke(t *testing.T) {
 	if len(res.Logprobs) == 0 {
 		t.Error("no logprobs on the live /v1 response — the S12.5 margin signal is absent (R16/F3)")
 	}
-	// F5: does b10085's json_schema→grammar preserve property order (reason
-	// first)? Normalize leading whitespace/`{` (pretty-printed output).
+	// R14 (P-T15-2 bump-procedure entry): the reason-first property-order check
+	// is a HARD ASSERT, not a Logf (the B4-5 residual carry). b10085 preserves
+	// json_schema→GBNF property order (confirmed live at B4-5); an engine bump
+	// that breaks ordered grammars MUST FAIL LOUDLY here — the two-call fallback
+	// is the flagged remedy, never a silent regression. Normalize leading
+	// whitespace/`{` (pretty-printed output).
 	head := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(res.Content), "{"))
-	if strings.HasPrefix(head, `"reason"`) {
-		t.Logf("F5 CONFIRMED: b10085 emits reason FIRST — free-text-then-constrained order preserved (no two-call fallback needed)")
+	if !strings.HasPrefix(head, `"reason"`) {
+		t.Errorf("R14/P-T15-2: ordered-grammar regression — the engine did NOT emit reason first (%q); free-text-then-constrained property order is BROKEN at the installed build. The two-call fallback is the flagged remedy (S12.4); this must never pass silently.", res.Content)
 	} else {
-		t.Logf("F5 FINDING: b10085 did NOT emit reason first (%q) — property order not preserved; the two-call fallback is the remedy", res.Content)
+		t.Logf("R14 assert PASS: reason emitted FIRST — ordered json_schema→grammar preserved at the pin")
 	}
 
 	// The $0 zero-allowance row with the REAL model hash + engine build (F3).

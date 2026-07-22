@@ -217,6 +217,11 @@ func seatByKey(key string) (SeatRecord, bool) {
 	return SeatRecord{}, false
 }
 
+// SeatByKey is the exported manifest lookup the S12.10 swap gate uses to
+// resolve a retarget's seat key → SeatRecord (its model hash keys the
+// calibration/battery check, R11).
+func SeatByKey(key string) (SeatRecord, bool) { return seatByKey(key) }
+
 // ModelHash returns the seat's model hash — the sha256 of its first GGUF
 // file (the "model hash" the D7 marker and the S12.9/S12.10 battery key on,
 // R9/R18). Empty until the bring-up pull records the sha256. A DOWNLOADED

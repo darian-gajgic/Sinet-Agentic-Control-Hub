@@ -160,6 +160,18 @@ func FakeActiveGPU(freeMiB, totalMiB int64, procs ...GPUProcess) GPUReading {
 	return GPUReading{PCIAddr: "0000:01:00.0", UUID: "GPU-fake", MemFreeMiB: freeMiB, MemTotalMiB: totalMiB, Processes: procs}
 }
 
+// TokenLogprobFixture builds a TokenLogprob whose chosen token carries a
+// top1−top2 gap of `gap` — the shared margin fixture builder for the battery +
+// stage tests (the topLogprob alternatives type is unexported, so a fixture
+// with a controlled margin needs this constructor).
+func TokenLogprobFixture(token string, gap float64) TokenLogprob {
+	return TokenLogprob{
+		Token:   token,
+		Logprob: -0.1,
+		Top:     []topLogprob{{Token: token, Logprob: -0.1}, {Token: "<alt>", Logprob: -0.1 - gap}},
+	}
+}
+
 // FakePowerReader is an injectable powerReader (battery/AC) for hermetic tests.
 type FakePowerReader struct {
 	OnBat bool

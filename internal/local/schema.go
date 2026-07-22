@@ -68,6 +68,31 @@ func SpotCheckSchema() json.RawMessage {
 	}, []string{"reason", "uncovered", "abstain"})
 }
 
+// ContradictionSchema is the S09.7 contradiction-screen (confirm stage) duty
+// schema (R16): reason first, then {contradicts ∈ yes/no/unclear, abstain}.
+// High-precision advisory — the caller treats only a confident "yes" as a hit
+// and refines the question card; the deterministic same-topic_key detection is
+// never suppressed by it (S09.7). One-stage per OQ4 (workhorse confirm).
+func ContradictionSchema() json.RawMessage {
+	return orderedObjectSchema([]prop{
+		{"reason", strField("brief reasoning — fill this FIRST")},
+		{"contradicts", enumField([]string{"yes", "no", "unclear"})},
+		{"abstain", map[string]any{"type": "boolean", "description": "true if the pair cannot be assessed (advisory skip)"}},
+	}, []string{"reason", "contradicts", "abstain"})
+}
+
+// EntailmentSchema is the S07.4 entailment duty schema (R17): reason first,
+// then {verdict ∈ supported/unsupported, abstain}. Binary; P(yes) rides the
+// verdict token's logprob margin (S12.4 "binary + P(yes) from logprobs"). An
+// abstain maps to the unverifiable verdict (empty/undecidable source).
+func EntailmentSchema() json.RawMessage {
+	return orderedObjectSchema([]prop{
+		{"reason", strField("brief reasoning — fill this FIRST")},
+		{"verdict", enumField([]string{"supported", "unsupported"})},
+		{"abstain", map[string]any{"type": "boolean", "description": "true if the source cannot decide the claim (unverifiable — rotted/empty/paywalled)"}},
+	}, []string{"reason", "verdict", "abstain"})
+}
+
 // HelpSchema is the utility Help drafting schema (S06.9 13.5 card help).
 // DRAFTING, not classification (S12.4 utility row: "this seat never decides",
 // human-gated downstream) — no forced-label abstain member (F7 ratified); the
@@ -78,6 +103,35 @@ func HelpSchema() json.RawMessage {
 		{"wrong", strField("what could go wrong")},
 		{"recommend", strField("what the platform recommends and why")},
 	}, []string{"what", "wrong", "recommend"})
+}
+
+// LabelField is one classification label the T15 battery drives its generic
+// schema from (brief R6): a field name plus its enum vocabulary (empty Enum =
+// a free string, not a routing label). The battery owns the case data; the
+// local package owns the schema SHAPE (the import wall, R24).
+type LabelField struct {
+	Name string   `json:"name"`
+	Enum []string `json:"enum,omitempty"`
+}
+
+// BatterySchema builds a reason-first classification schema for a battery suite
+// (R6): a required free-text `reason` first (F5), then each label field, then
+// an explicit abstain member (S12.4). Enum fields constrain to their vocabulary;
+// empty-enum fields are free strings.
+func BatterySchema(fields []LabelField) json.RawMessage {
+	props := []prop{{"reason", strField("brief free-text reasoning — fill this FIRST, before the labels")}}
+	required := []string{"reason"}
+	for _, f := range fields {
+		if len(f.Enum) > 0 {
+			props = append(props, prop{f.Name, enumField(f.Enum)})
+		} else {
+			props = append(props, prop{f.Name, strField("the " + f.Name + " label")})
+		}
+		required = append(required, f.Name)
+	}
+	props = append(props, prop{"abstain", map[string]any{"type": "boolean", "description": "true if the input cannot be classified confidently — never guess a label (S12.4)"}})
+	required = append(required, "abstain")
+	return orderedObjectSchema(props, required)
 }
 
 // prop is one ordered schema property (name → spec).

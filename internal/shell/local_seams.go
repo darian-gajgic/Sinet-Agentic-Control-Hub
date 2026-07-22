@@ -2,15 +2,22 @@ package shell
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
@@ -28,9 +35,14 @@ import (
 // localDeps are the production stores the local surface composes over.
 type localDeps struct {
 	Settings    *settings.Registry
+	DB          *storage.DB
 	Checkpoints *gates.Checkpoints
 	Events      *eventlog.Log
+	Runs        *run.Store
 	Log         *slog.Logger
+	// FlagByModel is the 7.3 revalidation-trigger seam (R12) satisfied by
+	// worker.Store.FlagByModel at the root — internal/local never imports worker.
+	FlagByModel local.FlagByModelFunc
 }
 
 // localSurface holds the composed S12 local surface: the duty caller, the
@@ -52,6 +64,22 @@ type localSurface struct {
 	// hook (nil-safe; wired-but-dormant) AND the live duty pre-flight (OQ2). Nil
 	// when the stack is unconfigured.
 	VRAM *local.VRAMAdmitter
+	// CalStore is the S12.5/S12.9 calibration + battery record store (OQ1,
+	// migration 0010). Backs the swap gate's P-T15-1 checks + the re-check.
+	CalStore *local.CalStore
+	// Swap is the S12.10 swap gate (B4-7): the SOLE write surface for ⚙
+	// local.alias (R11). Nil when the stack is unconfigured.
+	Swap *local.SwapGate
+	// Screen is the S09.7 contradiction screen wired LIVE onto the
+	// contradiction-screen duty (R16); the shell wires it into memory gates.
+	Screen memory.ContradictionScreen
+	// WriteGate is the runtime knowledge-write gate with the S09.7 screen wired
+	// (R16), held for the B6 knowledge-write surface (the SandboxBroker
+	// held-dormant precedent). Set by the shell after the surface is built.
+	WriteGate *memory.Gate
+	// Entail is the S07.4 entailment checker (R17), LIVE-wired; consumed when
+	// the EntailmentGate activates (web-research, v0.1) — held reachable now.
+	Entail verify.EntailmentChecker
 	// LocalLane is the lane the scheduler GPU-gates ("local" when configured, ""
 	// otherwise) — passed to scheduler.Config as a bare string (no import of
 	// internal/local from internal/scheduler, §26).
@@ -120,16 +148,39 @@ func buildLocalSurface(d localDeps) (*localSurface, error) {
 		dutyMap[worker.DutyUtility] = worker.Seat{Model: seat.Model, Lane: local.LaneLocal, WindowTokens: seat.ContextLen}
 	}
 
+	// The S12.5/S12.9 calibration + battery record store (OQ1, migration 0010):
+	// the queryable home the swap gate's P-T15-1 checks + the re-check read.
+	calStore := local.NewCalStore(d.DB)
+	// The S12.10 swap gate (R11): the SOLE ⚙ local.alias write surface, gated on
+	// fresh calibration + battery re-run for the new target, firing the 7.3
+	// trigger via worker.Store.FlagByModel (the wall-clean root seam).
+	swapGate := local.NewSwapGate(local.SwapDeps{
+		Settings: d.Settings, Store: calStore,
+		Writer: aliasWriter{reg: d.Settings}, Flag: d.FlagByModel, Events: d.Events,
+	})
+	// R4: the low-margin workhorse re-check consumer (uncalibrated ⇒ no gate).
+	recheck := local.NewReChecker(duty, calStore)
+	// The advisory metering seam: a short-lived platform run per run-less
+	// advisory local call (the contradiction screen at a memory-gate write), so
+	// every local call stays honestly metered (R18).
+	meter := advisoryMeter(d.Runs, d.Checkpoints)
+	screen := newContradictionScreen(duty, meter) // shell-local (needs memory; stage↛memory, §17)
+	checker := stage.NewEntailmentChecker(duty, meter)
+
 	ls := &localSurface{
 		Duty:          duty,
 		Surface:       surface,
-		Classifier:    stage.NewLocalClassifier(duty),
+		Classifier:    stage.NewLocalClassifierWithRecheck(duty, recheck),
 		Utility:       stage.NewLocalUtility(duty),
 		SpotCheck:     stage.NewLocalSpotCheck(duty),
 		TieBreak:      stage.NewLocalTieBreaker(duty),
 		DutyMap:       dutyMap,
 		Available:     true,
 		VRAM:          vram,
+		CalStore:      calStore,
+		Swap:          swapGate,
+		Screen:        screen,
+		Entail:        checker,
 		LocalLane:     local.LaneLocal,
 		SandboxBroker: sandboxBroker,
 	}
@@ -147,6 +198,62 @@ func buildLocalSurface(d localDeps) (*localSurface, error) {
 	}
 	ls.GameMode = gm
 	return ls, nil
+}
+
+// newWriteGate constructs a memory write gate with the committer (D9) and the
+// S09.7 contradiction screen (R16) wired — the ONE construction site so every
+// gate carries both. A nil screen leaves the deterministic same-topic_key
+// detection alone (never suppressed, S09.7).
+func newWriteGate(store *memory.Store, committer memory.Committer, screen memory.ContradictionScreen) *memory.Gate {
+	g := memory.NewGate(store)
+	g.Committer = committer
+	g.Screen = screen
+	return g
+}
+
+// aliasWriter adapts *settings.Registry to the local.AliasWriter seam (R11):
+// the S12.10 swap gate's ONLY ⚙ local.alias write goes through Registry.Set in
+// one tx (override row + settings_events + settings.changed). internal/local
+// never imports settings — this adapter keeps the wall clean.
+type aliasWriter struct{ reg *settings.Registry }
+
+func (w aliasWriter) SetAliasMap(ctx context.Context, m map[string]string, actorID, reason string) error {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("shell: marshal alias map: %w", err)
+	}
+	return w.reg.Set(ctx, settings.SetRequest{
+		Key:    "local.alias",
+		Value:  raw,
+		Actor:  settings.Actor{Kind: settings.ActorOperator, ID: actorID},
+		Reason: reason,
+	})
+}
+
+// advisoryMeter builds a stage.AdvisoryMeter over the run store: a short-lived
+// platform run per run-less advisory local call (the contradiction screen at a
+// memory-gate write), driven to running for the D7 checkpoint and settled
+// terminal immediately after (so the recovery ladder never touches it, R18).
+// task_id is empty (a platform maintenance run, nullable FK).
+func advisoryMeter(runs *run.Store, cps *gates.Checkpoints) stage.AdvisoryMeter {
+	if runs == nil || cps == nil {
+		return nil
+	}
+	return func(ctx context.Context, purpose string) (string, func(), error) {
+		id := fmt.Sprintf("platform.advisory.%s.%d", purpose, time.Now().UnixNano())
+		if _, err := runs.Create(ctx, run.NewRun{ID: id, UserID: "platform", Lane: local.LaneLocal, Substrate: "local"}); err != nil {
+			return "", nil, err
+		}
+		for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+			if _, err := runs.Transition(ctx, id, st, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+				return "", nil, err
+			}
+		}
+		settle := func() {
+			_, _ = runs.Transition(context.WithoutCancel(ctx), id, run.StateCompleted, run.TransitionOptions{Actor: run.ActorPlatform})
+		}
+		return id, settle, nil
+	}
 }
 
 // startGameMode launches the ⚙-gated GameMode D-Bus subscription in the

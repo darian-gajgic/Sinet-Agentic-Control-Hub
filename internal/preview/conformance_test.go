@@ -107,7 +107,11 @@ func TestNoNewMigration(t *testing.T) {
 	}
 	for _, p := range sqls {
 		name := filepath.Base(p)
-		if name >= "0010" {
+		// The preview packet (B4-4) adds NO migration — disposable previews have
+		// no durable table (R23). Migration 0010 was added later by B4-7 (S12.5/
+		// S12.9 calibration + battery records, OQ1(a) disposition); anything
+		// beyond it would be an unexpected preview-side add.
+		if name >= "0011" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}

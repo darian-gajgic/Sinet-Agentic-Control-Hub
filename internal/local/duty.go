@@ -143,6 +143,30 @@ func (d *Duty) Call(ctx context.Context, runID string, in DutyRequest) (DutyResu
 	if err != nil {
 		return DutyResult{}, err // embedder post-gate / unknown alias / no seat
 	}
+	return d.callOnSeat(ctx, runID, in.Alias, seat, in)
+}
+
+// CallSeat runs a duty request on an EXPLICIT seat, bypassing alias resolution
+// (R4): the intake-triage low-margin re-check re-runs the SAME duty on the
+// workhorse seat, so the D7 marker records duty=<alias> model=<workhorse>. The
+// alias is carried for the marker/duty label only.
+func (d *Duty) CallSeat(ctx context.Context, runID, alias string, seat SeatRecord, in DutyRequest) (DutyResult, error) {
+	if d == nil || d.client == nil || d.cps == nil {
+		return DutyResult{}, ErrStackAbsent
+	}
+	if runID == "" {
+		return DutyResult{}, fmt.Errorf("local: duty %q call needs a consuming run (R18)", alias)
+	}
+	if d.adm != nil && d.adm.Stopped() {
+		return DutyResult{}, ErrAdmissionsStopped
+	}
+	return d.callOnSeat(ctx, runID, alias, seat, in)
+}
+
+// callOnSeat is the shared call core (servable check → abstain belt → admission
+// pre-flight → /v1 call → D7 metering). alias labels the D7 marker; seat picks
+// the model.
+func (d *Duty) callOnSeat(ctx context.Context, runID, alias string, seat SeatRecord, in DutyRequest) (DutyResult, error) {
 	if !seat.Servable {
 		return DutyResult{}, fmt.Errorf("%w: %q — %s", ErrNotServable, seat.Model, seat.Note)
 	}
@@ -159,12 +183,12 @@ func (d *Duty) Call(ctx context.Context, runID string, in DutyRequest) (DutyResu
 	// refusal surfaces as ErrGPUAdmissionRefused and the caller degrades per its
 	// S12.4/S06 row (R17) — never a faked load.
 	if d.admitter != nil {
-		ok, reason, err := d.admitter.AdmitDuty(ctx, seat.Model, aliasUrgent(in.Alias))
+		ok, reason, err := d.admitter.AdmitDuty(ctx, seat.Model, aliasUrgent(alias))
 		if err != nil {
-			return DutyResult{}, fmt.Errorf("local: GPU admission pre-flight for duty %q: %w", in.Alias, err)
+			return DutyResult{}, fmt.Errorf("local: GPU admission pre-flight for duty %q: %w", alias, err)
 		}
 		if !ok {
-			return DutyResult{}, fmt.Errorf("%w: duty %q (%s)", ErrGPUAdmissionRefused, in.Alias, reason)
+			return DutyResult{}, fmt.Errorf("%w: duty %q (%s)", ErrGPUAdmissionRefused, alias, reason)
 		}
 	}
 
@@ -185,7 +209,7 @@ func (d *Duty) Call(ctx context.Context, runID string, in DutyRequest) (DutyResu
 	}
 
 	// D7: ONE checkpoint row on the consuming run with the local marker (R18).
-	usage, err := UsageJSON(in.Alias, seat.Model, seat.ModelHash(), LlamaCppPin, comp.InputTokens, comp.OutputTokens)
+	usage, err := UsageJSON(alias, seat.Model, seat.ModelHash(), LlamaCppPin, comp.InputTokens, comp.OutputTokens)
 	if err != nil {
 		return DutyResult{}, err
 	}
@@ -196,12 +220,12 @@ func (d *Duty) Call(ctx context.Context, runID string, in DutyRequest) (DutyResu
 		ModelID:          seat.Model,
 	})
 	if err != nil {
-		d.surfaceUnmeteredDefect(ctx, runID, in.Alias, err)
-		return DutyResult{}, fmt.Errorf("local: D7 metering write failed for duty %q on run %q: %w", in.Alias, runID, err)
+		d.surfaceUnmeteredDefect(ctx, runID, alias, err)
+		return DutyResult{}, fmt.Errorf("local: D7 metering write failed for duty %q on run %q: %w", alias, runID, err)
 	}
 
 	return DutyResult{
-		Alias:        in.Alias,
+		Alias:        alias,
 		Model:        seat.Model,
 		Seat:         seat,
 		Content:      comp.Content,

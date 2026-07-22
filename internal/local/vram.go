@@ -75,6 +75,17 @@ type powerReader interface {
 	OnBattery() (bool, error)
 }
 
+// PowerReader is the exported host AC/battery observation (the B4-7 battery
+// harness consumes it for the ⚙ local.batch.ac_only gate, R7). FakePowerReader
+// satisfies it in tests.
+type PowerReader interface {
+	OnBattery() (bool, error)
+}
+
+// NewPowerReader returns the live sysfs host power-supply reader (a sleep-safe
+// host observation, never a periodic GPU wake — S12.8).
+func NewPowerReader() PowerReader { return newSysfsPowerReader() }
+
 // smiFunc runs nvidia-smi and returns its stdout — injected so a test can prove
 // a suspended GPU is NEVER polled (the fixture makes this panic if called; R18).
 type smiFunc func(ctx context.Context, args ...string) ([]byte, error)
@@ -253,15 +264,28 @@ func (p *sysfsPowerReader) OnBattery() (bool, error) {
 	return sawMains, nil // a mains supply exists but none online ⇒ on battery
 }
 
-// Ledger holds the per-model VRAM footprint beliefs (S12.7 step 5). At v0 it is
-// EMPTY — OQ1 is machinery-only, so no calibration data is recorded here and
-// every model is UNCALIBRATED (Footprint returns calibrated=false). B4-7's
-// calibration run (S12.9 #2) fills this per (model, quant, context, slots,
-// engine build); the values key on the manifest model hash + engine build. The
-// compositor-headroom figures (hybrid + MUX, S12.7 step 6) live here too,
-// uncalibrated at v0 — machinery for B4-7 to fill, never guessed.
+// FootprintKey is the FULL S12.7 step-5 footprint tuple (brief R18 / B4-6 F5
+// carry): a VRAM footprint is a fact of (model, quant, context, slots, engine
+// build), not of the model string alone — the same weights at a different
+// context or slot count occupy different VRAM, and an engine bump re-measures
+// (LedgerReRunTriggers). The calibration run (S12.9 #2, R21) fills the ledger
+// per tuple; an unmeasured tuple stays honest-uncalibrated.
+type FootprintKey struct {
+	Model       string `json:"model"`
+	Quant       string `json:"quant"`
+	Context     int64  `json:"context"`
+	Slots       int64  `json:"slots"`
+	EngineBuild string `json:"engine_build"`
+}
+
+// Ledger holds the per-tuple VRAM footprint beliefs (S12.7 step 5, R18). At v0
+// it is EMPTY — the calibration values are B4-7's measurement (S12.9 #2), so
+// every tuple is UNCALIBRATED and admission rests entirely on the live
+// memory.free reading (R10). The compositor-headroom figures (hybrid + MUX,
+// S12.7 step 6) live here too, uncalibrated at v0 — machinery for B4-7 to fill,
+// never guessed.
 type Ledger struct {
-	footprints map[string]int64 // model → measured MiB (EMPTY at v0)
+	footprints map[FootprintKey]int64 // tuple → measured MiB (EMPTY at v0)
 	// HybridHeadroomMiB / MUXHeadroomMiB are the S12.7 step-6 compositor-headroom
 	// figures per display mode (hybrid is the recommended VRAM-maximizing mode).
 	// Zero = uncalibrated (B4-7 measures them; never a documented constant, R8).
@@ -269,18 +293,43 @@ type Ledger struct {
 	MUXHeadroomMiB    int64
 }
 
-// NewLedger returns the honest-uncalibrated v0 ledger (OQ1; R10).
-func NewLedger() *Ledger { return &Ledger{footprints: map[string]int64{}} }
+// NewLedger returns the honest-uncalibrated v0 ledger (R10/R18).
+func NewLedger() *Ledger { return &Ledger{footprints: map[FootprintKey]int64{}} }
 
-// Footprint returns a model's measured VRAM footprint and whether it is
-// CALIBRATED (S12.7). At v0 nothing is calibrated (OQ1) → (0, false); admission
-// then rests entirely on the live memory.free reading (R9/R10), never a belief.
+// SetFootprint records a MEASURED per-tuple footprint — the calibration run
+// (R21) fills the ledger through this; never a guessed constant (R8/R18).
+func (l *Ledger) SetFootprint(key FootprintKey, mib int64) {
+	if l == nil {
+		return
+	}
+	l.footprints[key] = mib
+}
+
+// FootprintByKey returns a tuple's measured VRAM footprint and whether it is
+// CALIBRATED (S12.7/R18). Uncalibrated ⇒ (0, false) and admission rests on the
+// live reading (R10).
+func (l *Ledger) FootprintByKey(key FootprintKey) (mib int64, calibrated bool) {
+	if l == nil {
+		return 0, false
+	}
+	v, ok := l.footprints[key]
+	return v, ok
+}
+
+// Footprint returns a MODEL's measured footprint for the admission-belief note
+// (S12.7): any calibrated tuple for the model, else (0, false). Admission rests
+// on the LIVE reading regardless of this belief (R9/R10/R18) — the tuple key is
+// the precise calibration surface (FootprintByKey), this is the coarse note.
 func (l *Ledger) Footprint(model string) (mib int64, calibrated bool) {
 	if l == nil {
 		return 0, false
 	}
-	v, ok := l.footprints[model]
-	return v, ok
+	for k, v := range l.footprints {
+		if k.Model == model {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
 // LedgerReRunTriggers documents the S12.7 invalidation rule (R8): the ledger is

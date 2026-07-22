@@ -264,8 +264,7 @@ func Run(ctx context.Context, opts Options) error {
 		// The knowledge write gate carries the committer at every construction
 		// site (Spec S09.2/D9; R28): a file-backed approval commits with the
 		// approver as author and fills knowledge_entries.file_commit NULL→hash.
-		seedGate := memory.NewGate(memStore)
-		seedGate.Committer = committer
+		seedGate := newWriteGate(memStore, committer, nil) // seeding runs before the local surface; the screen wires at the runtime gate below
 		switch n, err := seedGate.EnsureB2SeedGovernance(ctx); {
 		case errors.Is(err, memory.ErrNoOperator):
 			logger.Info("memory: B2 seed governance deferred — no operator account yet (Spec S09.10, D10)")
@@ -277,8 +276,7 @@ func Run(ctx context.Context, opts Options) error {
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded
 		// provenance says so). Same D10 deferral as the B2 seeds.
-		playbookGate := memory.NewGate(memStore)
-		playbookGate.Committer = committer
+		playbookGate := newWriteGate(memStore, committer, nil)
 		switch created, err := playbookGate.EnsureComposerPlaybook(ctx); {
 		case errors.Is(err, memory.ErrNoOperator):
 			logger.Info("memory: composer-playbook governance deferred — no operator account yet (Spec S09.10, D10)")
@@ -318,12 +316,22 @@ func Run(ctx context.Context, opts Options) error {
 		// endpoints, api unchanged). Unconfigured is the dev default — every
 		// seam nil, the pipeline/routing degrade per the S12.4/S06 rows (R17).
 		localSurf, err = buildLocalSurface(localDeps{
-			Settings: reg, Checkpoints: checkpoints, Events: log, Log: logger,
+			Settings: reg, DB: db, Checkpoints: checkpoints, Events: log, Runs: runs, Log: logger,
+			// The 7.3 revalidation-trigger seam (R12): the swap gate flags worker
+			// versions referencing the swapped model. Wall-clean — a func seam.
+			FlagByModel: workStore.FlagByModel,
 		})
 		if err != nil {
 			return err
 		}
-		logger.Info("local: S12 duty surface wired (B4-5)", "configured", localSurf.Available)
+		logger.Info("local: S12 duty surface wired (B4-5/B4-7)", "configured", localSurf.Available)
+		// The S09.7 contradiction screen (B4-7 R16) is composed on localSurf.Screen
+		// and wired into the runtime knowledge-write gate here — the advisory
+		// local-model duty refines a same-topic_key conflict's question card; the
+		// deterministic detection is never suppressed, and a nil screen
+		// (unconfigured stack) leaves it alone. The gate is held for the B6
+		// knowledge-write surface (the SandboxBroker held-dormant precedent).
+		localSurf.WriteGate = newWriteGate(memStore, committer, localSurf.Screen)
 		// The ⚙-gated GameMode D-Bus subscription (probe-bound; inert unless the
 		// operator session-bus address is configured — R13/R14). The scripts
 		// leg is operator-installed config, not a runtime goroutine.

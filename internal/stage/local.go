@@ -53,18 +53,38 @@ func triageTiers() []string {
 // string; the classifier sizes, S10 prices — the estimate stays Known=false).
 var triageSizes = []string{"trivial", "small", "medium", "large", "xlarge"}
 
+// triageLabelFields are the routing-decisive intake-triage labels the S12.5
+// margin is taken over (R4): family + stakes drive routing; size is a soft
+// estimate. The least-confident of these is the case margin.
+var triageLabelFields = []string{"family", "stakes"}
+
 // ---- Classifier (intake-triage alias) ----
 
-type localClassifier struct{ duty *local.Duty }
+type localClassifier struct {
+	duty    *local.Duty
+	recheck *local.ReChecker // R4: low-margin workhorse re-check (nil ⇒ uncalibrated posture, no gate)
+}
 
 var _ intake.Classifier = (*localClassifier)(nil)
 
-// NewLocalClassifier wraps the duty caller as the intake Classifier seam.
-func NewLocalClassifier(duty *local.Duty) intake.Classifier { return &localClassifier{duty} }
+// NewLocalClassifier wraps the duty caller as the intake Classifier seam. The
+// re-check is uncalibrated (no gate) — use NewLocalClassifierWithRecheck to
+// wire the S12.5 low-margin workhorse re-check (R4).
+func NewLocalClassifier(duty *local.Duty) intake.Classifier {
+	return &localClassifier{duty: duty}
+}
+
+// NewLocalClassifierWithRecheck wires the classifier with the S12.5 low-margin
+// re-check consumer (R4): a below-threshold fast-tier triage re-checks on the
+// workhorse ($0, local→local) when a calibrated threshold exists.
+func NewLocalClassifierWithRecheck(duty *local.Duty, recheck *local.ReChecker) intake.Classifier {
+	return &localClassifier{duty: duty, recheck: recheck}
+}
 
 func (c *localClassifier) Classify(ctx context.Context, req intake.Request, reg *intake.RegistrySlice) (intake.TriageProposal, error) {
 	schema := local.TriageSchema(triageFamilies(), triageTiers(), triageSizes)
-	res, err := c.duty.Call(ctx, req.TaskID+RunSuffixIntake, local.DutyRequest{
+	runID := req.TaskID + RunSuffixIntake
+	in := local.DutyRequest{
 		Alias:          local.AliasIntakeTriage,
 		System:         "You are a task triage classifier for a personal automation platform. Output ONLY the JSON matching the schema — put your brief reasoning in the leading \"reason\" field, then the labels (free-text-then-constrained). Set abstain=true if you cannot classify confidently — never guess a label.",
 		User:           triagePrompt(req, reg, schema),
@@ -72,11 +92,20 @@ func (c *localClassifier) Classify(ctx context.Context, req intake.Request, reg 
 		Name:           "intake-triage",
 		MaxTokens:      triageMaxTokens,
 		Classification: true,
-	})
+	}
+	res, err := c.duty.Call(ctx, runID, in)
 	if err != nil {
 		// Fail closed: the pipeline treats a classify error as high-stakes,
 		// unknown estimate, no band membership (S06.2). Never faked.
 		return intake.TriageProposal{}, err
+	}
+	// R4: low-margin re-check on the workhorse ($0, local→local). Uncalibrated
+	// ⇒ no gate (the fast answer stands). The re-check never hard-fails the
+	// classification — a failed re-check leaves the fast answer.
+	if c.recheck != nil {
+		if rc, rerr := c.recheck.MarginRecheck(ctx, runID, local.AliasIntakeTriage, in, res, triageLabelFields); rerr == nil {
+			res = rc.Result
+		}
 	}
 	return parseTriage(res.Content)
 }
