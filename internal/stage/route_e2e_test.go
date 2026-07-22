@@ -228,7 +228,7 @@ func TestGeneralistExecuteEmitsRoutingDecidedAndGapRecord(t *testing.T) {
 		t.Fatalf("routing.decided events = %d, want exactly 1", len(decided))
 	}
 	d := decided[0]
-	if d["generalist"] != true || d["model"] != "claude-opus-4-8" || d["lane"] != "anthropic" {
+	if d["generalist"] != true || d["model"] != "claude-sonnet-5" || d["lane"] != "anthropic" {
 		t.Fatalf("routing.decided payload = %v", d)
 	}
 	if s, _ := d["plain_reason"].(string); !strings.Contains(s, "generalist") {

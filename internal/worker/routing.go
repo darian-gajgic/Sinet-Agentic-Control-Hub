@@ -102,28 +102,33 @@ const DefaultWindowTokens = 200_000
 
 // DefaultDutyMap is the v0 recommended platform-wide duty map (S06.10
 // "uniform recommended default"), seat mix RATIFIED at the B3 gate
-// 2026-07-22 (operator D3, free-text; record P3/gates/B3-report.md §7):
-// frontier-class ceremony AND execution (claude-opus-4-8 — satisfies
-// S06.10's "paid frontier-class" bar for interviewing/critique and
-// S08.6's frontier-class composer ceremony, closing the dormant mismatch
-// the all-haiku map carried), with the V2 judge on claude-sonnet-5 — a
-// paid frontier-class model per the S07.5 class bar, deliberately a
-// DIFFERENT model than the executor (the operator's pick; serves S07.5's
-// independence intent — same-family judges inflate own-style output).
-// P-T06-5: this judge retarget IS a version bump — the golden-set re-run
-// on the sonnet-5 judge is pre-registered at the B4 judge-calibration
-// measurement row (B2-3 deferral record); verdicts before that run are
-// bring-up-grade. The utility seat is deliberately ABSENT: S06.10 pins it
-// to the local tier (S12, B4) — an absent duty degrades with a recorded
+// 2026-07-22 (operator D3; record + research grounding in
+// P3/gates/B3-report.md §7): the advisor split. Planning rides
+// claude-opus-4-8 — S06.10's "paid frontier-class" bar for
+// interview/critique and S08.6's frontier-class composer ceremony.
+// Execution rides claude-sonnet-5 — the ratified advisor-pattern default
+// executor under an opus-class planner (also the subscription's separate
+// sonnet weekly pool; a ratification fact, not runtime pricing). The V2
+// judge rides claude-opus-4-8 — paid frontier-class per the S07.5 class
+// bar, capability ≥ the executor, and deliberately a DIFFERENT model than
+// the executor whose output it judges (cross-model judging; same-model
+// judges prefer their own output). P-T06-5: the judge retarget IS a
+// version bump — the golden-set re-run on the opus-4-8 judge is
+// pre-registered at the B4 judge-calibration measurement row (B2-3
+// deferral record); verdicts before that run are bring-up-grade. Gate
+// rider: the serialize-by-deny E3 leg re-runs on this executor seat in
+// the B4 battery (the B3-3 measurement ran on the superseded haiku
+// default). The utility seat is deliberately ABSENT: S06.10 pins it to
+// the local tier (S12, B4) — an absent duty degrades with a recorded
 // reason, never fakes a local model onto a paid lane. No S18 key covers
 // the map (the §7/§9/§11 constant precedent; the standing settings-tab
 // directive applies). D5 unchanged: all seats subscription-covered,
 // metered list EMPTY, selection never prices.
 func DefaultDutyMap() DutyMap {
 	return DutyMap{
-		DutyExecution: Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyExecution: Seat{Model: "claude-sonnet-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
 		DutyPlanning:  Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
-		DutyJudge:     Seat{Model: "claude-sonnet-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyJudge:     Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
 	}
 }
 
