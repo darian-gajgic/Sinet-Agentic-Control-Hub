@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
@@ -46,6 +47,10 @@ Modes:
 Tools:
 
   units        render the systemd unit set (generated, never installed)
+  snapshot     take one platform-state snapshot (Spec S13.10; the one-shot
+               driven by the generated sinet-snapshot.timer)
+  restore-drill run one verified-restore drill (Spec S13.10; the one-shot
+               driven by the generated sinet-restore-drill.timer)
   run-launch   per-run sandbox launcher — the fixed ExecStart of the
                sinet-run@ template (Spec S11.8); reads a spool record and
                composes the S11.1 stack. System-invoked, never by hand.
@@ -80,6 +85,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return broker.Main(args[1:], stdout, stderr)
 	case "run-launch":
 		return sandbox.RunLaunch(args[1:], stdout, stderr)
+	case "snapshot":
+		return backup.SnapshotMode(args[1:], stdout, stderr)
+	case "restore-drill":
+		return backup.DrillMode(args[1:], stdout, stderr)
 	case "units":
 		return runUnits(args[1:], stdout, stderr)
 	case "engine-hook":

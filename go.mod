@@ -3,6 +3,8 @@ module github.com/dariannixda-eng/Sinet-Agentic-Control-Hub
 go 1.26.5
 
 require (
+	filippo.io/age v1.3.1
+	github.com/klauspost/compress v1.19.1
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
@@ -10,6 +12,7 @@ require (
 )
 
 require (
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

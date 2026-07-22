@@ -124,6 +124,33 @@ func TestUnitsToStdout(t *testing.T) {
 	}
 }
 
+// TestSnapshotAndDrillModesExist: `sinet snapshot` and `sinet restore-drill`
+// are recognized one-shot modes (Spec S13.10, R21/R22) — they dispatch to the
+// backup pipeline and fail with a config error, never "unknown mode".
+func TestSnapshotAndDrillModesExist(t *testing.T) {
+	for _, mode := range []string{"snapshot", "restore-drill"} {
+		code, _, errOut := run(t, mode)
+		if strings.Contains(errOut, "unknown mode") {
+			t.Errorf("%q reported unknown mode: %s", mode, errOut)
+		}
+		// Missing --snapshot-remote (a bring-up config) → a usage error, not a
+		// crash, and definitely a recognized mode.
+		if code == exitOK {
+			t.Errorf("%q with no config unexpectedly succeeded", mode)
+		}
+		if !strings.Contains(errOut, "snapshot-remote") {
+			t.Errorf("%q did not name the required --snapshot-remote: %s", mode, errOut)
+		}
+	}
+	// The usage text lists them as tools.
+	_, out, _ := run(t, "help")
+	for _, want := range []string{"snapshot", "restore-drill"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage text missing %q", want)
+		}
+	}
+}
+
 func TestUnitsToDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "units")
 	code, out, errOut := run(t, "units", "--out", dir)
@@ -134,8 +161,8 @@ func TestUnitsToDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read out dir: %v", err)
 	}
-	if len(entries) != 6 {
-		t.Fatalf("%d files written, want 6", len(entries))
+	if len(entries) != 10 {
+		t.Fatalf("%d files written, want 10", len(entries))
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "sinet-control.service"))
 	if err != nil {

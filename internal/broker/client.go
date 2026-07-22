@@ -36,6 +36,20 @@ func Dial(socket string) (*Client, error) {
 func (c *Client) Close() error { return c.conn.Close() }
 
 func (c *Client) roundTrip(req Request) (Response, error) {
+	resp, err := c.send(req)
+	if err != nil {
+		return Response{}, err
+	}
+	if !resp.OK {
+		return resp, fmt.Errorf("broker: %s", resp.Error)
+	}
+	return resp, nil
+}
+
+// send is roundTrip WITHOUT the !OK→error collapse: it returns the raw
+// response so a caller (Push) can distinguish a stale-lease rejection from a
+// broker refusal. A returned error is a wire/transport failure only.
+func (c *Client) send(req Request) (Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := writeJSON(c.conn, req); err != nil {
@@ -44,9 +58,6 @@ func (c *Client) roundTrip(req Request) (Response, error) {
 	var resp Response
 	if err := readJSONReader(c.r, &resp); err != nil {
 		return Response{}, err
-	}
-	if !resp.OK {
-		return resp, fmt.Errorf("broker: %s", resp.Error)
 	}
 	return resp, nil
 }
@@ -72,6 +83,55 @@ func (c *Client) Resolve(profile string) (secret, kind string, err error) {
 // HMAC — the key never leaves the broker (S11.5 ssh-agent posture).
 func (c *Client) Sign(profile string, data []byte) ([]byte, error) {
 	resp, err := c.roundTrip(Request{Op: OpSign, Profile: profile, Data: base64.StdEncoding.EncodeToString(data)})
+	if err != nil {
+		return nil, err
+	}
+	sig, err := base64.StdEncoding.DecodeString(resp.Sig)
+	if err != nil {
+		return nil, fmt.Errorf("broker: decode signature: %w", err)
+	}
+	return sig, nil
+}
+
+// PushResult is the outcome of a broker CAS push (Spec S13.6).
+type PushResult struct {
+	// Rejected is true when git rejected the push because the
+	// --force-with-lease lease was stale (the ref moved since approval) — a
+	// NORMAL collision the caller routes back to a merge card, NEVER a blind
+	// retry against a new sha (S13.6 step 4).
+	Rejected bool
+}
+
+// Push runs a CAS push through the broker (Spec S13.6). Its distinctions
+// matter to the caller: a broker REFUSAL (a protected ref without
+// accept-authorization, or a bare / value-less lease) returns an error — the
+// P-T12-1 guardrail held; a stale-lease REJECTION returns
+// PushResult{Rejected:true}, nil so the accept path routes to a merge card;
+// success returns a zero PushResult. The caller sets Op-independent fields
+// (RepoDir/Remote/Refs/Protected/Authorized/Atomic/Profile) on req.
+func (c *Client) Push(req Request) (PushResult, error) {
+	req.Op = OpPush
+	resp, err := c.send(req)
+	if err != nil {
+		return PushResult{}, err
+	}
+	if resp.Rejected {
+		return PushResult{Rejected: true}, nil
+	}
+	if !resp.OK {
+		return PushResult{}, fmt.Errorf("broker: %s", resp.Error)
+	}
+	return PushResult{}, nil
+}
+
+// SignData produces an SSHSIG over data with the broker-held git-ssh-key (Spec
+// S13.6 step 5, gpg.format=ssh). Returns the armored signature; the key never
+// leaves the broker. namespace is "git" for commit signing.
+func (c *Client) SignData(profile, namespace string, data []byte) ([]byte, error) {
+	resp, err := c.roundTrip(Request{
+		Op: OpSignData, Profile: profile, Namespace: namespace,
+		Data: base64.StdEncoding.EncodeToString(data),
+	})
 	if err != nil {
 		return nil, err
 	}

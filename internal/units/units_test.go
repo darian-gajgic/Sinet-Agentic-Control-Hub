@@ -33,6 +33,10 @@ func TestUnitSetIsComplete(t *testing.T) {
 		"sinet-engine@.service",
 		"sinet-run@.service",
 		"sinet-portpool.service",
+		"sinet-snapshot.service",
+		"sinet-snapshot.timer",
+		"sinet-restore-drill.service",
+		"sinet-restore-drill.timer",
 		"journald-sinet.conf",
 	}
 	if len(files) != len(want) {
@@ -42,6 +46,38 @@ func TestUnitSetIsComplete(t *testing.T) {
 		if files[i].Name != name {
 			t.Errorf("file %d = %s, want %s (deterministic order)", i, files[i].Name, name)
 		}
+	}
+}
+
+func TestBackupTimersPersistentCalendar(t *testing.T) {
+	files := gen(t, units.Params{})
+	// Snapshot: one-shot service + a PERSISTENT calendar timer (Spec S01.7 —
+	// suspend catch-up), NOT an in-process ticker. ⚙ backup.interval default is
+	// daily.
+	svc := files["sinet-snapshot.service"]
+	for _, want := range []string{"Type=oneshot", "ExecStart=/usr/local/bin/sinet snapshot", "EnvironmentFile=-/etc/sinet/snapshot.env", "User=sinet"} {
+		if !strings.Contains(svc.Content, want) {
+			t.Errorf("sinet-snapshot.service lacks %q", want)
+		}
+	}
+	if !svc.Draft {
+		t.Error("snapshot service should be draft (live config is a bring-up step)")
+	}
+	timer := files["sinet-snapshot.timer"]
+	for _, want := range []string{"OnCalendar=*-*-* 00:00:00", "Persistent=true", "Unit=sinet-snapshot.service", "WantedBy=timers.target"} {
+		if !strings.Contains(timer.Content, want) {
+			t.Errorf("sinet-snapshot.timer lacks %q:\n%s", want, timer.Content)
+		}
+	}
+	// Restore drill: default ⚙ backup.drill_interval = 3 months → quarterly.
+	drill := files["sinet-restore-drill.timer"]
+	for _, want := range []string{"OnCalendar=*-1/3-01 00:00:00", "Persistent=true", "Unit=sinet-restore-drill.service"} {
+		if !strings.Contains(drill.Content, want) {
+			t.Errorf("sinet-restore-drill.timer lacks %q:\n%s", want, drill.Content)
+		}
+	}
+	if !strings.Contains(files["sinet-restore-drill.service"].Content, "ExecStart=/usr/local/bin/sinet restore-drill") {
+		t.Error("restore-drill service lacks its ExecStart")
 	}
 }
 
@@ -75,7 +111,9 @@ func TestControlUnitDirectives(t *testing.T) {
 
 func TestEveryUnitStaticUserNeverDynamic(t *testing.T) {
 	for name, f := range gen(t, units.Params{}) {
-		if name == "journald-sinet.conf" {
+		// The journald drop-in and .timer units have no [Service] section and
+		// therefore no User= (a timer runs its Unit=, which carries the user).
+		if name == "journald-sinet.conf" || strings.HasSuffix(name, ".timer") {
 			continue
 		}
 		if !strings.Contains(f.Content, "User=sinet") {

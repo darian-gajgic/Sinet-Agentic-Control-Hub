@@ -219,6 +219,12 @@ const (
 	EventComment = "review.comment"
 	// EventDrained is one S13.4 drain batch: what that rework received.
 	EventDrained = "review.drained"
+	// EventAccepted is the terminal accept of a deliverable (Spec S13.6):
+	// the state move to accepted plus any supersession. The outward git
+	// accept mechanics (applies-cleanly, squash, CAS push) compose ABOVE
+	// this package (CONVENTIONS §27); this event records the durable state
+	// outcome, owner-attributed (15.6).
+	EventAccepted = "deliverable.accepted"
 )
 
 const eventSchemaVersion = 1

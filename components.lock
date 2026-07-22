@@ -240,6 +240,56 @@
       "notes": "S16-rail os-mechanism entry materialized at P3-B4-1 (first platform consumption: internal/review shells `git -c core.quotepath=false diff --no-index --no-color --unified=3`; exit 1 = differs, handled). Observed at adoption: git version 2.53.0 on the Ubuntu 26.04 LTS host. Absence is a LOUD error on the diff path (never a silent fallback); no CI running-unit assertion (an on-demand CLI, not a unit — the Caddy/claude precedent)"
     },
     {
+      "name": "age (snapshot encryption)",
+      "kind": "library",
+      "pin": "v1.3.1",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "scope": "module root at v1.3.1 (single LICENSE, BSD 3-Clause verbatim: The age Authors / Google LLC / Filippo Valsorda). Transitive filippo.io/hpke v0.4.0 is BSD-3-Clause (module-root LICENSE at v0.4.0, verified via pkg.go.dev, not assumed). golang.org/x/crypto (v0.54.0) + golang.org/x/sys (v0.47.0) are MVS-pulled and covered by their own lock entries.",
+        "checked": "2026-07-22"
+      },
+      "role": {
+        "summary": "snapshot-lane client-side encryption (age -r <operator recipients>) behind internal/backup — the S13.10 lane where encryption proves who can READ and the snapshot_ledger proves integrity (age has NO sender authentication, P-T12-4)",
+        "section": "S13.10"
+      },
+      "replacement": "the snapshot-lane crypto swap at S13's pipeline seam (a gopass-class store alternative or an alternate age implementation behind encryptTo/decryptWith); the age file format is stable and the identity is escrowed off-host, so a swap re-snapshots without data loss",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "X-Wing post-quantum hybrid recipient (the age-CLI plugin row, S16.8) — an optional add once the Go plugin status verifies",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-22",
+      "modules": [
+        "filippo.io/age",
+        "filippo.io/hpke"
+      ],
+      "notes": "Adopted at P3-B4-3 because Spec S13.10 fixes age for the UNCONDITIONAL client-side snapshot encryption and the stdlib has none; filippo.io/age is the canonical Go age library. Rides the EXISTING S16.3 age row (its 'TBD-P3(pin)' resolves here; the age v1.3.1 CLIs remain user-level escrow-ceremony tooling, NOT a platform dep — this is the Go MODULE). Pin LIVE-verified 2026-07-22 via proxy.golang.org: filippo.io/age @latest = v1.3.1 (published 2025-12-28). S16.4 checklist walked: #1 niche/seam — one crypto lane behind internal/backup, owning section S13.10; #2 organ-grade — a leaf crypto library, no orchestration/store opinions; #3 health — Filippo Valsorda maintained, stable v1 line; #4 license path-scoped above (age + hpke BSD-3, verified not assumed); #5 behavior — encrypt/decrypt round-trip + identity->recipient derivation asserted by internal/backup tests at the pin (fresh temp keypairs; the real ~/.config/sinet/age-identity.txt is NEVER read by tests); #6 unmodified — import-only; #7 runner-never-store — n/a (computes ciphertext; platform.db untouched); #8 pin+funeral — this entry; #9 watch rows above; #10 operator ratification QUEUED for the B4 gate (the B0-5/B1-2/B4-1 precedent). The LIVE require graph resolved filippo.io/hpke (NOT filippo.io/edwards25519, which memory/the brief guessed — the mandated live-verify caught it); x/crypto/x/sys stay at the existing higher pins under MVS."
+    },
+    {
+      "name": "zstd (pure-Go compression)",
+      "kind": "library",
+      "pin": "v1.19.1",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "scope": "PATH-SCOPED (P-T16-2): the imported subtree github.com/klauspost/compress/zstd and its compiled internal deps (internal/snapref, internal/cpuinfo, internal/le, fse, huff0) are BSD-3-Clause (root LICENSE: The Go Authors / Klaus Post / The Snappy-Go Authors). The module ALSO carries Apache-2.0 (gzhttp/*) and MIT (s2/cmd/internal/*) paths that are NOT in the zstd import tree and are never linked. Verified 2026-07-22 via pkg.go.dev.",
+        "checked": "2026-07-22"
+      },
+      "role": {
+        "summary": "snapshot-lane compression (the tar | zstd | age pipeline) behind internal/backup — the S13.10 compressor; pure-Go/cgo-free per the single-static-binary rule",
+        "section": "S13.10"
+      },
+      "replacement": "stdlib compress/gzip fallback, or an alternate pure-Go zstd module, behind the one compression seam (buildArchive/unpackArchive); the archive format is internal, so a compressor swap is a re-snapshot away",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-22",
+      "modules": [
+        "github.com/klauspost/compress"
+      ],
+      "notes": "NET-NEW S16.4 onboarding, NOT a pre-registered S16.3 row (the S16.3 v0 manifest has an age row and a sops row but NO zstd row; S13.10 names zstd in the pipeline; S16.4 is the ratified mechanism for adopting a component S16.3 did not pre-register) — the ONE adoption beyond a pre-registered row this packet, coordinator-ratified and flagged to the B4 gate. Pin LIVE-verified 2026-07-22 via proxy.golang.org: github.com/klauspost/compress @latest = v1.19.1 (published 2026-07-20). cgo-free CONFIRMED by building the importer under CGO_ENABLED=0 (the static-binary rule, CONVENTIONS §1; DataDog's cgo-wrapping zstd is disqualified). FULL S16.4 ten-check walk: #1 niche/seam — one compressor behind internal/backup, owning section S13.10; #2 organ-grade — a leaf compression library, no orchestration/store opinions; #3 health — klauspost/compress is the dominant pure-Go zstd, actively maintained (monthly cadence); #4 license path-scoped above (BSD-3 for the zstd subtree, verified not assumed; the Apache/MIT paths are not linked); #5 behavior — compress/decompress round-trip asserted by internal/backup tests at the pin, plus the full snapshot->drill archive round-trip; #6 unmodified — import-only; #7 runner-never-store — n/a; #8 pin+funeral — this entry (funeral = the stdlib gzip fallback behind the one seam); #9 watch rows above; #10 operator ratification QUEUED for the B4 gate. Zero transitive requires (its go.mod carries only the go directive)."
+    },
+    {
       "name": "Caddy",
       "kind": "organ-unit",
       "pin": "2.6.2-14",

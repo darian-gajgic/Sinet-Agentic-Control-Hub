@@ -89,6 +89,44 @@ func EvaluateFreshness(settings FreshnessSettings, in FreshnessInput, now time.T
 	return Freshness{Fresh: len(reasons) == 0, Reasons: reasons}, nil
 }
 
+// SiblingAcceptRun is one active project run the sibling-accept producer
+// re-evaluates (Spec S02.8/S13.9).
+type SiblingAcceptRun struct {
+	RunID          string
+	CheckpointTime time.Time
+	Fingerprint    Fingerprint
+	Versions       VersionFields
+}
+
+// FireSiblingAccept is the S02.8 sibling-accept PRODUCER (Spec S13.9 "an
+// accepted sibling fires the freshness trigger"; Spec S02.8): on an accept in a
+// project, every active run is re-evaluated with FreshnessInput.SiblingAccept =
+// true — feeding the shipped EvaluateFreshness CONSUMER — so each routes to the
+// S02.6 re-validation ("blocked is not failed") before spending anything
+// significant. Returns the routed run ids. The producer supplies each run's own
+// fingerprint on both sides, so SiblingAccept is the sole trigger under test;
+// real fingerprint/age drift compounds it at the actual resume.
+func FireSiblingAccept(settings FreshnessSettings, runs []SiblingAcceptRun, now time.Time) ([]string, error) {
+	var routed []string
+	for _, r := range runs {
+		fr, err := EvaluateFreshness(settings, FreshnessInput{
+			CheckpointTime:  r.CheckpointTime,
+			Stored:          r.Fingerprint,
+			Current:         r.Fingerprint,
+			StoredVersions:  r.Versions,
+			CurrentVersions: r.Versions,
+			SiblingAccept:   true,
+		}, now)
+		if err != nil {
+			return nil, err
+		}
+		if !fr.Fresh {
+			routed = append(routed, r.RunID)
+		}
+	}
+	return routed, nil
+}
+
 func fingerprintDrift(stored, current Fingerprint) []string {
 	var reasons []string
 	if stored.RepoHead != current.RepoHead {

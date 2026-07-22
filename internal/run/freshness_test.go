@@ -9,6 +9,29 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
+// TestFireSiblingAccept: the S02.8 sibling-accept PRODUCER (Spec S13.9) feeds
+// EvaluateFreshness with SiblingAccept=true for each active run, so every one
+// routes to S02.6 re-validation even when its own fingerprint is unchanged.
+func TestFireSiblingAccept(t *testing.T) {
+	reg := settings.New()
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	runs := []run.SiblingAcceptRun{
+		{RunID: "r1", CheckpointTime: now.Add(-time.Minute)},
+		{RunID: "r2", CheckpointTime: now.Add(-time.Minute)},
+	}
+	routed, err := run.FireSiblingAccept(reg, runs, now)
+	if err != nil {
+		t.Fatalf("FireSiblingAccept: %v", err)
+	}
+	if len(routed) != 2 || routed[0] != "r1" || routed[1] != "r2" {
+		t.Errorf("sibling-accept routed %v, want [r1 r2] (all active runs re-validate)", routed)
+	}
+	// No active runs → nothing routed, no error.
+	if r, err := run.FireSiblingAccept(reg, nil, now); err != nil || len(r) != 0 {
+		t.Errorf("empty FireSiblingAccept = %v, %v", r, err)
+	}
+}
+
 func TestEvaluateFreshness(t *testing.T) {
 	reg := settings.New() // ⚙ freshness.max_age default 24 h
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)

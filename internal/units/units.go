@@ -20,6 +20,7 @@ package units
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // A1 hostname commitment (Spec S01.8, amendment A1, operator 2026-07-19):
@@ -39,12 +40,16 @@ const DefaultBinaryPath = "/usr/local/bin/sinet"
 // Settings is the units-facing view of the settings registry (Spec S01.10).
 type Settings interface {
 	Int(key string) (int64, error)
+	Duration(key string) (time.Duration, error)
 }
 
-// Dotted ⚙ keys rendered into the unit set (owned by Spec S01).
+// Dotted ⚙ keys rendered into the unit set (owned by Spec S01, plus the S13.10
+// backup cadences the persistent calendar timers derive from).
 const (
-	keyWatchdogSec   = "shell.watchdog_sec"
-	keyJournalMaxUse = "shell.journal_max_use"
+	keyWatchdogSec     = "shell.watchdog_sec"
+	keyJournalMaxUse   = "shell.journal_max_use"
+	keyBackupInterval  = "backup.interval"       // seconds (snapshot cadence)
+	keyBackupDrillEach = "backup.drill_interval" // months (restore-drill cadence)
 )
 
 // File is one generated configuration file.
@@ -106,12 +111,29 @@ func Files(settings Settings, p Params) ([]File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("units: read ⚙ %s: %w", keyJournalMaxUse, err)
 	}
+	backupInterval, err := settings.Duration(keyBackupInterval)
+	if err != nil {
+		return nil, fmt.Errorf("units: read ⚙ %s: %w", keyBackupInterval, err)
+	}
+	snapCal, err := onCalendarFromSeconds(int64(backupInterval.Seconds()))
+	if err != nil {
+		return nil, fmt.Errorf("units: ⚙ %s: %w", keyBackupInterval, err)
+	}
+	drillMonths, err := settings.Int(keyBackupDrillEach)
+	if err != nil {
+		return nil, fmt.Errorf("units: read ⚙ %s: %w", keyBackupDrillEach, err)
+	}
+	drillCal := onCalendarFromMonths(drillMonths)
 	return []File{
 		controlService(bin, watchdogSec),
 		brokerService(bin),
 		engineTemplate(),
 		runTemplate(bin),
 		portpoolService(bin),
+		snapshotService(bin),
+		snapshotTimer(snapCal, keyBackupInterval),
+		restoreDrillService(bin),
+		restoreDrillTimer(drillCal, keyBackupDrillEach),
 		journaldDropIn(journalMaxUse),
 	}, nil
 }
@@ -264,6 +286,138 @@ Restart=on-failure
 WantedBy=multi-user.target
 `)
 	return File{Name: "sinet-portpool.service", Content: b.String()}
+}
+
+// snapshotService is the one-shot `sinet snapshot` service (Spec S13.10). Its
+// live configuration — the private snapshot-repo URL, the broker git-ssh-key
+// profile, the escrow identity path, the file stores — rides an EnvironmentFile
+// the operator supplies at the B4 gate/bring-up, so the LIVE leg is pure config
+// with no code change (R24). Generated, never installed.
+func snapshotService(bin string) File {
+	var b strings.Builder
+	b.WriteString(header())
+	fmt.Fprintf(&b, `# One-shot platform-state snapshot (Spec S13.10). Bring-up config
+# (SINET_SNAPSHOT_REMOTE, SINET_SNAPSHOT_GIT_PROFILE, SINET_SNAPSHOT_IDENTITY,
+# SINET_SNAPSHOT_STORES) rides /etc/sinet/snapshot.env — the operator supplies
+# it at the B4 gate (the private repo designation + broker key enrollment are
+# operator prerequisites; nothing is created automatically).
+[Unit]
+Description=Sinet platform-state snapshot (Spec S13.10)
+After=sinet-broker.service
+Wants=sinet-broker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/sinet/snapshot.env
+ExecStart=%s snapshot --snapshot-remote ${SINET_SNAPSHOT_REMOTE} --git-profile ${SINET_SNAPSHOT_GIT_PROFILE} --identity ${SINET_SNAPSHOT_IDENTITY} ${SINET_SNAPSHOT_STORES}
+StateDirectory=sinet
+`, bin)
+	b.WriteString(staticUser)
+	b.WriteString(hardening)
+	return File{Name: "sinet-snapshot.service", Content: b.String(), Draft: true}
+}
+
+// snapshotTimer is the S01.7 PERSISTENT calendar timer for snapshots: a slot
+// missed in suspend fires once on next activation (distinct from the in-process
+// WAL/recovery tickers). OnCalendar derives from ⚙ backup.interval. Generated,
+// never installed.
+func snapshotTimer(onCalendar, key string) File {
+	return calendarTimer("sinet-snapshot", "platform-state snapshot", onCalendar, key)
+}
+
+// restoreDrillService is the one-shot `sinet restore-drill` service (Spec
+// S13.10): fetch the newest blob → verify against the ledger fail-closed →
+// decrypt with the escrow identity → rebuild → integrity + S02.9. Generated,
+// never installed.
+func restoreDrillService(bin string) File {
+	var b strings.Builder
+	b.WriteString(header())
+	fmt.Fprintf(&b, `# One-shot verified-restore drill (Spec S13.10: a backup that is not
+# restore-tested does not exist). Shares /etc/sinet/snapshot.env with the
+# snapshot service. A fail-closed drill raises a High flag (S14).
+[Unit]
+Description=Sinet restore drill (Spec S13.10)
+After=sinet-broker.service
+Wants=sinet-broker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/sinet/snapshot.env
+ExecStart=%s restore-drill --snapshot-remote ${SINET_SNAPSHOT_REMOTE} --git-profile ${SINET_SNAPSHOT_GIT_PROFILE} --identity ${SINET_SNAPSHOT_IDENTITY}
+StateDirectory=sinet
+`, bin)
+	b.WriteString(staticUser)
+	b.WriteString(hardening)
+	return File{Name: "sinet-restore-drill.service", Content: b.String(), Draft: true}
+}
+
+// restoreDrillTimer is the S01.7 persistent calendar timer for the restore
+// drill; OnCalendar derives from ⚙ backup.drill_interval. Generated, never
+// installed.
+func restoreDrillTimer(onCalendar, key string) File {
+	return calendarTimer("sinet-restore-drill", "restore drill", onCalendar, key)
+}
+
+// calendarTimer renders a persistent (suspend-catch-up) calendar timer unit
+// (Spec S01.7). Persistent=true is what makes a missed slot fire once on next
+// activation.
+func calendarTimer(unit, what, onCalendar, key string) File {
+	var b strings.Builder
+	b.WriteString(header())
+	fmt.Fprintf(&b, `# Persistent calendar timer for the %s (Spec S01.7: a slot missed in
+# suspend fires once on next activation; NOT an in-process ticker). OnCalendar
+# derives from ⚙ %s.
+[Unit]
+Description=Sinet %s schedule (Spec S13.10)
+
+[Timer]
+OnCalendar=%s
+Persistent=true
+Unit=%s.service
+
+[Install]
+WantedBy=timers.target
+`, what, key, what, onCalendar, unit)
+	return File{Name: unit + ".timer", Content: b.String(), Draft: true}
+}
+
+// onCalendarFromSeconds maps a ⚙ backup.interval (seconds) to a systemd
+// OnCalendar expression (Spec S01.7). Sub-daily intervals that are whole-hour
+// divisors of a day render as an hour step; a day renders daily; a week renders
+// weekly; other whole-day intervals render as an approximate day step (a
+// month-boundary caveat). A non-expressible interval is a LOUD error rather
+// than a silently mis-scheduled timer.
+func onCalendarFromSeconds(sec int64) (string, error) {
+	if sec <= 0 {
+		return "", fmt.Errorf("interval %ds is not positive", sec)
+	}
+	d := time.Duration(sec) * time.Second
+	day := 24 * time.Hour
+	switch {
+	case d == day:
+		return "*-*-* 00:00:00", nil
+	case d == 7*day:
+		return "Mon *-*-* 00:00:00", nil
+	case d < day:
+		if d%time.Hour != 0 || day%d != 0 {
+			return "", fmt.Errorf("interval %s is not a whole-hour divisor of a day", d)
+		}
+		return fmt.Sprintf("*-*-* 0/%d:00:00", int(d/time.Hour)), nil
+	case d%day == 0:
+		return fmt.Sprintf("*-*-1/%d 00:00:00", int(d/day)), nil
+	default:
+		return "", fmt.Errorf("interval %s is not expressible as a persistent calendar timer", d)
+	}
+}
+
+// onCalendarFromMonths maps a ⚙ backup.drill_interval (months) to a systemd
+// OnCalendar expression: every n-th month on the 1st (a year-boundary caveat for
+// n that does not divide 12). n=1 is monthly.
+func onCalendarFromMonths(n int64) string {
+	if n <= 1 {
+		return "*-*-01 00:00:00"
+	}
+	return fmt.Sprintf("*-1/%d-01 00:00:00", n)
 }
 
 func journaldDropIn(journalMaxUse int64) File {

@@ -49,7 +49,22 @@ import (
 const (
 	KindEngineCred = "engine-cred" // delivered to the engine at spawn (injection)
 	KindSigningKey = "signing-key" // owner secret; result-only (never handed out)
+	// KindGitSSHKey is an owner's git SSH private key (S13.6). It is
+	// result-only like a signing-key — the broker runs `git push` and
+	// `ssh-keygen -Y sign` WITH it and returns only the result; the key NEVER
+	// leaves the broker (D2/S11.5). Kept a distinct kind so the destination
+	// constraint is exact: it is served ONLY to the push/sign-data ops, never
+	// resolved (engine injection) or HMAC-signed.
+	KindGitSSHKey = "git-ssh-key"
 )
+
+func validKind(kind string) bool {
+	switch kind {
+	case KindEngineCred, KindSigningKey, KindGitSSHKey:
+		return true
+	}
+	return false
+}
 
 // Store errors.
 var (
@@ -143,7 +158,7 @@ func (s *Store) Put(profile, kind, secret string) error {
 	if err := validProfile(profile); err != nil {
 		return err
 	}
-	if kind != KindEngineCred && kind != KindSigningKey {
+	if !validKind(kind) {
 		return fmt.Errorf("broker: unknown credential kind %q", kind)
 	}
 	gcm, err := s.aead()

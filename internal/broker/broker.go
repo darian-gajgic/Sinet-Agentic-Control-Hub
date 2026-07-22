@@ -160,6 +160,16 @@ func (s *Server) dispatch(req Request) Response {
 		zero(keyBytes) // shorten the plaintext window; the key is NEVER returned
 		return Response{OK: true, Sig: base64.StdEncoding.EncodeToString(sig)}
 
+	case OpPush:
+		// The S13.6 CAS push — THE guardrail (P-T12-1). The decision (bare-force
+		// refusal, protected-ref-requires-authorization) is in gitPush, which
+		// checks BEFORE resolving any credential.
+		return s.gitPush(req)
+
+	case OpSignData:
+		// The S13.6 SSHSIG signing (gpg.format=ssh); the key never leaves.
+		return s.signData(req)
+
 	default:
 		return Response{OK: false, Error: "unknown operation"}
 	}
