@@ -213,6 +213,7 @@ func Run(ctx context.Context, opts Options) error {
 	var intakeSurface api.IntakeSurface
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
+	var localSurf *localSurface
 	admission := opts.Admission
 	if admission == nil {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
@@ -311,6 +312,23 @@ func Run(ctx context.Context, opts Options) error {
 			Root: filepath.Join(stateDir, "review"),
 		}
 
+		// The S12 local-tier surface (B4-5): the duty-alias client, the class-(b)
+		// intake/tie-break seams, the effective DutyMap (with the utility seat)
+		// + LocalAvailable, and the eager-unload surface (held for the B6
+		// endpoints, api unchanged). Unconfigured is the dev default — every
+		// seam nil, the pipeline/routing degrade per the S12.4/S06 rows (R17).
+		localSurf, err = buildLocalSurface(localDeps{
+			Settings: reg, Checkpoints: checkpoints, Events: log, Log: logger,
+		})
+		if err != nil {
+			return err
+		}
+		logger.Info("local: S12 duty surface wired (B4-5)", "configured", localSurf.Available)
+		// The ⚙-gated GameMode D-Bus subscription (probe-bound; inert unless the
+		// operator session-bus address is configured — R13/R14). The scripts
+		// leg is operator-installed config, not a runtime goroutine.
+		localSurf.startGameMode(ctx)
+
 		sk, err := stage.New(stage.Config{
 			DB:          db,
 			Log:         log,
@@ -322,10 +340,17 @@ func Run(ctx context.Context, opts Options) error {
 			// S08.8 selection goes live (B3-3): the router over the worker
 			// store, duty-map recommended defaults, flat-rate coverage on
 			// the configured lane, consumption pressure as the flat-lane
-			// ordering input (D5: never dollars), the S12 tie-break seam
-			// absent until B4.
-			Workers:       workStore,
-			RoutePressure: routePressure{g: metering.NewPressureGauge(db, reg)},
+			// ordering input (D5: never dollars). The S12 tie-break + duty
+			// seams and the utility DutyMap seat wire when the local stack is
+			// configured (B4-5, localSurf); nil/false is the degrade posture.
+			Workers:        workStore,
+			DutyMap:        localSurf.DutyMap,
+			LocalAvailable: localSurf.Available,
+			TieBreak:       localSurf.TieBreak,
+			Classifier:     localSurf.Classifier,
+			Utility:        localSurf.Utility,
+			SpotCheck:      localSurf.SpotCheck,
+			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg)},
 			// The S08.6 composer's policy-input seams: the current approved
 			// composer playbook (the governed S09.10 house object) and the
 			// lane's pinned engine version keying validation records.

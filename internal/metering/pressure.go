@@ -111,19 +111,26 @@ func (g *PressureGauge) Read(ctx context.Context, userID, lane string, budget Bu
 // start is the zero time and the sum covers all recorded consumption — used
 // only for the observability reading, never as a denominator.
 func (g *PressureGauge) weightedConsumption(ctx context.Context, userID, lane string, since time.Time, sincePinned bool, weight float64) (float64, error) {
+	// Read by USER (all lanes) and match the EFFECTIVE lane in Go so the local
+	// per-row lane override is honored (§8 reading 4): a local duty call meters
+	// on lane "local" (the D5 floor, S12.1), not on the consuming run's paid
+	// lane. With no local rows the behavior is identical to the old
+	// lane-filtered query (effectiveLane == the run lane). No new pressure
+	// machinery — the existing gauge honors the same override the fold does
+	// (R19).
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if sincePinned && !since.IsZero() {
 		rows, err = g.db.QueryContext(ctx,
-			`SELECT c.usage_json FROM checkpoints c JOIN runs r ON r.run_id = c.run_id
-			  WHERE r.user_id = ? AND r.lane = ? AND c.created_ts >= ?`,
-			userID, lane, since.UTC().Format(time.RFC3339Nano))
+			`SELECT c.usage_json, r.lane FROM checkpoints c JOIN runs r ON r.run_id = c.run_id
+			  WHERE r.user_id = ? AND c.created_ts >= ?`,
+			userID, since.UTC().Format(time.RFC3339Nano))
 	} else {
 		rows, err = g.db.QueryContext(ctx,
-			`SELECT c.usage_json FROM checkpoints c JOIN runs r ON r.run_id = c.run_id
-			  WHERE r.user_id = ? AND r.lane = ?`, userID, lane)
+			`SELECT c.usage_json, r.lane FROM checkpoints c JOIN runs r ON r.run_id = c.run_id
+			  WHERE r.user_id = ?`, userID)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("metering: read consumption for %q/%s: %w", userID, lane, err)
@@ -131,9 +138,12 @@ func (g *PressureGauge) weightedConsumption(ctx context.Context, userID, lane st
 	defer rows.Close()
 	var total float64
 	for rows.Next() {
-		var usage string
-		if err := rows.Scan(&usage); err != nil {
+		var usage, runLane string
+		if err := rows.Scan(&usage, &runLane); err != nil {
 			return 0, fmt.Errorf("metering: scan consumption: %w", err)
+		}
+		if effectiveLane(runLane, json.RawMessage(usage)) != lane {
+			continue
 		}
 		acc := normalize(json.RawMessage(usage))
 		// Everything at full weight except cache reads at ⚙ weight (S10.4).

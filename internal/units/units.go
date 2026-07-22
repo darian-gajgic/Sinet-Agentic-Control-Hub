@@ -5,10 +5,16 @@
 // Units are GENERATED, NEVER INSTALLED by this code: output goes to stdout
 // or an operator-chosen directory, and host changes (installing under
 // /etc/systemd, systemctl calls) are a B0-gate operator decision
-// (P3/STATE.md). Adopted organs (caddy, the watchlist executor, local-model
-// units, tailscaled) ship their own units and are deliberately not
-// generated here — replacing one is a unit + components.lock edit at the
-// process/adoption seams (Spec S01.3).
+// (P3/STATE.md). Most adopted organs (caddy, the watchlist executor,
+// tailscaled) ship their OWN units and are deliberately not generated here —
+// replacing one is a unit + components.lock edit at the process/adoption
+// seams (Spec S01.3). The ONE exception (corrected at P3-B4-5, §8 reading 1):
+// `sinet-llamaswap.service` IS generated — llama-swap ships no unit file, so
+// the unit is SINET configuration for an unmodified adopted binary (S16.1
+// config-only integration — not a fork), the Sinet-named adopted-organ unit
+// S12.2 names, carried by the P3/STATE directive ("GENERATED, not installed …
+// install = B4 gate or hardening"). Its ExecStart runs the operator-installed
+// llama-swap binary + generated config, NOT the sinet multi-call binary.
 //
 // ⚙ values are rendered from the settings registry (shell.watchdog_sec,
 // shell.journal_max_use). At B0 generation reads the declared defaults —
@@ -69,7 +75,26 @@ type File struct {
 type Params struct {
 	// BinaryPath overrides DefaultBinaryPath.
 	BinaryPath string
+	// LlamaSwapBinary / LlamaSwapConfig / LlamaSwapListen are the STRUCTURAL
+	// config for the generated sinet-llamaswap.service (Spec S12.2; NOT ⚙,
+	// §8 reading 7). The binary is the operator/user-installed llama-swap
+	// (adopted organ, NOT the sinet binary); the config is the generated
+	// llama-swap YAML; the listen address is loopback (S01.1). Defaults below.
+	LlamaSwapBinary string
+	LlamaSwapConfig string
+	LlamaSwapListen string
 }
+
+// Default structural paths for the generated llama-swap unit (operator-set at
+// install; the composition-root passthrough — the SINET_SRT_PATH precedent).
+const (
+	defaultLlamaSwapBinary = "/usr/local/bin/llama-swap"
+	defaultLlamaSwapConfig = "/etc/sinet/llamaswap.yaml"
+	defaultLlamaSwapListen = "127.0.0.1:8791"
+	// LocalSlice is the systemd slice the local-inference tier sits in (S12.2:
+	// the designated systemd-oomd victim; slice NAME [coordinator-draft]).
+	LocalSlice = "sinet-local.slice"
+)
 
 // header is the shared provenance banner.
 func header() string {
@@ -124,6 +149,18 @@ func Files(settings Settings, p Params) ([]File, error) {
 		return nil, fmt.Errorf("units: read ⚙ %s: %w", keyBackupDrillEach, err)
 	}
 	drillCal := onCalendarFromMonths(drillMonths)
+	swapBin := p.LlamaSwapBinary
+	if swapBin == "" {
+		swapBin = defaultLlamaSwapBinary
+	}
+	swapCfg := p.LlamaSwapConfig
+	if swapCfg == "" {
+		swapCfg = defaultLlamaSwapConfig
+	}
+	swapListen := p.LlamaSwapListen
+	if swapListen == "" {
+		swapListen = defaultLlamaSwapListen
+	}
 	return []File{
 		controlService(bin, watchdogSec),
 		brokerService(bin),
@@ -134,8 +171,88 @@ func Files(settings Settings, p Params) ([]File, error) {
 		snapshotTimer(snapCal, keyBackupInterval),
 		restoreDrillService(bin),
 		restoreDrillTimer(drillCal, keyBackupDrillEach),
+		llamaSwapService(swapBin, swapCfg, swapListen),
+		localSlice(),
 		journaldDropIn(journalMaxUse),
 	}, nil
+}
+
+// llamaSwapService renders the S12.2 adopted-organ unit for llama-swap (brief
+// R11; §8 reading 1). GENERATED, never installed (install = the B4 gate /
+// hardening session). ExecStart runs the operator-installed llama-swap binary
+// + the generated config (structural config), NOT the sinet binary — llama-swap
+// is an adopted organ with no new cmd/ or mode. Loopback bind (S01.1); own
+// journal identity; User=sinet; the S01.2 hardening set as far as compatible
+// (the GPU device exception is recorded in-file, S01.2). Placed in the
+// local-inference slice (the designated systemd-oomd victim; slice POLICY is
+// S10's, deferred — no policy values invented here).
+func llamaSwapService(binary, config, listen string) File {
+	var b strings.Builder
+	b.WriteString(header())
+	fmt.Fprintf(&b, `# GENERATED, not installed (P3-B4-5; install = B4 gate / hardening). This is
+# SINET configuration for the UNMODIFIED adopted llama-swap organ (S16.1
+# config-only integration, not a fork); llama-swap ships no unit file, so
+# this unit is Sinet's. Its ExecStart runs the operator-installed llama-swap
+# binary + the generated config (structural config), NEVER the sinet binary.
+[Unit]
+Description=Sinet local-inference front (llama-swap → llama-server; Spec S12.2)
+After=network.target
+# The control plane reaches this on loopback (platform plane, S12.6); it is
+# not a hard dependency (the local tier degrades when absent, S12.4).
+
+[Service]
+Type=exec
+# ExecStart: the operator-installed llama-swap binary + the generated config.
+# Loopback listen only (S01.1 invariant); llama-swap spawns llama-server
+# backends as child processes (one per loaded model; process death returns
+# VRAM fully to zero, S12.2), so the whole tier sits in this unit's slice.
+ExecStart=%s --listen %s --config %s
+Restart=on-failure
+# local-inference slice: the designated systemd-oomd victim (S12.2). oomd/
+# weight POLICY is Spec S10's and is DEFERRED to B4-6/hardening — no policy
+# values are invented here (brief R11).
+Slice=%s
+`, binary, listen, config, LocalSlice)
+	b.WriteString(staticUser)
+	// Hardening set, with the recorded GPU exception (S01.2: per-unit
+	// exceptions recorded in-file with a reason).
+	b.WriteString(`# Standard hardening set (Spec S01.2), with one recorded exception:
+# PrivateDevices= is deliberately NOT set — the backends need /dev/nvidia*
+# (CUDA); hiding devices would break GPU inference. ProtectSystem=strict keeps
+# /usr read-only (llama-swap + the model cache live elsewhere). The model
+# cache + config are read-only inputs; llama-swap writes no durable state.
+ProtectSystem=strict
+NoNewPrivileges=yes
+PrivateTmp=yes
+SystemCallFilter=@system-service
+`)
+	b.WriteString(`
+[Install]
+WantedBy=multi-user.target
+`)
+	return File{Name: "sinet-llamaswap.service", Content: b.String(), Draft: true}
+}
+
+// localSlice renders the minimal local-inference slice (brief R11). It carries
+// NO oomd/weight policy values — that POLICY is Spec S10's (arbitration), a
+// B4-6/hardening concern; a comment states the deferral. GENERATED, not
+// installed.
+func localSlice() File {
+	var b strings.Builder
+	b.WriteString(header())
+	fmt.Fprintf(&b, `# GENERATED, not installed (P3-B4-5). The local-inference slice: llama-swap
+# and its llama-server backend children run here so the whole GPU tier is one
+# systemd-oomd target (S12.2 — the designated victim under memory pressure).
+[Unit]
+Description=Sinet local-inference slice (GPU tier; Spec S12.2)
+
+[Slice]
+# oomd/weight POLICY (MemoryHigh=, ManagedOOMMemoryPressure=, CPUWeight=,
+# io/memory accounting) is Spec S10's arbitration and is DEFERRED to
+# B4-6/hardening — no policy values are invented here (brief R11). This slice
+# file exists so the unit's Slice=%s target is present.
+`, LocalSlice)
+	return File{Name: LocalSlice, Content: b.String(), Draft: true}
 }
 
 func controlService(bin string, watchdogSec int64) File {

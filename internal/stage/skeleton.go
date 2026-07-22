@@ -90,9 +90,13 @@ func New(cfg Config) (*Skeleton, error) {
 		// refuses. Pressure orders multiple flat lanes (D5: consumption
 		// pressure, never dollars) — moot with one lane, wired regardless.
 		s.router = &worker.Router{
-			Store:    cfg.Workers,
-			DutyMap:  s.dutyMap,
-			Coverage: worker.Coverage{FlatRateLanes: []string{cfg.Lane}},
+			Store:   cfg.Workers,
+			DutyMap: s.dutyMap,
+			// LocalAvailable flips true when the S12 local stack is configured
+			// (B4-5): the utility seat joins the effective DutyMap (built at
+			// the composition root) and a class-(a) dispatch onto it degrades
+			// to the paid seat with the refined reason (R22).
+			Coverage: worker.Coverage{FlatRateLanes: []string{cfg.Lane}, LocalAvailable: cfg.LocalAvailable},
 			TieBreak: cfg.TieBreak,
 			Pressure: cfg.RoutePressure,
 		}
@@ -121,6 +125,12 @@ func New(cfg Config) (*Skeleton, error) {
 		ArtifactRoot: cfg.ArtifactRoot,
 		Planner:      cfg.Planner,
 		Critic:       cfg.Critic,
+		// The S12.1 class-(b) local duty seams (B4-5): wired only when the
+		// local stack is configured; nil degrades exactly per the S06 rows
+		// (Classifier fails closed to high, Utility/SpotCheck skipped) — R20.
+		Classifier: cfg.Classifier,
+		Utility:    cfg.Utility,
+		SpotCheck:  cfg.SpotCheck,
 		// The S13.7 registry feeds intake resolution (S06.2) and the S02.6/
 		// S09.6 approval-staleness fingerprint (B4-2 seams).
 		Registry:           cfg.Registry,

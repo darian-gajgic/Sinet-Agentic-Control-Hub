@@ -150,11 +150,17 @@ func (l *Ledger) fold(runID, userID string, rows []checkpointRow) RunConsumption
 	for _, r := range rows {
 		acc := normalize(r.usageJSON)
 		purpose := derivePurpose(runID, r)
-		cur := l.exceptions.Currency(r.lane)
-		k := key{r.model, r.lane, purpose}
+		// Per-row lane override: a local duty call meters on the permanent
+		// free tier, not on the consuming run's paid lane (§8 reading 4). The
+		// model stays the checkpoint's model_id column (the resolved local
+		// model, set by internal/local); only the lane is overridden.
+		localRow := parseLocalMarker(r.usageJSON) != nil
+		lane := effectiveLane(r.lane, r.usageJSON)
+		cur := l.exceptions.Currency(lane)
+		k := key{r.model, lane, purpose}
 		li := agg[k]
 		if li == nil {
-			li = &LineItem{Model: r.model, Lane: r.lane, Purpose: purpose, Tier: TierMeasured, Currency: cur, TableVersion: l.prices.Version()}
+			li = &LineItem{Model: r.model, Lane: lane, Purpose: purpose, Tier: TierMeasured, Currency: cur, TableVersion: l.prices.Version()}
 			agg[k] = li
 			order = append(order, k)
 		}
@@ -171,7 +177,14 @@ func (l *Ledger) fold(runID, userID string, rows []checkpointRow) RunConsumption
 			rc.WorstTier = t
 		}
 
-		priced := l.prices.Price(r.model, r.lane, r.createdTS, acc, cur)
+		// Local rows price a TRUE $0 (zero-allowance), never UNPRICED and never
+		// through the S10.3 flat-lane guard (R19; §8 reading 5).
+		var priced PricedCost
+		if localRow {
+			priced = priceLocal(cur, l.prices.Version())
+		} else {
+			priced = l.prices.Price(r.model, lane, r.createdTS, acc, cur)
+		}
 		if priced.Unpriced {
 			li.UnpricedCalls++
 			rc.TotalUnpricedCalls++

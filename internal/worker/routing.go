@@ -510,16 +510,23 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	}
 
 	// Mechanical helper duties default to the local lane — the permanent
-	// free tier (S08.8 step 5). Absent until B4: degrade to the paid seat
-	// with the absence recorded (never faked).
+	// free tier (S08.8 step 5). The consumer-class split binds (S12.1; §8
+	// reading 3): the local tier's PLATFORM DUTY calls (class (b): intake
+	// seams, tie-break) consume it directly through the S12.4 alias registry
+	// (internal/local, B4-5), but the local ENGINE lane (class (a): a run
+	// dispatching onto a local model via the opencode adapter) has NO v0
+	// consumer in this cut — no second adapter exists. So a template/helper
+	// demanding duty utility/mechanical (an engine dispatch) resolves to the
+	// paid execution seat either way, never a fake dispatch onto a lane with
+	// no adapter, never an error (absent duties degrade, never faked —
+	// S08.8/CONVENTIONS §19).
 	localNote := ""
 	if q.Mechanical || duty == DutyUtility {
 		if r.Coverage.LocalAvailable {
-			// The local tier serves through the S12 alias registry (B4);
-			// reaching here before that wiring exists is a defect.
-			return Seat{}, "", "", "", fmt.Errorf("%w: local tier marked available but no local seat wiring exists (S12, B4)", ErrInvalid)
+			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is serving; its engine lane carries no v0 consumer (S12.1 class (a) — platform duty calls ride it directly), so this dispatch rides the paid seat.", duty)
+		} else {
+			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is absent until B4 (S12); riding the paid seat instead.", duty)
 		}
-		localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is absent until B4 (S12); riding the paid seat instead.", duty)
 		duty = DutyExecution
 	}
 

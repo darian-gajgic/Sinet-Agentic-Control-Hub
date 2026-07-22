@@ -37,6 +37,8 @@ func TestUnitSetIsComplete(t *testing.T) {
 		"sinet-snapshot.timer",
 		"sinet-restore-drill.service",
 		"sinet-restore-drill.timer",
+		"sinet-llamaswap.service",
+		"sinet-local.slice",
 		"journald-sinet.conf",
 	}
 	if len(files) != len(want) {
@@ -111,9 +113,10 @@ func TestControlUnitDirectives(t *testing.T) {
 
 func TestEveryUnitStaticUserNeverDynamic(t *testing.T) {
 	for name, f := range gen(t, units.Params{}) {
-		// The journald drop-in and .timer units have no [Service] section and
-		// therefore no User= (a timer runs its Unit=, which carries the user).
-		if name == "journald-sinet.conf" || strings.HasSuffix(name, ".timer") {
+		// The journald drop-in, .timer, and .slice units have no [Service]
+		// section and therefore no User= (a timer runs its Unit=, which
+		// carries the user; a .slice is a cgroup grouping, S12.2).
+		if name == "journald-sinet.conf" || strings.HasSuffix(name, ".timer") || strings.HasSuffix(name, ".slice") {
 			continue
 		}
 		if !strings.Contains(f.Content, "User=sinet") {

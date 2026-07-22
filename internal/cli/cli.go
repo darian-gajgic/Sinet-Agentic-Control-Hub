@@ -9,6 +9,7 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -48,6 +50,9 @@ Modes:
 Tools:
 
   units        render the systemd unit set (generated, never installed)
+  local        local-tier tool (Spec S12): unload|resume|status (the eager-
+               unload verb, S12.2) + config|manifest|gamemode-snippet renders
+               (GENERATED, never installed). Management verbs are loopback-only
   snapshot     take one platform-state snapshot (Spec S13.10; the one-shot
                driven by the generated sinet-snapshot.timer)
   restore-drill run one verified-restore drill (Spec S13.10; the one-shot
@@ -94,6 +99,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return backup.DrillMode(args[1:], stdout, stderr)
 	case "units":
 		return runUnits(args[1:], stdout, stderr)
+	case "local":
+		return runLocal(args[1:], stdout, stderr)
 	case "engine-hook":
 		return runEngineHook(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
@@ -149,6 +156,109 @@ func runEngineHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sinet engine-hook: %v\n", err)
 		return exitError
 	}
+	return exitOK
+}
+
+// runLocal is the `sinet local` tool subcommand (Spec S12; brief R12 — a
+// tool, never a mode: no unit file, not in the reserved table). Verbs:
+// unload/resume/status (the eager-unload verb, S12.2), and config/manifest/
+// gamemode-snippet renders (GENERATED, never installed). Management verbs are
+// loopback-only (S12.6); the unload leg reaches llama-swap directly, and the
+// admission-stop leg rides the control-plane surface (B6) — the dev posture is
+// documented honestly (R12).
+func runLocal(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "sinet local: subcommand required (unload|resume|status|config|manifest|gamemode-snippet)")
+		return exitUsage
+	}
+	ctx := context.Background()
+	endpoint := os.Getenv("SINET_LOCAL_ENDPOINT")
+	switch args[0] {
+	case "unload":
+		if endpoint == "" {
+			fmt.Fprintln(stderr, "sinet local unload: SINET_LOCAL_ENDPOINT unset (the local stack is not configured)")
+			return exitError
+		}
+		if err := local.UnloadAllDirect(ctx, endpoint); err != nil {
+			fmt.Fprintf(stderr, "sinet local unload: %v\n", err)
+			return exitError
+		}
+		fmt.Fprintln(stdout, "local: unloaded all models (direct llama-swap leg, S12.2).")
+		fmt.Fprintln(stdout, "note: stopping local-lane admissions is a control-plane act — it rides the eager-unload surface (B6 endpoint); this CLI does the unload leg only (S12.6 dev posture).")
+		return exitOK
+	case "resume":
+		fmt.Fprintln(stdout, "local: resume rides the control-plane eager-unload surface (B6 endpoint); models reload on demand at llama-swap regardless. Standalone this leg is a documented no-op (S12.6 dev posture).")
+		return exitOK
+	case "status":
+		fmt.Fprintf(stdout, "local: endpoint=%q llama-swap-pin=%s llama.cpp-pin=%s\n", endpoint, local.LlamaSwapPin, local.LlamaCppPin)
+		if endpoint == "" {
+			fmt.Fprintln(stdout, "local: stack UNCONFIGURED (dev default) — the duty seams degrade per the S12.4/S06 rows (R17).")
+		}
+		return exitOK
+	case "manifest":
+		b, err := local.ManifestJSON()
+		if err != nil {
+			fmt.Fprintf(stderr, "sinet local manifest: %v\n", err)
+			return exitError
+		}
+		fmt.Fprintln(stdout, string(b))
+		return exitOK
+	case "gamemode-snippet":
+		fmt.Fprint(stdout, local.GameModeSnippet(units.DefaultBinaryPath))
+		return exitOK
+	case "config":
+		return runLocalConfig(stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "sinet local: unknown subcommand %q\n", args[0])
+		return exitUsage
+	}
+}
+
+// runLocalConfig renders the llama-swap config from the manifest + ⚙ defaults
+// + the live-read GPU UUID (Spec S12.2; brief R10). GENERATED, never
+// installed. ⚙ values render from the declared defaults (registry unattached,
+// like `sinet units`); paths are the SINET_LOCAL_* structural config.
+func runLocalConfig(stdout, stderr io.Writer) int {
+	reg := settings.New()
+	ttlFast, err := reg.Int("local.ttl.fast_s")
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local config: %v\n", err)
+		return exitError
+	}
+	ttlWork, err := reg.Int("local.ttl.workhorse_s")
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local config: %v\n", err)
+		return exitError
+	}
+	grace, err := reg.Int("local.unload.term_grace_s")
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local config: %v\n", err)
+		return exitError
+	}
+	sc := local.StackFromEnv()
+	uuids, err := local.GPUUUIDs(context.Background())
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local config: %v\n", err)
+		return exitError
+	}
+	llamaServer := sc.LlamaServer
+	if llamaServer == "" {
+		llamaServer = "/usr/local/bin/llama-server"
+	}
+	cache := sc.ModelCache
+	if cache == "" {
+		cache = "/var/lib/sinet/models"
+	}
+	out, err := local.GenerateConfig(local.ConfigParams{
+		ModelCacheDir: cache, GPUUUIDs: uuids, LlamaServer: llamaServer,
+		TTLFastS: ttlFast, TTLWorkhorseS: ttlWork, UnloadGraceS: grace,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local config: %v\n", err)
+		return exitError
+	}
+	fmt.Fprint(stdout, out)
+	fmt.Fprintln(stdout, "# GENERATED — installing the config + the sinet-llamaswap.service unit is a B4-gate operator decision.")
 	return exitOK
 }
 

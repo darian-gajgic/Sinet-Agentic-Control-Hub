@@ -172,9 +172,23 @@ type Config struct {
 	// pressure, never dollars); nil short-circuits with a single covered
 	// lane. metering.PressureGauge adapts to it at the composition root.
 	RoutePressure worker.PressureReader
-	// TieBreak is the S12 local-duty tie-break seam (B4; nil = the
+	// TieBreak is the S12 local-duty tie-break seam (B4-5; nil = the
 	// deterministic degraded order with the absence recorded).
 	TieBreak worker.TieBreaker
+	// LocalAvailable reports the S12 local serving stack is configured (B4-5):
+	// the effective DutyMap gains the utility seat and Coverage.LocalAvailable
+	// flips true, so a class-(a) engine dispatch onto duty utility degrades to
+	// the paid seat with the refined honest reason (BINDING reading; R22).
+	LocalAvailable bool
+
+	// The S12.1 class-(b) intake duty seams (B4-5; brief R20): local
+	// implementations wired ONLY when the local stack is configured — the
+	// pipeline degrades exactly per the S06 rows otherwise (Classifier fails
+	// closed to high, Utility falls back to deterministic text, SpotCheck is
+	// skipped). Nil is the sanctioned dev/test posture.
+	Classifier intake.Classifier
+	Utility    intake.Utility
+	SpotCheck  intake.SpotCheck
 
 	// Confiner wraps engine spawns in the composed per-run sandbox (Spec
 	// S11). NIL IS THE SANCTIONED DEV POSTURE (the B1-1 unconfined dev
