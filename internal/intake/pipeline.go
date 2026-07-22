@@ -55,9 +55,22 @@ type Pipeline struct {
 	Router Router
 
 	// Fingerprint supplies the current freshness fingerprint for the
-	// approval staleness check (G1 Def.5; S02 owns the durable set).
-	// Optional; nil restricts staleness to the age trigger.
-	Fingerprint func(ctx context.Context) (run.Fingerprint, error)
+	// approval staleness check (G1 Def.5; S02 owns the durable set). The
+	// matched project (from the registry slice, "" when none) lets the probe
+	// supply that project's real repo HEAD (Spec S13.7 feed; R33); members the
+	// platform cannot honestly observe stay empty, never faked. Optional; nil
+	// restricts staleness to the age trigger.
+	Fingerprint func(ctx context.Context, project string) (run.Fingerprint, error)
+
+	// CitedEntryVersions resolves the CURRENT versions of cited project-truth
+	// knowledge entries (Spec S09.6): given entry keys, it returns {key:
+	// version} for those currently ACTIVE — a key omitted from the result has
+	// been superseded, removed, or retired, so mapDrift fires vanished-key
+	// drift. Wired by the shell to the memory store; internal/intake never
+	// imports internal/memory (the S09.1 capability wall — stage imports
+	// intake, so the walls stay transitively clean, R32). Nil leaves cited
+	// drift unmeasurable (the stored versions carry forward, no false drift).
+	CitedEntryVersions func(ctx context.Context, keys []string) (map[string]string, error)
 
 	// Now is the clock seam (tests). Timestamps are recorded, never an
 	// ordering authority (P-T07-4).
@@ -261,6 +274,16 @@ func validFloors(in []FloorReason) []FloorReason {
 		}
 	}
 	return out
+}
+
+// projectOf returns the matched registry project id, or "" when no registry
+// entry matched (the fingerprint probe then supplies no repo HEAD — never a
+// faked one, R33).
+func projectOf(r *RegistrySlice) string {
+	if r != nil {
+		return r.Project
+	}
+	return ""
 }
 
 func registryRef(r *RegistrySlice) string {
@@ -685,9 +708,20 @@ func (p *Pipeline) phaseApproval(ctx context.Context, st *State, pair *Pair) (bo
 		return false, pair, err
 	}
 	if p.Fingerprint != nil {
-		if fp, err := p.Fingerprint(ctx); err == nil {
+		if fp, err := p.Fingerprint(ctx, projectOf(st.Registry)); err == nil {
 			fp.SpecPlanVersion = pair.Plan.SpecPlanVersion()
 			st.StoredFingerprint = &fp
+		}
+	}
+	// Cited project-truth entries (Spec S09.6, R31): resolve the plan's
+	// citations to their current versions and record them in the stored
+	// fingerprint so a later supersession/removal/new-version is drift.
+	if len(pair.Plan.CitedEntries) > 0 && p.CitedEntryVersions != nil {
+		if versions, err := p.CitedEntryVersions(ctx, pair.Plan.CitedEntries); err == nil && len(versions) > 0 {
+			if st.StoredFingerprint == nil {
+				st.StoredFingerprint = &run.Fingerprint{SpecPlanVersion: pair.Plan.SpecPlanVersion()}
+			}
+			st.StoredFingerprint.CitedEntryVersions = versions
 		}
 	}
 	return true, pair, p.issueCard(ctx, st, card)

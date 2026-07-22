@@ -36,6 +36,13 @@ type Store struct {
 	// comparisons. Nil at v0: the comparison surface is the two revisions'
 	// object refs; the 2-up/swipe/onion trio renders from them (Spec S15).
 	PixelDiff PixelDiffAid
+	// BaseContent resolves the pre-task base (project HEAD at branch base)
+	// content for a repo-backed deliverable — revision 1's old side (Spec
+	// S13.5/S13.1). Nil, or a non-repo deliverable (ok=false), keeps the
+	// empty-base behaviour. Wired by the composition root to the git topology
+	// package; review's import set stays storage+eventlog only (the PixelDiff
+	// seam precedent, R25).
+	BaseContent BaseContentSource
 	// Now is the test clock seam.
 	Now func() time.Time
 }
@@ -156,6 +163,13 @@ type MintInput struct {
 	Objects map[string][]byte
 	// Types optionally labels object MIME/kind per name (metadata cards).
 	Types map[string]string
+	// SnapshotSHA is the S13.5 repo-backed snapshot-commit pin for a
+	// repo-backed revision (Spec S13.1: repo-backed types pin a snapshot-commit
+	// sha). Settable at insert; empty leaves snapshot_sha NULL — the honest
+	// content-pin lane (composer definitions, non-repo tasks). The platform ref
+	// is created OUTSIDE this package (the composition wires the git side and
+	// this fill together, R20).
+	SnapshotSHA string
 }
 
 // MintRevision mints revision N and advances current_revision, appending
@@ -234,16 +248,17 @@ func (s *Store) MintRevision(ctx context.Context, in MintInput) (Revision, error
 		DeliverableID: in.DeliverableID, N: in.N, Owner: d.Owner,
 		RunID: in.RunID, AttemptRef: in.AttemptRef,
 		PinKind: pinKind, ContentSHA256: contentSHA,
+		SnapshotSHA: in.SnapshotSHA,
 		PlatformRef: RevisionRef(in.DeliverableID, in.N),
 		Objects:     refs, CreatedTS: now,
 	}
 	err = s.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO deliverable_revisions (deliverable_id, n, user_id, run_id, attempt_ref,
-			                                    pin_kind, content_sha256, platform_ref, objects, created_ts)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                                    pin_kind, content_sha256, snapshot_sha, platform_ref, objects, created_ts)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			rev.DeliverableID, rev.N, rev.Owner, rev.RunID, rev.AttemptRef,
-			rev.PinKind, rev.ContentSHA256, rev.PlatformRef, string(objJSON), now); err != nil {
+			rev.PinKind, rev.ContentSHA256, nullString(rev.SnapshotSHA), rev.PlatformRef, string(objJSON), now); err != nil {
 			return fmt.Errorf("review: mint revision: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -294,6 +309,15 @@ func contentPin(files map[string]string, refs []ObjectRef) string {
 	}
 	manifest, _ := json.Marshal(refs)
 	return hashBytes(manifest)
+}
+
+// nullString maps an empty string to a SQL NULL (snapshot_sha is NULL until
+// the S13.5 fill).
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func sameRefs(a, b []ObjectRef) bool {
@@ -395,6 +419,39 @@ func (s *Store) RevisionFiles(ctx context.Context, deliverableID string, n int) 
 			ErrContentDrift, deliverableID, n, r.ContentSHA256, got)
 	}
 	return files, nil
+}
+
+// SetSnapshotSHA fills a revision's S13.5 snapshot-commit pin (fill-once,
+// NULL → sha; the migration trigger enforces it — a second, DIFFERENT fill
+// aborts). Idempotent when the same sha is re-supplied (the S07.7 resume
+// re-enters on the pinned revision). The platform ref
+// refs/sinet/deliverable/<id>/rev-<n> is created OUTSIDE this package at the
+// same point (the composition wires the git side, R20).
+func (s *Store) SetSnapshotSHA(ctx context.Context, deliverableID string, n int, sha string) error {
+	if sha == "" {
+		return fmt.Errorf("%w: snapshot sha is empty", ErrBadInput)
+	}
+	rev, err := s.RevisionAt(ctx, deliverableID, n)
+	if err != nil {
+		return err
+	}
+	if rev.SnapshotSHA == sha {
+		return nil // idempotent re-fill with the same sha
+	}
+	return s.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE deliverable_revisions SET snapshot_sha = ? WHERE deliverable_id = ? AND n = ? AND snapshot_sha IS NULL`,
+			sha, deliverableID, n)
+		if err != nil {
+			return fmt.Errorf("review: set snapshot sha: %w", err)
+		}
+		if rows, err := res.RowsAffected(); err != nil {
+			return err
+		} else if rows != 1 {
+			return fmt.Errorf("%w: %s rev %d has no unfilled snapshot slot", ErrBadInput, deliverableID, n)
+		}
+		return nil
+	})
 }
 
 // SetVerdictRef fills the revision's verification-verdict ref (fill-once,

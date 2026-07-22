@@ -766,9 +766,25 @@ func (p *Pipeline) CheckApprovalStale(ctx context.Context, taskID string, siblin
 		current = stored // fingerprint drift only measurable with a probe
 	}
 	if p.Fingerprint != nil {
-		if fp, err := p.Fingerprint(ctx); err == nil {
+		if fp, err := p.Fingerprint(ctx, projectOf(st.Registry)); err == nil {
 			fp.SpecPlanVersion = stored.SpecPlanVersion
 			current = fp
+		}
+	}
+	// Cited project-truth entries (Spec S09.6, R32): the probe cannot know a
+	// plan's citations, so the SAME cited keys' current versions resolve
+	// through the dedicated seam. A superseded/removed/retired entry no longer
+	// resolves active → its key vanishes from the current map → mapDrift fires
+	// "no longer observable". A nil seam is not measurable → carry stored
+	// forward (no false drift), the same posture as the base probe.
+	current.CitedEntryVersions = stored.CitedEntryVersions
+	if len(stored.CitedEntryVersions) > 0 && p.CitedEntryVersions != nil {
+		keys := make([]string, 0, len(stored.CitedEntryVersions))
+		for k := range stored.CitedEntryVersions {
+			keys = append(keys, k)
+		}
+		if cur, err := p.CitedEntryVersions(ctx, keys); err == nil {
+			current.CitedEntryVersions = cur
 		}
 	}
 	issued, err := parseRFC3339(st.CardIssuedTS)

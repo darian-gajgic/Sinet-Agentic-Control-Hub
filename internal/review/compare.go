@@ -55,6 +55,37 @@ type PixelDiffAid interface {
 	PixelDiff(ctx context.Context, oldPath, newPath string) (PixelDiffResult, error)
 }
 
+// BaseContentSource resolves a repo-backed deliverable's pre-task base content
+// (project HEAD at the branch base — revision 1's old side, Spec S13.5/S13.1).
+// ok=false means the deliverable is not repo-backed (or has no resolvable
+// base), keeping the empty-base behaviour. The implementation lives in the git
+// topology package and is wired by the composition root; review's imports stay
+// storage+eventlog only (R25).
+type BaseContentSource interface {
+	BaseContent(ctx context.Context, deliverableID string) (files map[string]string, ok bool, err error)
+}
+
+// baseOrRevisionFiles returns a content-pinned revision's files, or — for
+// rev 0 — the repo-backed pre-task base via the BaseContent seam (Spec
+// S13.1: revision 1 is presented against project HEAD at branch base). A nil
+// seam or a non-repo deliverable yields the empty base (today's behaviour).
+func (s *Store) baseOrRevisionFiles(ctx context.Context, deliverableID string, rev int) (map[string]string, error) {
+	if rev >= 1 {
+		return s.RevisionFiles(ctx, deliverableID, rev)
+	}
+	if s.BaseContent == nil {
+		return map[string]string{}, nil
+	}
+	files, ok, err := s.BaseContent.BaseContent(ctx, deliverableID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return map[string]string{}, nil
+	}
+	return files, nil
+}
+
 // PixelDiffResult is a server-side pixel-diff aid product.
 type PixelDiffResult struct {
 	DiffObjectSHA string  `json:"diff_object_sha,omitempty"`
@@ -161,12 +192,12 @@ func (s *Store) contentDiff(ctx context.Context, deliverableID string, oldN, new
 	if err != nil {
 		return "", err
 	}
-	oldFiles := map[string]string{}
-	if oldN > 0 {
-		oldFiles, err = s.RevisionFiles(ctx, deliverableID, oldN)
-		if err != nil {
-			return "", err
-		}
+	// oldN 0 resolves the repo-backed pre-task base through the seam (Spec
+	// S13.5): Compare(id, 0, 1) then diffs branch base → rev 1; a non-repo
+	// deliverable keeps the empty base.
+	oldFiles, err := s.baseOrRevisionFiles(ctx, deliverableID, oldN)
+	if err != nil {
+		return "", err
 	}
 	names := map[string]bool{}
 	for n := range oldFiles {

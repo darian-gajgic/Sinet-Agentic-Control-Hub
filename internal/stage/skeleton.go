@@ -107,6 +107,10 @@ func New(cfg Config) (*Skeleton, error) {
 		// B2-4 wiring): every paid-call checkpoint embeds the current
 		// ledger revision ref.
 		LedgerRevision: cfg.Ledger.CheckpointRef,
+		// The S02.4(d) artifact-snapshot block goes LIVE (B4-2): a paid-call
+		// checkpoint on a project-backed run carries the platform snapshot
+		// commit sha; a workspace-less run leaves it empty (nil-path, R17/R18).
+		Snapshot: cfg.Snapshot,
 	}
 	s.pipe = &intake.Pipeline{
 		DB:           cfg.DB,
@@ -117,7 +121,17 @@ func New(cfg Config) (*Skeleton, error) {
 		ArtifactRoot: cfg.ArtifactRoot,
 		Planner:      cfg.Planner,
 		Critic:       cfg.Critic,
-		Now:          cfg.Now,
+		// The S13.7 registry feeds intake resolution (S06.2) and the S02.6/
+		// S09.6 approval-staleness fingerprint (B4-2 seams).
+		Registry:           cfg.Registry,
+		Fingerprint:        cfg.Fingerprint,
+		CitedEntryVersions: cfg.CitedEntryVersions,
+		Now:                cfg.Now,
+	}
+	// The review store's Compare old-side 0 resolves the repo-backed pre-task
+	// base through the topology seam (R25); nil keeps the empty-base behavior.
+	if cfg.Review != nil && cfg.BaseContent != nil {
+		cfg.Review.BaseContent = cfg.BaseContent
 	}
 	if s.pipe.Planner == nil {
 		s.pipe.Planner = &EnginePlanner{s: s}
@@ -455,6 +469,18 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	if err := ledger.CheckStageClose(doc, assigned); err != nil {
 		s.crash(ctx, r.ID, "stage-close gate: "+err.Error())
 		return err
+	}
+
+	// Execute-leg stage close takes a platform snapshot commit (Spec S13.5,
+	// R19): it captures any bash side effects since the last checkpoint as
+	// revision raw material for the verification handoff mint. A workspace-less
+	// run returns "" — the content-pin lane, no snapshot. Best-effort: a
+	// snapshot failure is logged, never a crash of a completed execution.
+	if s.cfg.Snapshot != nil {
+		if _, serr := s.cfg.Snapshot(ctx, r.ID); serr != nil {
+			s.logger().Warn("stage: execute-leg stage-close snapshot failed",
+				"run", r.ID, "err", serr)
+		}
 	}
 
 	if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateCompleted, run.TransitionOptions{

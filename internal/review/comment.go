@@ -412,7 +412,21 @@ func (s *Store) placeAll(ctx context.Context, deliverableID string, n int, comme
 	fileCache := map[int]map[string]string{}
 	filesAt := func(rev int) (map[string]string, error) {
 		if rev < 1 {
-			return nil, nil // pre-task base: S13.5 materializes it (B4-2)
+			// Pre-task base (revision 1's old side): repo-backed base content
+			// via the seam gives a NON-NIL source so an old-side anchor can map
+			// (ladder step 1); a non-repo deliverable keeps nil — the honest
+			// degrade from step 3 (Spec S13.5, R25).
+			if s.BaseContent == nil {
+				return nil, nil
+			}
+			files, ok, err := s.BaseContent.BaseContent(ctx, deliverableID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, nil
+			}
+			return files, nil
 		}
 		if f, ok := fileCache[rev]; ok {
 			return f, nil

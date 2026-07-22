@@ -246,6 +246,30 @@ type Config struct {
 	// in-memory channel); the composition root always wires it.
 	Review *review.Store
 
+	// The S13.5/S13.7 git-topology + registry seams (B4-2), wired by the
+	// composition root over internal/project through narrow func fields (the
+	// Driver.Snapshot/LedgerRevision precedent; this package never imports
+	// internal/project — the walls stay clean, CONVENTIONS §35). All nil in
+	// the pre-S13.5 posture: intake resolves no registry, deliverables pin
+	// content only (snapshot_sha NULL), and the pre-task base stays empty.
+	//
+	// Registry is the S06.2 intake resolution seam (production impl over
+	// repo_registry); Fingerprint + CitedEntryVersions feed the S02.6/S09.6
+	// approval-staleness fingerprint; Snapshot is the S02.4d checkpoint
+	// artifact ref (wired to Driver.Snapshot) AND the round-boundary snapshot
+	// recorded on a minted revision; CreateRevisionRef creates the S13.1
+	// platform ref at snapshot-fill time (R20); BaseContent resolves a
+	// repo-backed deliverable's pre-task base for Compare's old-side 0 (R25);
+	// WorkspaceCwd swaps the plain run dir for the project worktree on an
+	// execute leg of a registered project (R34).
+	Registry           intake.Registry
+	Fingerprint        func(ctx context.Context, project string) (run.Fingerprint, error)
+	CitedEntryVersions func(ctx context.Context, keys []string) (map[string]string, error)
+	Snapshot           func(ctx context.Context, runID string) (string, error)
+	CreateRevisionRef  func(ctx context.Context, runID, ref, snapshotSHA string) error
+	BaseContent        review.BaseContentSource
+	WorkspaceCwd       func(ctx context.Context, runID string) (path string, ok bool, err error)
+
 	Logger *slog.Logger
 	Now    func() time.Time
 }

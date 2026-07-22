@@ -219,7 +219,7 @@ func TestWorkersStructurallyCannotWriteL2(t *testing.T) {
 // stage only the ledger.Source view.
 func TestEngineFacingPackagesDoNotImportMemory(t *testing.T) {
 	for _, dir := range []string{
-		"../adapters", "../adapters/claudecli", "../stage", "../ledger",
+		"../adapters", "../adapters/claudecli", "../stage", "../ledger", "../intake",
 	} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {

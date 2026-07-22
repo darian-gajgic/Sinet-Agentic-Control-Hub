@@ -151,6 +151,19 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 	if err != nil {
 		return SessionResult{}, err
 	}
+	// Repo-backed runs work in the project worktree (Spec S02.10/S13.5, R34):
+	// the plain run cwd is replaced by the run-branch worktree of the
+	// registered project store; a non-project run keeps the plain dir. The
+	// platform-owned work dir (lowered config + ctl dir) stays separate
+	// (S03.5). Idempotent: the seam creates the worktree once and returns it.
+	if s.cfg.WorkspaceCwd != nil {
+		if wpath, ok, werr := s.cfg.WorkspaceCwd(ctx, in.RunID); werr == nil && ok && wpath != "" {
+			cwd = wpath
+		} else if werr != nil {
+			s.logger().Warn("stage: project workspace unavailable; using the plain run dir",
+				"run", in.RunID, "err", werr)
+		}
+	}
 	if in.Assemble {
 		brief, err = s.cfg.Ledger.Assemble(ctx, ledger.AssembleInput{
 			RunID:         in.RunID,

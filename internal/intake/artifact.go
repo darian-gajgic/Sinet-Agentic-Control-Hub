@@ -167,6 +167,14 @@ type Plan struct {
 	ResearchNodes []ResearchNode `json:"research_nodes,omitempty"`
 	Risks         []string       `json:"risks,omitempty"`
 
+	// CitedEntries lists the project-truth knowledge entries this plan's
+	// assumptions cite (Spec S09.6). Their versions join the freshness
+	// fingerprint at approval — a ratified extension of the G1 Def.5 set (R30).
+	// Additive and optional: a plan without citations renders byte-identically
+	// to today (the omitempty + guarded section preserve the S06.6 re-render
+	// integrity).
+	CitedEntries []string `json:"cited_entries,omitempty"`
+
 	// Est is the plan-derived size/cost estimate, explicitly compared to
 	// the Stage-0 guess by the spine — surfaced, never silent (2.5).
 	Est Estimate `json:"est"`
@@ -540,6 +548,15 @@ func renderPlanMD(p *Plan) []byte {
 				line += ": " + rn.Query
 			}
 			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(p.CitedEntries) > 0 {
+		// Cited project-truth knowledge (Spec S09.6); only rendered when
+		// present, so plans without citations re-render byte-identically.
+		b.WriteString("## Cited knowledge\n\n")
+		for _, c := range p.CitedEntries {
+			fmt.Fprintf(&b, "- %s\n", c)
 		}
 		b.WriteString("\n")
 	}

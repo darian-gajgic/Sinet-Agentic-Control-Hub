@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -42,6 +43,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -237,7 +239,26 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return err
 		}
-		switch n, err := memory.NewGate(memStore).EnsureB2SeedGovernance(ctx); {
+		// The S13.5/S13.7 project store (git topology + registry) and the
+		// S09.2 knowledge-dir committer (commit-on-approval, D9). The knowledge
+		// root is initialised as ONE git repo so every scope dir shares it
+		// (Spec S13.10 "git-versioned file stores").
+		proj, err := project.New(project.Config{DB: db, Log: log, Root: filepath.Join(stateDir, "projects")})
+		if err != nil {
+			return err
+		}
+		if err := proj.EnsureRepo(ctx, filepath.Join(stateDir, "knowledge")); err != nil {
+			return fmt.Errorf("shell: init knowledge git repo (Spec S13.10): %w", err)
+		}
+		committer := proj.Committer()
+		pseams := projectSeams{proj: proj, runs: runs, db: db}
+
+		// The knowledge write gate carries the committer at every construction
+		// site (Spec S09.2/D9; R28): a file-backed approval commits with the
+		// approver as author and fills knowledge_entries.file_commit NULL→hash.
+		seedGate := memory.NewGate(memStore)
+		seedGate.Committer = committer
+		switch n, err := seedGate.EnsureB2SeedGovernance(ctx); {
 		case errors.Is(err, memory.ErrNoOperator):
 			logger.Info("memory: B2 seed governance deferred — no operator account yet (Spec S09.10, D10)")
 		case err != nil:
@@ -248,7 +269,9 @@ func Run(ctx context.Context, opts Options) error {
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded
 		// provenance says so). Same D10 deferral as the B2 seeds.
-		switch created, err := memory.NewGate(memStore).EnsureComposerPlaybook(ctx); {
+		playbookGate := memory.NewGate(memStore)
+		playbookGate.Committer = committer
+		switch created, err := playbookGate.EnsureComposerPlaybook(ctx); {
 		case errors.Is(err, memory.ErrNoOperator):
 			logger.Info("memory: composer-playbook governance deferred — no operator account yet (Spec S09.10, D10)")
 		case err != nil:
@@ -310,6 +333,16 @@ func Run(ctx context.Context, opts Options) error {
 				DB: db, Log: log, Settings: reg,
 				Root: filepath.Join(stateDir, "review"),
 			},
+			// The S13.5/S13.7 git-topology + registry seams (B4-2), wired over
+			// internal/project through the projectSeams adapter (stage/intake/
+			// review never import internal/project, CONVENTIONS §35).
+			Registry:           registrySeam{proj: proj},
+			Fingerprint:        pseams.Fingerprint,
+			CitedEntryVersions: memoryCitedEntryVersions(memStore),
+			Snapshot:           pseams.Snapshot,
+			CreateRevisionRef:  pseams.CreateRevisionRef,
+			BaseContent:        pseams,
+			WorkspaceCwd:       pseams.WorkspaceCwd,
 			// CheckPacks ships empty: the software pack is per-project
 			// registry machinery (Spec S13, B4) — software-domain verifies
 			// fail LOUDLY rather than run a degraded launch domain.
@@ -664,6 +697,29 @@ func composerPlaybook(s *memory.Store) func(ctx context.Context) (worker.Playboo
 			return worker.Playbook{}, err
 		}
 		return worker.Playbook{EntryID: e.ID, Version: e.Version, Content: e.Content}, nil
+	}
+}
+
+// memoryCitedEntryVersions is the S09.6 cited-entry resolver (R32): given
+// cited knowledge-entry keys, it returns {key: version} for those currently
+// ACTIVE. A superseded, removed, or tombstoned entry no longer resolves active
+// → its key is OMITTED, so the intake fingerprint's mapDrift fires vanished-
+// key drift (retirement semantics). internal/intake never imports
+// internal/memory — this func seam is wired at the composition root.
+func memoryCitedEntryVersions(s *memory.Store) func(ctx context.Context, keys []string) (map[string]string, error) {
+	return func(ctx context.Context, keys []string) (map[string]string, error) {
+		out := make(map[string]string, len(keys))
+		for _, k := range keys {
+			e, err := s.Get(ctx, k)
+			if err != nil {
+				continue // absent → vanished (removed/never existed)
+			}
+			if e.Status != memory.StatusActive || e.Tombstone {
+				continue // superseded/removed/tombstoned → vanished
+			}
+			out[k] = strconv.FormatInt(e.Version, 10)
+		}
+		return out, nil
 	}
 }
 

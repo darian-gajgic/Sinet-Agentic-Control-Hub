@@ -96,14 +96,36 @@ func (rs reviewSink) MintCandidate(ctx context.Context, d verify.Deliverable, ro
 	if err != nil {
 		return err
 	}
-	_, err = rs.store().MintRevision(ctx, review.MintInput{
+	// The round boundary is revision raw material (Spec S13.5, R19): a
+	// project-backed run's workspace snapshot sha pins the minted revision;
+	// a workspace-less run (the content-pin lane — the walking-skeleton
+	// content deliverable, composer definitions) records snapshot_sha NULL,
+	// a valid honest state.
+	snapshotSHA := ""
+	if rs.s.cfg.Snapshot != nil {
+		if sha, serr := rs.s.cfg.Snapshot(ctx, d.RunID); serr == nil {
+			snapshotSHA = sha
+		}
+	}
+	if _, err = rs.store().MintRevision(ctx, review.MintInput{
 		DeliverableID: dl.ID,
 		N:             d.Revision,
 		RunID:         d.RunID,
 		AttemptRef:    verify.MintRef(d.RunID, round),
 		Files:         map[string]string{DeliverableFileName: d.Content},
-	})
-	return err
+		SnapshotSHA:   snapshotSHA,
+	}); err != nil {
+		return err
+	}
+	// The minted-revision platform ref refs/sinet/deliverable/<id>/rev-<n> is
+	// created in the project store OUTSIDE internal/review (Spec S13.1, R20):
+	// the composition wires the git side and the review-side fill together.
+	if snapshotSHA != "" && rs.s.cfg.CreateRevisionRef != nil {
+		if err := rs.s.cfg.CreateRevisionRef(ctx, d.RunID, review.RevisionRef(dl.ID, d.Revision), snapshotSHA); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (rs reviewSink) RecordVerdict(ctx context.Context, d verify.Deliverable, eventSeq int64) error {
