@@ -10,6 +10,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -168,7 +169,7 @@ func runEngineHook(args []string, stdout, stderr io.Writer) int {
 // documented honestly (R12).
 func runLocal(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "sinet local: subcommand required (unload|resume|status|config|manifest|gamemode-snippet)")
+		fmt.Fprintln(stderr, "sinet local: subcommand required (unload|resume|status|vram|config|manifest|gamemode-snippet)")
 		return exitUsage
 	}
 	ctx := context.Background()
@@ -215,6 +216,8 @@ func runLocal(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, "local: stack UNCONFIGURED (dev default) — the duty seams degrade per the S12.4/S06 rows (R17).")
 		}
 		return exitOK
+	case "vram":
+		return runLocalVRAM(ctx, stdout, stderr)
 	case "manifest":
 		b, err := local.ManifestJSON()
 		if err != nil {
@@ -232,6 +235,29 @@ func runLocal(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sinet local: unknown subcommand %q\n", args[0])
 		return exitUsage
 	}
+}
+
+// runLocalVRAM prints the S12.7 sleep-gated VRAM ledger snapshot (B4-6): the
+// GPU readings (device-truth memory.free + per-process attribution incl.
+// graphics clients), the sleep gate (a suspended GPU is recorded asleep and
+// NEVER polled), and the host battery/AC state — plus ⚙ guard band + battery
+// mode. A read-only tool (a tool, never a mode — CONVENTIONS §1); reads are
+// event-driven, never a timer (R15). ⚙ from the declared defaults (registry
+// unattached, like `sinet local config`).
+func runLocalVRAM(ctx context.Context, stdout, stderr io.Writer) int {
+	adm := local.NewVRAMAdmitter(local.VRAMDeps{Settings: settings.New()})
+	snap, err := adm.Snapshot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local vram: %v\n", err)
+		return exitError
+	}
+	b, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "sinet local vram: %v\n", err)
+		return exitError
+	}
+	fmt.Fprintln(stdout, string(b))
+	return exitOK
 }
 
 // runLocalConfig renders the llama-swap config from the manifest + ⚙ defaults

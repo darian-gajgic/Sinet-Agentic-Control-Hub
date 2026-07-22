@@ -1,6 +1,7 @@
 package local
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -111,6 +112,62 @@ func (fs *FakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}
 }
+
+// FakeGPUReader is an injectable gpuReader for hermetic VRAM-admission /
+// preemption tests (brief R18): a test sets the readings a "GPU" reports
+// (including a suspended fixture) and asserts the admission table + the
+// kill-recovery path without a real GPU. It counts Read calls so a test can
+// assert reads happen only when contemplated (event-driven, never a timer).
+type FakeGPUReader struct {
+	mu       sync.Mutex
+	readings []GPUReading
+	reads    int
+}
+
+// NewFakeGPUReader returns a reader that reports the given readings.
+func NewFakeGPUReader(readings ...GPUReading) *FakeGPUReader {
+	return &FakeGPUReader{readings: readings}
+}
+
+// Read returns the injected readings and counts the call.
+func (f *FakeGPUReader) Read(context.Context) ([]GPUReading, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	return append([]GPUReading(nil), f.readings...), nil
+}
+
+// Set replaces the reported readings (e.g. free rises after a kill).
+func (f *FakeGPUReader) Set(readings ...GPUReading) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readings = readings
+}
+
+// Reads returns how many times Read was called.
+func (f *FakeGPUReader) Reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
+}
+
+// FakeSuspendedGPU is a suspended-GPU reading fixture (asleep, 0 client bytes) —
+// R18's proof-shape that admission treats a sleeping GPU without polling it.
+func FakeSuspendedGPU() GPUReading { return GPUReading{PCIAddr: "0000:01:00.0", Suspended: true} }
+
+// FakeActiveGPU is an active-GPU reading fixture with the given free/total MiB.
+func FakeActiveGPU(freeMiB, totalMiB int64, procs ...GPUProcess) GPUReading {
+	return GPUReading{PCIAddr: "0000:01:00.0", UUID: "GPU-fake", MemFreeMiB: freeMiB, MemTotalMiB: totalMiB, Processes: procs}
+}
+
+// FakePowerReader is an injectable powerReader (battery/AC) for hermetic tests.
+type FakePowerReader struct {
+	OnBat bool
+	Err   error
+}
+
+// OnBattery reports the injected battery state.
+func (f *FakePowerReader) OnBattery() (bool, error) { return f.OnBat, f.Err }
 
 func (fs *FakeServer) handleChat(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))

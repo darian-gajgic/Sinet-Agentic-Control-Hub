@@ -82,6 +82,23 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, r run.Run) error
 }
 
+// GPUAdmitter is the S10.9 GPU-admission POLICY hook (the S10-policy/S12-mechanic
+// split): before the scheduler dispatches a run onto the local-inference lane,
+// it asks whether the VRAM ledger admits loading the run's model (Spec S12.7:
+// live memory.free ≥ ledger(model) + guard band). Whether the WORK is admitted
+// at all — pressure, budgets, background caps, priorities — stays S10's; this
+// hook is only the VRAM mechanic (S10.9 "the ledger/broker mechanics are
+// [XREF:S12]"). It is satisfied by an internal/local VRAM admitter wired at the
+// shell — the scheduler NEVER imports internal/local (CONVENTIONS §26), so this
+// is a scheduler-DECLARED interface (the Pressure/Dispatcher nil-able precedent).
+// Nil ⇒ no GPU gate (every non-local run, and the dev default, unchanged).
+// WIRED-BUT-DORMANT at v0: class-(a) local execution has no consumer, so no run
+// dispatches onto the local lane (P3/STATE binding) — the hook is hermetically
+// tested, never live-exercised.
+type GPUAdmitter interface {
+	AdmitLoad(ctx context.Context, model string) (ok bool, reason string, err error)
+}
+
 // Config assembles a Scheduler. DB, Runs, Settings and Dispatcher are
 // mandatory; the metering hooks default to inert if omitted.
 type Config struct {
@@ -95,7 +112,14 @@ type Config struct {
 	// Receipts materializes a receipt when a dispatched run reaches a terminal
 	// state (Spec S10.1/S10.10). Nil skips receipt materialization.
 	Receipts *metering.Receipts
-	Logger   *slog.Logger
+	// GPUAdmitter is the S10.9 GPU-admission policy hook (Spec S12.7 mechanics).
+	// Nil ⇒ no GPU gate. Consulted only for candidates on LocalLane (below).
+	GPUAdmitter GPUAdmitter
+	// LocalLane is the lane name whose dispatch is GPU-admission-gated (the S03.2
+	// local lane, "local"). "" ⇒ no lane is gated. Set by the shell to the local
+	// lane name as a bare string (never an internal/local import — §26 wall).
+	LocalLane string
+	Logger    *slog.Logger
 	// Now is the clock seam (tests). Nil = time.Now.
 	Now func() time.Time
 	// LeaseTTL overrides the claim lease deadline (tests). 0 = ⚙
@@ -112,16 +136,18 @@ const keyLeaseTTL = "recovery.dead_after"
 
 // Scheduler is the one run scheduler (Spec S10.7).
 type Scheduler struct {
-	db         *storage.DB
-	runs       *run.Store
-	settings   Settings
-	dispatcher Dispatcher
-	pressure   *metering.PressureGauge
-	receipts   *metering.Receipts
-	logger     *slog.Logger
-	now        func() time.Time
-	poll       time.Duration
-	leaseTTL   time.Duration
+	db          *storage.DB
+	runs        *run.Store
+	settings    Settings
+	dispatcher  Dispatcher
+	pressure    *metering.PressureGauge
+	receipts    *metering.Receipts
+	gpuAdmitter GPUAdmitter
+	localLane   string
+	logger      *slog.Logger
+	now         func() time.Time
+	poll        time.Duration
+	leaseTTL    time.Duration
 
 	admitMu   sync.Mutex
 	admitting bool
@@ -142,18 +168,20 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, errors.New("scheduler: a Dispatcher is required (fire-and-forget is banned, S16.6)")
 	}
 	s := &Scheduler{
-		db:         cfg.DB,
-		runs:       cfg.Runs,
-		settings:   cfg.Settings,
-		dispatcher: cfg.Dispatcher,
-		pressure:   cfg.Pressure,
-		receipts:   cfg.Receipts,
-		logger:     cfg.Logger,
-		now:        cfg.Now,
-		poll:       cfg.PollInterval,
-		leaseTTL:   cfg.LeaseTTL,
-		nudge:      make(chan struct{}, 1),
-		inflight:   map[string]struct{}{},
+		db:          cfg.DB,
+		runs:        cfg.Runs,
+		settings:    cfg.Settings,
+		dispatcher:  cfg.Dispatcher,
+		pressure:    cfg.Pressure,
+		receipts:    cfg.Receipts,
+		gpuAdmitter: cfg.GPUAdmitter,
+		localLane:   cfg.LocalLane,
+		logger:      cfg.Logger,
+		now:         cfg.Now,
+		poll:        cfg.PollInterval,
+		leaseTTL:    cfg.LeaseTTL,
+		nudge:       make(chan struct{}, 1),
+		inflight:    map[string]struct{}{},
 	}
 	if s.logger == nil {
 		s.logger = slog.Default()
@@ -362,6 +390,22 @@ func (s *Scheduler) claimPass(ctx context.Context) (int, error) {
 			}
 			if !ok {
 				continue // pressure headroom (S10.4)
+			}
+		}
+		// GPU-admission POLICY hook (S10.9; the S10-policy/S12-mechanic split):
+		// before dispatching onto the local-inference lane, the VRAM ledger must
+		// admit the load (Spec S12.7). Wired-but-dormant — class-(a) local
+		// execution has no v0 consumer, so no candidate is ever on the local lane
+		// (P3/STATE binding); when one lands, a full ledger holds this back until
+		// there is VRAM headroom.
+		if s.gpuAdmitter != nil && s.localLane != "" && c.lane == s.localLane {
+			ok, reason, err := s.gpuAdmitter.AdmitLoad(ctx, c.substrate)
+			if err != nil {
+				return dispatched, fmt.Errorf("scheduler: GPU admission check for run %s: %w", c.runID, err)
+			}
+			if !ok {
+				s.logger.InfoContext(ctx, "scheduler: GPU admission refused local-lane dispatch (S10.9/S12.7)", "run", c.runID, "reason", reason)
+				continue // no VRAM headroom (S12.7)
 			}
 		}
 		r, claimed, err := s.claimOne(ctx, c)

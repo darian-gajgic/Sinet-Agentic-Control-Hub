@@ -396,14 +396,27 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return err
 		}
+		// The S10.9 GPU-admission policy hook (B4-6/R13): the local VRAM admitter
+		// gates dispatch onto the local lane (Spec S12.7 mechanics). Nil when the
+		// stack is unconfigured (no gate) — assigned via a concrete-nil check so a
+		// nil admitter is a true nil interface (not a typed nil). Wired-but-dormant:
+		// class-(a) local execution has no v0 consumer, so no run is on the local lane.
+		var gpuAdmitter scheduler.GPUAdmitter
+		localLane := ""
+		if localSurf.VRAM != nil {
+			gpuAdmitter = localSurf.VRAM
+			localLane = localSurf.LocalLane
+		}
 		sched, err = scheduler.New(scheduler.Config{
-			DB:         db,
-			Runs:       runs,
-			Settings:   reg,
-			Dispatcher: sk,
-			Pressure:   metering.NewPressureGauge(db, reg),
-			Receipts:   metering.NewReceipts(db, meterLedger, exceptions),
-			Logger:     logger,
+			DB:          db,
+			Runs:        runs,
+			Settings:    reg,
+			Dispatcher:  sk,
+			Pressure:    metering.NewPressureGauge(db, reg),
+			Receipts:    metering.NewReceipts(db, meterLedger, exceptions),
+			GPUAdmitter: gpuAdmitter,
+			LocalLane:   localLane,
+			Logger:      logger,
 		})
 		if err != nil {
 			return err

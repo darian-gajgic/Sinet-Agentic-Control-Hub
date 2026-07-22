@@ -30,9 +30,13 @@ import (
 // ChatSpec is one shaped /v1/chat/completions request (the duty layer builds
 // it; the client applies temp-0/logprobs/json_schema).
 type ChatSpec struct {
-	Model     string
-	System    string          // free-text reasoning-then-constrained framing precedes the constrained region
-	User      string          // the duty prompt (carries the schema in-prompt too, S12.4)
+	Model  string
+	System string // free-text reasoning-then-constrained framing precedes the constrained region
+	User   string // the duty prompt (carries the schema in-prompt too, S12.4)
+	// Messages, when non-nil, is the verbatim message list — used by the S12.6
+	// sandboxed plane, which forwards a worker's own multi-turn request rather
+	// than composing System/User. Ignored on the platform plane (System/User).
+	Messages  []chatMessage
 	Schema    json.RawMessage // the json_schema enforced at the engine (nil ⇒ free text, e.g. utility drafting)
 	Name      string          // json_schema name
 	MaxTokens int64           // per-duty length cap (structural constant)
@@ -144,10 +148,14 @@ func (c *Client) Chat(ctx context.Context, spec ChatSpec) (Completion, error) {
 		Temperature: 0, // greedy for every classification-shaped duty (S12.4)
 		MaxTokens:   spec.MaxTokens,
 	}
-	if spec.System != "" {
-		req.Messages = append(req.Messages, chatMessage{Role: "system", Content: spec.System})
+	if spec.Messages != nil {
+		req.Messages = spec.Messages // the S12.6 sandboxed plane forwards verbatim
+	} else {
+		if spec.System != "" {
+			req.Messages = append(req.Messages, chatMessage{Role: "system", Content: spec.System})
+		}
+		req.Messages = append(req.Messages, chatMessage{Role: "user", Content: spec.User})
 	}
-	req.Messages = append(req.Messages, chatMessage{Role: "user", Content: spec.User})
 	if len(spec.Schema) > 0 {
 		name := spec.Name
 		if name == "" {

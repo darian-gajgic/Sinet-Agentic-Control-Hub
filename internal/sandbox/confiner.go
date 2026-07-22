@@ -142,6 +142,20 @@ func (co *Composer) Confine(req adapters.StartRequest, spec adapters.SpawnSpec) 
 		RWExchange:   spec.RWExchange,
 		EnginePrefix: spec.EnginePrefix,
 	}
+	// The S12.6 GPU-broker bridge (B4-6/OQ3): the sandbox runtime injects the
+	// per-run bridge at spawn (the Confiner/CredInject spawn-seam precedent). The
+	// grant is nil at v0 (no class-(a) consumer mints one — BINDING), so this is
+	// a dormant seam; when populated, Compose binds the UDS + sets the worker's
+	// /v1 env, and fails closed on a C0 bridge.
+	if g := req.BridgeGrant; g != nil {
+		sp.Bridge = &Bridge{
+			SocketPath:   g.SocketPath,
+			EnvName:      g.EnvName,
+			BaseURL:      g.BaseURL,
+			TokenEnvName: g.TokenEnvName,
+			Token:        g.Token,
+		}
+	}
 	egress, err := co.egressForClass(class)
 	if err != nil {
 		return nil, nil, err

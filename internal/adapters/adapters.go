@@ -274,6 +274,42 @@ type StartRequest struct {
 	// platform gate always fires first (S03.4 ceiling ordering).
 	CeilingCostUSD float64
 	CeilingSteps   int64
+
+	// BridgeGrant, when set, is the S12.6 GPU-broker sandboxed-plane grant the
+	// sandbox runtime injects at spawn: a per-sandbox loopback/UDS bridge the
+	// granted worker reaches `/v1` through, carrying the per-run bearer token and
+	// the class-derived budgets. Same posture as CredInject (json:"-"): the grant
+	// is recompiled every run from control-plane data and NEVER lands in a park
+	// record, the event log, or the DB. C0 connectors are never granted it; C1
+	// workers may be, C3 workers get tighter budgets (S11.6/S12.6 — the class
+	// ladder is internal/sandbox's, applied at mint). WIRED-BUT-DORMANT at v0:
+	// class-(a) local execution has no consumer, so nothing populates this
+	// (BINDING) — it is a hermetically-tested seam (B4-6/OQ3).
+	BridgeGrant *BridgeGrant `json:"-"`
+}
+
+// BridgeGrant is the S12.6 sandboxed-plane bridge injected into a granted
+// worker's sandbox (B4-6/OQ3). The GPU broker (internal/local) mints the token
+// and allowlist; the confinement class (internal/sandbox's LadderRank) decides
+// whether the bridge is granted and its budgets; the sandbox runtime binds the
+// SocketPath and sets EnvName=BaseURL so the worker's `/v1` points at the
+// per-sandbox bridge — never a routable host address, never /dev/nvidia*
+// (S12.6). Defined here so the adapter seam owns the type (sandbox → adapters is
+// the only import direction); primitive fields only (internal/local, which
+// mints the values, never imports adapters — §26 wall).
+type BridgeGrant struct {
+	// SocketPath is the platform-owned UDS the bridge listens on (bound into the
+	// sandbox read-write, the WorkDir/RWExchange precedent).
+	SocketPath string
+	// EnvName / BaseURL point the worker's OpenAI client at the bridge (e.g.
+	// OPENAI_BASE_URL=http://unix or a loopback URL over the bound socket).
+	EnvName string
+	BaseURL string
+	// TokenEnvName / Token carry the per-run bearer token the worker presents
+	// (the virtual-key pattern; never persisted — the json:"-" posture holds
+	// transitively via StartRequest).
+	TokenEnvName string
+	Token        string
 }
 
 // CompiledWorker is the compiled worker body+config an engine receives

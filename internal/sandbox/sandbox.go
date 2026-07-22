@@ -239,6 +239,47 @@ type Spawn struct {
 	// so a real engine installed outside /usr (e.g. an npm-global claude) is
 	// reachable inside the sandbox. Empty for system-path probes.
 	EnginePrefix string
+
+	// Bridge, when set, is the S12.6 GPU-broker sandboxed-plane injection
+	// (B4-6/OQ3): a per-sandbox UDS the granted worker reaches `/v1` through.
+	// The socket is bound read-write and the worker's OpenAI env is set to point
+	// at it — never /dev/nvidia*, never a routable host address (S12.6). C0
+	// connectors never get it (Compose fails closed on a C0 bridge). Nil = no
+	// bridge (the v0 default — no class-(a) consumer, dormant seam).
+	Bridge *Bridge
+}
+
+// Bridge is the S12.6 GPU-broker sandboxed-plane injection payload (B4-6/OQ3).
+// The GPU broker (internal/local) mints the token + allowlist; the confinement
+// class decides whether it is granted and its budgets (BridgeBudgetFor); the
+// sandbox runtime binds SocketPath and sets EnvName=BaseURL (+ the token env) so
+// the worker's `/v1` points at the per-sandbox bridge.
+type Bridge struct {
+	SocketPath   string
+	EnvName      string
+	BaseURL      string
+	TokenEnvName string
+	Token        string
+}
+
+// BridgeBudgetFor is the S11.6/S12.6 class→bridge policy (B4-6/R6): whether the
+// GPU bridge is granted to a class and its class-derived rate/size budgets. C0
+// connectors NEVER get it; C1/C2 get standard budgets; C3 web-reading (v0.1)
+// gets TIGHTER budgets (hostile-input step-up). A class comparison over the
+// exported ladder constants — this is the ladder's home package, so the policy
+// is authoritative here, never re-derived across the import wall. The mint site
+// (the future class-(a) consumer) calls this before minting a grant. Rate/size
+// values are structural constants (the sseBatchSize precedent; S18 ratifies no
+// key — a per-run budget is not operator-tuned ⚙).
+func BridgeBudgetFor(c Class) (granted bool, ratePerMin int, maxBytes int64) {
+	switch c {
+	case C3:
+		return true, 30, 256 << 10 // C3: tighter (v0.1 web-reading step-up)
+	case C1, C2:
+		return true, 120, 1 << 20 // C1/C2: standard
+	default:
+		return false, 0, 0 // C0 (and any non-v0/unknown class): never granted
+	}
 }
 
 // Compose turns a class + spawn into the exact bwrap argv and the seccomp
@@ -331,6 +372,26 @@ func Compose(c Class, sp Spawn, caps Capabilities) (argv []string, seccomp []byt
 			return nil, nil, err
 		}
 		a = append(a, "--bind", xp, xp)
+	}
+	// The S12.6 GPU-broker bridge (B4-6/OQ3): bind the per-sandbox UDS read-write
+	// and set the worker's `/v1` env to point at it. C0 connectors NEVER get the
+	// bridge — a C0 spawn carrying one FAILS CLOSED (the sandbox is the boundary;
+	// the mint also refuses C0, so this is defense-in-depth, S12.6/S11.6).
+	if sp.Bridge != nil && sp.Bridge.SocketPath != "" {
+		if c == C0 {
+			return nil, nil, fmt.Errorf("sandbox: a C0 connector must never be granted the GPU bridge (S12.6/S11.6)")
+		}
+		bp, err := absClean(sp.Bridge.SocketPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		a = append(a, "--bind", bp, bp)
+		if sp.Bridge.EnvName != "" {
+			a = append(a, "--setenv", sp.Bridge.EnvName, sp.Bridge.BaseURL)
+		}
+		if sp.Bridge.TokenEnvName != "" {
+			a = append(a, "--setenv", sp.Bridge.TokenEnvName, sp.Bridge.Token)
+		}
 	}
 	// Sanctioned read-only caches (S11.3). A writable cross-run cache is the
 	// poisoning anti-pattern and is never emitted (rw-no-delete mounts below

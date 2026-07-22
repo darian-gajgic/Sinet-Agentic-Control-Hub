@@ -61,16 +61,30 @@ const (
 type Settings interface {
 	Int(key string) (int64, error)
 	Bool(key string) (bool, error)
+	String(key string) (string, error)
 	StringMap(key string) (map[string]string, error)
 }
 
-// ⚙ keys consumed by this package (all declared since B0-2, Spec S18).
+// ⚙ keys consumed by this package (all declared since B0-2, Spec S18 — NO new
+// key; the 118-key tally stays green, R21). B4-6 additionally consumes the
+// three GPU-broker/VRAM keys that B4-5 only referenced.
 const (
-	keyAlias        = "local.alias"               // TypeMap duty→seat (S12.4; R15/R20–R22)
-	keyTTLFast      = "local.ttl.fast_s"          // fast/CPU-class seat TTL (R10)
-	keyTTLWorkhorse = "local.ttl.workhorse_s"     // workhorse-class seat TTL (R10)
-	keyGameModeHook = "local.gamemode_hook"       // gates the whole GameMode behavior (R13)
-	keyUnloadGrace  = "local.unload.term_grace_s" // config-gen MAY consume as unloadTimeout (R10 comment)
+	keyAlias        = "local.alias"               // TypeMap duty→seat (S12.4; B4-5 R15)
+	keyTTLFast      = "local.ttl.fast_s"          // fast/CPU-class seat TTL (B4-5 R10)
+	keyTTLWorkhorse = "local.ttl.workhorse_s"     // workhorse-class seat TTL (B4-5 R10)
+	keyGameModeHook = "local.gamemode_hook"       // gates the whole GameMode behavior (B4-5 R13)
+	keyUnloadGrace  = "local.unload.term_grace_s" // llama-swap unloadTimeout (B4-5) + the Sinet-side SIGTERM→grace→SIGKILL grace (R11)
+
+	keyGuardBandMB         = "local.vram.guard_band_mb"      // admission math headroom (R9)
+	keyBatteryGPUAdmission = "local.battery.gpu_admission"   // battery admission {never,urgent-only,always} (R14)
+	keySandboxLogprobs     = "local.broker.sandbox_logprobs" // sandboxed-plane logprobs gate, per-template (R5)
+)
+
+// Battery-admission enum values (⚙ local.battery.gpu_admission; Spec S12.8).
+const (
+	BatteryNever      = "never"
+	BatteryUrgentOnly = "urgent-only"
+	BatteryAlways     = "always"
 )
 
 // Duty-alias names (Spec S12.4 registry; alias names [coordinator-draft]).
@@ -113,6 +127,22 @@ var (
 	// was chosen — never a fabricated label (S12.4 cross-cutting rule; the
 	// caller degrades per its S12.4 row).
 	ErrAbstained = errors.New("local: duty abstained (schema unclear member)")
+	// ErrGPUAdmissionRefused reports the VRAM/battery admission check refused a
+	// load (R9/R14): live memory.free below the guard band (a game/compositor
+	// holds VRAM) or the battery policy refuses. The caller degrades per its
+	// S12.4/S06 row — never a fake load (R17). The reason string carries the
+	// live numbers.
+	ErrGPUAdmissionRefused = errors.New("local: GPU admission refused")
+	// ErrTokenInvalid reports a sandboxed-plane call with an absent/expired
+	// per-run bearer token (R3) — the GPU broker never serves it.
+	ErrTokenInvalid = errors.New("local: sandboxed-plane bearer token invalid or expired")
+	// ErrModelNotAllowed reports a sandboxed call naming a duty alias outside the
+	// run's grant allowlist (R3/R4) — the broker refuses it.
+	ErrModelNotAllowed = errors.New("local: duty alias not in the run's allowlist")
+	// ErrLogprobsRefused reports a sandboxed call requesting logprobs while ⚙
+	// local.broker.sandbox_logprobs is off for the run (R5 side-channel
+	// reduction) — the platform plane keeps logprobs, the sandboxed plane does not.
+	ErrLogprobsRefused = errors.New("local: logprobs refused for the sandboxed caller (⚙ local.broker.sandbox_logprobs off)")
 )
 
 // normalizeAlias trims and lowercases an alias for map lookup tolerance.

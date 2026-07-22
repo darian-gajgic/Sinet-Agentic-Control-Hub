@@ -48,6 +48,19 @@ type localSurface struct {
 	DutyMap    worker.DutyMap
 	Available  bool
 	GameMode   *local.GameModeHook
+	// VRAM is the S12.7 admitter (B4-6): the scheduler's GPU-admission policy
+	// hook (nil-safe; wired-but-dormant) AND the live duty pre-flight (OQ2). Nil
+	// when the stack is unconfigured.
+	VRAM *local.VRAMAdmitter
+	// LocalLane is the lane the scheduler GPU-gates ("local" when configured, ""
+	// otherwise) — passed to scheduler.Config as a bare string (no import of
+	// internal/local from internal/scheduler, §26).
+	LocalLane string
+	// SandboxBroker is the S12.6 GPU-broker sandboxed-plane surface (B4-6): the
+	// token registry + the /v1 bridge handler. Composed + held DORMANT — no
+	// class-(a) consumer mints a token this cut (BINDING), so the handler is
+	// never served to a live sandbox; it is a hermetically-tested seam.
+	SandboxBroker *local.SandboxBroker
 }
 
 // buildLocalSurface composes the S12 local surface (R12/R20–R22). It never
@@ -59,18 +72,44 @@ func buildLocalSurface(d localDeps) (*localSurface, error) {
 		return &localSurface{}, nil // dev default: unconfigured → the seams degrade (R17)
 	}
 	reg := local.NewRegistry(d.Settings)
+	// The S12.7 VRAM admitter (B4-6): live sysfs+nvidia-smi reads, sleep-gated,
+	// honest-uncalibrated (OQ1). Backs the scheduler hook (R13) AND the duty
+	// pre-flight (OQ2).
+	vram := local.NewVRAMAdmitter(local.VRAMDeps{Settings: d.Settings, Logger: d.Log})
 	duty := local.NewDuty(local.DutyDeps{
 		Registry:    reg,
 		Client:      local.NewClient(cfg.Endpoint),
 		Checkpoints: d.Checkpoints,
 		Events:      d.Events,
+		// OQ2: the live GPU-admission pre-flight before a duty call triggers a
+		// llama-swap load (operator-wins holds live).
+		Admitter: vram,
 		// The durable cross-process admission flag (F4/F11): the CLI resolves
 		// the same path from SINET_LOCAL_STATE via StackFromEnv, so an engaged
 		// stop survives a restart and the CLI verb + surface share it.
 		AdmissionsFlag: cfg.AdmissionsFlag(),
 		Logger:         d.Log,
 	})
-	surface := local.NewSurface(local.NewEagerUnload(duty, d.Events, d.Log))
+	// The S12.7 kill-not-freeze preemptor (B4-6/R11) wired BEHIND the eager-unload
+	// verb: after llama-swap's unload, a wedged backend still holding VRAM is
+	// SIGTERM→grace→SIGKILL-ed and recovery verified.
+	preempt := local.NewPreemptor(local.PreemptorDeps{Settings: d.Settings, Admitter: vram, Logger: d.Log})
+	eager := local.NewEagerUnload(duty, d.Events, d.Log)
+	eager.SetPreemptor(preempt)
+	surface := local.NewSurface(eager)
+
+	// The S12.6 GPU-broker sandboxed plane (B4-6): the per-run token registry +
+	// the /v1 bridge handler. Composed + held DORMANT — no v0 consumer mints a
+	// token (BINDING), so the handler is never served to a live sandbox.
+	sandboxBroker := local.NewSandboxBroker(local.SandboxBrokerDeps{
+		Tokens:      local.NewTokenRegistry(),
+		Registry:    reg,
+		Client:      local.NewClient(cfg.Endpoint),
+		Checkpoints: d.Checkpoints,
+		Events:      d.Events,
+		Settings:    d.Settings,
+		Logger:      d.Log,
+	})
 
 	// The effective DutyMap gains the utility seat (local lane, manifest
 	// window) when configured; Coverage.LocalAvailable flips true (R22). The
@@ -82,14 +121,17 @@ func buildLocalSurface(d localDeps) (*localSurface, error) {
 	}
 
 	ls := &localSurface{
-		Duty:       duty,
-		Surface:    surface,
-		Classifier: stage.NewLocalClassifier(duty),
-		Utility:    stage.NewLocalUtility(duty),
-		SpotCheck:  stage.NewLocalSpotCheck(duty),
-		TieBreak:   stage.NewLocalTieBreaker(duty),
-		DutyMap:    dutyMap,
-		Available:  true,
+		Duty:          duty,
+		Surface:       surface,
+		Classifier:    stage.NewLocalClassifier(duty),
+		Utility:       stage.NewLocalUtility(duty),
+		SpotCheck:     stage.NewLocalSpotCheck(duty),
+		TieBreak:      stage.NewLocalTieBreaker(duty),
+		DutyMap:       dutyMap,
+		Available:     true,
+		VRAM:          vram,
+		LocalLane:     local.LaneLocal,
+		SandboxBroker: sandboxBroker,
 	}
 
 	// The ⚙-gated GameMode hook: the scripts leg (rendered snippet, operator

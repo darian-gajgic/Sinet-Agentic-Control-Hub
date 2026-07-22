@@ -117,11 +117,18 @@ const eagerEventSchemaVersion = 1
 
 // EagerUnload is the operator-wins switch verb (R12). Nil-safe.
 type EagerUnload struct {
-	adm    *Admissions
-	client *Client
-	log    *eventlog.Log
-	logger *slog.Logger
+	adm     *Admissions
+	client  *Client
+	preempt *Preemptor // B4-6: the forced-kill escalation behind the unload (R12)
+	log     *eventlog.Log
+	logger  *slog.Logger
 }
+
+// SetPreemptor wires the S12.7 forced-kill discipline BEHIND the unload leg
+// (B4-6/R12): after llama-swap's own unload, a wedged llama-server backend still
+// holding VRAM is force-killed (SIGTERM→grace→SIGKILL) with recovery verified.
+// Nil-safe; when unset, Engage keeps the B4-5 admissions-stop + unload behavior.
+func (e *EagerUnload) SetPreemptor(p *Preemptor) { e.preempt = p }
 
 // NewEagerUnload wires the verb over a live Duty (shares its admission gate +
 // client), recording events through log.
@@ -146,6 +153,15 @@ func (e *EagerUnload) Engage(ctx context.Context, actor string) error {
 	var unloadErr error
 	if e.client != nil {
 		unloadErr = e.client.UnloadAll(ctx)
+	}
+	// Forced-kill escalation BEHIND the unload (R12): if a llama-server backend
+	// wedged and still holds VRAM after the unload, SIGTERM→grace→SIGKILL it and
+	// verify recovery. Idempotent — a no-op when nothing is wedged. Best-effort:
+	// admissions are already stopped (the operator-wins guarantee holds).
+	if e.preempt != nil {
+		if err := e.preempt.ForceKillWedged(ctx); err != nil {
+			e.logger.Warn("local: forced-kill escalation of a wedged backend failed", "actor", actor, "err", err)
+		}
 	}
 	e.record(ctx, actor, EventLocalAdmissionsStopped, unloadErr)
 	if unloadErr != nil {

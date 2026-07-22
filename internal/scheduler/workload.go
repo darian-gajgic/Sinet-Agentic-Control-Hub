@@ -75,6 +75,7 @@ type candidate struct {
 	runID      string
 	userID     string
 	lane       string
+	substrate  string // the run's substrate — the model key for the S10.9 GPU hook (dormant)
 	class      WorkloadClass
 	enqueuedTS time.Time
 }

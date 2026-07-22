@@ -67,12 +67,13 @@ type DutyResult struct {
 // (the stack unconfigured) makes every call ErrStackAbsent so the stage
 // seams degrade exactly per each duty's S12.4/S06 row (R17).
 type Duty struct {
-	reg    *Registry
-	client *Client
-	cps    *gates.Checkpoints
-	log    *eventlog.Log
-	adm    *Admissions
-	logger *slog.Logger
+	reg      *Registry
+	client   *Client
+	cps      *gates.Checkpoints
+	log      *eventlog.Log
+	adm      *Admissions
+	admitter *VRAMAdmitter // OQ2 live GPU-admission pre-flight; nil ⇒ no gate
+	logger   *slog.Logger
 }
 
 // DutyDeps are the wired dependencies of a live Duty.
@@ -82,6 +83,10 @@ type DutyDeps struct {
 	Checkpoints *gates.Checkpoints
 	Events      *eventlog.Log
 	Admissions  *Admissions
+	// Admitter is the S12.7 VRAM/battery admitter run as the LIVE platform-plane
+	// pre-flight before a duty call triggers a llama-swap load (OQ2). Nil ⇒ no
+	// gate (the dev default is unchanged; an unconfigured stack never gates).
+	Admitter *VRAMAdmitter
 	// AdmissionsFlag is the durable cross-process admission flag path (F4/F11);
 	// used only when Admissions is nil. "" = the in-memory dev fallback.
 	AdmissionsFlag string
@@ -99,7 +104,7 @@ func NewDuty(d DutyDeps) *Duty {
 	if adm == nil {
 		adm = NewAdmissions(d.AdmissionsFlag)
 	}
-	return &Duty{reg: d.Registry, client: d.Client, cps: d.Checkpoints, log: d.Events, adm: adm, logger: logger}
+	return &Duty{reg: d.Registry, client: d.Client, cps: d.Checkpoints, log: d.Events, adm: adm, admitter: d.Admitter, logger: logger}
 }
 
 // Admissions returns the caller's admission gate (the eager-unload switch),
@@ -144,6 +149,22 @@ func (d *Duty) Call(ctx context.Context, runID string, in DutyRequest) (DutyResu
 	if in.Classification && len(in.Schema) > 0 {
 		if err := assertAbstain(in.Schema); err != nil {
 			return DutyResult{}, err
+		}
+	}
+
+	// OQ2 LIVE pre-flight: run the S12.7 VRAM + S12.8 battery admission check
+	// BEFORE the call triggers a llama-swap load, so operator-wins holds live (a
+	// game/compositor holding VRAM refuses the load; battery policy parks
+	// non-urgent duties). Nil-safe: no admitter ⇒ no gate (dev default). A
+	// refusal surfaces as ErrGPUAdmissionRefused and the caller degrades per its
+	// S12.4/S06 row (R17) — never a faked load.
+	if d.admitter != nil {
+		ok, reason, err := d.admitter.AdmitDuty(ctx, seat.Model, aliasUrgent(in.Alias))
+		if err != nil {
+			return DutyResult{}, fmt.Errorf("local: GPU admission pre-flight for duty %q: %w", in.Alias, err)
+		}
+		if !ok {
+			return DutyResult{}, fmt.Errorf("%w: duty %q (%s)", ErrGPUAdmissionRefused, in.Alias, reason)
 		}
 	}
 

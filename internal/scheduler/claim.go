@@ -78,7 +78,7 @@ func (s *Scheduler) activeSlots(ctx context.Context) (map[laneKey]int64, error) 
 // skipped). The lane comes from the run (Spec S02.2 runs.lane).
 func (s *Scheduler) candidates(ctx context.Context) ([]candidate, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT q.queue_id, q.run_id, q.user_id, r.lane, q.priority_lane, q.enqueued_ts
+		`SELECT q.queue_id, q.run_id, q.user_id, r.lane, r.substrate, q.priority_lane, q.enqueued_ts
 		   FROM queue q JOIN runs r ON r.run_id = q.run_id
 		  WHERE q.status = ? AND r.state = ?`,
 		queueQueued, string(run.StateQueued))
@@ -93,7 +93,7 @@ func (s *Scheduler) candidates(ctx context.Context) ([]candidate, error) {
 			class    string
 			enqueued string
 		)
-		if err := rows.Scan(&c.queueID, &c.runID, &c.userID, &c.lane, &class, &enqueued); err != nil {
+		if err := rows.Scan(&c.queueID, &c.runID, &c.userID, &c.lane, &c.substrate, &class, &enqueued); err != nil {
 			return nil, fmt.Errorf("scheduler: scan candidate: %w", err)
 		}
 		c.class = WorkloadClass(class)
