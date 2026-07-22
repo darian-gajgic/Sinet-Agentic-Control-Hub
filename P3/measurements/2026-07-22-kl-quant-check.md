@@ -2,7 +2,7 @@
 
 - **DRAIN C9 CORRECTION (round 1) + R1 (round 2):** round 1's §28 said "Executed on the two default-path quants" — FALSE at the time (only the 4B ran; the 9B was deferred on an UNMEASURED "multi-hour" estimate). Drain round 2 completed the 9B BF16 baseline pull and EXECUTED the 9B leg too (below), so BOTH default-path quants are now genuinely KL-checked. This file records the ACTUAL executions.
 - Tool: `llama-perplexity` (built from the pinned b10085 tree, `version: 1 (b4aa7dd)` == b10085). Corpus: the ~250K-token Sinet-domain corpus (`kl_corpus.txt`, assembled deterministically from Spec/Research/Docs, 1,050,000 B ≈ 262,500 tokens, sha256 `592874e7…`). Two-step: baseline logits from the BF16 model → compare the deployed quant. Weights-quant only; KV cache stays fp16 (S12.3). $0 local; on AC.
-- Baselines (BF16, sanctioned OQ3(a) pull): Qwen3.5-4B-BF16 (8.42 GB, sha `9e6e2841…`), Qwen3.5-9B-BF16 (**17,920,697,312 B == HF content-length**, completed in drain round 2; in `~/.sinet-b45/baselines/`, deletable after the check).
+- Baselines (BF16, sanctioned OQ3(a) pull): Qwen3.5-4B-BF16 (8.42 GB, sha `9e6e2841…`), Qwen3.5-9B-BF16 (**17,920,697,312 B == HF content-length**, sha256 `daebe40eeea7057c1cdf35ac56d13f507d8bf12171bbb7a6b6b0d3f05439159a` — hashed at coordinator landing [N2], completed in drain round 2; in `~/.sinet-b45/baselines/`, deletable after the check).
 
 ## Pre-registered expectation
 
