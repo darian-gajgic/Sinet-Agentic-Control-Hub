@@ -20,17 +20,19 @@ func TestSeedRubricValid(t *testing.T) {
 	if err := r.Validate(); err != nil {
 		t.Fatalf("seed rubric invalid: %v", err)
 	}
-	if r.Domain != verify.DomainSoftware || r.Version != 1 {
+	// v2 (B4-7 rider 1): the golden-set rates are measured on the ratified
+	// opus-4-8 judge (P-T06-5); content flagged for gate ratification (D1).
+	if r.Domain != verify.DomainSoftware || r.Version != 2 {
 		t.Fatalf("rubric identity: %+v", r)
 	}
-	if r.GoldenSet.Measured {
-		t.Fatal("seed rubric must be honestly unmeasured until the B4 golden-set run")
+	if !r.GoldenSet.Measured || r.GoldenSet.TPR == nil || r.GoldenSet.TNR == nil {
+		t.Fatal("v2 rubric must carry measured golden-set rates (rider 1 P-T06-5 run)")
 	}
-	if !strings.Contains(r.JudgePin, "S08") {
-		t.Fatalf("judge pin must name the S08 selection hand-off: %q", r.JudgePin)
+	if !strings.Contains(r.JudgePin, "opus-4-8") {
+		t.Fatalf("judge pin must name the ratified opus-4-8 judge seat: %q", r.JudgePin)
 	}
-	if !strings.Contains(r.LengthBiasNote, "UNMEASURED") {
-		t.Fatalf("length-bias note must be honest (P-T06-3): %q", r.LengthBiasNote)
+	if !strings.Contains(r.LengthBiasNote, "MEASURED") {
+		t.Fatalf("length-bias note must be measured (P-T06-3): %q", r.LengthBiasNote)
 	}
 	// Engineering rules bite: a rubric without anchors or with a scale is
 	// rejected.

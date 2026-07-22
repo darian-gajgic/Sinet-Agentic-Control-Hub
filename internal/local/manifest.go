@@ -156,6 +156,15 @@ func Manifest() []SeatRecord {
 			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B (3.3 vs 4.1 comparison = S12.9 R24; the first-party 4.1 GGUF ibm-granite/granite-guardian-4.1-8b-GGUF EXISTS, apache-2.0, full quant ladder — the alternate row below). Quant policy: Q5/Q6 for ≤9B on pool12; KV cache stays fp16/q8_0 (never quantized). RE-PULLED + HASHED at B4-7 (R19): resumed to completion (4.20 GB, sha256 above). This is the entailment DEFAULT seat, consumed by B4-7's entailment measurement (S12.9).",
 		},
 		{
+			Seat: "Granite Guardian 4.1 8B", Role: "Entailment MEASUREMENT-ALTERNATE (S12.9 #5 3.3-vs-4.1 comparison; platform data)",
+			Model:   "Granite Guardian 4.1-8B",
+			CardURL: "https://huggingface.co/ibm-granite/granite-guardian-4.1-8b-GGUF",
+			License: License{SPDX: "Apache-2.0", VerifyDate: "2026-07-22", Note: "card license verified apache-2.0 at pull (S12.3)"},
+			Files:   []GGUFFile{{Repo: "ibm-granite/granite-guardian-4.1-8b-GGUF", Name: "granite-guardian-4.1-8b-Q5_K_M.gguf", SHA256: "4bb6aa91e991822559583f77d40c860027f856a7f79fe1c6c3c3c35b97c838a5"}},
+			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, ServingContext: 8192, GPUSeated: true, Servable: true, Pulled: true,
+			Note: "PULLED + HASHED at B4-7 drain C7 (R19/F5b): the first-party 4.1 GGUF (5.97 GB, sha256 above; my round-1 'no such GGUF' claim was FALSE — I had probed one wrong repo name). A MEASUREMENT-ALTERNATE for the S12.9 #5 entailment comparison (2026-07-22-entailment-thresholds.md), NOT the default seat (3.3 stays default until a swap gate flip). Card license apache-2.0 verified at pull.",
+		},
+		{
 			Seat: "Bespoke-MiniCheck-7B", Role: "Entailment accuracy-alternate (alternate only, never default)",
 			Model:   "Bespoke-MiniCheck-7B",
 			CardURL: "https://huggingface.co/bespokelabs/Bespoke-MiniCheck-7B",

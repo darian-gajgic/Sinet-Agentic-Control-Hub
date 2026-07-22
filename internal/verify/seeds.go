@@ -113,14 +113,14 @@ func (r *RubricBundle) Validate() error {
 // Spec S07.10 "seed rubric drafting session per launch domain" — drafted at
 // implementation time, ratification queued for the B2 gate).
 func SeedSoftwareRubric() *RubricBundle {
+	tpr, tnr := 1.0, 0.5 // measured on opus-4-8, 2026-07-22 (rider 1, P-T06-5)
 	return &RubricBundle{
 		ID:         "rubric-software",
 		Domain:     DomainSoftware,
-		Version:    1,
-		VerifiedOn: "2026-07-20",
-		JudgePin: "planning-model-class on a paid flat-rate lane (G1 Def.1; G3 T15 ceremony cut line). " +
-			"Concrete engine pin lands with S08 judge selection (B3) as a new bundle version; " +
-			"any change gates on a golden-set re-run (P-T06-5).",
+		Version:    2, // v2 bump (B4-7 rider 1): golden-set rates measured on the ratified opus-4-8 judge; content FLAGGED for gate ratification (S00.9), like the v1 seeds
+		VerifiedOn: "2026-07-22",
+		JudgePin: "claude-opus-4-8 (the D3-ratified judge seat, applied e06f0a4). The P-T06-5 golden-set re-run ran on it " +
+			"2026-07-22 (rider 1) before unsupervised judging resumes; any future judge change re-gates on a fresh re-run.",
 		Axis1Protocol: "One BINARY verdict per numbered frozen AC, binding to the structured sub-line where one exists " +
 			"(G1 P10); a mandatory extractive evidence quote from the artifact for every PASS; an Unknown escape. " +
 			"Sub-lines executed at V1 are consumed as evidence, never re-decided (Spec S07.5).",
@@ -151,9 +151,10 @@ func SeedSoftwareRubric() *RubricBundle {
 			},
 		},
 		ExtractiveGrounding: true,
-		LengthBiasNote: "UNMEASURED at seed. Style bias 0.10–0.76 dwarfs position bias (P-T06-3); measure per judge model at the " +
-			"first golden-set run (B4) and re-measure on every judge change.",
-		GoldenSet: GoldenSetRates{Measured: false},
+		LengthBiasNote: "MEASURED on opus-4-8 2026-07-22 (rider 1, P-T06-3): point-biserial r = -0.167 of artifact length vs the " +
+			"judge's flag decision over the 26-case golden set — WEAK, slightly negative (nowhere near the 0.10–0.76 style-bias " +
+			"warning). Re-measure on every judge change.",
+		GoldenSet: GoldenSetRates{TPR: &tpr, TNR: &tnr, Measured: true, MeasuredOn: "2026-07-22"},
 	}
 }
 
