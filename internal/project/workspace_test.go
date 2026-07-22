@@ -143,15 +143,25 @@ func TestSnapshotNoChangeNoEmptyCommit(t *testing.T) {
 	}
 }
 
-func TestFreshAttemptNewBranchOldStays(t *testing.T) {
+func TestFreshAttemptBranchesFromMovedHead(t *testing.T) {
 	f := newFix(t)
 	ctx := context.Background()
 	e := f.activeProject("shop", "alice", "shop", map[string]string{"main.go": "package main\n"})
 	ws1, _ := f.store.EnsureWorkspace(ctx, "shop", "task-1")
+	if ws1.Base != f.git(e.StorePath, "rev-parse", "refs/heads/main") {
+		t.Fatal("attempt 1 base is not the default-branch HEAD")
+	}
 	f.writeFiles(ws1.Path, map[string]string{"work.txt": "attempt 1\n"})
-	if _, err := f.store.Snapshot(ctx, ws1.Path); err != nil {
+	tip1, err := f.store.Snapshot(ctx, ws1.Path)
+	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
+
+	// The default branch MOVES (a sibling accept advanced main).
+	f.writeFiles(e.StorePath, map[string]string{"upstream.txt": "moved\n"})
+	f.git(e.StorePath, "add", "-A")
+	f.git(e.StorePath, "commit", "-q", "-m", "upstream advance")
+	movedHead := f.git(e.StorePath, "rev-parse", "refs/heads/main")
 
 	ws2, err := f.store.FreshAttempt(ctx, "shop", "task-1", 2)
 	if err != nil {
@@ -160,9 +170,16 @@ func TestFreshAttemptNewBranchOldStays(t *testing.T) {
 	if ws2.Branch == ws1.Branch {
 		t.Fatalf("fresh attempt reused the branch %q", ws2.Branch)
 	}
-	// The old attempt's branch STAYS (Spec S13.5: never rewriting the old one).
-	if sha, _ := f.store.refSHA(ctx, e.StorePath, "refs/heads/"+ws1.Branch); sha == "" {
-		t.Fatal("fresh attempt deleted the old run branch")
+	// F6: the new attempt branches from the CURRENT (moved) HEAD, NOT attempt 1's base.
+	if ws2.Base != movedHead {
+		t.Fatalf("fresh attempt base = %q, want the moved HEAD %q", ws2.Base, movedHead)
+	}
+	if ws2.Base == ws1.Base {
+		t.Fatal("fresh attempt reused the old (stale) base")
+	}
+	// The old attempt's branch STAYS untouched (Spec S13.5).
+	if sha, _ := f.store.refSHA(ctx, e.StorePath, "refs/heads/"+ws1.Branch); sha != tip1 {
+		t.Fatalf("old run branch moved/deleted: %q, want %q", sha, tip1)
 	}
 }
 
@@ -212,7 +229,7 @@ func TestMintedRevisionRefSurvivesBranchGC(t *testing.T) {
 	unprotected, _ := f.store.Snapshot(ctx, ws.Path)
 
 	// Abandon the attempt: retention GC removes the worktree + branch.
-	if err := f.store.CollectRunWorktree(ctx, "shop", "task-1", 1); err != nil {
+	if err := f.store.CollectRunWorktree(ctx, "shop", "task-1", 1, []string{ref}); err != nil {
 		t.Fatalf("CollectRunWorktree: %v", err)
 	}
 	// Force a real gc prune; the minted-revision commit MUST survive via its
@@ -290,7 +307,7 @@ func TestGCFlagsDirtyOrphanNeverDeletes(t *testing.T) {
 		t.Fatal("FlagWorktrees deleted a worktree (it must only flag)")
 	}
 	// A dirty run worktree also refuses retention GC (ErrDirty).
-	if err := f.store.CollectRunWorktree(ctx, "shop", "task-1", 1); !errors.Is(err, ErrDirty) {
+	if err := f.store.CollectRunWorktree(ctx, "shop", "task-1", 1, nil); !errors.Is(err, ErrDirty) {
 		t.Fatalf("collect dirty run worktree: err = %v, want ErrDirty", err)
 	}
 }

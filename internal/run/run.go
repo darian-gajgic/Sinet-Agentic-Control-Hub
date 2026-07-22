@@ -425,6 +425,17 @@ func (s *Store) Get(ctx context.Context, runID string) (Run, error) {
 	return scanRun(row)
 }
 
+// SetWorkspaceRef records the run's workspace path — the isolated workspace it
+// works in (Spec S02.10 workspace seam; S13.5 R14: runs.workspace_ref records
+// the workspace). Idempotent; not a state change, so it rides its own tx.
+func (s *Store) SetWorkspaceRef(ctx context.Context, runID, ref string) error {
+	return s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`UPDATE runs SET workspace_ref = ? WHERE run_id = ?`, nullString(ref), runID)
+		return err
+	})
+}
+
 // GetTx returns one run inside the caller's transaction.
 func (s *Store) GetTx(ctx context.Context, tx *sql.Tx, runID string) (Run, error) {
 	return s.getTx(ctx, tx, runID)

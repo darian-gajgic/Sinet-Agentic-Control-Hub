@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// STANDING conformance battery (CONVENTIONS §17/§35; the §15 import-graph
+// STANDING conformance battery (brief R35; CONVENTIONS §17/§23; the §15 import-graph
 // precedent): the git-topology/registry package's isolation is proven by
 // inspection on every run, never assumed.
 

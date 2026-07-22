@@ -323,32 +323,6 @@ func (s *Store) MatchForIntake(ctx context.Context, h MatchHint) (Entry, bool, e
 	return best, true, nil
 }
 
-// MatchForIntakeAny matches an active entry by name/alias WITHOUT a visibility
-// filter — a platform-internal resolution (the composition root resolving a
-// deliverable's repo-backed base, R25), never a user-facing query.
-func (s *Store) MatchForIntakeAny(ctx context.Context, h MatchHint) (Entry, bool, error) {
-	entries, err := s.List(ctx)
-	if err != nil {
-		return Entry{}, false, err
-	}
-	hay := " " + strings.ToLower(h.Title+" "+h.Text) + " "
-	var best Entry
-	bestLen := 0
-	for _, e := range entries {
-		if !e.Active() {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(e.Name))
-		if name != "" && tokenPresent(hay, name) && len(name) > bestLen {
-			best, bestLen = e, len(name)
-		}
-	}
-	if bestLen == 0 {
-		return Entry{}, false, nil
-	}
-	return best, true, nil
-}
-
 // visibleTo reports whether user owns or is an invited member of the entry.
 func visibleTo(e Entry, user string) bool {
 	if e.Owner == user {

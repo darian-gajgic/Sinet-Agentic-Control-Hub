@@ -41,14 +41,23 @@ func runBranch(pipelineID string, attempt int) string {
 	return fmt.Sprintf("sinet/run/%s-a%d", pipelineID, attempt)
 }
 
-func baseRef(pipelineID string) string { return "refs/sinet/base/" + pipelineID }
+// baseRef names an attempt's durably-recorded base — the default-branch HEAD
+// at THAT attempt's creation (Spec S13.5: a fresh attempt branches from the
+// current HEAD, base recorded per-attempt). Attempt 1's base is revision 1's
+// old side (Spec S13.1); a sibling-leaf name keeps later attempts D/F-safe.
+func baseRef(pipelineID string, attempt int) string {
+	if attempt <= 1 {
+		return "refs/sinet/base/" + pipelineID
+	}
+	return fmt.Sprintf("refs/sinet/base/%s-a%d", pipelineID, attempt)
+}
 
 func (s *Store) worktreePath(projectID, pipelineID string, attempt int) string {
-	name := sanitize(pipelineID)
+	name := pathComponent(pipelineID)
 	if attempt > 1 {
 		name = fmt.Sprintf("%s-a%d", name, attempt)
 	}
-	return filepath.Join(s.root, "worktrees", sanitize(projectID), name)
+	return filepath.Join(s.root, "worktrees", pathComponent(projectID), name)
 }
 
 // EnsureWorkspace attaches a pipeline to its run-branch worktree of the
@@ -74,9 +83,12 @@ func (s *Store) ensureWorkspaceAttempt(ctx context.Context, projectID, pipelineI
 	branch := runBranch(pipelineID, attempt)
 	path := s.worktreePath(projectID, pipelineID, attempt)
 
-	// Record the pipeline base durably the first time (revision 1's old side,
-	// Spec S13.1): refs/sinet/base/<pipeline> = default-branch HEAD now.
-	base, err := s.refSHA(ctx, e.StorePath, baseRef(pipelineID))
+	// Record THIS attempt's base durably the first time: the default-branch
+	// HEAD now (Spec S13.5 — a fresh attempt branches from the CURRENT HEAD;
+	// attempt 1's base is revision 1's old side, Spec S13.1). Once recorded the
+	// base is immutable so a re-attach reuses the exact branch point.
+	bref := baseRef(pipelineID, attempt)
+	base, err := s.refSHA(ctx, e.StorePath, bref)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -88,7 +100,7 @@ func (s *Store) ensureWorkspaceAttempt(ctx context.Context, projectID, pipelineI
 		if base == "" {
 			return Workspace{}, fmt.Errorf("%w: project %q default branch %q has no HEAD", ErrBadInput, projectID, e.DefaultBranch)
 		}
-		if _, err := s.git(ctx, e.StorePath, identity{}, "update-ref", baseRef(pipelineID), base); err != nil {
+		if _, err := s.git(ctx, e.StorePath, identity{}, "update-ref", bref, base); err != nil {
 			return Workspace{}, err
 		}
 	}
@@ -118,8 +130,8 @@ func (s *Store) ensureWorkspaceAttempt(ctx context.Context, projectID, pipelineI
 // FreshAttempt starts a NEW run branch and worktree for a pipeline (Spec
 // S13.5: the attempt model — when the base moved or an attempt is abandoned, a
 // NEW branch, never rewriting the old one; the old attempt's branch STAYS
-// until revision-retention GC clears it). The new base is the CURRENT default
-// branch HEAD.
+// until revision-retention GC clears it). The new attempt branches from the
+// CURRENT default-branch HEAD, recorded as this attempt's own base ref.
 func (s *Store) FreshAttempt(ctx context.Context, projectID, pipelineID string, attempt int) (Workspace, error) {
 	if attempt < 2 {
 		return Workspace{}, fmt.Errorf("%w: a fresh attempt is >= 2 (attempt 1 is EnsureWorkspace)", ErrBadInput)
@@ -232,29 +244,48 @@ func (s *Store) BaseContent(ctx context.Context, projectID, pipelineID string) (
 	if err != nil {
 		return nil, err
 	}
-	base, err := s.refSHA(ctx, e.StorePath, baseRef(pipelineID))
+	// Revision 1's old side is attempt 1's base (the pre-task state, Spec
+	// S13.1).
+	base, err := s.refSHA(ctx, e.StorePath, baseRef(pipelineID, 1))
 	if err != nil || base == "" {
 		return nil, err
 	}
-	names, err := s.git(ctx, e.StorePath, identity{}, "ls-tree", "-r", "--name-only", base)
+	// -z gives NUL-terminated paths so a path with an embedded newline or a
+	// quirky name is unambiguous (quotepath is already off).
+	names, err := s.git(ctx, e.StorePath, identity{}, "ls-tree", "-r", "-z", "--name-only", base)
 	if err != nil {
 		return nil, err
 	}
 	files := map[string]string{}
-	for _, name := range strings.Split(names, "\n") {
-		name = strings.TrimSpace(name)
+	for _, name := range strings.Split(names, "\x00") {
 		if name == "" {
 			continue
 		}
-		content, err := s.git(ctx, e.StorePath, identity{}, "show", base+":"+name)
+		// Byte-exact blob read: cat-file blob returns the blob VERBATIM — no
+		// added trailing newline, no trimming. Leading blank lines, trailing
+		// newlines and empty files are preserved so Compare line numbers and
+		// old-side anchor mapping are exact (P-T12-2: silent mis-anchoring is
+		// the worst class).
+		content, err := s.blob(ctx, e.StorePath, base, name)
 		if err != nil {
 			return nil, err
 		}
-		// `git show` trims a trailing newline off blob output; the diff/anchor
-		// consumers line-split, so a trailing newline is re-added for fidelity.
-		files[name] = content + "\n"
+		files[name] = content
 	}
 	return files, nil
+}
+
+// blob returns a tree-ish path's blob content byte-exact (no trim, no added
+// newline). A read error is loud, never a silent empty file.
+func (s *Store) blob(ctx context.Context, store, treeish, path string) (string, error) {
+	code, stdout, stderr, err := s.gitRaw(ctx, store, identity{}, "cat-file", "blob", treeish+":"+path)
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", fmt.Errorf("project: cat-file blob %s:%s (exit %d): %s", treeish, path, code, strings.TrimSpace(stderr))
+	}
+	return stdout, nil
 }
 
 // RepoHead returns the current HEAD of an ACTIVE project's default branch —
@@ -270,6 +301,22 @@ func (s *Store) RepoHead(ctx context.Context, projectID string) (string, error) 
 		return "", fmt.Errorf("%w: %q", ErrNotActive, projectID)
 	}
 	return s.refSHA(ctx, e.StorePath, "refs/heads/"+e.DefaultBranch)
+}
+
+// ExistingWorkspace returns a pipeline's attempt-1 run-branch worktree PATH
+// when it already exists (created by the execute leg), WITHOUT creating one —
+// the snapshot/mint resolution for legs (intake, verify) that must not
+// materialize a workspace (F4). ok=false when no worktree exists.
+func (s *Store) ExistingWorkspace(ctx context.Context, projectID, pipelineID string) (string, bool, error) {
+	e, err := s.Get(ctx, projectID)
+	if err != nil {
+		return "", false, err
+	}
+	path := s.worktreePath(projectID, pipelineID, 1)
+	if s.worktreeRegistered(ctx, e.StorePath, path) {
+		return path, true, nil
+	}
+	return "", false, nil
 }
 
 // worktreeRegistered reports whether path is a registered (non-prunable)

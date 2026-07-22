@@ -206,6 +206,8 @@ func runRole(runID string) (role, bool) {
 		return roleVerify, true
 	case strings.HasSuffix(id, RunSuffixCompose):
 		return roleCompose, true
+	case strings.HasSuffix(id, RunSuffixOnboard):
+		return roleOnboard, true
 	}
 	return "", false
 }
@@ -227,8 +229,8 @@ func allDigits(s string) bool {
 func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 	rl, ok := runRole(r.ID)
 	if !ok {
-		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s|*%s)", r.ID,
-			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify, RunSuffixCompose)
+		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s|*%s|*%s)", r.ID,
+			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify, RunSuffixCompose, RunSuffixOnboard)
 	}
 	switch rl {
 	case roleIntake:
@@ -237,6 +239,8 @@ func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 		return s.dispatchExecute(ctx, r)
 	case roleCompose:
 		return s.dispatchCompose(ctx, r)
+	case roleOnboard:
+		return s.dispatchOnboard(ctx, r)
 	default:
 		return s.dispatchVerify(ctx, r)
 	}

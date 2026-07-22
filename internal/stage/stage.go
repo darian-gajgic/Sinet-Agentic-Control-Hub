@@ -48,6 +48,7 @@ package stage
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -249,7 +250,7 @@ type Config struct {
 	// The S13.5/S13.7 git-topology + registry seams (B4-2), wired by the
 	// composition root over internal/project through narrow func fields (the
 	// Driver.Snapshot/LedgerRevision precedent; this package never imports
-	// internal/project — the walls stay clean, CONVENTIONS §35). All nil in
+	// internal/project — the walls stay clean, brief R35 / CONVENTIONS §23). All nil in
 	// the pre-S13.5 posture: intake resolves no registry, deliverables pin
 	// content only (snapshot_sha NULL), and the pre-task base stays empty.
 	//
@@ -269,6 +270,14 @@ type Config struct {
 	CreateRevisionRef  func(ctx context.Context, runID, ref, snapshotSHA string) error
 	BaseContent        review.BaseContentSource
 	WorkspaceCwd       func(ctx context.Context, runID string) (path string, ok bool, err error)
+
+	// The S13.7 onboarding-as-task seams (R5/F1), wired over internal/project.
+	// OnboardStart runs register → clone → scan → draft, returning the drafted
+	// card payload (idempotent under re-dispatch); OnboardApprove activates the
+	// pending entry on owner approval (D10), applying an optional edited draft.
+	// Nil = the onboarding run role is unavailable (StartOnboarding errors).
+	OnboardStart   func(ctx context.Context, projectID, owner, name, source string) (json.RawMessage, error)
+	OnboardApprove func(ctx context.Context, projectID, owner string, editedDraft json.RawMessage) error
 
 	Logger *slog.Logger
 	Now    func() time.Time

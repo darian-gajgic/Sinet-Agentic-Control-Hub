@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,7 +64,7 @@ func (s *Store) Onboard(ctx context.Context, in OnboardInput) (Entry, Draft, err
 	if branch == "" {
 		branch = "main"
 	}
-	store := filepath.Join(s.root, "stores", sanitize(in.ProjectID))
+	store := filepath.Join(s.root, "stores", pathComponent(in.ProjectID))
 	if _, err := os.Stat(store); err == nil {
 		return Entry{}, Draft{}, fmt.Errorf("%w: store path %q already exists", ErrBadInput, store)
 	}
@@ -102,7 +103,7 @@ func (s *Store) Onboard(ctx context.Context, in OnboardInput) (Entry, Draft, err
 	if err != nil {
 		return Entry{}, Draft{}, err
 	}
-	draft, err := s.Scan(store)
+	draft, err := s.Scan(store, branch)
 	if err != nil {
 		return Entry{}, Draft{}, err
 	}
@@ -144,6 +145,54 @@ func (s *Store) Approve(ctx context.Context, projectID, approver string, edited 
 	return s.Activate(ctx, projectID, approver)
 }
 
+// OnboardStart runs the platform onboarding task's deterministic steps
+// (register → clone/init → scan → draft) and returns the drafted content as
+// JSON to surface on the durable owner-approval ask (Spec S13.7, R5/F1). It is
+// idempotent under re-dispatch: if the entry already exists pending, it returns
+// its current drafted capture rather than re-cloning. The run-substrate
+// realization (the .onboard run role + the ask/park) is the stage layer's; the
+// git side stays here (stage never imports internal/project, brief R35).
+func (s *Store) OnboardStart(ctx context.Context, in OnboardInput) ([]byte, error) {
+	if e, err := s.Get(ctx, in.ProjectID); err == nil {
+		// Already onboarded (re-dispatch after a crash): return the current
+		// drafted capture; a rescan is the owner's explicit re-scan verb.
+		if e.CaptureVersion >= 1 {
+			return json.Marshal(draftOf(e.Capture))
+		}
+		return json.Marshal(Draft{})
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	_, draft, err := s.Onboard(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(draft)
+}
+
+// OnboardApprove activates a pending entry on owner approval, applying an
+// optional edited draft (Spec S13.7 → D10). The owner check is the stage ask's
+// (the ask row's owner answers); this asserts it too (defence in depth).
+func (s *Store) OnboardApprove(ctx context.Context, projectID, approver string, editedDraftJSON []byte) error {
+	var edited *Draft
+	if len(editedDraftJSON) > 0 && string(editedDraftJSON) != "null" {
+		var d Draft
+		if err := json.Unmarshal(editedDraftJSON, &d); err != nil {
+			return fmt.Errorf("%w: onboard edited draft: %v", ErrBadInput, err)
+		}
+		// Recompute the drift baseline over the owner's edited content.
+		d.ScanHash = scanHash(d)
+		edited = &d
+	}
+	_, err := s.Approve(ctx, projectID, approver, edited)
+	return err
+}
+
+// draftOf projects a capture back into a Draft (the onboarding card payload).
+func draftOf(c Capture) Draft {
+	return Draft{Conventions: c.Conventions, Commands: c.Commands, DangerZones: c.DangerZones, ScanHash: c.ScanHash}
+}
+
 // Rescan re-scans an entry's store and records a NEW capture version (Spec
 // S13.7: re-scan on demand). Never overwrites the prior capture — re-capture
 // is a new immutable version.
@@ -152,7 +201,7 @@ func (s *Store) Rescan(ctx context.Context, projectID, by string) (Capture, erro
 	if err != nil {
 		return Capture{}, err
 	}
-	draft, err := s.Scan(e.StorePath)
+	draft, err := s.Scan(e.StorePath, e.DefaultBranch)
 	if err != nil {
 		return Capture{}, err
 	}
@@ -184,7 +233,7 @@ func (s *Store) DriftCheck(ctx context.Context, projectID string) (DriftReport, 
 	if e.CaptureVersion < 1 {
 		return DriftReport{}, fmt.Errorf("%w: entry %q has no capture to compare", ErrBadInput, projectID)
 	}
-	live, err := s.Scan(e.StorePath)
+	live, err := s.Scan(e.StorePath, e.DefaultBranch)
 	if err != nil {
 		return DriftReport{}, err
 	}
@@ -252,4 +301,17 @@ func sanitize(s string) string {
 			return '_'
 		}
 	}, s)
+}
+
+// pathComponent maps an id to a COLLISION-FREE filesystem path component: an
+// already path-safe id maps to itself; any id sanitize would alter carries a
+// short content-hash suffix, so two distinct ids (e.g. "a/b" and "a_b") can
+// never share a worktree/store path (F16e — a collision would be silent data
+// corruption across pipelines).
+func pathComponent(id string) string {
+	clean := sanitize(id)
+	if clean == id && id != "" {
+		return clean
+	}
+	return clean + "-" + hashContent([]byte(id))[:12]
 }

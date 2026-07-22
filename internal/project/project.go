@@ -8,7 +8,7 @@
 // GC, the minted-revision platform refs, and the knowledge-dir git committer
 // (Spec S09.2 commit-on-approval).
 //
-// Boundaries and import discipline (CONVENTIONS §17/§35): this package imports
+// Boundaries and import discipline (brief R35; CONVENTIONS §17/§23): this package imports
 // storage + eventlog (+ stdlib) ONLY. It is consumed by the composition root
 // (shell) and the stage runtime through narrow interfaces; it never imports
 // internal/memory, internal/adapters, internal/stage, internal/intake, or
@@ -165,6 +165,10 @@ var (
 	// ErrDirty rejects auto-deleting a worktree that holds uncommitted work
 	// (Spec S13.5/S02.10: dirty checkouts are flagged, never auto-deleted).
 	ErrDirty = errors.New("project: worktree holds uncommitted work — flagged, never auto-deleted")
+	// ErrUnprotectedRevision rejects retention GC of a run branch whose minted
+	// revisions are not all protected by their platform refs (Spec S13.1/R21):
+	// deleting the branch would orphan a minted revision's only copy.
+	ErrUnprotectedRevision = errors.New("project: a minted revision is not ref-protected — branch retained")
 	// ErrBadInput covers malformed store inputs.
 	ErrBadInput = errors.New("project: invalid input")
 	// ErrAlreadyRegistered rejects a duplicate registration of a project id.

@@ -18,6 +18,7 @@ package shell
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -251,7 +252,7 @@ func Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("shell: init knowledge git repo (Spec S13.10): %w", err)
 		}
 		committer := proj.Committer()
-		pseams := projectSeams{proj: proj, runs: runs, db: db}
+		pseams := &projectSeams{proj: proj, runs: runs, db: db}
 
 		// The knowledge write gate carries the committer at every construction
 		// site (Spec S09.2/D9; R28): a file-backed approval commits with the
@@ -335,7 +336,7 @@ func Run(ctx context.Context, opts Options) error {
 			},
 			// The S13.5/S13.7 git-topology + registry seams (B4-2), wired over
 			// internal/project through the projectSeams adapter (stage/intake/
-			// review never import internal/project, CONVENTIONS §35).
+			// review never import internal/project, brief R35 / CONVENTIONS §23).
 			Registry:           registrySeam{proj: proj},
 			Fingerprint:        pseams.Fingerprint,
 			CitedEntryVersions: memoryCitedEntryVersions(memStore),
@@ -343,6 +344,13 @@ func Run(ctx context.Context, opts Options) error {
 			CreateRevisionRef:  pseams.CreateRevisionRef,
 			BaseContent:        pseams,
 			WorkspaceCwd:       pseams.WorkspaceCwd,
+			// The S13.7 onboarding-as-task seams over internal/project (R5).
+			OnboardStart: func(ctx context.Context, projectID, owner, name, source string) (json.RawMessage, error) {
+				return proj.OnboardStart(ctx, project.OnboardInput{ProjectID: projectID, Owner: owner, Name: name, Source: source})
+			},
+			OnboardApprove: func(ctx context.Context, projectID, owner string, edited json.RawMessage) error {
+				return proj.OnboardApprove(ctx, projectID, owner, edited)
+			},
 			// CheckPacks ships empty: the software pack is per-project
 			// registry machinery (Spec S13, B4) — software-domain verifies
 			// fail LOUDLY rather than run a degraded launch domain.
@@ -365,6 +373,9 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 		sk.Bind(sched)
+		// Late-bind the pipeline into the project seams: run→project resolution
+		// reads the durable intake match (st.Registry.Project) through it (F3).
+		pseams.pipe = sk.Pipeline()
 		admission = sched
 		intakeSurface = sk.Surface()
 	}
@@ -711,8 +722,13 @@ func memoryCitedEntryVersions(s *memory.Store) func(ctx context.Context, keys []
 		out := make(map[string]string, len(keys))
 		for _, k := range keys {
 			e, err := s.Get(ctx, k)
+			if errors.Is(err, memory.ErrNotFound) {
+				continue // genuinely absent → vanished (removed/never existed)
+			}
 			if err != nil {
-				continue // absent → vanished (removed/never existed)
+				// A real DB error must PROPAGATE — not be mistaken for a
+				// vanished entry, which would fabricate drift (F11).
+				return nil, fmt.Errorf("shell: resolve cited entry %q: %w", k, err)
 			}
 			if e.Status != memory.StatusActive || e.Tombstone {
 				continue // superseded/removed/tombstoned → vanished

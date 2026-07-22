@@ -713,16 +713,30 @@ func (p *Pipeline) phaseApproval(ctx context.Context, st *State, pair *Pair) (bo
 			st.StoredFingerprint = &fp
 		}
 	}
-	// Cited project-truth entries (Spec S09.6, R31): resolve the plan's
-	// citations to their current versions and record them in the stored
-	// fingerprint so a later supersession/removal/new-version is drift.
+	// Cited project-truth entries (Spec S09.6 "records those entry versions in
+	// its freshness fingerprint", R31): resolve the plan's citations to their
+	// current versions and record them in the stored fingerprint so a later
+	// supersession/removal/new-version is drift. A citation that cannot resolve
+	// at approval (resolver error, or a cited key that is not an ACTIVE
+	// project-truth entry) is a LOUD capture failure surfaced through the
+	// approval flow — never silently stored-as-nothing, which would escape every
+	// future drift check (F10). The resolver-absent test posture leaves
+	// citations uncaptured (the §14 absent-seam degradation); production always
+	// wires it.
 	if len(pair.Plan.CitedEntries) > 0 && p.CitedEntryVersions != nil {
-		if versions, err := p.CitedEntryVersions(ctx, pair.Plan.CitedEntries); err == nil && len(versions) > 0 {
-			if st.StoredFingerprint == nil {
-				st.StoredFingerprint = &run.Fingerprint{SpecPlanVersion: pair.Plan.SpecPlanVersion()}
-			}
-			st.StoredFingerprint.CitedEntryVersions = versions
+		versions, err := p.CitedEntryVersions(ctx, pair.Plan.CitedEntries)
+		if err != nil {
+			return false, pair, fmt.Errorf("%w: %v", ErrCitationUnresolved, err)
 		}
+		for _, k := range pair.Plan.CitedEntries {
+			if _, ok := versions[k]; !ok {
+				return false, pair, fmt.Errorf("%w: cited entry %q is not an active project-truth entry at approval", ErrCitationUnresolved, k)
+			}
+		}
+		if st.StoredFingerprint == nil {
+			st.StoredFingerprint = &run.Fingerprint{SpecPlanVersion: pair.Plan.SpecPlanVersion()}
+		}
+		st.StoredFingerprint.CitedEntryVersions = versions
 	}
 	return true, pair, p.issueCard(ctx, st, card)
 }

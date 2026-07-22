@@ -365,4 +365,9 @@ var (
 	ErrBelowFloor = errors.New("intake: tier cannot drop below a deterministic floor")
 	// ErrTaxonomy covers invalid taxonomy or trigger files.
 	ErrTaxonomy = errors.New("intake: invalid taxonomy")
+	// ErrCitationUnresolved reports a PLAN citing a project-truth knowledge
+	// entry that cannot be resolved to an active version at approval (Spec
+	// S09.6): a loud capture failure, never a silent no-op that would escape
+	// every future drift check (F10).
+	ErrCitationUnresolved = errors.New("intake: cited project-truth entry cannot be resolved at approval (S09.6)")
 )

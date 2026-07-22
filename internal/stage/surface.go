@@ -113,6 +113,16 @@ func (u *Surface) Submit(ctx context.Context, userID string, body json.RawMessag
 // nothing (the effects gate is untouched, Spec S07.1), and V3 accept
 // mechanics with their own gating are Spec S13's (B4).
 func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.RawMessage, pinVerified bool) (json.RawMessage, error) {
+	if IsOnboardAskID(askID) {
+		// The S13.7 onboarding-approval ask (D10: the owner answers; a
+		// non-owner is refused). Registry activation releases nothing outward,
+		// so no step-up is demanded.
+		projectID, err := u.sk.AnswerOnboarding(ctx, userID, askID, answer)
+		if err != nil {
+			return nil, mapOnboardErr(err)
+		}
+		return u.taskView(ctx, onboardTaskPrefix+projectID)
+	}
 	if verify.IsVerifyAskID(askID) {
 		taskID, err := u.sk.AnswerVerifyAsk(ctx, userID, askID, answer)
 		if err != nil {

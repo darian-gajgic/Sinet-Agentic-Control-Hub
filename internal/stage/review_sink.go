@@ -99,13 +99,17 @@ func (rs reviewSink) MintCandidate(ctx context.Context, d verify.Deliverable, ro
 	// The round boundary is revision raw material (Spec S13.5, R19): a
 	// project-backed run's workspace snapshot sha pins the minted revision;
 	// a workspace-less run (the content-pin lane — the walking-skeleton
-	// content deliverable, composer definitions) records snapshot_sha NULL,
-	// a valid honest state.
+	// content deliverable, composer definitions) has the seam return "" and
+	// records snapshot_sha NULL, a valid honest state. A snapshot ERROR on a
+	// repo-backed run is LOUD (CONVENTIONS §14: never faked, F2) — the mint
+	// does not proceed to a state indistinguishable from the content-pin lane.
 	snapshotSHA := ""
 	if rs.s.cfg.Snapshot != nil {
-		if sha, serr := rs.s.cfg.Snapshot(ctx, d.RunID); serr == nil {
-			snapshotSHA = sha
+		sha, serr := rs.s.cfg.Snapshot(ctx, d.RunID)
+		if serr != nil {
+			return fmt.Errorf("stage: round-boundary snapshot for %s: %w", d.RunID, serr)
 		}
+		snapshotSHA = sha
 	}
 	if _, err = rs.store().MintRevision(ctx, review.MintInput{
 		DeliverableID: dl.ID,

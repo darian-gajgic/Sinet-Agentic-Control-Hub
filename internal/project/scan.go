@@ -64,8 +64,10 @@ var dangerRules = []dangerRule{
 
 // Scan reads a project store and proposes a draft capture (Spec S13.7). It is
 // pure over the filesystem state and safe on any directory (a git store, a
-// worktree, or a plain dir); .git is never inspected.
-func (s *Store) Scan(store string) (Draft, error) {
+// worktree, or a plain dir); .git is never inspected. defaultBranch names the
+// project's default branch so the force-push danger zone pins the REAL ref
+// (never a placeholder that would flow into ledger §2).
+func (s *Store) Scan(store, defaultBranch string) (Draft, error) {
 	var d Draft
 	present := func(rel string) (string, bool) {
 		p := filepath.Join(store, rel)
@@ -127,10 +129,15 @@ func (s *Store) Scan(store string) (Draft, error) {
 		}
 		d.DangerZones = append(d.DangerZones, z)
 	}
-	// The always-on defaults (obvious hazards independent of any file).
+	// The always-on defaults (obvious hazards independent of any file). The
+	// force-push zone pins the project's REAL default branch.
+	branch := defaultBranch
+	if branch == "" {
+		branch = "main"
+	}
 	d.DangerZones = append(d.DangerZones,
 		DangerZone{Path: "**/*credential*", Action: "read", Rule: "credentials are broker-held, never in a workspace (D2)"},
-		DangerZone{Path: "<default-branch>", Action: "force-push", Rule: "never force-push a protected ref — accepts only (Spec S13.6)"},
+		DangerZone{Path: branch, Action: "force-push", Rule: "never force-push a protected ref — accepts only (Spec S13.6)"},
 	)
 	sort.SliceStable(d.DangerZones, func(i, j int) bool { return d.DangerZones[i].Path < d.DangerZones[j].Path })
 

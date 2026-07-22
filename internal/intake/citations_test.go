@@ -2,6 +2,8 @@ package intake_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -70,6 +72,33 @@ func TestCitedEntryDriftFires(t *testing.T) {
 	}
 	if !got.StaleFlag || !citedReason(got.StaleReasons) {
 		t.Fatalf("removal drift not flagged with a cited reason: %+v", got.StaleReasons)
+	}
+}
+
+// TestCitedEntryUnresolvedIsLoud (F10): a plan citing an entry that cannot be
+// resolved to an active version at approval is a LOUD capture failure — never
+// silently stored-as-nothing (which would escape every future drift check).
+func TestCitedEntryUnresolvedIsLoud(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+	f.planner.draft = func(in intake.DraftInput) (intake.Pair, error) {
+		p := basePair(in)
+		p.Plan.CitedEntries = []string{"ghost"}
+		return p, nil
+	}
+	// The resolver cannot resolve "ghost" (superseded/removed/never existed).
+	f.p.CitedEntryVersions = func(_ context.Context, keys []string) (map[string]string, error) {
+		return map[string]string{}, nil
+	}
+	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID)
+	askID, _ := f.openAsk(st.RunID)
+	// Force-proceed drives draft → critique → approval-card issue, where the
+	// citation is resolved: the unresolvable citation surfaces loudly here.
+	raw, _ := json.Marshal(intake.Answer{ForceProceed: true})
+	if _, err := f.p.Answer(ctx, "u1", askID, raw); !errors.Is(err, intake.ErrCitationUnresolved) {
+		t.Fatalf("unresolvable citation: err = %v, want ErrCitationUnresolved", err)
 	}
 }
 

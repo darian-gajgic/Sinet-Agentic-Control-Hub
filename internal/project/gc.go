@@ -110,7 +110,7 @@ func (s *Store) AddUtilityCheckout(ctx context.Context, projectID, committish st
 	}
 	// Prune opportunistically on the create path (Spec S13.5).
 	_, _ = s.git(ctx, e.StorePath, identity{}, "worktree", "prune")
-	path := filepath.Join(s.root, "utility", sanitize(projectID), fmt.Sprintf("u-%d", s.clock().UnixNano()))
+	path := filepath.Join(s.root, "utility", pathComponent(projectID), fmt.Sprintf("u-%d", s.clock().UnixNano()))
 	if _, err := s.git(ctx, e.StorePath, identity{}, "worktree", "add", "--lock",
 		"--reason", "sinet platform utility checkout (Spec S13.5)", "--detach", path, committish); err != nil {
 		return UtilityCheckout{}, err
@@ -200,18 +200,37 @@ func (s *Store) FlagWorktrees(ctx context.Context, projectID string) ([]Worktree
 
 // CollectRunWorktree is revision-retention GC for an abandoned run attempt
 // (Spec S13.5/S02.10): it removes a run-branch worktree and deletes its branch
-// — but ONLY when clean (a dirty worktree is refused with ErrDirty, never
-// auto-deleted). Minted-revision commits survive branch deletion because their
-// refs/sinet/deliverable refs keep them reachable (Spec S13.1, R20): branch
-// deletion is admissible precisely because the platform refs protect the
-// minted objects.
-func (s *Store) CollectRunWorktree(ctx context.Context, projectID, pipelineID string, attempt int) error {
+// — but ONLY when clean AND every minted revision of the pipeline is protected
+// by its platform ref (Spec S13.1, R20/R21). requiredRefs is the pipeline's
+// minted-revision refs (refs/sinet/deliverable/<id>/rev-<n>, supplied by the
+// caller who knows the deliverable): branch deletion is admissible precisely
+// because those refs keep the minted objects reachable. Refusals leave the
+// branch untouched:
+//
+//   - a dirty worktree → ErrDirty (never auto-deleted);
+//   - any required ref missing or not pointing at a reachable commit →
+//     ErrUnprotectedRevision (the branch survives so no minted commit is
+//     orphaned).
+func (s *Store) CollectRunWorktree(ctx context.Context, projectID, pipelineID string, attempt int, requiredRefs []string) error {
 	e, err := s.Get(ctx, projectID)
 	if err != nil {
 		return err
 	}
 	branch := runBranch(pipelineID, attempt)
 	path := s.worktreePath(projectID, pipelineID, attempt)
+
+	// Enforce ref-protection BEFORE any destructive step: a minted revision
+	// whose platform ref is absent or dangling would be orphaned by deletion.
+	for _, ref := range requiredRefs {
+		sha, err := s.refSHA(ctx, e.StorePath, ref)
+		if err != nil {
+			return err
+		}
+		if sha == "" || !s.objectExists(ctx, e.StorePath, sha) {
+			return fmt.Errorf("%w: %q not protected by a reachable %s", ErrUnprotectedRevision, pipelineID, ref)
+		}
+	}
+
 	if s.worktreeRegistered(ctx, e.StorePath, path) {
 		dirty, err := s.isDirty(ctx, path)
 		if err == nil && dirty {

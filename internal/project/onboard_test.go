@@ -108,7 +108,7 @@ func TestScanDeterministicHeuristics(t *testing.T) {
 		"pnpm-lock.yaml":           "lockfileVersion: 9\n",
 		".github/workflows/ci.yml": "on: push\n",
 	})
-	d, err := f.store.Scan(dir)
+	d, err := f.store.Scan(dir, "main")
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestScanDeterministicHeuristics(t *testing.T) {
 		t.Fatal("scan missed the .github/workflows danger zone")
 	}
 	// The scan is deterministic: a second scan of the same tree agrees.
-	d2, _ := f.store.Scan(dir)
+	d2, _ := f.store.Scan(dir, "main")
 	if d.ScanHash != d2.ScanHash {
 		t.Fatalf("scan hash not deterministic: %q vs %q", d.ScanHash, d2.ScanHash)
 	}

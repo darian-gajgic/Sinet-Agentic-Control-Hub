@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -139,5 +138,3 @@ func (f *fix) activeProject(projectID, owner, name string, files map[string]stri
 	}
 	return e
 }
-
-func mustNow() time.Time { return time.Now() }
