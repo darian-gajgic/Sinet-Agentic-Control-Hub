@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -114,9 +115,10 @@ type Manager struct {
 	mu       sync.Mutex
 	// cloneWriteHook is a test seam fired after a throwaway clone is created,
 	// standing in for the (deferred) dev server's writes so the zero-mutation
-	// proof (F3/R6) exercises the real launch→compose→teardown path. nil in
+	// proof (F3/R6) exercises the real launch→compose→teardown path. It receives
+	// the Session so a test can also observe s.checkout / s.clone. nil in
 	// production.
-	cloneWriteHook func(clone string)
+	cloneWriteHook func(s *Session)
 }
 
 // New validates the required dependencies and returns a Manager.
@@ -263,15 +265,13 @@ func (m *Manager) launchStatic(ctx context.Context, s *Session) (*Session, error
 	if ok, reason := m.reserveSlot(s); !ok { // F20: cap-check + allocate + store, one lock
 		return m.finishAndRelease(ctx, s, StateAtCapacity, reason, ""), nil
 	}
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(s.PoolPort))
-	if err := assertLoopbackListen(addr); err != nil {
-		m.unreserve(s)
-		return nil, err
-	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := m.bindStatic(s) // advances past externally-bound ports (R2-1)
 	if err != nil {
 		m.unreserve(s)
-		return nil, fmt.Errorf("preview: bind static server: %w", err)
+		if errors.Is(err, errPortExhausted) {
+			return m.finishAndRelease(ctx, s, StateAtCapacity, "no bindable preview port in the range (S13.8)", ""), nil
+		}
+		return nil, err
 	}
 	// F13: serve through a symlink-safe filesystem — unsandboxed platform code
 	// must never follow a committed symlink out of the checkout and serve host
@@ -279,9 +279,47 @@ func (m *Manager) launchStatic(ctx context.Context, s *Session) (*Session, error
 	srv := &http.Server{Handler: http.FileServer(checkoutFS{root: s.checkout}), ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	s.stop = func() { _ = srv.Close() }
-	s.BackendAddr = addr
+	s.BackendAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(s.PoolPort))
 	s.Ports = []Port{{Number: s.PoolPort, Label: "static"}}
 	return m.goLive(ctx, s)
+}
+
+// errPortExhausted signals that the fixed range holds no BINDABLE port (every
+// remaining port is bound externally) — mapped to the honest at-capacity state.
+var errPortExhausted = errors.New("preview: no bindable preview port in the range")
+
+// bindStatic binds a loopback listener on the session's pool port, ADVANCING to
+// the next pool port whenever a port is bound EXTERNALLY (EADDRINUSE) — the OS
+// bind view diverges from the file-stub reservation view under a squatter or a
+// parallel test package that shares the range (R2-1). Each externally-occupied
+// port is held reserved during the probe so Allocate yields a DIFFERENT next
+// port, then released. Returns errPortExhausted when the range runs out.
+func (m *Manager) bindStatic(s *Session) (net.Listener, error) {
+	var squatted []int
+	defer func() {
+		for _, p := range squatted {
+			_ = m.cfg.Ports.Release(p)
+		}
+	}()
+	for {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(s.PoolPort))
+		if err := assertLoopbackListen(addr); err != nil {
+			return nil, err
+		}
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			return nil, fmt.Errorf("preview: bind static server: %w", err)
+		}
+		squatted = append(squatted, s.PoolPort)
+		next, aerr := m.cfg.Ports.Allocate(s.ID)
+		if aerr != nil {
+			return nil, errPortExhausted
+		}
+		s.PoolPort = next
+	}
 }
 
 // launchSandboxed composes the dev-server runner through the EXISTING sandbox
@@ -312,7 +350,7 @@ func (m *Manager) launchSandboxed(ctx context.Context, s *Session, runner *Runne
 	}
 	s.clone = clone
 	if m.cloneWriteHook != nil {
-		m.cloneWriteHook(clone) // test seam: stand in for the dev server's writes (F3)
+		m.cloneWriteHook(s) // test seam: stand in for the dev server's writes (F3)
 	}
 	host := m.previewHost(s)
 	s.HostInjections = hostInjections(runner.Tool, host)

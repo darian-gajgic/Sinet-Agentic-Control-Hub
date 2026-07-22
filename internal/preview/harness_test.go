@@ -77,7 +77,11 @@ func newMgrFix(t *testing.T, files map[string]string, dtype string, previewOverr
 	}
 	committish := gitOut(t, e.StorePath, "rev-parse", "HEAD")
 
-	ports, err := portpool.New(portpool.Config{Dir: filepath.Join(t.TempDir(), "portpool")})
+	// A DISJOINT range from the shell composition test's (R2-1a): both packages
+	// run in parallel and the OS loopback port is the shared resource neither
+	// file-stub sees; the preview package owns 47700-47719, the shell 47800-47819,
+	// and neither touches the structural default 47600-47619.
+	ports, err := portpool.New(portpool.Config{Dir: filepath.Join(t.TempDir(), "portpool"), Lo: 47700, Hi: 47719})
 	if err != nil {
 		t.Fatalf("portpool.New: %v", err)
 	}
@@ -99,6 +103,10 @@ type fakeReviews struct {
 	deliverables map[string]review.Deliverable
 	revisions    map[string]review.Revision
 	accepted     map[string]review.Revision
+	// acceptedErr, when set, is returned by AcceptedRevision for an id absent
+	// from `accepted` INSTEAD of the ErrBadInput-wrapped default — to exercise
+	// LaunchComparison's non-ErrBadInput propagate branch (F7).
+	acceptedErr error
 }
 
 func (f *fakeReviews) Deliverable(_ context.Context, id string) (review.Deliverable, error) {
@@ -118,14 +126,16 @@ func (f *fakeReviews) RevisionAt(_ context.Context, id string, n int) (review.Re
 }
 
 func (f *fakeReviews) AcceptedRevision(_ context.Context, id string) (review.Revision, error) {
-	r, ok := f.accepted[id]
-	if !ok {
-		// Wrap review.ErrBadInput exactly as review.Store.AcceptedRevision does
-		// for a not-accepted deliverable, so LaunchComparison's F7 branch is
-		// exercised (single-instance) vs a real error (propagate).
-		return review.Revision{}, fmt.Errorf("%w: deliverable %q is not accepted", review.ErrBadInput, id)
+	if r, ok := f.accepted[id]; ok {
+		return r, nil
 	}
-	return r, nil
+	if f.acceptedErr != nil {
+		return review.Revision{}, f.acceptedErr // a REAL error → must propagate (F7)
+	}
+	// Wrap review.ErrBadInput exactly as review.Store.AcceptedRevision does for a
+	// not-accepted deliverable, so LaunchComparison's F7 branch is exercised
+	// (single-instance) vs a real error (propagate).
+	return review.Revision{}, fmt.Errorf("%w: deliverable %q is not accepted", review.ErrBadInput, id)
 }
 
 type fakeSettings struct {

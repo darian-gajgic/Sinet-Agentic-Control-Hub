@@ -3,15 +3,19 @@ package preview
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
 )
 
@@ -366,11 +370,13 @@ func TestZeroMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, _ := fx.manager(withSandbox(sandbox.NewComposer(fx.reg, nil)), withLookup(stubLookup(map[string]string{"npm": stub})))
-	// Simulate the dev server's writes landing in the clone: hook the compose
-	// step through the clone-write seam.
-	m.cloneWriteHook = func(clone string) {
-		_ = os.WriteFile(filepath.Join(clone, "node_modules_marker"), []byte("installed"), 0o600)
-		_ = os.WriteFile(filepath.Join(clone, "src", "app.js"), []byte("MUTATED"), 0o600)
+	// Simulate the dev server's writes landing in the clone, and capture the
+	// revision utility checkout so the direct leg (R2-2) can assert it separately.
+	var capturedCheckout string
+	m.cloneWriteHook = func(s *Session) {
+		capturedCheckout = s.checkout
+		_ = os.WriteFile(filepath.Join(s.clone, "node_modules_marker"), []byte("installed"), 0o600)
+		_ = os.WriteFile(filepath.Join(s.clone, "src", "app.js"), []byte("MUTATED"), 0o600)
 	}
 	s, err := m.Launch(ctx, LaunchRequest{DeliverableID: "dlv1", User: "u"})
 	if err != nil {
@@ -385,6 +391,16 @@ func TestZeroMutation(t *testing.T) {
 	}
 	if hashTree(t, e.StorePath) != beforeStore {
 		t.Errorf("the project store tree was mutated by the preview (R6)")
+	}
+	// DIRECT leg (R2-2): the revision utility checkout (under <root>/utility/,
+	// outside both trees hashed above) was released CLEAN by teardown — a
+	// manager-side write into s.checkout would dirty it, ReleaseUtilityCheckout
+	// would ErrDirty, and the worktree dir would REMAIN. Assert it is gone.
+	if capturedCheckout == "" {
+		t.Fatal("clone hook did not fire — revision checkout not captured")
+	}
+	if _, err := os.Stat(capturedCheckout); !os.IsNotExist(err) {
+		t.Errorf("revision checkout %q not released clean after teardown — a manager-side write dirtied it (R2-2/R6)", capturedCheckout)
 	}
 	// The reviewed worktree releases cleanly (a dirtied one would ErrDirty).
 	if err := fx.proj.ReleaseUtilityCheckout(ctx, fx.projectID, reviewed.Path); err != nil {
@@ -596,5 +612,60 @@ func TestStopRetryableOnPartialFailure(t *testing.T) {
 	res, _ := fx.ports.List()
 	if len(res) != 0 {
 		t.Fatalf("port not released after retry: %+v", res)
+	}
+}
+
+// TestStaticLaneAdvancesPastBoundPort pins R2-1(b): when a pool port is bound
+// EXTERNALLY (a squatter, or a parallel test package sharing the range), the OS
+// bind view diverges from the file-stub view; launchStatic advances to the next
+// port rather than hard-erroring on EADDRINUSE. Deterministic: pre-bind the
+// lowest range port, then assert the session lands on a later one and serves.
+func TestStaticLaneAdvancesPastBoundPort(t *testing.T) {
+	fx := newMgrFix(t, map[string]string{"index.html": "advance"}, "code")
+	lo, hi := fx.ports.Range()
+	squat, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(lo)))
+	if err != nil {
+		t.Skipf("could not pre-bind %d: %v", lo, err)
+	}
+	defer squat.Close()
+
+	m, _ := fx.manager()
+	s, err := m.Launch(context.Background(), LaunchRequest{DeliverableID: "dlv1", User: "u"})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if s.State != StateLive {
+		t.Fatalf("state = %s, want live", s.State)
+	}
+	if s.PoolPort == lo {
+		t.Fatalf("landed on the externally-bound port %d — did not advance (R2-1)", lo)
+	}
+	if s.PoolPort <= lo || s.PoolPort > hi {
+		t.Fatalf("advanced port %d out of range [%d,%d]", s.PoolPort, lo, hi)
+	}
+	resp, err := http.Get("http://" + s.BackendAddr + "/")
+	if err != nil {
+		t.Fatalf("GET advanced backend: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("advanced backend status %d", resp.StatusCode)
+	}
+}
+
+// TestComparisonPropagatesRealError pins F7's propagate branch: a NON-ErrBadInput
+// error from AcceptedRevision (e.g. a storage failure) propagates out of
+// LaunchComparison rather than being swallowed as the honest single-instance
+// state.
+func TestComparisonPropagatesRealError(t *testing.T) {
+	fx := newMgrFix(t, map[string]string{"index.html": "x"}, "code")
+	fx.reviews.acceptedErr = errorString("storage boom") // not review.ErrBadInput
+	m, _ := fx.manager()
+	_, err := m.LaunchComparison(context.Background(), "dlv1", 0, "u")
+	if err == nil {
+		t.Fatalf("expected LaunchComparison to propagate a real store error (F7)")
+	}
+	if errors.Is(err, review.ErrBadInput) {
+		t.Fatalf("a real error must not be reported as ErrBadInput/single-instance (F7)")
 	}
 }

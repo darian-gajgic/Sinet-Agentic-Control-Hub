@@ -226,9 +226,9 @@ func (a *Allocator) List() ([]Reservation, error) {
 	}
 	var out []Reservation
 	for _, e := range entries {
-		// Only reservation files (<port>.json); a reclaim tombstone
-		// (<port>.json.reclaim.<pid>.<seq>) has a different final extension and
-		// is skipped (F11).
+		// Only reservation files (<port>.json). The reclaim machinery's sidecar
+		// files — the per-port lock (<port>.json.lock) and the pre-link temp
+		// (.tmp-*) — have a different final extension and are skipped (F11/R2-3).
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}

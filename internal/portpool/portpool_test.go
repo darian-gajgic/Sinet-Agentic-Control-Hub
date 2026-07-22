@@ -181,12 +181,25 @@ func TestCrossInstanceClaim(t *testing.T) {
 	}
 }
 
-// TestStaleReclaimContention pins F11: many allocators over ONE dir, racing to
-// reclaim a range full of STALE reservations, never double-claim a port — the
-// atomic rename-to-tombstone ensures only one claimant reclaims each stale slot,
-// and the fresh reservations a winner writes are seen as fresh (skipped) by the
-// rest. Run under -race.
+// TestStaleReclaimContention pins F11: separate allocators over ONE shared dir
+// (distinct processes), racing to reclaim a range full of STALE reservations,
+// never double-claim a port. The shipped mechanism is a per-port O_EXCL lock
+// (<port>.json.lock) whose critical section removes the stale file AND hard-links
+// the fresh one atomically, so no second reclaimer can remove the fresh
+// reservation a winner just linked, and the temp+link claim never leaves an
+// empty file to misread. One run drives `contentionRounds` fresh rounds so a
+// single `go test -race` shakes the interleaving repeatedly (R2-3). Run -race.
 func TestStaleReclaimContention(t *testing.T) {
+	const contentionRounds = 40
+	for round := 0; round < contentionRounds; round++ {
+		runContentionRound(t)
+	}
+}
+
+// runContentionRound fills a 4-port range with stale reservations, then races 8
+// separate allocators to reclaim them, asserting no port is double-owned.
+func runContentionRound(t *testing.T) {
+	t.Helper()
 	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	clk := base
 	dir := filepath.Join(t.TempDir(), "res")

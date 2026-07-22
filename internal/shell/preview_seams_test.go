@@ -26,11 +26,13 @@ import (
 func TestBuildPreviewSurfaceComposition(t *testing.T) {
 	// F8: pin the routing config to empty so a dev-shell export can never make
 	// this test dial the LIVE Caddy admin API (host hazard). The test asserts
-	// routing is disabled below.
+	// routing is disabled below. R2-1a: pin a DISJOINT port range (47800-47819)
+	// from the preview package's (47700-47719) so the two test packages, running
+	// in parallel, never contend for the same OS loopback port.
 	t.Setenv("SINET_PREVIEW_CADDY_ADMIN", "")
 	t.Setenv("SINET_PREVIEW_BASE_HOST", "test.invalid")
-	t.Setenv("SINET_PREVIEW_PORT_LO", "")
-	t.Setenv("SINET_PREVIEW_PORT_HI", "")
+	t.Setenv("SINET_PREVIEW_PORT_LO", "47800")
+	t.Setenv("SINET_PREVIEW_PORT_HI", "47819")
 	ctx := context.Background()
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
