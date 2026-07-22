@@ -117,16 +117,18 @@ func TestBumpProcedureTierR(t *testing.T) {
 		t.Fatal("llama-swap did not accept the generated config / did not become ready (contract broken at the pin)")
 	}
 
-	// /v1/models lists exactly the GPU-seated servable seats (the YAML contract).
+	// /v1/models lists exactly the GPU-seated servable seats that are PULLED
+	// (the YAML contract; R6 excludes a Servable-but-unpulled seat — a partial/
+	// absent GGUF is never configured, S12.3).
 	models := getModels(t, base)
 	for _, s := range local.Manifest() {
 		_, present := models[s.Model]
-		if s.GPUSeated && s.Servable {
+		if s.GPUSeated && s.Servable && s.Pulled {
 			if !present {
 				t.Errorf("configured seat %q absent from /v1/models (llama-swap contract)", s.Model)
 			}
 		} else if present {
-			t.Errorf("non-servable/post-gate seat %q leaked into /v1/models (R10)", s.Model)
+			t.Errorf("non-servable/post-gate/unpulled seat %q leaked into /v1/models (R10/R6)", s.Model)
 		}
 	}
 	// The unload routes (the eager-unload contract, R12).

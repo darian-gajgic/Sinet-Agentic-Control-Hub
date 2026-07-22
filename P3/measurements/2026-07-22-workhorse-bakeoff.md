@@ -1,7 +1,7 @@
 # Workhorse bakeoff — Qwen3.5-9B vs Gemma-4-12B-QAT (S12.9 #1, R20) — 2026-07-22
 
-- Instrument: the T15 battery `intake-triage` suite (32 synthetic Sinet-domain seeds; real traces accumulate later — S12.9). Each model served on b10085 sm_120 (ctx 8192/4096, 4 slots, ngl 99). $0 local. On AC.
-- Basis stated: SYNTHETIC bring-up seeds (S12.9's "real Sinet-domain traces accumulate later"). Scoring is STRICT 3-field (family+stakes+size all match).
+- Instrument: the FULL T15 battery classification suites — all 6 duty suites (intake-triage 32 cases + watchdog-disambiguator / watchlist-triage / intent-filling / entailment / contradiction-screen at ≥30 cases each; synthetic Sinet-domain seeds, real traces accumulate later — S12.9), run on BOTH the 9B incumbent and the Gemma challenger so the ≥2-suite `DecidePromotion` rule is exercisable. Each model served on b10085 sm_120 (ctx 8192/4096, 4 slots, ngl 99). $0 local. On AC.
+- Basis stated: SYNTHETIC bring-up seeds (S12.9's "real Sinet-domain traces accumulate later"). Scoring is per-suite (intake-triage STRICT 3-field family+stakes+size; the other suites per their own label shape).
 
 ## Pre-registered expectation
 

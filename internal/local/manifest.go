@@ -25,21 +25,21 @@ import (
 // row below.
 //
 // The model set is PULLED to the model-cache root and the per-file sha256 is
-// recorded here (drain F1: the pulls are executed, not deferred). PULLED +
-// HASHED this session (Pulled:true, real SHA256): the workhorse-DEFAULT
-// (Qwen3.5-9B), the fast/smoke seat (Qwen3.5-4B — loaded on the real GPU for
-// the tier-L smoke), and the CPU floor (MiniCheck-Flan-T5). Honest upstream
-// blockers (recorded precisely, NOT silently deferred — drain F1): the SQL
-// (Arctic), the workhorse-alternate (Gemma 4) and the entailment default
-// (Granite) hit HF's per-IP global rate-limit (~0.5 MB/s after ~15 GB of
-// session downloads; Granite's own CDN is throttled harder) so their multi-GB
-// files cannot complete in-session — sha256 fills at bring-up; Bespoke-
-// MiniCheck-7B is 401-GATED (CC-BY-NC — needs an operator HF credential); the
-// DeBERTa NLI cross-encoder has NO GGUF (encoder classification head — its
-// B4-7 consumer pulls safetensors for a transformers runtime); the embedder
-// is post-gate (not pulled). None of the incomplete seats is the v0 default
-// path or the smoke — they are B4-7 measurement/bakeoff seats. The model-cache
-// location + residency stay an operator ratification (item e).
+// recorded here (the pulls are executed, not deferred). PULLED + HASHED
+// (Pulled:true, real SHA256): the workhorse-DEFAULT (Qwen3.5-9B), the
+// fast/smoke seat (Qwen3.5-4B — loaded on the real GPU for the tier-L smoke),
+// the CPU floor (MiniCheck-Flan-T5), and — across the B4-7 drain rounds, once
+// HF's per-IP rate limit cleared — the workhorse-alternate (Gemma 4), the SQL
+// seat (Arctic), the entailment default (Granite Guardian 3.3, completed +
+// sha256'd in drain round 2, R2c) and the entailment measurement-alternate
+// (Granite Guardian 4.1). Remaining honest blockers (recorded precisely, NOT
+// silently deferred): Bespoke-MiniCheck-7B is 401-GATED (CC-BY-NC — needs an
+// operator HF credential); the DeBERTa NLI cross-encoder has NO GGUF (encoder
+// classification head — its B4-7 consumer pulls safetensors for a transformers
+// runtime); the embedder is post-gate (not pulled). None of the unpulled seats
+// is the v0 default path or the smoke, and none is configured into llama-swap
+// (config-gen's Pulled gate, R6). The model-cache location + residency stay an
+// operator ratification (item e).
 
 // License is a seat's card-verified license record (Spec S12.3).
 type License struct {
@@ -151,9 +151,9 @@ func Manifest() []SeatRecord {
 			Model:   "Granite Guardian 3.3-8B",
 			CardURL: "https://huggingface.co/ibm-granite/granite-guardian-3.3-8b-GGUF",
 			License: License{SPDX: "Apache-2.0", VerifyDate: vd},
-			Files:   []GGUFFile{{Repo: "ibm-granite/granite-guardian-3.3-8b-GGUF", Name: "granite-guardian-3.3-8b-Q5_K_M.gguf"}},
-			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, ServingContext: 8192, GPUSeated: true, Servable: true,
-			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B. RE-PULL WAS TRUNCATED (drain honesty fix): round 1 recorded sha 7dee8bb7 at 4.20 GB on curl rc=0, but the true size is 5.80 GB — the 4.20 GB file was INCOMPLETE (llama-server: tensor blk.28 not within file bounds). Void hash removed + Pulled cleared; re-pulling to the full 5.80 GB at bring-up (its sha256 fills then). Quant policy: Q5/Q6 for ≤9B on pool12; KV stays fp16/q8_0. Entailment DEFAULT seat (the 4.1 alternate row below serves the S12.9 comparison in the interim).",
+			Files:   []GGUFFile{{Repo: "ibm-granite/granite-guardian-3.3-8b-GGUF", Name: "granite-guardian-3.3-8b-Q5_K_M.gguf", SHA256: "d7a29778234185881e126e07cb72d97c0215310e239c77a76819153f5e0c842f"}},
+			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, ServingContext: 8192, GPUSeated: true, Servable: true, Pulled: true,
+			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B. RE-PULL COMPLETED (B4-7 drain round 2, R2c): round 1 recorded sha 7dee8bb7 at 4.20 GB on curl rc=0, but that was a TRUNCATED CDN response — the true HF content-length is 5,797,465,184 B (5.80 GB), so the 4.20 GB file was INCOMPLETE (llama-server: tensor blk.28 not within file bounds). Re-pulled to the full 5,797,465,184 B (disk size == content-length, HEAD-verified) and sha256'd (hash above); the void 7dee8bb7 partial hash is discarded. Quant policy: Q5/Q6 for ≤9B on pool12; KV stays fp16/q8_0. Entailment DEFAULT seat, now Pulled+servable. The S12.9 #5 head-to-head threshold measurement was run on the 4.1 alternate (2026-07-22-entailment-thresholds.md); 3.3's own entailment leg runs at bring-up on this now-complete seat.",
 		},
 		{
 			Seat: "Granite Guardian 4.1 8B", Role: "Entailment MEASUREMENT-ALTERNATE (S12.9 #5 3.3-vs-4.1 comparison; platform data)",

@@ -110,10 +110,12 @@ func TestGenerateConfigPool12ResidentEmptyNoEmbedder(t *testing.T) {
 	if !strings.Contains(cfg, `"resident":`) || !strings.Contains(cfg, "members: []") {
 		t.Error("config does not emit the actual empty resident group (F10/S12.8)")
 	}
-	// No embedder member (post-gate) and no non-servable CPU seat faked in.
-	for _, forbidden := range []string{"Qwen3-Embedding-0.6B", "nli-deberta", "MiniCheck-Flan-T5"} {
+	// No embedder member (post-gate), no non-servable CPU seat, and no
+	// Servable-but-unpulled seat (Bespoke-MiniCheck is 401-gated, Pulled=false)
+	// faked in (R10/R6).
+	for _, forbidden := range []string{"Qwen3-Embedding-0.6B", "nli-deberta", "MiniCheck-Flan-T5", "Bespoke-MiniCheck"} {
 		if strings.Contains(cfg, forbidden) {
-			t.Errorf("config leaked a non-configured seat %q (R10)", forbidden)
+			t.Errorf("config leaked a non-configured seat %q (R10/R6)", forbidden)
 		}
 	}
 	// Per-class TTL: fast=120, workhorse-class=300.
@@ -123,6 +125,38 @@ func TestGenerateConfigPool12ResidentEmptyNoEmbedder(t *testing.T) {
 	// A missing GPU UUID is a loud error — placement is by UUID, never index.
 	if _, err := GenerateConfig(ConfigParams{ModelCacheDir: "/m", LlamaServer: "/s"}); err == nil {
 		t.Error("GenerateConfig with no GPU UUID should error (R10)")
+	}
+}
+
+// TestGenerateConfigExcludesServableUnpulled proves the R6 gate: a Servable +
+// GPU-seated seat whose weights are NOT pulled (no verified sha256) is EXCLUDED
+// from the generated config — "a partial GGUF must never be configured" (S12.3).
+// Bespoke-MiniCheck is the canonical case: Servable + GPU-seated but 401-gated,
+// so Pulled=false; without the gate, config-gen would emit a model path that
+// llama-server cannot load. The test asserts BOTH the specific exclusion and
+// the general property that every emitted seat is Pulled.
+func TestGenerateConfigExcludesServableUnpulled(t *testing.T) {
+	cfg, err := GenerateConfig(ConfigParams{
+		ModelCacheDir: "/models", GPUUUIDs: []string{"GPU-ed0494dc"},
+		LlamaServer: "/opt/llama-server", TTLFastS: 120, TTLWorkhorseS: 300, UnloadGraceS: 5,
+	})
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+	// Every Servable + GPU-seated but UNPULLED seat must be absent from the
+	// config (and at least one such seat must exist to actually exercise the
+	// gate — Bespoke-MiniCheck at v0).
+	var exercised bool
+	for _, s := range Manifest() {
+		if s.GPUSeated && s.Servable && !s.Pulled {
+			exercised = true
+			if strings.Contains(cfg, `"`+s.Model+`":`) {
+				t.Errorf("R6: Servable-but-unpulled seat %q configured — a partial/absent GGUF must never be configured (S12.3)", s.Model)
+			}
+		}
+	}
+	if !exercised {
+		t.Error("R6: no Servable-but-unpulled seat in the manifest — the gate cannot be exercised (Bespoke-MiniCheck is expected to be Servable+GPUSeated, Pulled=false)")
 	}
 }
 

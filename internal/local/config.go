@@ -85,10 +85,16 @@ func GenerateConfig(p ConfigParams) (string, error) {
 
 	b.WriteString("models:\n")
 	for _, s := range Manifest() {
-		if !s.GPUSeated || !s.Servable {
+		if !s.GPUSeated || !s.Servable || !s.Pulled {
 			// CPU/non-servable/post-gate seats are never faked into config
 			// (R10); they live in the manifest with their honest Servable
-			// note (DeBERTa NLI, Flan-T5, the post-gate embedder).
+			// note (DeBERTa NLI, Flan-T5, the post-gate embedder). The !Pulled
+			// gate (R6, drain round 2): a Servable+GPU-seated seat whose weights
+			// are not present with a verified sha256 (e.g. the 401-gated
+			// Bespoke-MiniCheck) is EXCLUDED — "a partial GGUF must never be
+			// configured" (S12.3): llama-server refuses a partial/absent file at
+			// load. Pulled is set only when the manifest recorded the file's
+			// sha256, so it is the hash-present gate.
 			continue
 		}
 		if len(s.Files) == 0 {

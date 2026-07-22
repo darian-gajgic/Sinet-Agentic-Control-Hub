@@ -24,7 +24,7 @@ The D3 advisor split (applied `e06f0a4`) set the judge seat to **opus-4-8** — 
 
 ## Observation — EXECUTED 2026-07-22 (drain D1/F8)
 
-Harness: `internal/adapters/claudecli/rider1_golden_test.go` (`SINET_RIDER1=1`, the committed claudecli-adapter Drive pattern from `live_smoke_test.go`), the 26-case `SeedGoldenSet()` through the S07.5 two-axis judge prompts (Compliance + Sanity, the same shapes `stage.EngineJudge` sends), clean context (artifact + ACs only, no transcript), on **claude-opus-4-8**. Judge-as-classifier: a case is flagged (REVISE) when EITHER axis returns a blocker.
+Harness: `internal/adapters/claudecli/rider1_golden_test.go` (`SINET_RIDER1=1`, the committed claudecli-adapter Drive pattern from `live_smoke_test.go`), the 26-case `SeedGoldenSet()` through **simplified S07.5-shaped two-axis judge prompts** (Compliance + Sanity — replicas that collapse the axis taxonomy to a single `blocker` boolean, NOT the byte-identical findings/escalate/reopen_spec schema `stage.EngineJudge` sends; sufficient for the judge-as-classifier P-T06-5 signal, and a byte-identical-schema re-run is at the gate's discretion), clean context (artifact + ACs only, no transcript), on **claude-opus-4-8**. Judge-as-classifier: a case is flagged (REVISE) when EITHER axis returns a blocker.
 
 - **TPR = 1.000, 95% Wilson [0.84, 1.00] (20/20)** — every planted defect (AC-blockers, sanity-blockers, check-integrity, research-not-run, reopen-spec, V0-malformed) correctly flagged.
 - **TNR = 0.500, 95% Wilson [0.19, 0.81] (3/6)** — only 3 of 6 clean controls correctly passed; opus-4-8 FALSE-flagged 3 simple-but-correct artifacts (over-strict sanity/expert-standard on minimal code).

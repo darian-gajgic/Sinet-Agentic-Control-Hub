@@ -20,21 +20,28 @@ import (
 // rider1_golden_test.go — D3 rider 1 (P-T06-5, S07.9): the golden-set re-run on
 // the ratified opus-4-8 judge, gated by SINET_RIDER1=1 (a PAID leg — the
 // packet's pre-ratified obligation). It runs the 26-case golden seed
-// (verify.SeedGoldenSet) through the REAL two-axis judge prompts (the S07.5
-// Compliance + Sanity shapes, the same instructions stage.EngineJudge sends) on
+// (verify.SeedGoldenSet) through SIMPLIFIED S07.5-shaped two-axis judge prompts
+// (Compliance + Sanity): the prompts are replicas that collapse the axis
+// taxonomy to a single `blocker` boolean, NOT the byte-identical
+// findings/escalate/reopen_spec schema stage.EngineJudge sends. The
+// judge-as-classifier signal P-T06-5 requires (does either axis flag a
+// blocker?) is preserved, so the TPR/TNR measurement stands as the S07.9 gate;
+// a byte-identical-schema re-run is at the gate's discretion. On
 // claude-opus-4-8 via the committed claudecli adapter, clean context (artifact +
-// ACs only, no transcript). Judge-as-classifier: a case is flagged (REVISE) when
-// either axis finds a blocking issue; TPR/TNR vs the human labels. Projection
-// $2.10, ratified STOP LINE $5.00 — the harness aborts + records if cumulative
-// cost reaches it.
+// ACs only, no transcript): a case is flagged (REVISE) when either axis finds a
+// blocking issue; TPR/TNR vs the human labels. Projection $2.10, ratified STOP
+// LINE $5.00 — the harness aborts + records if cumulative cost reaches it.
 
 const (
 	rider1Model    = "claude-opus-4-8"
 	rider1StopLine = 5.00
 )
 
-// axis-1 (compliance) + axis-2 (sanity) prompt shapes — the S07.5 judge shapes
-// (replicated from stage/engines.go's axis schemas; unexported there).
+// axis-1 (compliance) + axis-2 (sanity) prompt shapes — SIMPLIFIED S07.5-shaped
+// replicas of stage/engines.go's axis schemas (unexported there): a single
+// `blocker` boolean stands in for the full findings/escalate/reopen_spec
+// taxonomy. Sufficient for the judge-as-classifier P-T06-5 signal; a
+// byte-identical-schema re-run is at the gate's discretion.
 const rider1Axis1 = `You are the spec-compliance judge (S07.5 axis 1). For each numbered acceptance criterion, decide pass/fail over the artifact. A PASS needs an exact substring quote of the artifact as evidence; if you cannot quote it, the verdict is unknown. Output EXACTLY one JSON object:
 {"verdicts":[{"key":"AC-1","pass":true,"unknown":false,"evidence":"..."}],"blocker":true}
 where "blocker" is true if ANY criterion fails.`
