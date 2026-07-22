@@ -44,6 +44,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
@@ -211,6 +212,7 @@ func Run(ctx context.Context, opts Options) error {
 	var sched *scheduler.Scheduler
 	var intakeSurface api.IntakeSurface
 	var acceptSurf *acceptSurface
+	var previewSurf *preview.Manager
 	admission := opts.Admission
 	if admission == nil {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
@@ -407,7 +409,23 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 		logger.Info("accept: S13.6 accept + S13.9 follow-up wired (operator endpoints are B6)")
+
+		// The S13.8 preview module (B4-4): disposable try-out environments +
+		// before-vs-after, composed from the production stores (R19) and held for
+		// the B6 /api/deliverables preview endpoints (S15.2). Routing is disabled
+		// until the Caddy admin endpoint is configured at bring-up (structural
+		// config; the live front chain is never dialed here — host hazard).
+		previewSurf, err = buildPreviewSurface(previewDeps{
+			Reviews: reviewStore, Projects: proj, Sandbox: composer,
+			Events: log, Settings: reg, StateDir: stateDir, Log: logger,
+		})
+		if err != nil {
+			return err
+		}
+		logger.Info("preview: S13.8 preview module wired (operator endpoints are B6)",
+			"routing_enabled", os.Getenv("SINET_PREVIEW_CADDY_ADMIN") != "")
 	}
+	_ = previewSurf // held for the B6 api layer (S15.2); no endpoints built here
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
 	if err := assertLoopbackAddr(cfg.HTTPAddr); err != nil {

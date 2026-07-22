@@ -240,6 +240,28 @@
       "notes": "S16-rail os-mechanism entry materialized at P3-B4-1 (first platform consumption: internal/review shells `git -c core.quotepath=false diff --no-index --no-color --unified=3`; exit 1 = differs, handled). Observed at adoption: git version 2.53.0 on the Ubuntu 26.04 LTS host. Absence is a LOUD error on the diff path (never a silent fallback); no CI running-unit assertion (an on-demand CLI, not a unit — the Caddy/claude precedent)"
     },
     {
+      "name": "ttyd (terminal-over-WebSocket)",
+      "kind": "os-mechanism",
+      "pin": "1.7.7",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the ttyd release consumed UNMODIFIED as an external host subprocess at tag 1.7.7 — LICENSE read verbatim at that ref (\"MIT License\", Copyright (c) 2016-2022 Shuanglei Tao); never vendored, never linked (the process boundary is the boundary, the git-entry precedent)",
+        "checked": "2026-07-22"
+      },
+      "role": {
+        "summary": "CLI preview transport (Spec S13.8: \"ttyd serves CLIs over the same routing\") — serves a captured CLI over WebSocket INSIDE the per-preview sandbox, riding the same probe->pool->Caddy-route path as a dev server; consumed by internal/preview, probe-gated (PATH + SINET_TTYD_PATH), absent -> the honest CLI no-preview state, NEVER installed",
+        "section": "S13.8"
+      },
+      "replacement": "drop to the honest no-preview state for CLI types (the zero-dependency fallback — the lane degrades to exactly the absent-binary behavior, ZERO code change), or a successor terminal-over-WebSocket server (gotty/wetty-class) behind the same probe->invocation seam",
+      "abandonment": "signaled by the watch row (upstream release cadence is LOW — 1.7.7 is the current tag, early-2024 — a low-activity but single-purpose stable tool); an OS-release upgrade re-verifies at the quarterly pass (the git/bwrap os-mechanism pattern). Absent ttyd is already the shipped default on this host (host-install is the B4-gate decision), so the funeral plan is inert to trigger",
+      "watch": [
+        "ttyd upstream release cadence + security advisories at the quarterly dependency pass (S16.7) — the low-release-cadence single-maintainer risk is bounded by the zero-dependency no-preview fallback",
+        "re-verify the pinned tag's LICENSE on any pin bump (P-T16-2 path-scoped)"
+      ],
+      "last_review": "2026-07-22",
+      "notes": "NET-NEW S16.4 os-mechanism onboarding at P3-B4-4 (the B4-3 zstd/klauspost precedent for a spec-named, non-pre-registered component): Spec S13.8's body places 'ttyd serves CLIs over the same routing' in normative v0 behavior, but S16.3 pre-registers NO ttyd row (verified) -> the S16.4 checklist is the ratified entry path (S16.2). Pin LIVE-verified 2026-07-22 against github.com/tsl0922/ttyd/releases: latest release = 1.7.7 (1.7.7 > 1.7.6 > 1.7.5). S16.4 ten-check walk: #1 niche/seam — CLI preview transport behind the process/preview seam (internal/preview), owning section S13.8; #2 organ-grade — a single-purpose terminal-over-WS server, no orchestration/session-ownership/store-of-record opinions (it runs per-preview INSIDE the sandbox; S01.2's unit map has NO ttyd row — kind os-mechanism, the git precedent, NOT an organ unit); #3 health from primary sources — mature, widely-deployed; upstream release cadence is LOW (1.7.7 current, early-2024), a bounded risk given the zero-dependency no-preview fallback; #4 license path-scoped — MIT verified verbatim at the 1.7.7 ref (LICENSE read, not assumed), Copyright (c) 2016-2022 Shuanglei Tao; #5 behavior probed — invocation generation asserted at the pin by internal/preview with a STUB ttyd under t.TempDir() (no real ttyd required, the sandbox stub-srt precedent); a live invocation row is a bring-up step; #6 adopt-unmodified — consumed as an external subprocess (config/flags only), never patched/vendored/linked; #7 runner-never-store — n/a (a transport; platform.db untouched); #8 pin+funeral — this entry; #9 watch rows above; #10 operator ratification QUEUED to the B4 gate ALONGSIDE the host-install decision — if the operator declines, the honest no-preview state IS the behavior with ZERO code change (probe-gated consumption; the srt-at-B2-gate precedent). The executor did NOT install ttyd on the host."
+    },
+    {
       "name": "age (snapshot encryption)",
       "kind": "library",
       "pin": "v1.3.1",

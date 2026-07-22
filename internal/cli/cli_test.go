@@ -58,25 +58,21 @@ func TestUnknownMode(t *testing.T) {
 	}
 }
 
-func TestReservedModesReportUnimplemented(t *testing.T) {
-	// broker (S11.5) and run-launch (S11.8) are implemented at B1-3 and left the
-	// reserved table; only portpool remains a reserved daemon stub.
-	for _, mode := range []string{"portpool"} {
-		code, _, errOut := run(t, mode)
-		if code != exitError {
-			t.Errorf("%s: exit %d, want %d", mode, code, exitError)
-		}
-		if !strings.Contains(errOut, "not implemented") {
-			t.Errorf("%s: stderr %q lacks not-implemented notice", mode, errOut)
-		}
+func TestReservedTableEmpty(t *testing.T) {
+	// broker (S11.5) + run-launch (S11.8) at B1-3, portpool (S13.8) at B4-4 —
+	// every S01.2 daemon mode is now built and left the reserved table. The map
+	// stays as the reserved-mode seam so a future daemon fails "not implemented"
+	// rather than "unknown mode".
+	if len(reserved) != 0 {
+		t.Errorf("reserved table is non-empty (%v) — every S01.2 daemon mode should be built", reserved)
 	}
 }
 
-// TestBrokerAndRunLaunchWired proves the B1-3 modes are recognized (not
-// "unknown mode") without starting the broker daemon (which would block): a
-// bad flag returns the usage exit code from each mode's flag parser.
-func TestBrokerAndRunLaunchWired(t *testing.T) {
-	for _, mode := range []string{"broker", "run-launch"} {
+// TestDaemonModesWired proves the daemon modes are recognized (not "unknown
+// mode") without starting a daemon (which would block): a bad flag returns the
+// usage exit code from each mode's flag parser.
+func TestDaemonModesWired(t *testing.T) {
+	for _, mode := range []string{"broker", "run-launch", "portpool"} {
 		code, _, errOut := run(t, mode, "--definitely-not-a-flag")
 		if code != exitUsage {
 			t.Errorf("%s --badflag: exit %d, want %d (stderr: %q)", mode, code, exitUsage, errOut)

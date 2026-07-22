@@ -19,6 +19,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
@@ -42,7 +43,7 @@ Modes:
 
   control    platform control plane (sinet-control.service)
   broker     credential broker (sinet-broker.service; Spec S11.5)
-  portpool   preview port-pool daemon (sinet-portpool.service) [not yet implemented]
+  portpool   preview port-pool daemon (sinet-portpool.service; Spec S13.8)
 
 Tools:
 
@@ -65,11 +66,11 @@ Tools:
 `
 
 // reserved names the daemon modes of Spec S01.2 ahead of their
-// implementations. The broker mode is implemented at B1-3 (Spec S11.5) and
-// left the table.
-var reserved = map[string]string{
-	"portpool": "sinet-portpool",
-}
+// implementations. The broker mode is implemented at B1-3 (Spec S11.5) and the
+// portpool mode at B4-4 (Spec S13.8); both left the table. It is empty now —
+// every S01.2 daemon mode is built — but the map stays as the reserved-mode
+// seam so a future daemon fails with "not implemented" rather than "unknown".
+var reserved = map[string]string{}
 
 // Run executes one invocation of the sinet binary and returns its exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -83,6 +84,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return shell.Main(args[1:], stdout, stderr)
 	case "broker":
 		return broker.Main(args[1:], stdout, stderr)
+	case "portpool":
+		return portpool.Main(args[1:], stdout, stderr)
 	case "run-launch":
 		return sandbox.RunLaunch(args[1:], stdout, stderr)
 	case "snapshot":
