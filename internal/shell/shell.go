@@ -425,7 +425,6 @@ func Run(ctx context.Context, opts Options) error {
 		logger.Info("preview: S13.8 preview module wired (operator endpoints are B6)",
 			"routing_enabled", os.Getenv("SINET_PREVIEW_CADDY_ADMIN") != "")
 	}
-	_ = previewSurf // held for the B6 api layer (S15.2); no endpoints built here
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
 	if err := assertLoopbackAddr(cfg.HTTPAddr); err != nil {
@@ -461,6 +460,7 @@ func Run(ctx context.Context, opts Options) error {
 		Intake:     intakeSurface,
 		Accept:     acceptAccepter(acceptSurf),
 		FollowUp:   acceptFollowUp(acceptSurf),
+		Preview:    previewSurf, // held for the B6 preview endpoints (F17); not routed
 		Logger:     logger,
 	})
 	httpSrv := &http.Server{

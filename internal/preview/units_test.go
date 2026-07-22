@@ -29,8 +29,12 @@ func TestRenderProxydUnits(t *testing.T) {
 	if !strings.Contains(service.Content, "--exit-idle-time=900s") {
 		t.Errorf("service lacks ⚙-derived --exit-idle-time:\n%s", service.Content)
 	}
-	if !strings.Contains(service.Content, "StopWhenUnneeded=yes") {
-		t.Errorf("service lacks StopWhenUnneeded=yes:\n%s", service.Content)
+	// F9: the StopWhenUnneeded=yes DIRECTIVE must NOT be set — nothing Requires=
+	// this proxy, so it would let systemd stop a just-activated proxy; idle-stop
+	// is --exit-idle-time + the socket re-arm. (The comment may mention the token
+	// descriptively; the directive form is what must be absent.)
+	if strings.Contains(service.Content, "StopWhenUnneeded=yes") {
+		t.Errorf("service sets StopWhenUnneeded=yes (wrong for a no-backend-unit topology, F9):\n%s", service.Content)
 	}
 	if !strings.Contains(service.Content, "systemd-socket-proxyd") {
 		t.Errorf("service lacks systemd-socket-proxyd ExecStart:\n%s", service.Content)

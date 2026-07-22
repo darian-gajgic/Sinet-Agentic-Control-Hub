@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ func (f *mgrFix) manager(opts ...func(*Config)) (*Manager, *recordingEvents) {
 	cfg := Config{
 		Reviews: f.reviews, Projects: f.proj, Ports: f.ports,
 		Events: rec, Settings: f.reg, BaseHost: "sinet.example.ts.net",
+		Scratch: f.t.TempDir(), // clones under a test-owned root, never system temp (F16)
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -46,6 +48,27 @@ func withCaddy(endpoint string) func(*Config) {
 func withSandbox(s Sandbox) func(*Config)   { return func(c *Config) { c.Sandbox = s } }
 func withSettings(s Settings) func(*Config) { return func(c *Config) { c.Settings = s } }
 func withLookup(l ToolLookup) func(*Config) { return func(c *Config) { c.Lookup = l } }
+func withPorts(p Ports) func(*Config)       { return func(c *Config) { c.Ports = p } }
+
+// flakyPorts fails the next Release once, then delegates — to exercise Stop's
+// retryable partial-teardown path (F21).
+type flakyPorts struct {
+	inner    Ports
+	failNext bool
+}
+
+func (f *flakyPorts) Allocate(owner string) (int, error) { return f.inner.Allocate(owner) }
+func (f *flakyPorts) Release(port int) error {
+	if f.failNext {
+		f.failNext = false
+		return errorString("release boom")
+	}
+	return f.inner.Release(port)
+}
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
 
 func stubLookup(tools map[string]string) ToolLookup {
 	return func(name string) (string, bool) { p, ok := tools[name]; return p, ok }
@@ -94,6 +117,7 @@ func TestStaticLaneLifecycleE2E(t *testing.T) {
 	if len(rec.byType(EventStarted)) != 1 {
 		t.Fatalf("expected one preview.started event")
 	}
+	rid := s.RouteID // Stop clears it on success (F21) — capture before teardown
 
 	// Teardown: port released, route removed, checkout released, event recorded.
 	if err := m.Stop(ctx, s.ID); err != nil {
@@ -118,7 +142,7 @@ func TestStaticLaneLifecycleE2E(t *testing.T) {
 		switch {
 		case mth == "POST /config/apps/http/servers/srv0/routes":
 			adds++
-		case mth == "DELETE /id/"+s.RouteID:
+		case mth == "DELETE /id/"+rid:
 			dels++
 		}
 	}
@@ -144,6 +168,11 @@ func TestLowTierEventAttribution(t *testing.T) {
 	}
 	if s.State != StateLive {
 		t.Fatalf("state = %s", s.State)
+	}
+	// F22/R12: routing disabled (no Caddy admin endpoint) is recorded as a
+	// machine-readable reason on the live session.
+	if s.Routed || !strings.Contains(s.Reason, "routing disabled") {
+		t.Errorf("routing-disabled live session lacks the reason: routed=%v reason=%q", s.Routed, s.Reason)
 	}
 	got := rec.byType(EventStarted)
 	if len(got) != 1 {
@@ -307,50 +336,57 @@ func TestRegistryCommandThroughManager(t *testing.T) {
 	}
 }
 
-// TestZeroMutation: preview writes land only in the throwaway clone; teardown
-// deletes it; the read-only checkout AND a separate reviewed run worktree are
-// byte-identical before/after a full clone lifecycle — the preview cannot mutate
-// the reviewed workspace (Spec S13.8; R6).
+// TestZeroMutation wraps the REAL Manager lifecycle (F3/R6): a dev-server launch
+// stages a checkout, clones it, composes (writing into the clone), and tears
+// down — and the project's committed tree AND a separate "reviewed run worktree"
+// stay byte-identical (symlinks included) across the whole path. Caps-gated: the
+// dev-server lane requires composition (this host has caps).
 func TestZeroMutation(t *testing.T) {
+	caps := sandbox.Probe()
+	if !caps.Available() {
+		t.Skip("SANCTIONED SKIP (S16.3): host cannot compose the sandbox boundary")
+	}
 	fx := newMgrFix(t, map[string]string{"src/app.js": "console.log(1)", "package.json": "{}"}, "code")
 	ctx := context.Background()
-	// The preview's read-only worktree-at-rev utility checkout (R5).
-	checkout, err := fx.proj.AddUtilityCheckout(ctx, fx.projectID, fx.committish)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A SEPARATE "reviewed run worktree" the preview is never handed.
+
+	// A SEPARATE reviewed run worktree the preview is NEVER handed + the project
+	// store base — both must be untouched after the lifecycle.
 	reviewed, err := fx.proj.AddUtilityCheckout(ctx, fx.projectID, fx.committish)
 	if err != nil {
 		t.Fatal(err)
 	}
-	beforeCheckout := hashTree(t, checkout.Path)
+	e, _ := fx.proj.Get(ctx, fx.projectID)
 	beforeReviewed := hashTree(t, reviewed.Path)
+	beforeStore := hashTree(t, e.StorePath)
 
-	clone, err := throwawayClone(checkout.Path)
+	// A stub runner whose composeCheck writes into the clone via a hook, so the
+	// "preview writes" happen inside the real Manager launch→compose→teardown.
+	stub := filepath.Join(t.TempDir(), "npm")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := fx.manager(withSandbox(sandbox.NewComposer(fx.reg, nil)), withLookup(stubLookup(map[string]string{"npm": stub})))
+	// Simulate the dev server's writes landing in the clone: hook the compose
+	// step through the clone-write seam.
+	m.cloneWriteHook = func(clone string) {
+		_ = os.WriteFile(filepath.Join(clone, "node_modules_marker"), []byte("installed"), 0o600)
+		_ = os.WriteFile(filepath.Join(clone, "src", "app.js"), []byte("MUTATED"), 0o600)
+	}
+	s, err := m.Launch(ctx, LaunchRequest{DeliverableID: "dlv1", User: "u"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Launch: %v", err)
 	}
-	// The preview writes land ONLY in the clone (installs, dev-server output).
-	if err := os.WriteFile(filepath.Join(clone, "node_modules_marker"), []byte("installed"), 0o600); err != nil {
-		t.Fatal(err)
+	if s.Lane != LaneDevServer {
+		t.Fatalf("lane = %s, want dev-server", s.Lane)
 	}
-	if err := os.WriteFile(filepath.Join(clone, "src", "app.js"), []byte("MUTATED"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// Teardown deletes the clone.
-	_ = os.RemoveAll(clone)
 
-	if hashTree(t, checkout.Path) != beforeCheckout {
-		t.Errorf("the read-only checkout was mutated by the preview (R6)")
-	}
 	if hashTree(t, reviewed.Path) != beforeReviewed {
 		t.Errorf("the reviewed run worktree was mutated by the preview (R6)")
 	}
-	// The pristine checkout releases cleanly (a dirtied one would ErrDirty).
-	if err := fx.proj.ReleaseUtilityCheckout(ctx, fx.projectID, checkout.Path); err != nil {
-		t.Errorf("clean checkout should release, got %v", err)
+	if hashTree(t, e.StorePath) != beforeStore {
+		t.Errorf("the project store tree was mutated by the preview (R6)")
 	}
+	// The reviewed worktree releases cleanly (a dirtied one would ErrDirty).
 	if err := fx.proj.ReleaseUtilityCheckout(ctx, fx.projectID, reviewed.Path); err != nil {
 		t.Errorf("clean reviewed worktree should release, got %v", err)
 	}
@@ -400,5 +436,165 @@ func TestComparisonBeforeVsAfter(t *testing.T) {
 		if !strings.Contains(string(blob), want) {
 			t.Errorf("contract JSON lacks %s: %s", want, blob)
 		}
+	}
+}
+
+// TestLaunchCLILane covers the ttyd CLI lane through the Manager (F10): absent
+// ttyd → honest no-preview; present ttyd on a composable host → the deferred
+// state; the read-only checkout is composed via a CLONE, never writable (F2).
+func TestLaunchCLILane(t *testing.T) {
+	ctx := context.Background()
+
+	// Absent ttyd → honest CLI no-preview (never installed, R20/R21).
+	fx := newMgrFix(t, map[string]string{"main.go": "package main"}, "cli", "myctl serve")
+	m, _ := fx.manager(withSandbox(sandbox.NewComposer(fx.reg, nil)), withLookup(stubLookup(nil)))
+	s, err := m.Launch(ctx, LaunchRequest{DeliverableID: "dlv1", User: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Lane != LaneCLI || s.State != StateNoPreview || !strings.Contains(s.Reason, "ttyd") {
+		t.Fatalf("absent ttyd: lane/state/reason = %s/%s/%q, want cli/no-preview/ttyd", s.Lane, s.State, s.Reason)
+	}
+
+	// Present ttyd on a composable host → deferred state; checkout composed via a
+	// clone (F2), nothing held live.
+	caps := sandbox.Probe()
+	if !caps.Available() {
+		t.Skip("SANCTIONED SKIP (S16.3): host cannot compose the sandbox boundary")
+	}
+	fx2 := newMgrFix(t, map[string]string{"main.go": "package main"}, "cli", "myctl serve")
+	stub := filepath.Join(t.TempDir(), "ttyd")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m2, _ := fx2.manager(withSandbox(sandbox.NewComposer(fx2.reg, nil)), withLookup(stubLookup(map[string]string{"ttyd": stub})))
+	s2, err := m2.Launch(ctx, LaunchRequest{DeliverableID: "dlv1", User: "u"})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if s2.Lane != LaneCLI || s2.State != StateUnavailable || !strings.Contains(s2.Reason, "ttyd CLI") {
+		t.Fatalf("present ttyd: lane/state/reason = %s/%s/%q", s2.Lane, s2.State, s2.Reason)
+	}
+	if s2.PoolPort != 0 {
+		t.Errorf("deferred CLI held a port %d", s2.PoolPort)
+	}
+}
+
+// TestCheckoutFSRefusesSymlinkEscape pins F13: the static server's filesystem
+// refuses a committed symlink that resolves outside the checkout, so unsandboxed
+// platform code never serves host files to the tailnet; in-tree files still open.
+func TestCheckoutFSRefusesSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "secret")
+	if err := os.WriteFile(outside, []byte("SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "evil")); err != nil {
+		t.Skipf("symlinks unsupported here: %v", err)
+	}
+	fsys := checkoutFS{root: root}
+	f, err := fsys.Open("/index.html")
+	if err != nil {
+		t.Errorf("in-tree file should open, got %v", err)
+	} else {
+		f.Close()
+	}
+	if _, err := fsys.Open("/evil"); err == nil {
+		t.Errorf("a symlink escaping the checkout must be refused (F13)")
+	}
+}
+
+// TestRenderUnitsReadsIdleSetting pins F1: the production unit-rendering path
+// reads ⚙ preview.idle_stop by dotted key through the Settings interface — the
+// value is not a constant.
+func TestRenderUnitsReadsIdleSetting(t *testing.T) {
+	fx := newMgrFix(t, map[string]string{"index.html": "x"}, "code")
+	m, _ := fx.manager(withSettings(fakeSettings{idle: 120 * time.Second, cap: 3}))
+	_, service, err := m.RenderUnits(47600, "127.0.0.1:5173")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(service.Content, "--exit-idle-time=120s") {
+		t.Fatalf("⚙ idle value did not flow into the rendered unit:\n%s", service.Content)
+	}
+	// The real registry default (900 s) flows through too.
+	m2, _ := fx.manager()
+	_, svc2, err := m2.RenderUnits(47600, "127.0.0.1:5173")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(svc2.Content, "--exit-idle-time=900s") {
+		t.Fatalf("registry default idle did not render:\n%s", svc2.Content)
+	}
+}
+
+// TestBwrapOverlayFlags behavior-asserts the bwrap overlay flags on THIS host's
+// bwrap (F15/§10): --overlay-src + --tmp-overlay expose the lowerdir, proving the
+// production overlay-upper substrate is real (never --help parsing). Caps-gated.
+func TestBwrapOverlayFlags(t *testing.T) {
+	caps := sandbox.Probe()
+	if !caps.Available() {
+		t.Skip("SANCTIONED SKIP (S16.3): host cannot compose the sandbox boundary")
+	}
+	lower := t.TempDir()
+	if err := os.WriteFile(filepath.Join(lower, "f.txt"), []byte("lower"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const dest = "/overlay-probe"
+	cmd := exec.Command(sandbox.SystemBwrap, "--unshare-user", "--unshare-net",
+		"--ro-bind", "/usr", "/usr", "--ro-bind-try", "/bin", "/bin",
+		"--ro-bind-try", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64",
+		"--proc", "/proc", "--dev", "/dev",
+		"--overlay-src", lower, "--tmp-overlay", dest,
+		"--", "/bin/cat", dest+"/f.txt")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bwrap %s rejected --overlay-src/--tmp-overlay (the overlay substrate claim is unproven): %v\n%s", caps.BwrapVersion, err, out)
+	}
+	if strings.TrimSpace(string(out)) != "lower" {
+		t.Fatalf("overlay did not expose the lowerdir file: %q", out)
+	}
+}
+
+// TestStopRetryableOnPartialFailure pins F21: a Release failure during Stop
+// returns the joined error and KEEPS the session (retryable); a retry completes
+// and forgets it, and only then is the stop event emitted.
+func TestStopRetryableOnPartialFailure(t *testing.T) {
+	fx := newMgrFix(t, map[string]string{"index.html": "x"}, "code")
+	fp := &flakyPorts{inner: fx.ports}
+	m, rec := fx.manager(withPorts(fp))
+	ctx := context.Background()
+	s, err := m.Launch(ctx, LaunchRequest{DeliverableID: "dlv1", User: "u"})
+	if err != nil || s.State != StateLive {
+		t.Fatalf("launch state=%v err=%v", s.State, err)
+	}
+	// First Stop: Release fails → error returned, session retained.
+	fp.failNext = true
+	if err := m.Stop(ctx, s.ID); err == nil {
+		t.Fatalf("expected a partial-teardown error")
+	}
+	if len(m.List()) != 1 {
+		t.Fatalf("session dropped on partial failure — not retryable (F21)")
+	}
+	if len(rec.byType(EventStopped)) != 0 {
+		t.Fatalf("stopped event emitted before full teardown")
+	}
+	// Retry: Release now succeeds → session forgotten, event emitted.
+	if err := m.Stop(ctx, s.ID); err != nil {
+		t.Fatalf("retry Stop: %v", err)
+	}
+	if len(m.List()) != 0 {
+		t.Fatalf("session not forgotten after successful retry")
+	}
+	if len(rec.byType(EventStopped)) != 1 {
+		t.Fatalf("expected one stopped event after full teardown, got %d", len(rec.byType(EventStopped)))
+	}
+	res, _ := fx.ports.List()
+	if len(res) != 0 {
+		t.Fatalf("port not released after retry: %+v", res)
 	}
 }

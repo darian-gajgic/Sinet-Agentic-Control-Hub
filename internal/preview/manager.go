@@ -5,14 +5,17 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
 )
 
 // manager.go is the S13.8 preview lifecycle manager: launch → disposition →
@@ -89,6 +93,11 @@ type Config struct {
 	// config; empty ⇒ units.FQDN default via the composition root). The
 	// per-preview host is preview-<id>.<BaseHost>.
 	BaseHost string
+	// Scratch is the root under which throwaway clones are created (a configured
+	// platform dir, e.g. <state-dir>/preview-clones at the composition root;
+	// t.TempDir() in tests) — NEVER system temp (F16). Empty ⇒ os.TempDir(), used
+	// only if a caller forgets to set it.
+	Scratch string
 	// Lookup is the runner/ttyd discovery seam (nil ⇒ DefaultToolLookup).
 	Lookup ToolLookup
 	// Now is the clock seam (nil ⇒ time.Now).
@@ -103,6 +112,11 @@ type Manager struct {
 	lookup   ToolLookup
 	sessions map[string]*Session
 	mu       sync.Mutex
+	// cloneWriteHook is a test seam fired after a throwaway clone is created,
+	// standing in for the (deferred) dev server's writes so the zero-mutation
+	// proof (F3/R6) exercises the real launch→compose→teardown path. nil in
+	// production.
+	cloneWriteHook func(clone string)
 }
 
 // New validates the required dependencies and returns a Manager.
@@ -115,6 +129,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if cfg.BaseHost == "" {
 		cfg.BaseHost = "preview.invalid" // structural placeholder; the shell sets units.FQDN
+	}
+	if cfg.Scratch == "" {
+		cfg.Scratch = os.TempDir() // fallback only; the shell + tests set a configured root (F16)
 	}
 	lookup := cfg.Lookup
 	if lookup == nil {
@@ -243,29 +260,27 @@ func (m *Manager) finishAndRelease(ctx context.Context, s *Session, state State,
 // (Spec S13.8 index.html → static server; R11). Fully live at v0. Every
 // listener it opens is loopback-only (asserted, P-T13-2).
 func (m *Manager) launchStatic(ctx context.Context, s *Session) (*Session, error) {
-	if full := m.atCapacity(); full {
-		return m.finishAndRelease(ctx, s, StateAtCapacity, m.capacityReason(), ""), nil
+	if ok, reason := m.reserveSlot(s); !ok { // F20: cap-check + allocate + store, one lock
+		return m.finishAndRelease(ctx, s, StateAtCapacity, reason, ""), nil
 	}
-	port, err := m.cfg.Ports.Allocate(s.ID)
-	if err != nil {
-		return m.finishAndRelease(ctx, s, StateAtCapacity, "port pool exhausted (S13.8)", ""), nil
-	}
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(s.PoolPort))
 	if err := assertLoopbackListen(addr); err != nil {
-		m.cfg.Ports.Release(port)
+		m.unreserve(s)
 		return nil, err
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		m.cfg.Ports.Release(port)
+		m.unreserve(s)
 		return nil, fmt.Errorf("preview: bind static server: %w", err)
 	}
-	srv := &http.Server{Handler: http.FileServer(http.Dir(s.checkout)), ReadHeaderTimeout: 5 * time.Second}
+	// F13: serve through a symlink-safe filesystem — unsandboxed platform code
+	// must never follow a committed symlink out of the checkout and serve host
+	// files to the tailnet.
+	srv := &http.Server{Handler: http.FileServer(checkoutFS{root: s.checkout}), ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	s.stop = func() { _ = srv.Close() }
-	s.PoolPort = port
 	s.BackendAddr = addr
-	s.Ports = []Port{{Number: port, Label: "static"}}
+	s.Ports = []Port{{Number: s.PoolPort, Label: "static"}}
 	return m.goLive(ctx, s)
 }
 
@@ -274,28 +289,31 @@ func (m *Manager) launchStatic(ctx context.Context, s *Session) (*Session, error
 // throwaway clone absorbing all writes so the read-only checkout is never
 // mutated (Spec S13.8; R6/R7). No new class, no loosened profile, no extra
 // binds. Absent composition capability → the honest unavailable state, never an
-// unconfined run (R7). Live serving of the in-netns dev server rides the
-// deferred host egress + socket-activation substrate (S11.4/§8 reading 5), so
-// at v0 the disposition composes and reports the honest deferred state; the
-// bring-up substrate flips it live with no code change.
+// unconfined run (R7). Live serving of the in-netns dev server is DEFERRED: it
+// depends on the host egress + socket-activation substrate (S11.4/§8 reading 5)
+// AND the spawn/probe/route activation code, both bring-up work — so at v0 the
+// disposition composes and reports the honest deferred state (F6).
 func (m *Manager) launchSandboxed(ctx context.Context, s *Session, runner *Runner) (*Session, error) {
 	if m.cfg.Sandbox == nil || !m.cfg.Sandbox.Caps().Available() {
 		return m.finishAndRelease(ctx, s, StateUnavailable, "host cannot compose the sandbox boundary (S16.3) — never an unconfined preview (R7)", ""), nil
+	}
+	if len(runner.Argv) == 0 { // F12: a whitespace-only command splits to empty argv
+		return m.finishAndRelease(ctx, s, StateNoPreview, "no runnable preview command (empty after parsing, R2)", ""), nil
 	}
 	tool := runner.Argv[0]
 	toolPath, ok := m.lookup(tool)
 	if !ok {
 		return m.finishAndRelease(ctx, s, StateNoPreview, "required tool not present: "+tool+" (never installed, S16.2/R2)", ""), nil
 	}
-	if full := m.atCapacity(); full {
-		return m.finishAndRelease(ctx, s, StateAtCapacity, m.capacityReason(), ""), nil
-	}
-	clone, err := throwawayClone(s.checkout)
+	clone, err := throwawayClone(m.cfg.Scratch, s.checkout)
 	if err != nil {
 		m.releaseCheckout(ctx, s)
 		return nil, err
 	}
 	s.clone = clone
+	if m.cloneWriteHook != nil {
+		m.cloneWriteHook(clone) // test seam: stand in for the dev server's writes (F3)
+	}
 	host := m.previewHost(s)
 	s.HostInjections = hostInjections(runner.Tool, host)
 	argv := append([]string{toolPath}, runner.Argv[1:]...)
@@ -303,11 +321,17 @@ func (m *Manager) launchSandboxed(ctx context.Context, s *Session, runner *Runne
 		m.teardownSandboxed(ctx, s)
 		return m.markUnavailable(s, "sandbox composition failed: "+err.Error()), nil
 	}
-	// Composition verified; the in-netns→host live path is the deferred
-	// substrate. Tear the clone + checkout down (nothing runs live yet).
+	// Composition verified; the in-netns→host live path is deferred. Tear the
+	// clone + checkout down (nothing runs live yet).
 	m.teardownSandboxed(ctx, s)
-	return m.markUnavailable(s,
-		"dev-server preview composes (class C2) but live serving needs the deferred host egress + socket-activation substrate (S11.4/§8 reading 5); a bring-up step flips it live with no code change"), nil
+	return m.markUnavailable(s, deferredReason("dev-server")), nil
+}
+
+// deferredReason is the honest v0 state reason for a lane that composes but
+// cannot serve live yet (F6): the true dependency is the deferred host
+// substrate PLUS bring-up activation code — NOT a zero-code flip.
+func deferredReason(lane string) string {
+	return lane + " preview composes (class C2), but live serving is DEFERRED: it needs the host egress + socket-activation substrate (S11.4/§8 reading 5) AND the spawn/probe/route lane-activation code — both bring-up work, not a zero-code flip"
 }
 
 // launchCLI serves a captured CLI over ttyd inside the sandbox, over the same
@@ -325,19 +349,23 @@ func (m *Manager) launchCLI(ctx context.Context, s *Session, runner *Runner) (*S
 	if m.cfg.Sandbox == nil || !m.cfg.Sandbox.Caps().Available() {
 		return m.finishAndRelease(ctx, s, StateUnavailable, "host cannot compose the sandbox boundary for the ttyd lane (S16.3/R7)", ""), nil
 	}
-	if full := m.atCapacity(); full {
-		return m.finishAndRelease(ctx, s, StateAtCapacity, m.capacityReason(), ""), nil
+	// F2: compose the throwaway CLONE as the writable C2 workspace — the
+	// read-only revision checkout is NEVER composed writable (R6).
+	clone, err := throwawayClone(m.cfg.Scratch, s.checkout)
+	if err != nil {
+		m.releaseCheckout(ctx, s)
+		return nil, err
 	}
+	s.clone = clone
 	// The ttyd invocation binds inside the netns; its port rides the same
 	// probe→pool→route path. Composition is verified; live serving is deferred.
 	inv := ttydInvocation(ttydPath, ttydDefaultPort, runner.Argv)
-	if err := m.composeCheck(inv, s.checkout, nil); err != nil {
-		m.releaseCheckout(ctx, s)
+	if err := m.composeCheck(inv, clone, nil); err != nil {
+		m.teardownSandboxed(ctx, s)
 		return m.markUnavailable(s, "ttyd sandbox composition failed: "+err.Error()), nil
 	}
-	m.releaseCheckout(ctx, s)
-	return m.markUnavailable(s,
-		"ttyd CLI preview composes but live serving needs the deferred substrate (S11.4/§8 reading 5); a bring-up step flips it live with no code change"), nil
+	m.teardownSandboxed(ctx, s)
+	return m.markUnavailable(s, deferredReason("ttyd CLI")), nil
 }
 
 // composeCheck builds the C2 preview plan through the EXISTING sandbox surface
@@ -358,14 +386,16 @@ func (m *Manager) composeCheck(argv []string, workspace string, inj []HostInject
 	return nil
 }
 
-// goLive stores a backed session, adds its Caddy route, and emits the start
-// event (Spec S13.8; R12/R16/R22).
+// goLive adds a backed session's Caddy route and emits the start event (Spec
+// S13.8; R12/R16/R22). The session is already stored (reserveSlot, F20); a route
+// failure unreserves it. Routing-disabled sessions carry a machine-readable
+// reason (F22/R12).
 func (m *Manager) goLive(ctx context.Context, s *Session) (*Session, error) {
 	host := m.previewHost(s)
 	rid := routeID(s.ID)
 	if err := m.cfg.Caddy.AddRoute(ctx, rid, host, s.BackendAddr); err != nil {
 		m.stopBackend(s)
-		m.cfg.Ports.Release(s.PoolPort)
+		m.unreserve(s)
 		m.releaseCheckout(ctx, s)
 		return nil, err
 	}
@@ -373,45 +403,56 @@ func (m *Manager) goLive(ctx context.Context, s *Session) (*Session, error) {
 		s.RouteID = rid
 		s.Routed = true
 		s.URL = "https://" + host + "/"
+		s.Reason = ""
 	} else {
 		s.URL = "http://" + s.BackendAddr + "/" // routing disabled (dev): loopback
+		s.Reason = "routing disabled: no Caddy admin endpoint configured — reachable via the loopback backend in dev; the tailnet front chain is the bring-up exposure path (S01.4, R12)"
 	}
 	s.State = StateLive
-	s.Reason = ""
-	m.mu.Lock()
-	m.sessions[s.ID] = s
-	m.mu.Unlock()
 	m.emit(ctx, EventStarted, s)
 	return s, nil
 }
 
 // Stop tears a live preview down idempotently (Spec S13.8 R16): stop the
 // backend, release the port to the pool, remove the Caddy route, delete the
-// clone, release the utility checkout — each tolerant of already-done — and
-// emit the stop event. An unknown session id is a no-op (idempotent teardown).
+// clone, release the utility checkout — each tolerant of already-done — and emit
+// the stop event. On a PARTIAL teardown failure it CONTINUES the other steps,
+// returns the joined error, and KEEPS the session so Stop is retryable; the
+// session is forgotten (and the stop event emitted) only on full success (F21).
+// An unknown session id is a no-op.
 func (m *Manager) Stop(ctx context.Context, sessionID string) error {
 	m.mu.Lock()
 	s, ok := m.sessions[sessionID]
-	if ok {
-		delete(m.sessions, sessionID)
-	}
 	m.mu.Unlock()
 	if !ok {
-		return nil // idempotent
+		return nil // idempotent (unknown or already fully torn down)
 	}
-	m.stopBackend(s)
+	var errs []error
+	m.stopBackend(s) // idempotent
 	if s.PoolPort != 0 {
 		if err := m.cfg.Ports.Release(s.PoolPort); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("release port: %w", err))
+		} else {
+			s.PoolPort = 0
 		}
 	}
 	if s.RouteID != "" {
 		if err := m.cfg.Caddy.RemoveRoute(ctx, s.RouteID); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("remove route: %w", err))
+		} else {
+			s.RouteID, s.Routed = "", false
 		}
 	}
-	m.deleteClone(s)
-	m.releaseCheckout(ctx, s)
+	m.deleteClone(s) // idempotent
+	if err := m.releaseCheckoutErr(ctx, s); err != nil {
+		errs = append(errs, fmt.Errorf("release checkout: %w", err))
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...) // keep the session — retryable (F21)
+	}
+	m.mu.Lock()
+	delete(m.sessions, sessionID)
+	m.mu.Unlock()
 	m.emit(ctx, EventStopped, s)
 	return nil
 }
@@ -428,29 +469,50 @@ func (m *Manager) List() []*Session {
 	return out
 }
 
-// atCapacity reports whether the ⚙ preview.max_concurrent cap is reached (Spec
-// S13.8; R15). Only backed (port-holding) sessions count. A settings read error
-// fails closed (treated as at-capacity) rather than launching past an unknown
-// cap.
-func (m *Manager) atCapacity() bool {
+// reserveSlot atomically checks the ⚙ preview.max_concurrent cap and allocates a
+// port under ONE lock, storing the session to hold the slot so two concurrent
+// launches can never both pass the cap then both allocate (F20/R15). Only backed
+// (port-holding) sessions count. A settings read error fails closed. ok=false
+// carries a machine-readable reason (at capacity / pool exhausted).
+func (m *Manager) reserveSlot(s *Session) (ok bool, reason string) {
 	capN, err := m.cfg.Settings.Int(keyMaxConcurrent)
 	if err != nil {
 		m.log.Warn("preview: read ⚙ preview.max_concurrent failed — failing closed", "err", err)
-		return true
+		return false, "settings read failed — refusing to launch past an unknown cap (⚙ preview.max_concurrent)"
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	live := 0
-	for _, s := range m.sessions {
-		if s.backed() {
+	for _, x := range m.sessions {
+		if x.backed() {
 			live++
 		}
 	}
-	return int64(live) >= capN
+	if int64(live) >= capN {
+		return false, capacityReason(capN)
+	}
+	port, err := m.cfg.Ports.Allocate(s.ID)
+	if err != nil {
+		return false, "port pool exhausted (S13.8)"
+	}
+	s.PoolPort = port
+	m.sessions[s.ID] = s // hold the slot before releasing the lock
+	return true, ""
 }
 
-func (m *Manager) capacityReason() string {
-	capN, _ := m.cfg.Settings.Int(keyMaxConcurrent)
+// unreserve drops a reserved-but-not-yet-live session: remove it from the map
+// and return its port to the pool (the reserveSlot failure path, F20).
+func (m *Manager) unreserve(s *Session) {
+	m.mu.Lock()
+	delete(m.sessions, s.ID)
+	m.mu.Unlock()
+	if s.PoolPort != 0 {
+		_ = m.cfg.Ports.Release(s.PoolPort)
+		s.PoolPort = 0
+	}
+}
+
+func capacityReason(capN int64) string {
 	return fmt.Sprintf("at the concurrent-preview cap (⚙ preview.max_concurrent=%d); preview dev servers compete with interactive host use (S13.8/3.11)", capN)
 }
 
@@ -470,7 +532,7 @@ func (m *Manager) registryPreviewCommand(ctx context.Context, projectID string) 
 	if err != nil || !e.Active() {
 		return ""
 	}
-	return e.Capture.Commands.Preview
+	return strings.TrimSpace(e.Capture.Commands.Preview) // F12: whitespace ⇒ heuristics
 }
 
 func (m *Manager) previewHost(s *Session) string {
@@ -491,15 +553,39 @@ func (m *Manager) stopBackend(s *Session) {
 }
 
 func (m *Manager) releaseCheckout(ctx context.Context, s *Session) {
-	if s.checkout == "" || s.projectID == "" {
-		return
-	}
-	if err := m.cfg.Projects.ReleaseUtilityCheckout(ctx, s.projectID, s.checkout); err != nil {
+	if err := m.releaseCheckoutErr(ctx, s); err != nil {
 		// A dirtied checkout is a loud defect (never auto-deleted, S13.5) — log
 		// it; the checkout stays for inspection.
 		m.log.Warn("preview: release utility checkout failed", "path", s.checkout, "err", err)
 	}
+}
+
+// releaseCheckoutErr releases the read-only utility checkout and RETURNS any
+// error (the Stop path collects it for retry, F21). Clears s.checkout on success
+// so a retry skips it; a dirtied checkout errors loudly (project ErrDirty).
+func (m *Manager) releaseCheckoutErr(ctx context.Context, s *Session) error {
+	if s.checkout == "" || s.projectID == "" {
+		return nil
+	}
+	if err := m.cfg.Projects.ReleaseUtilityCheckout(ctx, s.projectID, s.checkout); err != nil {
+		return err
+	}
 	s.checkout = ""
+	return nil
+}
+
+// RenderUnits produces the per-preview socket + socket-proxyd unit TEXT for a
+// pool port + backend, reading the idle time from ⚙ preview.idle_stop by dotted
+// key through the narrow Settings interface (R15 — consumed at unit generation,
+// never a constant). This is the production unit-generation path for the
+// gate-install flow (GENERATED, never installed; F1). The Manager is wired at
+// the composition root, so the ⚙ value is the live registry value.
+func (m *Manager) RenderUnits(poolPort int, backend string) (socket, service units.File, err error) {
+	idle, err := m.cfg.Settings.Duration(keyIdleStop)
+	if err != nil {
+		return units.File{}, units.File{}, fmt.Errorf("preview: read ⚙ %s: %w", keyIdleStop, err)
+	}
+	return RenderProxydUnits(poolPort, backend, idle)
 }
 
 func (m *Manager) deleteClone(s *Session) {
@@ -564,16 +650,21 @@ func newSessionID() string {
 	return "p" + hex.EncodeToString(b[:])
 }
 
-// throwawayClone copies a read-only checkout into a fresh temp dir that absorbs
-// all preview writes — the discardable substrate that keeps the checkout pristine
-// (Spec S13.8: "a throwaway clone when dependency-dir-sized"; R6). The .git
-// worktree pointer is skipped (the preview runs source, not history). In
-// production the overlay upper (bwrap --overlay over the ro checkout) is the
-// alternative substrate; both are spec-sanctioned and the preview hands a
-// writable path either way (the workspace-overlay wiring is S11.3/S02.10, a
-// deferred host component that composes identically).
-func throwawayClone(src string) (string, error) {
-	dst, err := os.MkdirTemp("", "sinet-preview-clone-")
+// throwawayClone copies a read-only checkout into a fresh dir under the
+// configured scratch root that absorbs all preview writes — the discardable
+// substrate that keeps the checkout pristine (Spec S13.8: "a throwaway clone
+// when dependency-dir-sized"; R6). scratchRoot is a platform-owned dir (F16),
+// never system temp in production. The .git worktree pointer is skipped (the
+// preview runs source, not history). The bwrap `--overlay`/`--ro-overlay`/
+// `--tmp-overlay` upper over the ro checkout is the production ALTERNATIVE
+// substrate — its flag acceptance on this host's bwrap is behavior-asserted
+// (TestBwrapOverlayFlags, §10), but the workspace-overlay WIRING (S11.3/S02.10)
+// is a deferred host component; the clone is the v0 path.
+func throwawayClone(scratchRoot, src string) (string, error) {
+	if err := os.MkdirAll(scratchRoot, 0o700); err != nil {
+		return "", fmt.Errorf("preview: scratch root: %w", err)
+	}
+	dst, err := os.MkdirTemp(scratchRoot, "clone-")
 	if err != nil {
 		return "", fmt.Errorf("preview: clone dir: %w", err)
 	}
@@ -613,4 +704,27 @@ func copyTree(src, dst string) error {
 		}
 		return os.WriteFile(target, data, 0o600)
 	})
+}
+
+// checkoutFS is a symlink-safe http.FileSystem over the read-only checkout root
+// (F13): it refuses any path that resolves — through a committed symlink —
+// OUTSIDE the checkout, so the ONE unsandboxed lane (the static server) can never
+// serve host files to the tailnet. An escaping, dangling, or missing path is an
+// honest 404 (os.ErrNotExist).
+type checkoutFS struct{ root string }
+
+func (c checkoutFS) Open(name string) (http.File, error) {
+	full := filepath.Join(c.root, filepath.FromSlash(path.Clean("/"+name)))
+	rootReal, err := filepath.EvalSymlinks(c.root)
+	if err != nil {
+		return nil, os.ErrNotExist
+	}
+	real, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return nil, os.ErrNotExist // missing or dangling — do not serve
+	}
+	if real != rootReal && !strings.HasPrefix(real, rootReal+string(os.PathSeparator)) {
+		return nil, os.ErrNotExist // the resolved target escaped the checkout
+	}
+	return http.Dir(c.root).Open(name)
 }

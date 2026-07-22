@@ -93,6 +93,11 @@ type Allocator struct {
 	mu         sync.Mutex
 }
 
+// lockStale bounds a reclaim critical section (a stat + a remove — microseconds);
+// a per-port reclaim lock older than this is a crashed-holder leak and is itself
+// reclaimable, so a crash during reclaim can never permanently strand a port.
+const lockStale = 30 * time.Second
+
 // New opens an allocator over Config.Dir, creating the directory if absent.
 func New(cfg Config) (*Allocator, error) {
 	if cfg.Dir == "" {
@@ -128,9 +133,12 @@ func (a *Allocator) path(port int) string {
 }
 
 // Allocate reserves the lowest free port in the range for owner and returns it.
-// The claim is an O_EXCL create, atomic across processes. A reservation older
-// than StaleAfter is reclaimed as a crash orphan (stale-owner detection). When
-// every port is reserved and none is reclaimable, ErrPoolExhausted.
+// The claim is a hard-link of a fully-written temp file (tryClaim) — atomic
+// across processes AND never leaving an empty/half-written reservation visible,
+// so a concurrent reclaimer can never misread a just-claimed slot. A reservation
+// older than StaleAfter is reclaimed as a crash orphan under a per-port lock
+// (reclaim). When every port is reserved and none is reclaimable,
+// ErrPoolExhausted.
 func (a *Allocator) Allocate(owner string) (int, error) {
 	if owner == "" {
 		return 0, ErrBadOwner
@@ -140,38 +148,59 @@ func (a *Allocator) Allocate(owner string) (int, error) {
 	now := a.now()
 	for port := a.lo; port <= a.hi; port++ {
 		path := a.path(port)
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if errors.Is(err, os.ErrExist) {
-			// Occupied — reclaim only if the existing reservation is a stale
-			// crash orphan, then retry the atomic claim.
-			if a.staleAfter >= 0 && a.stale(path, now) {
-				if rmErr := os.Remove(path); rmErr == nil {
-					f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-				}
-			}
-		}
+		ok, err := a.tryClaim(path, port, owner, now)
 		if err != nil {
-			continue // occupied and not reclaimable (or a lost race) — next port
+			return 0, err
 		}
-		res := Reservation{Port: port, Owner: owner, ReservedAt: now}
-		enc, mErr := json.Marshal(res)
-		if mErr != nil {
-			f.Close()
-			_ = os.Remove(path)
-			return 0, fmt.Errorf("portpool: marshal reservation: %w", mErr)
+		if ok {
+			return port, nil
 		}
-		if _, wErr := f.Write(enc); wErr != nil {
-			f.Close()
-			_ = os.Remove(path)
-			return 0, fmt.Errorf("portpool: write reservation: %w", wErr)
+		// Occupied — if the reservation is a stale crash orphan, reclaim AND claim
+		// it atomically under the per-port lock (remove + link in one locked
+		// critical section, so no other reclaimer can remove the fresh slot we
+		// just linked, F11).
+		ok, err = a.reclaimAndClaim(path, port, owner, now)
+		if err != nil {
+			return 0, err
 		}
-		if cErr := f.Close(); cErr != nil {
-			_ = os.Remove(path)
-			return 0, fmt.Errorf("portpool: close reservation: %w", cErr)
+		if ok {
+			return port, nil
 		}
-		return port, nil
 	}
 	return 0, ErrPoolExhausted
+}
+
+// tryClaim atomically creates the reservation at path IF it does not exist: it
+// writes the full content to a temp file, then HARD-LINKs it into place (link
+// fails EEXIST if the port is taken — the atomic single-winner claim — and the
+// file appears at path already complete, so no reader ever sees an empty or
+// half-written reservation). Returns (true,nil) on claim, (false,nil) when the
+// port is taken.
+func (a *Allocator) tryClaim(path string, port int, owner string, now time.Time) (bool, error) {
+	enc, err := json.Marshal(Reservation{Port: port, Owner: owner, ReservedAt: now})
+	if err != nil {
+		return false, fmt.Errorf("portpool: marshal reservation: %w", err)
+	}
+	tmp, err := os.CreateTemp(a.dir, ".tmp-*")
+	if err != nil {
+		return false, fmt.Errorf("portpool: temp reservation: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(enc); err != nil {
+		tmp.Close()
+		return false, fmt.Errorf("portpool: write reservation: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return false, fmt.Errorf("portpool: close reservation: %w", err)
+	}
+	if err := os.Link(tmpName, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil // port already claimed
+		}
+		return false, fmt.Errorf("portpool: link reservation: %w", err)
+	}
+	return true, nil
 }
 
 // Release frees a port's reservation. Idempotent: an already-absent reservation
@@ -197,7 +226,10 @@ func (a *Allocator) List() ([]Reservation, error) {
 	}
 	var out []Reservation
 	for _, e := range entries {
-		if e.IsDir() {
+		// Only reservation files (<port>.json); a reclaim tombstone
+		// (<port>.json.reclaim.<pid>.<seq>) has a different final extension and
+		// is skipped (F11).
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
 		res, ok := a.read(filepath.Join(a.dir, e.Name()))
@@ -206,6 +238,45 @@ func (a *Allocator) List() ([]Reservation, error) {
 		}
 	}
 	return out, nil
+}
+
+// reclaimAndClaim reclaims a STALE reservation and claims the port in ONE locked
+// critical section (F11): a per-port O_EXCL <path>.lock serializes reclaimers,
+// and — crucially — the stale REMOVE and the fresh CLAIM (link) both happen under
+// that lock, so no second reclaimer can remove the fresh reservation this one
+// just linked (the gap-between-remove-and-link race). Under the lock it
+// RE-verifies staleness (a concurrent claimant may have recreated a fresh
+// reservation) and never removes a fresh one. Returns (true,nil) when the port
+// was reclaimed and claimed; (false,nil) when the slot is fresh, the lock is
+// held, or an outer claimant grabbed the freed slot first. Called under a.mu.
+func (a *Allocator) reclaimAndClaim(path string, port int, owner string, now time.Time) (bool, error) {
+	if a.staleAfter < 0 || !a.stale(path, now) {
+		return false, nil // stale-reclaim disabled, or the reservation is fresh
+	}
+	lock := path + ".lock"
+	lf, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		// A lock older than lockStale is a crashed-holder leak: remove + retry once
+		// so a crash during reclaim never strands the port. Real-wall-clock (lock
+		// mtime), distinct from the injectable reservation-staleness clock.
+		if fi, statErr := os.Stat(lock); statErr == nil && time.Since(fi.ModTime()) > lockStale {
+			_ = os.Remove(lock)
+			lf, err = os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		}
+	}
+	if err != nil {
+		return false, nil // another reclaimer holds the lock — skip this port
+	}
+	defer func() { _ = lf.Close(); _ = os.Remove(lock) }()
+	if !a.stale(path, now) {
+		return false, nil // recreated fresh since the pre-check — never remove it
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	// Claim WHILE HOLDING THE LOCK: an outer (unlocked) tryClaim may have grabbed
+	// the freed slot first → link EEXIST → (false,nil), and we yield to it.
+	return a.tryClaim(path, port, owner, now)
 }
 
 // stale reports whether the reservation at path is older than StaleAfter. An

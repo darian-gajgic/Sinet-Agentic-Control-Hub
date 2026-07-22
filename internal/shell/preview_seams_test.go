@@ -24,6 +24,13 @@ import (
 // launches a static preview from a repo-backed revision and tears it down. No
 // live front chain is touched (routing disabled: no admin endpoint configured).
 func TestBuildPreviewSurfaceComposition(t *testing.T) {
+	// F8: pin the routing config to empty so a dev-shell export can never make
+	// this test dial the LIVE Caddy admin API (host hazard). The test asserts
+	// routing is disabled below.
+	t.Setenv("SINET_PREVIEW_CADDY_ADMIN", "")
+	t.Setenv("SINET_PREVIEW_BASE_HOST", "test.invalid")
+	t.Setenv("SINET_PREVIEW_PORT_LO", "")
+	t.Setenv("SINET_PREVIEW_PORT_HI", "")
 	ctx := context.Background()
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
@@ -113,5 +120,24 @@ func TestPreviewInCmdDeps(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Sinet-Agentic-Control-Hub/internal/preview") {
 		t.Fatalf("cmd/sinet deps do not include internal/preview (surface not compiled in)")
+	}
+}
+
+// TestEnvPortRange pins F18: the structural port-range override is passed
+// through from env; malformed/absent env falls back to the portpool default.
+func TestEnvPortRange(t *testing.T) {
+	t.Setenv("SINET_PREVIEW_PORT_LO", "40000")
+	t.Setenv("SINET_PREVIEW_PORT_HI", "40009")
+	if lo, hi := envPortRange(); lo != 40000 || hi != 40009 {
+		t.Errorf("override = [%d,%d], want [40000,40009]", lo, hi)
+	}
+	t.Setenv("SINET_PREVIEW_PORT_LO", "notanint")
+	if lo, hi := envPortRange(); lo != 0 || hi != 0 {
+		t.Errorf("malformed lo → [%d,%d], want [0,0] (default)", lo, hi)
+	}
+	t.Setenv("SINET_PREVIEW_PORT_LO", "40009")
+	t.Setenv("SINET_PREVIEW_PORT_HI", "40000") // hi < lo
+	if lo, hi := envPortRange(); lo != 0 || hi != 0 {
+		t.Errorf("hi<lo → [%d,%d], want [0,0] (default)", lo, hi)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 )
 
 // Settings is the api-facing view of the settings registry (Spec S01.10):
@@ -82,6 +83,10 @@ type Config struct {
 	// endpoints land with the B6 operator surfaces (F1).
 	Accept   *accept.Accepter
 	FollowUp *intake.FollowUp
+	// Preview is the S13.8 preview surface (launch/stop/list/before-vs-after),
+	// composed at the shell root and HELD here for the B6 /api/deliverables
+	// preview endpoints (S15.2); wired but NOT yet routed (F17).
+	Preview *preview.Manager
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -106,6 +111,9 @@ type Server struct {
 	// routed.
 	accept   *accept.Accepter
 	followUp *intake.FollowUp
+	// preview is the S13.8 preview surface, held for the B6
+	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
+	preview *preview.Manager
 }
 
 // New assembles the Server.
@@ -124,6 +132,7 @@ func New(cfg Config) *Server {
 		intake:     cfg.Intake,
 		accept:     cfg.Accept,
 		followUp:   cfg.FollowUp,
+		preview:    cfg.Preview,
 	}
 	if s.auth == nil {
 		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}

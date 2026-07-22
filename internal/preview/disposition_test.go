@@ -103,6 +103,20 @@ func TestPerTypeDispositions(t *testing.T) {
 	}
 }
 
+// TestWhitespaceRegistryCommand pins F12: a whitespace-only registry preview
+// command is NOT treated as a command — heuristics apply — and a whitespace CLI
+// command yields empty argv (the manager then reports no-preview, never a panic).
+func TestWhitespaceRegistryCommand(t *testing.T) {
+	// Whitespace command over an index.html tree → heuristics win → static.
+	if lane, r := Detect(tree(t, "index.html"), "code", "   \t "); lane != LaneStatic || r.Tool != "static" {
+		t.Errorf("whitespace registry cmd → %s/%v, want static (heuristics)", lane, r)
+	}
+	// CLI type with a whitespace command → empty argv (no index-out-of-range).
+	if lane, r := Detect(tree(t), "cli", "  "); lane != LaneCLI || len(r.Argv) != 0 {
+		t.Errorf("whitespace cli cmd → %s argv=%v, want cli/empty", lane, r.Argv)
+	}
+}
+
 // TestHostInjectionsPerProvider: allowedHosts injection is present in the
 // runner invocation data per provider (Spec S13.8: "allowedHosts injected, or
 // Vite HMR silently dies"; R13). The Vite lane names server.allowedHosts.

@@ -75,6 +75,7 @@ var composeFiles = []string{"docker-compose.yml", "docker-compose.yaml", "compos
 //     (R4).
 func Detect(checkoutDir, dtype, registryCmd string) (Lane, *Runner) {
 	dt := strings.ToLower(strings.TrimSpace(dtype))
+	registryCmd = strings.TrimSpace(registryCmd) // F12: whitespace-only ⇒ no command
 
 	// 1. Notebook self-preview.
 	if dt == "notebook" || hasFileWithExt(checkoutDir, ".ipynb") {

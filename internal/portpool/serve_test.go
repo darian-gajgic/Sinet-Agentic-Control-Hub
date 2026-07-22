@@ -96,7 +96,7 @@ func TestAssertLoopback(t *testing.T) {
 			t.Errorf("assertLoopback(%q) = %v, want nil", a, err)
 		}
 	}
-	bad := []string{"0.0.0.0:47600", "localhost:47600", "192.168.1.10:47600", "sinet:47600", "8481"}
+	bad := []string{"0.0.0.0:47600", "localhost:47600", "192.168.1.10:47600", "sinet:47600", "9999"}
 	for _, a := range bad {
 		if err := assertLoopback(a); err == nil {
 			t.Errorf("assertLoopback(%q) = nil, want rejection", a)

@@ -28,10 +28,11 @@ const proxydBinary = "/usr/lib/systemd/systemd-socket-proxyd"
 
 // RenderProxydUnits renders the .socket + proxyd .service pair for one pool port
 // (Spec S13.8; R14): the socket listens loopback-only on the pool port, the
-// proxyd forwards to the in-netns dev-server backend with an --exit-idle-time
-// from ⚙ preview.idle_stop, and StopWhenUnneeded=yes tears the preview front
-// down when the proxy idles out. Text only; installing/enabling/starting is a
-// gate operator step, never this code's.
+// proxyd forwards to the in-netns dev-server backend, and idle-stop is
+// --exit-idle-time from ⚙ preview.idle_stop (the proxy exits when idle, the
+// socket re-arms, the next connection re-activates it — the correct mechanism
+// for this no-backend-unit topology; StopWhenUnneeded is not set, F9). Text
+// only; installing/enabling/starting is a gate operator step, never this code's.
 func RenderProxydUnits(poolPort int, backend string, idle time.Duration) (socket, service units.File, err error) {
 	if poolPort <= 0 {
 		return units.File{}, units.File{}, fmt.Errorf("preview: proxyd units need a positive pool port, got %d", poolPort)
@@ -66,13 +67,15 @@ WantedBy=sockets.target
 		Name: base + ".service",
 		Content: fmt.Sprintf(`# GENERATED per-preview socket-proxyd (Spec S13.8) — never installed by this
 # code. systemd-socket-proxyd is host systemd (host-managed, no components.lock
-# entry). --exit-idle-time is ⚙ preview.idle_stop; StopWhenUnneeded=yes stops
-# the preview front when the proxy idles out (Spec S13.8 R14).
+# entry). Idle-stop in THIS topology (no separate backend unit) is
+# --exit-idle-time=<⚙ preview.idle_stop>: the proxy EXITS when idle and the
+# paired .socket re-arms, so the next connection re-activates it (Spec S13.8 R14
+# names the mechanism; StopWhenUnneeded is deliberately NOT set — nothing
+# Requires= this proxy, so it would let systemd stop a just-activated proxy; F9).
 [Unit]
 Description=Sinet preview socket-proxyd for pool port %d (Spec S13.8)
 Requires=%s.socket
 After=%s.socket
-StopWhenUnneeded=yes
 
 [Service]
 ExecStart=%s --exit-idle-time=%ds %s

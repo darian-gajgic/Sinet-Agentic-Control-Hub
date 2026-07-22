@@ -1,6 +1,11 @@
 package preview
 
-import "context"
+import (
+	"context"
+	"errors"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+)
 
 // comparison.go builds the before-vs-after dual instances (Spec S13.8 §S1.9;
 // R17/R18): the accepted revision (the "before", resolved via
@@ -26,12 +31,16 @@ func (m *Manager) LaunchComparison(ctx context.Context, deliverableID string, ca
 	cmp := &Comparison{DeliverableID: deliverableID, After: after.View()}
 
 	acc, err := m.cfg.Reviews.AcceptedRevision(ctx, deliverableID)
-	if err != nil {
-		// No accepted revision (the deliverable is not accepted): honest
-		// single-instance state — the candidate stands alone, nothing to sync to.
+	if errors.Is(err, review.ErrBadInput) {
+		// The deliverable is simply not accepted (review.ErrBadInput): honest
+		// single-instance state — the candidate stands alone, nothing to sync to
+		// (F7). Any OTHER error (not-found, storage) is a real failure — propagate.
 		cmp.SingleInstance = true
 		cmp.Sync = SyncSemantics{Mode: "path", Enabled: false}
 		return cmp, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	before, err := m.Launch(ctx, LaunchRequest{
 		DeliverableID: deliverableID, Revision: acc.N, Role: RoleBefore, User: user,

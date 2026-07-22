@@ -118,24 +118,35 @@ func TestLiveNetnsProbe(t *testing.T) {
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	// cmd.Process.Pid is the bwrap MONITOR (host netns); the sandboxed listener
-	// is a descendant in the new netns. R8 parses "the sandboxed process TREE's
-	// /proc/<pid>/net/tcp" — so probe the tree, not just the monitor.
+	// is a descendant in the new netns. The PRODUCTION probeListeningPorts walks
+	// the tree (F5), so the live test consumes exactly the shipped function.
 	monitor := cmd.Process.Pid
 
+	// Caps were present and bwrap started: the listener MUST appear in the
+	// sandbox netns. A genuine non-appearance is the regression this test exists
+	// to catch (F4) — it FAILS, never skips.
 	found := false
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-		if containsPort(probeTree(monitor), probePort) {
+		ports, err := probeListeningPorts(monitor)
+		if err == nil && containsPort(ports, probePort) {
 			found = true
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !found {
-		t.Skipf("SANCTIONED SKIP: listener did not appear in the sandbox netns (bwrap/loopback unavailable here)")
+		t.Fatalf("listener on %d did not appear in the sandbox netns despite caps + a started bwrap — the netns probe regressed (F4)", probePort)
 	}
-	// Netns isolation: the port lives in the sandbox netns, NOT the host's.
-	if hostPorts, err := probeListeningPorts(os.Getpid()); err == nil && containsPort(hostPorts, probePort) {
-		t.Errorf("port %d leaked into the host netns — netns isolation broken", probePort)
+	// Netns isolation: the port lives in the sandbox netns, NOT the host's. Probe
+	// the TEST process's OWN netns view with the single-pid probePID — NOT the
+	// tree walk, which would (correctly) find the sandbox via this process's own
+	// bwrap-child descendant.
+	if hostPorts, err := probePID(os.Getpid()); err == nil {
+		for _, p := range hostPorts {
+			if p == probePort {
+				t.Errorf("port %d leaked into the host netns — netns isolation broken", probePort)
+			}
+		}
 	}
 }
 
@@ -146,76 +157,4 @@ func containsPort(ports []Port, n int) bool {
 		}
 	}
 	return false
-}
-
-// probeTree unions the listening ports across a process and all its descendants
-// (the sandboxed process shares its netns with bwrap's other sandbox-side
-// processes; the monitor is in the host netns and simply lacks the sandbox
-// port). This is the "sandboxed process tree" the R8 probe parses.
-func probeTree(root int) []Port {
-	seen := map[int]bool{}
-	var out []Port
-	for _, pid := range append(descendants(root), root) {
-		ports, err := probeListeningPorts(pid)
-		if err != nil {
-			continue
-		}
-		for _, p := range ports {
-			if !seen[p.Number] {
-				seen[p.Number] = true
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}
-
-// descendants returns every descendant pid of root by walking /proc PPIDs.
-func descendants(root int) []int {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return nil
-	}
-	ppid := map[int]int{}
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		if pp := parentPid(pid); pp != 0 {
-			ppid[pid] = pp
-		}
-	}
-	var out []int
-	frontier := []int{root}
-	for len(frontier) > 0 {
-		cur := frontier[0]
-		frontier = frontier[1:]
-		for pid, pp := range ppid {
-			if pp == cur {
-				out = append(out, pid)
-				frontier = append(frontier, pid)
-			}
-		}
-	}
-	return out
-}
-
-// parentPid reads /proc/<pid>/stat, tolerating a comm field with spaces/parens.
-func parentPid(pid int) int {
-	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if err != nil {
-		return 0
-	}
-	s := string(b)
-	i := strings.LastIndex(s, ")") // end of the (comm) field
-	if i < 0 {
-		return 0
-	}
-	fields := strings.Fields(s[i+1:]) // state, ppid, ...
-	if len(fields) < 2 {
-		return 0
-	}
-	pp, _ := strconv.Atoi(fields[1])
-	return pp
 }

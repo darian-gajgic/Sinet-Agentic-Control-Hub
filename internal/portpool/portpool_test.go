@@ -1,8 +1,10 @@
 package portpool
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 )
@@ -176,5 +178,75 @@ func TestCrossInstanceClaim(t *testing.T) {
 	}
 	if p1 == p2 {
 		t.Fatalf("two instances over one dir claimed the same port %d", p1)
+	}
+}
+
+// TestStaleReclaimContention pins F11: many allocators over ONE dir, racing to
+// reclaim a range full of STALE reservations, never double-claim a port — the
+// atomic rename-to-tombstone ensures only one claimant reclaims each stale slot,
+// and the fresh reservations a winner writes are seen as fresh (skipped) by the
+// rest. Run under -race.
+func TestStaleReclaimContention(t *testing.T) {
+	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	clk := base
+	dir := filepath.Join(t.TempDir(), "res")
+	mk := func() *Allocator {
+		a, err := New(Config{Dir: dir, Lo: 47600, Hi: 47603, StaleAfter: time.Hour, Now: func() time.Time { return clk }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	// Fill the 4-port range with reservations, then age them past StaleAfter.
+	seed := mk()
+	for i := 0; i < 4; i++ {
+		if _, err := seed.Allocate("crashed"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clk = base.Add(2 * time.Hour) // set BEFORE the goroutines: no concurrent clk write
+
+	const workers = 8 // more claimants than ports (4)
+	type res struct {
+		port int
+		err  error
+	}
+	out := make(chan res, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			p, err := mk().Allocate(fmt.Sprintf("claim-%d", id))
+			out <- res{p, err}
+		}(i)
+	}
+	wg.Wait()
+	close(out)
+
+	seen := map[int]int{}
+	success := 0
+	for r := range out {
+		if r.err == nil {
+			seen[r.port]++
+			success++
+		}
+	}
+	for port, c := range seen {
+		if c > 1 {
+			t.Errorf("port %d double-claimed %d times — the reclaim race (F11)", port, c)
+		}
+	}
+	if success < 1 || success > 4 {
+		t.Errorf("reclaim successes = %d, want 1..4 (exactly 4 ports)", success)
+	}
+	// The strongest invariant: the count of successful allocations equals the
+	// number of live reservation files — no port is owned by two callers at once.
+	final, err := seed.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(final) != success {
+		t.Errorf("live reservations (%d) != successful allocations (%d) — a port is double-owned (F11)", len(final), success)
 	}
 }

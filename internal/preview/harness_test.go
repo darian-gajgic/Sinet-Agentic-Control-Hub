@@ -120,7 +120,10 @@ func (f *fakeReviews) RevisionAt(_ context.Context, id string, n int) (review.Re
 func (f *fakeReviews) AcceptedRevision(_ context.Context, id string) (review.Revision, error) {
 	r, ok := f.accepted[id]
 	if !ok {
-		return review.Revision{}, fmt.Errorf("deliverable %q has no accepted revision", id)
+		// Wrap review.ErrBadInput exactly as review.Store.AcceptedRevision does
+		// for a not-accepted deliverable, so LaunchComparison's F7 branch is
+		// exercised (single-instance) vs a real error (propagate).
+		return review.Revision{}, fmt.Errorf("%w: deliverable %q is not accepted", review.ErrBadInput, id)
 	}
 	return r, nil
 }
@@ -242,8 +245,20 @@ func hashTree(t *testing.T, dir string) string {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, path)
-		if rel == ".git" {
-			return fs.SkipDir
+		if d.Name() == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil // git-worktree .git FILE — skip just it, not siblings
+		}
+		if d.Type()&fs.ModeSymlink != 0 { // F3: symlink mutations must be visible
+			target, lerr := os.Readlink(path)
+			if lerr != nil {
+				return lerr
+			}
+			rels = append(rels, rel)
+			contents[rel] = "symlink\x00" + target
+			return nil
 		}
 		if !d.Type().IsRegular() {
 			return nil

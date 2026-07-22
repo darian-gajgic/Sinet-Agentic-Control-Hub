@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
@@ -42,8 +43,10 @@ type previewDeps struct {
 // endpoint UNSET → routing disabled; base host = the tailnet FQDN; range = the
 // portpool structural default.
 func buildPreviewSurface(d previewDeps) (*preview.Manager, error) {
+	lo, hi := envPortRange() // structural override (F18); 0,0 ⇒ portpool default
 	ports, err := portpool.New(portpool.Config{
 		Dir: filepath.Join(d.StateDir, "portpool", "reservations"),
+		Lo:  lo, Hi: hi,
 	})
 	if err != nil {
 		return nil, err
@@ -62,6 +65,20 @@ func buildPreviewSurface(d previewDeps) (*preview.Manager, error) {
 		Events:   d.Events,
 		Settings: d.Settings,
 		BaseHost: baseHost,
-		Log:      d.Log,
+		// Throwaway clones live under a platform-owned dir, never system temp (F16).
+		Scratch: filepath.Join(d.StateDir, "preview-clones"),
+		Log:     d.Log,
 	})
+}
+
+// envPortRange reads the structural port-range override (F18): SINET_PREVIEW_
+// PORT_LO / _HI (both must parse to positive ints, lo<=hi) — else 0,0 (the
+// portpool structural default). No ⚙ key; a bring-up deployment config value.
+func envPortRange() (lo, hi int) {
+	l, lerr := strconv.Atoi(os.Getenv("SINET_PREVIEW_PORT_LO"))
+	h, herr := strconv.Atoi(os.Getenv("SINET_PREVIEW_PORT_HI"))
+	if lerr == nil && herr == nil && l > 0 && h >= l {
+		return l, h
+	}
+	return 0, 0
 }
