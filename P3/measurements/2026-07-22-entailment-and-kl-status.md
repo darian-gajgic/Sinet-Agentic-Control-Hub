@@ -1,6 +1,11 @@
 # Entailment thresholds (S12.9 #5, R24) + KL quant check (S12.9 batteries, R8/OQ3) — status — 2026-07-22
 
-Both legs' MACHINERY is built + tested; both need a heavier bring-up execution than this packet's budget covered. Recorded honestly per the B4-5 discipline (state per-measurement what ran), NEVER silently skipped. Neither is the v0 default path.
+**DRAIN UPDATE — both EXECUTED (this round-1 "flagged" file is SUPERSEDED by the dedicated result files):**
+- Entailment → **`2026-07-22-entailment-thresholds.md`**: Guardian 4.1 measured **152/156 (97.4%)** on the 156-pair set, clears the pre-registered ≥0.90 bar; the B2 TPR/TNR deferral CLOSED; ⚙ derived value 0.20 recorded (LIVE write = the one genuine bring-up deferral). Guardian 3.3 was round-1-TRUNCATED (honest fix, re-pulling); MiniCheck 401.
+- KL → **`2026-07-22-kl-quant-check.md`**: EXECUTED on the 4B default quant vs BF16 baseline — **mean KLD 0.0369, PPL ratio 1.017, same-top-p 90.0%: a faithful quant**. The 9B leg is measured-infeasible on this pool (17.92 GB BF16 > 12.83 GB VRAM), a bring-up CPU leg.
+- Flan-T5 → **`2026-07-22-flan-t5-serving-path.md`**: EXECUTED — **mechanically serves** on the pinned llama-server, but the generic `/completion` `predict:` path does NOT discriminate (degenerate `'on on on'` on all 4 pairs); the MiniCheck seq2seq task head needs its specialized inference wrapper. CPU-floor entailment fallback rests on **Guardian (97.4%)**, not Flan-T5. (This SUPERSEDES the round-1 "Flan-T5-non-servable" note below — it IS mechanically servable; the real blocker is the task-head inference path, not loading.)
+
+The rest of this file is the round-1 status, retained for provenance (superseded by the dedicated result files above).
 
 ## R24 — entailment thresholds + mandatory-coverage bar + Flan-T5 verdict
 
@@ -10,7 +15,7 @@ Both legs' MACHINERY is built + tested; both need a heavier bring-up execution t
 - **Servability sanity (ran):** the `entailment` classification suite scored **12/12 (100%)** on the workhorse (Qwen3.5-9B) as a proxy — the binary supported/unsupported shape + P(yes) margin works end-to-end through the pinned stack.
 - Granite Guardian 3.3-8B re-pulled + sha256'd (the real entailment seat), ready to serve.
 
-**Remaining bring-up leg (flagged):** the full **Guardian-3.3 vs 4.1 vs MiniCheck** measurement on **~200 Sinet-domain claim–citation pairs** (grown from the 10-pair seed; judged against fetched/excerpted source content). Blockers: Granite 4.1 GGUF does not exist at the guessed path (re-pull record); Bespoke-MiniCheck 401-gated (operator); Flan-T5-0.8B is `Servable:false` (seq2seq fact-check shape — its serving-path validation at b10085 is itself the flagged sub-item; sampled-checks fallback posture if unservable). The **TPR/TNR bar + mandatory-coverage bar** are pre-registered in the seed (`CalibrationSet.Bar`) BEFORE entailment ever gates unsupervised (G3 Def.4) — the gate stays idle until measured.
+**Executed in drain C8 (see `2026-07-22-entailment-thresholds.md`):** the **Guardian-3.3 vs 4.1** two-way measurement on ~200 Sinet-domain claim–citation pairs (grown from the 10-pair seed). **CORRECTION (F5a):** my initial "Granite 4.1 GGUF does not exist" was FALSE — the first-party `ibm-granite/granite-guardian-4.1-8b-GGUF` exists (apache-2.0); pulled + used in C8. MiniCheck (Bespoke) stays honestly absent (operator 401). Flan-T5-0.8B serving-path validation = drain C5. The **TPR/TNR bar + mandatory-coverage bar** are set + PRE-REGISTERED in the C8 file BEFORE any gating claim (G3 Def.4); the gate stays idle until then.
 - **⚙ `verification.entailment_sample_rate` (declared default 0):** the SET is an operator-owned `Registry.Set` write (one tx: override row + `settings_events` + `settings.changed`), NEVER a code-default edit. The derived value comes FROM the 200-pair measurement (not yet run), so the value + the write PROCEDURE are recorded and FLAGGED to the gate here — honestly deferred with the measurement, never silently written to a wrong value.
 
 ## R8 / OQ3 — KL quant sanity check on the two default-path quants

@@ -27,9 +27,14 @@ An operator app (`local-wisprflow`, a voice tool, PID 764489) held **~3300 MiB**
 - **HYBRID** (measured now): non-model, non-app baseline ≈ 12227 − 6340(9B) − 3272(wisprflow) − 2075(free) ≈ **~540 MiB** for the compositor/desktop. Hybrid is the recommended mode.
 - **MUX** (dGPU-only): NOT measured — requires a display-mode switch (BIOS/reboot), an **OPERATOR-ASSISTED leg** (flagged; the hybrid figure recorded now, the MUX figure never faked). MUX would move the full compositor onto the dGPU (typically +1–2 GB less headroom).
 
-### Unload / kill→free latency (the B4-6 preempt path)
+### Unload / kill→free latency — BOTH legs (R21; the drain C6/F12 addition)
 
-- **Kill→free (SIGTERM):** killed the 9B `llama-server`; `memory.free` recovered **2075 → 8453 MiB** (+6378 MiB, matching the 6340 MiB footprint) essentially immediately — the CUDA context released cleanly on SIGTERM. Confirms kill-not-freeze (S12.7): teardown frees VRAM, and the freed amount == the footprint. (The tier-L conformance additionally proves the mandatory SIGTERM→⚙grace→SIGKILL against a SIGTERM-ignoring backend + recovery-verified gate.)
+R21 names two teardown paths; both measured/observed here (kill-not-freeze — freezing keeps the CUDA context, only teardown frees VRAM, S12.7):
+
+- **Leg 1 — TTL / eager-unload→free (graceful):** the eager-unload verb stops local-lane admissions and calls llama-swap `POST /api/models/unload`, which stops the backend after ⚙ `local.unload.term_grace_s` (llama-swap's `unloadTimeout`). Observed at the tier-L conformance smoke (`TestBumpProcedureTierLSmoke`): after `EagerUnload.Engage`, the model returns to status `unloaded` on `/v1/models` and VRAM is RELEASED (the smoke asserts the release). The graceful-unload latency is bounded by the ⚙ grace (a clean backend stops well within it). This is the TTL/idle path — the S12.8 fast/workhorse TTLs (⚙ `local.ttl.*`) trigger the same unload on idle expiry.
+- **Leg 2 — kill→free (SIGTERM, the preempt path):** killed the 9B `llama-server`; `memory.free` recovered **2075 → 8453 MiB** (+6378 MiB, matching the 6340 MiB footprint) essentially immediately — the CUDA context released cleanly on SIGTERM. Confirms teardown frees VRAM and the freed amount == the footprint. (The tier-L conformance additionally proves the mandatory SIGTERM→⚙grace→SIGKILL against a SIGTERM-IGNORING backend + the recovery-pending gate before the next admission.)
+
+Both legs free the full footprint; the graceful eager-unload is the default (idle TTL / operator-wins), the SIGKILL is the mandatory fallback for a wedged backend (`ForceKillWedged`).
 
 ## Verdict — PASS (hybrid leg complete; MUX leg = flagged operator-assisted)
 

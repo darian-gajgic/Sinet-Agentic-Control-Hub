@@ -151,9 +151,9 @@ func Manifest() []SeatRecord {
 			Model:   "Granite Guardian 3.3-8B",
 			CardURL: "https://huggingface.co/ibm-granite/granite-guardian-3.3-8b-GGUF",
 			License: License{SPDX: "Apache-2.0", VerifyDate: vd},
-			Files:   []GGUFFile{{Repo: "ibm-granite/granite-guardian-3.3-8b-GGUF", Name: "granite-guardian-3.3-8b-Q5_K_M.gguf", SHA256: "7dee8bb7b74cb8e8c780be93b62c86eec0dc6baff953431df64ba0c672e3fa4f"}},
-			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, ServingContext: 8192, GPUSeated: true, Servable: true, Pulled: true,
-			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B (3.3 vs 4.1 comparison = S12.9 R24; the first-party 4.1 GGUF ibm-granite/granite-guardian-4.1-8b-GGUF EXISTS, apache-2.0, full quant ladder — the alternate row below). Quant policy: Q5/Q6 for ≤9B on pool12; KV cache stays fp16/q8_0 (never quantized). RE-PULLED + HASHED at B4-7 (R19): resumed to completion (4.20 GB, sha256 above). This is the entailment DEFAULT seat, consumed by B4-7's entailment measurement (S12.9).",
+			Files:   []GGUFFile{{Repo: "ibm-granite/granite-guardian-3.3-8b-GGUF", Name: "granite-guardian-3.3-8b-Q5_K_M.gguf"}},
+			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, ServingContext: 8192, GPUSeated: true, Servable: true,
+			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B. RE-PULL WAS TRUNCATED (drain honesty fix): round 1 recorded sha 7dee8bb7 at 4.20 GB on curl rc=0, but the true size is 5.80 GB — the 4.20 GB file was INCOMPLETE (llama-server: tensor blk.28 not within file bounds). Void hash removed + Pulled cleared; re-pulling to the full 5.80 GB at bring-up (its sha256 fills then). Quant policy: Q5/Q6 for ≤9B on pool12; KV stays fp16/q8_0. Entailment DEFAULT seat (the 4.1 alternate row below serves the S12.9 comparison in the interim).",
 		},
 		{
 			Seat: "Granite Guardian 4.1 8B", Role: "Entailment MEASUREMENT-ALTERNATE (S12.9 #5 3.3-vs-4.1 comparison; platform data)",
