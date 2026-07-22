@@ -27,6 +27,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -351,6 +352,7 @@ type harness struct {
 	sk           *stage.Skeleton
 	sched        *scheduler.Scheduler
 	sur          *stage.Surface
+	review       *review.Store
 	artifactRoot string
 }
 
@@ -376,6 +378,7 @@ func newHarness(t *testing.T, extraEnv ...string) *harness {
 		t.Fatalf("os.Executable: %v", err)
 	}
 	root := t.TempDir()
+	rev := &review.Store{DB: db, Log: log, Settings: reg, Root: filepath.Join(root, "review")}
 	sk, err := stage.New(stage.Config{
 		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led, Settings: reg,
 		Adapters: map[string]adapters.Adapter{
@@ -390,6 +393,11 @@ func newHarness(t *testing.T, extraEnv ...string) *harness {
 		ArtifactRoot: filepath.Join(root, "artifacts"),
 		RunRoot:      filepath.Join(root, "runs"),
 		CopyAsideDir: filepath.Join(root, "copy-aside"),
+		// The S13 review store rides every e2e exactly as the composition
+		// root wires it (B4-1): minting at the verification handoff,
+		// findings as durable comments, THE drain composing retry
+		// packages.
+		Review: rev,
 	})
 	if err != nil {
 		t.Fatalf("stage.New: %v", err)
@@ -407,7 +415,8 @@ func newHarness(t *testing.T, extraEnv ...string) *harness {
 	}
 	sk.Bind(sched)
 	return &harness{t: t, db: db, log: log, runs: runs, cps: cps, led: led,
-		sk: sk, sched: sched, sur: sk.Surface(), artifactRoot: filepath.Join(root, "artifacts")}
+		sk: sk, sched: sched, sur: sk.Surface(), review: rev,
+		artifactRoot: filepath.Join(root, "artifacts")}
 }
 
 // tick runs one synchronous admission cycle and waits for its dispatches.

@@ -294,7 +294,27 @@ func (v *Verifier) ResumeWithGuidance(ctx context.Context, in VerifyInput, card 
 		gfs[i].Round = startRound
 	}
 
-	pkg := BuildRetryPackage(in.Spec, acs, gfs, d, startRound)
+	// With the S13 sink wired, the answer's guidance lands as durable
+	// requester comments and the package findings come from THE drain
+	// (Spec S13.4: every open comment — the parked rounds' still-open
+	// findings AND the guidance — numbered, batch-consumed to the resumed
+	// attempt). Without it, the B2-5 in-memory shape: the guidance alone.
+	var pkg RetryPackage
+	if v.Review != nil {
+		if err := v.Review.RecordGuidance(ctx, d, owner, guidance); err != nil {
+			return Outcome{}, fmt.Errorf("verify: record guidance: %w", err)
+		}
+		drained, err := v.Review.DrainOpen(ctx, d, AttemptRef(d.RunID, startRound))
+		if err != nil {
+			return Outcome{}, fmt.Errorf("verify: drain for resumed round %d: %w", startRound, err)
+		}
+		for i := range drained {
+			drained[i].Round = startRound // the round the batch feeds
+		}
+		pkg = RetryPackage{Spec: in.Spec, ACs: acs, Findings: drained, Deliverable: d, Round: startRound}
+	} else {
+		pkg = BuildRetryPackage(in.Spec, acs, gfs, d, startRound)
+	}
 	nd, err := v.Revise(ctx, pkg)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("verify: guidance rework round %d: %w", startRound, err)

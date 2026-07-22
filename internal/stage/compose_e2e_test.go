@@ -28,6 +28,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -85,6 +86,7 @@ func newComposeHarness(t *testing.T, operator string) *routedHarness {
 		t.Fatalf("os.Executable: %v", err)
 	}
 	root := t.TempDir()
+	rev := &review.Store{DB: db, Log: log, Settings: reg, Root: filepath.Join(root, "review")}
 	sk, err := stage.New(stage.Config{
 		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led, Settings: reg,
 		Workers: workers,
@@ -108,6 +110,9 @@ func newComposeHarness(t *testing.T, operator string) *routedHarness {
 		ArtifactRoot: filepath.Join(root, "artifacts"),
 		RunRoot:      filepath.Join(root, "runs"),
 		CopyAsideDir: filepath.Join(root, "copy-aside"),
+		// The S13 review store, as the composition root wires it (B4-1):
+		// the composed definition presents at birth as a deliverable.
+		Review: rev,
 	})
 	if err != nil {
 		t.Fatalf("stage.New: %v", err)
@@ -126,7 +131,8 @@ func newComposeHarness(t *testing.T, operator string) *routedHarness {
 	}
 	sk.Bind(sched)
 	h := &harness{t: t, db: db, log: log, runs: runs, cps: cps, led: led,
-		sk: sk, sched: sched, sur: sk.Surface(), artifactRoot: filepath.Join(root, "artifacts")}
+		sk: sk, sched: sched, sur: sk.Surface(), review: rev,
+		artifactRoot: filepath.Join(root, "artifacts")}
 	return &routedHarness{harness: h, workers: workers}
 }
 
@@ -224,6 +230,36 @@ func TestNoFitComposeVerbE2E(t *testing.T) {
 	}
 	if card.Diff == "" || card.Provenance.AuthorKind != "composer" {
 		t.Fatalf("approval-as-diff card = %+v", card)
+	}
+
+	// The composed definition presented AT BIRTH as a deliverable (Spec
+	// S13.1 "automation definitions ride the same machinery"): revision 1
+	// of a worker-definition deliverable whose content IS the canonical
+	// render the approval-as-diff card presents — diffable and commentable
+	// through the one review schema.
+	defDlv, err := h.review.Deliverable(ctx, stage.DefinitionDeliverableID(taskB))
+	if err != nil {
+		t.Fatalf("definition deliverable: %v", err)
+	}
+	if defDlv.Type != "worker-definition" || defDlv.SubjectRef != verID || defDlv.CurrentRevision != 1 {
+		t.Fatalf("definition deliverable row: %+v", defDlv)
+	}
+	defFiles, err := h.review.RevisionFiles(ctx, defDlv.ID, 1)
+	if err != nil {
+		t.Fatalf("definition revision files: %v", err)
+	}
+	src, err := h.workers.VersionSource(ctx, verID)
+	if err != nil {
+		t.Fatalf("VersionSource: %v", err)
+	}
+	if defFiles[stage.DefinitionFileName] != src {
+		t.Fatalf("definition revision content must be the canonical render the card diffs")
+	}
+	if _, err := h.review.AddComment(ctx, review.CommentInput{
+		DeliverableID: defDlv.ID, Author: owner, Body: "tighten the persona block",
+		FileLevel: stage.DefinitionFileName,
+	}); err != nil {
+		t.Fatalf("definition deliverable must be commentable: %v", err)
 	}
 	gapSig := ver.EvidenceRef[len("gap:"):]
 	gap, err := h.workers.Gap(ctx, gapSig)

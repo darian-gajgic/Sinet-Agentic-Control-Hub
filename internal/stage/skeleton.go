@@ -553,6 +553,10 @@ func (s *Skeleton) newVerifier(domain string) *verify.Verifier {
 	if revise == nil {
 		revise = s.engineRevise
 	}
+	var sink verify.ReviewSink
+	if s.cfg.Review != nil {
+		sink = reviewSink{s: s}
+	}
 	return &verify.Verifier{
 		DB:       s.cfg.DB,
 		Log:      s.cfg.Log,
@@ -561,6 +565,7 @@ func (s *Skeleton) newVerifier(domain string) *verify.Verifier {
 		Judge:    judge,
 		Pack:     s.cfg.CheckPacks[domain],
 		Runner:   s.cfg.CheckRunner,
+		Review:   sink,
 		// Research counters stay nil at B2-4: stage sessions exist now,
 		// but the research TOOL substrate (WebSearch/egress) does not —
 		// nodes record UNVERIFIABLE-HERE loudly, never a fake pass

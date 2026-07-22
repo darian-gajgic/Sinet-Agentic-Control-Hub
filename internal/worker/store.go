@@ -550,6 +550,19 @@ func (s *Store) skillRefFor(name string) (CompiledSkillRef, error) {
 // readTemplateFile loads and hash-verifies a version's file (Spec S08.3:
 // the hash check catches the tamper; a stale/tampered file never
 // compiles).
+// VersionSource returns a version's canonical template source,
+// hash-verified against the row (the persisted parse∘render fixed point —
+// what is diffed, approved and, at B4, committed; Spec S08.1). It is the
+// content a composed definition presents through the S13.1 deliverable
+// schema ("automation definitions ride the same machinery").
+func (s *Store) VersionSource(ctx context.Context, versionID string) (string, error) {
+	v, err := s.VersionByID(ctx, versionID)
+	if err != nil {
+		return "", err
+	}
+	return s.readTemplateFile(v)
+}
+
 func (s *Store) readTemplateFile(v Version) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(s.root, v.FilePath))
 	if err != nil {

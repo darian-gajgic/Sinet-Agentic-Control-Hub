@@ -84,6 +84,11 @@ type Verifier struct {
 	// Entailment ships idle at v0 (Spec S07.4); nil is an inactive gate.
 	Entailment *EntailmentGate
 
+	// Review is the S13 review-schema seam (B4): revision minting at the
+	// handoff, findings-as-comments, guidance ingress, and THE S13.4
+	// drain. Nil = the pre-S13 in-memory channel (see ReviewSink).
+	Review ReviewSink
+
 	// PreGates overrides the V0 gate set (nil = DefaultPreGates) — the
 	// extension point per-deployment shape checks ride.
 	PreGates []PreGate
@@ -292,6 +297,17 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 	for round := startRound; ; round++ {
 		record := RoundRecord{Round: round, ContentSHA: d.SHA256(), Revision: d.Revision}
 
+		// ---- S13.1 minting: the candidate passes to review — one
+		// revision per round (idempotent when the resume path re-enters on
+		// the pinned revision; a V0-regenerated candidate re-mints as the
+		// round's new revision, the malformed mint staying in the
+		// never-compressed lineage). ----
+		if v.Review != nil {
+			if err := v.Review.MintCandidate(ctx, d, round); err != nil {
+				return Outcome{}, fmt.Errorf("verify: mint candidate rev %d: %w", d.Revision, err)
+			}
+		}
+
 		// ---- V0 (Spec S07.2): hard kill before any paid call. ----
 		v0 := RunV0(v.preGates(), d)
 		record.V0 = &v0
@@ -427,6 +443,20 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 		record.EventSeq = seq
 		out.Rounds = append(out.Rounds, record)
 
+		// ---- S13 landing: the verdict ref pins onto the judged revision
+		// and the round's findings become durable review comments — notes
+		// ride to the requester on the review surface (Spec S07.6), one
+		// schema with human comments (Spec S13.1). Suite defects
+		// (check-integrity) stay out: their sink is the card. ----
+		if v.Review != nil {
+			if err := v.Review.RecordVerdict(ctx, d, seq); err != nil {
+				return Outcome{}, fmt.Errorf("verify: record verdict ref: %w", err)
+			}
+			if err := v.Review.RecordFindings(ctx, d, reviewable(findings)); err != nil {
+				return Outcome{}, fmt.Errorf("verify: record round findings: %w", err)
+			}
+		}
+
 		// CHECK-INTEGRITY raiser (Spec S07.7): every blocker-severity
 		// check-integrity finding of the round — judge–check disagreements
 		// and runner failures alike — gets its decision card (+ quarantine
@@ -517,8 +547,26 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 		}
 
 		// Build the exact retry package and run the fresh-session executor
-		// (Spec S07.6).
-		pkg := BuildRetryPackage(in.Spec, input.ACs, findings, d, round+1)
+		// (Spec S07.6). With the S13 sink wired, the package findings come
+		// from THE drain (Spec S13.4): every open comment on the current
+		// revision — this round's findings plus any human comments sitting
+		// open — numbered [F1..Fn], batch-consumed to the attempt,
+		// severity carried (notes travel; the round trigger was the
+		// blocker verdict above). Without it, the pre-S13 in-memory shape:
+		// the round's blockers.
+		var pkg RetryPackage
+		if v.Review != nil {
+			drained, err := v.Review.DrainOpen(ctx, d, AttemptRef(d.RunID, round+1))
+			if err != nil {
+				return Outcome{}, fmt.Errorf("verify: drain for round %d: %w", round+1, err)
+			}
+			for i := range drained {
+				drained[i].Round = round + 1 // the round the batch feeds
+			}
+			pkg = RetryPackage{Spec: in.Spec, ACs: input.ACs, Findings: drained, Deliverable: d, Round: round + 1}
+		} else {
+			pkg = BuildRetryPackage(in.Spec, input.ACs, findings, d, round+1)
+		}
 		nd, err := v.Revise(ctx, pkg)
 		if err != nil {
 			return Outcome{}, fmt.Errorf("verify: rework round %d: %w", round+1, err)

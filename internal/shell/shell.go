@@ -43,6 +43,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
@@ -302,6 +303,13 @@ func Run(ctx context.Context, opts Options) error {
 			ArtifactRoot: filepath.Join(stateDir, "artifacts"),
 			RunRoot:      filepath.Join(stateDir, "runs"),
 			CopyAsideDir: filepath.Join(stateDir, "copy-aside"),
+			// The S13.1–S13.4 review store (B4-1): revision minting at the
+			// verification handoff, one comment schema for humans and
+			// findings, THE S13.4 drain; object dir under the state dir.
+			Review: &review.Store{
+				DB: db, Log: log, Settings: reg,
+				Root: filepath.Join(stateDir, "review"),
+			},
 			// CheckPacks ships empty: the software pack is per-project
 			// registry machinery (Spec S13, B4) — software-domain verifies
 			// fail LOUDLY rather than run a degraded launch domain.

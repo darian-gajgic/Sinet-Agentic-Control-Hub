@@ -80,6 +80,9 @@ type Finding struct {
 	// Text is carried verbatim as a numbered point (Spec S07.6): the retry
 	// fixes named problems and never regenerates blind.
 	Text string `json:"text"`
+	// SuggestedChange is the optional suggested change of the S13.1
+	// finding schema, delivered with the numbered point (Spec S13.4).
+	SuggestedChange string `json:"suggested_change,omitempty"`
 	// Round is the round the finding was first raised in.
 	Round int `json:"round"`
 	// Demoted marks a blocker demoted to note for citing no frozen

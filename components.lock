@@ -194,6 +194,52 @@
       "notes": "S16.3 os-mechanism row materialized at P3-B1-3 (first consumption: internal/sandbox composes /usr/bin/bwrap for per-run confinement). Host = Ubuntu 26.04 LTS, kernel 7.0.0-27-generic. Probe CLEARED 2026-07-20 (internal/sandbox.Probe, re-verifying SPIKE P2-S2 at runtime): bubblewrap 0.11.1 at /usr/bin/bwrap — MUST invoke the system path (the shipped AppArmor profile /etc/apparmor.d/bwrap-userns-restrict attaches to it; S11.2 rider); unprivileged user+net namespace FORMS under apparmor_restrict_unprivileged_userns=1 (functional probe, not a sysctl read); seccomp SECCOMP_MODE_FILTER available, profile loaded via bwrap --seccomp fd (kills ptrace/process_vm_readv/process_vm_writev — proven live: PTRACE_TRACEME denied EPERM inside the sandbox); Landlock present at ABI 8 (landlock_create_ruleset = syscall 444) — ruleset composed as data, live ENFORCEMENT is a B1 seam (x/sys v0.47.0 exposes no Landlock wrappers; the boundary is bwrap+netns regardless); netns present (empty per-run netns, no route = the S11.4 primary default-drop), nftables at /usr/sbin/nft. DECISIONS (reported, gate-flagged): srt (sandbox-runtime, S16.3 library row) ADOPTED as the primary composition path at P3-B1-3R — its own `sandbox-runtime` library entry is materialized above; the direct composition of these primitives is retained as the S16.3 funeral-plan fallback, selected by internal/sandbox.BuildPlan when srt is absent (host-deferred install batching at the B2 gate; native fallback runs at B1, no regression). sops + age (S16.3 rows) NOT consumed at B1 — the dev-mode broker store encrypts at rest with stdlib AES-256-GCM (zero new deps); the ratified systemd-creds + sops/age host-integrated format lands with broker key management at a host-install gate (age adoption + sops decision queued for the B1 gate, operator #10; coheres with operator age-identity-escrow item 6). Host egress substrate (nftables default-DROP + host proxy, S11.4/S11.8 sinet-egress-setup.service) is a boot-time root install — DEFERRED (no host changes at B1); the empty netns is delivered. Not a Go dependency (no modules claim); no CI running-unit assertion yet (activates with unit install, CONVENTIONS §4)."
     },
     {
+      "name": "PDF text extraction",
+      "kind": "library",
+      "pin": "v0.0.0-20250511090121-5959a4027728",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "scope": "module root at the pinned pseudo-version (single LICENSE, BSD 3-Clause verbatim, 'Copyright (c) 2009 The Go Authors' — the rsc.io/pdf lineage; no enterprise/ee carve-out directories; zero transitive dependencies — go.mod has no require lines, verified in the hash-verified module cache)",
+        "checked": "2026-07-22"
+      },
+      "role": {
+        "summary": "PDF plain-text extraction behind review.ExtractPDFText — the S13.2 v0 PDF comparison surface (extracted-text diff ONLY; G2 Def.13: MIT/BSD-licensed extraction, AGPL extractors excluded as defaults)",
+        "section": "S13.2"
+      },
+      "replacement": "github.com/dslipak/pdf (BSD-3-Clause fork of the same rsc.io/pdf lineage, same GetPlainText API) or a vendored copy (BSD-3 permits) behind the one ExtractPDFText function; an extraction failure already degrades to the labeled metadata-card fallback, so abandonment never blocks review",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7); the repo is quiet (last push 2025-05-11) — a stale-but-working leaf reader, sanctioned by the FC-v1 react-diff-view precedent (single-maintainer risk bounded by exact pin, BSD forkability, and the swap being contained to one function)",
+      "watch": [
+        "quarterly dependency pass (S16.7): re-check archived flag + last push; the pixel-overlay lane re-entry (post-v0, G2 Def.13) may replace this surface's exclusivity",
+        "docx/pandiff enhancement lane re-entry (R13-OQ7 audit) revisits the whole document-diff toolset"
+      ],
+      "last_review": "2026-07-22",
+      "modules": [
+        "github.com/ledongthuc/pdf"
+      ],
+      "notes": "Adopted at P3-B4-1 because Spec S13.2 fixes the v0 PDF review surface as extracted-text diff with MIT/BSD-licensed extraction and the stdlib has no PDF reader. Landscape LIVE-verified 2026-07-22: github.com/ledongthuc/pdf @latest = v0.0.0-20250511090121-5959a4027728 (proxy.golang.org; untagged — the pseudo-version IS the exact pin), repo NOT archived, 613 stars, BSD-3-Clause (GitHub API + LICENSE file read); pdfcpu (Apache-2.0, active) extracts raw content STREAMS, not decoded reading text — unfit for the extracted-text surface; go-fitz/MuPDF and UniDoc lanes are AGPL/commercial — excluded by G2 Def.13; dslipak/pdf is the same lineage but staler (last push 2024-04). S16.4 checklist walked: #1 niche/seam — one extraction function behind internal/review, owning section S13.2; #2 organ-grade — pure-Go leaf library, zero deps, no orchestration/store opinions; #3 health — quiet-but-alive fork of an archived original; risk bounded per the abandonment row; #4 license path-scoped above (LICENSE read verbatim, not assumed); #5 behavior — extraction asserted at the pin by an in-tree generated-PDF fixture test (internal/review); a panic in the extractor is recovered and degrades to the labeled fallback (no type refused, Spec S13.2); #6 unmodified — import-only; #7 runner-never-store — n/a (pure function over object-dir bytes; platform.db untouched); #8 pin+funeral — this entry; #9 watch rows above; #10 operator ratification queued for the B4 gate (the B0-5/B1-2 precedent)"
+    },
+    {
+      "name": "git (host CLI)",
+      "kind": "os-mechanism",
+      "pin": "ubuntu-26.04-lts",
+      "license": {
+        "spdx": "GPL-2.0-only",
+        "scope": "OS-packaged host CLI consumed UNMODIFIED as an external subprocess (/usr/bin/git) — never vendored, never linked; the GPL boundary is the process boundary (the S13.2 MIT/BSD constraint governs the LINKED PDF extractor, not host tools)",
+        "checked": "2026-07-22"
+      },
+      "role": {
+        "summary": "host-side unified line diff between revision pins (`git diff --no-index`, Spec S13.2) — the ONE diff authority for both the review surface and the S13.3 anchor diff-map; the S13.5 git topology (branch-per-pipeline, snapshot commits) is its heavier consumer at B4-2",
+        "section": "S13.2"
+      },
+      "replacement": "an in-tree LCS line differ (the worker approval-card unifiedDiff shape) producing the same unified format — loses none of the schema, only diff-engine parity with the git the S13.5 topology uses anyway",
+      "abandonment": "git leaving the host OS is not a live scenario; an OS-release upgrade re-verifies the observed version at the quarterly pass (the bwrap-entry pattern)",
+      "watch": [
+        "re-check observed version on OS upgrade + quarterly dependency pass (S16.7); CI runs the ubuntu-24.04 runner's git — the diff format contract (unified hunks) is version-stable and asserted by the internal/review tests on both"
+      ],
+      "last_review": "2026-07-22",
+      "notes": "S16-rail os-mechanism entry materialized at P3-B4-1 (first platform consumption: internal/review shells `git -c core.quotepath=false diff --no-index --no-color --unified=3`; exit 1 = differs, handled). Observed at adoption: git version 2.53.0 on the Ubuntu 26.04 LTS host. Absence is a LOUD error on the diff path (never a silent fallback); no CI running-unit assertion (an on-demand CLI, not a unit — the Caddy/claude precedent)"
+    },
+    {
       "name": "Caddy",
       "kind": "organ-unit",
       "pin": "2.6.2-14",

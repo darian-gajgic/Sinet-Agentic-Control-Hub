@@ -247,6 +247,19 @@ func (s *Skeleton) dispatchCompose(ctx context.Context, r run.Run) error {
 		return err
 	}
 
+	// The composed definition presents AT BIRTH as a deliverable (Spec
+	// S13.1 "automation definitions ride the same machinery"): revision 1
+	// of a worker-definition deliverable, diffable/commentable through the
+	// S13 review schema — the approval-as-diff station's presentation
+	// substrate (the station-4 card itself keeps its deterministic build,
+	// B3-2; the B6 surface renders from this schema).
+	if s.cfg.Review != nil {
+		if err := s.presentDefinition(ctx, r, st.Compose.RequestedBy, v); err != nil {
+			s.crash(ctx, r.ID, "compose: present definition as deliverable: "+err.Error())
+			return err
+		}
+	}
+
 	if s.cfg.EnginePin == "" {
 		s.crash(ctx, r.ID, "compose: Config.EnginePin unset — validation records key on (version × model × engine pin), S08.1")
 		return errors.New("stage: Config.EnginePin unset")

@@ -57,6 +57,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
@@ -236,6 +237,14 @@ type Config struct {
 	// (the adapter's exported Pin; this package never imports substrate
 	// packages, CONVENTIONS §10).
 	EnginePin string
+
+	// Review is the S13.1–S13.4 review store (B4-1). Wiring it activates
+	// revision minting at the verification handoff, findings-as-durable-
+	// comments, and THE S13.4 drain composing retry packages; the composer
+	// leg additionally presents composed definitions as deliverables at
+	// birth (Spec S13.1). NIL IS A TEST-ONLY POSTURE (the pre-S13
+	// in-memory channel); the composition root always wires it.
+	Review *review.Store
 
 	Logger *slog.Logger
 	Now    func() time.Time
