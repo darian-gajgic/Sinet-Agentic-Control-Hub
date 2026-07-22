@@ -89,6 +89,14 @@ func TestSandboxedPlaneSurface(t *testing.T) {
 	if r := do(t, srv, http.MethodPost, "/v1/chat/completions", "", `{"model":"intake-triage"}`); r.StatusCode != http.StatusUnauthorized {
 		t.Errorf("no token: status %d, want 401", r.StatusCode)
 	}
+	// A bare token WITHOUT the "Bearer " scheme ⇒ 401 (strict parse, F4).
+	bare, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/models", nil)
+	bare.Header.Set("Authorization", tok)
+	if r, err := srv.Client().Do(bare); err != nil {
+		t.Fatal(err)
+	} else if r.StatusCode != http.StatusUnauthorized {
+		t.Errorf("bare token (no Bearer scheme): status %d, want 401 (strict RFC 6750 parse)", r.StatusCode)
+	}
 	// Allowed alias ⇒ 200.
 	if r := do(t, srv, http.MethodPost, "/v1/chat/completions", tok, `{"model":"intake-triage","messages":[{"role":"user","content":"x"}]}`); r.StatusCode != http.StatusOK {
 		t.Fatalf("allowed alias: status %d, want 200", r.StatusCode)
@@ -148,5 +156,47 @@ func decode(t *testing.T, r *http.Response, v any) {
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+}
+
+// TestSandboxedMarkerUsesRequestedAlias proves the D7 marker records the
+// REQUESTED alias, never the grant's first alias (F1): with a multi-alias grant
+// [utility, intake-triage], a call to intake-triage (NOT first) must record a
+// consistent (duty=intake-triage, model=Qwen3.5-4B) pair — not (utility, 4B).
+func TestSandboxedMarkerUsesRequestedAlias(t *testing.T) {
+	ctx := context.Background()
+	b, tr, e := newBroker(t)
+	e.runningRun(t, "sbx.multi")
+	e.fake.SetModelResponse("Qwen3.5-4B", local.FakeResponse{Content: `{"abstain":true}`, InputTokens: 7, OutputTokens: 2})
+
+	srv := httptest.NewServer(b.Handler())
+	t.Cleanup(srv.Close)
+
+	tok, err := tr.Mint(local.SandboxGrant{
+		RunID: "sbx.multi", Owner: "alice", Class: "C1",
+		ModelAllowlist: []string{local.AliasUtility, local.AliasIntakeTriage}, MaxRequestBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := do(t, srv, http.MethodPost, "/v1/chat/completions", tok, `{"model":"intake-triage","messages":[{"role":"user","content":"x"}]}`); r.StatusCode != http.StatusOK {
+		t.Fatalf("multi-alias call: status %d, want 200", r.StatusCode)
+	}
+
+	var usageJSON string
+	if err := e.db.QueryRowContext(ctx, `SELECT usage_json FROM checkpoints WHERE run_id = ?`, "sbx.multi").Scan(&usageJSON); err != nil {
+		t.Fatalf("read checkpoint usage: %v", err)
+	}
+	var marker struct {
+		Local local.LocalMarker `json:"local"`
+	}
+	if err := json.Unmarshal([]byte(usageJSON), &marker); err != nil {
+		t.Fatalf("parse marker: %v", err)
+	}
+	if marker.Local.Duty != local.AliasIntakeTriage {
+		t.Errorf("D7 marker duty = %q, want the REQUESTED alias %q (not the grant's first alias)", marker.Local.Duty, local.AliasIntakeTriage)
+	}
+	if marker.Local.Model != "Qwen3.5-4B" {
+		t.Errorf("D7 marker model = %q, want Qwen3.5-4B (the requested alias's seat)", marker.Local.Model)
 	}
 }

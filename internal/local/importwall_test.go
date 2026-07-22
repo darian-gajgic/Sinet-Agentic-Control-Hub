@@ -38,6 +38,26 @@ func TestWorkerNeverImportsLocal(t *testing.T) {
 	}
 }
 
+// The reverse walls B4-6 depends on (R20 "AST-pinned where new"): the scheduler
+// GPU-admission hook is a scheduler-DECLARED interface satisfied structurally by
+// a local admitter, and the bridge injection lives in internal/sandbox — so
+// neither package may import internal/local.
+func TestSchedulerNeverImportsLocal(t *testing.T) {
+	for _, path := range internalImports(t, filepath.Join("..", "scheduler")) {
+		if path == modPrefix+"local" {
+			t.Error("internal/scheduler imports internal/local — forbidden (R13/R20: the GPU-admission hook is a scheduler-declared interface)")
+		}
+	}
+}
+
+func TestSandboxNeverImportsLocal(t *testing.T) {
+	for _, path := range internalImports(t, filepath.Join("..", "sandbox")) {
+		if path == modPrefix+"local" {
+			t.Error("internal/sandbox imports internal/local — forbidden (R7/R20: sandbox → adapters is the only sandbox edge)")
+		}
+	}
+}
+
 // internalImports returns the module-internal imports of the non-test .go
 // files in dir.
 func internalImports(t *testing.T, dir string) []string {

@@ -228,15 +228,29 @@ func (b *SandboxBroker) Handler() http.Handler {
 	return mux
 }
 
-// bearer extracts the per-run token and resolves its grant, or writes 401.
-func (b *SandboxBroker) bearer(w http.ResponseWriter, r *http.Request) (string, SandboxGrant, bool) {
-	tok := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer"))
+// bearer is the shared token-validated dispatch path (F4): it parses the
+// Authorization header STRICTLY as the RFC 6750 "Bearer <token>" scheme (the
+// scheme matched case-insensitively; a bare or glued token is rejected),
+// resolves the grant (token→run→owner), and enforces the grant's per-plane rate
+// limit so EVERY token-bearing route counts against the budget — not just
+// /v1/chat/completions. Writes 401/429 and returns ok=false on failure.
+func (b *SandboxBroker) bearer(w http.ResponseWriter, r *http.Request) (SandboxGrant, bool) {
+	scheme, tok, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		writeOpenAIError(w, http.StatusUnauthorized, ErrTokenInvalid.Error())
+		return SandboxGrant{}, false
+	}
+	tok = strings.TrimSpace(tok)
 	grant, ok := b.tokens.Resolve(tok)
 	if !ok {
 		writeOpenAIError(w, http.StatusUnauthorized, ErrTokenInvalid.Error())
-		return "", SandboxGrant{}, false
+		return SandboxGrant{}, false
 	}
-	return tok, grant, true
+	if !b.tokens.rateOK(tok) {
+		writeOpenAIError(w, http.StatusTooManyRequests, "rate limit exceeded for this run's grant (S12.6)")
+		return SandboxGrant{}, false
+	}
+	return grant, true
 }
 
 type sandboxChatRequest struct {
@@ -247,12 +261,8 @@ type sandboxChatRequest struct {
 }
 
 func (b *SandboxBroker) handleChat(w http.ResponseWriter, r *http.Request) {
-	tok, grant, ok := b.bearer(w, r)
+	grant, ok := b.bearer(w, r)
 	if !ok {
-		return
-	}
-	if !b.tokens.rateOK(tok) {
-		writeOpenAIError(w, http.StatusTooManyRequests, "rate limit exceeded for this run's grant (S12.6)")
 		return
 	}
 	limit := grant.MaxRequestBytes
@@ -316,8 +326,11 @@ func (b *SandboxBroker) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// ONE $0 D7 row keyed to the SANDBOXED run (token→run→owner), reusing the
 	// B4-5 usage.go wire contract — a new WRITER of the same contract, NO
-	// metering-package change (R17).
-	if err := b.meter(r.Context(), grant, seat, comp); err != nil {
+	// metering-package change (R17). The marker's duty is the REQUESTED,
+	// allowlist-validated alias (req.Model) — never the grant's first alias —
+	// so the (duty, model) pair stays internally consistent (the platform
+	// plane's duty.go posture; F1).
+	if err := b.meter(r.Context(), grant, req.Model, seat, comp); err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "metering write failed")
 		return
 	}
@@ -340,7 +353,7 @@ func (b *SandboxBroker) handleChat(w http.ResponseWriter, r *http.Request) {
 // exactly as the platform plane does — the ROUTE exists, the seat does not
 // serve (R4).
 func (b *SandboxBroker) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := b.bearer(w, r); !ok {
+	if _, ok := b.bearer(w, r); !ok {
 		return
 	}
 	writeOpenAIError(w, http.StatusServiceUnavailable, ErrEmbedderPostGate.Error())
@@ -348,7 +361,7 @@ func (b *SandboxBroker) handleEmbeddings(w http.ResponseWriter, r *http.Request)
 
 // handleModels returns ONLY the run's allowlist (R4) — never the full model set.
 func (b *SandboxBroker) handleModels(w http.ResponseWriter, r *http.Request) {
-	_, grant, ok := b.bearer(w, r)
+	grant, ok := b.bearer(w, r)
 	if !ok {
 		return
 	}
@@ -359,8 +372,8 @@ func (b *SandboxBroker) handleModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
-func (b *SandboxBroker) meter(ctx context.Context, grant SandboxGrant, seat SeatRecord, comp Completion) error {
-	usage, err := UsageJSON(firstAlias(grant), seat.Model, seat.ModelHash(), LlamaCppPin, comp.InputTokens, comp.OutputTokens)
+func (b *SandboxBroker) meter(ctx context.Context, grant SandboxGrant, alias string, seat SeatRecord, comp Completion) error {
+	usage, err := UsageJSON(alias, seat.Model, seat.ModelHash(), LlamaCppPin, comp.InputTokens, comp.OutputTokens)
 	if err != nil {
 		return err
 	}
@@ -390,13 +403,6 @@ func (b *SandboxBroker) surfaceUnmeteredDefect(ctx context.Context, runID string
 	_, _ = b.log.Append(ctx, eventlog.Append{
 		UserID: "platform", Type: EventLocalUnmeteredDefect, SchemaVersion: dutyEventSchemaVersion, Payload: payload,
 	})
-}
-
-func firstAlias(g SandboxGrant) string {
-	if len(g.ModelAllowlist) > 0 {
-		return g.ModelAllowlist[0]
-	}
-	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
