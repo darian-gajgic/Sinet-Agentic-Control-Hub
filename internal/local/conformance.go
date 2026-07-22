@@ -3,6 +3,7 @@ package local
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // conformance.go — structural-config passthrough + installed-stack detection
@@ -27,6 +28,22 @@ type StackConfig struct {
 	// GameModeBus is the operator session-bus address the GameMode D-Bus
 	// subscription monitors (R14; "" ⇒ deferred-with-finding).
 	GameModeBus string
+	// StateDir is the durable state dir both the control plane and the CLI
+	// resolve identically (SINET_LOCAL_STATE) so the eager-unload/admission
+	// flag is cross-process + restart-surviving (F4/F11). "" ⇒ in-memory only.
+	StateDir string
+}
+
+// AdmissionsFlag is the durable admission flag path (F4/F11): both the control
+// plane (via buildLocalSurface) and the `sinet local` CLI resolve it from the
+// SAME SINET_LOCAL_STATE via StackFromEnv, so the CLI verb and the surface
+// share one durable cross-process state. "" when StateDir is unset (dev
+// in-memory fallback).
+func (c StackConfig) AdmissionsFlag() string {
+	if c.StateDir == "" {
+		return ""
+	}
+	return filepath.Join(c.StateDir, "admissions.stopped")
 }
 
 // StackFromEnv reads the SINET_LOCAL_* structural config (bring-up
@@ -37,6 +54,7 @@ func StackFromEnv() StackConfig {
 		LlamaServer: os.Getenv("SINET_LOCAL_LLAMA_SERVER"),
 		ModelCache:  os.Getenv("SINET_LOCAL_MODEL_CACHE"),
 		GameModeBus: os.Getenv("SINET_LOCAL_GAMEMODE_BUS"),
+		StateDir:    os.Getenv("SINET_LOCAL_STATE"),
 	}
 }
 

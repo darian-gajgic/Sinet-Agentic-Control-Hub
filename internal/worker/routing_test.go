@@ -326,7 +326,7 @@ func TestRouteMechanicalHelperDegradesLocalAbsence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if !strings.Contains(d.PlainReason, "local free tier") || !strings.Contains(d.PlainReason, "B4") {
+	if !strings.Contains(d.PlainReason, "local free tier") || !strings.Contains(d.PlainReason, "not configured") {
 		t.Fatalf("local-tier absence not recorded: %q", d.PlainReason)
 	}
 	if d.Model != "claude-sonnet-5" {

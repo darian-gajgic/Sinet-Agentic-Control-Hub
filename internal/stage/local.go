@@ -66,7 +66,7 @@ func (c *localClassifier) Classify(ctx context.Context, req intake.Request, reg 
 	schema := local.TriageSchema(triageFamilies(), triageTiers(), triageSizes)
 	res, err := c.duty.Call(ctx, req.TaskID+RunSuffixIntake, local.DutyRequest{
 		Alias:          local.AliasIntakeTriage,
-		System:         "You are a task triage classifier for a personal automation platform. Reason briefly, then output ONLY the JSON. Set abstain=true if you cannot classify confidently — never guess a label.",
+		System:         "You are a task triage classifier for a personal automation platform. Output ONLY the JSON matching the schema — put your brief reasoning in the leading \"reason\" field, then the labels (free-text-then-constrained). Set abstain=true if you cannot classify confidently — never guess a label.",
 		User:           triagePrompt(req, reg, schema),
 		Schema:         schema,
 		Name:           "intake-triage",
@@ -92,13 +92,15 @@ func triagePrompt(req intake.Request, reg *intake.RegistrySlice, schema json.Raw
 }
 
 func parseTriage(content string) (intake.TriageProposal, error) {
+	// Fields mirror the TriageSchema exactly (F12: no unreachable fields —
+	// band inputs ReadOnly/NewNeeds are the pipeline's deterministic layer's,
+	// not requested from the classifier). `reason` is the leading free-text
+	// region (F5); it is not consumed into the proposal.
 	var out struct {
 		Family      string `json:"family"`
 		Stakes      string `json:"stakes"`
 		Size        string `json:"size"`
 		DataBearing bool   `json:"data_bearing"`
-		ReadOnly    bool   `json:"read_only"`
-		NewNeeds    bool   `json:"new_needs"`
 		Abstain     bool   `json:"abstain"`
 	}
 	if err := json.Unmarshal([]byte(content), &out); err != nil {
@@ -117,11 +119,9 @@ func parseTriage(content string) (intake.TriageProposal, error) {
 		tier = intake.TierHigh // conservative
 	}
 	p := intake.TriageProposal{
-		Family:   fam,
-		Tier:     tier,
-		Est:      intake.Estimate{SizeClass: out.Size, Known: false, Basis: "local intake-triage size class (S10 prices)"},
-		ReadOnly: out.ReadOnly,
-		NewNeeds: out.NewNeeds,
+		Family: fam,
+		Tier:   tier,
+		Est:    intake.Estimate{SizeClass: out.Size, Known: false, Basis: "local intake-triage size class (S10 prices)"},
 	}
 	if out.DataBearing {
 		// The classifier may only ADD the data-bearing flag (S06.2 rule 4);
@@ -188,17 +188,17 @@ type localSpotCheck struct{ duty *local.Duty }
 
 var _ intake.SpotCheck = (*localSpotCheck)(nil)
 
-// NewLocalSpotCheck wraps the duty caller as the intake SpotCheck seam. Per
-// brief R20 it rides the `utility` alias; S12.4's intake-triage "serves"
-// column also lists the advisory coverage spot-check — an alias-assignment
-// coordinator choice (alias names are [coordinator-draft]); flagged.
+// NewLocalSpotCheck wraps the duty caller as the intake SpotCheck seam. It
+// rides the `intake-triage` alias (drain F8): S12.4's registry lists the
+// advisory coverage spot-check in the intake-triage row (the fast seat); the
+// utility row omits it — the spec wins over the brief's R20 mis-citation.
 func NewLocalSpotCheck(duty *local.Duty) intake.SpotCheck { return &localSpotCheck{duty} }
 
 func (s *localSpotCheck) Check(ctx context.Context, pair intake.Pair) ([]string, error) {
 	schema := local.SpotCheckSchema()
 	res, err := s.duty.Call(ctx, pair.Spec.TaskID+RunSuffixIntake, local.DutyRequest{
-		Alias:          local.AliasUtility,
-		System:         "You perform an advisory semantic coverage check. List the acceptance-criteria labels the plan appears NOT to cover. Advisory only — never a gate.",
+		Alias:          local.AliasIntakeTriage,
+		System:         "You perform an advisory semantic coverage check. Put brief reasoning in the leading \"reason\" field, then list in \"uncovered\" the acceptance-criteria labels the plan appears NOT to cover. Advisory only — never a gate.",
 		User:           spotCheckPrompt(pair, schema),
 		Schema:         schema,
 		Name:           "coverage-spotcheck",
@@ -253,9 +253,16 @@ func (t *localTieBreaker) Break(ctx context.Context, q worker.RouteQuery, candid
 		ids[i] = c.TemplateID
 	}
 	schema := local.TieBreakSchema(ids)
-	res, err := t.duty.Call(ctx, q.TaskID+RunSuffixIntake, local.DutyRequest{
+	// The consuming run is the caller's (drain F2): intake-time routing rides
+	// <task>.intake; helper-spawn routing rides the coordinator's execute run
+	// (q.RunID), which may differ from the now-terminal intake run.
+	runID := q.RunID
+	if runID == "" {
+		runID = q.TaskID + RunSuffixIntake
+	}
+	res, err := t.duty.Call(ctx, runID, local.DutyRequest{
 		Alias:          local.AliasUtility,
-		System:         "You pick the best-fit worker for a task, or abstain. Advisory — a human confirms and may re-route.",
+		System:         "You pick the best-fit worker for a task, or abstain. Put your one-line reasoning in the leading \"reason\" field, then the pick. Advisory — a human confirms and may re-route.",
 		User:           tieBreakPrompt(q, candidates, schema),
 		Schema:         schema,
 		Name:           "tie-break",

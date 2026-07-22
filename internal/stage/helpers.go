@@ -390,8 +390,12 @@ func (s *Skeleton) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, er
 func (s *Skeleton) routeHelper(ctx context.Context, r run.Run, req SpawnRequest) worker.Decision {
 	if s.router != nil {
 		d, err := s.router.Route(ctx, worker.RouteQuery{
-			Requester:    r.UserID,
-			TaskID:       r.TaskID,
+			Requester: r.UserID,
+			TaskID:    r.TaskID,
+			// The consuming run of any tie-break D7 write is the coordinator's
+			// execute run r.ID — the intake run may be terminal at helper-spawn
+			// time (drain F2; D6/§19).
+			RunID:        r.ID,
 			TaskText:     req.Brief.Objective,
 			Kind:         worker.KindAgentic,
 			Classes:      []string{req.Brief.Class},
@@ -414,7 +418,7 @@ func (s *Skeleton) routeHelper(ctx context.Context, r run.Run, req SpawnRequest)
 	}
 	reason := "Helper on the generalist execution seat."
 	if req.Mechanical {
-		reason = "Mechanical helper duty prefers the local free tier, absent until B4 (S12); riding the paid execution seat. " + reason
+		reason = "Mechanical helper duty prefers the local free tier; its engine lane carries no v0 consumer (S12.1 class (a), B4-5), so it rides the paid execution seat. " + reason
 	}
 	return worker.Decision{
 		Cause: "helper-spawn", Generalist: true, Model: model, Lane: seat.Lane,

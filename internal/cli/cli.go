@@ -172,25 +172,45 @@ func runLocal(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	ctx := context.Background()
-	endpoint := os.Getenv("SINET_LOCAL_ENDPOINT")
+	sc := local.StackFromEnv()
+	endpoint := sc.Endpoint
+	flag := sc.AdmissionsFlag()
 	switch args[0] {
 	case "unload":
 		if endpoint == "" {
 			fmt.Fprintln(stderr, "sinet local unload: SINET_LOCAL_ENDPOINT unset (the local stack is not configured)")
 			return exitError
 		}
+		// Full verb pair (F4): stop admissions DURABLY (the flag the running
+		// control plane's duty client checks per call) AND unload at llama-swap.
+		if flag != "" {
+			if err := local.StopAdmissions(flag, "eager-unload engaged by CLI"); err != nil {
+				fmt.Fprintf(stderr, "sinet local unload: %v\n", err)
+				return exitError
+			}
+		}
 		if err := local.UnloadAllDirect(ctx, endpoint); err != nil {
 			fmt.Fprintf(stderr, "sinet local unload: %v\n", err)
 			return exitError
 		}
-		fmt.Fprintln(stdout, "local: unloaded all models (direct llama-swap leg, S12.2).")
-		fmt.Fprintln(stdout, "note: stopping local-lane admissions is a control-plane act — it rides the eager-unload surface (B6 endpoint); this CLI does the unload leg only (S12.6 dev posture).")
+		fmt.Fprintln(stdout, "local: unloaded all models + stopped local-lane admissions (durable flag, cross-process, S12.2).")
+		if flag == "" {
+			fmt.Fprintln(stdout, "note: SINET_LOCAL_STATE unset — the admission-stop is in-memory only for this process; set it so the running control plane observes the stop (F4/F11 durable state).")
+		}
 		return exitOK
 	case "resume":
-		fmt.Fprintln(stdout, "local: resume rides the control-plane eager-unload surface (B6 endpoint); models reload on demand at llama-swap regardless. Standalone this leg is a documented no-op (S12.6 dev posture).")
+		if flag == "" {
+			fmt.Fprintln(stdout, "local: resume is a no-op — SINET_LOCAL_STATE unset, no durable admission flag to clear (F4/F11).")
+			return exitOK
+		}
+		if err := local.ResumeAdmissions(flag); err != nil {
+			fmt.Fprintf(stderr, "sinet local resume: %v\n", err)
+			return exitError
+		}
+		fmt.Fprintln(stdout, "local: resumed local-lane admissions (cleared the durable flag); models reload on demand at llama-swap.")
 		return exitOK
 	case "status":
-		fmt.Fprintf(stdout, "local: endpoint=%q llama-swap-pin=%s llama.cpp-pin=%s\n", endpoint, local.LlamaSwapPin, local.LlamaCppPin)
+		fmt.Fprintf(stdout, "local: endpoint=%q llama-swap-pin=%s llama.cpp-pin=%s admissions-stopped=%v\n", endpoint, local.LlamaSwapPin, local.LlamaCppPin, flag != "" && local.AdmissionsStopped(flag))
 		if endpoint == "" {
 			fmt.Fprintln(stdout, "local: stack UNCONFIGURED (dev default) — the duty seams degrade per the S12.4/S06 rows (R17).")
 		}

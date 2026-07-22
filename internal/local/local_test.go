@@ -106,9 +106,9 @@ func TestGenerateConfigPool12ResidentEmptyNoEmbedder(t *testing.T) {
 			t.Errorf("config missing %q", want)
 		}
 	}
-	// resident EMPTY (S12.8): documented, never a resident group with members.
-	if !strings.Contains(cfg, "resident: deliberately EMPTY") {
-		t.Error("config does not document the empty resident group (S12.8)")
+	// resident group MATERIALIZED empty (F10; S12.8): present with members: [].
+	if !strings.Contains(cfg, `"resident":`) || !strings.Contains(cfg, "members: []") {
+		t.Error("config does not emit the actual empty resident group (F10/S12.8)")
 	}
 	// No embedder member (post-gate) and no non-servable CPU seat faked in.
 	for _, forbidden := range []string{"Qwen3-Embedding-0.6B", "nli-deberta", "MiniCheck-Flan-T5"} {
@@ -138,9 +138,15 @@ func TestDutySchemasCarryAbstain(t *testing.T) {
 		}
 	}
 	// A schema without an abstain member is rejected by the belt.
-	noAbstain := objectSchema(map[string]any{"x": map[string]any{"type": "string"}}, []string{"x"})
+	noAbstain := orderedObjectSchema([]prop{{"x", map[string]any{"type": "string"}}}, []string{"x"})
 	if err := assertAbstain(noAbstain); err == nil {
 		t.Error("assertAbstain accepted a schema with no abstain member")
+	}
+	// reason is FIRST in every classification schema (F5 free-text-then-constrained).
+	for name, s := range schemas {
+		if !strings.HasPrefix(string(s), `{"type":"object","properties":{"reason":`) {
+			t.Errorf("schema %q does not place reason first (F5): %s", name, s)
+		}
 	}
 }
 

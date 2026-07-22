@@ -64,7 +64,11 @@ func buildLocalSurface(d localDeps) (*localSurface, error) {
 		Client:      local.NewClient(cfg.Endpoint),
 		Checkpoints: d.Checkpoints,
 		Events:      d.Events,
-		Logger:      d.Log,
+		// The durable cross-process admission flag (F4/F11): the CLI resolves
+		// the same path from SINET_LOCAL_STATE via StackFromEnv, so an engaged
+		// stop survives a restart and the CLI verb + surface share it.
+		AdmissionsFlag: cfg.AdmissionsFlag(),
+		Logger:         d.Log,
 	})
 	surface := local.NewSurface(local.NewEagerUnload(duty, d.Events, d.Log))
 

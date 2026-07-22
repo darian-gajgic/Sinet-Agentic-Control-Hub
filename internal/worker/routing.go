@@ -33,8 +33,9 @@ import (
 //     enters this package's selection inputs, structurally.
 //  4. Research nodes route to a search-capable lane.
 //  5. Helpers ride this same pipeline with the spawn trigger as an input
-//     (the S04 boundary); mechanical helper duties default to the local
-//     lane — absent until B4, degraded with a recorded reason.
+//     (the S04 boundary); mechanical helper duties prefer the local lane —
+//     its engine lane has no v0 consumer (S12.1 class (a), B4-5), so the
+//     dispatch degrades to the paid seat with a recorded reason.
 //
 // No trained router exists at household n and no silent switching, ever
 // (14.3): every decision carries a plain-language reason, appears on the
@@ -186,6 +187,12 @@ type PressureReader interface {
 type RouteQuery struct {
 	Requester string
 	TaskID    string
+	// RunID is the CONSUMING run of any local duty call the router makes (the
+	// S12 tie-break D7 row, drain F2): intake-time routing rides the intake
+	// run (<task>.intake); helper-spawn routing rides the coordinator's
+	// execute run (per D6/§19). The caller sets it; empty falls back to the
+	// intake run for the intake-time default.
+	RunID string
 	// TaskText is the request title+text — the FTS/trigger match input.
 	TaskText string
 	// Family is the S06 task family; Domain the verification domain the
@@ -525,7 +532,7 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 		if r.Coverage.LocalAvailable {
 			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is serving; its engine lane carries no v0 consumer (S12.1 class (a) — platform duty calls ride it directly), so this dispatch rides the paid seat.", duty)
 		} else {
-			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is absent until B4 (S12); riding the paid seat instead.", duty)
+			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is not configured (S12); riding the paid seat instead.", duty)
 		}
 		duty = DutyExecution
 	}

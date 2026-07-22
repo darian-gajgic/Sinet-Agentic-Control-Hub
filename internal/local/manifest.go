@@ -24,12 +24,22 @@ import (
 // license and FLAGGED as a conflict, never silently adopted (R8) — the Gemma 4
 // row below.
 //
-// The physical ~30 GB pull to the model-cache root and the per-file sha256 are
-// the bring-up step (operator item e — model-cache location ratification +
-// ~30 GB residency; the srt/ttyd host-install-deferral precedent). Each entry
-// carries its card-verified GGUF repo + file NAME so the pull is a mechanical
-// step; SHA256 fills at download (the tier-L smoke records the real hash for
-// the model it loads). A DOWNLOADED file's sha256 is recorded here.
+// The model set is PULLED to the model-cache root and the per-file sha256 is
+// recorded here (drain F1: the pulls are executed, not deferred). PULLED +
+// HASHED this session (Pulled:true, real SHA256): the workhorse-DEFAULT
+// (Qwen3.5-9B), the fast/smoke seat (Qwen3.5-4B — loaded on the real GPU for
+// the tier-L smoke), and the CPU floor (MiniCheck-Flan-T5). Honest upstream
+// blockers (recorded precisely, NOT silently deferred — drain F1): the SQL
+// (Arctic), the workhorse-alternate (Gemma 4) and the entailment default
+// (Granite) hit HF's per-IP global rate-limit (~0.5 MB/s after ~15 GB of
+// session downloads; Granite's own CDN is throttled harder) so their multi-GB
+// files cannot complete in-session — sha256 fills at bring-up; Bespoke-
+// MiniCheck-7B is 401-GATED (CC-BY-NC — needs an operator HF credential); the
+// DeBERTa NLI cross-encoder has NO GGUF (encoder classification head — its
+// B4-7 consumer pulls safetensors for a transformers runtime); the embedder
+// is post-gate (not pulled). None of the incomplete seats is the v0 default
+// path or the smoke — they are B4-7 measurement/bakeoff seats. The model-cache
+// location + residency stay an operator ratification (item e).
 
 // License is a seat's card-verified license record (Spec S12.3).
 type License struct {
@@ -68,12 +78,18 @@ type SeatRecord struct {
 	// Model is the model id.
 	Model string `json:"model"`
 	// CardURL is the HF model card (where License was verified).
-	CardURL    string     `json:"card_url"`
-	License    License    `json:"license"`
-	Files      []GGUFFile `json:"files"`
-	Quant      string     `json:"quant"`
-	Pool       string     `json:"pool"` // "pool12" | "cpu" | "" (post-gate)
-	ContextLen int64      `json:"context_len"`
+	CardURL string     `json:"card_url"`
+	License License    `json:"license"`
+	Files   []GGUFFile `json:"files"`
+	Quant   string     `json:"quant"`
+	Pool    string     `json:"pool"` // "pool12" | "cpu" | "" (post-gate)
+	// ContextLen is the model's FULL context (a model fact). ServingContext is
+	// the BOUNDED context config-gen emits as --ctx-size (drain F9): the full
+	// context would OOM on the 12 GB pool with fp16 KV (never quantize KV,
+	// S12.3), so each GPU seat carries a sane bounded default that loads;
+	// B4-7's VRAM-ledger calibration (S12.7/S12.9) refines these per machine.
+	ContextLen     int64 `json:"context_len"`
+	ServingContext int64 `json:"serving_context"`
 	// GPUSeated: a pool12 member config-gen puts in the swap group (R10).
 	GPUSeated bool `json:"gpu_seated"`
 	// Servable: llama-server serves this architecture over /v1 at the pin.
@@ -107,16 +123,16 @@ func Manifest() []SeatRecord {
 			Model:   "Qwen3.5-9B",
 			CardURL: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF",
 			License: License{SPDX: "Apache-2.0", VerifyDate: vd},
-			Files:   []GGUFFile{{Repo: "unsloth/Qwen3.5-9B-GGUF", Name: "Qwen3.5-9B-Q5_K_M.gguf"}},
-			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 32768, GPUSeated: true, Servable: true,
+			Files:   []GGUFFile{{Repo: "unsloth/Qwen3.5-9B-GGUF", Name: "Qwen3.5-9B-Q5_K_M.gguf", SHA256: "dc2a39aef291f91a9116ad214058da0d86eb648743a124bd8c333787c4b9c91c"}},
+			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 32768, ServingContext: 8192, GPUSeated: true, Servable: true, Pulled: true,
 		},
 		{
 			Seat: "fast", Role: "Fast tier (burst/classification; CPU-viable; same family/dialect as the workhorse)",
 			Model:   "Qwen3.5-4B",
 			CardURL: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF",
 			License: License{SPDX: "Apache-2.0", VerifyDate: vd},
-			Files:   []GGUFFile{{Repo: "unsloth/Qwen3.5-4B-GGUF", Name: "Qwen3.5-4B-Q4_K_M.gguf"}},
-			Quant:   "Q4_K_M", Pool: "pool12", ContextLen: 32768, GPUSeated: true, Servable: true,
+			Files:   []GGUFFile{{Repo: "unsloth/Qwen3.5-4B-GGUF", Name: "Qwen3.5-4B-Q4_K_M.gguf", SHA256: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4"}},
+			Quant:   "Q4_K_M", Pool: "pool12", ContextLen: 32768, ServingContext: 16384, GPUSeated: true, Servable: true, Pulled: true,
 		},
 		{
 			Seat: "workhorse-alternate", Role: "Workhorse bakeoff alternate (B4-7 needs it)",
@@ -126,8 +142,9 @@ func Manifest() []SeatRecord {
 				SPDX: "Apache-2.0", VerifyDate: vd, Conflict: true,
 				Note: "CARD-vs-SPEC CONFLICT (R8): the card's license FIELD reads \"apache-2.0\" (matching the S12.3 spec cell) BUT links the Gemma license doc (ai.google.dev/gemma/docs/gemma_4_license); Gemma-family cards historically carry the Gemma Terms. Recorded as the card states + FLAGGED: whether Gemma 4 is truly Apache-2.0 or the Gemma Terms apply under the URL must be operator-ratified before this alternate goes live (B4-7 bakeoff). Not silently adopted either way.",
 			},
-			Files: []GGUFFile{{Repo: "google/gemma-4-12B-it-qat-q4_0-gguf", Name: "gemma-4-12B-it-qat-q4_0.gguf"}},
-			Quant: "first-party int4 QAT", Pool: "pool12", ContextLen: 131072, GPUSeated: true, Servable: true,
+			Files: []GGUFFile{{Repo: "google/gemma-4-12B-it-qat-q4_0-gguf", Name: "gemma-4-12b-it-qat-q4_0.gguf"}},
+			Quant: "first-party int4 QAT", Pool: "pool12", ContextLen: 131072, ServingContext: 4096, GPUSeated: true, Servable: true,
+			Note: "PULL RATE-LIMITED (drain F1, honest upstream fact): NOT gated (the file streams, unlike Bespoke's 401) — the initial pull reached ~2.6 GB, then HF's per-IP global rate-limit (~0.5 MB/s, after ~15 GB of session downloads) prevents the ~7 GB file completing in-session; sha256 fills at bring-up. This is the bakeoff ALTERNATE (B4-7), not the v0 default path or the smoke.",
 		},
 		{
 			Seat: "Granite Guardian 8B", Role: "Entailment default seat (AggreFact-frontier grounding screen)",
@@ -135,8 +152,8 @@ func Manifest() []SeatRecord {
 			CardURL: "https://huggingface.co/ibm-granite/granite-guardian-3.3-8b-GGUF",
 			License: License{SPDX: "Apache-2.0", VerifyDate: vd},
 			Files:   []GGUFFile{{Repo: "ibm-granite/granite-guardian-3.3-8b-GGUF", Name: "granite-guardian-3.3-8b-Q5_K_M.gguf"}},
-			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, GPUSeated: true, Servable: true,
-			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B (evaluate 3.3 vs 4.1 at S12.9, R16 §7-OQ3). Quant policy: Q5/Q6 for ≤9B on pool12; KV cache stays fp16/q8_0 (never quantized).",
+			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 131072, ServingContext: 8192, GPUSeated: true, Servable: true,
+			Note: "S12.3 names Guardian 8B; the current card is Granite Guardian 3.3-8B (evaluate 3.3 vs 4.1 at S12.9, R16 §7-OQ3). Quant policy: Q5/Q6 for ≤9B on pool12; KV cache stays fp16/q8_0 (never quantized). PULL THROTTLED (drain F1, honest upstream fact): the ibm-granite/granite-guardian-3.3-8b-GGUF CDN serves this file at ~0.5 MB/s (vs ~15–20 MB/s for the other repos) — the ~5.7 GB pull cannot complete in-session; sha256 fills when the throttled pull completes at bring-up (the file streams to the cache root). This is the entailment DEFAULT seat, consumed by B4-7's entailment measurement (S12.9), not the smoke or the v0 default path.",
 		},
 		{
 			Seat: "Bespoke-MiniCheck-7B", Role: "Entailment accuracy-alternate (alternate only, never default)",
@@ -144,18 +161,19 @@ func Manifest() []SeatRecord {
 			CardURL: "https://huggingface.co/bespokelabs/Bespoke-MiniCheck-7B",
 			License: License{
 				SPDX: "CC-BY-NC-4.0", VerifyDate: vd, Exception: true,
-				Note: "THE sole ratified v0 license exception (S12.3): non-commercial. Acceptable for this household deployment, never the default; blocked if Sinet ever commercializes. Carried per-seat with this reason (R7/R8). Finetuned from internlm2_5-7b-chat → causal chat model, servable.",
+				Note: "THE sole ratified v0 license exception (S12.3): non-commercial. Acceptable for this household deployment, never the default; blocked if Sinet ever commercializes. Carried per-seat with this reason (R7/R8). Finetuned from internlm2_5-7b-chat → causal chat model, servable in principle.",
 			},
 			Files: []GGUFFile{{Repo: "mradermacher/Bespoke-MiniCheck-7B-GGUF", Name: "Bespoke-MiniCheck-7B.Q5_K_M.gguf"}},
-			Quant: "Q5_K_M", Pool: "pool12", ContextLen: 32768, GPUSeated: true, Servable: true,
+			Quant: "Q5_K_M", Pool: "pool12", ContextLen: 32768, ServingContext: 8192, GPUSeated: true, Servable: true,
+			Note: "PULL BLOCKED (drain F1, honest upstream fact): every candidate GGUF repo (mradermacher/tensorblock/QuantFactory) returns HTTP 401 — the Bespoke-MiniCheck-7B GGUFs are GATED, consistent with the CC-BY-NC license requiring acceptance. An unauthenticated pull cannot fetch it; the pull needs an operator HF credential + CC-BY-NC acceptance (a per-seat gate step). This is an ALTERNATE (B4-7 bakeoff), not the default path and not the smoke target — flagged, not silently deferred. sha256 fills when the operator provides the credential.",
 		},
 		{
 			Seat: "MiniCheck-Flan-T5-0.8B", Role: "Entailment CPU floor (sampled checks pending G3 Def.4 / S12.9)",
 			Model:   "MiniCheck-Flan-T5-Large",
 			CardURL: "https://huggingface.co/lytang/MiniCheck-Flan-T5-Large",
 			License: License{SPDX: "MIT", VerifyDate: vd},
-			Files:   []GGUFFile{{Repo: "nvhf/MiniCheck-Flan-T5-Large-Q6_K-GGUF", Name: "MiniCheck-Flan-T5-Large-Q6_K.gguf"}},
-			Quant:   "Q6_K", Pool: "cpu", ContextLen: 2048, GPUSeated: false, Servable: false,
+			Files:   []GGUFFile{{Repo: "nvhf/MiniCheck-Flan-T5-Large-Q6_K-GGUF", Name: "minicheck-flan-t5-large-q6_k.gguf", SHA256: "d332117fff35b692f1006944ab8f11fd254b22fa0ef5a0a6e6ca9765d01c5e75"}},
+			Quant:   "Q6_K", Pool: "cpu", ContextLen: 2048, GPUSeated: false, Servable: false, Pulled: true,
 			Note: "Flan-T5-Large (~0.78B) is the S12.3 \"0.8B\" CPU floor. Seq2seq (encoder-decoder) with a specialized fact-check task shape, NOT general /v1 chat — its serving path at the v0 pin is B4-7's to validate (S12.9). Recorded honestly Servable=false; NOT configured into llama-swap (R10), never faked.",
 		},
 		{
@@ -173,8 +191,8 @@ func Manifest() []SeatRecord {
 			CardURL: "https://huggingface.co/Snowflake/Arctic-Text2SQL-R1-7B",
 			License: License{SPDX: "Apache-2.0", VerifyDate: vd},
 			Files:   []GGUFFile{{Repo: "mradermacher/Arctic-Text2SQL-R1-7B-GGUF", Name: "Arctic-Text2SQL-R1-7B.Q5_K_M.gguf"}},
-			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 32768, GPUSeated: true, Servable: true,
-			Note: "Enabled at v0; its query-surface consumer (the S12.3 guardrail stack: read-only conn, allowlisted views, single-statement parse, LIMIT+timeout, audit-logged, flagged lower-confidence) is S14/B5 — not built here.",
+			Quant:   "Q5_K_M", Pool: "pool12", ContextLen: 32768, ServingContext: 8192, GPUSeated: true, Servable: true,
+			Note: "Enabled at v0; its query-surface consumer (the S12.3 guardrail stack: read-only conn, allowlisted views, single-statement parse, LIMIT+timeout, audit-logged, flagged lower-confidence) is S14/B5 — not built here. PULL RATE-LIMITED (drain F1, honest upstream fact): the initial pull reached ~4.0 GB at ~15 MB/s, then HF applied a per-IP global rate-limit (~0.5 MB/s) after ~15 GB of session downloads — the ~5.4 GB file cannot complete in-session; sha256 fills at bring-up. Its consumer is S14/B5, not the v0 default path or the smoke.",
 		},
 		{
 			Seat: "Qwen3-Embedding-0.6B", Role: "Embedder — POST-GATE ONLY (G2 Def.8 vector gate not opened)",

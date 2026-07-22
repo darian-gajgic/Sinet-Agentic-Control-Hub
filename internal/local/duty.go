@@ -82,7 +82,10 @@ type DutyDeps struct {
 	Checkpoints *gates.Checkpoints
 	Events      *eventlog.Log
 	Admissions  *Admissions
-	Logger      *slog.Logger
+	// AdmissionsFlag is the durable cross-process admission flag path (F4/F11);
+	// used only when Admissions is nil. "" = the in-memory dev fallback.
+	AdmissionsFlag string
+	Logger         *slog.Logger
 }
 
 // NewDuty wires a live duty caller (called by the shell when the local stack
@@ -94,7 +97,7 @@ func NewDuty(d DutyDeps) *Duty {
 	}
 	adm := d.Admissions
 	if adm == nil {
-		adm = NewAdmissions()
+		adm = NewAdmissions(d.AdmissionsFlag)
 	}
 	return &Duty{reg: d.Registry, client: d.Client, cps: d.Checkpoints, log: d.Events, adm: adm, logger: logger}
 }
@@ -152,6 +155,9 @@ func (d *Duty) Call(ctx context.Context, runID string, in DutyRequest) (DutyResu
 		Name:      in.Name,
 		MaxTokens: in.MaxTokens,
 		Logprobs:  in.Classification,
+		// Classification duties are greedy label emitters — disable any
+		// reasoning-model <think> phase so the length cap yields the JSON.
+		NoThink: in.Classification,
 	})
 	if err != nil {
 		return DutyResult{}, err

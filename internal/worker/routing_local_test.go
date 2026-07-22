@@ -55,7 +55,7 @@ func TestResolveSeatLocalAbsentDegradesWithAbsenceReason(t *testing.T) {
 	if seat.Model != exec.Model {
 		t.Errorf("seat model = %q, want the execution seat %q", seat.Model, exec.Model)
 	}
-	if !strings.Contains(reason, "absent until B4") {
-		t.Errorf("reason = %q, want the absent-until-B4 reason", reason)
+	if !strings.Contains(reason, "not configured") {
+		t.Errorf("reason = %q, want the not-configured reason", reason)
 	}
 }

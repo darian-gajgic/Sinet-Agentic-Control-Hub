@@ -21,7 +21,7 @@ import (
 // internal/local against a fake /v1, mapping results to the seam types and
 // degrading per the S12.4/S06 rows.
 
-func localSeamEnv(t *testing.T) (*local.Duty, *local.FakeServer, *storage.DB) {
+func localSeamEnv(t *testing.T) (*local.Duty, *local.FakeServer, *storage.DB, *run.Store) {
 	t.Helper()
 	ctx := context.Background()
 	reg := settings.New()
@@ -50,12 +50,27 @@ func localSeamEnv(t *testing.T) (*local.Duty, *local.FakeServer, *storage.DB) {
 		Registry: local.NewRegistry(reg), Client: local.NewClient(fake.URL),
 		Checkpoints: gates.NewCheckpoints(db, log), Events: log,
 	})
-	return duty, fake, db
+	return duty, fake, db, runs
+}
+
+// runningRun walks a fresh run new→queued→claimed→running so the tie-break D7
+// row can land on it (used by the F2 helper-context test).
+func runningRun(t *testing.T, runs *run.Store, id string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := runs.Create(ctx, run.NewRun{ID: id, UserID: "alice", Lane: "anthropic", Substrate: "claude-cli"}); err != nil {
+		t.Fatalf("Create %s: %v", id, err)
+	}
+	for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+		if _, err := runs.Transition(ctx, id, st, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+			t.Fatalf("Transition %s: %v", id, err)
+		}
+	}
 }
 
 func TestLocalClassifierMapsTriage(t *testing.T) {
 	ctx := context.Background()
-	duty, fake, _ := localSeamEnv(t)
+	duty, fake, _, _ := localSeamEnv(t)
 	fake.SetModelResponse("Qwen3.5-4B", local.FakeResponse{
 		Content:     `{"family":"software","stakes":"high","size":"large","data_bearing":true,"abstain":false}`,
 		InputTokens: 50, OutputTokens: 4,
@@ -78,7 +93,7 @@ func TestLocalClassifierMapsTriage(t *testing.T) {
 
 func TestLocalClassifierAbstainFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	duty, fake, _ := localSeamEnv(t)
+	duty, fake, _, _ := localSeamEnv(t)
 	fake.SetModelResponse("Qwen3.5-4B", local.FakeResponse{Content: `{"abstain":true}`, InputTokens: 5, OutputTokens: 1})
 	c := stage.NewLocalClassifier(duty)
 	if _, err := c.Classify(ctx, intake.Request{TaskID: "t1", Text: "??"}, nil); err == nil {
@@ -88,7 +103,7 @@ func TestLocalClassifierAbstainFailsClosed(t *testing.T) {
 
 func TestLocalTieBreakerPicksAndDegrades(t *testing.T) {
 	ctx := context.Background()
-	duty, fake, _ := localSeamEnv(t)
+	duty, fake, _, _ := localSeamEnv(t)
 	cands := []worker.Candidate{{TemplateID: "w-1", Name: "one"}, {TemplateID: "w-2", Name: "two"}}
 	tb := stage.NewLocalTieBreaker(duty)
 
@@ -119,9 +134,41 @@ func TestLocalTieBreakerPicksAndDegrades(t *testing.T) {
 	}
 }
 
+// TestTieBreakMetersOnConsumingRun proves the tie-break D7 row lands on the
+// ACTUAL consuming run (q.RunID), NOT hard-coded <task>.intake (drain F2): the
+// helper-spawn context passes the coordinator's execute run, which is running
+// while the intake run is terminal.
+func TestTieBreakMetersOnConsumingRun(t *testing.T) {
+	ctx := context.Background()
+	duty, fake, db, runs := localSeamEnv(t)
+	runningRun(t, runs, "coord.execute") // the coordinator's execute run
+	cands := []worker.Candidate{{TemplateID: "w-1", Name: "one"}, {TemplateID: "w-2", Name: "two"}}
+	fake.SetModelResponse("Qwen3.5-9B", local.FakeResponse{Content: `{"reason":"r","pick":"w-1"}`, InputTokens: 20, OutputTokens: 3})
+
+	if _, _, err := stage.NewLocalTieBreaker(duty).Break(ctx,
+		worker.RouteQuery{TaskID: "t1", RunID: "coord.execute", TaskText: "x"}, cands); err != nil {
+		t.Fatalf("Break: %v", err)
+	}
+	if n := cpCount(t, db, "coord.execute"); n != 1 {
+		t.Errorf("tie-break D7 rows on coord.execute = %d, want 1 (F2)", n)
+	}
+	if n := cpCount(t, db, "t1.intake"); n != 0 {
+		t.Errorf("tie-break wrote %d rows on the intake run — must ride q.RunID (F2)", n)
+	}
+}
+
+func cpCount(t *testing.T, db *storage.DB, runID string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM checkpoints WHERE run_id = ?`, runID).Scan(&n); err != nil {
+		t.Fatalf("count checkpoints %s: %v", runID, err)
+	}
+	return n
+}
+
 func TestLocalUtilityAndSpotCheck(t *testing.T) {
 	ctx := context.Background()
-	duty, fake, _ := localSeamEnv(t)
+	duty, fake, _, _ := localSeamEnv(t)
 	pair := intake.Pair{Spec: intake.Spec{TaskID: "t1", Restatement: "do the thing", ACs: []intake.AC{{N: 1, Plain: "works"}}}}
 
 	fake.SetModelResponse("Qwen3.5-9B", local.FakeResponse{Content: `{"what":"w","wrong":"x","recommend":"y"}`, InputTokens: 40, OutputTokens: 8})
@@ -133,7 +180,8 @@ func TestLocalUtilityAndSpotCheck(t *testing.T) {
 		t.Errorf("help = %+v, want {w,x,y}", h)
 	}
 
-	fake.SetModelResponse("Qwen3.5-9B", local.FakeResponse{Content: `{"uncovered":["AC-1"],"abstain":false}`, InputTokens: 30, OutputTokens: 4})
+	// SpotCheck rides the intake-triage alias (F8) → fast → Qwen3.5-4B.
+	fake.SetModelResponse("Qwen3.5-4B", local.FakeResponse{Content: `{"reason":"x","uncovered":["AC-1"],"abstain":false}`, InputTokens: 30, OutputTokens: 4})
 	uncov, err := stage.NewLocalSpotCheck(duty).Check(ctx, pair)
 	if err != nil {
 		t.Fatalf("Check: %v", err)

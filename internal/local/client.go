@@ -39,6 +39,14 @@ type ChatSpec struct {
 	// Logprobs requests the label-token logprobs (S12.5 margin input). On for
 	// classification-shaped duties; off for free-text drafting.
 	Logprobs bool
+	// NoThink disables a reasoning model's <think> phase for this call
+	// (chat_template_kwargs enable_thinking:false — honored by Qwen-class
+	// thinking templates, ignored by others). Set for classification-shaped
+	// duties: they are temp-0 greedy label emitters, and an unbounded thinking
+	// phase would consume the length cap before the constrained JSON (observed
+	// live at the tier-L smoke — the schema's `reason` field IS the lightweight
+	// reasoning). Free-text drafting leaves it off.
+	NoThink bool
 }
 
 // TokenLogprob is one decoded token's logprob + its top alternatives — the
@@ -69,9 +77,9 @@ type Client struct {
 	http *http.Client
 }
 
-// NewClient returns a client for the llama-swap base URL (loopback). A nil
-// timeout uses a generous default (local generation can be slow on a cold
-// load — the S12.8 ~2–7 s reloads plus generation).
+// NewClient returns a client for the llama-swap base URL (loopback). The
+// timeout is a generous fixed default — local generation can be slow on a cold
+// load (the S12.8 ~2–7 s reloads plus generation).
 func NewClient(base string) *Client {
 	base = strings.TrimRight(base, "/")
 	return &Client{base: base, http: &http.Client{Timeout: 5 * time.Minute}}
@@ -81,13 +89,14 @@ func NewClient(base string) *Client {
 func (c *Client) Base() string { return c.base }
 
 type chatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []chatMessage   `json:"messages"`
-	Temperature    float64         `json:"temperature"`
-	MaxTokens      int64           `json:"max_tokens,omitempty"`
-	ResponseFormat *responseFormat `json:"response_format,omitempty"`
-	Logprobs       bool            `json:"logprobs,omitempty"`
-	TopLogprobs    int             `json:"top_logprobs,omitempty"`
+	Model              string          `json:"model"`
+	Messages           []chatMessage   `json:"messages"`
+	Temperature        float64         `json:"temperature"`
+	MaxTokens          int64           `json:"max_tokens,omitempty"`
+	ResponseFormat     *responseFormat `json:"response_format,omitempty"`
+	Logprobs           bool            `json:"logprobs,omitempty"`
+	TopLogprobs        int             `json:"top_logprobs,omitempty"`
+	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
 }
 
 type chatMessage struct {
@@ -152,6 +161,11 @@ func (c *Client) Chat(ctx context.Context, spec ChatSpec) (Completion, error) {
 	if spec.Logprobs {
 		req.Logprobs = true
 		req.TopLogprobs = 2 // top1/top2 — the S12.5 margin input
+	}
+	if spec.NoThink {
+		// Disable a reasoning model's <think> phase so the length cap is spent
+		// on the constrained JSON, not reasoning (tier-L observed).
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 	}
 
 	body, err := json.Marshal(req)

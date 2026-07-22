@@ -27,6 +27,14 @@ import (
 // generator is asserted against this schema by the conformance suite (R26);
 // the schema was probed from the pinned build's docs + example config, never
 // assumed.
+//
+// Power/residency posture (S12.8; R23): this generated config carries NO
+// residency slot (the resident group is empty), so `nvidia-persistenced` in
+// UVM persistence mode is NEVER run by anything Sinet generates — it would
+// disable RTD3 deep GPU sleep outright (S12.8). Nothing here or in the
+// generated unit starts it (trivially satisfied). Background-inference clock
+// caps (`-lgc`) need root and are an OPERATOR/hardening flag, never emitted or
+// applied here.
 
 // ConfigParams are the structural inputs to config generation (R10). The
 // paths/endpoints are structural config (composition-root passthrough,
@@ -91,11 +99,19 @@ func GenerateConfig(p ConfigParams) (string, error) {
 		if s.Seat == "fast" {
 			ttl = p.TTLFastS // fast/CPU-class seat TTL (R10)
 		}
+		// Emit the BOUNDED serving context (drain F9), never the model's full
+		// context — the full context would OOM on the 12 GB pool with fp16 KV.
+		ctx := s.ServingContext
+		if ctx == 0 {
+			ctx = s.ContextLen
+		}
 		fmt.Fprintf(&b, "  %q:\n", s.Model)
-		// --ctx-size sets the context; KV cache stays fp16 (the default — the
-		// quant policy: KV cache is never quantized, S12.3). --jinja lets the
-		// server apply the model's chat template for /v1/chat/completions.
-		fmt.Fprintf(&b, "    cmd: %q\n", fmt.Sprintf("%s --port ${PORT} --model %s --ctx-size %d --jinja", p.LlamaServer, modelPath, s.ContextLen))
+		// --n-gpu-layers 999 fully offloads the pool12 seat to the GPU (its
+		// CUDA_VISIBLE_DEVICES device); --ctx-size sets the bounded serving
+		// context; KV cache stays fp16 (the default — the quant policy: KV
+		// cache is never quantized, S12.3); --jinja applies the model's chat
+		// template for /v1/chat/completions.
+		fmt.Fprintf(&b, "    cmd: %q\n", fmt.Sprintf("%s --port ${PORT} --model %s --ctx-size %d --n-gpu-layers 999 --jinja", p.LlamaServer, modelPath, ctx))
 		fmt.Fprintf(&b, "    ttl: %d\n", ttl)
 		fmt.Fprintf(&b, "    unloadTimeout: %d\n", p.UnloadGraceS)
 		// Per-model GPU placement by UUID (R10; S12.2 §4.1/§4.4).
@@ -116,11 +132,17 @@ func GenerateConfig(p ConfigParams) (string, error) {
 	for _, m := range members {
 		fmt.Fprintf(&b, "      - %q\n", m)
 	}
-	b.WriteString("  # resident: deliberately EMPTY (S12.8 revision — an always-resident\n")
-	b.WriteString("  # multi-GB model and deep GPU sleep (RTD3) are mutually exclusive; every\n")
-	b.WriteString("  # registry duty is event-driven, none latency-critical below ~10 s). The\n")
-	b.WriteString("  # operator may pin the fast tier at runtime (an operator verb, empty by\n")
-	b.WriteString("  # default). pool24 (eGPU) is NOT configured until enrollment (S12.11).\n")
+	// resident: MATERIALIZED as an actual empty group (drain F10 — verified
+	// live that llama-swap v241 accepts it). Deliberately EMPTY (S12.8 revision
+	// — an always-resident multi-GB model and deep GPU sleep (RTD3) are
+	// mutually exclusive; every registry duty is event-driven, none
+	// latency-critical below ~10 s). The operator may pin the fast tier at
+	// runtime (an operator verb). pool24 (eGPU) is NOT configured until
+	// enrollment (S12.11).
+	b.WriteString("  \"resident\":\n")
+	b.WriteString("    persistent: true\n")
+	b.WriteString("    swap: false\n")
+	b.WriteString("    members: []\n")
 
 	return b.String(), nil
 }

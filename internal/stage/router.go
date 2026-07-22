@@ -27,13 +27,16 @@ func (sr *skeletonRouter) RouteTask(ctx context.Context, q intake.RouteQuery) (i
 	d, err := sr.s.router.Route(ctx, worker.RouteQuery{
 		Requester: q.Requester,
 		TaskID:    q.TaskID,
-		TaskText:  q.TaskText,
-		Family:    q.Family,
-		Domain:    domainFor(intake.Family(q.Family)),
-		Kind:      worker.KindAgentic,
-		Classes:   q.Classes,
-		Tools:     q.Tools,
-		Research:  q.Research,
+		// Intake-time routing: the consuming run of any tie-break D7 write is
+		// the intake run (drain F2).
+		RunID:    q.TaskID + RunSuffixIntake,
+		TaskText: q.TaskText,
+		Family:   q.Family,
+		Domain:   domainFor(intake.Family(q.Family)),
+		Kind:     worker.KindAgentic,
+		Classes:  q.Classes,
+		Tools:    q.Tools,
+		Research: q.Research,
 	})
 	if err != nil {
 		return intake.RouteBlock{}, err

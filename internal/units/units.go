@@ -221,6 +221,9 @@ Slice=%s
 # (CUDA); hiding devices would break GPU inference. ProtectSystem=strict keeps
 # /usr read-only (llama-swap + the model cache live elsewhere). The model
 # cache + config are read-only inputs; llama-swap writes no durable state.
+# Power/residency (S12.8): this unit NEVER runs nvidia-persistenced (it would
+# disable RTD3 deep GPU sleep) — nothing here starts it; -lgc clock caps are a
+# root operator/hardening flag, never applied by the platform.
 ProtectSystem=strict
 NoNewPrivileges=yes
 PrivateTmp=yes

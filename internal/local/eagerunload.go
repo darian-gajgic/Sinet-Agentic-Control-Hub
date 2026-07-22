@@ -3,8 +3,11 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -21,20 +24,32 @@ import (
 // management verbs live on the platform plane, loopback (S12.6).
 
 // Admissions is the local-lane admission gate the eager-unload switch flips.
-// Stopped ⇒ the duty client refuses new calls (ErrAdmissionsStopped).
+// Stopped ⇒ the duty client refuses new calls (ErrAdmissionsStopped). It is
+// DURABLE and CROSS-PROCESS when file-backed (drain F4/F11): the state is a
+// state-dir flag file (presence = stopped, content = the reason) that the duty
+// client checks per call and both the CLI verb and the control-plane surface
+// write — so an engaged stop SURVIVES a control-plane restart and the CLI
+// `sinet local unload` genuinely stops admissions the running control plane
+// then observes. With no path (the dev fallback) it is an in-memory bool.
 type Admissions struct {
+	path    string // file-backed when non-empty (durable, cross-process)
 	mu      sync.RWMutex
-	stopped bool
+	stopped bool // in-memory fallback when path == ""
 	reason  string
 }
 
-// NewAdmissions returns an open admission gate.
-func NewAdmissions() *Admissions { return &Admissions{} }
+// NewAdmissions returns an admission gate. A non-empty flagPath makes it
+// durable + cross-process; "" is the in-memory dev fallback.
+func NewAdmissions(flagPath string) *Admissions { return &Admissions{path: flagPath} }
 
 // Stopped reports whether local-lane admissions are stopped.
 func (a *Admissions) Stopped() bool {
 	if a == nil {
 		return false
+	}
+	if a.path != "" {
+		_, err := os.Stat(a.path)
+		return err == nil
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -46,26 +61,57 @@ func (a *Admissions) Reason() string {
 	if a == nil {
 		return ""
 	}
+	if a.path != "" {
+		b, err := os.ReadFile(a.path)
+		if err != nil {
+			return ""
+		}
+		return string(b)
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.reason
 }
 
-// Stop stops admissions (idempotent).
-func (a *Admissions) Stop(reason string) {
+// Stop stops admissions (idempotent). File-backed: writes the flag durably.
+func (a *Admissions) Stop(reason string) error {
+	if a.path != "" {
+		if err := os.MkdirAll(filepath.Dir(a.path), 0o755); err != nil {
+			return fmt.Errorf("local: create admissions state dir: %w", err)
+		}
+		if err := os.WriteFile(a.path, []byte(reason), 0o644); err != nil {
+			return fmt.Errorf("local: write admissions flag: %w", err)
+		}
+		return nil
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopped = true
 	a.reason = reason
+	return nil
 }
 
-// Resume reopens admissions (idempotent).
-func (a *Admissions) Resume() {
+// Resume reopens admissions (idempotent). File-backed: removes the flag.
+func (a *Admissions) Resume() error {
+	if a.path != "" {
+		if err := os.Remove(a.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("local: remove admissions flag: %w", err)
+		}
+		return nil
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopped = false
 	a.reason = ""
+	return nil
 }
+
+// StopAdmissions / ResumeAdmissions / AdmissionsStopped are the standalone
+// file-backed verbs the `sinet local` CLI uses (no control-plane wiring) so
+// the gamemode.ini scripts genuinely pause/resume across processes (F4).
+func StopAdmissions(flagPath, reason string) error { return NewAdmissions(flagPath).Stop(reason) }
+func ResumeAdmissions(flagPath string) error       { return NewAdmissions(flagPath).Resume() }
+func AdmissionsStopped(flagPath string) bool       { return NewAdmissions(flagPath).Stopped() }
 
 const eagerEventSchemaVersion = 1
 
@@ -84,7 +130,7 @@ func NewEagerUnload(d *Duty, log *eventlog.Log, logger *slog.Logger) *EagerUnloa
 		logger = slog.Default()
 	}
 	if d == nil {
-		return &EagerUnload{adm: NewAdmissions(), log: log, logger: logger}
+		return &EagerUnload{adm: NewAdmissions(""), log: log, logger: logger}
 	}
 	return &EagerUnload{adm: d.Admissions(), client: d.Client(), log: log, logger: logger}
 }
@@ -94,7 +140,9 @@ func NewEagerUnload(d *Duty, log *eventlog.Log, logger *slog.Logger) *EagerUnloa
 // best-effort — admissions stop regardless (the operator-wins guarantee holds
 // even if the endpoint is briefly unreachable).
 func (e *EagerUnload) Engage(ctx context.Context, actor string) error {
-	e.adm.Stop("eager-unload engaged by " + actor)
+	if err := e.adm.Stop("eager-unload engaged by " + actor); err != nil {
+		return err
+	}
 	var unloadErr error
 	if e.client != nil {
 		unloadErr = e.client.UnloadAll(ctx)
@@ -109,7 +157,9 @@ func (e *EagerUnload) Engage(ctx context.Context, actor string) error {
 
 // Resume reopens local-lane admissions (R12). Idempotent; event-recorded.
 func (e *EagerUnload) Resume(ctx context.Context, actor string) error {
-	e.adm.Resume()
+	if err := e.adm.Resume(); err != nil {
+		return err
+	}
 	e.record(ctx, actor, EventLocalAdmissionsResumed, nil)
 	return nil
 }
@@ -126,8 +176,11 @@ func (e *EagerUnload) record(ctx context.Context, actor, typ string, unloadErr e
 		UnloadOK  bool   `json:"unload_ok"`
 		UnloadErr string `json:"unload_err,omitempty"`
 	}{actor, unloadErr == nil, errString(unloadErr)})
+	// Platform-scope control act (15.6): the acting principal (operator /
+	// "gamemode") rides the payload; the event owner is "platform" — a real
+	// principal, never a free-string user_id (drain F12; the §8 ladder pattern).
 	if _, err := e.log.Append(ctx, eventlog.Append{
-		UserID: actor, Type: typ, SchemaVersion: eagerEventSchemaVersion, Payload: payload,
+		UserID: "platform", Type: typ, SchemaVersion: eagerEventSchemaVersion, Payload: payload,
 	}); err != nil {
 		e.logger.Error("local: could not record eager-unload event", "type", typ, "err", err)
 	}

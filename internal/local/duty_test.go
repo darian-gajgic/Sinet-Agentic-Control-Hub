@@ -205,6 +205,45 @@ func TestEagerUnload(t *testing.T) {
 	}
 }
 
+// TestDurableAdmissionCrossProcess proves the eager-unload/admission state is
+// durable + cross-process + restart-surviving (drain F4/F11): a flag written by
+// one process (the CLI verb) is observed by a fresh Admissions (the control
+// plane after a restart) and refuses duty calls until cleared.
+func TestDurableAdmissionCrossProcess(t *testing.T) {
+	flag := filepath.Join(t.TempDir(), "local", "admissions.stopped")
+	// Process A (the CLI `sinet local unload`) stops admissions durably.
+	if err := local.StopAdmissions(flag, "by CLI"); err != nil {
+		t.Fatalf("StopAdmissions: %v", err)
+	}
+	// Process B (a fresh Admissions — the control plane after a restart) sees it.
+	admB := local.NewAdmissions(flag)
+	if !admB.Stopped() || admB.Reason() != "by CLI" {
+		t.Errorf("durable stop not observed cross-process (F4/F11): stopped=%v reason=%q", admB.Stopped(), admB.Reason())
+	}
+	// A duty client sharing the flag refuses calls (never dials).
+	duty := local.NewDuty(local.DutyDeps{
+		Registry: local.NewRegistry(settings.New()),
+		Client:   local.NewClient("http://127.0.0.1:1"),
+		Checkpoints: gates.NewCheckpoints(func() *storage.DB {
+			db, _ := storage.Open(context.Background(), filepath.Join(t.TempDir(), storage.DBFileName), settings.New())
+			t.Cleanup(func() { db.Close() })
+			db.Migrate(context.Background())
+			return db
+		}(), nil),
+		AdmissionsFlag: flag,
+	})
+	if _, err := duty.Call(context.Background(), "r.intake", local.DutyRequest{Alias: local.AliasUtility, User: "x"}); !errors.Is(err, local.ErrAdmissionsStopped) {
+		t.Errorf("duty call under durable stop: got %v, want ErrAdmissionsStopped", err)
+	}
+	// Resume clears the flag durably.
+	if err := local.ResumeAdmissions(flag); err != nil {
+		t.Fatalf("ResumeAdmissions: %v", err)
+	}
+	if local.AdmissionsStopped(flag) {
+		t.Error("resume did not clear the durable flag")
+	}
+}
+
 func hasEvent(t *testing.T, db *storage.DB, typ string) bool {
 	t.Helper()
 	var n int
