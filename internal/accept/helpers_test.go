@@ -65,7 +65,7 @@ func (f *fix) seedRemote(baseBody string) (string, string) {
 // run-scoped mint event).
 func (f *fix) mkTaskRun(taskID, runID, userID string) {
 	f.t.Helper()
-	f.exec(`INSERT INTO users (user_id, role, created_ts) VALUES (?, 'operator', ?)`, userID, nowStr())
+	f.exec(`INSERT OR IGNORE INTO users (user_id, role, created_ts) VALUES (?, 'operator', ?)`, userID, nowStr())
 	f.exec(`INSERT INTO tasks (task_id, user_id, created_ts) VALUES (?, ?, ?)`, taskID, userID, nowStr())
 	runs := run.NewStore(f.db, f.log)
 	if _, err := runs.Create(f.ctx, run.NewRun{ID: runID, UserID: userID, TaskID: taskID, Substrate: "claude-cli", Lane: "anthropic"}); err != nil {

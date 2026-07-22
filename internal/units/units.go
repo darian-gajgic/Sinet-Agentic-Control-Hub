@@ -366,7 +366,9 @@ func calendarTimer(unit, what, onCalendar, key string) File {
 	b.WriteString(header())
 	fmt.Fprintf(&b, `# Persistent calendar timer for the %s (Spec S01.7: a slot missed in
 # suspend fires once on next activation; NOT an in-process ticker). OnCalendar
-# derives from ⚙ %s.
+# derives from ⚙ %s. A sub-day hour step (0/N) fires at 0,N,2N,... each day then
+# resets at the day boundary; a non-clean ⚙ value honors the nearest whole
+# hour/day cadence (F7 — never a generation failure inside the clamp).
 [Unit]
 Description=Sinet %s schedule (Spec S13.10)
 
@@ -382,11 +384,15 @@ WantedBy=timers.target
 }
 
 // onCalendarFromSeconds maps a ⚙ backup.interval (seconds) to a systemd
-// OnCalendar expression (Spec S01.7). Sub-daily intervals that are whole-hour
-// divisors of a day render as an hour step; a day renders daily; a week renders
-// weekly; other whole-day intervals render as an approximate day step (a
-// month-boundary caveat). A non-expressible interval is a LOUD error rather
-// than a silently mis-scheduled timer.
+// OnCalendar expression (Spec S01.7). It is TOTAL over the ⚙ clamp (6 h – 7 d)
+// and never fails generation (F7): a day renders daily, a week weekly, other
+// sub-day intervals as an hour step (systemd `0/N`, which fires at 0,N,2N,…
+// within a day then resets at the day boundary — the documented wrap), and
+// multi-day intervals as a day-of-month step (month-boundary caveat). Clean
+// hour/day values render exactly; a non-clean value (a fractional hour/day the
+// clamp technically permits) honors the NEAREST whole-hour/day cadence — never
+// a silent mis-schedule (the timer comment states this), never a failure. Only
+// a non-positive value (never clamp-valid) errors.
 func onCalendarFromSeconds(sec int64) (string, error) {
 	if sec <= 0 {
 		return "", fmt.Errorf("interval %ds is not positive", sec)
@@ -395,18 +401,24 @@ func onCalendarFromSeconds(sec int64) (string, error) {
 	day := 24 * time.Hour
 	switch {
 	case d == day:
-		return "*-*-* 00:00:00", nil
+		return "*-*-* 00:00:00", nil // daily
 	case d == 7*day:
-		return "Mon *-*-* 00:00:00", nil
+		return "Mon *-*-* 00:00:00", nil // weekly
 	case d < day:
-		if d%time.Hour != 0 || day%d != 0 {
-			return "", fmt.Errorf("interval %s is not a whole-hour divisor of a day", d)
+		h := int((d + 30*time.Minute) / time.Hour) // nearest whole hour
+		if h < 1 {
+			h = 1
 		}
-		return fmt.Sprintf("*-*-* 0/%d:00:00", int(d/time.Hour)), nil
-	case d%day == 0:
-		return fmt.Sprintf("*-*-1/%d 00:00:00", int(d/day)), nil
+		if h > 23 {
+			h = 23
+		}
+		return fmt.Sprintf("*-*-* 0/%d:00:00", h), nil
 	default:
-		return "", fmt.Errorf("interval %s is not expressible as a persistent calendar timer", d)
+		days := int((d + 12*time.Hour) / day) // nearest whole day
+		if days < 1 {
+			days = 1
+		}
+		return fmt.Sprintf("*-*-1/%d 00:00:00", days), nil
 	}
 }
 

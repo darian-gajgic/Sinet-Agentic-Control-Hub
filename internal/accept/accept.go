@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
@@ -98,22 +99,53 @@ type Signer func(profile, namespace string, data []byte) ([]byte, error)
 // intake resolution + run store (R16); nil short-circuits (no active runs).
 type ActiveRuns func(ctx context.Context, projectID string) ([]run.SiblingAcceptRun, error)
 
+// SigningPosture reports whether a user's accept commits are SSH-signed and,
+// if so, the broker git-ssh-key profile to sign with — a STRUCTURAL per-user
+// fact (Spec S13.6 step 5: all-or-nothing per user; the platform NEVER produces
+// a mixed-signed history, F3). The production impl derives it from the broker
+// git-ssh-key presence (the operator signs from day one; members opt in at
+// enrollment). There is NO per-call override — signing is never an accept-call
+// argument — so one user cannot produce a mixed signed/unsigned history. nil
+// posture = unsigned (dev).
+type SigningPosture func(ctx context.Context, userID string) (sign bool, profile string, err error)
+
 // Config wires an Accepter.
 type Config struct {
-	Project    *project.Store
-	Journal    *gates.Journal
-	Push       Pusher
-	Review     *review.Store
-	Signer     Signer
-	ActiveRuns ActiveRuns
+	Project        *project.Store
+	Journal        *gates.Journal
+	Push           Pusher
+	Review         *review.Store
+	Signer         Signer
+	SigningPosture SigningPosture
+	ActiveRuns     ActiveRuns
 	// Freshness reads ⚙ freshness.max_age for the sibling-accept producer.
 	Freshness run.FreshnessSettings
 	Now       func() time.Time
 }
 
+// inflight is a project's in-flight accept — pushed to the remote's protected
+// ref, local default branch not yet advanced. The next candidate for the
+// project validates onto its commit (HEAD-plus-first, the S13.6 depth-1 merge
+// queue).
+type inflight struct {
+	effectID string
+	commit   string
+}
+
 // Accepter runs the S13.6 accept.
 type Accepter struct {
 	cfg Config
+	mu  sync.Mutex
+	// inflightByProject is the depth-1 merge-queue look-ahead: at most one
+	// in-flight accept per project (S13.6 step 1). It is control-plane
+	// coordination state (transient by nature — a crash aborts in-flight
+	// accepts and the effect journal's ReconcileInDoubt resolves the rows).
+	inflightByProject map[string]inflight
+	// AfterPush, when set, is invoked after a successful push while this accept
+	// is in-flight (its commit on the remote, local not yet advanced) — an
+	// observability/coordination seam a test uses to drive a SECOND accept that
+	// stacks onto HEAD-plus-first (F2). nil in production.
+	AfterPush func(projectID, commit string)
 }
 
 // New builds an Accepter.
@@ -124,7 +156,36 @@ func New(cfg Config) (*Accepter, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Accepter{cfg: cfg}, nil
+	return &Accepter{cfg: cfg, inflightByProject: map[string]inflight{}}, nil
+}
+
+// projectOnto is the applies-cleanly base for a project (Spec S13.6 step 1): an
+// in-flight accept's resulting commit (HEAD-plus-first, the depth-1 queue) when
+// one is pending, else current default-branch HEAD. A second in-flight accept
+// therefore validates against HEAD-plus-first; once the first terminates it
+// revalidates against real HEAD.
+func (a *Accepter) projectOnto(ctx context.Context, projectID string) (string, error) {
+	a.mu.Lock()
+	inf, ok := a.inflightByProject[projectID]
+	a.mu.Unlock()
+	if ok {
+		return inf.commit, nil
+	}
+	return a.cfg.Project.RepoHead(ctx, projectID)
+}
+
+func (a *Accepter) markInflight(projectID, effectID, commit string) {
+	a.mu.Lock()
+	a.inflightByProject[projectID] = inflight{effectID: effectID, commit: commit}
+	a.mu.Unlock()
+}
+
+func (a *Accepter) clearInflight(projectID, effectID string) {
+	a.mu.Lock()
+	if inf, ok := a.inflightByProject[projectID]; ok && inf.effectID == effectID {
+		delete(a.inflightByProject, projectID)
+	}
+	a.mu.Unlock()
 }
 
 // Input is one accept action (Spec S13.6). High tier — the S01.9 PIN step-up is
@@ -142,12 +203,10 @@ type Input struct {
 	Provenance string
 	// Engine/Model/VendorNoreply render the attribution trailers (step 3).
 	Engine, Model, VendorNoreply string
-	// Sign + SigningProfile: when the accepting user signs (all-or-nothing per
-	// user, S13.6 step 5), the squash commit is SSH-signed via the broker.
-	Sign           bool
-	SigningProfile string
 	// GitProfile is the broker git-ssh-key profile for the push transport
-	// (empty in dev = file://; the live ssh leg is pure-config, R24).
+	// (empty in dev = file://; the live ssh leg is pure-config, R24). Signing
+	// is NOT an accept-call argument — it is the accepting user's structural
+	// posture (SigningPosture, F3), so no call can produce a mixed history.
 	GitProfile string
 }
 
@@ -188,7 +247,9 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	onto, err := a.cfg.Project.RepoHead(ctx, in.ProjectID)
+	// onto is the depth-1 merge-queue base (S13.6 step 1): HEAD-plus-first when
+	// an accept for this project is already in-flight, else current HEAD.
+	onto, err := a.projectOnto(ctx, in.ProjectID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -210,11 +271,13 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 	protectedRef := "refs/heads/" + e.DefaultBranch
 
 	// 3. Class-A effect: Propose (payload = CAS expect-sha + candidate pin +
-	// rendered trailers) → Approve (the gated High-tier act) → BeginExecute
-	// (BEFORE the push).
-	payload, err := json.Marshal(map[string]any{
-		"expect_sha": onto, "candidate": candidate, "trailers": trailers,
-		"ref": protectedRef, "deliverable_id": in.DeliverableID,
+	// rendered trailers + the self-sufficient re-drive fields) → Approve (the
+	// gated High-tier act). The payload pins EVERYTHING the crash-window
+	// re-drive needs to reproduce the push deterministically (F4).
+	payload, err := json.Marshal(acceptPayload{
+		ExpectSHA: onto, Candidate: candidate, Trailers: trailers, Ref: protectedRef,
+		DeliverableID: in.DeliverableID, ProjectID: in.ProjectID, AuthorName: in.AcceptingUserName,
+		Subject: in.Subject, Provenance: in.Provenance, GitProfile: in.GitProfile,
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -223,70 +286,201 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err := a.cfg.Journal.Approve(ctx, eff.ID, in.AcceptingUser); err != nil {
+	approved, err := a.cfg.Journal.Approve(ctx, eff.ID, in.AcceptingUser)
+	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err := a.cfg.Journal.BeginExecute(ctx, eff.ID); err != nil {
-		return Outcome{}, err
-	}
+	// The squash timestamp is pinned to the effect's approval time so a
+	// crash-window re-drive reproduces the SAME commit deterministically (F4).
+	return a.executeAccept(ctx, executeSpec{
+		effectID: eff.ID, projectID: in.ProjectID, deliverableID: in.DeliverableID,
+		acceptingUser: in.AcceptingUser, authorName: in.AcceptingUserName,
+		onto: onto, candidate: candidate, trailers: trailers, protectedRef: protectedRef,
+		subject: in.Subject, provenance: in.Provenance, gitProfile: in.GitProfile,
+		when: approved.ApprovedTS,
+	})
+}
 
-	// 4. Platform squash → one attributed commit (the pinned trailers in the body).
-	var sign func([]byte) ([]byte, error)
-	if in.Sign {
-		if a.cfg.Signer == nil {
-			return Outcome{}, fmt.Errorf("accept: signing requested but no broker signer wired")
-		}
-		sign = func(p []byte) ([]byte, error) { return a.cfg.Signer(in.SigningProfile, "git", p) }
+// acceptPayload is the class-A accept effect's pinned payload — self-sufficient
+// so the crash-window re-drive reproduces the push from the effect alone (F4).
+type acceptPayload struct {
+	ExpectSHA     string `json:"expect_sha"`
+	Candidate     string `json:"candidate"`
+	Trailers      string `json:"trailers"`
+	Ref           string `json:"ref"`
+	DeliverableID string `json:"deliverable_id"`
+	ProjectID     string `json:"project_id"`
+	AuthorName    string `json:"author_name"`
+	Subject       string `json:"subject"`
+	Provenance    string `json:"provenance"`
+	GitProfile    string `json:"git_profile"`
+}
+
+// executeSpec is the execute phase's inputs — from Input on a fresh accept, or
+// reconstructed from the pinned payload on a crash-window re-drive.
+type executeSpec struct {
+	effectID, projectID, deliverableID, acceptingUser, authorName string
+	onto, candidate, trailers, protectedRef, subject, provenance  string
+	gitProfile                                                    string
+	when                                                          time.Time
+}
+
+// ReDrive re-drives an in-doubt accept effect that ReconcileInDoubt returned to
+// `approved` (the S02.7 class-A crash-window replay, R8): it re-squashes the
+// candidate onto the SAME pinned expect-sha and blind-replays the CAS push
+// against that sha — NEVER a new sha. A push success → Succeed; a lease
+// rejection (the ref moved) → Fail + merge card. The effect's idempotency key
+// and attempt count survive the replay (gates.BeginExecute), so the at-least-
+// once retry is invisible at the ref-level CAS.
+func (a *Accepter) ReDrive(ctx context.Context, effectID string) (Outcome, error) {
+	eff, err := a.cfg.Journal.Get(ctx, effectID)
+	if err != nil {
+		return Outcome{}, err
 	}
-	commit, err := a.cfg.Project.SquashAccept(ctx, in.ProjectID, project.SquashInput{
-		Tree: mr.Tree, Parent: onto, UserID: in.AcceptingUser, AuthorName: in.AcceptingUserName,
-		Message: buildMessage(in.Subject, in.Provenance, trailers), When: a.cfg.Now(), Sign: sign,
+	if eff.Class != gates.ClassA {
+		return Outcome{}, fmt.Errorf("accept: effect %q is not a class-A accept", effectID)
+	}
+	if eff.State != gates.EffectApproved {
+		return Outcome{}, fmt.Errorf("accept: re-drive wants an approved (reconciled) effect, %q is %s", effectID, eff.State)
+	}
+	var p acceptPayload
+	if err := json.Unmarshal(eff.Payload, &p); err != nil {
+		return Outcome{}, fmt.Errorf("accept: parse pinned payload: %w", err)
+	}
+	return a.executeAccept(ctx, executeSpec{
+		effectID: effectID, projectID: p.ProjectID, deliverableID: p.DeliverableID,
+		acceptingUser: eff.UserID, authorName: p.AuthorName,
+		onto: p.ExpectSHA, candidate: p.Candidate, trailers: p.Trailers, protectedRef: p.Ref,
+		subject: p.Subject, provenance: p.Provenance, gitProfile: p.GitProfile,
+		when: eff.ApprovedTS,
+	})
+}
+
+// ReDriveApproved re-drives every approved class-A ACCEPT effect (F4): a crash
+// leaves an accept effect approved — either between Approve and BeginExecute, or
+// returned there from `executing` by ReconcileInDoubt. Run at startup right
+// after the recovery ladder's reconcile, this leads reconcile to the push being
+// re-driven with the pinned expect-sha. Non-accept class-A effects are skipped
+// (their own executors re-drive them). Returns the number re-driven; a
+// per-effect error aborts so the caller can log and retry next boot.
+func (a *Accepter) ReDriveApproved(ctx context.Context) (int, error) {
+	approved, err := a.cfg.Journal.InState(ctx, gates.EffectApproved)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, eff := range approved {
+		if eff.Class != gates.ClassA {
+			continue
+		}
+		var p acceptPayload
+		if json.Unmarshal(eff.Payload, &p) != nil || p.DeliverableID == "" || p.ProjectID == "" {
+			continue // not an accept effect
+		}
+		if _, err := a.ReDrive(ctx, eff.ID); err != nil {
+			return n, fmt.Errorf("accept: re-drive %s: %w", eff.ID, err)
+		}
+		n++
+	}
+	return n, nil
+}
+
+// executeAccept is the shared execute phase (BeginExecute BEFORE the push →
+// squash → CAS push → Succeed|Fail), driven by a fresh Accept or a re-drive. The
+// push is always blind against the pinned expect-sha; a lease rejection is a
+// merge card, never a new-sha retry (S13.6 step 4 / R8).
+func (a *Accepter) executeAccept(ctx context.Context, s executeSpec) (Outcome, error) {
+	if _, err := a.cfg.Journal.BeginExecute(ctx, s.effectID); err != nil {
+		return Outcome{}, err
+	}
+	e, err := a.cfg.Project.Get(ctx, s.projectID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	// Re-validate applies-cleanly onto the PINNED expect-sha (deterministic
+	// tree); a collision now is a merge card + Fail.
+	mr, err := a.cfg.Project.AppliesClean(ctx, s.projectID, s.onto, s.candidate)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !mr.Clean {
+		a.failEffect(ctx, s.effectID, "collision")
+		return Outcome{EffectID: s.effectID, Card: mergeCard(s.deliverableID, s.projectID, s.onto, s.candidate, "applies-clean-collision", mr.Conflicts)}, nil
+	}
+	sign, err := a.signerFor(ctx, s.acceptingUser)
+	if err != nil {
+		return Outcome{}, err
+	}
+	commit, err := a.cfg.Project.SquashAccept(ctx, s.projectID, project.SquashInput{
+		Tree: mr.Tree, Parent: s.onto, UserID: s.acceptingUser, AuthorName: s.authorName,
+		Message: buildMessage(s.subject, s.provenance, s.trailers), When: s.when, Sign: sign,
 	})
 	if err != nil {
-		a.failEffect(ctx, eff.ID, "squash failed")
+		a.failEffect(ctx, s.effectID, "squash failed")
 		return Outcome{}, err
 	}
-
-	// 5. Broker CAS push (--force-with-lease=<ref>:<expect> + protected-ref
-	// authorization). A stale-lease REJECTION routes back to a merge card
-	// (never a blind retry, S13.6 step 4); the crash-window in-doubt row would
-	// replay blind against the SAME pinned expect-sha (class-A, ReconcileInDoubt).
 	res, err := a.cfg.Push.Push(broker.Request{
 		RepoDir: e.StorePath, Remote: e.RemoteURL,
-		Refs:       []broker.RefUpdate{{Ref: protectedRef, ExpectSHA: onto, SrcSHA: commit}},
+		Refs:       []broker.RefUpdate{{Ref: s.protectedRef, ExpectSHA: s.onto, SrcSHA: commit}},
 		Protected:  e.ProtectedRefs,
 		Authorized: true,
-		Profile:    in.GitProfile,
+		Profile:    s.gitProfile,
 	})
 	if err != nil {
-		a.failEffect(ctx, eff.ID, "push failed")
+		a.failEffect(ctx, s.effectID, "push failed")
 		return Outcome{}, fmt.Errorf("accept: broker push: %w", err)
 	}
 	if res.Rejected {
-		a.failEffect(ctx, eff.ID, "lease rejected")
+		a.failEffect(ctx, s.effectID, "lease rejected")
 		return Outcome{
-			EffectID: eff.ID,
-			Card:     mergeCard(in.DeliverableID, in.ProjectID, onto, candidate, "lease-rejected", "the ref moved since approval"),
+			EffectID: s.effectID,
+			Card:     mergeCard(s.deliverableID, s.projectID, s.onto, s.candidate, "lease-rejected", "the ref moved since approval"),
 		}, nil
 	}
 
-	// 6. Succeed, then commit the durable outcome: accepted state + advance the
-	// local default branch + fire the sibling-accept freshness trigger.
-	if _, err := a.cfg.Journal.Succeed(ctx, eff.ID, mustJSON(map[string]string{"commit": commit})); err != nil {
+	// The commit is now on the remote's protected ref but the LOCAL default
+	// branch is not yet advanced — the in-flight window during which a
+	// concurrent accept for this project stacks onto HEAD-plus-first (F2).
+	a.markInflight(s.projectID, s.effectID, commit)
+	defer a.clearInflight(s.projectID, s.effectID)
+	if a.AfterPush != nil {
+		a.AfterPush(s.projectID, commit)
+	}
+
+	if _, err := a.cfg.Journal.Succeed(ctx, s.effectID, mustJSON(map[string]string{"commit": commit})); err != nil {
 		return Outcome{}, err
 	}
-	acc, err := a.cfg.Review.Accept(ctx, in.DeliverableID, in.AcceptingUser)
+	acc, err := a.cfg.Review.Accept(ctx, s.deliverableID, s.acceptingUser)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := a.cfg.Project.AdvanceDefaultBranch(ctx, in.ProjectID, commit, onto); err != nil {
+	if err := a.cfg.Project.AdvanceDefaultBranch(ctx, s.projectID, commit); err != nil {
 		return Outcome{}, err
 	}
-	routed, err := a.fireSibling(ctx, in.ProjectID)
+	routed, err := a.fireSibling(ctx, s.projectID)
 	if err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Accepted: true, Commit: commit, EffectID: eff.ID, Superseded: acc.Superseded, RoutedRuns: routed}, nil
+	return Outcome{Accepted: true, Commit: commit, EffectID: s.effectID, Superseded: acc.Superseded, RoutedRuns: routed}, nil
+}
+
+// signerFor resolves the accepting user's STRUCTURAL signing posture (F3) into a
+// commit signer, or nil when the user does not sign. Never a per-call flag.
+func (a *Accepter) signerFor(ctx context.Context, user string) (func([]byte) ([]byte, error), error) {
+	if a.cfg.SigningPosture == nil {
+		return nil, nil
+	}
+	signs, profile, err := a.cfg.SigningPosture(ctx, user)
+	if err != nil {
+		return nil, fmt.Errorf("accept: resolve signing posture: %w", err)
+	}
+	if !signs {
+		return nil, nil
+	}
+	if a.cfg.Signer == nil {
+		return nil, fmt.Errorf("accept: user %q signs but no broker signer is wired", user)
+	}
+	return func(p []byte) ([]byte, error) { return a.cfg.Signer(profile, "git", p) }, nil
 }
 
 // fireSibling fires the S02.8 sibling-accept freshness trigger to the project's

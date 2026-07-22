@@ -228,6 +228,28 @@ func (s *Store) resolve(profile string) (kind, secret string, err error) {
 	return rec.Kind, string(pt), nil
 }
 
+// kindOf reports a profile's credential kind WITHOUT decrypting the secret (the
+// Kind is plaintext in the record) — a secret-free presence check the decision
+// path uses to derive a user's signing posture (S13.6/F3). exists=false when
+// the profile is absent.
+func (s *Store) kindOf(profile string) (kind string, exists bool, err error) {
+	if err := validProfile(profile); err != nil {
+		return "", false, err
+	}
+	blob, err := os.ReadFile(s.recordPath(profile))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("broker: read record: %w", err)
+	}
+	var rec profileRecord
+	if err := json.Unmarshal(blob, &rec); err != nil {
+		return "", false, fmt.Errorf("broker: parse record: %w", err)
+	}
+	return rec.Kind, true, nil
+}
+
 func (s *Store) aead() (cipher.AEAD, error) {
 	block, err := aes.NewCipher(s.master)
 	if err != nil {

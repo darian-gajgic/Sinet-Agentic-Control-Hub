@@ -80,7 +80,7 @@ type SquashInput struct {
 	// Message is the full commit message (Conventional-Commit subject + body
 	// with the task/session provenance link + the deterministic attribution
 	// trailers). The trailers are rendered ABOVE this package (the structural
-	// template lives in internal/stage; §8 reading 2) and passed in whole.
+	// template lives in internal/accept; §8 reading 2) and passed in whole.
 	Message string
 	// When is the author/committer timestamp (recorded UTC for determinism).
 	When time.Time
@@ -91,10 +91,16 @@ type SquashInput struct {
 	Sign func(payload []byte) (armoredSig []byte, err error)
 }
 
-// SquashAccept creates ONE clean attributed commit whose tree is the accepted
-// revision's, placed on current HEAD (Spec S13.6 step 2). Author = committer =
-// the accepting user, set per-invocation via the object bytes (no global/host
-// git config is ever touched — §23). No ref is moved: the commit is created as
+// SquashAccept creates ONE clean attributed commit placed on current HEAD
+// (Spec S13.6 step 2). Its tree is the AppliesClean RESULT: when HEAD has not
+// diverged this equals the accepted revision's own tree ("tree is the accepted
+// revision's", S13.6 step 2); when HEAD moved with non-conflicting interim
+// work the merged tree incorporates BOTH — committing the raw revision tree
+// would SILENTLY DISCARD the interim work, contradicting S13.6's own
+// no-silent-overwrite rule, so the ratified reading commits the merge result
+// (coordinator-ratified drain round 1, F6). Author = committer = the accepting
+// user, set per-invocation via the object bytes (no global/host git config is
+// ever touched — §23). No ref is moved: the commit is created as
 // an object the broker then CAS-pushes (S13.6 step 4); the local default
 // branch advances only on push success (AdvanceDefaultBranch). Returns the new
 // commit sha. There is NO --amend — the accept commit is fresh, not a rewrite.
@@ -132,28 +138,44 @@ func (s *Store) SquashAccept(ctx context.Context, projectID string, in SquashInp
 }
 
 // AdvanceDefaultBranch fast-forwards the project's LOCAL default branch to
-// newSHA under a CAS on expect (Spec S13.6): the broker has already CAS-pushed
-// newSHA to the remote's protected ref, so this syncs the local store to
-// match. ff-only and CAS-guarded — never a rewrite. Called only AFTER a
-// successful push, so the local branch never runs ahead of the remote.
-func (s *Store) AdvanceDefaultBranch(ctx context.Context, projectID, newSHA, expect string) error {
-	if newSHA == "" || expect == "" {
-		return fmt.Errorf("%w: advance needs a new sha and the expected old sha", ErrBadInput)
+// newSHA (Spec S13.6): the broker has already CAS-pushed newSHA to the remote's
+// protected ref, so this syncs the local store to match. It re-reads the local
+// head and CAS-updates against it; the move is a no-op when newSHA is already
+// incorporated (an ancestor of the local head — the depth-1 stacked case where
+// a later accept already advanced local past this one), a fast-forward when the
+// local head is behind, and a LOUD error on genuine divergence. Never a rewrite.
+func (s *Store) AdvanceDefaultBranch(ctx context.Context, projectID, newSHA string) error {
+	if newSHA == "" {
+		return fmt.Errorf("%w: advance needs a new sha", ErrBadInput)
 	}
 	e, err := s.Get(ctx, projectID)
 	if err != nil {
 		return err
 	}
 	ref := "refs/heads/" + e.DefaultBranch
-	ff, err := s.isAncestor(ctx, e.StorePath, expect, newSHA)
+	cur, err := s.refSHA(ctx, e.StorePath, ref)
 	if err != nil {
 		return err
 	}
-	if !ff {
-		return fmt.Errorf("%w: default branch %s -> %s", ErrNotFastForward, expect[:min(8, len(expect))], newSHA[:min(8, len(newSHA))])
+	if cur == newSHA {
+		return nil
 	}
-	// The CAS old-value (expect) makes a concurrent local move fail loudly.
-	_, err = s.git(ctx, e.StorePath, identity{}, "update-ref", ref, newSHA, expect)
+	if cur != "" {
+		if incorporated, err := s.isAncestor(ctx, e.StorePath, newSHA, cur); err != nil {
+			return err
+		} else if incorporated {
+			return nil // already incorporated (a later stacked accept advanced past this)
+		}
+		ff, err := s.isAncestor(ctx, e.StorePath, cur, newSHA)
+		if err != nil {
+			return err
+		}
+		if !ff {
+			return fmt.Errorf("%w: default branch %s -> %s", ErrNotFastForward, cur[:min(8, len(cur))], newSHA[:min(8, len(newSHA))])
+		}
+	}
+	// CAS on the re-read current value so a concurrent local move fails loudly.
+	_, err = s.git(ctx, e.StorePath, identity{}, "update-ref", ref, newSHA, cur)
 	return err
 }
 

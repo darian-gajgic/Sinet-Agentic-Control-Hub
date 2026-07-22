@@ -31,6 +31,10 @@ const (
 	// signature is returned. The platform embeds it as the commit's gpgsig
 	// header (the accept-commit signing path).
 	OpSignData = "sign-data"
+	// OpHasKey reports whether a profile exists and its kind, WITHOUT the
+	// secret — the secret-free presence check the control plane uses to derive
+	// a user's structural signing posture (S13.6 all-or-nothing, F3).
+	OpHasKey = "has-key"
 )
 
 // RefUpdate is one ref this push moves under CAS. ExpectSHA is the
@@ -88,4 +92,7 @@ type Response struct {
 	// new sha (S13.6 step 4). Distinct from a broker refusal (OK false with no
 	// Rejected) and from a generic failure.
 	Rejected bool `json:"rejected,omitempty"`
+	// Has is the has-key reply: whether the profile exists (Kind carries its
+	// kind); no secret ever accompanies it.
+	Has bool `json:"has,omitempty"`
 }

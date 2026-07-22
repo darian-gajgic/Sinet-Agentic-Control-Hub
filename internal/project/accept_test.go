@@ -73,7 +73,7 @@ func TestAppliesCleanAndSquash(t *testing.T) {
 	}
 
 	// The local default branch advances to the accept commit (ff, CAS).
-	if err := f.store.AdvanceDefaultBranch(ctx, "proj", commit, head); err != nil {
+	if err := f.store.AdvanceDefaultBranch(ctx, "proj", commit); err != nil {
 		t.Fatalf("AdvanceDefaultBranch: %v", err)
 	}
 	if got, _ := f.store.RepoHead(ctx, "proj"); got != commit {
@@ -126,6 +126,51 @@ func TestSquashAcceptSigned(t *testing.T) {
 	out := f.gitEnvCmd(e.StorePath, "-c", "gpg.format=ssh", "-c", "gpg.ssh.allowedSignersFile="+allowed, "verify-commit", commit)
 	if !strings.Contains(out, "Good \"git\" signature") {
 		t.Errorf("accept commit signature did not verify:\n%s", out)
+	}
+}
+
+// TestAppliesCleanDivergenceKeepsBothSides (F6, ratified): HEAD moved with a
+// NON-conflicting change → the accept commit's tree incorporates BOTH the
+// accepted revision's content AND the interim work — the merged tree, never the
+// raw revision tree (which would silently discard the interim work, S13.6).
+func TestAppliesCleanDivergenceKeepsBothSides(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+	e := f.activeProject("proj", "u1", "P", map[string]string{"a.txt": "base-a\n", "b.txt": "base-b\n"})
+	ws, _ := f.store.EnsureWorkspace(ctx, "proj", "pipe1")
+	// The candidate edits a.txt only.
+	f.writeFiles(ws.Path, map[string]string{"a.txt": "CANDIDATE-a\n"})
+	candidate, _ := f.store.Snapshot(ctx, ws.Path)
+	base, _ := f.store.RepoHead(ctx, "proj")
+
+	// HEAD moves with a NON-conflicting change to b.txt (interim work).
+	f.writeFiles(e.StorePath, map[string]string{"b.txt": "INTERIM-b\n"})
+	f.git(e.StorePath, "add", "-A")
+	f.git(e.StorePath, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-m", "interim work")
+	moved := f.git(e.StorePath, "rev-parse", "HEAD")
+	if moved == base {
+		t.Fatal("setup: HEAD did not move")
+	}
+
+	mr, err := f.store.AppliesClean(ctx, "proj", moved, candidate)
+	if err != nil {
+		t.Fatalf("AppliesClean: %v", err)
+	}
+	if !mr.Clean {
+		t.Fatalf("non-conflicting divergence reported a collision: %s", mr.Conflicts)
+	}
+	commit, err := f.store.SquashAccept(ctx, "proj", SquashInput{
+		Tree: mr.Tree, Parent: moved, UserID: "u1", Message: "feat: accept over interim work\n", When: time.Unix(1_700_000_000, 0),
+	})
+	if err != nil {
+		t.Fatalf("SquashAccept: %v", err)
+	}
+	// BOTH sides present: the candidate's a.txt AND the interim b.txt.
+	if got := f.git(e.StorePath, "show", commit+":a.txt"); got != "CANDIDATE-a" {
+		t.Errorf("a.txt = %q, want the candidate's content", got)
+	}
+	if got := f.git(e.StorePath, "show", commit+":b.txt"); got != "INTERIM-b" {
+		t.Errorf("b.txt = %q, want the interim work preserved (no silent overwrite)", got)
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 // The S13.6 accept state verb — storage + eventlog only (CONVENTIONS §22).
 // The OUTWARD accept mechanics (applies-cleanly depth-1 queue, platform
 // squash, deterministic trailers, broker CAS push through the effect journal)
-// compose ABOVE this package, in internal/stage over internal/project +
+// compose ABOVE this package, in internal/accept over internal/project +
 // internal/gates + internal/broker (Spec S13.6; CONVENTIONS §27). This verb is
 // the durable state outcome those mechanics commit on success: the deliverable
 // moves to accepted, and a newly accepted definition supersedes its prior

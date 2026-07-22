@@ -104,7 +104,11 @@ func DumpFrom(ctx context.Context, srcPath string, stripPayloadBeforeSeq int64) 
 	}
 	var tables, virtuals, post []object
 	for _, o := range all {
-		if isShadowTable(o.name, virtualNames) {
+		shadow, unexpected := shadowClass(o.name, virtualNames)
+		if unexpected {
+			return "", 0, fmt.Errorf("storage: table %q matches an FTS virtual-table prefix but is not a recognized shadow table — refusing to silently drop it from the dump (S13.10)", o.name)
+		}
+		if shadow {
 			continue
 		}
 		switch {
@@ -145,16 +149,29 @@ func DumpFrom(ctx context.Context, srcPath string, stripPayloadBeforeSeq int64) 
 	return b.String(), userVersion, nil
 }
 
-// isShadowTable reports whether name is a shadow table of some FTS5 virtual
-// table (named <virtual>_...): those are created by the virtual table's CREATE
-// and must never be dumped independently.
-func isShadowTable(name string, virtualNames map[string]bool) bool {
+// fts5ShadowSuffixes are the exact shadow tables an FTS5 virtual table creates
+// (external-content omits _content; the full set is enumerated so an
+// unexpected <virtual>_* table is never silently dropped).
+var fts5ShadowSuffixes = map[string]bool{
+	"data": true, "idx": true, "docsize": true, "config": true, "content": true,
+}
+
+// shadowClass classifies a table name against the FTS5 virtual tables: a
+// recognized shadow (skip — the virtual table's CREATE rebuilds it), an
+// UNEXPECTED prefix match (fail loud — never a silent drop, F9), or neither.
+func shadowClass(name string, virtualNames map[string]bool) (shadow, unexpected bool) {
 	for vt := range virtualNames {
+		if name == vt {
+			return false, false // the virtual table itself
+		}
 		if strings.HasPrefix(name, vt+"_") {
-			return true
+			if fts5ShadowSuffixes[name[len(vt)+1:]] {
+				return true, false
+			}
+			return false, true // matches an FTS prefix but is not a known shadow
 		}
 	}
-	return false
+	return false, false
 }
 
 func dumpTableData(ctx context.Context, db *sql.DB, table string, stripBeforeSeq int64, b *strings.Builder) error {

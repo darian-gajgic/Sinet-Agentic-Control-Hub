@@ -3,6 +3,7 @@ package accept_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,14 @@ func newFix(t *testing.T) *fix {
 
 	acc, err := accept.New(accept.Config{
 		Project: proj, Journal: journal, Push: client, Review: rev, Signer: client.SignData,
+		// The PRODUCTION signing posture: a user signs iff they have a
+		// git-ssh-key enrolled in the broker (F3 — derived, structural,
+		// per-user; no per-call override).
+		SigningPosture: func(_ context.Context, user string) (bool, string, error) {
+			profile := user + "-git"
+			kind, has, err := client.HasKey(profile)
+			return has && kind == broker.KindGitSSHKey, profile, err
+		},
 		ActiveRuns: func(context.Context, string) ([]run.SiblingAcceptRun, error) {
 			// One active run in the project, checkpointed long ago.
 			return []run.SiblingAcceptRun{{RunID: f.activeID, CheckpointTime: time.Unix(1, 0)}}, nil
@@ -136,6 +145,61 @@ func (f *fix) prepare(candidateBody string) (accept.Input, string) {
 	return in, candidate
 }
 
+// prepareNext mints a SECOND in-review deliverable on a new pipeline (its base
+// is the CURRENT default HEAD, moved by the prior accept), reusing the already-
+// onboarded project.
+func (f *fix) prepareNext(n int, body string) accept.Input {
+	f.t.Helper()
+	ctx := f.ctx
+	id := fmt.Sprintf("dlv%d", n)
+	pipe := fmt.Sprintf("pipe%d", n)
+	task := fmt.Sprintf("t%d", n)
+	runID := fmt.Sprintf("r%d", n)
+	ws, err := f.proj.EnsureWorkspace(ctx, "proj", pipe)
+	if err != nil {
+		f.t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws.Path, fmt.Sprintf("f%d.txt", n)), []byte(body), 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+	candidate, err := f.proj.Snapshot(ctx, ws.Path)
+	if err != nil {
+		f.t.Fatalf("Snapshot: %v", err)
+	}
+	if err := f.proj.CreateRevisionRef(ctx, "proj", review.RevisionRef(id, 1), candidate); err != nil {
+		f.t.Fatalf("CreateRevisionRef: %v", err)
+	}
+	f.mkTaskRun(task, runID, "u1")
+	if _, err := f.rev.EnsureDeliverable(ctx, review.EnsureInput{
+		ID: id, Owner: "u1", TaskID: task, ProjectID: "proj", Type: "markdown",
+	}); err != nil {
+		f.t.Fatalf("EnsureDeliverable: %v", err)
+	}
+	if _, err := f.rev.MintRevision(ctx, review.MintInput{
+		DeliverableID: id, N: 1, RunID: runID, AttemptRef: runID + "#round-1",
+		Files: map[string]string{fmt.Sprintf("f%d.txt", n): body}, SnapshotSHA: candidate,
+	}); err != nil {
+		f.t.Fatalf("MintRevision: %v", err)
+	}
+	return accept.Input{
+		DeliverableID: id, AcceptingUser: "u1", AcceptingUserName: "User One", ProjectID: "proj",
+		Subject: "feat: follow-on change", Engine: "claude-cli", Model: "opus-4-8", VendorNoreply: "noreply@anthropic.invalid",
+	}
+}
+
+// enrollGitKey generates and stores a git-ssh-key for a user in the broker,
+// making their derived signing posture "signs".
+func (f *fix) enrollGitKey(t *testing.T, user string) {
+	t.Helper()
+	keyPath := filepath.Join(t.TempDir(), user+"-gitkey")
+	f.runCmd("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", keyPath, "-C", user)
+	priv, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.storeBrokerKey(user+"-git", string(priv))
+}
+
 // TestAcceptEndToEnd (rubric 2,4,5,10): one class-A effect through the journal,
 // a platform squash into one attributed commit CAS-pushed to the remote's
 // protected ref, the deliverable moves to accepted, and the sibling-accept
@@ -192,6 +256,159 @@ func TestAcceptEndToEnd(t *testing.T) {
 	// The sibling-accept trigger routed the active run to re-validation.
 	if len(out.RoutedRuns) != 1 || out.RoutedRuns[0] != f.activeID {
 		t.Errorf("sibling-accept did not route the active run: %v", out.RoutedRuns)
+	}
+}
+
+// TestDepth1StacksOntoHeadPlusFirst (F2): while a first accept is in-flight
+// (pushed to the remote, local not yet advanced), a second accept for the
+// project validates onto HEAD-plus-first (the first's resulting commit) and
+// stacks — its accept commit's parent is the first's commit, not the stale base.
+func TestDepth1StacksOntoHeadPlusFirst(t *testing.T) {
+	f := newFix(t)
+	inA, _ := f.prepare("a-content\n")
+	inB := f.prepareNext(2, "b-content\n") // B's candidate is based on the same base
+
+	var bParent, bCommit string
+	f.acc.AfterPush = func(_ string, commitA string) {
+		f.acc.AfterPush = nil // the nested accept must not re-enter the hook
+		outB, err := f.acc.Accept(f.ctx, inB)
+		if err != nil {
+			t.Errorf("stacked accept: %v", err)
+			return
+		}
+		if outB.Card != nil || !outB.Accepted {
+			t.Errorf("B did not stack cleanly: %+v", outB)
+			return
+		}
+		bCommit = outB.Commit
+		bParent = f.git("--git-dir="+f.remote, "rev-parse", bCommit+"^")
+		if bParent != commitA {
+			t.Errorf("B stacked onto %s, want HEAD-plus-first %s", bParent, commitA)
+		}
+	}
+	outA, err := f.acc.Accept(f.ctx, inA)
+	if err != nil {
+		t.Fatalf("A accept: %v", err)
+	}
+	if !outA.Accepted {
+		t.Fatalf("A not accepted: %+v", outA)
+	}
+	if bCommit == "" {
+		t.Fatal("the stacked second accept did not run")
+	}
+	// B is a descendant of A on the remote (the depth-1 stack landed in order).
+	if outA.Commit != bParent {
+		t.Errorf("A commit %s is not B's parent %s", outA.Commit, bParent)
+	}
+	// The registry is empty after both complete (no leak → the next accept
+	// revalidates against real HEAD).
+	if outA.Card != nil {
+		t.Error("A produced a merge card")
+	}
+}
+
+// pinnedPayload builds the class-A accept effect payload keys ReDrive reads
+// (the crash-window re-drive is self-sufficient from the effect, F4).
+func pinnedPayload(candidate string) []byte {
+	p, _ := json.Marshal(map[string]any{
+		"expect_sha": "", "candidate": candidate,
+		"trailers": accept.RenderTrailers("claude-cli", "opus-4-8", "noreply@anthropic.invalid"),
+		"ref":      "refs/heads/main", "deliverable_id": "dlv", "project_id": "proj",
+		"author_name": "User One", "subject": "feat: recovered accept", "provenance": "Task: t1", "git_profile": "",
+	})
+	return p
+}
+
+// crashedEffect drives the journal to `executing` (BeginExecute done, no push)
+// — the crash window — then reconciles the in-doubt row back to `approved`, and
+// returns the effect id ready for ReDrive.
+func (f *fix) crashedEffect(t *testing.T, candidate string) string {
+	t.Helper()
+	// expect_sha = the base (RepoHead); patch it into the payload.
+	pl := map[string]any{}
+	json.Unmarshal(pinnedPayload(candidate), &pl)
+	pl["expect_sha"] = f.baseSHA
+	payload, _ := json.Marshal(pl)
+	eff, err := f.journal.Propose(f.ctx, gates.Proposal{UserID: "u1", Class: gates.ClassA, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.journal.Approve(f.ctx, eff.ID, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.journal.BeginExecute(f.ctx, eff.ID); err != nil { // now `executing` — crash here, before the push
+		t.Fatal(err)
+	}
+	// Recovery: the in-doubt executing class-A row returns to approved for replay.
+	if _, err := f.journal.ReconcileInDoubt(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.journal.Get(f.ctx, eff.ID); got.State != gates.EffectApproved {
+		t.Fatalf("reconcile left the effect in %s, want approved", got.State)
+	}
+	return eff.ID
+}
+
+// TestCrashWindowReDriveLandsAtPinnedSha (F4): BeginExecute → crash (no push) →
+// reconcile → ReDrive blind-replays the CAS push against the SAME pinned
+// expect-sha → the commit lands and the effect Succeeds.
+func TestCrashWindowReDriveLandsAtPinnedSha(t *testing.T) {
+	f := newFix(t)
+	_, candidate := f.prepare("candidate\n")
+	effID := f.crashedEffect(t, candidate)
+
+	out, err := f.acc.ReDrive(f.ctx, effID)
+	if err != nil {
+		t.Fatalf("ReDrive: %v", err)
+	}
+	if !out.Accepted || out.Card != nil {
+		t.Fatalf("re-drive did not complete: %+v", out)
+	}
+	// The push landed at the pinned expect-sha (remote base → the accept commit).
+	if tip := f.remoteMain(); tip != out.Commit {
+		t.Errorf("remote main %s != re-driven commit %s", tip, out.Commit)
+	}
+	if eff, _ := f.journal.Get(f.ctx, effID); eff.State != gates.EffectSucceeded {
+		t.Errorf("effect state %s after re-drive, want succeeded", eff.State)
+	}
+	if d, _ := f.rev.Deliverable(f.ctx, "dlv"); d.State != review.StateAccepted {
+		t.Errorf("deliverable not accepted after re-drive: %s", d.State)
+	}
+}
+
+// TestCrashWindowReDriveRefMovedMergeCard (F4): if the ref moved during the
+// crash window, the blind replay against the pinned sha lease-rejects → Fail +
+// merge card, NEVER a new-sha retry.
+func TestCrashWindowReDriveRefMovedMergeCard(t *testing.T) {
+	f := newFix(t)
+	_, candidate := f.prepare("candidate\n")
+	effID := f.crashedEffect(t, candidate)
+
+	// The remote ref moves out from under the pinned lease (a concurrent push).
+	other := filepath.Join(t.TempDir(), "other")
+	f.git("clone", "file://"+f.remote, other)
+	os.WriteFile(filepath.Join(other, "z.txt"), []byte("z\n"), 0o600)
+	f.git("-C", other, "add", "-A")
+	f.git("-C", other, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-m", "concurrent")
+	f.git("-C", other, "push", "file://"+f.remote, "HEAD:refs/heads/main")
+	moved := f.remoteMain()
+
+	out, err := f.acc.ReDrive(f.ctx, effID)
+	if err != nil {
+		t.Fatalf("ReDrive: %v", err)
+	}
+	if out.Accepted || out.Card == nil || out.Card.Reason != "lease-rejected" {
+		t.Fatalf("ref-moved re-drive did not route to a merge card: %+v", out)
+	}
+	if eff, _ := f.journal.Get(f.ctx, effID); eff.State != gates.EffectFailed {
+		t.Errorf("effect state %s, want failed", eff.State)
+	}
+	// Never a new-sha retry: the remote stays at the concurrent commit.
+	if f.remoteMain() != moved {
+		t.Error("a re-drive rejection still moved the remote — a forbidden new-sha retry")
+	}
+	if d, _ := f.rev.Deliverable(f.ctx, "dlv"); d.State != review.StateInReview {
+		t.Errorf("deliverable accepted despite a rejected re-drive: %s", d.State)
 	}
 }
 
@@ -275,19 +492,13 @@ func TestAcceptLeaseRejectionMergeCard(t *testing.T) {
 	}
 }
 
-// TestAcceptSigned (rubric 8): with signing on, the accept commit is SSH-signed
-// via the broker (the key never leaves) and the signature verifies.
+// TestAcceptSigned (rubric 8): a user whose STRUCTURAL posture is "signs" (a
+// git-ssh-key enrolled in the broker) produces an SSH-signed accept commit; the
+// key never leaves the broker.
 func TestAcceptSigned(t *testing.T) {
 	f := newFix(t)
 	in, _ := f.prepare("signed candidate\n")
-	// Enroll a git-ssh-key in the broker and turn on signing.
-	keyDir := t.TempDir()
-	keyPath := filepath.Join(keyDir, "gitkey")
-	f.runCmd("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", keyPath, "-C", "u1")
-	priv, _ := os.ReadFile(keyPath)
-	f.storeBrokerKey("u1-git", string(priv))
-	in.Sign = true
-	in.SigningProfile = "u1-git"
+	f.enrollGitKey(t, "u1") // u1's posture is now "signs" (derived, not a call flag)
 
 	out, err := f.acc.Accept(f.ctx, in)
 	if err != nil {
@@ -296,5 +507,43 @@ func TestAcceptSigned(t *testing.T) {
 	body := f.git("--git-dir="+f.remote, "cat-file", "-p", out.Commit)
 	if !strings.Contains(body, "gpgsig -----BEGIN SSH SIGNATURE-----") {
 		t.Fatalf("accept commit is not signed:\n%s", body)
+	}
+}
+
+// TestSigningPostureIsStructural (F3): a user's signing is a durable per-user
+// fact, not a per-call argument — so the platform NEVER produces a mixed-signed
+// history. A signing user's every accept is signed; a non-signing user's every
+// accept is unsigned; no call can override it (the flag does not exist).
+func TestSigningPostureIsStructural(t *testing.T) {
+	// A user WITHOUT an enrolled key: every accept is unsigned.
+	f1 := newFix(t)
+	in1, _ := f1.prepare("v1\n")
+	out1, err := f1.acc.Accept(f1.ctx, in1)
+	if err != nil {
+		t.Fatalf("unsigned accept: %v", err)
+	}
+	if strings.Contains(f1.git("--git-dir="+f1.remote, "cat-file", "-p", out1.Commit), "gpgsig") {
+		t.Error("a user with no enrolled key produced a SIGNED commit — posture leaked")
+	}
+
+	// A user WITH an enrolled key: EVERY accept signs. Two deliverables in one
+	// project both sign — there is no per-call flag to un-sign one, so a mixed
+	// history is impossible by construction (Input has no signing field).
+	f2 := newFix(t)
+	f2.enrollGitKey(t, "u1")
+	inA, _ := f2.prepare("a\n")
+	out2a, err := f2.acc.Accept(f2.ctx, inA)
+	if err != nil {
+		t.Fatalf("signed accept 1: %v", err)
+	}
+	inB := f2.prepareNext(2, "b\n")
+	out2b, err := f2.acc.Accept(f2.ctx, inB)
+	if err != nil {
+		t.Fatalf("signed accept 2: %v", err)
+	}
+	for i, c := range []string{out2a.Commit, out2b.Commit} {
+		if !strings.Contains(f2.git("--git-dir="+f2.remote, "cat-file", "-p", c), "gpgsig") {
+			t.Errorf("accept %d by a signing user is UNSIGNED — mixed-signed history (F3)", i+1)
+		}
 	}
 }

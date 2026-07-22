@@ -170,6 +170,15 @@ func (s *Server) dispatch(req Request) Response {
 		// The S13.6 SSHSIG signing (gpg.format=ssh); the key never leaves.
 		return s.signData(req)
 
+	case OpHasKey:
+		// Secret-free presence check for the signing-posture derivation (F3):
+		// the decision path holds no secret — kindOf never decrypts.
+		kind, exists, err := s.store.kindOf(req.Profile)
+		if err != nil {
+			return errResp(err)
+		}
+		return Response{OK: true, Has: exists, Kind: kind}
+
 	default:
 		return Response{OK: false, Error: "unknown operation"}
 	}

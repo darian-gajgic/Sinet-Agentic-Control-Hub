@@ -171,12 +171,15 @@ func Run(ctx context.Context, opts Options) error {
 	runs := run.NewStore(db, log)
 	checkpoints := gates.NewCheckpoints(db, log)
 	taskLedger := ledger.NewStore(db, log)
+	// The two-phase effect journal (Spec S02.7) — shared by the recovery ladder
+	// (in-doubt reconcile) and the S13.6 accept orchestration (the accept is a
+	// class-A effect through it, F1).
+	effects, err := gates.NewJournal(gates.JournalConfig{DB: db, Settings: reg})
+	if err != nil {
+		return err
+	}
 	ladder := opts.Ladder
 	if ladder == nil {
-		effects, err := gates.NewJournal(gates.JournalConfig{DB: db, Settings: reg})
-		if err != nil {
-			return err
-		}
 		ladder, err = recovery.New(recovery.Config{
 			DB:          db,
 			Log:         log,
@@ -207,6 +210,7 @@ func Run(ctx context.Context, opts Options) error {
 	// Spec S19.5 B2), and the intake API surface goes live.
 	var sched *scheduler.Scheduler
 	var intakeSurface api.IntakeSurface
+	var acceptSurf *acceptSurface
 	admission := opts.Admission
 	if admission == nil {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
@@ -297,6 +301,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		logger.Info("worker: store open (Spec S08.1)", "root", workStore.Root())
 
+		// The S13.1–S13.4 review store (B4-1), shared by the stage pipeline
+		// (minting/drain) and the S13.6 accept orchestration (the accepted state
+		// verb, F1).
+		reviewStore := &review.Store{
+			DB: db, Log: log, Settings: reg,
+			Root: filepath.Join(stateDir, "review"),
+		}
+
 		sk, err := stage.New(stage.Config{
 			DB:          db,
 			Log:         log,
@@ -330,10 +342,7 @@ func Run(ctx context.Context, opts Options) error {
 			// The S13.1–S13.4 review store (B4-1): revision minting at the
 			// verification handoff, one comment schema for humans and
 			// findings, THE S13.4 drain; object dir under the state dir.
-			Review: &review.Store{
-				DB: db, Log: log, Settings: reg,
-				Root: filepath.Join(stateDir, "review"),
-			},
+			Review: reviewStore,
 			// The S13.5/S13.7 git-topology + registry seams (B4-2), wired over
 			// internal/project through the projectSeams adapter (stage/intake/
 			// review never import internal/project, brief R35 / CONVENTIONS §23).
@@ -378,6 +387,26 @@ func Run(ctx context.Context, opts Options) error {
 		pseams.pipe = sk.Pipeline()
 		admission = sched
 		intakeSurface = sk.Surface()
+
+		// The S13.6 accept orchestration + the S13.9 follow-up verb, composed
+		// from the production stores (F1): compiled in and reachable, held by
+		// the api layer for the B6 operator-surface endpoints (the S01.9 PIN
+		// step-up rides that surface, seam §3 — no endpoints built here).
+		who := os.Getenv("USER")
+		if who == "" {
+			who = "sinet"
+		}
+		acceptSurf, err = buildAcceptSurface(acceptDeps{
+			Proj: proj, Journal: effects, Review: reviewStore, Runs: runs,
+			DB: db, Log: log, Settings: reg,
+			BrokerSocket:   filepath.Join(stateDir, "broker", who+".sock"),
+			Pipeline:       sk.Pipeline(),
+			ProjectForTask: pseams.projectForTask,
+		})
+		if err != nil {
+			return err
+		}
+		logger.Info("accept: S13.6 accept + S13.9 follow-up wired (operator endpoints are B6)")
 	}
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
@@ -412,6 +441,8 @@ func Run(ctx context.Context, opts Options) error {
 		HealthFn:   healthFn(st, maint, log),
 		Stopping:   st.stopping,
 		Intake:     intakeSurface,
+		Accept:     acceptAccepter(acceptSurf),
+		FollowUp:   acceptFollowUp(acceptSurf),
 		Logger:     logger,
 	})
 	httpSrv := &http.Server{
@@ -434,6 +465,17 @@ func Run(ctx context.Context, opts Options) error {
 	if err := ladder.Reconcile(ctx); err != nil {
 		shutdownHTTP(httpSrv, logger)
 		return fmt.Errorf("shell: recovery ladder: %w", err)
+	}
+	// After the ladder returns in-doubt class-A effects to `approved`, re-drive
+	// any in-doubt ACCEPT effects: reconcile leads to the push being re-driven
+	// against the SAME pinned expect-sha (S13.6 R8 / F4). Non-fatal — a
+	// transient broker outage retries next boot.
+	if acceptSurf != nil {
+		if n, err := acceptSurf.Accepter.ReDriveApproved(ctx); err != nil {
+			logger.Warn("accept: re-drive of in-doubt accepts failed (retries next boot)", "err", err)
+		} else if n > 0 {
+			logger.Info("accept: re-drove in-doubt accept effects after recovery (Spec S13.6 R8)", "count", n)
+		}
 	}
 
 	if _, err := appendLifecycle(ctx, log, EventPlatformStarted); err != nil {

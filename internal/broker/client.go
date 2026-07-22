@@ -124,6 +124,16 @@ func (c *Client) Push(req Request) (PushResult, error) {
 	return PushResult{}, nil
 }
 
+// HasKey reports whether a profile exists and its kind, WITHOUT the secret —
+// the secret-free presence check for a user's signing posture (Spec S13.6, F3).
+func (c *Client) HasKey(profile string) (kind string, exists bool, err error) {
+	resp, err := c.roundTrip(Request{Op: OpHasKey, Profile: profile})
+	if err != nil {
+		return "", false, err
+	}
+	return resp.Kind, resp.Has, nil
+}
+
 // SignData produces an SSHSIG over data with the broker-held git-ssh-key (Spec
 // S13.6 step 5, gpg.format=ssh). Returns the armored signature; the key never
 // leaves the broker. namespace is "git" for commit signing.

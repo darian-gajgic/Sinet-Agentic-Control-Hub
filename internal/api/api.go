@@ -21,8 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // Settings is the api-facing view of the settings registry (Spec S01.10):
@@ -74,6 +76,12 @@ type Config struct {
 	// Intake is the walking-skeleton pipeline surface (intake_handlers.go);
 	// nil leaves those routes answering 503 (surface not wired).
 	Intake IntakeSurface
+	// Accept + FollowUp are the S13.6/S13.9 operator surfaces, composed at the
+	// shell root and HELD here for the B6 endpoints (the S01.9 PIN step-up rides
+	// that surface, seam §3). They are wired but NOT yet routed — the invocation
+	// endpoints land with the B6 operator surfaces (F1).
+	Accept   *accept.Accepter
+	FollowUp *intake.FollowUp
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -94,6 +102,10 @@ type Server struct {
 	logger     *slog.Logger
 	nudge      *broadcast
 	intake     IntakeSurface
+	// accept + followUp are held for the B6 operator endpoints (F1); not yet
+	// routed.
+	accept   *accept.Accepter
+	followUp *intake.FollowUp
 }
 
 // New assembles the Server.
@@ -110,6 +122,8 @@ func New(cfg Config) *Server {
 		logger:     cfg.Logger,
 		nudge:      newBroadcast(),
 		intake:     cfg.Intake,
+		accept:     cfg.Accept,
+		followUp:   cfg.FollowUp,
 	}
 	if s.auth == nil {
 		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}
