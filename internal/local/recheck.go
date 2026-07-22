@@ -72,10 +72,18 @@ func (r *ReChecker) MarginRecheck(ctx context.Context, runID, duty string, in Du
 	if !found || cal.AcceptLocal(margin) {
 		return out, nil // uncalibrated, or margin ≥ threshold ⇒ accept the fast answer
 	}
-	// Below threshold: re-check on the workhorse ($0, local→local, R4).
-	seat, exists := SeatByKey(WorkhorseSeatKey)
-	if !exists || !seat.Servable {
-		return out, nil // no workhorse seat available ⇒ the fast answer stands (honest)
+	// Below threshold: re-check on the workhorse ($0, local→local, R4). F6b:
+	// resolve the workhorse-role seat THROUGH the alias map (swap-invisible, R15)
+	// — the `utility` alias carries the workhorse role in the S12.4 default map;
+	// degrade to the manifest workhorse seat ONLY when the alias resolves
+	// non-servable/unset (never hardcode a seat key past the alias).
+	seat, rerr := r.duty.ResolveSeat(AliasUtility)
+	if rerr != nil || !seat.Servable {
+		ws, exists := SeatByKey(WorkhorseSeatKey)
+		if !exists || !ws.Servable {
+			return out, nil // no workhorse seat available ⇒ the fast answer stands (honest)
+		}
+		seat = ws
 	}
 	res, err := r.duty.CallSeat(ctx, runID, duty, seat, in)
 	if err != nil {

@@ -93,6 +93,21 @@ func EntailmentSchema() json.RawMessage {
 	}, []string{"reason", "verdict", "abstain"})
 }
 
+// ContractSchema builds a strict object schema requiring the given string
+// fields — the DRAFTING output-contract shape (S12.4 utility row): a free-text
+// drafting duty (utility Help) is Classification:false (no forced-label
+// abstain), but it STILL enforces a json_schema at the engine for its output
+// STRUCTURE (the production utility seam sends HelpSchema). The T15 battery's
+// output-contract suites use this so a schema-shaped contract (MustContainFields)
+// is honored at the engine, never left to free prose (F2b).
+func ContractSchema(fields []string) json.RawMessage {
+	props := make([]prop, 0, len(fields))
+	for _, f := range fields {
+		props = append(props, prop{f, strField("the " + f + " field")})
+	}
+	return orderedObjectSchema(props, fields)
+}
+
 // HelpSchema is the utility Help drafting schema (S06.9 13.5 card help).
 // DRAFTING, not classification (S12.4 utility row: "this seat never decides",
 // human-gated downstream) — no forced-label abstain member (F7 ratified); the

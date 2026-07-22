@@ -30,8 +30,9 @@ import (
 )
 
 // Version versions the committed battery (case data + harness). Bumped when the
-// seed suites change.
-const Version = "t15-v0"
+// seed suites change (t15-v1: all suites grown to the ≥30-case S12.5 bootstrap
+// floor, F9).
+const Version = "t15-v1"
 
 // Kind marks how a suite is scored.
 type Kind string
@@ -266,6 +267,14 @@ func (r *Runner) runCase(ctx context.Context, s *Suite, schema json.RawMessage, 
 		spec.Schema = schema
 		spec.Name = s.Duty
 		spec.Logprobs = true
+		spec.NoThink = true
+	} else if c.Contract != nil && len(c.Contract.MustContainFields) > 0 {
+		// F2b: a schema-shaped output contract (utility Help) enforces its output
+		// STRUCTURE at the engine via a drafting json_schema — Classification:false
+		// (no forced abstain, no logprobs), but the required fields are honored so
+		// the check runs against real structured output, not free prose (S12.4).
+		spec.Schema = local.ContractSchema(c.Contract.MustContainFields)
+		spec.Name = s.Duty
 		spec.NoThink = true
 	}
 	comp, err := r.comp.Chat(ctx, spec)

@@ -32,10 +32,24 @@ import (
 
 const sanctionedSkip = "SANCTIONED SKIP (CONVENTIONS §10): "
 
-// TestPinsMatchLock couples LlamaSwapPin / LlamaCppPin to the components.lock
-// entries (the §10 Pin↔lock precedent). A drift is a LOUD failure — the
-// operator's S03.3/S12.10 deliberate-bump decision, never a silent retarget.
-func TestPinsMatchLock(t *testing.T) {
+// ── The S12.10 deliberate-bump procedure battery (F17) ──────────────────────
+// The three TestBumpProcedure* entries below are the ONE named run-handle a
+// serving-engine bump session runs as a single battery (P-T15-2 — behavioral,
+// documentation is never the check):
+//
+//	go test ./internal/local/ -run TestBumpProcedure -v          # F + pin coupling
+//	SINET_LIVE_SMOKE=1 go test ./internal/local/ -run TestBumpProcedure -v  # + tier L
+//
+// It asserts, on every bump: pin↔lock coupling (loud drift), the real
+// llama-swap+llama.cpp /v1/models + unload contract (tier R), and the live
+// json_schema ENFORCEMENT + logprobs + $0 D7 marker + VRAM-release + the R14
+// reason-first ORDER assert (tier L). Named in CONVENTIONS §28.
+
+// TestBumpProcedurePinsMatchLock couples LlamaSwapPin / LlamaCppPin to the
+// components.lock entries (the §10 Pin↔lock precedent). A drift is a LOUD
+// failure — the operator's S03.3/S12.10 deliberate-bump decision, never a
+// silent retarget.
+func TestBumpProcedurePinsMatchLock(t *testing.T) {
 	var lock struct {
 		Components []struct {
 			Name string `json:"name"`
@@ -61,7 +75,7 @@ func TestPinsMatchLock(t *testing.T) {
 	}
 }
 
-// TestConformanceTierR is the real-stack tier ($0, auto-runs when installed):
+// TestBumpProcedureTierR is the real-stack tier ($0, auto-runs when installed):
 // it MECHANIZES the llama-swap YAML/endpoint contract (the S16.3 watch row's
 // substance, R26/F3) — generate a config, start the pinned llama-swap on an
 // ephemeral loopback port, and assert /v1/models lists exactly the generated
@@ -69,7 +83,7 @@ func TestPinsMatchLock(t *testing.T) {
 // the installed llama-swap version and LOUD-reports any pin delta (§10; never
 // retargets). No model/CUDA is loaded (contract only). Absent binaries
 // SANCTIONED-SKIP.
-func TestConformanceTierR(t *testing.T) {
+func TestBumpProcedureTierR(t *testing.T) {
 	llamaSwap, llamaServer, ok := local.InstalledStack()
 	if !ok {
 		t.Skip(sanctionedSkip + "local serving stack not installed (llama-swap + llama-server absent) — host install is the B4 gate/hardening step")
@@ -199,14 +213,14 @@ func assertPOST200(t *testing.T, url string) {
 	}
 }
 
-// TestTierLLiveSmoke is THE one tier-L smoke ($0 by construction): against a
+// TestBumpProcedureTierLSmoke is THE one tier-L smoke ($0 by construction): against a
 // live llama-swap endpoint (SINET_LOCAL_ENDPOINT), one duty call end-to-end —
 // alias → model load → temp-0 constrained response with the abstain-capable
 // schema → the $0 D7 checkpoint row with model hash + engine build → the
 // zero-allowance receipt line via the metering fold — then eager-unload. Never
 // touches production units/ports. Gated by SINET_LIVE_SMOKE=1; absent it
 // SANCTIONED-SKIPs.
-func TestTierLLiveSmoke(t *testing.T) {
+func TestBumpProcedureTierLSmoke(t *testing.T) {
 	if os.Getenv("SINET_LIVE_SMOKE") != "1" {
 		t.Skip(sanctionedSkip + "tier-L live smoke gated by SINET_LIVE_SMOKE=1")
 	}

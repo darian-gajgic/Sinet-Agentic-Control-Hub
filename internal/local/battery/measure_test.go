@@ -55,7 +55,18 @@ func TestMeasureSuites(t *testing.T) {
 	}
 	var reports []suiteReport
 
-	for _, s := range battery.SeedSuites() {
+	// A loaded suite file (SINET_MEASURE_SUITE_FILE) overrides the seed set —
+	// the grown ~200-pair entailment set (C8) runs this way against Guardian.
+	suites := battery.SeedSuites()
+	if f := os.Getenv("SINET_MEASURE_SUITE_FILE"); f != "" {
+		s, err := battery.LoadSuite(f)
+		if err != nil {
+			t.Fatalf("LoadSuite %s: %v", f, err)
+		}
+		suites = []*battery.Suite{s}
+	}
+
+	for _, s := range suites {
 		if want != "" && !contains(want, s.Duty) {
 			continue
 		}

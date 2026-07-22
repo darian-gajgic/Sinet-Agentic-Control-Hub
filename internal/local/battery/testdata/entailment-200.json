@@ -1,0 +1,1111 @@
+{
+  "duty": "entailment",
+  "kind": "classification",
+  "fields": [
+    {
+      "name": "verdict",
+      "enum": [
+        "supported",
+        "unsupported"
+      ]
+    }
+  ],
+  "label_fields": [
+    "verdict"
+  ],
+  "system": "You are a strict grounding checker. A claim is 'supported' ONLY if the SOURCE text entails it; otherwise 'unsupported'. Reason briefly, then verdict.",
+  "cases": [
+    {
+      "id": "e2-001",
+      "prompt": "CLAIM: The project is Apache-2.0 licensed.\n\nSOURCE:\nThis project is licensed under the Apache License, Version 2.0.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-002",
+      "prompt": "CLAIM: The project is MIT licensed.\n\nSOURCE:\nThis project is licensed under the Apache License, Version 2.0.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-003",
+      "prompt": "CLAIM: According to the documentation, the project is Apache-2.0 licensed.\n\nSOURCE:\nDocs: This project is licensed under the Apache License, Version 2.0.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-004",
+      "prompt": "CLAIM: The documentation states that the project is MIT licensed.\n\nSOURCE:\nDocs: This project is licensed under the Apache License, Version 2.0.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-005",
+      "prompt": "CLAIM: It is MIT licensed.\n\nSOURCE:\nReleased under the MIT License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-006",
+      "prompt": "CLAIM: It is GPL-3.0 licensed.\n\nSOURCE:\nReleased under the MIT License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-007",
+      "prompt": "CLAIM: According to the documentation, it is MIT licensed.\n\nSOURCE:\nDocs: Released under the MIT License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-008",
+      "prompt": "CLAIM: The documentation states that it is GPL-3.0 licensed.\n\nSOURCE:\nDocs: Released under the MIT License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-009",
+      "prompt": "CLAIM: It uses the BSD 3-Clause license.\n\nSOURCE:\nDistributed under the BSD 3-Clause License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-010",
+      "prompt": "CLAIM: It uses the Apache-2.0 license.\n\nSOURCE:\nDistributed under the BSD 3-Clause License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-011",
+      "prompt": "CLAIM: According to the documentation, it uses the BSD 3-Clause license.\n\nSOURCE:\nDocs: Distributed under the BSD 3-Clause License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-012",
+      "prompt": "CLAIM: The documentation states that it uses the Apache-2.0 license.\n\nSOURCE:\nDocs: Distributed under the BSD 3-Clause License.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-013",
+      "prompt": "CLAIM: Free tier allows 100 requests per minute.\n\nSOURCE:\nFree tier: up to 100 requests/minute per API key.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-014",
+      "prompt": "CLAIM: Free tier allows 1000 requests per minute.\n\nSOURCE:\nFree tier: up to 100 requests/minute per API key.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-015",
+      "prompt": "CLAIM: According to the documentation, free tier allows 100 requests per minute.\n\nSOURCE:\nDocs: Free tier: up to 100 requests/minute per API key.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-016",
+      "prompt": "CLAIM: The documentation states that free tier allows 1000 requests per minute.\n\nSOURCE:\nDocs: Free tier: up to 100 requests/minute per API key.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-017",
+      "prompt": "CLAIM: Paid plans allow 5000 requests per minute.\n\nSOURCE:\nPaid plans raise the limit to 5000 requests/minute.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-018",
+      "prompt": "CLAIM: Paid plans allow 500 requests per minute.\n\nSOURCE:\nPaid plans raise the limit to 5000 requests/minute.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-019",
+      "prompt": "CLAIM: According to the documentation, paid plans allow 5000 requests per minute.\n\nSOURCE:\nDocs: Paid plans raise the limit to 5000 requests/minute.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-020",
+      "prompt": "CLAIM: The documentation states that paid plans allow 500 requests per minute.\n\nSOURCE:\nDocs: Paid plans raise the limit to 5000 requests/minute.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-021",
+      "prompt": "CLAIM: The default timeout is 30 seconds.\n\nSOURCE:\ntimeout (int, default 30): seconds before aborting.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-022",
+      "prompt": "CLAIM: The default timeout is 300 seconds.\n\nSOURCE:\ntimeout (int, default 30): seconds before aborting.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-023",
+      "prompt": "CLAIM: According to the documentation, the default timeout is 30 seconds.\n\nSOURCE:\nDocs: timeout (int, default 30): seconds before aborting.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-024",
+      "prompt": "CLAIM: The documentation states that the default timeout is 300 seconds.\n\nSOURCE:\nDocs: timeout (int, default 30): seconds before aborting.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-025",
+      "prompt": "CLAIM: Idle connections close after 90 seconds.\n\nSOURCE:\nConnections idle for 90s are closed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-026",
+      "prompt": "CLAIM: Idle connections never close.\n\nSOURCE:\nConnections idle for 90s are closed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-027",
+      "prompt": "CLAIM: According to the documentation, idle connections close after 90 seconds.\n\nSOURCE:\nDocs: Connections idle for 90s are closed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-028",
+      "prompt": "CLAIM: The documentation states that idle connections never close.\n\nSOURCE:\nDocs: Connections idle for 90s are closed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-029",
+      "prompt": "CLAIM: Python 3.8 support was removed in 3.2.\n\nSOURCE:\nChangelog 3.2: minimum supported Python is now 3.9; 3.8 removed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-030",
+      "prompt": "CLAIM: Python 3.8 support was added in 3.2.\n\nSOURCE:\nChangelog 3.2: minimum supported Python is now 3.9; 3.8 removed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-031",
+      "prompt": "CLAIM: According to the documentation, python 3.8 support was removed in 3.2.\n\nSOURCE:\nDocs: Changelog 3.2: minimum supported Python is now 3.9; 3.8 removed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-032",
+      "prompt": "CLAIM: The documentation states that python 3.8 support was added in 3.2.\n\nSOURCE:\nDocs: Changelog 3.2: minimum supported Python is now 3.9; 3.8 removed.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-033",
+      "prompt": "CLAIM: Node 18 or newer is required.\n\nSOURCE:\nRequires Node.js >= 18.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-034",
+      "prompt": "CLAIM: Node 14 is supported.\n\nSOURCE:\nRequires Node.js >= 18.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-035",
+      "prompt": "CLAIM: According to the documentation, node 18 or newer is required.\n\nSOURCE:\nDocs: Requires Node.js >= 18.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-036",
+      "prompt": "CLAIM: The documentation states that node 14 is supported.\n\nSOURCE:\nDocs: Requires Node.js >= 18.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-037",
+      "prompt": "CLAIM: v4 removed the callback API.\n\nSOURCE:\nv4 drops the deprecated callback API.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-038",
+      "prompt": "CLAIM: v4 kept the callback API.\n\nSOURCE:\nv4 drops the deprecated callback API.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-039",
+      "prompt": "CLAIM: According to the documentation, v4 removed the callback API.\n\nSOURCE:\nDocs: v4 drops the deprecated callback API.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-040",
+      "prompt": "CLAIM: The documentation states that v4 kept the callback API.\n\nSOURCE:\nDocs: v4 drops the deprecated callback API.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-041",
+      "prompt": "CLAIM: Data defaults to the EU region.\n\nSOURCE:\nBy default, data is stored in the Frankfurt (EU) region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-042",
+      "prompt": "CLAIM: Data defaults to the US region.\n\nSOURCE:\nBy default, data is stored in the Frankfurt (EU) region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-043",
+      "prompt": "CLAIM: According to the documentation, data defaults to the EU region.\n\nSOURCE:\nDocs: By default, data is stored in the Frankfurt (EU) region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-044",
+      "prompt": "CLAIM: The documentation states that data defaults to the US region.\n\nSOURCE:\nDocs: By default, data is stored in the Frankfurt (EU) region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-045",
+      "prompt": "CLAIM: US traffic uses us-east-1.\n\nSOURCE:\nUS customers are served from us-east-1.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-046",
+      "prompt": "CLAIM: US traffic uses eu-west-1.\n\nSOURCE:\nUS customers are served from us-east-1.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-047",
+      "prompt": "CLAIM: According to the documentation, uS traffic uses us-east-1.\n\nSOURCE:\nDocs: US customers are served from us-east-1.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-048",
+      "prompt": "CLAIM: The documentation states that uS traffic uses eu-west-1.\n\nSOURCE:\nDocs: US customers are served from us-east-1.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-049",
+      "prompt": "CLAIM: Paid plans have a 99.9% uptime SLA.\n\nSOURCE:\nOur SLA guarantees 99.9% monthly uptime for paid plans.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-050",
+      "prompt": "CLAIM: Paid plans have a 99.99% uptime SLA.\n\nSOURCE:\nOur SLA guarantees 99.9% monthly uptime for paid plans.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-051",
+      "prompt": "CLAIM: According to the documentation, paid plans have a 99.9% uptime SLA.\n\nSOURCE:\nDocs: Our SLA guarantees 99.9% monthly uptime for paid plans.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-052",
+      "prompt": "CLAIM: The documentation states that paid plans have a 99.99% uptime SLA.\n\nSOURCE:\nDocs: Our SLA guarantees 99.9% monthly uptime for paid plans.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-053",
+      "prompt": "CLAIM: Free plans have no SLA.\n\nSOURCE:\nFree plans carry no uptime guarantee.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-054",
+      "prompt": "CLAIM: Free plans have a 99.9% SLA.\n\nSOURCE:\nFree plans carry no uptime guarantee.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-055",
+      "prompt": "CLAIM: According to the documentation, free plans have no SLA.\n\nSOURCE:\nDocs: Free plans carry no uptime guarantee.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-056",
+      "prompt": "CLAIM: The documentation states that free plans have a 99.9% SLA.\n\nSOURCE:\nDocs: Free plans carry no uptime guarantee.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-057",
+      "prompt": "CLAIM: Data at rest is AES-256 encrypted.\n\nSOURCE:\nAll stored data is encrypted at rest using AES-256.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-058",
+      "prompt": "CLAIM: Data at rest is unencrypted.\n\nSOURCE:\nAll stored data is encrypted at rest using AES-256.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-059",
+      "prompt": "CLAIM: According to the documentation, data at rest is AES-256 encrypted.\n\nSOURCE:\nDocs: All stored data is encrypted at rest using AES-256.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-060",
+      "prompt": "CLAIM: The documentation states that data at rest is unencrypted.\n\nSOURCE:\nDocs: All stored data is encrypted at rest using AES-256.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-061",
+      "prompt": "CLAIM: Passwords use argon2id hashing.\n\nSOURCE:\nPasswords are hashed with argon2id.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-062",
+      "prompt": "CLAIM: Passwords are stored in plaintext.\n\nSOURCE:\nPasswords are hashed with argon2id.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-063",
+      "prompt": "CLAIM: According to the documentation, passwords use argon2id hashing.\n\nSOURCE:\nDocs: Passwords are hashed with argon2id.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-064",
+      "prompt": "CLAIM: The documentation states that passwords are stored in plaintext.\n\nSOURCE:\nDocs: Passwords are hashed with argon2id.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-065",
+      "prompt": "CLAIM: TLS 1.2 is the minimum.\n\nSOURCE:\nTLS 1.2 is the minimum accepted version.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-066",
+      "prompt": "CLAIM: TLS 1.0 is accepted.\n\nSOURCE:\nTLS 1.2 is the minimum accepted version.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-067",
+      "prompt": "CLAIM: According to the documentation, tLS 1.2 is the minimum.\n\nSOURCE:\nDocs: TLS 1.2 is the minimum accepted version.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-068",
+      "prompt": "CLAIM: The documentation states that tLS 1.0 is accepted.\n\nSOURCE:\nDocs: TLS 1.2 is the minimum accepted version.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-069",
+      "prompt": "CLAIM: Max upload is 25 MB.\n\nSOURCE:\nUploads are capped at 25 MB per file.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-070",
+      "prompt": "CLAIM: Max upload is 250 MB.\n\nSOURCE:\nUploads are capped at 25 MB per file.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-071",
+      "prompt": "CLAIM: According to the documentation, max upload is 25 MB.\n\nSOURCE:\nDocs: Uploads are capped at 25 MB per file.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-072",
+      "prompt": "CLAIM: The documentation states that max upload is 250 MB.\n\nSOURCE:\nDocs: Uploads are capped at 25 MB per file.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-073",
+      "prompt": "CLAIM: PDFs are accepted uploads.\n\nSOURCE:\nOnly image/* and application/pdf are accepted.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-074",
+      "prompt": "CLAIM: Videos are accepted uploads.\n\nSOURCE:\nOnly image/* and application/pdf are accepted.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-075",
+      "prompt": "CLAIM: According to the documentation, pDFs are accepted uploads.\n\nSOURCE:\nDocs: Only image/* and application/pdf are accepted.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-076",
+      "prompt": "CLAIM: The documentation states that videos are accepted uploads.\n\nSOURCE:\nDocs: Only image/* and application/pdf are accepted.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-077",
+      "prompt": "CLAIM: Webhooks retry up to 5 times.\n\nSOURCE:\nFailed webhooks are retried at most 5 times with backoff.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-078",
+      "prompt": "CLAIM: Webhooks never retry.\n\nSOURCE:\nFailed webhooks are retried at most 5 times with backoff.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-079",
+      "prompt": "CLAIM: According to the documentation, webhooks retry up to 5 times.\n\nSOURCE:\nDocs: Failed webhooks are retried at most 5 times with backoff.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-080",
+      "prompt": "CLAIM: The documentation states that webhooks never retry.\n\nSOURCE:\nDocs: Failed webhooks are retried at most 5 times with backoff.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-081",
+      "prompt": "CLAIM: 5xx responses are retried.\n\nSOURCE:\nRequests are retried on 429 and 5xx only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-082",
+      "prompt": "CLAIM: 404 responses are retried.\n\nSOURCE:\nRequests are retried on 429 and 5xx only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-083",
+      "prompt": "CLAIM: According to the documentation, 5xx responses are retried.\n\nSOURCE:\nDocs: Requests are retried on 429 and 5xx only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-084",
+      "prompt": "CLAIM: The documentation states that 404 responses are retried.\n\nSOURCE:\nDocs: Requests are retried on 429 and 5xx only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-085",
+      "prompt": "CLAIM: Sessions expire after 24 hours.\n\nSOURCE:\nA session token is valid for 24 hours, then re-auth is required.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-086",
+      "prompt": "CLAIM: Sessions never expire.\n\nSOURCE:\nA session token is valid for 24 hours, then re-auth is required.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-087",
+      "prompt": "CLAIM: According to the documentation, sessions expire after 24 hours.\n\nSOURCE:\nDocs: A session token is valid for 24 hours, then re-auth is required.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-088",
+      "prompt": "CLAIM: The documentation states that sessions never expire.\n\nSOURCE:\nDocs: A session token is valid for 24 hours, then re-auth is required.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-089",
+      "prompt": "CLAIM: API keys are shown only once.\n\nSOURCE:\nAPI keys are shown once at creation and cannot be retrieved later.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-090",
+      "prompt": "CLAIM: API keys can be retrieved anytime.\n\nSOURCE:\nAPI keys are shown once at creation and cannot be retrieved later.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-091",
+      "prompt": "CLAIM: According to the documentation, aPI keys are shown only once.\n\nSOURCE:\nDocs: API keys are shown once at creation and cannot be retrieved later.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-092",
+      "prompt": "CLAIM: The documentation states that aPI keys can be retrieved anytime.\n\nSOURCE:\nDocs: API keys are shown once at creation and cannot be retrieved later.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-093",
+      "prompt": "CLAIM: The API returns JSON by default.\n\nSOURCE:\nResponses default to application/json.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-094",
+      "prompt": "CLAIM: The API returns XML by default.\n\nSOURCE:\nResponses default to application/json.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-095",
+      "prompt": "CLAIM: According to the documentation, the API returns JSON by default.\n\nSOURCE:\nDocs: Responses default to application/json.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-096",
+      "prompt": "CLAIM: The documentation states that the API returns XML by default.\n\nSOURCE:\nDocs: Responses default to application/json.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-097",
+      "prompt": "CLAIM: Timestamps are UTC RFC 3339.\n\nSOURCE:\nTimestamps are serialized as RFC 3339 UTC.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-098",
+      "prompt": "CLAIM: Timestamps are local-time epoch.\n\nSOURCE:\nTimestamps are serialized as RFC 3339 UTC.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-099",
+      "prompt": "CLAIM: According to the documentation, timestamps are UTC RFC 3339.\n\nSOURCE:\nDocs: Timestamps are serialized as RFC 3339 UTC.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-100",
+      "prompt": "CLAIM: The documentation states that timestamps are local-time epoch.\n\nSOURCE:\nDocs: Timestamps are serialized as RFC 3339 UTC.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-101",
+      "prompt": "CLAIM: Pages hold up to 100 items.\n\nSOURCE:\nList endpoints return at most 100 items per page.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-102",
+      "prompt": "CLAIM: Pages hold up to 1000 items.\n\nSOURCE:\nList endpoints return at most 100 items per page.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-103",
+      "prompt": "CLAIM: According to the documentation, pages hold up to 100 items.\n\nSOURCE:\nDocs: List endpoints return at most 100 items per page.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-104",
+      "prompt": "CLAIM: The documentation states that pages hold up to 1000 items.\n\nSOURCE:\nDocs: List endpoints return at most 100 items per page.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-105",
+      "prompt": "CLAIM: next_cursor pages forward.\n\nSOURCE:\nUse the next_cursor field to page forward.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-106",
+      "prompt": "CLAIM: next_cursor pages backward.\n\nSOURCE:\nUse the next_cursor field to page forward.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-107",
+      "prompt": "CLAIM: According to the documentation, next_cursor pages forward.\n\nSOURCE:\nDocs: Use the next_cursor field to page forward.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-108",
+      "prompt": "CLAIM: The documentation states that next_cursor pages backward.\n\nSOURCE:\nDocs: Use the next_cursor field to page forward.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-109",
+      "prompt": "CLAIM: Refunds are available within 30 days.\n\nSOURCE:\nYou may request a refund up to 30 days after purchase.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-110",
+      "prompt": "CLAIM: Refunds are available anytime.\n\nSOURCE:\nYou may request a refund up to 30 days after purchase.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-111",
+      "prompt": "CLAIM: According to the documentation, refunds are available within 30 days.\n\nSOURCE:\nDocs: You may request a refund up to 30 days after purchase.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-112",
+      "prompt": "CLAIM: The documentation states that refunds are available anytime.\n\nSOURCE:\nDocs: You may request a refund up to 30 days after purchase.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-113",
+      "prompt": "CLAIM: The cache TTL is 5 minutes.\n\nSOURCE:\nCached responses live for 5 minutes.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-114",
+      "prompt": "CLAIM: The cache TTL is 1 hour.\n\nSOURCE:\nCached responses live for 5 minutes.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-115",
+      "prompt": "CLAIM: According to the documentation, the cache TTL is 5 minutes.\n\nSOURCE:\nDocs: Cached responses live for 5 minutes.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-116",
+      "prompt": "CLAIM: The documentation states that the cache TTL is 1 hour.\n\nSOURCE:\nDocs: Cached responses live for 5 minutes.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-117",
+      "prompt": "CLAIM: Writes invalidate the cache.\n\nSOURCE:\nThe cache is invalidated on any write.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-118",
+      "prompt": "CLAIM: Writes never affect the cache.\n\nSOURCE:\nThe cache is invalidated on any write.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-119",
+      "prompt": "CLAIM: According to the documentation, writes invalidate the cache.\n\nSOURCE:\nDocs: The cache is invalidated on any write.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-120",
+      "prompt": "CLAIM: The documentation states that writes never affect the cache.\n\nSOURCE:\nDocs: The cache is invalidated on any write.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-121",
+      "prompt": "CLAIM: Backups are kept 30 days.\n\nSOURCE:\nBackups run nightly and are retained for 30 days.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-122",
+      "prompt": "CLAIM: Backups are kept forever.\n\nSOURCE:\nBackups run nightly and are retained for 30 days.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-123",
+      "prompt": "CLAIM: According to the documentation, backups are kept 30 days.\n\nSOURCE:\nDocs: Backups run nightly and are retained for 30 days.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-124",
+      "prompt": "CLAIM: The documentation states that backups are kept forever.\n\nSOURCE:\nDocs: Backups run nightly and are retained for 30 days.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-125",
+      "prompt": "CLAIM: Migrations are manual.\n\nSOURCE:\nMigrations must be applied manually before deploy.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-126",
+      "prompt": "CLAIM: Migrations run automatically.\n\nSOURCE:\nMigrations must be applied manually before deploy.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-127",
+      "prompt": "CLAIM: According to the documentation, migrations are manual.\n\nSOURCE:\nDocs: Migrations must be applied manually before deploy.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-128",
+      "prompt": "CLAIM: The documentation states that migrations run automatically.\n\nSOURCE:\nDocs: Migrations must be applied manually before deploy.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-129",
+      "prompt": "CLAIM: Deploys are staged by region.\n\nSOURCE:\nDeploys roll out region-by-region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-130",
+      "prompt": "CLAIM: Deploys go to all regions at once.\n\nSOURCE:\nDeploys roll out region-by-region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-131",
+      "prompt": "CLAIM: According to the documentation, deploys are staged by region.\n\nSOURCE:\nDocs: Deploys roll out region-by-region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-132",
+      "prompt": "CLAIM: The documentation states that deploys go to all regions at once.\n\nSOURCE:\nDocs: Deploys roll out region-by-region.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-133",
+      "prompt": "CLAIM: hpke is a dependency.\n\nSOURCE:\nhpke is a transitive dependency; edwards25519 is not.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-134",
+      "prompt": "CLAIM: edwards25519 is a dependency.\n\nSOURCE:\nhpke is a transitive dependency; edwards25519 is not.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-135",
+      "prompt": "CLAIM: According to the documentation, hpke is a dependency.\n\nSOURCE:\nDocs: hpke is a transitive dependency; edwards25519 is not.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-136",
+      "prompt": "CLAIM: The documentation states that edwards25519 is a dependency.\n\nSOURCE:\nDocs: hpke is a transitive dependency; edwards25519 is not.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-137",
+      "prompt": "CLAIM: It binds loopback 8482.\n\nSOURCE:\nThe service binds 127.0.0.1:8482 only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-138",
+      "prompt": "CLAIM: It binds all interfaces on 8482.\n\nSOURCE:\nThe service binds 127.0.0.1:8482 only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-139",
+      "prompt": "CLAIM: According to the documentation, it binds loopback 8482.\n\nSOURCE:\nDocs: The service binds 127.0.0.1:8482 only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-140",
+      "prompt": "CLAIM: The documentation states that it binds all interfaces on 8482.\n\nSOURCE:\nDocs: The service binds 127.0.0.1:8482 only.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-141",
+      "prompt": "CLAIM: Unknown keys are rejected.\n\nSOURCE:\nUnknown config keys fail closed at startup.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-142",
+      "prompt": "CLAIM: Unknown keys are ignored.\n\nSOURCE:\nUnknown config keys fail closed at startup.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-143",
+      "prompt": "CLAIM: According to the documentation, unknown keys are rejected.\n\nSOURCE:\nDocs: Unknown config keys fail closed at startup.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-144",
+      "prompt": "CLAIM: The documentation states that unknown keys are ignored.\n\nSOURCE:\nDocs: Unknown config keys fail closed at startup.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-145",
+      "prompt": "CLAIM: The KV cache is fp16.\n\nSOURCE:\nThe KV cache stays fp16; only weights are quantized.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-146",
+      "prompt": "CLAIM: The KV cache is quantized to q4.\n\nSOURCE:\nThe KV cache stays fp16; only weights are quantized.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-147",
+      "prompt": "CLAIM: According to the documentation, the KV cache is fp16.\n\nSOURCE:\nDocs: The KV cache stays fp16; only weights are quantized.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-148",
+      "prompt": "CLAIM: The documentation states that the KV cache is quantized to q4.\n\nSOURCE:\nDocs: The KV cache stays fp16; only weights are quantized.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-149",
+      "prompt": "CLAIM: The workhorse is Qwen3.5-9B Q5_K_M.\n\nSOURCE:\nThe workhorse default is Qwen3.5-9B at Q5_K_M.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-150",
+      "prompt": "CLAIM: The workhorse is Gemma-4-12B.\n\nSOURCE:\nThe workhorse default is Qwen3.5-9B at Q5_K_M.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-151",
+      "prompt": "CLAIM: According to the documentation, the workhorse is Qwen3.5-9B Q5_K_M.\n\nSOURCE:\nDocs: The workhorse default is Qwen3.5-9B at Q5_K_M.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-152",
+      "prompt": "CLAIM: The documentation states that the workhorse is Gemma-4-12B.\n\nSOURCE:\nDocs: The workhorse default is Qwen3.5-9B at Q5_K_M.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-153",
+      "prompt": "CLAIM: Local models are $0.\n\nSOURCE:\nFree-tier local models cost $0 and are always available.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-154",
+      "prompt": "CLAIM: Local models are metered per token.\n\nSOURCE:\nFree-tier local models cost $0 and are always available.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    },
+    {
+      "id": "e2-155",
+      "prompt": "CLAIM: According to the documentation, local models are $0.\n\nSOURCE:\nDocs: Free-tier local models cost $0 and are always available.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "supported"
+      }
+    },
+    {
+      "id": "e2-156",
+      "prompt": "CLAIM: The documentation states that local models are metered per token.\n\nSOURCE:\nDocs: Free-tier local models cost $0 and are always available.\n\nIs the claim supported by the source? Answer supported or unsupported.",
+      "expect_labels": {
+        "verdict": "unsupported"
+      }
+    }
+  ]
+}

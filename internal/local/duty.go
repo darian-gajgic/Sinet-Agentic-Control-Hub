@@ -125,6 +125,20 @@ func (d *Duty) Client() *Client {
 	return d.client
 }
 
+// ResolveSeat resolves a duty alias to its serving seat over ⚙ local.alias +
+// the manifest, WITHOUT the servable gate — the caller decides how to degrade a
+// non-servable seat (the R16 contradiction screen resolves its alias first and
+// degrades to the workhorse one-stage confirm only when the resolved seat is
+// non-servable; F6a). This keeps platform callers addressing ALIASES (S12.4)
+// and swap-invisible (R15): an operator retarget of the alias to a servable
+// seat is honored. Nil-safe.
+func (d *Duty) ResolveSeat(alias string) (SeatRecord, error) {
+	if d == nil || d.reg == nil {
+		return SeatRecord{}, ErrStackAbsent
+	}
+	return d.reg.SeatFor(alias)
+}
+
 // Call runs one duty-alias call on the consuming run, writing ONE $0 D7 usage
 // row (R18). runID is the consuming run (intake seams ride <task>.intake,
 // tie-break rides the routing/intake run). Errors are for the caller to

@@ -58,6 +58,38 @@ func TestSandboxNeverImportsLocal(t *testing.T) {
 	}
 }
 
+// F11: memory and verify gain NO internal/local import — the ContradictionScreen
+// (memory seam) and EntailmentChecker (verify seam) adapters live at the
+// composition bridge (internal/shell / internal/stage), never in the seam
+// packages (R16/R17/R31).
+func TestMemoryNeverImportsLocal(t *testing.T) {
+	for _, path := range internalImports(t, filepath.Join("..", "memory")) {
+		if path == modPrefix+"local" {
+			t.Error("internal/memory imports internal/local — forbidden (R16/R31: the ContradictionScreen adapter lives in internal/shell)")
+		}
+	}
+}
+
+func TestVerifyNeverImportsLocal(t *testing.T) {
+	for _, path := range internalImports(t, filepath.Join("..", "verify")) {
+		if path == modPrefix+"local" {
+			t.Error("internal/verify imports internal/local — forbidden (R17/R31: the EntailmentChecker adapter lives in internal/stage)")
+		}
+	}
+}
+
+// F11: the T15 battery subpackage's declared posture — it drives the local
+// client/schemas/margins and produces local.SuiteResult/LabeledItem, so it
+// imports internal/local + stdlib ONLY (§28), never storage/eventlog/gates or
+// any engine-facing package.
+func TestBatteryImportWall(t *testing.T) {
+	for _, path := range internalImports(t, "battery") {
+		if path != modPrefix+"local" {
+			t.Errorf("internal/local/battery imports %q — only internal/local (+ stdlib) is allowed (§28)", path)
+		}
+	}
+}
+
 // internalImports returns the module-internal imports of the non-test .go
 // files in dir.
 func internalImports(t *testing.T, dir string) []string {

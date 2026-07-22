@@ -47,9 +47,18 @@ func newContradictionScreen(duty *local.Duty, meter stage.AdvisoryMeter) memory.
 // silently resolves (S09.7). An error/abstain degrades to the deterministic hit
 // alone (the §14 absent-seam precedent).
 func (c *contradictionScreen) Screen(ctx context.Context, a, b memory.Entry) (bool, string, error) {
-	seat, ok := local.SeatByKey(local.WorkhorseSeatKey)
-	if !ok || !seat.Servable {
-		return false, "", nil // no servable confirm seat ⇒ deterministic hit stands
+	// F6a: resolve the contradiction-screen ALIAS first (platform callers address
+	// aliases, S12.4; swap-invisible, R15) — use its seat when servable (a future
+	// pre-screen/servable pick, or an operator retarget). Degrade to the workhorse
+	// one-stage confirm ONLY when the resolved seat is non-servable (the DeBERTa
+	// default at the pin).
+	seat, err := c.duty.ResolveSeat(local.AliasContradiction)
+	if err != nil || !seat.Servable {
+		ws, ok := local.SeatByKey(local.WorkhorseSeatKey)
+		if !ok || !ws.Servable {
+			return false, "", nil // no servable confirm seat ⇒ deterministic hit stands
+		}
+		seat = ws
 	}
 	runID, settle := stage.BeginAdvisory(ctx, c.meter, "contradiction-screen")
 	defer settle()

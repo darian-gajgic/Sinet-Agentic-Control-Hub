@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -142,34 +143,44 @@ func TestSwapGateAdmitsCalibratedTargetAndFires7_3(t *testing.T) {
 	env := newSwapEnv(t)
 	ctx := context.Background()
 	writer := &recordingAliasWriter{}
-	var flagged []string
-	flagCalls := 0
+	var flagArgs []string // every model/alias the 7.3 seam was fired with
 	flag := func(_ context.Context, model, reason string) ([]string, error) {
-		flagCalls++
-		flagged = []string{"v-fake"} // simulate one worker version referencing the model
-		return flagged, nil
+		flagArgs = append(flagArgs, model)
+		return []string{"v-" + model}, nil // one fake worker version per target
 	}
 	gate := NewSwapGate(SwapDeps{Settings: env.reg, Store: env.store, Writer: writer, Flag: flag, Events: env.log})
 
-	seat, _ := SeatByKey("fast")
-	key := CalibrationKey{Duty: "intake-triage", ModelHash: seat.ModelHash(), EngineBuild: LlamaCppPin}
+	// Retarget intake-triage from its default target ("fast" = Qwen3.5-4B) to the
+	// workhorse ("workhorse" = Qwen3.5-9B) — a REAL old≠new swap.
+	newSeat, _ := SeatByKey("workhorse")
+	oldSeat, _ := SeatByKey("fast") // the current default target
+	key := CalibrationKey{Duty: "intake-triage", ModelHash: newSeat.ModelHash(), EngineBuild: LlamaCppPin}
 	if err := env.store.SaveCalibration(ctx, Calibration{Key: key, Threshold: 1.0, AcceptanceBar: 0.2, LabeledN: 40, MeetsBar: true}); err != nil {
 		t.Fatalf("SaveCalibration: %v", err)
 	}
-	if err := env.store.SaveBatterySuite(ctx, NewSuiteResult("intake-triage", seat.ModelHash(), LlamaCppPin, "t15-v0", 28, 30, 20)); err != nil {
+	if err := env.store.SaveBatterySuite(ctx, NewSuiteResult("intake-triage", newSeat.ModelHash(), LlamaCppPin, "t15-v0", 28, 30, 20)); err != nil {
 		t.Fatalf("SaveBatterySuite: %v", err)
 	}
-	res, err := gate.Retarget(ctx, "intake-triage", "fast", "op1", "bakeoff flip")
+	res, err := gate.Retarget(ctx, "intake-triage", "workhorse", "op1", "bakeoff flip")
 	if err != nil {
 		t.Fatalf("Retarget: %v", err)
 	}
-	if writer.calls != 1 || writer.last["intake-triage"] != "fast" {
+	if writer.calls != 1 || writer.last["intake-triage"] != "workhorse" {
 		t.Fatalf("gate must write the alias map through the ONE write surface; got calls=%d last=%v", writer.calls, writer.last)
 	}
-	if flagCalls != 1 {
-		t.Errorf("every swap must fire the 7.3 trigger exactly once, got %d", flagCalls)
+	// F4: the 7.3 trigger fires against the SWAPPED ALIAS + the OLD target's
+	// model — NEVER the new target (nothing was validated against it yet).
+	joined := " " + strings.Join(flagArgs, " ") + " "
+	if !strings.Contains(joined, " intake-triage ") {
+		t.Errorf("7.3 must fire against the swapped alias 'intake-triage'; fired with %v", flagArgs)
 	}
-	if len(res.FlaggedVersions) != 1 {
+	if !strings.Contains(joined, " "+oldSeat.Model+" ") {
+		t.Errorf("7.3 must fire against the OLD target model %q; fired with %v", oldSeat.Model, flagArgs)
+	}
+	if strings.Contains(joined, " "+newSeat.Model+" ") {
+		t.Errorf("7.3 must NOT fire against the NEW target model %q (F4); fired with %v", newSeat.Model, flagArgs)
+	}
+	if len(res.FlaggedVersions) == 0 {
 		t.Errorf("expected the flagged versions to ride the result, got %v", res.FlaggedVersions)
 	}
 }

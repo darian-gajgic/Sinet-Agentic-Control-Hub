@@ -269,14 +269,32 @@ func (g *SwapGate) Retarget(ctx context.Context, duty, newSeatKey, actorID, reas
 		return RetargetResult{}, fmt.Errorf("local: swap gate ⚙ %s write: %w", keyAlias, err)
 	}
 
-	// Fire the 7.3 revalidation trigger (R12): flag every worker version
-	// referencing the new model. nil seam ⇒ no worker store (dev) — flags
-	// nothing, recorded honestly.
+	// Fire the 7.3 revalidation trigger (R12, F4): flag every worker version
+	// whose validation record or model pin references the SWAPPED ALIAS or the
+	// OLD target's model (S12.10 × S08.10a) — NOT the new target, which nothing
+	// was validated against yet. The match templates are tuned against what
+	// workers ran on BEFORE the swap: the duty alias and the old model. Fired
+	// for both, deduped. nil seam ⇒ no worker store (dev) — flags nothing,
+	// recorded honestly.
 	var flagged []string
 	if g.flag != nil {
-		flagged, err = g.flag(ctx, seat.Model, fmt.Sprintf("S12.10 swap: duty %q alias retargeted to %q (7.3 revalidation trigger)", dutyKey, newSeatKey))
-		if err != nil {
-			return RetargetResult{}, fmt.Errorf("local: swap gate 7.3 flag firing: %w", err)
+		reasonMsg := fmt.Sprintf("S12.10 swap: duty %q retargeted %q→%q (7.3 revalidation — was validated against the old target)", dutyKey, oldSeatKey, newSeatKey)
+		targets := []string{dutyKey} // the swapped alias
+		if oldSeat, ok := SeatByKey(oldSeatKey); ok && oldSeat.Model != "" {
+			targets = append(targets, oldSeat.Model) // the OLD target's model
+		}
+		seen := map[string]bool{}
+		for _, tgt := range targets {
+			hits, ferr := g.flag(ctx, tgt, reasonMsg)
+			if ferr != nil {
+				return RetargetResult{}, fmt.Errorf("local: swap gate 7.3 flag firing (%q): %w", tgt, ferr)
+			}
+			for _, v := range hits {
+				if !seen[v] {
+					seen[v] = true
+					flagged = append(flagged, v)
+				}
+			}
 		}
 	}
 
