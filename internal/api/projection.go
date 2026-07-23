@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -145,7 +147,7 @@ func (p *projector) runCard(ctx context.Context, runID string) (RunCard, string,
 	if pay, ok := p.latestPayload(ctx, runID, "tool.completed", "engine.tool_result"); ok {
 		name := firstString(pay, "tool", "name", "tool_name")
 		if name != "" {
-			c.Tool = &ToolInfo{Name: name, ArgsDigest: firstString(pay, "args_digest", "digest", "args")}
+			c.Tool = &ToolInfo{Name: name, ArgsDigest: argsDigest(pay)}
 		}
 	}
 
@@ -249,11 +251,19 @@ func (p *projector) latestRunForTask(ctx context.Context, taskID string) (BoardR
 
 // ── fleet / meters ──
 
-// FleetLane is one lane's meter snapshot: the lane and its active-run count.
-// Deeper per-lane utilization/budget/burn rides what B4-5 exposes (seam).
+// FleetLane is one (owner, lane)'s meter snapshot (§3): the active-run count
+// plus the S10.4 meter reads — weighted_consumption (always available),
+// utilization and budget_remaining (nil until an operator budget is declared,
+// S10.4 — v0 declares none). burn_rate is a SEAM: the S10.4 gauge exposes
+// cumulative weighted consumption, not a trailing-window rate; a real burn_rate
+// needs a windowed calc B4-5/B6 own — nil here, never faked.
 type FleetLane struct {
-	Lane       string `json:"lane"`
-	ActiveRuns int64  `json:"active_runs"`
+	Lane                string   `json:"lane"`
+	ActiveRuns          int64    `json:"active_runs"`
+	WeightedConsumption float64  `json:"weighted_consumption"`
+	Utilization         *float64 `json:"utilization"`
+	BudgetRemaining     *float64 `json:"budget_remaining"`
+	BurnRate            *float64 `json:"burn_rate"`
 }
 
 // FleetSeat is a local-tier duty seat's admission state. Declared here; the
@@ -282,26 +292,68 @@ type FleetSnapshot struct {
 
 func (p *projector) fleet(ctx context.Context, scope ownerScope) (FleetSnapshot, error) {
 	out := FleetSnapshot{Lanes: []FleetLane{}, LocalSeats: []FleetSeat{}}
-	q := `SELECT lane, COUNT(*) FROM runs WHERE state IN (?, ?, ?, ?, ?, ?)`
+	// Group by (owner, lane) so each lane's meter is read for its owner — a
+	// member sees only their own (owner, lane) rows and figures; the operator
+	// sees every owner's (owner-scoped exactly like the rest of the snapshot).
+	q := `SELECT user_id, lane, COUNT(*) FROM runs WHERE state IN (?, ?, ?, ?, ?, ?)`
 	args := append([]any{}, activeStates...)
 	if !scope.Operator {
 		q += ` AND user_id = ?`
 		args = append(args, scope.UserID)
 	}
-	q += ` GROUP BY lane ORDER BY lane`
+	q += ` GROUP BY user_id, lane ORDER BY lane, user_id`
 	rows, err := p.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return out, fmt.Errorf("projection: fleet lanes: %w", err)
 	}
-	defer rows.Close()
+	type fleetRow struct {
+		owner  string
+		lane   string
+		active int64
+	}
+	var raw []fleetRow
 	for rows.Next() {
-		var l FleetLane
-		if err := rows.Scan(&l.Lane, &l.ActiveRuns); err != nil {
+		var fr fleetRow
+		if err := rows.Scan(&fr.owner, &fr.lane, &fr.active); err != nil {
+			rows.Close()
 			return out, fmt.Errorf("projection: fleet scan: %w", err)
+		}
+		raw = append(raw, fr)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	// Meter reads run after draining the lane cursor (the meter seam queries
+	// the DB). LaneMeter is owner-keyed on the row's owner, so a member's
+	// figures cover only their own consumption.
+	for _, fr := range raw {
+		l := FleetLane{Lane: fr.lane, ActiveRuns: fr.active}
+		if p.meter != nil {
+			if m, merr := p.meter.LaneMeter(ctx, fr.owner, fr.lane); merr == nil {
+				l.WeightedConsumption = m.WeightedConsumption
+				l.Utilization = m.Utilization
+				l.BudgetRemaining = m.BudgetRemaining
+			}
 		}
 		out.Lanes = append(out.Lanes, l)
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// argsDigest returns the tool's args digest for the run card (§4: "digest,
+// never raw args"). It uses a real digest field when present; when only raw
+// args are present it returns a short sha256 fingerprint — NEVER the raw args
+// verbatim; "" when neither is present.
+func argsDigest(pay json.RawMessage) string {
+	if d := firstString(pay, "args_digest", "digest"); d != "" {
+		return d
+	}
+	if raw := firstString(pay, "args"); raw != "" {
+		sum := sha256.Sum256([]byte(raw))
+		return "sha256:" + hex.EncodeToString(sum[:])[:12]
+	}
+	return ""
 }
 
 // ── inbox ──

@@ -28,7 +28,10 @@ func (f fixedIdentity) Authenticate(*http.Request) (api.Identity, error) {
 	return api.Identity{UserID: f.id}, nil
 }
 
-// fakeMeter is the run-card metering seam under test (§4 counters).
+// fakeMeter is the metering seam under test (§4 run counters + §3 fleet lane
+// meter). LaneMeter returns a fixed non-zero consumption so the fleet lane
+// carries a real meter figure; owner-scoping of the lane LIST is enforced by
+// the projection SQL, exercised by TestSSEMemberScopedSnapshots.
 type fakeMeter struct {
 	tokens int64
 	cost   float64
@@ -36,6 +39,10 @@ type fakeMeter struct {
 
 func (m fakeMeter) RunMeter(context.Context, string) (api.RunMeter, error) {
 	return api.RunMeter{Tokens: m.tokens, APIEquivCostUSD: m.cost, Unpriced: m.cost == 0}, nil
+}
+
+func (m fakeMeter) LaneMeter(context.Context, string, string) (api.LaneMeter, error) {
+	return api.LaneMeter{WeightedConsumption: 1}, nil
 }
 
 func nowTS() string { return time.Now().UTC().Format(time.RFC3339Nano) }
@@ -79,6 +86,21 @@ func seedAsk(t *testing.T, b *backend, askID, runID, owner, status string) {
 	t.Helper()
 	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
 		askID, runID, owner, "{}", status, nowTS())
+}
+
+func seedEffect(t *testing.T, b *backend, effectID, runID, owner, class, state string) {
+	t.Helper()
+	exec(t, b, `INSERT INTO effects (effect_id, run_id, user_id, class, payload, payload_hash, state, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,?,?,?,?)`, effectID, runID, owner, class, "{}", "h", state, nowTS(), nowTS())
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
 }
 
 // appendRun appends one run-scoped event (generation 0, matching a seeded run)
@@ -503,6 +525,155 @@ func TestRedactionObservabilityEdgeOnly(t *testing.T) {
 				t.Fatalf("%s imports internal/redact — redaction must never touch deliverable content (R18)", f)
 			}
 		}
+	}
+}
+
+// TestSSEMemberScopedSnapshots proves the OQ1 owner scope on the SNAPSHOT
+// projections (D1): a member's board/fleet/inbox snapshots contain NONE of
+// another owner's rows, while the operator sees all. Non-tautological — it
+// fails if any snapshot's `user_id = ?` predicate is dropped.
+func TestSSEMemberScopedSnapshots(t *testing.T) {
+	b := newBackend(t)
+	seedUser(t, b, "op", auth.RoleOperator)
+	seedUser(t, b, "alice", auth.RoleMember)
+	seedTask(t, b, "t-alice", "alice", "Alice Task", "doing")
+	seedTask(t, b, "t-bob", "op", "Bob Task", "doing")
+	seedRun(t, b, "r-alice", "alice", "t-alice", "running", "lane-alice")
+	seedRun(t, b, "r-bob", "op", "t-bob", "running", "lane-bob")
+	seedAsk(t, b, "ask-alice", "r-alice", "alice", "gate")
+	seedAsk(t, b, "ask-bob", "r-bob", "op", "gate")
+	seedEffect(t, b, "eff-alice", "r-alice", "alice", "A", "proposed")
+	seedEffect(t, b, "eff-bob", "r-bob", "op", "A", "proposed")
+
+	bobRows := []string{"t-bob", "Bob Task", "r-bob", "lane-bob", "ask-bob", "eff-bob"}
+	aliceRows := []string{"t-alice", "r-alice", "lane-alice", "ask-alice", "eff-alice"}
+
+	// Member alice: her three snapshots carry her rows and none of bob's.
+	_, tsA := newTestServer(t, serverOpts{b: b, auth: fixedIdentity{"alice"}, meter: fakeMeter{}})
+	rA, doneA := stream(t, testCtx(t), tsA.URL+"/events?topics=board,fleet,inbox", nil)
+	defer doneA()
+	aliceAll := ""
+	for i := 0; i < 3; i++ {
+		aliceAll += mustJSON(t, readSnapshot(t, rA).state)
+	}
+	for _, tok := range bobRows {
+		if strings.Contains(aliceAll, tok) {
+			t.Fatalf("member snapshot leaks another owner's row %q: %s", tok, aliceAll)
+		}
+	}
+	for _, tok := range aliceRows {
+		if !strings.Contains(aliceAll, tok) {
+			t.Fatalf("member snapshot missing own row %q (empty ≠ scoped): %s", tok, aliceAll)
+		}
+	}
+
+	// Operator: sees every owner's rows.
+	_, tsO := newTestServer(t, serverOpts{b: b, auth: fixedIdentity{"op"}, meter: fakeMeter{}})
+	rO, doneO := stream(t, testCtx(t), tsO.URL+"/events?topics=board,fleet,inbox", nil)
+	defer doneO()
+	opAll := ""
+	for i := 0; i < 3; i++ {
+		opAll += mustJSON(t, readSnapshot(t, rO).state)
+	}
+	for _, tok := range append(append([]string{}, bobRows...), aliceRows...) {
+		if !strings.Contains(opAll, tok) {
+			t.Fatalf("operator snapshot missing %q — operator must see all owners: %s", tok, opAll)
+		}
+	}
+}
+
+// TestSSESnapshotStoreRawServeRedacted proves D2: writeSnapshotFrame redacts
+// snapshot-projected strings (a run-card last-activity line AND a board task
+// title), while the DB rows hold the secret verbatim. Fails if snapshot
+// redaction is removed.
+func TestSSESnapshotStoreRawServeRedacted(t *testing.T) {
+	b := newBackend(t)
+	const secret = "sk-ant-api03-SNAPSHOTsecret1234567_xyz"
+	seedTask(t, b, "t1", "u1", "title with "+secret, "doing")
+	seedRun(t, b, "r1", "u1", "t1", "running", "anthropic")
+	appendRun(t, b, "u1", "r1", "run.state_changed", `{"to":"running","line":"activity `+secret+` seen"}`)
+	_, ts := newTestServer(t, serverOpts{b: b, meter: fakeMeter{}})
+
+	r, done := stream(t, testCtx(t), ts.URL+"/events?topics=run,board&run=r1", nil)
+	defer done()
+	runState := mustJSON(t, readSnapshot(t, r).state) // run snapshot (last_activity line)
+	if strings.Contains(runState, secret) {
+		t.Fatalf("run snapshot leaks the planted secret (snapshot redaction removed?): %s", runState)
+	}
+	if !strings.Contains(runState, "[REDACTED:anthropic_key]") {
+		t.Fatalf("run snapshot last-activity line not redacted: %s", runState)
+	}
+	boardState := mustJSON(t, readSnapshot(t, r).state) // board snapshot (task title)
+	if strings.Contains(boardState, secret) {
+		t.Fatalf("board snapshot leaks the planted secret in a task title: %s", boardState)
+	}
+
+	// Store-raw: the DB rows still hold the secret verbatim.
+	var title string
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT title FROM tasks WHERE task_id = 't1'`).Scan(&title); err != nil {
+		t.Fatalf("read title: %v", err)
+	}
+	if !strings.Contains(title, secret) {
+		t.Fatalf("stored task title was mutated — store-raw violated (R19)")
+	}
+	rows, err := b.log.After(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	raw := false
+	for _, e := range rows {
+		if strings.Contains(string(e.Payload), secret) {
+			raw = true
+		}
+	}
+	if !raw {
+		t.Fatalf("stored run_events payload was mutated — store-raw violated (R19)")
+	}
+}
+
+// TestSSEFleetLaneMeterFields proves D3: the fleet lane carries a real meter
+// snapshot (weighted_consumption from the metering seam + the utilization/
+// budget_remaining/burn_rate fields), not just a run count.
+func TestSSEFleetLaneMeterFields(t *testing.T) {
+	b := newBackend(t)
+	seedRun(t, b, "r1", "u1", "", "running", "anthropic")
+	_, ts := newTestServer(t, serverOpts{b: b, meter: fakeMeter{}})
+	r, done := stream(t, testCtx(t), ts.URL+"/events?topics=fleet", nil)
+	defer done()
+	snap := readSnapshot(t, r)
+	lanes, _ := snap.state["lanes"].([]any)
+	if len(lanes) == 0 {
+		t.Fatalf("fleet snapshot has no lanes: %v", snap.state)
+	}
+	lane0, _ := lanes[0].(map[string]any)
+	for _, k := range []string{"lane", "active_runs", "weighted_consumption", "utilization", "budget_remaining", "burn_rate"} {
+		if _, ok := lane0[k]; !ok {
+			t.Fatalf("fleet lane missing meter field %q (§3 meter snapshot): %v", k, lane0)
+		}
+	}
+	if wc, _ := lane0["weighted_consumption"].(float64); wc != 1 {
+		t.Fatalf("fleet lane weighted_consumption = %v, want 1 (a real meter read, not a run count)", lane0["weighted_consumption"])
+	}
+}
+
+// TestRunCardArgsDigestNeverRawArgs proves D4: when a tool event carries only
+// raw args (no digest field), args_digest is a sha256 fingerprint — NEVER the
+// raw args verbatim (§4 "digest, never raw args").
+func TestRunCardArgsDigestNeverRawArgs(t *testing.T) {
+	b := newBackend(t)
+	seedRun(t, b, "r1", "u1", "", "running", "anthropic")
+	appendRun(t, b, "u1", "r1", "tool.completed", `{"tool":"bash","args":"rm -rf /secret/path"}`)
+	_, ts := newTestServer(t, serverOpts{b: b, meter: fakeMeter{}})
+	r, done := stream(t, testCtx(t), ts.URL+"/events?topics=run&run=r1", nil)
+	defer done()
+	tool, _ := readSnapshot(t, r).state["tool"].(map[string]any)
+	dig, _ := tool["args_digest"].(string)
+	if strings.Contains(dig, "rm -rf") || strings.Contains(dig, "/secret/path") {
+		t.Fatalf("args_digest surfaced RAW args %q — §4 promises digest, never raw args", dig)
+	}
+	if !strings.HasPrefix(dig, "sha256:") {
+		t.Fatalf("args_digest = %q, want a sha256: fingerprint of the raw args", dig)
 	}
 }
 

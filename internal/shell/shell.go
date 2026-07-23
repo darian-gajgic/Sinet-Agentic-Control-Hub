@@ -223,7 +223,7 @@ func Run(ctx context.Context, opts Options) error {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
 		exceptions := metering.NoMeteredExceptions()
 		meterLedger := metering.NewLedger(db, priceTable, exceptions, reg)
-		meterReader = projMeter{ledger: meterLedger}
+		meterReader = projMeter{ledger: meterLedger, gauge: metering.NewPressureGauge(db, reg)}
 		// The S11 composer probes the host once at startup (probe-at-
 		// compose, S16.3) and logs the result. ENGINE spawns run through it
 		// only OUTSIDE dev posture: a confined engine holds a credential
@@ -870,12 +870,17 @@ func (p routePressure) Pressure(ctx context.Context, owner, lane string) (float6
 	return gauge.WeightedConsumption, nil
 }
 
-// projMeter adapts the S10 metering ledger to the api.MeterReader seam for the
-// S14.3 run card (brief §4): it folds a run's checkpoint usage into a monotonic
-// token total and the API-equivalent cost so far. Subscription lanes price as
-// UNPRICED (the empty v0 table) — the counter is honest, never money-by-
-// generation (S10.1).
-type projMeter struct{ ledger *metering.Ledger }
+// projMeter adapts the S10 metering ledger + S10.4 pressure gauge to the
+// api.MeterReader seam for the S14.3 snapshots (brief §4/§3). RunMeter folds a
+// run's checkpoint usage into a monotonic token total and the API-equivalent
+// cost so far (subscription lanes price UNPRICED under the empty v0 table — the
+// counter is honest, never money-by-generation, S10.1). LaneMeter reads one
+// (owner, lane) weighted consumption + utilization/budget-remaining against the
+// operator budget (undeclared at v0 → nil, honest).
+type projMeter struct {
+	ledger *metering.Ledger
+	gauge  *metering.PressureGauge
+}
 
 func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, error) {
 	rc, err := m.ledger.RunConsumption(ctx, runID)
@@ -891,4 +896,19 @@ func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, er
 		APIEquivCostUSD: rc.TotalPricedUSD,
 		Unpriced:        rc.TotalUnpricedCalls > 0,
 	}, nil
+}
+
+func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.LaneMeter, error) {
+	g, err := m.gauge.Read(ctx, userID, lane, metering.UndeclaredBudget())
+	if err != nil {
+		return api.LaneMeter{}, err
+	}
+	lm := api.LaneMeter{WeightedConsumption: g.WeightedConsumption}
+	if g.Applicable { // a budget is declared → utilization + remaining are meaningful
+		u := g.Pressure
+		lm.Utilization = &u
+		rem := float64(g.Budget.PeriodTokens) - g.WeightedConsumption
+		lm.BudgetRemaining = &rem
+	}
+	return lm, nil
 }

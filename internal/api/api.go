@@ -46,12 +46,25 @@ type RunMeter struct {
 	Unpriced        bool
 }
 
-// MeterReader is the narrow metering read-seam for the run card: it folds a
-// run's checkpoint usage into its counters. The shell adapts
-// metering.Ledger.RunConsumption to it; nil leaves the counters at zero (the
-// snapshot still projects, best-effort).
+// LaneMeter is the S14.3 fleet per-lane meter snapshot (§3): the S10.4
+// weighted consumption (always available) plus utilization and budget-remaining
+// against the operator-declared budget. Utilization/BudgetRemaining are nil
+// until a budget is declared (S10.4 — v0 declares none), so the fleet lane
+// carries a real consumption figure regardless, never just a run count.
+type LaneMeter struct {
+	WeightedConsumption float64
+	Utilization         *float64
+	BudgetRemaining     *float64
+}
+
+// MeterReader is the narrow metering read-seam for the S14.3 snapshots: the
+// run-card counters and the fleet per-lane meter. Both reads are owner-keyed
+// (RunMeter folds one run's checkpoints; LaneMeter reads one (owner, lane)
+// consumption). The shell adapts metering.Ledger + PressureGauge to it; nil
+// leaves the counters at zero (the snapshot still projects, best-effort).
 type MeterReader interface {
 	RunMeter(ctx context.Context, runID string) (RunMeter, error)
+	LaneMeter(ctx context.Context, userID, lane string) (LaneMeter, error)
 }
 
 // keySSEKeepalive is the comment-frame keepalive cadence on the SSE stream,
