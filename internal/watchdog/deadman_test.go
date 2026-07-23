@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -74,6 +75,35 @@ func TestDeadManAlarmWhenLocalDark(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no dead-man alarm raised when the local floor was dark")
+	}
+}
+
+// TestDeadManDuenessFromLog (drain D6): dueness is derived from the event log
+// (the last canary's birth), not a wall-clock ticker — so it survives restart
+// and suspend. Fresh DB → due; 1h after a probe → not due; 25h after → due.
+func TestDeadManDuenessFromLog(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	w := e.wd()
+
+	// Fresh DB: no canary has ever run → due immediately (first-probe-due).
+	if due, err := w.deadManDue(ctx, time.Now()); err != nil || !due {
+		t.Fatalf("a fresh DB must be due (first-probe-due-immediately): due=%v err=%v", due, err)
+	}
+
+	// Run one probe; it plants a canary whose birth anchors dueness.
+	probeAt := time.Now()
+	if err := w.DeadManProbe(ctx); err != nil {
+		t.Fatalf("DeadManProbe: %v", err)
+	}
+
+	// 1h later (a fake clock) → NOT due (< 24h since the canary birth).
+	if due, err := w.deadManDue(ctx, probeAt.Add(time.Hour)); err != nil || due {
+		t.Fatalf("1h after a probe must NOT be due: due=%v err=%v", due, err)
+	}
+	// 25h later → due again.
+	if due, err := w.deadManDue(ctx, probeAt.Add(25*time.Hour)); err != nil || !due {
+		t.Fatalf("25h after a probe must be due: due=%v err=%v", due, err)
 	}
 }
 

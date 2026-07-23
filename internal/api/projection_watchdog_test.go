@@ -116,6 +116,94 @@ func TestWatchdogFlagsInboxOwnerScoped(t *testing.T) {
 	}
 }
 
+// appendRunlessFlag appends a run-less watchdog.flagged (spend/organ/retune),
+// owner-attributed, with a suffixed anomaly_class.
+func appendRunlessFlag(t *testing.T, log *eventlog.Log, owner, rule, class, severity string) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{
+		"rule": rule, "anomaly_class": class, "severity": severity, "detail": "d",
+	})
+	if _, err := log.Append(context.Background(), eventlog.Append{
+		UserID: owner, Type: "watchdog.flagged", SchemaVersion: 1, Payload: payload,
+	}); err != nil {
+		t.Fatalf("append run-less flag: %v", err)
+	}
+}
+
+// appendRunlessSuppress appends a run-less watchdog.suppressed at platform scope
+// carrying the FULL anomaly_class as its rule (what watchdog.Suppress now emits).
+func appendRunlessSuppress(t *testing.T, log *eventlog.Log, class string) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{"rule": class, "count": 1})
+	if _, err := log.Append(context.Background(), eventlog.Append{
+		UserID: "platform", Type: "watchdog.suppressed", SchemaVersion: 1, Payload: payload,
+	}); err != nil {
+		t.Fatalf("append run-less suppress: %v", err)
+	}
+}
+
+// TestWatchdogFlagsExcludeDeadManCanary (drain D4): a canary cycle leaves a
+// synthetic watchdog.loop flag on a platform.deadman.* run; the inbox shows the
+// real flag and NOT the canary's (which would otherwise sit forever-open).
+func TestWatchdogFlagsExcludeDeadManCanary(t *testing.T) {
+	ctx := context.Background()
+	db, log, runs := wdTestDB(t)
+	p := &projector{db: db}
+
+	real := runningRun(t, runs, "a.execute", "alice")
+	appendFlag(t, log, real.ID, "alice", real.Generation, "watchdog.loop", "flag-now")
+	canary := runningRun(t, runs, "platform.deadman.123", "platform")
+	appendFlag(t, log, canary.ID, "platform", canary.Generation, "watchdog.loop", "flag-now")
+
+	op, err := p.inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatalf("operator inbox: %v", err)
+	}
+	if len(op.WatchdogFlags) != 1 || op.WatchdogFlags[0].RunID != "a.execute" {
+		t.Fatalf("inbox must show the real flag and NOT the dead-man canary's: %+v", op.WatchdogFlags)
+	}
+}
+
+// TestWatchdogFlagsPlatformSuppressClearsMemberView (drain D5): a platform-scope
+// suppress of a run-less flag (spend/organ/retune) clears it in BOTH the operator
+// and the owning member's views, WITHOUT exposing any other owner's flags.
+func TestWatchdogFlagsPlatformSuppressClearsMemberView(t *testing.T) {
+	ctx := context.Background()
+	db, log, _ := wdTestDB(t)
+	p := &projector{db: db}
+
+	// alice's run-less flags: a spend spike, an organ absence, a retune proposal.
+	appendRunlessFlag(t, log, "alice", "watchdog.spend", "watchdog.spend:alice", "flag-now")
+	appendRunlessFlag(t, log, "alice", "watchdog.organ_absence", "watchdog.organ_absence:watchlist", "daily-digest")
+	appendRunlessFlag(t, log, "alice", "watchdog.retune_proposal", "watchdog.retune_proposal:watchdog.loop_repeat", "daily-digest")
+	// bob's own spend flag — alice must never see it.
+	appendRunlessFlag(t, log, "bob", "watchdog.spend", "watchdog.spend:bob", "flag-now")
+
+	// Platform-scope suppresses (what Suppress emits for a run-less flag).
+	appendRunlessSuppress(t, log, "watchdog.spend:alice")
+	appendRunlessSuppress(t, log, "watchdog.organ_absence:watchlist")
+	appendRunlessSuppress(t, log, "watchdog.retune_proposal:watchdog.loop_repeat")
+
+	// Operator: alice's three are cleared; only bob's spend remains.
+	op, err := p.inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatalf("operator inbox: %v", err)
+	}
+	if len(op.WatchdogFlags) != 1 || op.WatchdogFlags[0].AnomalyClass != "watchdog.spend:bob" {
+		t.Fatalf("operator: alice's run-less flags should be platform-suppressed, only bob's spend left: %+v", op.WatchdogFlags)
+	}
+
+	// alice: her three are cleared by the platform-scope suppress (D5), and she
+	// still sees none of bob's.
+	al, err := p.inbox(ctx, ownerScope{UserID: "alice"})
+	if err != nil {
+		t.Fatalf("alice inbox: %v", err)
+	}
+	if len(al.WatchdogFlags) != 0 {
+		t.Fatalf("alice: her run-less flags should clear under a platform-scope suppress (D5): %+v", al.WatchdogFlags)
+	}
+}
+
 func TestWatchdogFlagsSupersededDropped(t *testing.T) {
 	ctx := context.Background()
 	db, log, runs := wdTestDB(t)

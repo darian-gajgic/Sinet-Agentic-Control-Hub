@@ -200,6 +200,42 @@ func TestSuspiciousCompletionByClass(t *testing.T) {
 	}
 }
 
+// TestCrashedRunNotFlagged (drain D8, demonstrated): a crashed run is NOT in the
+// Tier-0 behavioral watch set, so a crash-shaped loop trace never earns an
+// unresolvable flag. run.IsTerminal(StateCrashed)=false by design (crashed is
+// terminal-but-supersedable), so the old IsTerminal gate let a crashed run fall
+// through to the counters and receive a loop flag it could never resume away.
+// FAILS against pre-drain code (which flags it).
+func TestCrashedRunNotFlagged(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	w := e.wd()
+	e.runningRun("t.execute", "alice")
+	for i := 0; i < 5; i++ {
+		e.toolEvent("t.execute", "Bash", "d1", false)
+	}
+	// running → crashed (a ratified edge; recovery owns the crashed row).
+	if _, err := e.runs.Transition(ctx, "t.execute", run.StateCrashed, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("crash: %v", err)
+	}
+	if err := w.EvaluateRun(ctx, "t.execute"); err != nil {
+		t.Fatalf("EvaluateRun: %v", err)
+	}
+	if fs := e.flagsFor("t.execute"); len(fs) != 0 {
+		t.Fatalf("a crashed run with a loop trace was flagged — crashed is recovery's, not the watchdog's (D8): %+v", fs)
+	}
+}
+
+// TestCompletedSentinelMatchesRunState guards the value-comparison the
+// suspicious-completion check uses (isCleanCompletion reads the state by VALUE,
+// never the StateCompleted ident — deadman.go's importwall exception, D10b) so it
+// cannot silently drift from the run FSM.
+func TestCompletedSentinelMatchesRunState(t *testing.T) {
+	if completedState != string(run.StateCompleted) {
+		t.Fatalf("completedState %q drifted from run.StateCompleted %q", completedState, run.StateCompleted)
+	}
+}
+
 func TestTailEvaluatesRunsWithNewEvents(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)

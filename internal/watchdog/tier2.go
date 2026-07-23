@@ -37,7 +37,7 @@ func (w *Watchdog) flag(ctx context.Context, r run.Run, trig trigger) error {
 
 	var annRef *int64
 	if annotatable(trig.Rule) {
-		events, rerr := w.readRecentEvents(ctx, r.ID, recentWindow)
+		events, rerr := w.readRecentEvents(ctx, r.ID, r.Generation, recentWindow)
 		if rerr != nil {
 			w.logger.Warn("watchdog: read events for annotation", "run", r.ID, "err", rerr)
 		} else {

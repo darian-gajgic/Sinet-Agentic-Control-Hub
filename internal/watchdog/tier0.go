@@ -54,11 +54,39 @@ func (w *Watchdog) Tail(ctx context.Context, afterSeq int64) (int64, error) {
 	return cursor, nil
 }
 
-// EvaluateRun runs Tier-0 over one run's recent events (R1). An ACTIVE run runs
-// the loop / ping-pong / error-loop counters (the first trip flags and parks —
-// once parked the run is no longer active, so a second evaluation is inert). A
-// COMPLETED run runs the suspicious-completion check. Any other terminal state
-// is recovery's, not the watchdog's (Spec S02.5).
+// behavioralWatchStates is the POSITIVE state allowlist the Tier-0
+// loop/ping-pong/error-loop counters watch (drain D3/D8): a run actively
+// executing. Naming ONLY the good states keeps the forbidden terminal idents out
+// of the watchdog (importwall) and — the point of D8 — keeps a crashed run OUT
+// of the behavioral watch set (run.IsTerminal(StateCrashed)=false by design, so
+// the old IsTerminal gate let a crashed run receive an unresolvable loop flag).
+// A crashed/parked/queued/terminal run is simply not in the set.
+var behavioralWatchStates = map[run.State]bool{
+	run.StateRunning:  true,
+	run.StateDraining: true,
+}
+
+// completedState is the clean-completion terminal's VALUE (Spec S02.3). The
+// suspicious-completion check reads it by value (isCleanCompletion), never via
+// the run.StateCompleted ident — that ident is deadman.go's sanctioned
+// self-termination exception (importwall D10). A drift guard test asserts this
+// value matches run.StateCompleted.
+const completedState = "completed"
+
+// isCleanCompletion reports whether s is the clean-completion terminal — the
+// only terminal the suspicious-completion check watches (R7/D8). A
+// crashed/tombstoned/finalized/died-at-gate run is recovery's, never the
+// watchdog's, and is not this value.
+func isCleanCompletion(s run.State) bool { return string(s) == completedState }
+
+// EvaluateRun runs Tier-0 over one run's recent events (R1), keyed on a POSITIVE
+// state allowlist (drain D3/D8). A run in behavioralWatchStates (running/
+// draining) runs the loop / ping-pong / error-loop counters (the first trip
+// flags and parks; once parked the run leaves the set, so a re-evaluation is
+// inert). A cleanly-COMPLETED run runs the suspicious-completion check. Every
+// other state — queued/claimed/new (nothing to watch yet), parked (contained),
+// and the recovery-owned terminals (crashed/tombstoned/finalized/died-at-gate) —
+// is in NEITHER set and receives no Tier-0 flag.
 func (w *Watchdog) EvaluateRun(ctx context.Context, runID string) error {
 	r, err := w.runs.Get(ctx, runID)
 	if errors.Is(err, run.ErrNotFound) {
@@ -67,16 +95,16 @@ func (w *Watchdog) EvaluateRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	events, err := w.readRecentEvents(ctx, runID, recentWindow)
+	events, err := w.readRecentEvents(ctx, runID, r.Generation, recentWindow)
 	if err != nil {
 		return err
 	}
 
-	if run.IsTerminal(r.State) {
-		if r.State == run.StateCompleted {
+	if !behavioralWatchStates[r.State] {
+		if isCleanCompletion(r.State) {
 			return w.checkSuspiciousCompletion(ctx, r, events)
 		}
-		return nil // crashed/tombstoned/finalized/died-at-gate are recovery's
+		return nil // not a Tier-0 watch state (crashed/terminal are recovery's)
 	}
 
 	tools := toolCompleted(events)

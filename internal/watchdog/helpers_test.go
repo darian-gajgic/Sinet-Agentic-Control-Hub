@@ -167,6 +167,24 @@ func (e *env) staleActivity(id string, secondsAgo int) {
 	}
 }
 
+// limitEvent appends a limit.event carrying an explicit resets_at (the
+// resume-time a limit-park guard reads — drain D2). Appended while running,
+// BEFORE the park transition, mirroring the real order (the limit lands, then the
+// run parks).
+func (e *env) limitEvent(id string, resetsAt time.Time) {
+	e.t.Helper()
+	payload, _ := json.Marshal(map[string]any{
+		"class":     "usage",
+		"resets_at": resetsAt.UTC().Format(time.RFC3339Nano),
+	})
+	if _, err := e.log.Append(context.Background(), eventlog.Append{
+		RunID: id, Generation: e.gen(id), UserID: e.owner(id), Type: "limit.event",
+		SchemaVersion: 1, Payload: payload,
+	}); err != nil {
+		e.t.Fatalf("append limit event: %v", err)
+	}
+}
+
 // verdictEvent appends a verdict.recorded event on a run (verification activity).
 func (e *env) verdictEvent(id string) {
 	e.t.Helper()

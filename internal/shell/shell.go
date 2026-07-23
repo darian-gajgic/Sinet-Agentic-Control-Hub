@@ -496,14 +496,12 @@ func Run(ctx context.Context, opts Options) error {
 			Meter: watchdog.AdvisoryMeter(advisoryMeter(runs, checkpoints)),
 			Spend: meterLedger,
 			Listener: func(context.Context) ([]watchdog.ForeignListener, error) {
-				// Recurring re-audit of the one bind the shell controls, reusing
-				// the S01.6 loopback lint (R25). Enumerating every OS listener
-				// needs /proc parsing and must never dial the live front chain
-				// (host hazard) — deferred; the detection LOGIC is fixture-tested.
-				if err := assertLoopbackAddr(cfg.HTTPAddr); err != nil {
-					return []watchdog.ForeignListener{{Addr: cfg.HTTPAddr, Process: "sinet-control"}}, nil
-				}
-				return nil, nil
+				// Recurring in-process listener audit (R25, drain D7): enumerate
+				// THIS process's listening sockets via /proc and flag any bound
+				// beyond loopback — a real runtime-drift check, not a re-lint of
+				// the immutable cfg.HTTPAddr. It never dials the live front chain
+				// (host hazard); the external chain is out of this process's scope.
+				return auditOwnListeners()
 			},
 			Logger: logger,
 		})
@@ -867,17 +865,25 @@ func watchdogSweepLoop(ctx context.Context, wd *watchdog.Watchdog, logger *slog.
 	}
 }
 
-// watchdogDeadManLoop drives the dead-man canary V2 on the structural daily
-// cadence (Spec S14.4; brief R28-DMC) — the shell is the independent observer.
+// watchdogDeadManLoop drives the dead-man canary V2 (Spec S14.4; brief R28-DMC;
+// drain D6) — the shell is the independent observer. It ticks on the SWEEP
+// cadence and probes only when a probe is DUE; dueness is derived from the event
+// log (the last canary's birth), NOT a 24h wall-clock ticker, which resets on
+// every restart and freezes across suspend — on this laptop that ticker could
+// leave the daily probe rarely or never firing, silently. The 24h interval stays
+// a structural constant (watchdog.DeadManInterval); only WHEN it is measured
+// changed. On a fresh log no probe has ever run, so the FIRST tick is due
+// (first-probe-due — no 24h wait); dueness is checked on the tick rather than
+// inline at start so the probe never races the bring-up/shutdown lifecycle.
 func watchdogDeadManLoop(ctx context.Context, wd *watchdog.Watchdog, logger *slog.Logger) {
-	t := time.NewTicker(watchdog.DeadManInterval)
+	t := time.NewTicker(watchdog.SweepInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := wd.DeadManProbe(ctx); err != nil {
+			if err := wd.DeadManProbeIfDue(ctx); err != nil {
 				logger.Warn("watchdog: dead-man probe", "err", err)
 			}
 		}

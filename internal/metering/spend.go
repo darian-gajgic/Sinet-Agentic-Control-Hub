@@ -107,6 +107,35 @@ func (l *Ledger) SpendWindow(ctx context.Context, userID string, asOf time.Time,
 	return out, nil
 }
 
+// SpendOwners lists the distinct users with any checkpoint (paid or local) on
+// the as-of UTC day — the S14.4 spend rule's per-person owner set (brief R6 /
+// drain D11). It derives from the day's USAGE ROWS (checkpoints), not from
+// currently-active runs: a person whose runs all completed earlier today is
+// still spend-checked, closing the gap where a completed-run owner escaped that
+// day's check. Read-only aggregation (S10.1), outside any caller transaction.
+func (l *Ledger) SpendOwners(ctx context.Context, asOf time.Time) ([]string, error) {
+	asOf = asOf.UTC()
+	midnight := time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
+	end := midnight.AddDate(0, 0, 1)
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT DISTINCT user_id FROM checkpoints
+		  WHERE created_ts >= ? AND created_ts < ?`,
+		midnight.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, fmt.Errorf("metering: spend owners: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, fmt.Errorf("metering: spend owner scan: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 // median returns the median of xs (0 for an empty slice). Even counts average
 // the two central values.
 func median(xs []float64) float64 {

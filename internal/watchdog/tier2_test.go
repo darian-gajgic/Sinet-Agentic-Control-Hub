@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 )
 
@@ -103,6 +104,63 @@ func TestResumeClearsFlag(t *testing.T) {
 	}
 	if fs := e.flagsFor("t.execute"); len(fs) != 2 {
 		t.Fatalf("a fresh post-resume loop should flag again: want 2 flags, got %d", len(fs))
+	}
+}
+
+// TestResumeFenceNoRetripWithoutNewEvents (drain D1, demonstrated): after an
+// operator resume (parked→running, which bumps the generation), one Tail pass
+// that picks up ONLY the resume transition — zero new tool events — must NOT
+// re-park the run and must NOT re-invoke Tier-1. The generation fence drops the
+// stale pre-park trace (at the old generation); without it, the tail re-reads
+// that trace, re-trips the loop, re-parks the run the operator just said "resume
+// — I was wrong" to, and burns a duty call. This test FAILS against pre-drain
+// code. The legitimate counter-case (a FRESH loop after resume still flags) is
+// TestResumeClearsFlag, which stays green.
+func TestResumeFenceNoRetripWithoutNewEvents(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t).withDuty() // duty wired so a Tier-1 RE-invocation would be observable
+	w := e.wd()
+	e.fake.SetResponse(local.FakeResponse{
+		Content:     `{"reason":"stuck","verdict":"loop","confidence":0.9,"evidence":"same Bash ×5"}`,
+		InputTokens: 20, OutputTokens: 4,
+	})
+	e.runningRun("t.execute", "alice")
+	for i := 0; i < 5; i++ {
+		e.toolEvent("t.execute", "Bash", "d1", false)
+	}
+	// Trip + park + annotate once.
+	if err := w.EvaluateRun(ctx, "t.execute"); err != nil {
+		t.Fatalf("EvaluateRun: %v", err)
+	}
+	if e.state("t.execute") != run.StateParked {
+		t.Fatalf("setup: run did not park on the initial loop")
+	}
+	if fs := e.flagsFor("t.execute"); len(fs) != 1 {
+		t.Fatalf("setup: want 1 flag before resume, got %d", len(fs))
+	}
+	annBefore := len(e.eventsOfType(EventAnnotated))
+	if annBefore != 1 {
+		t.Fatalf("setup: want 1 annotation before resume, got %d", annBefore)
+	}
+
+	// Cursor just before the resume, so one Tail pass catches the resume
+	// transition (which touches the run) but there are ZERO new tool events.
+	beforeResume, _ := e.log.Head(ctx)
+	if _, err := e.runs.Transition(ctx, "t.execute", run.StateRunning, run.TransitionOptions{Reason: "resume — I was wrong", Actor: "alice"}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if _, err := w.Tail(ctx, beforeResume); err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+
+	if e.state("t.execute") != run.StateRunning {
+		t.Fatalf("the resumed run was RE-PARKED on its stale pre-park trace (generation fence missing, F1)")
+	}
+	if fs := e.flagsFor("t.execute"); len(fs) != 1 {
+		t.Fatalf("a re-park flag was raised with zero new events: want 1, got %d", len(fs))
+	}
+	if got := len(e.eventsOfType(EventAnnotated)); got != annBefore {
+		t.Fatalf("Tier-1 was re-invoked after resume with zero new events: annotations %d → %d", annBefore, got)
 	}
 }
 

@@ -15,7 +15,10 @@ import (
 // sweep_test.go — the time-based signals + registered checks (brief R5/R6,
 // R21–R27, rubric 2/3/14–19).
 
-func TestSilenceTripsAndExcludesWaiting(t *testing.T) {
+// TestSilenceTripsAtBudget: a running run silent past its run-type budget trips
+// and parks (nit f — the exclusion cases are the separate tests below; this test
+// only proves the trip, so its name no longer over-promises an exclusion).
+func TestSilenceTripsAtBudget(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
 	w := e.wd()
@@ -38,6 +41,89 @@ func TestSilenceTripsAndExcludesWaiting(t *testing.T) {
 	}
 	if e.state("silent-run") != run.StateParked {
 		t.Errorf("silence did not park the running run")
+	}
+}
+
+// TestSilenceLimitParkResumeTime (drain D2, both directions): a limit-parked run
+// with a FUTURE resets_at is legitimately waiting (NOT silence-flagged); one with
+// a PAST resets_at should have resumed and is flagged. The resume-time is scoped
+// to the limit event — the park transition (run.state_changed) lands AFTER the
+// limit.event and must not mask it.
+func TestSilenceLimitParkResumeTime(t *testing.T) {
+	ctx := context.Background()
+	budget120 := func(e *env) { setMap(t, e.reg, keySilenceBudget, map[string]string{"anthropic": "120"}) }
+
+	// future resets_at → NOT flagged.
+	e := newEnv(t)
+	budget120(e)
+	w := e.wd()
+	e.runningRun("future-park", "alice")
+	e.limitEvent("future-park", time.Now().Add(time.Hour)) // resets in the future
+	if _, err := e.runs.Transition(ctx, "future-park", run.StateParked, run.TransitionOptions{Reason: "limit", Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	e.staleActivity("future-park", 200) // old enough to trip if it weren't waiting
+	if err := w.sweepSilence(ctx); err != nil {
+		t.Fatalf("sweepSilence: %v", err)
+	}
+	if fs := e.flagsFor("future-park"); len(fs) != 0 {
+		t.Fatalf("a limit-park with a FUTURE resets_at was flagged silent (false positive, F2): %+v", fs)
+	}
+
+	// past resets_at → flagged (the scheduler should have resumed it).
+	e2 := newEnv(t)
+	budget120(e2)
+	w2 := e2.wd()
+	e2.runningRun("past-park", "bob")
+	e2.limitEvent("past-park", time.Now().Add(-time.Hour)) // resets in the past
+	if _, err := e2.runs.Transition(ctx, "past-park", run.StateParked, run.TransitionOptions{Reason: "limit", Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	e2.staleActivity("past-park", 200)
+	if err := w2.sweepSilence(ctx); err != nil {
+		t.Fatalf("sweepSilence: %v", err)
+	}
+	fs := e2.flagsFor("past-park")
+	if len(fs) != 1 || fs[0].Rule != RuleSilence {
+		t.Fatalf("a limit-park with a PAST resets_at was NOT silence-flagged: %+v", fs)
+	}
+}
+
+// TestSilenceExcludesWatchdogParkAndBacklog (drain D3): a park with NO
+// resume-time (watchdog park / operator pause / gate / maintenance) is
+// waiting-on-human — never silence. A queued backlog run is scheduler-wait —
+// never silence.
+func TestSilenceExcludesWatchdogParkAndBacklog(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	w := e.wd()
+	setMap(t, e.reg, keySilenceBudget, map[string]string{"anthropic": "120"})
+
+	// A watchdog-parked run (parked with a watchdog reason, no resume-time).
+	e.runningRun("wd-parked", "alice")
+	if _, err := e.runs.Transition(ctx, "wd-parked", run.StateParked, run.TransitionOptions{Reason: "watchdog:watchdog.loop", Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	e.staleActivity("wd-parked", 200)
+
+	// A queued backlog run (never ran) with stale activity.
+	if _, err := e.runs.Create(ctx, run.NewRun{ID: "queued-run", UserID: "alice", Lane: "anthropic", Substrate: "claude-cli"}); err != nil {
+		t.Fatalf("create queued: %v", err)
+	}
+	if _, err := e.runs.Transition(ctx, "queued-run", run.StateQueued, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	e.staleActivity("queued-run", 200)
+
+	if err := w.sweepSilence(ctx); err != nil {
+		t.Fatalf("sweepSilence: %v", err)
+	}
+	for _, id := range []string{"wd-parked", "queued-run"} {
+		for _, f := range e.flagsFor(id) {
+			if f.Rule == RuleSilence {
+				t.Errorf("%s was silence-flagged — a resume-less park / queued backlog is never silence (D3): %+v", id, f)
+			}
+		}
 	}
 }
 
@@ -78,7 +164,9 @@ func TestSilenceExcludesParkedWithOpenAsk(t *testing.T) {
 }
 
 // fakeSpend is a controlled SpendReader isolating the watchdog's spend LOGIC
-// from the metering money-math (which spend_test.go tests directly).
+// from the metering money-math (which spend_test.go tests directly). SpendOwners
+// returns the window's owner (the day's spender), mirroring the real derive-from
+// -usage-rows set (drain D11) without touching real ledger rows.
 type fakeSpend struct {
 	win metering.SpendWindow
 	err error
@@ -86,6 +174,16 @@ type fakeSpend struct {
 
 func (f fakeSpend) SpendWindow(context.Context, string, time.Time, int) (metering.SpendWindow, error) {
 	return f.win, f.err
+}
+
+func (f fakeSpend) SpendOwners(context.Context, time.Time) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.win.UserID == "" {
+		return nil, nil
+	}
+	return []string{f.win.UserID}, nil
 }
 
 func TestSpendDormantWhenUnpriced(t *testing.T) {

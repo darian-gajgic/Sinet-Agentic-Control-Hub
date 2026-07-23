@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -379,6 +380,12 @@ type InboxApproval struct {
 	State    string `json:"state"`
 }
 
+// deadManCanaryPrefix marks the watchdog suite's synthetic dead-man canary runs
+// (internal/watchdog's canaryPrefix). Their flags never enter the inbox (drain
+// D4). internal/api does not import internal/watchdog (the seam is the canonical
+// run_events rows), so the prefix is pinned here as a literal.
+const deadManCanaryPrefix = "platform.deadman."
+
 // InboxWatchdogFlag is one OPEN watchdog flag surfaced in the inbox (B5-3,
 // S14.4): derived from the run_events watchdog.flagged rows — the latest per
 // (run, anomaly class) not superseded by a watchdog.suppressed for that rule or
@@ -507,6 +514,13 @@ func (p *projector) watchdogFlags(ctx context.Context, scope ownerScope) ([]Inbo
 			frows.Close()
 			return nil, fmt.Errorf("projection: watchdog flag scan: %w", err)
 		}
+		if strings.HasPrefix(runID, deadManCanaryPrefix) {
+			// The dead-man canary finalizes each day's synthetic run, and only a
+			// suppress/resume supersedes a flag — so its synthetic watchdog.loop
+			// flag would sit forever-open in the inbox (~30/month). The R23
+			// meta-alert already excludes these; the inbox does too (drain D4).
+			continue
+		}
 		pay := json.RawMessage(payload)
 		class := firstString(pay, "anomaly_class", "rule")
 		fr := flagRow{
@@ -527,15 +541,20 @@ func (p *projector) watchdogFlags(ctx context.Context, scope ownerScope) ([]Inbo
 		return []InboxWatchdogFlag{}, nil
 	}
 
-	// supersession sets (owner-scoped identically): a suppress for the rule, or a
-	// resume transition for the run, at a higher seq clears the flag.
-	suppressed, err := p.maxSeqByKey(ctx, scope, "watchdog.suppressed", func(runID string, pay json.RawMessage) string {
+	// supersession sets: a suppress for the rule, or a resume transition for the
+	// run, at a higher seq clears the flag. The suppress query includes
+	// PLATFORM-scope rows (inclPlatform) so a platform-scope suppress of a
+	// run-less flag (spend/organ/retune) clears it in a MEMBER's view too — the
+	// member already sees the flag; only the clearing effect crosses, never any
+	// other owner's flags (drain D5). The resume query stays strictly
+	// owner-scoped (a resume rides its own run, same owner as the flag).
+	suppressed, err := p.maxSeqByKey(ctx, scope, true, "watchdog.suppressed", func(runID string, pay json.RawMessage) string {
 		return runID + "\x00" + firstString(pay, "rule")
 	})
 	if err != nil {
 		return nil, err
 	}
-	resumed, err := p.maxSeqByKey(ctx, scope, "run.state_changed", func(runID string, pay json.RawMessage) string {
+	resumed, err := p.maxSeqByKey(ctx, scope, false, "run.state_changed", func(runID string, pay json.RawMessage) string {
 		if firstString(pay, "to") == "running" {
 			return runID // any resume clears the run's flags
 		}
@@ -566,12 +585,19 @@ func (p *projector) watchdogFlags(ctx context.Context, scope ownerScope) ([]Inbo
 
 // maxSeqByKey returns the highest event_seq per key for a run_events type,
 // owner-scoped. keyFn derives the key from the row's run_id + payload; a "" key
-// skips the row.
-func (p *projector) maxSeqByKey(ctx context.Context, scope ownerScope, typ string, keyFn func(runID string, pay json.RawMessage) string) (map[string]int64, error) {
+// skips the row. When inclPlatform is set, a member's scope ALSO admits
+// platform-scope rows (user_id='platform') — used for the suppress supersession
+// so a platform-scope clear of a run-less flag reaches the member's view without
+// widening which flags the member sees (drain D5).
+func (p *projector) maxSeqByKey(ctx context.Context, scope ownerScope, inclPlatform bool, typ string, keyFn func(runID string, pay json.RawMessage) string) (map[string]int64, error) {
 	q := `SELECT event_seq, COALESCE(run_id, ''), payload FROM run_events WHERE type = ?`
 	args := []any{typ}
 	if !scope.Operator {
-		q += ` AND user_id = ?`
+		if inclPlatform {
+			q += ` AND (user_id = ? OR user_id = 'platform')`
+		} else {
+			q += ` AND user_id = ?`
+		}
 		args = append(args, scope.UserID)
 	}
 	rows, err := p.db.QueryContext(ctx, q, args...)

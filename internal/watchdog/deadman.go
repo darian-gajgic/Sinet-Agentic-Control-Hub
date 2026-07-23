@@ -2,7 +2,9 @@ package watchdog
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -33,6 +35,58 @@ import (
 // canaryPrefix marks the synthetic dead-man canary runs so their (real, honest)
 // synthetic flags are excluded from the flag-now chattiness meta-alert (R23).
 const canaryPrefix = "platform.deadman."
+
+// DeadManProbeIfDue runs a dead-man probe only when one is DUE (drain D6). The
+// shell calls it on the sweep cadence instead of a 24h wall-clock ticker: a
+// ticker resets on every process restart and freezes across suspend, so on a
+// laptop the daily probe may rarely or never fire — silently — which is the
+// exact failure class the dead-man exists to catch. Dueness is derived from the
+// event log (OQ2), so it survives restart and suspend.
+func (w *Watchdog) DeadManProbeIfDue(ctx context.Context) error {
+	due, err := w.deadManDue(ctx, time.Now())
+	if err != nil {
+		return err
+	}
+	if !due {
+		return nil
+	}
+	return w.DeadManProbe(ctx)
+}
+
+// deadManDue reports whether a dead-man probe is due as of now: no probe has
+// ever run (first-probe-due-immediately — it is $0 and proves the whole
+// detection pipeline at bring-up), or ≥ DeadManInterval has elapsed since the
+// last canary's birth. The DeadManInterval (24h) stays a structural constant;
+// only WHEN it is measured changed (from a wall-clock ticker to a log anchor).
+func (w *Watchdog) deadManDue(ctx context.Context, now time.Time) (bool, error) {
+	last, ok, err := w.lastDeadManTime(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return true, nil // never probed → due immediately
+	}
+	return now.Sub(last) >= DeadManInterval, nil
+}
+
+// lastDeadManTime is the wall-clock birth of the most recent dead-man canary,
+// derived from the log (the latest platform.deadman.* run.created event) — no
+// side store, no cursor (S14.1 / OQ2). Returns ok=false when no canary has ever
+// been born.
+func (w *Watchdog) lastDeadManTime(ctx context.Context) (time.Time, bool, error) {
+	var tsRaw string
+	err := w.db.QueryRowContext(ctx,
+		`SELECT ts FROM run_events
+		 WHERE run_id LIKE ? AND type = ?
+		 ORDER BY event_seq DESC LIMIT 1`, canaryPrefix+"%", run.EventCreated).Scan(&tsRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return parseTS(tsRaw), true, nil
+}
 
 // DeadManProbe runs one dead-man canary pass (R28-DMC). It never returns an
 // error for a detection/local failure — a failure is the alarm it RAISES (the

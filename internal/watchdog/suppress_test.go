@@ -21,7 +21,7 @@ func TestSuppressEmitsAndSupersedes(t *testing.T) {
 	if err := w.EvaluateRun(ctx, "t.execute"); err != nil {
 		t.Fatalf("EvaluateRun: %v", err)
 	}
-	if err := w.Suppress(ctx, "t.execute", RuleLoop); err != nil {
+	if err := w.Suppress(ctx, "carol", "t.execute", RuleLoop); err != nil {
 		t.Fatalf("Suppress: %v", err)
 	}
 	sups := e.eventsOfType(EventSuppressed)
@@ -34,6 +34,10 @@ func TestSuppressEmitsAndSupersedes(t *testing.T) {
 	}
 	if sp.Rule != RuleLoop || sp.Count != 1 || sp.Propose {
 		t.Errorf("suppress = %+v, want rule=loop count=1 propose=false", sp)
+	}
+	// The acting principal rides the payload (drain D13), not the platform.
+	if sp.Actor != "carol" {
+		t.Errorf("suppress actor = %q, want the acting principal carol (not platform) (D13)", sp.Actor)
 	}
 	// The flag is now superseded (no longer open).
 	open, err := w.openFlagExists(ctx, "t.execute", RuleLoop)
@@ -60,7 +64,7 @@ func TestRetuneProposalOnNthSuppressNeverAutoMoves(t *testing.T) {
 		if err := w.EvaluateRun(ctx, id); err != nil {
 			t.Fatalf("EvaluateRun: %v", err)
 		}
-		if err := w.Suppress(ctx, id, RuleLoop); err != nil {
+		if err := w.Suppress(ctx, "op", id, RuleLoop); err != nil {
 			t.Fatalf("Suppress %d: %v", i, err)
 		}
 	}
@@ -85,6 +89,41 @@ func TestRetuneProposalOnNthSuppressNeverAutoMoves(t *testing.T) {
 	}
 }
 
+// TestSuppressClearsSuffixedRunlessFlag (drain D5): a run-less flag's
+// anomaly_class is SUFFIXED (watchdog.organ_absence:<organ>), so a suppress must
+// carry the FULL class to clear it — passing the bare rule (as callers did) left
+// those flags permanently un-clearable (they have no resume). The retune count
+// still folds into the BASE rule.
+func TestSuppressClearsSuffixedRunlessFlag(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	w := e.wd(func(d *Deps) {
+		d.Organs = func(context.Context) ([]OrganStatus, error) {
+			return []OrganStatus{{Organ: "watchlist", Up: false, Note: "unit inactive"}}, nil
+		}
+	})
+	if err := w.checkOrgans(ctx); err != nil {
+		t.Fatalf("checkOrgans: %v", err)
+	}
+	class := RuleOrganAbsence + ":watchlist"
+	if open, err := w.openOwnerlessFlagExists(ctx, class); err != nil || !open {
+		t.Fatalf("expected an open suffixed organ-absence flag (open=%v err=%v)", open, err)
+	}
+	// Suppress with the FULL suffixed class — the run-less flag has no resume, so
+	// this is its only path to cleared.
+	if err := w.Suppress(ctx, "op", "", class); err != nil {
+		t.Fatalf("Suppress: %v", err)
+	}
+	if open, err := w.openOwnerlessFlagExists(ctx, class); err != nil || open {
+		t.Fatalf("a suffixed run-less flag was not cleared by a full-class suppress (open=%v err=%v)", open, err)
+	}
+	// The suppress folded into the BASE rule's count (not the suffixed instance).
+	n, err := w.suppressCount(ctx, RuleOrganAbsence)
+	if err != nil || n != 1 {
+		t.Errorf("suppressCount(base) = %d (err=%v), want 1 — the suffixed suppress folds into the base rule (D5)", n, err)
+	}
+}
+
 // TestSuppressStructuralRuleNoProposal: a rule with a STRUCTURAL threshold
 // (suspicious-completion) has no ⚙ to raise, so no retune proposal is made even
 // at the retune count.
@@ -94,7 +133,7 @@ func TestSuppressStructuralRuleNoProposal(t *testing.T) {
 	w := e.wd()
 	retuneN, _ := e.reg.Int(keySuppressRetune)
 	for i := int64(0); i < retuneN; i++ {
-		if err := w.Suppress(ctx, "", RuleSuspiciousCompletion); err != nil {
+		if err := w.Suppress(ctx, "op", "", RuleSuspiciousCompletion); err != nil {
 			t.Fatalf("Suppress: %v", err)
 		}
 	}

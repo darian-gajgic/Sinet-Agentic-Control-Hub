@@ -518,7 +518,7 @@ var v0Types = []TypeSpec{
 	declare("retention.compacted", FamilyPlatform, "producer: B5-8 (S14.9 compaction pass logs itself)"),
 
 	// ── Family 13: Tools & artifacts (S2.1) ─────────────────────────────
-	minted("tool.completed", FamilyToolsArtifacts, VerdictRename, "internal/adapters/adapters.go:68 (KindToolResult)", "renamed from engine.tool_result"),
+	minted("tool.completed", FamilyToolsArtifacts, VerdictRename, "internal/adapters/adapters.go:68 (KindToolResult)", "renamed from engine.tool_result; a SECOND emitter is the B5-3 dead-man canary, which injects synthetic tool.completed rows on its platform.deadman.* run to exercise Tier-0 detection end-to-end (internal/watchdog/deadman.go injectLoopTrace) — same type, synthetic provenance"),
 	minted("engine.message", FamilyToolsArtifacts, VerdictAdmit, "internal/adapters/adapters.go:64 (KindMessage)", "raw assistant/user message trace step; the softest engine.* mapping — ADMIT as a trace step"),
 	minted("engine.done", FamilyToolsArtifacts, VerdictAdmit, "internal/adapters/adapters.go:69 (KindDone)", "the terminal envelope (run-total usage rides it); ADMIT as a trace/completion step"),
 	minted("artifact.produced", FamilyToolsArtifacts, VerdictRename, "internal/review/review.go:216", "renamed from deliverable.minted (a deliverable is a produced artifact, S13); artifact ref + hash"),

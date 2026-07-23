@@ -17,11 +17,20 @@ import (
 // checks + the flag-now meta-alert. Each check logs and continues — a failing
 // check never aborts the sweep (level-triggered, the recovery-sweep precedent).
 
-// activeStates are the non-terminal FSM states silence/spend evaluate over (R5).
-var activeStates = []run.State{
-	run.StateNew, run.StateQueued, run.StateClaimed,
-	run.StateRunning, run.StateParked, run.StateDraining,
-}
+// silenceWatchStates is the POSITIVE state allowlist the silence counter may
+// flag (drain D3 — the coordinator ruling that S14.4's alert-discipline mandate
+// outranks a self-noising literal). It is the candidate set InStates loads; the
+// per-run predicate silenceWatched then refines it:
+//
+//	new/queued/claimed → NOT here (scheduler wait, board-visible — never silence)
+//	running/draining    → watched UNLESS an open ask (waiting-on-human)
+//	parked              → watched ONLY with a PAST resume-time (the scheduler-
+//	                      should-have-resumed signal, D2's mechanism); a future
+//	                      resume-time, or NO resume-time (watchdog park, operator
+//	                      pause, maintenance drain, gate park), is a first-class
+//	                      waiting-on-human state — never silence-flagged
+//	terminal            → NOT here (never)
+var silenceWatchStates = []run.State{run.StateRunning, run.StateDraining, run.StateParked}
 
 // Sweep runs one pass of the time-based signals + registered checks (R28).
 func (w *Watchdog) Sweep(ctx context.Context) error {
@@ -46,17 +55,16 @@ func (w *Watchdog) Sweep(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// sweepSilence flags an active run that has emitted no event past its run-type's
-// budget (R5). The budget is ⚙ watchdog.silence_budget.<run_type>; an empty
-// entry (the v0 default — the whole map ships empty) falls back to the
+// sweepSilence flags a run that is supposed to be emitting but has gone silent
+// past its run-type's budget (R5). The budget is ⚙ watchdog.silence_budget.<run_type>;
+// an empty entry (the v0 default — the whole map ships empty) falls back to the
 // recovery.dead_after seed (5 min) until the TBD-BRINGUP per-run-type
-// calibration. A run that is LEGITIMATELY WAITING is excluded: a limit-park with
-// an explicit resume-time (the named guard) OR a park on an open ask
-// (waiting-on-human — the same "legitimately waiting" principle, the projection
-// models it as a first-class healthy state). Absence is time-based, so it reads
+// calibration. WHICH runs are watched is the POSITIVE allowlist silenceWatched
+// (drain D3) — a run parked with no resume-time is waiting-on-human (first-class,
+// its card already exists), never silence. Absence is time-based, so it reads
 // the newest event's wall-clock ts (never an ordering authority — display only).
 func (w *Watchdog) sweepSilence(ctx context.Context) error {
-	active, err := w.runs.InStates(ctx, activeStates...)
+	candidates, err := w.runs.InStates(ctx, silenceWatchStates...)
 	if err != nil {
 		return err
 	}
@@ -69,8 +77,8 @@ func (w *Watchdog) sweepSilence(ctx context.Context) error {
 		return err
 	}
 	now := time.Now()
-	for _, r := range active {
-		if r.State == run.StateParked && w.legitimatelyWaiting(ctx, r) {
+	for _, r := range candidates {
+		if !w.silenceWatched(ctx, r, now) {
 			continue
 		}
 		newest, ok, err := w.newestEventTS(ctx, r.ID)
@@ -120,11 +128,14 @@ func (w *Watchdog) sweepSpend(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	owners, err := w.distinctActiveOwners(ctx)
+	now := time.Now()
+	// The owner set is the day's SPENDERS (from the usage rows), not the
+	// currently-active runs (drain D11): a person whose runs all completed before
+	// the sweep still gets spend-checked.
+	owners, err := w.spend.SpendOwners(ctx, now)
 	if err != nil {
 		return err
 	}
-	now := time.Now()
 	for _, owner := range owners {
 		if owner == run.ActorPlatform {
 			continue
@@ -154,8 +165,10 @@ func (w *Watchdog) sweepSpend(ctx context.Context) error {
 
 // ── the four registered platform-health checks (R24–R27) ──
 // Each references the S14.5 conformance registry via the seam below; B5-3 does
-// NOT build that table — TODO(S14.5/B5-4): register these check ids into the
-// conformance_registry when it lands (the B5-2 NoEngineSSEReplay precedent).
+// NOT build that table — TODO(S14.5/B5-4): register these four check ids AND the
+// dead-man canary (deadman.go, R28-DMC — a fifth registry-row candidate: the
+// watchdog's own liveness probe) into the conformance_registry when it lands
+// (the B5-2 NoEngineSSEReplay precedent; B5-4 owns the registry).
 
 // checkResumeReconcile confirms the S01.7 wake steps completed (R24). Honestly
 // absent when no wake-completion seam is wired (the logind sleep/wake wiring is
@@ -296,34 +309,69 @@ func (w *Watchdog) checkFlagNowRate(ctx context.Context) error {
 
 // ── sweep read helpers (derive-from-log) ──
 
-// legitimatelyWaiting reports whether a parked run is waiting by design (R5): a
-// park with an explicit resume-time, or a park on an open ask (waiting-on-human)
-// — either is a healthy wait, not silence.
-func (w *Watchdog) legitimatelyWaiting(ctx context.Context, r run.Run) bool {
-	// open ask ⇒ waiting-on-human (the projection's first-class healthy state)
-	var openAsks int64
-	if err := w.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM asks WHERE run_id = ? AND answered_ts IS NULL`, r.ID).Scan(&openAsks); err == nil && openAsks > 0 {
-		return true
+// silenceWatched applies the drain-D3 positive-allowlist semantics to one
+// candidate run: is it a run that is supposed to be emitting right now?
+//
+//	running/draining → watched UNLESS waiting-on-human (an open ask)
+//	parked           → watched ONLY with a PAST resume-time (the scheduler
+//	                   should have resumed it — D2's mechanism); a future
+//	                   resume-time or NO resume-time is a first-class wait
+//	other            → never (defensive; the candidate set is already these three)
+func (w *Watchdog) silenceWatched(ctx context.Context, r run.Run, now time.Time) bool {
+	switch r.State {
+	case run.StateRunning, run.StateDraining:
+		return !w.hasOpenAsk(ctx, r.ID)
+	case run.StateParked:
+		if w.hasOpenAsk(ctx, r.ID) {
+			return false // gate park / waiting-on-human
+		}
+		rt, ok := w.parkResumeTime(ctx, r.ID)
+		return ok && rt.Before(now)
+	default:
+		return false
 	}
-	// explicit resume-time on the latest limit/park event
+}
+
+// hasOpenAsk reports whether the run has an unanswered ask — waiting-on-human,
+// the projection's first-class healthy state (never silence).
+func (w *Watchdog) hasOpenAsk(ctx context.Context, runID string) bool {
+	var n int64
+	if err := w.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM asks WHERE run_id = ? AND answered_ts IS NULL`, runID).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
+}
+
+// parkResumeTime extracts a limit-park's explicit resume-time (drain D2). The
+// scope is EXACTLY the limit event types the B5-2 projection reads
+// (limit.event / engine.rate_limit / run.parked) — deliberately NOT the park
+// transition (run.state_changed), which always lands AFTER the limit.event
+// carrying resets_at and would mask it (the demonstrated F2 defect: the guard
+// read the transition and missed the resume time, silence-flagging healthy
+// limit-parked runs). Returns (t, true) only when a parseable resume-time is
+// present; a park with no resume-time (watchdog/operator/gate/maintenance park)
+// returns (_, false) → excluded from silence by silenceWatched.
+func (w *Watchdog) parkResumeTime(ctx context.Context, runID string) (time.Time, bool) {
 	rows, err := w.db.QueryContext(ctx,
 		`SELECT payload FROM run_events
-		 WHERE run_id = ? AND type IN ('limit.event', 'engine.rate_limit', 'run.parked', 'run.state_changed', 'run.state')
-		 ORDER BY event_seq DESC LIMIT 1`, r.ID)
+		 WHERE run_id = ? AND type IN ('limit.event', 'engine.rate_limit', 'run.parked')
+		 ORDER BY event_seq DESC LIMIT 1`, runID)
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	defer rows.Close()
 	if rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err == nil {
-			if firstString([]byte(payload), "parked_until", "parked-until", "resets_at", "resets-at", "reset_at") != "" {
-				return true
+			if s := firstString([]byte(payload), "parked_until", "parked-until", "resets_at", "resets-at", "reset_at"); s != "" {
+				if t := parseTS(s); !t.IsZero() {
+					return t, true
+				}
 			}
 		}
 	}
-	return false
+	return time.Time{}, false
 }
 
 // newestEventTS returns the wall-clock ts of the run's newest event (time-based
@@ -336,30 +384,6 @@ func (w *Watchdog) newestEventTS(ctx context.Context, runID string) (time.Time, 
 		return time.Time{}, false, nil //nolint:nilerr — no rows ⇒ nothing to measure
 	}
 	return parseTS(tsRaw), true, nil
-}
-
-// distinctActiveOwners lists the distinct owners of active runs (spend is
-// per-person; at v0 spend is dormant so the set is only used to iterate).
-func (w *Watchdog) distinctActiveOwners(ctx context.Context) ([]string, error) {
-	q := `SELECT DISTINCT user_id FROM runs WHERE state IN (?, ?, ?, ?, ?, ?)`
-	args := make([]any, len(activeStates))
-	for i, s := range activeStates {
-		args[i] = string(s)
-	}
-	rows, err := w.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var u string
-		if err := rows.Scan(&u); err != nil {
-			return nil, err
-		}
-		out = append(out, u)
-	}
-	return out, rows.Err()
 }
 
 // flagNowCountSince counts flag-now watchdog.flagged events since ts (R23),

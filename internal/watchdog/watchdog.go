@@ -139,9 +139,12 @@ type Settings interface {
 // SpendReader is the narrow metering seam for the S14.4 spend rule (R6/§5):
 // the daily per-person priced total + trailing median (money-math stays in
 // metering, S14.10 Layer-0). *metering.Ledger satisfies it. Nil ⇒ the spend
-// rule is dormant.
+// rule is dormant. SpendOwners lists the day's spenders from the usage rows (a
+// person whose runs all completed today is still checked — drain D11), so the
+// sweep never derives its owner set from currently-active runs.
 type SpendReader interface {
 	SpendWindow(ctx context.Context, userID string, asOf time.Time, windowDays int) (metering.SpendWindow, error)
+	SpendOwners(ctx context.Context, asOf time.Time) ([]string, error)
 }
 
 // AdvisoryMeter opens a short-lived platform run for a run-less advisory local
@@ -333,14 +336,25 @@ type recentEvent struct {
 	TS      time.Time
 }
 
-// readRecentEvents returns the run's newest `limit` events in OLDEST-first
-// order (the counters read forward). Re-derived fresh each evaluation — no
-// durable cursor, no state table (R1; Spec S14.1). Short-batch, no long-lived
-// read tx (S02.1).
-func (w *Watchdog) readRecentEvents(ctx context.Context, runID string, limit int) ([]recentEvent, error) {
+// readRecentEvents returns the run's newest `limit` events AT the given
+// generation, in OLDEST-first order (the counters read forward). Re-derived
+// fresh each evaluation — no durable cursor, no state table (R1; Spec S14.1).
+// Short-batch, no long-lived read tx (S02.1).
+//
+// The generation FENCE (drain D1) is load-bearing: the resume edge
+// parked→running bumps the run's generation (Spec S02.5 step 4, verified in
+// internal/run/run.go generationBumps), and pre-park events carry the OLD
+// generation. Without the fence, one tail tick after an operator resume re-reads
+// the stale pre-park trace and re-trips loop/ping-pong/error-loop — re-parking a
+// run the operator just said "resume — I was wrong" to, with zero new events
+// (and burning a Tier-1 duty call). Fencing to the run's CURRENT generation
+// drops the pre-park trace; the resume transition event itself is at the new
+// generation, so a legitimate fresh anomaly (new events at the new generation)
+// still flags.
+func (w *Watchdog) readRecentEvents(ctx context.Context, runID string, generation int64, limit int) ([]recentEvent, error) {
 	rows, err := w.db.QueryContext(ctx,
 		`SELECT event_seq, type, payload, ts FROM run_events
-		 WHERE run_id = ? ORDER BY event_seq DESC LIMIT ?`, runID, limit)
+		 WHERE run_id = ? AND generation = ? ORDER BY event_seq DESC LIMIT ?`, runID, generation, limit)
 	if err != nil {
 		return nil, err
 	}

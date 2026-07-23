@@ -586,6 +586,27 @@ func TestRequiredFieldConformance(t *testing.T) {
 			`{"via":"grant","device_login":"alice@tailnet"}`,
 			[]string{"via", "device_login"},
 		},
+		{
+			// watchdog.flagged (B5-3): rule id + trigger evidence
+			// {signature, counts, spend vs baseline} + Tier-1 annotation ref —
+			// the FamilyWatchdog descriptor, keyed on the real FlagPayload fields.
+			"watchdog.flagged",
+			`{"rule":"watchdog.loop","anomaly_class":"watchdog.loop","severity":"flag-now","signature":"a1b2c3d4","counts":{"repeats":5},"annotation_ref":42,"detail":"identical tool-call signature repeated","parked":true,"actor":"platform"}`,
+			[]string{"rule", "anomaly_class", "severity", "signature", "counts"},
+		},
+		{
+			// watchdog.annotated (B5-3): the Tier-1 verdict referenced by a flag.
+			"watchdog.annotated",
+			`{"rule":"watchdog.loop","verdict":"loop","confidence":0.88,"evidence":"Bash d1 ×5","reason":"repeats the same call","model":"qwen","actor":"platform"}`,
+			[]string{"rule", "verdict", "confidence", "evidence"},
+		},
+		{
+			// watchdog.suppressed (B5-3): a per-rule tuning signal carrying the
+			// acting principal (drain D13) and the running count.
+			"watchdog.suppressed",
+			`{"rule":"watchdog.loop","actor":"op","count":1,"reason":"operator suppression (tuning signal, S14.4)","propose_retune":false}`,
+			[]string{"rule", "actor", "count"},
+		},
 	}
 	for _, c := range cases {
 		if _, ok := reg.TypeSpec(c.typ); !ok {
