@@ -195,43 +195,48 @@ func TestFifteenFamiliesWithRequiredFields(t *testing.T) {
 	if len(fams) != 15 {
 		t.Fatalf("families = %d, want 15 (S14.2)", len(fams))
 	}
-	want := map[eventlog.Family]bool{
-		eventlog.FamilyRunLifecycle: true, eventlog.FamilyCheckpoint: true,
-		eventlog.FamilyUsageLimits: true, eventlog.FamilyGateAsk: true,
-		eventlog.FamilyHumanDecision: true, eventlog.FamilyVerificationVerdict: true,
-		eventlog.FamilyRouting: true, eventlog.FamilyKnowledgeInjection: true,
-		eventlog.FamilyOrchestration: true, eventlog.FamilyWatchdog: true,
-		eventlog.FamilyDriftCanary: true, eventlog.FamilyPlatform: true,
-		eventlog.FamilyToolsArtifacts: true, eventlog.FamilyBenchmarkEval: true,
-		eventlog.FamilyRunSummary: true,
+	// The S14.2 "Required payload fields (contract minimum)" column, verbatim
+	// and frozen here so any future edit to a registry descriptor is caught as
+	// drift — the enforcement B5 packets depend on (D2 verbatim lock).
+	wantFields := map[eventlog.Family]string{
+		eventlog.FamilyRunLifecycle:        "from→to + cause (every FSM transition appends [S02.3]); stage id/kind, stage-brief hash, outcome",
+		eventlog.FamilyCheckpoint:          "checkpoint id + the S02.4 (a)–(e) refs (usage block, session cursor, ledger revision, artifact snapshot, version fields)",
+		eventlog.FamilyUsageLimits:         "per-paid-call token/cache fields + price-table version; limit class (five-class taxonomy [XREF:S10]) + provider signal + resets-at; park cause + parked-until",
+		eventlog.FamilyGateAsk:             "ask id, kind (gate|question), invocation-snapshot ref, answer ref — projected from asks [S02.2]",
+		eventlog.FamilyHumanDecision:       "actor, card id + type, decision, presented-at → decided-at (latency); effect approvals additionally journaled [S02.7]",
+		eventlog.FamilyVerificationVerdict: "rubric id + version, axis (spec-compliance|outcome-sanity), per-criterion results, findings [F1..Fn] with anchors, blocker/note split, round number, judge model id + its golden-set error rates at judging time",
+		eventlog.FamilyRouting:             "{cause enum, score, signals, routed worker/model/lane, effort mode, plain_reason} — one row per routed call; plain-language reason is mandatory, not prose-optional",
+		eventlog.FamilyKnowledgeInjection:  "the trace-manifest entries {item_id, source_path, content_hash, version, selector_rule, precedence_label}, incl. post-compaction re-injection",
+		eventlog.FamilyOrchestration:       "spawn-record ref (trigger, reason, depth, budgets, brief hash [S04.4]); refusals name the failed check",
+		eventlog.FamilyWatchdog:            "rule id, trigger evidence (signature, counts, spend vs baseline), Tier-1 annotation ref; suppressions are tuning signals (S14.4)",
+		eventlog.FamilyDriftCanary:         "source, lane(s), change class (price/terms/limits/models/endpoints/billing-regime), severity, one-line summary, incident fingerprint; canary kind + lane + pass/fail/delta",
+		eventlog.FamilyPlatform:            "settings: {actor, key, old, new, reason} (mirrors settings_events [S01.10]); auth: kind/user/device [S01.9]; compaction anomaly: {stage, lane, engine version, window fill at trigger, pinned sections at risk, summary artifact ref} [S05.7]; compaction pass logs itself",
+		eventlog.FamilyToolsArtifacts:      "tool name, args digest, duration, artifact refs; artifact ref + hash",
+		eventlog.FamilyBenchmarkEval:       "the BENCH-REG §14 record schema verbatim; suite id + version, asset id + version, metrics, runner + runner version",
+		eventlog.FamilyRunSummary:          "summary artifact ref + generation inputs digest",
 	}
+	if len(wantFields) != 15 {
+		t.Fatalf("expected 15 verbatim S14.2 descriptors, listed %d", len(wantFields))
+	}
+	seen := make(map[eventlog.Family]bool)
 	for _, f := range fams {
-		if !want[f.Name] {
-			t.Errorf("unexpected family %q", f.Name)
+		seen[f.Name] = true
+		want, ok := wantFields[f.Name]
+		if !ok {
+			t.Errorf("unexpected family %q (not in the S14.2 table)", f.Name)
+			continue
 		}
-		if strings.TrimSpace(f.RequiredFields) == "" {
-			t.Errorf("family %q has no contract-minimum required-field descriptor (S14.2)", f.Name)
+		if f.RequiredFields != want {
+			t.Errorf("family %q RequiredFields drifted from S14.2 verbatim:\n got: %q\nwant: %q", f.Name, f.RequiredFields, want)
 		}
 		if strings.TrimSpace(f.Anchor) == "" {
 			t.Errorf("family %q has no S14.2 anchor", f.Name)
 		}
 	}
-	// Spot-check a few descriptors verbatim against S14.2.
-	assertFieldContains(t, eventlog.FamilyVerificationVerdict, "round number")
-	assertFieldContains(t, eventlog.FamilyRouting, "plain_reason")
-	assertFieldContains(t, eventlog.FamilyKnowledgeInjection, "precedence_label")
-	assertFieldContains(t, eventlog.FamilyPlatform, "{actor, key, old, new, reason}")
-}
-
-func assertFieldContains(t *testing.T, fam eventlog.Family, substr string) {
-	t.Helper()
-	spec, ok := eventlog.Registry().FamilySpec(fam)
-	if !ok {
-		t.Errorf("family %q not declared", fam)
-		return
-	}
-	if !strings.Contains(spec.RequiredFields, substr) {
-		t.Errorf("family %q required fields missing %q (must be verbatim from S14.2): %q", fam, substr, spec.RequiredFields)
+	for fam := range wantFields {
+		if !seen[fam] {
+			t.Errorf("S14.2 family %q missing from the registry", fam)
+		}
 	}
 }
 
@@ -546,6 +551,36 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"checkpoint.written",
 			`{"model_id":"claude","session_id":"s1","message_index":4,"artifact_snapshot_ref":"ref"}`,
 			[]string{"model_id", "session_id"},
+		},
+		{
+			"usage.recorded",
+			`{"message_id":"msg_1","message_index":2,"model":"claude-x","usage":{"input_tokens":120,"output_tokens":48,"cache_read_input_tokens":10,"cache_creation_input_tokens":0}}`,
+			[]string{"message_id", "message_index", "usage"},
+		},
+		{
+			"engine.gate_ask",
+			`{"ask_id":"toolu_1","tool_name":"Bash","tool_input":{"command":"ls"},"engine_expiry":"2026-07-23T00:00:00Z"}`,
+			[]string{"ask_id", "tool_name"},
+		},
+		{
+			// tool.completed carries the completion ref + result excerpt; the
+			// tool name + args digest ride the tool-use side (tool.called,
+			// declare-only), linked back here via tool_use_id.
+			"tool.completed",
+			`{"tool_use_id":"toolu_1","excerpt":"exit 0","truncated":false}`,
+			[]string{"tool_use_id", "excerpt"},
+		},
+		{
+			"artifact.produced",
+			`{"deliverable_id":"dlv_1","n":1,"pin_kind":"content","content_sha256":"abc123","platform_ref":"obj/ref","attempt_ref":"att_1","objects":2}`,
+			[]string{"deliverable_id", "content_sha256"},
+		},
+		{
+			// auth.event: kind = the event type, user = the envelope user_id
+			// (15.6), device = device_login; via names the login method.
+			"auth.login",
+			`{"via":"grant","device_login":"alice@tailnet"}`,
+			[]string{"via", "device_login"},
 		},
 	}
 	for _, c := range cases {

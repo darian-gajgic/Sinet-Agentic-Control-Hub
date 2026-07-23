@@ -242,7 +242,7 @@ func parkHistoryTx(ctx context.Context, tx *sql.Tx, runID string) ([]ParkEpisode
 	for rows.Next() {
 		var payload, ts string
 		if err := rows.Scan(&payload, &ts); err != nil {
-			return nil, fmt.Errorf("metering: scan run.state: %w", err)
+			return nil, fmt.Errorf("metering: scan run.state_changed: %w", err)
 		}
 		var p struct {
 			From   string `json:"from"`
