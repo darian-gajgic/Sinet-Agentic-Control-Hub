@@ -647,7 +647,7 @@ func TestSSEFleetLaneMeterFields(t *testing.T) {
 		t.Fatalf("fleet snapshot has no lanes: %v", snap.state)
 	}
 	lane0, _ := lanes[0].(map[string]any)
-	for _, k := range []string{"lane", "active_runs", "weighted_consumption", "utilization", "budget_remaining", "burn_rate"} {
+	for _, k := range []string{"owner", "lane", "active_runs", "weighted_consumption", "utilization", "budget_remaining", "burn_rate"} {
 		if _, ok := lane0[k]; !ok {
 			t.Fatalf("fleet lane missing meter field %q (§3 meter snapshot): %v", k, lane0)
 		}

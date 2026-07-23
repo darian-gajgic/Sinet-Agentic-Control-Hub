@@ -258,6 +258,7 @@ func (p *projector) latestRunForTask(ctx context.Context, taskID string) (BoardR
 // cumulative weighted consumption, not a trailing-window rate; a real burn_rate
 // needs a windowed calc B4-5/B6 own — nil here, never faked.
 type FleetLane struct {
+	Owner               string   `json:"owner"`
 	Lane                string   `json:"lane"`
 	ActiveRuns          int64    `json:"active_runs"`
 	WeightedConsumption float64  `json:"weighted_consumption"`
@@ -328,7 +329,7 @@ func (p *projector) fleet(ctx context.Context, scope ownerScope) (FleetSnapshot,
 	// the DB). LaneMeter is owner-keyed on the row's owner, so a member's
 	// figures cover only their own consumption.
 	for _, fr := range raw {
-		l := FleetLane{Lane: fr.lane, ActiveRuns: fr.active}
+		l := FleetLane{Owner: fr.owner, Lane: fr.lane, ActiveRuns: fr.active}
 		if p.meter != nil {
 			if m, merr := p.meter.LaneMeter(ctx, fr.owner, fr.lane); merr == nil {
 				l.WeightedConsumption = m.WeightedConsumption
