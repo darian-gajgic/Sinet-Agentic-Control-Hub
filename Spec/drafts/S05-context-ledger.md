@@ -136,7 +136,7 @@ The platform's job is **prefix hygiene, not cache management** [R07 §4.5]:
 *(P-T04 ids assigned here in R07 §7.7 order, matching the P-T##-N convention; S17 consolidates.)*
 
 **Deferred / parked:**
-- PreCompact blocking + Claude-lane per-stage injection channel → TBD-P3(S5 PreCompact/injection spike) at P3 start [G1 D1.6]; result logged into the canary suite.
+- ~~PreCompact blocking + Claude-lane per-stage injection channel → TBD-P3(S5 PreCompact/injection spike)~~ — **CLOSED A4 (2026-07-23, B4 gate)**: spike PASS at P3-B1-4 (result file `P3/measurements/2026-07-20-precompact-injection-mechanics.md`); containment stays the primary stance.
 - Trace-manifest export to OTel GenAI semconv → re-entry: content-capture semantics stabilize (watchlist row) [R07 §4.3].
 - Retiring the CLAUDE.md shim → re-entry: Claude engine reads AGENTS.md natively (engine watchlist) [R07 §4.7].
 - Removing the "assumed" cache-weight label → re-entry: provider publishes subscription quota semantics; ⚙ re-ratified then [G1 Def.10].

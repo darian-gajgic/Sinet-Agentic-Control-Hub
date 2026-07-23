@@ -38,7 +38,7 @@ const DefaultBinary = "claude"
 // (the S03.3 deliberate-bump procedure moves both in lockstep). Consumed
 // by the composition root as the engine-pin key of validation records
 // (Spec S08.1).
-const Pin = "2.1.216"
+const Pin = "2.1.218"
 
 // cancelGrace is the TERM→KILL grace of the cancel ladder (S03.1:
 // process-group TERM→KILL). Not a ⚙ — S18 ratifies no such key (the

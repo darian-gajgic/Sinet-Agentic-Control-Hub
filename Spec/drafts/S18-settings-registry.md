@@ -94,7 +94,7 @@ Reading rules:
 | `verification.rework_rounds` | 3 | 0–ceiling | | | R04 §4 via G1 D1.1(d); S07 resolution note stands |
 | `verification.convergence_patience_rounds` | 2 | 1–`rework_rounds` | | | R04 §2.6/§3-D via G1 D1.1(d) |
 | `verification.sanity_stakes_floor` | standard | tier enum (S06.4) | | | G1 D1.2 mechanism; default [coordinator-draft] |
-| `verification.entailment_sample_rate` | TBD-BRINGUP(entailment calibration set) | 0–1 | | | G1 Def.2; G3 Def.4/Def.8 |
+| `verification.entailment_sample_rate` | TBD-BRINGUP → derived 0.20 (A8, 2026-07-23); live write pending bring-up | 0–1 | | | G1 Def.2; G3 Def.4/Def.8 |
 | `verification.research_rerun_limit` | 1 | 0–2 | | | feature 1.9; R03 §4 Stage 2(d) via S06.6 |
 | `verification.check_audit_interval_days` | 90 d | > 0 | | | P-T06-1; R04 §4; default [coordinator-draft] |
 | `verification.canary_interval_hours` | 24 h | > 0 | | | G1 Def.3 (superseded set: "canary daily") — dead-man escalation canary; see S18.4 R5 |

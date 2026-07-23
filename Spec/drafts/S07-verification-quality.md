@@ -54,7 +54,7 @@ Empty, truncated, placeholder-marker, diff-empty, and schema-invalid output dies
 
 Claim–citation entailment coverage is **mandatory for load-bearing claims and sampled for the rest** (`⚙ verification.entailment_sample_rate`) [G1 Def.2]. Claims are judged against the **fetched source content**, never against the deliverable's own citation text — judges are flippable by fabricated authority [R04 §2.1, §2.5]. Entailment is a narrow task validated at expert grade (judge agreement with physician consensus exceeded inter-physician agreement) and runs on the local tier [R04 §2.5]: default seat Granite-Guardian-8B, CPU floor Flan-T5-0.8B for sampled checks [G3 Def.4; seat mechanics XREF:S12].
 
-Thresholds and the mandatory-coverage bar (which claims count as load-bearing) are TBD-BRINGUP(entailment calibration set — planted supported/unsupported pairs + first real outcomes; pre-registered TPR/TNR bar before entailment gates unsupervised) [G3 Def.4, Def.8]. **v0 status:** the launch domain is software, so this machinery is specified and ships idle; it activates with the web-research domain at v0.1 [G1 D1.2; XREF:S19].
+Thresholds and the mandatory-coverage bar (which claims count as load-bearing) are TBD-BRINGUP(entailment calibration set — planted supported/unsupported pairs + first real outcomes; pre-registered TPR/TNR bar before entailment gates unsupervised) [G3 Def.4, Def.8]. **A8 (2026-07-23, B4 gate):** the pre-registered bar is now MEASURED — Granite Guardian 4.1 on the 156-pair Sinet set gives per-side TPR 0.949 / TNR 1.000: the ≥0.90 MAIN bar is met, the load-bearing 0.95 sub-bar is NOT (entailed side 0.949), so entailment stays conservative and idle; ⚙ `verification.entailment_sample_rate` DERIVED 0.20, live write pending at bring-up (result file `P3/measurements/2026-07-22-entailment-thresholds.md`). **v0 status:** the launch domain is software, so this machinery is specified and ships idle; it activates with the web-research domain at v0.1 [G1 D1.2; XREF:S19].
 
 ### S07.5 V2 — the dual-axis judge pass
 
@@ -153,7 +153,7 @@ Verification is a platform practice with its own failure modes, not a stage [G1 
 | `verification.rework_rounds` | 3 | 0–ceiling | R04 §4 via G1 D1.1(d); see Open item 1 |
 | `verification.convergence_patience_rounds` | 2 | 1–`rework_rounds` | R04 §2.6/§3-D via G1 D1.1(d) |
 | `verification.sanity_stakes_floor` | standard | tier enum (S06.4) | G1 D1.2 mechanism; default `[coordinator-draft]` |
-| `verification.entailment_sample_rate` | TBD-BRINGUP(entailment calibration set) | 0–1 | G1 Def.2; G3 Def.4/Def.8 |
+| `verification.entailment_sample_rate` | TBD-BRINGUP → derived 0.20 (A8, 2026-07-23); live write pending bring-up | 0–1 | G1 Def.2; G3 Def.4/Def.8 |
 | `verification.research_rerun_limit` | 1 | 0–2 | 1.9; S06.6 hand-off (R03 §4 Stage 2(d) as cited there) |
 | `verification.check_audit_interval_days` | 90 | > 0 | P-T06-1; R04 §4 "periodic"; default `[coordinator-draft]`, aligned to the drill cadence |
 | `verification.canary_interval_hours` | 24 | > 0 | G1 Def.3 as superseded at close ("canary daily") |

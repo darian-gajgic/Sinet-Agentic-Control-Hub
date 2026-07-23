@@ -79,7 +79,7 @@ The principle is **walking skeleton first**: stand up a thin intake → execute 
 - **B5 — Observability & evals.** Watchdog suite, conformance registry, the benchmark machinery, queryable-history layers [S14] — much of it registers checks defined in earlier phases, so it lands once those exist.
 - **B6 — Frontend.** The React SPA consumes every API built above; it is last because it depends on S01/S13/S14/S10/S06 [S15].
 
-TBD-P3 implementation spikes attach to their phase: serialize-by-deny reconfirm + PreCompact/injection-mechanics spike + Claude-lane auto-memory containment at B1 [XREF:S03, S05, S09]; interview-taxonomy and rubric seed sessions at B2 [XREF:S06, S07]; GameMode probe at B4 [XREF:S12]; workforce-map rendering choice + lockfile serialization at B6 [XREF:S15, S16]; the S16 pin cells resolve at the first quarterly manifest pass.
+TBD-P3 implementation spikes attach to their phase: serialize-by-deny reconfirm + PreCompact/injection-mechanics spike + Claude-lane auto-memory containment at B1 [XREF:S03, S05, S09]; interview-taxonomy and rubric seed sessions at B2 [XREF:S06, S07]; GameMode probe at B4 [XREF:S12]; workforce-map rendering choice + lockfile serialization at B6 [XREF:S15, S16]; the S16 pin cells resolve at the first quarterly manifest pass. **STATUS 2026-07-23:** the B1 spikes (serialize-by-deny → A3; PreCompact/injection → A4; auto-memory containment → A2) and the B4 GameMode probe (→ A5) have all EXECUTED and closed via the S00.9 changelog.
 
 ### S19.6 Bring-up measurement sequence
 

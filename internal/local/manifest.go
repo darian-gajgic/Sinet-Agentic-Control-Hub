@@ -140,7 +140,7 @@ func Manifest() []SeatRecord {
 			CardURL: "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf",
 			License: License{
 				SPDX: "Apache-2.0", VerifyDate: vd, Conflict: true,
-				Note: "CARD-vs-SPEC CONFLICT (R8): the card's license FIELD reads \"apache-2.0\" (matching the S12.3 spec cell) BUT links the Gemma license doc (ai.google.dev/gemma/docs/gemma_4_license); Gemma-family cards historically carry the Gemma Terms. Recorded as the card states + FLAGGED: whether Gemma 4 is truly Apache-2.0 or the Gemma Terms apply under the URL must be operator-ratified before this alternate goes live (B4-7 bakeoff). Not silently adopted either way.",
+				Note: "CARD-vs-SPEC CONFLICT (R8): the card's license FIELD reads \"apache-2.0\" (matching the S12.3 spec cell) BUT links the Gemma license doc (ai.google.dev/gemma/docs/gemma_4_license); Gemma-family cards historically carry the Gemma Terms. Recorded as the card states + FLAGGED: whether Gemma 4 is truly Apache-2.0 or the Gemma Terms apply under the URL must be operator-ratified before this alternate goes live (B4-7 bakeoff). Not silently adopted either way. B4 GATE (D3, 2026-07-23): operator acknowledged the conflict and KEEPS Gemma as a flagged NON-DEFAULT alternate — the conflict is recorded not resolved, so the alias flip stays promotion-blocked until the true license is settled; Gemma lost the bakeoff 0/6 so nothing on the v0 default path depends on it.",
 			},
 			Files: []GGUFFile{{Repo: "google/gemma-4-12B-it-qat-q4_0-gguf", Name: "gemma-4-12b-it-qat-q4_0.gguf", SHA256: "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b"}},
 			Quant: "first-party int4 QAT", Pool: "pool12", ContextLen: 131072, ServingContext: 4096, GPUSeated: true, Servable: true, Pulled: true,

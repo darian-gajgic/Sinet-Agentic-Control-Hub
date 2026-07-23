@@ -117,7 +117,7 @@ func SeedSoftwareRubric() *RubricBundle {
 	return &RubricBundle{
 		ID:         "rubric-software",
 		Domain:     DomainSoftware,
-		Version:    2, // v2 bump (B4-7 rider 1): golden-set rates measured on the ratified opus-4-8 judge; content FLAGGED for gate ratification (S00.9), like the v1 seeds
+		Version:    2, // v2 bump (B4-7 rider 1): golden-set rates measured on the ratified opus-4-8 judge; RATIFIED at the B4 gate 2026-07-23 (D4) — the over-strict TNR 0.50 is on record, safe-direction for a quality gate; a byte-identical-schema re-run stays at operator discretion
 		VerifiedOn: "2026-07-22",
 		JudgePin: "claude-opus-4-8 (the D3-ratified judge seat, applied e06f0a4). The P-T06-5 golden-set re-run ran on it " +
 			"2026-07-22 (rider 1) before unsupervised judging resumes; any future judge change re-gates on a fresh re-run.",

@@ -117,6 +117,17 @@ Your personal acceptance test remains the B6 UI click-through per your 2026-07-2
 5. **Bring-up items (not blocking):** the ⚙ `verification.entailment_sample_rate` = 0.20 LIVE write; Guardian-3.3 entailment leg + head-to-head; watchdog/watchlist bar re-measure; durable calibration-record writes at the deployed-seat keys; Bespoke HF credential if wanted.
 6. **Carried, unchanged:** suspend-probe leg ↔ the battery-drain measurement hour (timer installed); Z.AI prompt-unit calibration still parked (no Z.AI lane exists at v0).
 
-## 8. Gate answers (recorded at close — operator free-text)
+## 8. Gate answers (recorded at close — operator free-text, 2026-07-23)
 
-_Pending operator walkthrough._
+**Verbatim:** "ok" — a blanket approval of all six decisions as recommended (authoritative per the standing gate-answer convention; not re-asked via form).
+
+| # | Decision | Answer | Execution |
+|---|---|---|---|
+| D1 | Ratify the 8 new adoptions | **ok** | Ratified en bloc (S16.4 #10). Entries already in `components.lock` at live-verified pins; no code change — operator approval recorded here + STATE. |
+| D2 | Engine pin bump 2.1.216 → 2.1.217 | **ok (executed to the LIVE 2.1.218)** | The installed `claude` advanced 2.1.217 → **2.1.218** between gate presentation and execution (same session, auto-update). The S03.3 reconcile matches the pin to the *installed* engine, so it targeted 2.1.218 (pinning the no-longer-installed 2.1.217 would immediately re-open the drift D2 exists to close). Applied: `claudecli.Pin` + the lock engine entry in lockstep (+ dated note). Evidence at 2.1.218: `TestPinMatchesLock` PASS, `TestRealEngineVersionAgainstPin` PASS ("installed engine matches pin 2.1.218"), invalid-enum rejection + full-argv dry probe PASS — all zero-cost; parallel-gate behavior reconfirmed live one patch below at 2.1.217 (rider 2, 2026-07-22). No paid canary needed. |
+| D3 | Model license/manifest | **ok** | Guardian-4.1/3.3 rows clean (apache-2.0). Gemma: manifest `License.Conflict` note updated — operator acknowledged the conflict, Gemma KEPT as a flagged non-default alternate (promotion stays blocked; it lost the bakeoff 0/6, nothing on the v0 path depends on it). Bespoke: left unpulled at v0 (Guardian clears the bar alone). |
+| D4 | Ratify rubric bundle v2 | **ok** | `seeds.go` v2 provenance flipped from "FLAGGED for gate ratification" to "RATIFIED at the B4 gate 2026-07-23 (D4)"; the over-strict TNR 0.50 is on record (safe-direction); byte-identical-schema re-run stays operator discretion. Comment-only change; `internal/verify` green. |
+| D5 | S00.9 spec bookkeeping (A4–A8) | **ok (incl. A4)** | Five dated changelog entries added to `S00-front-matter.md` (canonical) + regenerated into the assembled `core-architecture-v1.md` (deterministic concat; draft==assembled verified): **A4** PreCompact/injection (clean close), **A5** GameMode probe (clean close), **A6** contradiction-screen P/R (narrowed — one-stage shipped shape), **A7** per-duty calibration (narrowed — covered duties), **A8** entailment thresholds + the B2 TPR/TNR deferral (MAIN bar met, load-bearing sub-bar conservative; ⚙ value derived 0.20, live write bring-up). All marker sites annotated (11 sites across S03/S05/S07/S09/S12/S18/S19; none left bare). No ⚙ default/clamp changed → no S18 re-sweep. |
+| D6 | Phase readings en bloc | **ok** | Ratified en bloc (B0–B3 precedent). |
+
+**GATE STATUS 2026-07-23 — FINAL: ALL SIX DECISIONS CLOSED AND EXECUTED. B4 CLOSED.** Landing battery green after all changes (gofmt/vet/build clean, 34 pkgs `go test -count=1`, lockgate 17). **B5 opened the same session** — queue cut in `P3/STATE.md`. Standing items §7 carried (none block B5).
