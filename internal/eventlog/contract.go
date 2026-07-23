@@ -401,11 +401,12 @@ var v0Families = []FamilySpec{
 	},
 }
 
-// v0Types is the reconciliation of every event type minted by B0–B4 (76
-// types), each mapped to a family with its verdict and provenance, plus the
-// declare-only types whose producers are later packets. The declare-once
-// contract test (contract_test.go) asserts every producer Event* constant
-// appears here; a newly-minted type absent from this table fails the build.
+// v0Types is the reconciliation of every event type minted by B0–B4 (76) plus
+// the three B5-3 watchdog types (79 minted total), each mapped to a family with
+// its verdict and provenance, plus the declare-only types whose producers are
+// later packets. The declare-once contract test (contract_test.go) asserts
+// every producer Event* constant appears here; a newly-minted type absent from
+// this table fails the build.
 var v0Types = []TypeSpec{
 	// ── Family 1: Run lifecycle (S2.1) ──────────────────────────────────
 	minted("run.created", FamilyRunLifecycle, VerdictAdmit, "internal/run/run.go:121", "the ∅→new birth edge"),
@@ -463,10 +464,10 @@ var v0Types = []TypeSpec{
 	minted("orchestration.helper", FamilyOrchestration, VerdictAdmit, "internal/stage/helpers.go:80", "the helper report/result (a third Orchestration member)"),
 	minted("intake.followup_spawned", FamilyOrchestration, VerdictAdmit, "internal/intake/followup.go:46", "a follow-up task spawned (S06/S13.6); spawn-class"),
 
-	// ── Family 10: Watchdog (S2.7) — DECLARE, producers B5-3 ────────────
-	declare("watchdog.flagged", FamilyWatchdog, "producer: B5-3 (S14.4)"),
-	declare("watchdog.annotated", FamilyWatchdog, "producer: B5-3 (S14.4 Tier-1 annotation)"),
-	declare("watchdog.suppressed", FamilyWatchdog, "producer: B5-3 (S14.4 suppression tuning signal)"),
+	// ── Family 10: Watchdog (S2.7) — MINTED by B5-3 (S14.4) ─────────────
+	minted("watchdog.flagged", FamilyWatchdog, VerdictConforms, "internal/watchdog/watchdog.go (EventFlagged); emitted internal/watchdog/tier2.go", "Tier-2 pause-and-flag: {rule, anomaly_class, severity, signature, counts, spend_vs_baseline, annotation_ref}; satisfies the FamilyWatchdog descriptor"),
+	minted("watchdog.annotated", FamilyWatchdog, VerdictConforms, "internal/watchdog/watchdog.go (EventAnnotated); emitted internal/watchdog/tier1.go", "Tier-1 annotation: {rule, verdict∈loop|productive|unclear, confidence, evidence}; low margin ⇒ unclear (S12.4), never gates"),
+	minted("watchdog.suppressed", FamilyWatchdog, VerdictConforms, "internal/watchdog/watchdog.go (EventSuppressed); emitted internal/watchdog/suppress.go", "per-rule suppression tuning signal; the retune proposal is a card, never an auto-move (S14.4)"),
 
 	// ── Family 11: Drift & canary (S2.8) — DECLARE, producers B5-6 ──────
 	declare("drift.finding", FamilyDriftCanary, "producer: B5-6 (S14.6)"),

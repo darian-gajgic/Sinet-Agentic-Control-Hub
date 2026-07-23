@@ -1,0 +1,196 @@
+package watchdog
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+)
+
+// deadman.go — the S14.4 dead-man canary V2 (brief R28-DMC; B4-7 OQ5 carry).
+// The watchdog's OWN liveness: does the detection machinery still detect? V2 is
+// an ACTIVE end-to-end probe (V1 was a research-note plant with no local tier):
+//
+//	(a) inject a synthetic known-anomaly (loop) trace on a canary run and assert
+//	    the watchdog DETECTS + Tier-1-ANNOTATES + FLAGS it (Tier-0 → Tier-1
+//	    local → flag end-to-end), then
+//	(b) make a $0 local liveness call through the disambiguator seat to confirm
+//	    the local floor answers.
+//
+// SHELL-DRIVEN (the independent observer — NOT the watchdog's own Tier-0 loop,
+// so a dead detection loop is observable → non-circular). Distinct from the
+// systemd WatchdogSec control-plane heartbeat (S01.2, which watches the whole
+// process). On FAILURE (detection dark / the local call fails) → an ALARM
+// (watchdog.flagged, rule=watchdog.dead_man, flag-now — OQ5, staying within the
+// suite's own watchdog.* types, not poaching B5-6's canary.result). On PASS → a
+// quiet liveness marker (journald, no new event type). The daily cadence is a
+// structural constant (DeadManInterval — no new ⚙).
+
+// canaryPrefix marks the synthetic dead-man canary runs so their (real, honest)
+// synthetic flags are excluded from the flag-now chattiness meta-alert (R23).
+const canaryPrefix = "platform.deadman."
+
+// DeadManProbe runs one dead-man canary pass (R28-DMC). It never returns an
+// error for a detection/local failure — a failure is the alarm it RAISES (the
+// probe itself succeeding at raising the alarm is the success). It returns an
+// error only when it cannot run the probe at all (e.g. the DB is unreachable),
+// which the shell logs.
+func (w *Watchdog) DeadManProbe(ctx context.Context) error {
+	canaryID := fmt.Sprintf("%s%d", canaryPrefix, time.Now().UnixNano())
+
+	canary, err := w.createCanary(ctx, canaryID)
+	if err != nil {
+		return fmt.Errorf("watchdog: dead-man create canary: %w", err)
+	}
+	defer w.terminateCanary(ctx, canaryID)
+
+	// (b) $0 local liveness call FIRST, while the canary is running
+	// (checkpointable). A duty error ⇒ the local floor is dark.
+	localAlive := w.deadManLiveness(ctx, canaryID)
+
+	// (a) inject the synthetic loop trace, then drive the FULL detection path.
+	if err := w.injectLoopTrace(ctx, canary); err != nil {
+		return fmt.Errorf("watchdog: dead-man inject trace: %w", err)
+	}
+	if err := w.EvaluateRun(ctx, canaryID); err != nil {
+		return fmt.Errorf("watchdog: dead-man evaluate: %w", err)
+	}
+	detected, err := w.canaryFlagged(ctx, canaryID)
+	if err != nil {
+		return fmt.Errorf("watchdog: dead-man read result: %w", err)
+	}
+
+	if detected && localAlive {
+		// Quiet liveness marker — journald only, NO new event type (OQ5).
+		w.logger.Info("watchdog: dead-man canary PASS — detection + local floor alive",
+			"canary", canaryID, "local_probed", w.duty != nil)
+		return nil
+	}
+	// ALARM: the watchdog is dark. flag-now, staying within watchdog.* (OQ5).
+	detail := "dead-man canary FAILED:"
+	if !detected {
+		detail += " the detection machinery did not flag a known synthetic loop"
+	}
+	if !localAlive {
+		detail += " the $0 local liveness call did not answer"
+	}
+	w.logger.Error("watchdog: DEAD-MAN ALARM — the watchdog is dark", "canary", canaryID, "detected", detected, "local_alive", localAlive)
+	return w.flagPlatform(ctx, trigger{
+		Rule:   RuleDeadMan,
+		Counts: map[string]int{"detected": boolToInt(detected), "local_alive": boolToInt(localAlive)},
+		Detail: detail,
+	})
+}
+
+// createCanary creates and drives a synthetic platform canary run to running
+// (checkpointable), so the probe can land a $0 D7 row and detect a loop on it.
+func (w *Watchdog) createCanary(ctx context.Context, id string) (run.Run, error) {
+	if _, err := w.runs.Create(ctx, run.NewRun{
+		ID: id, UserID: run.ActorPlatform, Lane: local.LaneLocal, Substrate: "local",
+	}); err != nil {
+		return run.Run{}, err
+	}
+	for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+		if _, err := w.runs.Transition(ctx, id, st, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+			return run.Run{}, err
+		}
+	}
+	return w.runs.Get(ctx, id)
+}
+
+// deadManLiveness makes a minimal $0 disambiguator call to confirm the local
+// floor answers (R28-DMC part b). No duty (unconfigured local tier) ⇒ nothing
+// to probe ⇒ alive (an honest skip, not a failure). A duty error ⇒ dark.
+func (w *Watchdog) deadManLiveness(ctx context.Context, canaryID string) bool {
+	if w.duty == nil {
+		return true
+	}
+	_, err := w.duty.Call(ctx, canaryID, local.DutyRequest{
+		Alias:          local.AliasWatchdog,
+		System:         "Liveness probe. Reason briefly, then answer verdict=productive.",
+		User:           "This is a liveness check. Respond with verdict=productive.",
+		Schema:         WatchdogSchema(),
+		Name:           "watchdog-deadman-liveness",
+		MaxTokens:      disambigMaxTokens,
+		Classification: true,
+	})
+	if err != nil {
+		w.logger.Warn("watchdog: dead-man local liveness call failed", "err", err)
+		return false
+	}
+	return true
+}
+
+// injectLoopTrace appends ⚙ watchdog.loop_repeat identical synthetic
+// tool.completed events on the canary run so loopTrip trips at the live
+// threshold (proving detection at the configured value, not a hard-coded one).
+func (w *Watchdog) injectLoopTrace(ctx context.Context, canary run.Run) error {
+	n, err := w.settings.Int(keyLoopRepeat)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"tool":        "deadman.synthetic",
+		"args_digest": "sha256:deadman-canary",
+		"excerpt":     "synthetic known-anomaly trace (dead-man canary)",
+	})
+	if err != nil {
+		return err
+	}
+	for i := int64(0); i < n; i++ {
+		if _, err := w.log.Append(ctx, eventlog.Append{
+			RunID:         canary.ID,
+			Generation:    canary.Generation,
+			UserID:        run.ActorPlatform,
+			Type:          "tool.completed",
+			SchemaVersion: eventSchemaVersion,
+			Payload:       payload,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// canaryFlagged reports whether the detection path produced a loop flag on the
+// canary — the liveness signal (detection is alive).
+func (w *Watchdog) canaryFlagged(ctx context.Context, canaryID string) (bool, error) {
+	_, found, err := w.latestFlagSeq(ctx, canaryID, RuleLoop)
+	return found, err
+}
+
+// terminateCanary drives the canary run to a terminal state so it never lingers
+// as an active run the silence sweep would later flag. Best-effort, on a
+// cancel-immune context (cleanup must complete even as ctx unwinds).
+func (w *Watchdog) terminateCanary(ctx context.Context, id string) {
+	cctx := context.WithoutCancel(ctx)
+	r, err := w.runs.Get(cctx, id)
+	if err != nil {
+		return
+	}
+	var to run.State
+	switch r.State {
+	case run.StateParked:
+		to = run.StateFinalized // detection parked it → finalize-with-card terminal
+	case run.StateRunning, run.StateDraining:
+		to = run.StateCompleted // detection did not park (broken) → complete it
+	default:
+		return // already terminal
+	}
+	if _, err := w.runs.Transition(cctx, id, to, run.TransitionOptions{
+		Reason: "dead-man canary complete", Actor: run.ActorPlatform,
+	}); err != nil {
+		w.logger.Warn("watchdog: dead-man canary cleanup", "canary", id, "err", err)
+	}
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

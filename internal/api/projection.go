@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -378,17 +379,36 @@ type InboxApproval struct {
 	State    string `json:"state"`
 }
 
+// InboxWatchdogFlag is one OPEN watchdog flag surfaced in the inbox (B5-3,
+// S14.4): derived from the run_events watchdog.flagged rows — the latest per
+// (run, anomaly class) not superseded by a watchdog.suppressed for that rule or
+// a resume (run.state_changed to=running, the "resume, I was wrong" action).
+// RunID is "" for a run-less flag (platform-health or a per-person spend spike).
+// Owner-scoped per S01.9 (the operator sees all incl. platform-scope; a member
+// sees only their own owner-attributed flags).
+type InboxWatchdogFlag struct {
+	Seq          int64     `json:"seq"`
+	RunID        string    `json:"run_id"`
+	Owner        string    `json:"owner"`
+	Rule         string    `json:"rule"`
+	AnomalyClass string    `json:"anomaly_class"`
+	Severity     string    `json:"severity"`
+	Detail       string    `json:"detail"`
+	FlaggedTS    time.Time `json:"flagged_ts"`
+}
+
 // InboxSnapshot is the `inbox` topic projection (§3): open asks + proposed
-// approvals, plus the declare-only watchdog/drift seams (producers B5-3/B5-6).
+// approvals + OPEN watchdog flags (B5-3), plus the declare-only drift seam
+// (producer B5-6).
 type InboxSnapshot struct {
-	Asks          []InboxAsk      `json:"asks"`
-	Approvals     []InboxApproval `json:"approvals"`
-	WatchdogFlags []any           `json:"watchdog_flags"`
-	DriftCards    []any           `json:"drift_cards"`
+	Asks          []InboxAsk          `json:"asks"`
+	Approvals     []InboxApproval     `json:"approvals"`
+	WatchdogFlags []InboxWatchdogFlag `json:"watchdog_flags"`
+	DriftCards    []any               `json:"drift_cards"`
 }
 
 func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot, error) {
-	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []any{}, DriftCards: []any{}}
+	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, DriftCards: []any{}}
 
 	aq := `SELECT ask_id, run_id, status, observed_ts FROM asks WHERE answered_ts IS NULL`
 	aargs := []any{}
@@ -434,7 +454,147 @@ func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot,
 		}
 		out.Approvals = append(out.Approvals, ap)
 	}
-	return out, erows.Err()
+	if err := erows.Err(); err != nil {
+		return out, err
+	}
+
+	flags, err := p.watchdogFlags(ctx, scope)
+	if err != nil {
+		return out, err
+	}
+	out.WatchdogFlags = flags
+	return out, nil
+}
+
+// watchdogFlags derives the OPEN watchdog flags for the inbox (B5-3, R30): the
+// latest watchdog.flagged per (run, anomaly class), owner-scoped, dropping any
+// superseded by a later watchdog.suppressed for the rule or a resume
+// (run.state_changed to=running). Pure derive-from-log — no watchdog_flags
+// table (S14.1; OQ2). internal/api does not import internal/watchdog: it reads
+// the canonical type strings directly.
+func (p *projector) watchdogFlags(ctx context.Context, scope ownerScope) ([]InboxWatchdogFlag, error) {
+	// latest watchdog.flagged per (run_id, anomaly_class)
+	fq := `SELECT event_seq, COALESCE(run_id, ''), user_id, payload, ts
+	         FROM run_events WHERE type = 'watchdog.flagged'`
+	fargs := []any{}
+	if !scope.Operator {
+		fq += ` AND user_id = ?`
+		fargs = append(fargs, scope.UserID)
+	}
+	fq += ` ORDER BY event_seq` // ascending: later rows overwrite earlier per key
+	frows, err := p.db.QueryContext(ctx, fq, fargs...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: watchdog flags: %w", err)
+	}
+	type flagRow struct {
+		seq   int64
+		runID string
+		owner string
+		rule  string
+		class string
+		sev   string
+		detl  string
+		ts    time.Time
+	}
+	latest := map[string]flagRow{} // key = runID\x00class
+	for frows.Next() {
+		var (
+			seq          int64
+			runID, owner string
+			payload, ts  string
+		)
+		if err := frows.Scan(&seq, &runID, &owner, &payload, &ts); err != nil {
+			frows.Close()
+			return nil, fmt.Errorf("projection: watchdog flag scan: %w", err)
+		}
+		pay := json.RawMessage(payload)
+		class := firstString(pay, "anomaly_class", "rule")
+		fr := flagRow{
+			seq: seq, runID: runID, owner: owner,
+			rule:  firstString(pay, "rule"),
+			class: class,
+			sev:   firstString(pay, "severity"),
+			detl:  firstString(pay, "detail"),
+			ts:    parseTS(ts),
+		}
+		latest[runID+"\x00"+class] = fr
+	}
+	frows.Close()
+	if err := frows.Err(); err != nil {
+		return nil, err
+	}
+	if len(latest) == 0 {
+		return []InboxWatchdogFlag{}, nil
+	}
+
+	// supersession sets (owner-scoped identically): a suppress for the rule, or a
+	// resume transition for the run, at a higher seq clears the flag.
+	suppressed, err := p.maxSeqByKey(ctx, scope, "watchdog.suppressed", func(runID string, pay json.RawMessage) string {
+		return runID + "\x00" + firstString(pay, "rule")
+	})
+	if err != nil {
+		return nil, err
+	}
+	resumed, err := p.maxSeqByKey(ctx, scope, "run.state_changed", func(runID string, pay json.RawMessage) string {
+		if firstString(pay, "to") == "running" {
+			return runID // any resume clears the run's flags
+		}
+		return "" // non-resume transitions do not clear
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]InboxWatchdogFlag, 0, len(latest))
+	for _, f := range latest {
+		if s, ok := suppressed[f.runID+"\x00"+f.class]; ok && s > f.seq {
+			continue
+		}
+		if f.runID != "" {
+			if r, ok := resumed[f.runID]; ok && r > f.seq {
+				continue
+			}
+		}
+		out = append(out, InboxWatchdogFlag{
+			Seq: f.seq, RunID: f.runID, Owner: f.owner, Rule: f.rule,
+			AnomalyClass: f.class, Severity: f.sev, Detail: f.detl, FlaggedTS: f.ts,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out, nil
+}
+
+// maxSeqByKey returns the highest event_seq per key for a run_events type,
+// owner-scoped. keyFn derives the key from the row's run_id + payload; a "" key
+// skips the row.
+func (p *projector) maxSeqByKey(ctx context.Context, scope ownerScope, typ string, keyFn func(runID string, pay json.RawMessage) string) (map[string]int64, error) {
+	q := `SELECT event_seq, COALESCE(run_id, ''), payload FROM run_events WHERE type = ?`
+	args := []any{typ}
+	if !scope.Operator {
+		q += ` AND user_id = ?`
+		args = append(args, scope.UserID)
+	}
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: watchdog supersession %s: %w", typ, err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var seq int64
+		var runID, payload string
+		if err := rows.Scan(&seq, &runID, &payload); err != nil {
+			return nil, err
+		}
+		k := keyFn(runID, json.RawMessage(payload))
+		if k == "" {
+			continue
+		}
+		if seq > out[k] {
+			out[k] = seq
+		}
+	}
+	return out, rows.Err()
 }
 
 // ── shared read helpers ──

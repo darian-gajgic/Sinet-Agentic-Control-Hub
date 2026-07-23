@@ -33,15 +33,17 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchdog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
-// producerTypes is the complete inventory of the 76 event types minted by the
-// B0–B4 producers, referenced through each package's exported Event* constant
-// so a producer-side value change (or a deleted constant) is caught here at
-// compile or assertion time. The 13 worker-asset lifecycle constants are
-// package-private (internal/worker/store.go:43-55, evTemplateCreated…), so
-// they appear here as literals — the one place Go cannot couple by identifier.
+// producerTypes is the complete inventory of the 79 event types minted by the
+// B0–B4 producers plus the three B5-3 watchdog types, referenced through each
+// package's exported Event* constant so a producer-side value change (or a
+// deleted constant) is caught here at compile or assertion time. The 13
+// worker-asset lifecycle constants are package-private (internal/worker/
+// store.go:43-55, evTemplateCreated…), so they appear here as literals — the
+// one place Go cannot couple by identifier.
 func producerTypes() []string {
 	types := []string{
 		// shell (2): platform lifecycle
@@ -85,6 +87,8 @@ func producerTypes() []string {
 		// local (4)
 		local.EventLocalUnmeteredDefect, local.EventLocalAdmissionsStopped,
 		local.EventLocalAdmissionsResumed, local.EventLocalAliasRetargeted,
+		// watchdog (3): the B5-3 S14.4 producers
+		watchdog.EventFlagged, watchdog.EventAnnotated, watchdog.EventSuppressed,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -138,11 +142,11 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 	}
 }
 
-// TestInventoryTotals pins the reconciliation counts (§2): 76 minted + 17
-// declare-only = 93 registered types.
+// TestInventoryTotals pins the reconciliation counts (§2): B5-3 minted the
+// three watchdog types, so 79 minted + 14 declare-only = 93 registered types.
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 76 {
-		t.Errorf("producer inventory = %d, want 76 (§2)", n)
+	if n := len(producerTypes()); n != 79 {
+		t.Errorf("producer inventory = %d, want 79 (§2; +3 watchdog at B5-3)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -155,11 +159,11 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 76 {
-		t.Errorf("registered minted types = %d, want 76", minted)
+	if minted != 79 {
+		t.Errorf("registered minted types = %d, want 79", minted)
 	}
-	if declareOnly != 17 {
-		t.Errorf("declare-only types = %d, want 17", declareOnly)
+	if declareOnly != 14 {
+		t.Errorf("declare-only types = %d, want 14", declareOnly)
 	}
 }
 
@@ -395,19 +399,19 @@ func TestRenamedTypesAreCanonical(t *testing.T) {
 	}
 }
 
-// TestDeclareOnlyFutureTypes (§2, seams): the 17 types declared now with
-// producers in later packets are present and marked declare-only.
+// TestDeclareOnlyFutureTypes (§2, seams): the 14 types declared now with
+// producers in later packets are present and marked declare-only. The three
+// watchdog types left this set when B5-3 became their producer.
 func TestDeclareOnlyFutureTypes(t *testing.T) {
 	reg := eventlog.Registry()
 	declareOnly := []string{
 		"stage.started", "stage.finished", "run.parked", "run.resumed",
 		"ask.observed", "ask.answered", "decision.recorded",
-		"watchdog.flagged", "watchdog.annotated", "watchdog.suppressed",
 		"drift.finding", "canary.result", "retention.compacted", "tool.called",
 		"benchmark.pair_recorded", "eval.score_recorded", "run.summary_written",
 	}
-	if len(declareOnly) != 17 {
-		t.Fatalf("expected 17 declare-only types, listed %d", len(declareOnly))
+	if len(declareOnly) != 14 {
+		t.Fatalf("expected 14 declare-only types, listed %d", len(declareOnly))
 	}
 	for _, typ := range declareOnly {
 		ts, ok := reg.TypeSpec(typ)

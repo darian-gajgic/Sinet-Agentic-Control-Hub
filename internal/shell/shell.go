@@ -56,6 +56,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchdog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
@@ -214,6 +215,9 @@ func Run(ctx context.Context, opts Options) error {
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
 	var localSurf *localSurface
+	// The S14.4 watchdog suite (B5-3): composed in the production path, driven by
+	// shell-owned goroutines (sweep + Tier-0 tail + dead-man probe) after step 5.
+	var wd *watchdog.Watchdog
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -475,6 +479,35 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		logger.Info("preview: S13.8 preview module wired (operator endpoints are B6)",
 			"routing_enabled", os.Getenv("SINET_PREVIEW_CADDY_ADMIN") != "")
+
+		// The S14.4 watchdog suite (B5-3): Tier-0 counters + the Tier-1
+		// disambiguator (localSurf.Duty, $0) + Tier-2 pause-and-flag, plus the
+		// registered health checks + the dead-man canary. The spend rule reads
+		// the priced ledger (dormant at v0 — empty price table); the Tier-1
+		// terminal-run $0 row rides the AdvisoryMeter platform-run seam (OQ4). The
+		// recurring listener audit reuses the shell's loopback lint (R25); the
+		// organ-liveness / wake-reconcile / WAL seams are honestly absent at v0
+		// (their host machinery — is-active from the sinet user, logind wake
+		// wiring — is a later packet). The shell OWNS WHEN (the goroutines below);
+		// the suite owns the LOGIC.
+		wd = watchdog.New(watchdog.Deps{
+			DB: db, Log: log, Runs: runs, Settings: reg,
+			Duty:  localSurf.Duty,
+			Meter: watchdog.AdvisoryMeter(advisoryMeter(runs, checkpoints)),
+			Spend: meterLedger,
+			Listener: func(context.Context) ([]watchdog.ForeignListener, error) {
+				// Recurring re-audit of the one bind the shell controls, reusing
+				// the S01.6 loopback lint (R25). Enumerating every OS listener
+				// needs /proc parsing and must never dial the live front chain
+				// (host hazard) — deferred; the detection LOGIC is fixture-tested.
+				if err := assertLoopbackAddr(cfg.HTTPAddr); err != nil {
+					return []watchdog.ForeignListener{{Addr: cfg.HTTPAddr, Process: "sinet-control"}}, nil
+				}
+				return nil, nil
+			},
+			Logger: logger,
+		})
+		logger.Info("watchdog: S14.4 suite wired (B5-3)", "tier1_local", localSurf.Duty != nil)
 	}
 
 	// ── S01.6 step 2: listener-binding lint, fail-closed (P-T13-2).
@@ -586,6 +619,20 @@ func Run(ctx context.Context, opts Options) error {
 	// (tests) is not a scheduler and brings its own driving; sched is nil then.
 	if sched != nil {
 		go sched.Run(procCtx)
+	}
+
+	// The S14.4 watchdog drivers (B5-3): the shell owns WHEN (Spec S10.7 /
+	// CONVENTIONS §7/§8 — the WAL/recovery-loop precedent). The event-driven
+	// Tier-0 tail catches loops near-real-time; the sweep runs the time-based
+	// signals + registered checks; the dead-man probe runs daily. Intervals are
+	// structural constants (no new ⚙; the independent-observer property for the
+	// dead-man canary is exactly that the shell — not the watchdog's own loop —
+	// drives it). Composed only in the production path (wd nil under injected
+	// admission).
+	if wd != nil {
+		go watchdogTailLoop(procCtx, wd, log, logger)
+		go watchdogSweepLoop(procCtx, wd, logger)
+		go watchdogDeadManLoop(procCtx, wd, logger)
 	}
 
 	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,
@@ -767,6 +814,71 @@ func recoverySweepLoop(ctx context.Context, settings Settings, ladder RecoveryLa
 		case <-t.C:
 			if err := ladder.Reconcile(ctx); err != nil {
 				logger.Warn("recovery sweep", "err", err)
+			}
+		}
+	}
+}
+
+// watchdogTailInterval is the poll cadence of the event-driven Tier-0 tail — a
+// structural constant (the After-based tail; a runaway loop is caught within a
+// couple of seconds, well before it burns a paid window). Not a ⚙ (the
+// sseBatchSize precedent, §7).
+const watchdogTailInterval = 2 * time.Second
+
+// watchdogTailLoop drives the event-driven Tier-0 tail (Spec S14.4; brief R28):
+// it bootstraps the cursor at the current head (a live loop keeps emitting, so
+// no history re-scan is needed) and re-evaluates the runs that emit new events.
+func watchdogTailLoop(ctx context.Context, wd *watchdog.Watchdog, log *eventlog.Log, logger *slog.Logger) {
+	cursor, err := log.Head(ctx)
+	if err != nil {
+		logger.Warn("watchdog: tail head bootstrap", "err", err)
+	}
+	t := time.NewTicker(watchdogTailInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			next, err := wd.Tail(ctx, cursor)
+			if err != nil {
+				logger.Warn("watchdog: Tier-0 tail", "err", err)
+				continue
+			}
+			cursor = next
+		}
+	}
+}
+
+// watchdogSweepLoop drives the time-based signals + registered checks on the
+// structural SweepInterval (Spec S14.4; brief R28).
+func watchdogSweepLoop(ctx context.Context, wd *watchdog.Watchdog, logger *slog.Logger) {
+	t := time.NewTicker(watchdog.SweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := wd.Sweep(ctx); err != nil {
+				logger.Warn("watchdog: sweep", "err", err)
+			}
+		}
+	}
+}
+
+// watchdogDeadManLoop drives the dead-man canary V2 on the structural daily
+// cadence (Spec S14.4; brief R28-DMC) — the shell is the independent observer.
+func watchdogDeadManLoop(ctx context.Context, wd *watchdog.Watchdog, logger *slog.Logger) {
+	t := time.NewTicker(watchdog.DeadManInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := wd.DeadManProbe(ctx); err != nil {
+				logger.Warn("watchdog: dead-man probe", "err", err)
 			}
 		}
 	}
