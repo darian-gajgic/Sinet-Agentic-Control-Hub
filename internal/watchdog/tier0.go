@@ -95,18 +95,27 @@ func (w *Watchdog) EvaluateRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	events, err := w.readRecentEvents(ctx, runID, r.Generation, recentWindow)
-	if err != nil {
-		return err
-	}
-
 	if !behavioralWatchStates[r.State] {
 		if isCleanCompletion(r.State) {
+			// Suspicious-completion reads the WHOLE run UNFENCED (drain-R1): a run
+			// that did real work before a resume (generation N) then completed
+			// quietly at generation N+1 is not a silent failure — counting only
+			// the post-resume generation would falsely flag it (and burn a Tier-1
+			// advisory call). The generation fence is BEHAVIORAL-only.
+			events, err := w.readRecentEvents(ctx, runID, allGenerations, recentWindow)
+			if err != nil {
+				return err
+			}
 			return w.checkSuspiciousCompletion(ctx, r, events)
 		}
 		return nil // not a Tier-0 watch state (crashed/terminal are recovery's)
 	}
 
+	// The behavioral counters read the run's CURRENT generation only (the D1 fence).
+	events, err := w.readRecentEvents(ctx, runID, r.Generation, recentWindow)
+	if err != nil {
+		return err
+	}
 	tools := toolCompleted(events)
 
 	loopN, err := w.settings.Int(keyLoopRepeat)

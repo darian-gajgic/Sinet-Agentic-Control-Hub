@@ -236,6 +236,38 @@ func TestCompletedSentinelMatchesRunState(t *testing.T) {
 	}
 }
 
+// TestSuspiciousCompletionCountsPreResumeWork (drain-R1, demonstrated): the
+// generation fence is BEHAVIORAL-only. A run that did real tool work at
+// generation 0, parked, resumed (gen→1), and completed with NO further tool
+// calls is NOT a silent failure — the whole-run (unfenced) read counts the
+// gen-0 work, so no suspicious-completion flag. Direction (b), a genuinely
+// tool-less completed run STILL flagging, is covered by
+// TestSuspiciousCompletionByClass (silent.execute). This test FAILS against the
+// pre-R1 fenced read (which counts only gen-1 → 0 tools → false flag).
+func TestSuspiciousCompletionCountsPreResumeWork(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	w := e.wd()
+	e.runningRun("work.execute", "alice")
+	// real tool work at generation 0
+	e.toolEvent("work.execute", "Bash", "d1", false)
+	e.toolEvent("work.execute", "Grep", "d2", false)
+	// park → resume (generation bumps to 1) → complete with NO further tool calls
+	if _, err := e.runs.Transition(ctx, "work.execute", run.StateParked, run.TransitionOptions{Reason: "watchdog:watchdog.loop", Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	if _, err := e.runs.Transition(ctx, "work.execute", run.StateRunning, run.TransitionOptions{Reason: "resume — I was wrong", Actor: "alice"}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	e.completeRun("work.execute")
+	if err := w.EvaluateRun(ctx, "work.execute"); err != nil {
+		t.Fatalf("EvaluateRun: %v", err)
+	}
+	if fs := e.flagsFor("work.execute"); len(fs) != 0 {
+		t.Fatalf("a run that did real work before a resume was falsely flagged suspicious-completion — the fence blinded the whole-run read (R1): %+v", fs)
+	}
+}
+
 func TestTailEvaluatesRunsWithNewEvents(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)

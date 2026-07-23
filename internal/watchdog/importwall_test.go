@@ -34,7 +34,7 @@ var deadmanOnlyStates = []string{"StateCompleted", "StateFinalized"}
 // forbiddenStateStrings are the recovery-owned state VALUES as string literals:
 // scanned so run.State("tombstoned") cannot construct a forbidden state past the
 // ident/selector check (drain D10a).
-var forbiddenStateStrings = []string{"tombstoned", "crashed", "died_at_gate"}
+var forbiddenStateStrings = []string{"tombstoned", "crashed", "died-at-gate"}
 
 // forbiddenKillStrings are kill-verb string literals a killer might use (a raw
 // syscall/exec verb) — matched case-insensitively (exact for the ambiguous

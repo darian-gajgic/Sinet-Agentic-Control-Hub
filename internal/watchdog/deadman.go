@@ -33,7 +33,10 @@ import (
 // structural constant (DeadManInterval — no new ⚙).
 
 // canaryPrefix marks the synthetic dead-man canary runs so their (real, honest)
-// synthetic flags are excluded from the flag-now chattiness meta-alert (R23).
+// synthetic flags are excluded from the flag-now chattiness meta-alert (R23) AND
+// from the inbox projection (drain D4). internal/api cannot import this package,
+// so internal/api/projection.go pins an identical literal (deadManCanaryPrefix) —
+// a rename here MUST update that copy too.
 const canaryPrefix = "platform.deadman."
 
 // DeadManProbeIfDue runs a dead-man probe only when one is DUE (drain D6). The

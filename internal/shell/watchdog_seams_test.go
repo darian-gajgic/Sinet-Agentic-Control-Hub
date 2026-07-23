@@ -18,8 +18,10 @@ import (
 )
 
 // watchdog_seams_test.go — the drain-D7 in-process listener audit and the
-// drain-D14 shell-posture wired-path coverage. Both are hermetic: no live
-// network beyond loopback listeners opened and closed in-test, no front chain.
+// drain-D14 shell-posture wired-path coverage. Both are hermetic: the only
+// sockets opened are ephemeral listeners bound and closed in-test — a loopback
+// one and, to exercise the audit's trip path, a 0.0.0.0 one — never connected to,
+// with no front chain and no paid lane.
 
 // TestAuditOwnListeners (drain D7): the real in-process listener audit passes a
 // loopback listener and trips a 0.0.0.0 one — a genuine runtime check over
@@ -35,7 +37,10 @@ func TestAuditOwnListeners(t *testing.T) {
 
 	foreign, err := auditOwnListeners()
 	if err != nil {
-		t.Skipf("listener audit unavailable in this environment (/proc): %v", err)
+		// Linux-only platform: a missing /proc is a real failure, not a
+		// sanctioned skip (CONVENTIONS §10 sanctions only the R/L engine-absence
+		// skips).
+		t.Fatalf("listener audit failed (Linux /proc required): %v", err)
 	}
 	if containsPort(foreign, loPort) {
 		t.Errorf("a 127.0.0.1 listener was flagged foreign: %v (port %s)", foreign, loPort)

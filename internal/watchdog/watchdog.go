@@ -111,6 +111,11 @@ const (
 	// Tier-0 counters (R1). Comfortably above the largest ⚙ counter clamp
 	// (pingpong 12 cycles = 24 calls) so a re-derivation never misses a trip.
 	recentWindow = 128
+	// allGenerations, passed as the generation to readRecentEvents, disables the
+	// generation fence — the whole run across generations (still the recentWindow
+	// bound). Used ONLY by the suspicious-completion path (drain-R1): the fence is
+	// behavioral-only; a completed run's whole-run activity must be counted.
+	allGenerations = -1
 	// eventSchemaVersion versions the watchdog.* event payloads.
 	eventSchemaVersion = 1
 	// eventLogSizeThresholdBytes is the WAL/table-growth flag threshold (R27) —
@@ -336,25 +341,34 @@ type recentEvent struct {
 	TS      time.Time
 }
 
-// readRecentEvents returns the run's newest `limit` events AT the given
-// generation, in OLDEST-first order (the counters read forward). Re-derived
-// fresh each evaluation — no durable cursor, no state table (R1; Spec S14.1).
-// Short-batch, no long-lived read tx (S02.1).
+// readRecentEvents returns the run's newest `limit` events in OLDEST-first order
+// (the counters read forward). generation >= 0 FENCES to that generation; passing
+// allGenerations (< 0) reads the whole run unfenced. Re-derived fresh each
+// evaluation — no durable cursor, no state table (R1; Spec S14.1). Short-batch,
+// no long-lived read tx (S02.1).
 //
-// The generation FENCE (drain D1) is load-bearing: the resume edge
-// parked→running bumps the run's generation (Spec S02.5 step 4, verified in
-// internal/run/run.go generationBumps), and pre-park events carry the OLD
-// generation. Without the fence, one tail tick after an operator resume re-reads
-// the stale pre-park trace and re-trips loop/ping-pong/error-loop — re-parking a
-// run the operator just said "resume — I was wrong" to, with zero new events
-// (and burning a Tier-1 duty call). Fencing to the run's CURRENT generation
-// drops the pre-park trace; the resume transition event itself is at the new
-// generation, so a legitimate fresh anomaly (new events at the new generation)
-// still flags.
+// The generation FENCE (drain D1) is load-bearing for the BEHAVIORAL counters
+// (loop/ping-pong/error-loop): the resume edge parked→running bumps the run's
+// generation (Spec S02.5 step 4, verified in internal/run/run.go generationBumps),
+// and pre-park events carry the OLD generation. Without the fence, one tail tick
+// after an operator resume re-reads the stale pre-park trace and re-trips —
+// re-parking a run the operator just said "resume — I was wrong" to, with zero
+// new events (and burning a Tier-1 duty call). Fencing to the CURRENT generation
+// drops the pre-park trace; the resume transition event is at the new generation,
+// so a legitimate fresh anomaly still flags. The suspicious-completion path,
+// though, reads UNFENCED (drain-R1): a run that did real work before a resume and
+// then completed quietly is not a silent failure, so its whole-run activity — not
+// just the post-resume generation — must be counted.
 func (w *Watchdog) readRecentEvents(ctx context.Context, runID string, generation int64, limit int) ([]recentEvent, error) {
+	fence, args := "", []any{runID}
+	if generation >= 0 {
+		fence = " AND generation = ?"
+		args = append(args, generation)
+	}
+	args = append(args, limit)
 	rows, err := w.db.QueryContext(ctx,
 		`SELECT event_seq, type, payload, ts FROM run_events
-		 WHERE run_id = ? AND generation = ? ORDER BY event_seq DESC LIMIT ?`, runID, generation, limit)
+		 WHERE run_id = ?`+fence+` ORDER BY event_seq DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
