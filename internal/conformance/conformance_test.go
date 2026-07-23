@@ -393,6 +393,92 @@ func TestRecordResultGoldenPayloadFields(t *testing.T) {
 	}
 }
 
+// TestRecordResultAtomicBothOrNeither is the GENUINE both-or-neither proof
+// (drain D2): a test-local trigger ABORTs the row UPDATE, which RecordResult
+// does AFTER appending the event, both in ONE WriteTx — so the append must roll
+// back with it. A two-transaction implementation (append committed before the
+// update) would leave the event behind and fail here; the abort-before-append
+// failure tests (unknown/derive/incomplete row) cannot catch that.
+func TestRecordResultAtomicBothOrNeither(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t)
+	ctx := context.Background()
+
+	if err := h.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`CREATE TRIGGER test_abort_result_update
+			   BEFORE UPDATE OF last_run, last_result ON conformance_registry
+			 BEGIN SELECT RAISE(ABORT, 'test: abort the row update AFTER the append point'); END;`)
+		return err
+	}); err != nil {
+		t.Fatalf("install test trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = h.db.WriteTx(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS test_abort_result_update`)
+			return err
+		})
+	})
+
+	before := h.evalScoreCount(t)
+	if err := h.st.RecordResult(ctx, greenResult("adapter-anthropic")); err == nil {
+		t.Fatal("RecordResult must error when the row update aborts")
+	}
+	if after := h.evalScoreCount(t); after != before {
+		t.Fatalf("the eval.score_recorded append was NOT rolled back with the aborted update: %d → %d — both-or-neither FAILED (append + update are not ONE tx)", before, after)
+	}
+	var lr sql.NullString
+	if err := h.db.QueryRowContext(ctx, `SELECT last_result FROM conformance_registry WHERE row_id = 'adapter-anthropic'`).Scan(&lr); err != nil {
+		t.Fatal(err)
+	}
+	if lr.Valid {
+		t.Errorf("the row update landed despite the aborted tx: last_result = %q", lr.String)
+	}
+}
+
+// ── the bump-gating set (rubric 10; R19) ──
+
+func TestBumpGatingSetSurfacesBLimbReference(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t)
+	rows, err := h.st.BumpGatingRows(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The engine_bump set is exactly the five engine-bump-triggered rows.
+	want := map[string]bool{
+		"adapter-anthropic": true, "adapter-local": true, "no-engine-sse-replay": true,
+		"d6-violation-attempts": true, "compaction-canary": true,
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("BumpGatingRows returned %d rows, want %d (the engine_bump set)", len(rows), len(want))
+	}
+	for _, st := range rows {
+		if !want[st.ID] {
+			t.Errorf("BumpGatingRows returned %q — not an engine_bump row", st.ID)
+		}
+		if !strings.Contains(st.TriggerSet, "engine_bump") {
+			t.Errorf("row %q trigger_set = %q, missing engine_bump", st.ID, st.TriggerSet)
+		}
+		// Each row carries the two-limb bump-gate with its (b)-limb S14.8/B5-5
+		// reference as row DATA (R19): a bump lands only after (a) the suite
+		// passes AND (b) the S14.8 quality probe shows no regression.
+		for _, needle := range []string{"(a)", "(b)", "S14.8", "B5-5"} {
+			if !strings.Contains(st.Notes, needle) {
+				t.Errorf("engine_bump row %q notes miss %q — the two-limb (b)-limb reference must ride the row: %q", st.ID, needle, st.Notes)
+			}
+		}
+	}
+	// No non-engine_bump row leaks in (the drill/restore/dead-man/kill-9 rows
+	// carry other triggers).
+	for _, st := range rows {
+		switch st.ID {
+		case "forced-escalation-e2e", "verified-restore-drill", "dead-man-canary", "kill9-suspend-cycle":
+			t.Errorf("non-engine_bump row %q leaked into the bump-gating set", st.ID)
+		}
+	}
+}
+
 // ── dueness (rubric 9) ──
 
 func TestDuenessStructuralAndSettingsBacked(t *testing.T) {

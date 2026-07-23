@@ -176,6 +176,31 @@ func (s *Store) Due(ctx context.Context) ([]RowState, error) {
 	return out, nil
 }
 
+// BumpGatingRows returns the S03.3 bump-gating set (R19; S14.5 closing ¶): the
+// registry rows whose trigger set contains engine_bump. An engine bump lands
+// only after (a) the candidate passes its per-lane conformance suite — these
+// rows — AND (b) the S14.8 before/after quality probe shows no regression
+// (P-T02-5); the (b)-limb reference to S14.8/B5-5 rides each row's notes as
+// data (bumpGateNote). This makes the two-limb gate queryable; it builds NO
+// bump executor and NO quality-probe machinery (the bump stays the operator's
+// S03.3 procedure, limb (b) is B5-5's).
+func (s *Store) BumpGatingRows(ctx context.Context) ([]RowState, error) {
+	all, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RowState, 0)
+	for _, st := range all {
+		for _, tok := range strings.Split(st.TriggerSet, ",") {
+			if tok == TriggerEngineBump {
+				out = append(out, st)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 // due computes dueness from the cadence token + last-run time, reading a
 // settings-backed cadence live (never a hardcoded ⚙ value). A never-run row is
 // due (its overdue-ness is trivially visible, OQ3).

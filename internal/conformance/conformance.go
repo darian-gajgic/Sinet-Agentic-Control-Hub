@@ -13,6 +13,9 @@
 // passive read surface derived from stored state (never an in-memory ticker),
 // so it survives restart and suspend.
 //
+// The registered suites assert behavior, never docs (Spec S03.3 rule 4); this
+// package parses no doc/help text of any kind.
+//
 // Imports are storage + eventlog + settings + stdlib ONLY (AST-pinned): it
 // never imports the producer packages whose suites it registers, and it never
 // imports api. Derive rows (restore-drill, dead-man) read the existing

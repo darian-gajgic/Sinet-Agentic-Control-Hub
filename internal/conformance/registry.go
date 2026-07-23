@@ -7,6 +7,15 @@ import "strings"
 // "every row carries its owning user_id").
 const platformUser = "platform"
 
+// bumpGateNote records the S03.3 bump-gating tie as ROW DATA on every
+// engine_bump-triggered row (R19; S14.5 closing ¶): a bump lands only after
+// (a) the candidate passes its per-lane conformance suite AND (b) the S14.8
+// before/after quality probe shows no regression (P-T02-5) — limb (b) is
+// B5-5's, referenced here as data. Querying the engine_bump rows
+// (BumpGatingRows) surfaces both limbs; this packet builds no bump executor and
+// no quality-probe machinery.
+const bumpGateNote = " S03.3 bump-gating tie (engine_bump row): a bump lands only after (a) the candidate passes its per-lane conformance suite AND (b) the S14.8 before/after quality probe (B5-5) shows no regression (P-T02-5)."
+
 // last_result vocabulary.
 const (
 	ResultGreen   = "green"
@@ -161,7 +170,7 @@ func SeedRows() []Row {
 			Schedule:    "on any engine/CLI version change + weekly",
 			Cadence:     CadenceWeekly,
 			AffectClass: AffectLane,
-			Notes:       "the Anthropic lane (claudecli battery). The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now.",
+			Notes:       "the Anthropic lane (claudecli battery). The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// Adapter per-lane — local [S03.2/S12.10]. The zai lane is OMITTED.
@@ -176,7 +185,7 @@ func SeedRows() []Row {
 			Schedule:    "on any engine/CLI version change + weekly",
 			Cadence:     CadenceWeekly,
 			AffectClass: AffectLane,
-			Notes:       "the local lane (the S12.10 deliberate-bump battery, the F17 one-named-run-handle TestBumpProcedure*). The zai lane is OMITTED and has NO row: internal/adapters holds only claudecli and S12.1 class (a) has no v0 consumer — a row claiming a nonexistent suite would fake (R7; the honest-dormancy discipline). Its row lands with its adapter. Lane-affecting ⇒ flag-now.",
+			Notes:       "the local lane (the S12.10 deliberate-bump battery, the F17 one-named-run-handle TestBumpProcedure*). The zai lane is OMITTED and has NO row: internal/adapters holds only claudecli and S12.1 class (a) has no v0 consumer — a row claiming a nonexistent suite would fake (R7; the honest-dormancy discipline). Its row lands with its adapter. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// The no-engine-SSE-replay standing assertion [S14.3 ¶3; S14.5] — a
@@ -191,7 +200,7 @@ func SeedRows() []Row {
 			Schedule:    "with the adapter per-lane suites (on any engine/CLI version change + weekly)",
 			Cadence:     CadenceWeekly,
 			AffectClass: AffectNone,
-			Notes:       "the S14.3 ¶3 no-reliance-on-engine-SSE-replay assertion (opencode ignores Last-Event-ID, fix declined upstream). The cross-lane log-reconstruction guarantee is an inspection-surface invariant (not a per-lane freeze or storage-corruption class) ⇒ an ordinary approval-class card.",
+			Notes:       "the S14.3 ¶3 no-reliance-on-engine-SSE-replay assertion (opencode ignores Last-Event-ID, fix declined upstream). The cross-lane log-reconstruction guarantee is an inspection-surface invariant (not a per-lane freeze or storage-corruption class) ⇒ an ordinary approval-class card." + bumpGateNote,
 		},
 		{
 			// D6 violation attempts [S04.5].
@@ -208,7 +217,7 @@ func SeedRows() []Row {
 			Schedule:    "quarterly + on engine bump",
 			Cadence:     CadenceQuarterly,
 			AffectClass: AffectLane,
-			Notes:       "the S04.5 D6 standing battery (CONVENTIONS §19): refusal asserted for depth-3/lateral/native-spawn/over-budget, containment-with-salvage for mid-run kill. Lane-affecting ⇒ flag-now.",
+			Notes:       "the S04.5 D6 standing battery (CONVENTIONS §19): refusal asserted for depth-3/lateral/native-spawn/over-budget, containment-with-salvage for mid-run kill. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// Compaction canary [S05.7] — OQ1(a).
@@ -223,7 +232,7 @@ func SeedRows() []Row {
 			Schedule:    "on engine bump + quarterly",
 			Cadence:     CadenceQuarterly,
 			AffectClass: AffectLane,
-			Notes:       "OQ1(a): NO standing canary-constraint→compact→adherence suite exists in-tree — the fixture is the B1-4 spike-method probe (the re-runnable reference) plus the nearest standing behavior checks (the SessionStart re-injection fixture + the SINET_B3_4 per-pin canary). The missing standing suite is FLAGGED to the B5 gate as an S05.7/adapter follow-up, not silently absorbed. Lane-affecting ⇒ flag-now.",
+			Notes:       "OQ1(a): NO standing canary-constraint→compact→adherence suite exists in-tree — the fixture is the B1-4 spike-method probe (the re-runnable reference) plus the nearest standing behavior checks (the SessionStart re-injection fixture + the SINET_B3_4 per-pin canary). The missing standing suite is FLAGGED to the B5 gate as an S05.7/adapter follow-up, not silently absorbed. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// Forced-escalation end-to-end [S06/S04/S07] — OQ4(a).
