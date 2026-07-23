@@ -214,11 +214,16 @@ func Run(ctx context.Context, opts Options) error {
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
 	var localSurf *localSurface
+	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
+	// api from the production ledger below; nil under injected admission (the
+	// snapshot still projects, counters best-effort).
+	var meterReader api.MeterReader
 	admission := opts.Admission
 	if admission == nil {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
 		exceptions := metering.NoMeteredExceptions()
 		meterLedger := metering.NewLedger(db, priceTable, exceptions, reg)
+		meterReader = projMeter{ledger: meterLedger}
 		// The S11 composer probes the host once at startup (probe-at-
 		// compose, S16.3) and logs the result. ENGINE spawns run through it
 		// only OUTSIDE dev posture: a confined engine holds a credential
@@ -507,6 +512,8 @@ func Run(ctx context.Context, opts Options) error {
 		Accept:     acceptAccepter(acceptSurf),
 		FollowUp:   acceptFollowUp(acceptSurf),
 		Preview:    previewSurf, // held for the B6 preview endpoints (F17); not routed
+		DB:         db,          // S14.3 snapshot projections (owner-scoped, OQ1)
+		Meter:      meterReader, // S14.3 run-card counters (§4)
 		Logger:     logger,
 	})
 	httpSrv := &http.Server{
@@ -861,4 +868,27 @@ func (p routePressure) Pressure(ctx context.Context, owner, lane string) (float6
 		return gauge.Pressure, nil
 	}
 	return gauge.WeightedConsumption, nil
+}
+
+// projMeter adapts the S10 metering ledger to the api.MeterReader seam for the
+// S14.3 run card (brief §4): it folds a run's checkpoint usage into a monotonic
+// token total and the API-equivalent cost so far. Subscription lanes price as
+// UNPRICED (the empty v0 table) — the counter is honest, never money-by-
+// generation (S10.1).
+type projMeter struct{ ledger *metering.Ledger }
+
+func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, error) {
+	rc, err := m.ledger.RunConsumption(ctx, runID)
+	if err != nil {
+		return api.RunMeter{}, err
+	}
+	var tokens int64
+	for _, li := range rc.Items {
+		tokens += li.PromptTokens + li.BilledOutputTokens + li.CacheReadTokens + li.CacheCreationTokens
+	}
+	return api.RunMeter{
+		Tokens:          tokens,
+		APIEquivCostUSD: rc.TotalPricedUSD,
+		Unpriced:        rc.TotalUnpricedCalls > 0,
+	}, nil
 }

@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -26,12 +27,31 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // Settings is the api-facing view of the settings registry (Spec S01.10):
 // effective ⚙ values by dotted key.
 type Settings interface {
 	Duration(key string) (time.Duration, error)
+}
+
+// RunMeter is the S14.3 run-card counter seam result: the run's monotonic
+// token total and API-equivalent cost so far (§4). Subscription lanes are
+// Unpriced → the cost is the done-directly heuristic figure (S10, on
+// receipts), never money-by-generation.
+type RunMeter struct {
+	Tokens          int64
+	APIEquivCostUSD float64
+	Unpriced        bool
+}
+
+// MeterReader is the narrow metering read-seam for the run card: it folds a
+// run's checkpoint usage into its counters. The shell adapts
+// metering.Ledger.RunConsumption to it; nil leaves the counters at zero (the
+// snapshot still projects, best-effort).
+type MeterReader interface {
+	RunMeter(ctx context.Context, runID string) (RunMeter, error)
 }
 
 // keySSEKeepalive is the comment-frame keepalive cadence on the SSE stream,
@@ -91,7 +111,15 @@ type Config struct {
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
 	PollInterval time.Duration
-	Logger       *slog.Logger // nil = slog.Default
+	// DB is the read-only handle for the S14.3 snapshot projections (brief §3):
+	// short SELECTs over the existing tables, owner-scoped per S01.9 (OQ1). nil
+	// disables snapshot-then-tail — the raw owner-scoped tail still serves
+	// (back-compat with the B0-3 endpoint).
+	DB *storage.DB
+	// Meter is the run-card metering seam (RunMeter); nil leaves the token/cost
+	// counters at zero.
+	Meter  MeterReader
+	Logger *slog.Logger // nil = slog.Default
 }
 
 // Server is the HTTP API of the control plane.
@@ -114,6 +142,9 @@ type Server struct {
 	// preview is the S13.8 preview surface, held for the B6
 	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
 	preview *preview.Manager
+	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
+	// (the raw tail still serves).
+	proj *projector
 }
 
 // New assembles the Server.
@@ -133,6 +164,9 @@ func New(cfg Config) *Server {
 		accept:     cfg.Accept,
 		followUp:   cfg.FollowUp,
 		preview:    cfg.Preview,
+	}
+	if cfg.DB != nil {
+		s.proj = &projector{db: cfg.DB, meter: cfg.Meter}
 	}
 	if s.auth == nil {
 		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}

@@ -22,6 +22,7 @@ import (
 
 // backend is a real migrated platform.db with its event log and auth store.
 type backend struct {
+	db    *storage.DB
 	log   *eventlog.Log
 	store *auth.Store
 }
@@ -39,7 +40,7 @@ func newBackend(t *testing.T) *backend {
 		t.Fatalf("migrate: %v", err)
 	}
 	log := eventlog.New(db, reg)
-	return &backend{log: log, store: auth.New(db, log)}
+	return &backend{db: db, log: log, store: auth.New(db, log)}
 }
 
 func appendEvents(t *testing.T, log *eventlog.Log, types ...string) []int64 {
@@ -73,6 +74,7 @@ type serverOpts struct {
 	health   func() api.Health
 	stopping chan struct{}
 	poll     time.Duration
+	meter    api.MeterReader // nil = counters best-effort (zero)
 }
 
 func newTestServer(t *testing.T, o serverOpts) (*api.Server, *httptest.Server) {
@@ -98,6 +100,8 @@ func newTestServer(t *testing.T, o serverOpts) (*api.Server, *httptest.Server) {
 		HealthFn:     o.health,
 		Stopping:     o.stopping,
 		PollInterval: o.poll,
+		DB:           o.b.db,
+		Meter:        o.meter,
 	})
 	// Production posture serves the browser leg over TLS (terminated at
 	// tailscale serve in the real chain, Spec S01.4), and its session
