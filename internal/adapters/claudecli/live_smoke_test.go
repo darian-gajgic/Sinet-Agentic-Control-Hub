@@ -90,7 +90,7 @@ func TestLiveSmoke(t *testing.T) {
 
 	types := liveEventTypes(t, e)
 	t.Logf("live event trail: %v", types)
-	need := map[string]bool{"engine.message": false, "engine.usage": false, "run.checkpoint": false, "engine.done": false}
+	need := map[string]bool{"engine.message": false, "usage.recorded": false, "checkpoint.written": false, "engine.done": false}
 	for _, typ := range types {
 		if _, tracked := need[typ]; tracked {
 			need[typ] = true

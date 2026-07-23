@@ -213,7 +213,7 @@ var (
 // Payloads are refs + hashes, never bodies (P-T07-5).
 const (
 	// EventMinted is one minted revision (run-scoped on the minting run).
-	EventMinted = "deliverable.minted"
+	EventMinted = "artifact.produced"
 	// EventComment is one comment-recording act (may cover a batch of
 	// findings recorded in one transaction).
 	EventComment = "review.comment"

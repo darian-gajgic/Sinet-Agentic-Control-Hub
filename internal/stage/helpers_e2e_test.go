@@ -89,7 +89,7 @@ func TestHelperSpawnRecordAndReportLandInCoordinatorL0(t *testing.T) {
 
 	// Spawn record written with the full S04.4 field set, BEFORE any
 	// lifecycle event.
-	spawns := eventsOfType(t, h.db, r.ID, "orchestration.spawn")
+	spawns := eventsOfType(t, h.db, r.ID, "helper.spawned")
 	if len(spawns) != 1 {
 		t.Fatalf("spawn records = %d", len(spawns))
 	}
@@ -184,7 +184,7 @@ func TestHelperRefusalsAreLoggedEvidence(t *testing.T) {
 			t.Fatalf("%s: spawn must refuse", c.name)
 		}
 	}
-	refusals := eventsOfType(t, h.db, r.ID, "orchestration.spawn_refused")
+	refusals := eventsOfType(t, h.db, r.ID, "spawn.refused")
 	if len(refusals) != len(cases) {
 		t.Fatalf("refusal events = %d, want %d", len(refusals), len(cases))
 	}
@@ -194,7 +194,7 @@ func TestHelperRefusalsAreLoggedEvidence(t *testing.T) {
 		}
 	}
 	// No spawn record was written for any refused proposal.
-	if spawns := eventsOfType(t, h.db, r.ID, "orchestration.spawn"); len(spawns) != 0 {
+	if spawns := eventsOfType(t, h.db, r.ID, "helper.spawned"); len(spawns) != 0 {
 		t.Fatalf("refused proposals wrote %d spawn records", len(spawns))
 	}
 }
@@ -230,7 +230,7 @@ func TestHelperDepth3RecursionRefused(t *testing.T) {
 	}); err == nil {
 		t.Fatal("depth-3 recursion must refuse")
 	}
-	refusals := eventsOfType(t, h.db, r.ID, "orchestration.spawn_refused")
+	refusals := eventsOfType(t, h.db, r.ID, "spawn.refused")
 	if len(refusals) != 1 || refusals[0]["check"] != "depth" {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -254,7 +254,7 @@ func TestHelperSpawnBudgetExhaustionRefuses(t *testing.T) {
 	}); err == nil {
 		t.Fatal("9th spawn must refuse (⚙ spawn_budget; overrun only via an operator-visible gate)")
 	}
-	refusals := eventsOfType(t, h.db, r.ID, "orchestration.spawn_refused")
+	refusals := eventsOfType(t, h.db, r.ID, "spawn.refused")
 	if len(refusals) != 1 || refusals[0]["check"] != "spawn-budget" {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -278,7 +278,7 @@ func TestHelperRejectRetriesFreshThenFails(t *testing.T) {
 	}
 	// A retry is a FRESH spawn with a revised brief (fork-don't-poison):
 	// two spawn records, distinct ids, the second carrying the revision.
-	spawns := eventsOfType(t, h.db, r.ID, "orchestration.spawn")
+	spawns := eventsOfType(t, h.db, r.ID, "helper.spawned")
 	if len(spawns) != 2 {
 		t.Fatalf("spawn records = %d, want 2 (original + fresh retry)", len(spawns))
 	}

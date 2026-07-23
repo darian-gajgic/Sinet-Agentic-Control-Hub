@@ -69,12 +69,50 @@ const (
 	KindDone       EventKind = "done"
 )
 
-// EventTypePrefix namespaces adapter-observed events in run_events
-// (type = EventTypePrefix + Kind). Names are provisional pending the S14
-// event contract (B5), matching the B0-3/B0-4 precedent.
+// EventTypePrefix namespaces the engine-trace members of the closed S03.1
+// event set that keep their raw frame name in run_events (message, gate_ask,
+// done). The members carrying a distinct S14.2-canonical name are mapped by
+// eventType.
 const EventTypePrefix = "engine."
 
-// engineEventSchemaVersion versions the engine.* event payloads.
+// Canonical run_events type strings for the closed S03.1 engine event set,
+// reconciled to the S14.2 event-type contract (internal/eventlog/contract.go,
+// B5-1): usage/rate_limit/tool_result carry their S14.2-canonical names;
+// message/done are ADMITTED engine trace steps and gate_ask is the stored
+// Gate/ask trace event (OQ5) — all three keep the engine.<kind> frame name.
+const (
+	EventTypeMessage    = EventTypePrefix + string(KindMessage) // engine.message
+	EventTypeUsage      = "usage.recorded"                      // S14.2 Usage & limits
+	EventTypeRateLimit  = "limit.event"                         // S14.2 Usage & limits
+	EventTypeGateAsk    = EventTypePrefix + string(KindGateAsk) // engine.gate_ask
+	EventTypeToolResult = "tool.completed"                      // S14.2 Tools & artifacts
+	EventTypeDone       = EventTypePrefix + string(KindDone)    // engine.done
+)
+
+// eventType maps a closed-set engine kind (S03.1) to its canonical run_events
+// type (S14.2). Every adapter-observed event routes through it so only the
+// contract's canonical names reach run_events. Unknown engine frames are
+// filtered upstream (S03.1 forward-tolerance) and never reach this map.
+func eventType(kind EventKind) string {
+	switch kind {
+	case KindMessage:
+		return EventTypeMessage
+	case KindUsage:
+		return EventTypeUsage
+	case KindRateLimit:
+		return EventTypeRateLimit
+	case KindGateAsk:
+		return EventTypeGateAsk
+	case KindToolResult:
+		return EventTypeToolResult
+	case KindDone:
+		return EventTypeDone
+	default:
+		return EventTypePrefix + string(kind)
+	}
+}
+
+// engineEventSchemaVersion versions the engine event payloads.
 const engineEventSchemaVersion = 1
 
 // ExcerptCap bounds message/tool-result excerpts embedded in event

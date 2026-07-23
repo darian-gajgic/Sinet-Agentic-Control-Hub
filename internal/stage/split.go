@@ -117,7 +117,7 @@ func (s *Skeleton) consolidateSplit(ctx context.Context, r run.Run, stepID, stag
 	if _, err := s.cfg.Ledger.RecordDecision(ctx, r.ID, ledger.AuthorPlatform, run.ActorPlatform, stageName,
 		fmt.Sprintf("stage split executed: session %s ended at its checkpoint boundary; step %s continues as %s",
 			stageName, stepID, successor),
-		fmt.Sprintf("context.overflow stage-split auto-accepted (S05.3; event seq %d)", res.Budget.OverflowSeq),
+		fmt.Sprintf("compaction.anomaly stage-split auto-accepted (S05.3; event seq %d)", res.Budget.OverflowSeq),
 		0); err != nil {
 		return fmt.Errorf("record stage split: %w", err)
 	}

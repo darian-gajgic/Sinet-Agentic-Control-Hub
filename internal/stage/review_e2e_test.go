@@ -43,7 +43,7 @@ func TestReviewSchemaRidesVerifyE2E(t *testing.T) {
 		t.Fatalf("lineage 1..N: %d revs err %v", len(revs), err)
 	}
 	// Every judged round's pin matches the minted revision's pin, and the
-	// verdict ref filled (fill-once) with the round's verify.round seq.
+	// verdict ref filled (fill-once) with the round's verdict.recorded seq.
 	for _, rd := range card.Rounds {
 		rev, err := h.review.RevisionAt(ctx, dlvID, rd.Revision)
 		if err != nil {
@@ -53,7 +53,7 @@ func TestReviewSchemaRidesVerifyE2E(t *testing.T) {
 			t.Fatalf("rev %d pin %s != round record %s", rd.Revision, rev.ContentSHA256, rd.ContentSHA)
 		}
 		if rev.VerdictRef != rd.EventSeq {
-			t.Fatalf("rev %d verdict ref %d != verify.round seq %d", rd.Revision, rev.VerdictRef, rd.EventSeq)
+			t.Fatalf("rev %d verdict ref %d != verdict.recorded seq %d", rd.Revision, rev.VerdictRef, rd.EventSeq)
 		}
 		if rev.RunID != verifyRunID {
 			t.Fatalf("rev %d minting run %q", rd.Revision, rev.RunID)

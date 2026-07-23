@@ -33,7 +33,7 @@ const (
 	EventV1 = "verify.v1"
 	// EventRound is the per-round verdict record — the keep-forever class
 	// (G2 Def.11).
-	EventRound = "verify.round"
+	EventRound = "verdict.recorded"
 	// EventEscalation records one routed escalation with its ask id.
 	EventEscalation = "verify.escalation"
 )

@@ -118,7 +118,7 @@ const (
 // thresholds, carrying the proposal (stage split, or re-plan on a second
 // overflow / an overweight brief). Name provisional pending the S14 event
 // contract (B5), extending the CONVENTIONS §7/§8/§13/§14 naming note.
-const EventContextOverflow = "context.overflow"
+const EventContextOverflow = "compaction.anomaly"
 
 // contextOverflowSchemaVersion versions the context.overflow payload.
 const contextOverflowSchemaVersion = 1

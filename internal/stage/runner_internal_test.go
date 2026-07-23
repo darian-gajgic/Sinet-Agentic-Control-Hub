@@ -2,7 +2,7 @@ package stage
 
 // Budget-watcher unit tests (Spec S05.3 ⚙ consumption): stage-fit at
 // session start, overflow → stage-split proposal, second overflow within
-// one planned stage → re-plan — all as durable context.overflow events.
+// one planned stage → re-plan — all as durable compaction.anomaly events.
 
 import (
 	"context"

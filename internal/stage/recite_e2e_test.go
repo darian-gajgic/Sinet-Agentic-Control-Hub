@@ -349,7 +349,7 @@ func TestRecitationE2EDeliversManifestsAndJournals(t *testing.T) {
 		t.Errorf("fire = %+v", fires[0])
 	}
 
-	// The delivery is manifested + journaled: one context.manifest run
+	// The delivery is manifested + journaled: one knowledge.injected run
 	// event, kind recitation, at the pinned revision, hash-VERIFIED
 	// against the platform re-rendering (empty disposition). The test
 	// recomputes the expected hash independently from the point read.
@@ -363,7 +363,7 @@ func TestRecitationE2EDeliversManifestsAndJournals(t *testing.T) {
 	}
 	var payloads []string
 	rows, err := h.db.QueryContext(ctx,
-		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'context.manifest' ORDER BY event_seq`, runID)
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'knowledge.injected' ORDER BY event_seq`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,10 +422,10 @@ func TestRecitationE2EDeliversManifestsAndJournals(t *testing.T) {
 	// (the turns the dueness computation counted).
 	var usageEvents int
 	if err := h.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND type = 'engine.usage'`, runID).Scan(&usageEvents); err != nil {
+		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND type = 'usage.recorded'`, runID).Scan(&usageEvents); err != nil {
 		t.Fatal(err)
 	}
 	if usageEvents != reciteFakeTurns {
-		t.Errorf("engine.usage events = %d, want %d (turns-dueness rides persisted run events)", usageEvents, reciteFakeTurns)
+		t.Errorf("usage.recorded events = %d, want %d (turns-dueness rides persisted run events)", usageEvents, reciteFakeTurns)
 	}
 }

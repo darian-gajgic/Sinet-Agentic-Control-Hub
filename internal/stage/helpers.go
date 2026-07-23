@@ -75,8 +75,8 @@ const (
 // row (Spec S04.4: "spawn records and lifecycle transitions are event-log
 // rows in platform.db").
 const (
-	EventSpawn        = "orchestration.spawn"
-	EventSpawnRefused = "orchestration.spawn_refused"
+	EventSpawn        = "helper.spawned"
+	EventSpawnRefused = "spawn.refused"
 	EventHelper       = "orchestration.helper"
 )
 

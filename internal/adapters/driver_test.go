@@ -186,10 +186,10 @@ func TestDriveHappyPath(t *testing.T) {
 
 	// Engine events landed, in order, fenced at the running generation.
 	types := eventTypes(t, e, "r1")
-	want := []string{"run.created", "run.state", "run.state", "run.state", // create + queued + claimed + running
-		"engine.message", "engine.usage", "run.checkpoint", // paid call: usage event + checkpoint event, one tx (S02.3/S02.4)
-		"engine.rate_limit", "engine.done",
-		"run.state"} // completed
+	want := []string{"run.created", "run.state_changed", "run.state_changed", "run.state_changed", // create + queued + claimed + running
+		"engine.message", "usage.recorded", "checkpoint.written", // paid call: usage event + checkpoint event, one tx (S02.3/S02.4)
+		"limit.event", "engine.done",
+		"run.state_changed"} // completed
 	if len(types) != len(want) {
 		t.Fatalf("event types %v, want %v", types, want)
 	}

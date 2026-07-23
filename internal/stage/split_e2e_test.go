@@ -149,12 +149,12 @@ func TestStageSplitOverflowE2E(t *testing.T) {
 
 	execRun := taskID + ".execute"
 
-	// 1. The proposal record: exactly ONE context.overflow event, proposing
+	// 1. The proposal record: exactly ONE compaction.anomaly event, proposing
 	// the stage split for the planned stage S-1 (the successor sub-stage
 	// stayed under budget — re-checked per sub-stage — so no second event).
-	overflows := eventsOfType(t, h.db, execRun, "context.overflow")
+	overflows := eventsOfType(t, h.db, execRun, "compaction.anomaly")
 	if len(overflows) != 1 {
-		t.Fatalf("context.overflow events = %d, want exactly 1: %v", len(overflows), overflows)
+		t.Fatalf("compaction.anomaly events = %d, want exactly 1: %v", len(overflows), overflows)
 	}
 	ovf := overflows[0]
 	if ovf["proposal"] != "stage-split" || ovf["stage"] != "S-1" {
@@ -184,7 +184,7 @@ func TestStageSplitOverflowE2E(t *testing.T) {
 	// 3. REAL sub-stage briefs via the ledger: one assembly manifest per
 	// sub-stage session, the successor's built from the UPDATED (higher)
 	// ledger revision.
-	manifests := eventsOfType(t, h.db, execRun, "context.manifest")
+	manifests := eventsOfType(t, h.db, execRun, "knowledge.injected")
 	versionsByStage := map[string]float64{}
 	for _, m := range manifests {
 		if kind, _ := m["kind"].(string); kind != "" && kind != "assembly" {

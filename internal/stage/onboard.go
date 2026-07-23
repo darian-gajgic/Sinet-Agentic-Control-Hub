@@ -104,7 +104,7 @@ func (s *Skeleton) StartOnboarding(ctx context.Context, owner, projectID, name, 
 		}
 		_, err := s.cfg.Runs.CreateTx(ctx, tx, run.NewRun{
 			ID: runID, UserID: owner, TaskID: taskID, Substrate: s.cfg.Substrate, Lane: s.cfg.Lane,
-		}, "run.created", nil)
+		}, run.EventCreated, nil)
 		return err
 	})
 	switch {

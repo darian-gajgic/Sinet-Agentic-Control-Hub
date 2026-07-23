@@ -23,7 +23,7 @@ import (
 // EventCheckpoint is the run-event type appended with every checkpoint row
 // (Spec S02.3: "a paid call appends a checkpoint event and stays running").
 // Name provisional pending the S14 event contract (B5).
-const EventCheckpoint = "run.checkpoint"
+const EventCheckpoint = "checkpoint.written"
 
 // checkpointEventSchemaVersion versions the run.checkpoint payload.
 const checkpointEventSchemaVersion = 1

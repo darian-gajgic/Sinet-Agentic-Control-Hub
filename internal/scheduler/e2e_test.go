@@ -122,16 +122,16 @@ func TestEndToEndDevMode(t *testing.T) {
 		t.Logf("  id=%s %-16s %s", f.id, f.event, f.data)
 	}
 	assertTrail(t, trail, []string{
-		"run.created",    // new
-		"run.state",      // new→queued (Enqueue)
-		"run.state",      // queued→claimed (scheduler CAS)
-		"run.state",      // claimed→running (Driver)
-		"engine.message", // engine event
-		"engine.usage",   // paid call
-		"run.checkpoint", // S02.4 checkpoint, same tx as engine.usage
-		"engine.rate_limit",
+		"run.created",        // new
+		"run.state_changed",  // new→queued (Enqueue)
+		"run.state_changed",  // queued→claimed (scheduler CAS)
+		"run.state_changed",  // claimed→running (Driver)
+		"engine.message",     // engine event
+		"usage.recorded",     // paid call
+		"checkpoint.written", // S02.4 checkpoint, same tx as usage.recorded
+		"limit.event",
 		"engine.done",
-		"run.state", // running→completed
+		"run.state_changed", // running→completed
 	})
 }
 

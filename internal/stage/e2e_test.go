@@ -660,7 +660,7 @@ func TestWalkingSkeletonE2E(t *testing.T) {
 		{taskID + ".intake", ledger.EventContextManifest, 1}, // plan-draft assembly
 		{taskID + ".execute", ledger.EventContextManifest, 1},
 		{taskID + ".verify", ledger.EventContextManifest, 1}, // clean judge assembly
-		{taskID + ".verify", "verify.round", 1},
+		{taskID + ".verify", "verdict.recorded", 1},
 	} {
 		var n int
 		if err := h.db.QueryRowContext(ctx,
@@ -679,7 +679,7 @@ func TestWalkingSkeletonE2E(t *testing.T) {
 		t.Fatalf("count overflow events: %v", err)
 	}
 	if overflow != 0 {
-		t.Errorf("%d context.overflow events on a tiny walk", overflow)
+		t.Errorf("%d compaction.anomaly events on a tiny walk", overflow)
 	}
 
 	// Queue rows all settled.
@@ -695,12 +695,12 @@ func TestWalkingSkeletonE2E(t *testing.T) {
 	// The SHIP verdict is durable in the verify round record.
 	var payload string
 	if err := h.db.QueryRowContext(ctx,
-		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'verify.round' ORDER BY event_seq DESC LIMIT 1`,
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'verdict.recorded' ORDER BY event_seq DESC LIMIT 1`,
 		taskID+".verify").Scan(&payload); err != nil {
-		t.Fatalf("read verify.round: %v", err)
+		t.Fatalf("read verdict.recorded: %v", err)
 	}
 	if !strings.Contains(payload, `"SHIP`) {
-		t.Errorf("verify.round verdict not SHIP: %s", payload)
+		t.Errorf("verdict.recorded verdict not SHIP: %s", payload)
 	}
 
 	_ = verify.VerdictShip // documentation anchor: the drain's SHIP path is what this walk proves

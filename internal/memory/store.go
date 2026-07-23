@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
@@ -413,10 +414,10 @@ type InfluenceRef struct {
 func (s *Store) Influence(ctx context.Context, entryID string) ([]InfluenceRef, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT run_id, event_seq FROM run_events
-		 WHERE type = 'context.manifest' AND run_id IS NOT NULL
+		 WHERE type = ? AND run_id IS NOT NULL
 		   AND payload LIKE '%' || ? || '%'
 		 ORDER BY event_seq`,
-		`"`+manifestItemID(entryID)+`"`)
+		ledger.EventContextManifest, `"`+manifestItemID(entryID)+`"`)
 	if err != nil {
 		return nil, fmt.Errorf("memory: influence query: %w", err)
 	}

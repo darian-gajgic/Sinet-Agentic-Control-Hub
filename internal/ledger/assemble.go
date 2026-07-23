@@ -29,7 +29,7 @@ import (
 // injected item is logged to the run trace; one manifest per assembly plus
 // entries for any mid-stage injection). Name provisional pending the S14
 // event contract (B5), extending the CONVENTIONS §7/§8 naming note.
-const EventContextManifest = "context.manifest"
+const EventContextManifest = "knowledge.injected"
 
 // contextManifestSchemaVersion versions the context.manifest payload.
 const contextManifestSchemaVersion = 1

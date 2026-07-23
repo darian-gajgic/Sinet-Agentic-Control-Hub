@@ -284,7 +284,7 @@ func (d *Driver) persistEventInner(ctx context.Context, sess Session, r run.Run,
 		return d.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 			if _, err := d.Log.AppendTx(ctx, tx, eventlog.Append{
 				RunID: r.ID, Generation: r.Generation, UserID: r.UserID,
-				Type: EventTypePrefix + string(ev.Kind), SchemaVersion: engineEventSchemaVersion,
+				Type: eventType(ev.Kind), SchemaVersion: engineEventSchemaVersion,
 				Payload: payload,
 			}); err != nil {
 				return err
@@ -294,7 +294,7 @@ func (d *Driver) persistEventInner(ctx context.Context, sess Session, r run.Run,
 	default:
 		_, err := d.Log.Append(ctx, eventlog.Append{
 			RunID: r.ID, Generation: r.Generation, UserID: r.UserID,
-			Type: EventTypePrefix + string(ev.Kind), SchemaVersion: engineEventSchemaVersion,
+			Type: eventType(ev.Kind), SchemaVersion: engineEventSchemaVersion,
 			Payload: payload,
 		})
 		return err
@@ -334,7 +334,7 @@ func (d *Driver) checkpoint(ctx context.Context, sess Session, r run.Run, req St
 		// (S02.4: same transaction as its run-event append).
 		if _, err := d.Log.AppendTx(ctx, tx, eventlog.Append{
 			RunID: r.ID, Generation: r.Generation, UserID: r.UserID,
-			Type: EventTypePrefix + string(ev.Kind), SchemaVersion: engineEventSchemaVersion,
+			Type: eventType(ev.Kind), SchemaVersion: engineEventSchemaVersion,
 			Payload: payload,
 		}); err != nil {
 			return err

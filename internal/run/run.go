@@ -122,7 +122,7 @@ const (
 	// EventState is a stored-state transition: payload {from, to, reason,
 	// actor, detail}. One append per transition, same transaction as the
 	// runs.state update (Spec S02.3).
-	EventState = "run.state"
+	EventState = "run.state_changed"
 	// EventForked is the birth event of a fork-from-checkpoint successor
 	// (Spec S02.5 step 2), appended by internal/recovery.
 	EventForked = "run.forked"

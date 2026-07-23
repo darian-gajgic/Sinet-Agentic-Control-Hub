@@ -139,9 +139,9 @@ func (h *harness) askStatus(t *testing.T, askID string) (status, answer string) 
 func (h *harness) stateEvents(t *testing.T, runID string) []string {
 	t.Helper()
 	rows, err := h.db.QueryContext(context.Background(),
-		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'run.state' ORDER BY event_seq`, runID)
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'run.state_changed' ORDER BY event_seq`, runID)
 	if err != nil {
-		t.Fatalf("read run.state events: %v", err)
+		t.Fatalf("read run.state_changed events: %v", err)
 	}
 	defer rows.Close()
 	var out []string
@@ -209,7 +209,7 @@ func TestAnswerAcceptBestEffortE2E(t *testing.T) {
 	}
 	events := h.stateEvents(t, verifyRunID)
 	if !hasTransition(events, "parked", "running") || !hasTransition(events, "running", "completed") {
-		t.Fatalf("run.state trail missing the resume-then-complete edges: %v", events)
+		t.Fatalf("run.state_changed trail missing the resume-then-complete edges: %v", events)
 	}
 	if status, ans := h.askStatus(t, askID); status != "answered" || !strings.Contains(ans, "accept_best_effort") {
 		t.Fatalf("ask row = (%s, %s), want answered with the payload", status, ans)
@@ -219,7 +219,7 @@ func TestAnswerAcceptBestEffortE2E(t *testing.T) {
 	// item stays done_unverified, and the acceptance is a HUMAN decision.
 	var ships int
 	if err := h.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND type = 'verify.round' AND payload LIKE '%"verdict":"SHIP"%'`,
+		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND type = 'verdict.recorded' AND payload LIKE '%"verdict":"SHIP"%'`,
 		verifyRunID).Scan(&ships); err != nil {
 		t.Fatalf("count SHIP rounds: %v", err)
 	}
@@ -287,12 +287,12 @@ func TestAnswerReviseWithGuidanceToShipE2E(t *testing.T) {
 	// the ledger item verified through the ratified SHIP path.
 	var payload string
 	if err := h.db.QueryRowContext(ctx,
-		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'verify.round' ORDER BY event_seq DESC LIMIT 1`,
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'verdict.recorded' ORDER BY event_seq DESC LIMIT 1`,
 		verifyRunID).Scan(&payload); err != nil {
-		t.Fatalf("read verify.round: %v", err)
+		t.Fatalf("read verdict.recorded: %v", err)
 	}
 	if !strings.Contains(payload, `"verdict":"SHIP"`) || !strings.Contains(payload, `"round":4`) {
-		t.Fatalf("last verify.round = %s, want SHIP at round 4 (continued numbering)", payload)
+		t.Fatalf("last verdict.recorded = %s, want SHIP at round 4 (continued numbering)", payload)
 	}
 	doc, _, err := h.led.Current(ctx, taskID)
 	if err != nil {
