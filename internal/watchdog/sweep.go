@@ -164,11 +164,15 @@ func (w *Watchdog) sweepSpend(ctx context.Context) error {
 }
 
 // ── the four registered platform-health checks (R24–R27) ──
-// Each references the S14.5 conformance registry via the seam below; B5-3 does
-// NOT build that table — TODO(S14.5/B5-4): register these four check ids AND the
-// dead-man canary (deadman.go, R28-DMC — a fifth registry-row candidate: the
-// watchdog's own liveness probe) into the conformance_registry when it lands
-// (the B5-2 NoEngineSSEReplay precedent; B5-4 owns the registry).
+// These four checks (resume_reconcile, listener, organ_absence, event_log_size)
+// get NO conformance_registry row: they are continuous detection, S14.4-
+// scheduled, not fixture-backed proof suites — and the registry registers
+// suites and drills ("standing conformance suites and drills", S14.5). The
+// dead-man canary (deadman.go, R28-DMC) is a genuine scheduled drill and DID
+// earn a visibility row in B5-4 (its last-run derived from the deadman events,
+// no import edge either direction). Disposition: continuous detection,
+// S14.4-scheduled; registry registers suites and drills — coordinator OQ5(c),
+// 2026-07-23.
 
 // checkResumeReconcile confirms the S01.7 wake steps completed (R24). Honestly
 // absent when no wake-completion seam is wired (the logind sleep/wake wiring is

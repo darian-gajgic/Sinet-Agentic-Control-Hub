@@ -39,6 +39,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
@@ -198,6 +199,22 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 	}
+
+	// The S14.5 conformance registry (B5-4): the scheduling HOME for every
+	// "proven, not assumed" obligation — the standing suites + drills seeded as
+	// platform rows (id, owning section, fixtures, triggers, schedule, last
+	// run/result). Seeded unconditionally (platform obligations need no operator
+	// account, unlike the S09.10 house seeds); idempotent. Results land as
+	// eval.score_recorded via RecordResult and a red row surfaces as an inbox
+	// card through the api projection (owner-scoped). Dueness is a passive read
+	// surface (OQ3); the browse/render surface is B6's (the buildAcceptSurface
+	// reachability precedent, R22 — this compiles internal/conformance into the
+	// binary).
+	confRows, err := conformance.NewStore(db, log, reg).EnsureSeeded(ctx)
+	if err != nil {
+		return fmt.Errorf("shell: seed conformance registry (Spec S14.5): %w", err)
+	}
+	logger.Info("conformance: S14.5 registry seeded (B5-4)", "rows", confRows)
 
 	// The S10 scheduler + metering over the open DB (Spec S10): the claim
 	// loop (started below, after step 5) CAS-claims queued runs under

@@ -679,12 +679,13 @@ func TestRunCardArgsDigestNeverRawArgs(t *testing.T) {
 
 // ── No-engine-SSE-replay standing conformance (rubric 13; R14 / S14.5) ──
 //
-// TODO(S14.5/B5-4): register this standing assertion as a row in the S14.5
-// conformance_registry table (that table lands with B5-4). The named seam is
-// this test — /events resume reconstructs the exact event sequence from
-// run_events ALONE, with no engine/adapter in the loop. opencode ignores
-// Last-Event-ID and the fix was declined upstream, so the durable log is the
-// only replay source Sinet ever relies on (S14.3 ¶3, R12 §7.9).
+// This standing assertion is registered in the S14.5 conformance_registry as
+// row "no-engine-sse-replay" (internal/conformance SeedRows; migration 0011,
+// B5-4). This test IS its named fixture — /events resume reconstructs the exact
+// event sequence from run_events ALONE, with no engine/adapter in the loop.
+// opencode ignores Last-Event-ID and the fix was declined upstream, so the
+// durable log is the only replay source Sinet ever relies on (S14.3 ¶3, R12
+// §7.9).
 func TestConformance_NoEngineSSEReplay_ResumeFromLogAlone(t *testing.T) {
 	b := newBackend(t)
 	want := appendEvents(t, b.log, "e.one", "e.two", "e.three", "e.four", "e.five")

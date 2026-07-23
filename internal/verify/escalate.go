@@ -378,8 +378,10 @@ func CanaryResearchUsage() ResearchUsage { return zeroResearch{} }
 // CanaryWatch is the dead-man switch EXTERNAL to the pipeline (Spec S07.7:
 // alert-on-silence — the death of the escalation path is itself what
 // fires). Silent reports whether no canary card arrived within
-// ⚙ verification.canary_interval_hours; the operator alert it feeds is S14
-// wiring (B5).
+// ⚙ verification.canary_interval_hours; that schedule now registers as VISIBLE
+// DATA on the S14.5 conformance-registry "forced-escalation-e2e" row (B5-4,
+// OQ4(a)). The canary RUNNER (spawning the synthetic task) and the
+// silence→operator-alert wiring remain the S14.6 canary layer's / B6 (B5-6).
 type CanaryWatch struct {
 	DB       *storage.DB
 	Settings Settings
@@ -412,8 +414,10 @@ func (w *CanaryWatch) Silent(ctx context.Context, now time.Time) (bool, time.Dur
 // DrillCard is the quarterly-drill content contract (Spec S07.7 proof 3, the
 // Human-Handoff shape): a planted defect must traverse to the right person
 // carrying facts, sources, uncertainty, action history, and a recommended
-// next step; pass/fail recorded. Drill scheduling and the pass/fail record
-// are S14's (B5).
+// next step; pass/fail recorded. The drill's cadence and pass/fail HOME are the
+// S14.5 conformance-registry "forced-escalation-e2e" row (B5-4, OQ4(a): dueness
+// reads ⚙ verification.drill_interval_days; results land via RecordResult).
+// Running the drill remains a later packet.
 type DrillCard struct {
 	Facts           []string `json:"facts"`
 	Sources         []string `json:"sources"`

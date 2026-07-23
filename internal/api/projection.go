@@ -404,18 +404,39 @@ type InboxWatchdogFlag struct {
 	FlaggedTS    time.Time `json:"flagged_ts"`
 }
 
+// InboxConformanceCard is one RED conformance-registry result surfaced in the
+// inbox (B5-4, S14.5): a suite/drill whose last recorded result is red. It is
+// pure derivation over the conformance_registry table — no asks row (a suite
+// run has no platform run; asks.run_id is NOT NULL, R15), and internal/api does
+// not import internal/conformance (it reads the table directly, the
+// watchdog-flags derive-from-log precedent). A GREEN result raises nothing;
+// dueness/overdue-ness raise nothing (OQ3). FlagNow is the S14.4 alert-routing
+// class — true exactly on lane- or storage-affecting rows (R14); it is distinct
+// from the inbox Low/Medium/High risk tiers. Rows are platform-scope, so only
+// the operator sees them (R16); a member never does.
+type InboxConformanceCard struct {
+	RowID         string    `json:"row_id"`
+	OwningSection string    `json:"owning_section"`
+	Schedule      string    `json:"schedule"`
+	AffectClass   string    `json:"affect_class"`
+	FlagNow       bool      `json:"flag_now"`
+	LastResult    string    `json:"last_result"`
+	LastRunTS     time.Time `json:"last_run_ts"`
+}
+
 // InboxSnapshot is the `inbox` topic projection (§3): open asks + proposed
-// approvals + OPEN watchdog flags (B5-3), plus the declare-only drift seam
-// (producer B5-6).
+// approvals + OPEN watchdog flags (B5-3) + RED conformance cards (B5-4), plus
+// the declare-only drift seam (producer B5-6).
 type InboxSnapshot struct {
-	Asks          []InboxAsk          `json:"asks"`
-	Approvals     []InboxApproval     `json:"approvals"`
-	WatchdogFlags []InboxWatchdogFlag `json:"watchdog_flags"`
-	DriftCards    []any               `json:"drift_cards"`
+	Asks             []InboxAsk             `json:"asks"`
+	Approvals        []InboxApproval        `json:"approvals"`
+	WatchdogFlags    []InboxWatchdogFlag    `json:"watchdog_flags"`
+	ConformanceCards []InboxConformanceCard `json:"conformance_cards"`
+	DriftCards       []any                  `json:"drift_cards"`
 }
 
 func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot, error) {
-	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, DriftCards: []any{}}
+	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []any{}}
 
 	aq := `SELECT ask_id, run_id, status, observed_ts FROM asks WHERE answered_ts IS NULL`
 	aargs := []any{}
@@ -470,7 +491,55 @@ func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot,
 		return out, err
 	}
 	out.WatchdogFlags = flags
+
+	cards, err := p.conformanceCards(ctx, scope)
+	if err != nil {
+		return out, err
+	}
+	out.ConformanceCards = cards
 	return out, nil
+}
+
+// conformanceCards derives the RED conformance-registry cards for the inbox
+// (B5-4, S14.5): the registry rows whose last_result is 'red' — a red result
+// raises a card (flag-now when lane- or storage-affecting, R14); green raises
+// nothing and dueness raises nothing (OQ3). DERIVE rows (restore-drill,
+// dead-man) never write last_result to the table, so they never surface here —
+// their own subsystems own the alert (OQ2/OQ5(c)), no double-fire. Owner-scoped
+// per S01.9: rows are platform-scope, so a member's filter (user_id = <member>)
+// matches none and only the operator sees them (R16). internal/api reads the
+// table directly — it never imports internal/conformance (the §31 pattern).
+func (p *projector) conformanceCards(ctx context.Context, scope ownerScope) ([]InboxConformanceCard, error) {
+	q := `SELECT row_id, owning_section, schedule, affect_class, last_run
+	        FROM conformance_registry WHERE last_result = 'red'`
+	args := []any{}
+	if !scope.Operator {
+		q += ` AND user_id = ?`
+		args = append(args, scope.UserID)
+	}
+	q += ` ORDER BY row_id`
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: conformance cards: %w", err)
+	}
+	defer rows.Close()
+	out := []InboxConformanceCard{}
+	for rows.Next() {
+		var c InboxConformanceCard
+		var affect string
+		var lastRun sql.NullString
+		if err := rows.Scan(&c.RowID, &c.OwningSection, &c.Schedule, &affect, &lastRun); err != nil {
+			return nil, fmt.Errorf("projection: conformance card scan: %w", err)
+		}
+		c.AffectClass = affect
+		c.FlagNow = affect == "lane" || affect == "storage"
+		c.LastResult = "red"
+		if lastRun.Valid {
+			c.LastRunTS = parseTS(lastRun.String)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // watchdogFlags derives the OPEN watchdog flags for the inbox (B5-3, R30): the

@@ -526,9 +526,13 @@ var v0Types = []TypeSpec{
 	minted("review.drained", FamilyToolsArtifacts, VerdictAdmit, "internal/review/review.go:221", "review-drain event (S13)"),
 	declare("tool.called", FamilyToolsArtifacts, "no distinct producer today", "S14.2 names tool.called/completed; the engine surfaces tool_result → tool.completed; a tool-use-start producer is a later addition"),
 
-	// ── Family 14: Benchmark & eval (S2.11) — DECLARE, producers B5-7 ───
+	// ── Family 14: Benchmark & eval (S2.11) — eval.score_recorded MINTED at
+	// B5-4 (the S14.5 conformance-registry recording surface); B5-5 (regression
+	// evals) and B5-7 (BENCH-REG pairs) are future co-producers of the family.
+	// benchmark.pair_recorded stays DECLARE — its numbers change only via
+	// BENCH-REG §17 (CF5). ───
 	declare("benchmark.pair_recorded", FamilyBenchmarkEval, "producer: B5-7 (BENCH-REG §14 record verbatim; BENCH-REG numbers stay read-only)"),
-	declare("eval.score_recorded", FamilyBenchmarkEval, "producer: B5-7 (S14.7/S14.8)"),
+	minted("eval.score_recorded", FamilyBenchmarkEval, VerdictConforms, "internal/conformance/conformance.go (EventScoreRecorded); emitted internal/conformance RecordResult", "the S14.5 conformance-registry recording surface (B5-4); B5-5/B5-7 are future co-producers (S14.7/S14.8)"),
 
 	// ── Family 15: Run summary (11.1) — DECLARE, producer B5-8 ──────────
 	declare("run.summary_written", FamilyRunSummary, "producer: B5-8 (S14.9)"),
