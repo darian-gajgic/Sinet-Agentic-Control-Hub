@@ -425,6 +425,38 @@ func TestAggregateGreenIsInsufficient(t *testing.T) {
 
 // ── import wall (rubric 16) ──
 
+const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
+
+// bannedImports are the packages internal/evals must never import. It is the
+// S14.8 executor: it records through the S14.5 registry and reads the in-tree
+// eval artifacts, but the worker/local/stage surfaces it drives ride func seams
+// injected at the shell root.
+var bannedImports = map[string]string{
+	"internal/worker": "flag + green-stamp verbs ride func seams (the FlagByModelFunc precedent)",
+	"internal/local":  "the T15 battery records THROUGH this package, never imports either way",
+	"internal/stage":  "the P-T06-5 block is consulted by stage, not the other way round",
+	"internal/api":    "the red→card derivation is the api's projection, never an import",
+	"internal/gates":  "the quality gate is structurally separate from the effects gate",
+}
+
+// forbiddenImport reports whether an import path is a banned package or any
+// SUBPACKAGE of one — internal/local/battery is internal/local for wall
+// purposes — and why. The match is exact-or-prefix on the module-relative path,
+// never a suffix: a suffix match would let a subpackage through and would trip
+// on an unrelated package that merely ends in the same letters.
+func forbiddenImport(path string) (string, bool) {
+	rel, ok := strings.CutPrefix(path, modulePath)
+	if !ok {
+		return "", false
+	}
+	for bad, why := range bannedImports {
+		if rel == bad || strings.HasPrefix(rel, bad+"/") {
+			return why, true
+		}
+	}
+	return "", false
+}
+
 func TestImportWall(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, filepath.Join(repoRoot, "internal/evals"), func(fi os.FileInfo) bool {
@@ -433,26 +465,52 @@ func TestImportWall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// internal/evals is the S14.8 executor: it records through the S14.5
-	// registry and reads the in-tree eval artifacts, but the worker/local/stage
-	// surfaces it drives ride func seams injected at the shell root.
-	banned := map[string]string{
-		"internal/worker": "flag + green-stamp verbs ride func seams (the FlagByModelFunc precedent)",
-		"internal/local":  "the T15 battery records THROUGH this package, never imports either way",
-		"internal/stage":  "the P-T06-5 block is consulted by stage, not the other way round",
-		"internal/api":    "the red→card derivation is the api's projection, never an import",
-		"internal/gates":  "the quality gate is structurally separate from the effects gate",
-	}
+	files := 0
 	for _, pkg := range pkgs {
 		for name, file := range pkg.Files {
+			files++
 			for _, imp := range file.Imports {
 				path := strings.Trim(imp.Path.Value, `"`)
-				for bad, why := range banned {
-					if strings.HasSuffix(path, bad) {
-						t.Errorf("%s imports %s — forbidden: %s", filepath.Base(name), path, why)
-					}
+				if why, bad := forbiddenImport(path); bad {
+					t.Errorf("%s imports %s — forbidden: %s", filepath.Base(name), path, why)
 				}
 			}
+		}
+	}
+	if files == 0 {
+		t.Fatal("the import wall scanned no files — it would pass vacuously")
+	}
+}
+
+// TestImportWallCatchesSubpackages proves the wall FAILS when fed a forbidden
+// import, including a subpackage of a banned package (the non-tautology
+// precedent): a wall that cannot fail guarantees nothing.
+func TestImportWallCatchesSubpackages(t *testing.T) {
+	for _, path := range []string{
+		modulePath + "internal/local",
+		modulePath + "internal/local/battery",
+		modulePath + "internal/worker",
+		modulePath + "internal/worker/automation",
+		modulePath + "internal/stage",
+		modulePath + "internal/api",
+		modulePath + "internal/gates",
+	} {
+		if _, bad := forbiddenImport(path); !bad {
+			t.Errorf("the wall let %s through", path)
+		}
+	}
+	// Negative controls: the allowed edges and a package whose name merely
+	// starts with a banned one must NOT trip it.
+	for _, path := range []string{
+		modulePath + "internal/verify",
+		modulePath + "internal/conformance",
+		modulePath + "internal/storage",
+		modulePath + "internal/lockfile",
+		modulePath + "internal/localization",
+		"strings",
+	} {
+		if why, bad := forbiddenImport(path); bad {
+			t.Errorf("the wall wrongly rejected %s: %s", path, why)
 		}
 	}
 }

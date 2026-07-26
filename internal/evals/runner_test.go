@@ -49,7 +49,7 @@ func stubPromptfoo(t *testing.T, version, results string) (bin, trace string) {
 	}
 	bin = filepath.Join(dir, "promptfoo")
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "` + version + `"; exit 0; fi
+if [ "$1" = "--version" ]; then env > "` + trace + `/env-version"; echo "` + version + `"; exit 0; fi
 printf '%s\n' "$@" > "` + trace + `/argv"
 env > "` + trace + `/env"
 out=""
@@ -161,6 +161,77 @@ func TestFakeRunnerParsesOutputAndRecords(t *testing.T) {
 	}
 	if f.sweepRow(t).LastResult != "red" {
 		t.Error("the parsed red outcome did not land in platform.db")
+	}
+}
+
+func TestCallerEnvCannotWeakenTheHardening(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+	bin, trace := stubPromptfoo(t, "0.121.19", stubResults)
+	t.Setenv(evals.PromptfooPathEnv, bin)
+	r, err := evals.FindPromptfoo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A hostile RunConfig tries to re-enable telemetry and update checks and to
+	// redirect the runner's state back onto the host. Telemetry-off and the
+	// scratch redirection are S16.4 adoption-walk invariants of the entry, not
+	// caller conventions, so the hardening must win regardless.
+	home := t.TempDir()
+	_, err = r.Run(ctx, evals.RunConfig{
+		Suite: "s", Provider: "p", Cases: []evals.Case{{ID: "probe/one", Prompt: "x"}},
+		Env: []string{
+			"PROMPTFOO_DISABLE_TELEMETRY=0",
+			"PROMPTFOO_DISABLE_UPDATE=0",
+			"PROMPTFOO_CONFIG_DIR=" + home,
+			"ANTHROPIC_API_KEY=sentinel", // a legitimate provider entry survives
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := f.readTrace(t, trace, "env")
+	for _, want := range []string{"PROMPTFOO_DISABLE_TELEMETRY=1", "PROMPTFOO_DISABLE_UPDATE=1", "ANTHROPIC_API_KEY=sentinel"} {
+		if !strings.Contains(env, want) {
+			t.Errorf("child env misses %q:\n%s", want, env)
+		}
+	}
+	for _, forbidden := range []string{"PROMPTFOO_DISABLE_TELEMETRY=0", "PROMPTFOO_DISABLE_UPDATE=0", "PROMPTFOO_CONFIG_DIR=" + home} {
+		if strings.Contains(env, forbidden) {
+			t.Errorf("a caller entry defeated the hardening: %q", forbidden)
+		}
+	}
+}
+
+func TestIdentityRunsUnderScratchIsolation(t *testing.T) {
+	// The version probe must leave no runner state on the host either: at the
+	// B5-gate host install it would otherwise run against the operator's real
+	// config dir.
+	f := newFix(t)
+	bin, trace := stubPromptfoo(t, "0.121.19", stubResults)
+	t.Setenv(evals.PromptfooPathEnv, bin)
+	r, err := evals.FindPromptfoo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	r.WorkDir = work
+	if _, _, err := r.Identity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	env := f.readTrace(t, trace, "env-version")
+	for _, want := range []string{"PROMPTFOO_DISABLE_TELEMETRY=1", "PROMPTFOO_CONFIG_DIR=" + work, "PROMPTFOO_CACHE_PATH=" + work} {
+		if !strings.Contains(env, want) {
+			t.Errorf("the version probe env misses %q:\n%s", want, env)
+		}
+	}
+	// And it leaves nothing behind.
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Identity left scratch state behind: %v", entries)
 	}
 }
 

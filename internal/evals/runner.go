@@ -147,10 +147,17 @@ func FindPromptfoo() (*Promptfoo, error) {
 var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+`)
 
 // Identity reports the runner name and the INSTALLED version — the version that
-// actually ran, never the pin assumed from the manifest.
+// actually ran, never the pin assumed from the manifest. It runs under the same
+// scratch isolation as Run, so even a version probe cannot leave runner state
+// on the host.
 func (p *Promptfoo) Identity(ctx context.Context) (string, string, error) {
+	scratch, err := p.scratchDir()
+	if err != nil {
+		return "", "", err
+	}
+	defer os.RemoveAll(scratch)
 	cmd := exec.CommandContext(ctx, p.Path, "--version")
-	cmd.Env = p.env("")
+	cmd.Env = p.env(scratch, nil)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", "", fmt.Errorf("evals: promptfoo --version: %w", err)
@@ -166,9 +173,9 @@ func (p *Promptfoo) Identity(ctx context.Context) (string, string, error) {
 // process runs entirely inside a scratch dir: config, cache, and promptfoo's
 // own eval history live there and die with the run.
 func (p *Promptfoo) Run(ctx context.Context, cfg RunConfig) (RunOutcome, error) {
-	scratch, err := os.MkdirTemp(p.WorkDir, "sinet-promptfoo-")
+	scratch, err := p.scratchDir()
 	if err != nil {
-		return RunOutcome{}, fmt.Errorf("evals: promptfoo scratch dir: %w", err)
+		return RunOutcome{}, err
 	}
 	defer os.RemoveAll(scratch)
 
@@ -190,7 +197,7 @@ func (p *Promptfoo) Run(ctx context.Context, cfg RunConfig) (RunOutcome, error) 
 		// No shareable URL, no progress bar, no results table: self-hosted
 		// only, and stdout stays quiet because the results FILE is the record.
 		"--no-share", "--no-progress-bar", "--no-table")
-	cmd.Env = append(p.env(scratch), cfg.Env...)
+	cmd.Env = p.env(scratch, cfg.Env)
 	cmd.Dir = scratch
 	runErr := cmd.Run()
 	if runErr != nil {
@@ -208,24 +215,47 @@ func (p *Promptfoo) Run(ctx context.Context, cfg RunConfig) (RunOutcome, error) 
 	return parsePromptfooResults(cfg, raw)
 }
 
+// scratchDir creates the per-invocation dir holding everything the runner
+// writes — the generated config, its disk cache, and promptfoo's own eval
+// history. Callers remove it when the invocation ends, so nothing the runner
+// stores can be read back as a record.
+func (p *Promptfoo) scratchDir() (string, error) {
+	dir, err := os.MkdirTemp(p.WorkDir, "sinet-promptfoo-")
+	if err != nil {
+		return "", fmt.Errorf("evals: promptfoo scratch dir: %w", err)
+	}
+	return dir, nil
+}
+
 // env builds the child environment explicitly (deny-by-default, the S11.1
-// posture): only what the CLI needs, plus the disable switches that keep the
-// runner self-hosted and silent. scratch redirects promptfoo's own eval history
-// and disk cache so nothing it writes is ever read back as a record.
-func (p *Promptfoo) env(scratch string) []string {
-	env := []string{
+// posture): the caller's provider entries, then the hardening block. The
+// hardening block is applied LAST and any caller entry that collides with one
+// of its keys is DROPPED — telemetry-off, update-checks-off and the scratch
+// redirection are S16.4 adoption-walk invariants of this entry, not caller
+// conventions, so no RunConfig can weaken them.
+func (p *Promptfoo) env(scratch string, extra []string) []string {
+	hardened := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 		"PROMPTFOO_DISABLE_TELEMETRY=1",
 		"PROMPTFOO_DISABLE_UPDATE=1",
 		"NO_COLOR=1",
+		"PROMPTFOO_CONFIG_DIR=" + filepath.Join(scratch, "state"),
+		"PROMPTFOO_CACHE_PATH=" + filepath.Join(scratch, "cache"),
 	}
-	if scratch != "" {
-		env = append(env,
-			"PROMPTFOO_CONFIG_DIR="+filepath.Join(scratch, "state"),
-			"PROMPTFOO_CACHE_PATH="+filepath.Join(scratch, "cache"))
+	reserved := make(map[string]bool, len(hardened))
+	for _, e := range hardened {
+		key, _, _ := strings.Cut(e, "=")
+		reserved[key] = true
 	}
-	return env
+	env := make([]string, 0, len(extra)+len(hardened))
+	for _, e := range extra {
+		if key, _, ok := strings.Cut(e, "="); ok && reserved[key] {
+			continue
+		}
+		env = append(env, e)
+	}
+	return append(env, hardened...)
 }
 
 // promptfooConfig renders a RunConfig as promptfoo's config schema at the

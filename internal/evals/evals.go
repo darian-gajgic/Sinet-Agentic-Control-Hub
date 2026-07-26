@@ -10,11 +10,15 @@
 // event (Spec S14.2 family 14; P-T11-4 runners-never-stores — tools are
 // runners, Sinet's DB is the store).
 //
-// Import posture: storage + eventlog + settings + conformance + verify +
-// stdlib. It NEVER imports internal/worker, internal/local, or internal/stage
-// (AST-pinned): the flag, green-stamp, and swap surfaces those packages own
-// ride func seams injected at the shell root (the local.FlagByModelFunc
-// precedent, CONVENTIONS §28). The verify edge is the eval-object binding's:
+// Import posture: storage + conformance + verify + stdlib, and nothing else.
+// ⚙ values are read through the narrow Settings interface below rather than by
+// importing internal/settings, and the event-log edge belongs to conformance —
+// this package appends nothing directly. It NEVER imports internal/worker,
+// internal/local, internal/stage, internal/api, or internal/gates (AST-pinned,
+// subpackages included): the flag, green-stamp, and swap surfaces those
+// packages own ride func seams injected at the shell root (the
+// local.FlagByModelFunc precedent, CONVENTIONS §28). The verify edge is the
+// eval-object binding's:
 // the v0 software content IS the existing rubric-software v2 bundle and the
 // golden-software case set — this package invents no case content.
 //
