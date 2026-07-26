@@ -5,16 +5,27 @@
 // Units are GENERATED, NEVER INSTALLED by this code: output goes to stdout
 // or an operator-chosen directory, and host changes (installing under
 // /etc/systemd, systemctl calls) are a B0-gate operator decision
-// (P3/STATE.md). Most adopted organs (caddy, the watchlist executor,
-// tailscaled) ship their OWN units and are deliberately not generated here —
-// replacing one is a unit + components.lock edit at the process/adoption
-// seams (Spec S01.3). The ONE exception (corrected at P3-B4-5, §8 reading 1):
-// `sinet-llamaswap.service` IS generated — llama-swap ships no unit file, so
-// the unit is SINET configuration for an unmodified adopted binary (S16.1
-// config-only integration — not a fork), the Sinet-named adopted-organ unit
-// S12.2 names, carried by the P3/STATE directive ("GENERATED, not installed …
-// install = B4 gate or hardening"). Its ExecStart runs the operator-installed
-// llama-swap binary + generated config, NOT the sinet multi-call binary.
+// (P3/STATE.md). Adopted organs that ship their OWN unit file (caddy,
+// tailscaled) are deliberately not generated here — replacing one is a unit +
+// components.lock edit at the process/adoption seams (Spec S01.3).
+//
+// The carve-out (established at P3-B4-5 §8 reading 1, extended at P3-B5-6A): an
+// adopted organ that ships NO unit file of its own gets a Sinet-generated one,
+// because that unit is SINET configuration for an unmodified adopted binary
+// (S16.1 config-only integration — not a fork). Two units are generated under
+// it, both `Draft: true`, and each ExecStart runs the OPERATOR-INSTALLED
+// third-party binary, never the sinet multi-call binary:
+//
+//   - `sinet-llamaswap.service` — llama-swap ships no unit file (S12.2).
+//   - `sinet-watchlist.service` — changedetection.io ships no unit file: a
+//     recursive tree read of tag 0.55.8 matched no *.service and no systemd/
+//     path, only Dockerfile + docker-compose.yml (verified 2026-07-26). The
+//     B0-era package doc listed "the watchlist executor" among organs shipping
+//     their own units; that was an unchecked assumption and is corrected here
+//     (Spec S14.6 "own unit [S01.2]").
+//
+// Generation NEVER installs: the host install of either organ is a phase-gate
+// operator act.
 //
 // ⚙ values are rendered from the settings registry (shell.watchdog_sec,
 // shell.journal_max_use). At B0 generation reads the declared defaults —
@@ -25,6 +36,7 @@ package units
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -83,6 +95,15 @@ type Params struct {
 	LlamaSwapBinary string
 	LlamaSwapConfig string
 	LlamaSwapListen string
+	// WatchlistBinary / WatchlistDatastore / WatchlistListen are the STRUCTURAL
+	// config for the generated sinet-watchlist.service (Spec S14.6; NOT ⚙ —
+	// S18 ratifies no key, the sseBatchSize precedent). The binary is the
+	// operator-installed changedetection.io (adopted organ, NOT the sinet
+	// binary); the datastore is its state directory; the listen address is
+	// loopback (S01.1). Defaults below.
+	WatchlistBinary    string
+	WatchlistDatastore string
+	WatchlistListen    string
 }
 
 // Default structural paths for the generated llama-swap unit (operator-set at
@@ -94,6 +115,18 @@ const (
 	// LocalSlice is the systemd slice the local-inference tier sits in (S12.2:
 	// the designated systemd-oomd victim; slice NAME [coordinator-draft]).
 	LocalSlice = "sinet-local.slice"
+)
+
+// Default structural paths for the generated watchlist-executor unit
+// (operator-set at install; composition-root passthrough). The listen address
+// is loopback because changedetection.io's OWN default is 0.0.0.0 (its `-h`
+// flag / LISTEN_HOST env, verified at tag 0.55.8) — leaving that default would
+// bind the organ beyond loopback, which S01.1 forbids, so `-h` is load-bearing
+// here and not cosmetic.
+const (
+	defaultWatchlistBinary    = "/usr/local/bin/changedetection.io"
+	defaultWatchlistDatastore = "/var/lib/sinet/watchlist"
+	defaultWatchlistListen    = "127.0.0.1:5000"
 )
 
 // header is the shared provenance banner.
@@ -161,6 +194,22 @@ func Files(settings Settings, p Params) ([]File, error) {
 	if swapListen == "" {
 		swapListen = defaultLlamaSwapListen
 	}
+	watchBin := p.WatchlistBinary
+	if watchBin == "" {
+		watchBin = defaultWatchlistBinary
+	}
+	watchStore := p.WatchlistDatastore
+	if watchStore == "" {
+		watchStore = defaultWatchlistDatastore
+	}
+	watchListen := p.WatchlistListen
+	if watchListen == "" {
+		watchListen = defaultWatchlistListen
+	}
+	watchHost, watchPort, err := net.SplitHostPort(watchListen)
+	if err != nil {
+		return nil, fmt.Errorf("units: watchlist listen address %q: %w", watchListen, err)
+	}
 	return []File{
 		controlService(bin, watchdogSec),
 		brokerService(bin),
@@ -172,9 +221,58 @@ func Files(settings Settings, p Params) ([]File, error) {
 		restoreDrillService(bin),
 		restoreDrillTimer(drillCal, keyBackupDrillEach),
 		llamaSwapService(swapBin, swapCfg, swapListen),
+		watchlistService(watchBin, watchStore, watchHost, watchPort),
 		localSlice(),
 		journaldDropIn(journalMaxUse),
 	}, nil
+}
+
+// watchlistService renders the S14.6 adopted-organ unit for changedetection.io
+// (Spec S14.6 T1 "own unit [S01.2]"). GENERATED, never installed — the host
+// install is a B5-gate operator act. ExecStart runs the OPERATOR-INSTALLED
+// changedetection.io entry point, NOT the sinet binary: the organ is adopted
+// unmodified and integrated by REST + config only (S16.1, adopt-don't-fork).
+//
+// The flags are the pinned version's own (`-d` datastore, `-h` host, `-p`
+// port — getopt string "6Csd:h:p:l:P:" at tag 0.55.8). Binding to loopback is
+// deliberate: the organ's default host is 0.0.0.0.
+func watchlistService(binary, datastore, host, port string) File {
+	var b strings.Builder
+	b.WriteString(header())
+	fmt.Fprintf(&b, `# GENERATED, not installed (P3-B5-6A; install = the B5 gate). This is SINET
+# configuration for the UNMODIFIED adopted changedetection.io organ (S16.1
+# config-only integration, not a fork); changedetection.io ships no unit file
+# of its own (verified by a recursive tree read at tag 0.55.8), so this unit is
+# Sinet's. Its ExecStart runs the operator-installed changedetection.io binary,
+# NEVER the sinet binary.
+[Unit]
+Description=Sinet watchlist executor (changedetection.io page-diff tier; Spec S14.6)
+After=network.target
+
+[Service]
+Type=exec
+# Loopback listen only (S01.1 invariant): the organ's OWN default is 0.0.0.0,
+# so -h is load-bearing. Sinet drives its watch set over the REST API from the
+# control plane; hits are POLLED, so no inbound route exists.
+ExecStart=%s -d %s -h %s -p %s
+Restart=on-failure
+StateDirectory=sinet/watchlist
+`, binary, datastore, host, port)
+	b.WriteString(staticUser)
+	b.WriteString(`# Standard hardening set (Spec S01.2), with one recorded exception:
+# ProtectSystem= is 'full' rather than 'strict' because the organ is a Python
+# application whose interpreter and site-packages live under /usr; its own
+# writable state is confined to StateDirectory=. /home and /root stay hidden.
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
+`)
+	return File{Name: "sinet-watchlist.service", Content: b.String(), Draft: true}
 }
 
 // llamaSwapService renders the S12.2 adopted-organ unit for llama-swap (brief

@@ -402,9 +402,10 @@ var v0Families = []FamilySpec{
 }
 
 // v0Types is the reconciliation of every event type minted by B0–B4 (76) plus
-// the three B5-3 watchdog types (79 minted total), each mapped to a family with
-// its verdict and provenance, plus the declare-only types whose producers are
-// later packets. The declare-once contract test (contract_test.go) asserts
+// the three B5-3 watchdog types, the B5-4 conformance eval.score_recorded and
+// the B5-6A watchlist drift.finding (81 minted total), each mapped to a family
+// with its verdict and provenance, plus the declare-only types whose producers
+// are later packets. The declare-once contract test (contract_test.go) asserts
 // every producer Event* constant appears here; a newly-minted type absent from
 // this table fails the build.
 var v0Types = []TypeSpec{
@@ -469,9 +470,14 @@ var v0Types = []TypeSpec{
 	minted("watchdog.annotated", FamilyWatchdog, VerdictConforms, "internal/watchdog/watchdog.go (EventAnnotated); emitted internal/watchdog/tier1.go", "Tier-1 annotation: {rule, verdict∈loop|productive|unclear, confidence, evidence}; low margin ⇒ unclear (S12.4), never gates"),
 	minted("watchdog.suppressed", FamilyWatchdog, VerdictConforms, "internal/watchdog/watchdog.go (EventSuppressed); emitted internal/watchdog/suppress.go", "per-rule suppression tuning signal; the retune proposal is a card, never an auto-move (S14.4)"),
 
-	// ── Family 11: Drift & canary (S2.8) — DECLARE, producers B5-6 ──────
-	declare("drift.finding", FamilyDriftCanary, "producer: B5-6 (S14.6)"),
-	declare("canary.result", FamilyDriftCanary, "producer: B5-6 (S14.6)"),
+	// ── Family 11: Drift & canary (S2.8) — drift.finding MINTED at B5-6A
+	// (the S14.6 watchlist executor); canary.result stays DECLARE until the
+	// sibling API-canary layer (B5-6B) mints it. The two halves split at
+	// exactly this event-type seam. ──────────────────────────────────────
+	minted("drift.finding", FamilyDriftCanary, VerdictConforms,
+		"internal/watchlist/watchlist.go (EventDriftFinding); emitted internal/watchlist/drift.go Emit",
+		"outside-world drift from the S14.6 watchlist executor: {source, lanes, change_class, severity, summary, fingerprint} — the FamilyDriftCanary contract minimum verbatim; platform-scope (a watch hit has no run). Severity derives server-side from the change class and the WATCH ROW's lane (S14.4), never from the hit body"),
+	declare("canary.result", FamilyDriftCanary, "producer: B5-6B (S14.6 API canary layer)"),
 
 	// ── Family 12: Platform (13.4; S2.1) ────────────────────────────────
 	minted("settings.changed", FamilyPlatform, VerdictConforms, "internal/settings/settings.go:36", "spec-named (G3 Def.2); payload {actor,key,old,new,reason}"),

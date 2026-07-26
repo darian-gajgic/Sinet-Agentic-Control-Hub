@@ -35,12 +35,13 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchdog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
-// producerTypes is the complete inventory of the 80 event types minted by the
-// B0–B4 producers, the three B5-3 watchdog types, and the B5-4 conformance
-// eval.score_recorded, referenced through each package's exported Event*
+// producerTypes is the complete inventory of the 81 event types minted by the
+// B0–B4 producers, the three B5-3 watchdog types, the B5-4 conformance
+// eval.score_recorded and the B5-6A watchlist drift.finding, referenced through each package's exported Event*
 // constant so a producer-side value change (or a deleted constant) is caught
 // here at compile or assertion time. The 13 worker-asset lifecycle constants
 // are package-private (internal/worker/store.go:43-55, evTemplateCreated…), so
@@ -92,6 +93,8 @@ func producerTypes() []string {
 		watchdog.EventFlagged, watchdog.EventAnnotated, watchdog.EventSuppressed,
 		// conformance (1): the B5-4 S14.5 recording surface
 		conformance.EventScoreRecorded,
+		// watchlist (1): the B5-6A S14.6 outside-world drift producer
+		watchlist.EventDriftFinding,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -146,11 +149,12 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 }
 
 // TestInventoryTotals pins the reconciliation counts (§2): B5-3 minted the
-// three watchdog types and B5-4 minted eval.score_recorded, so 80 minted + 13
-// declare-only = 93 registered types.
+// three watchdog types, B5-4 minted eval.score_recorded and B5-6A minted
+// drift.finding, so 81 minted + 12 declare-only = 93 registered types.
+// canary.result stays declare-only until the sibling API-canary layer (B5-6B).
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 80 {
-		t.Errorf("producer inventory = %d, want 80 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4)", n)
+	if n := len(producerTypes()); n != 81 {
+		t.Errorf("producer inventory = %d, want 81 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -163,11 +167,11 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 80 {
-		t.Errorf("registered minted types = %d, want 80", minted)
+	if minted != 81 {
+		t.Errorf("registered minted types = %d, want 81", minted)
 	}
-	if declareOnly != 13 {
-		t.Errorf("declare-only types = %d, want 13", declareOnly)
+	if declareOnly != 12 {
+		t.Errorf("declare-only types = %d, want 12", declareOnly)
 	}
 }
 
@@ -403,21 +407,24 @@ func TestRenamedTypesAreCanonical(t *testing.T) {
 	}
 }
 
-// TestDeclareOnlyFutureTypes (§2, seams): the 13 types declared now with
+// TestDeclareOnlyFutureTypes (§2, seams): the 12 types declared now with
 // producers in later packets are present and marked declare-only. The three
 // watchdog types left this set when B5-3 became their producer;
-// eval.score_recorded left when B5-4 became its producer (benchmark.pair_recorded
-// stays — its producer is B5-7, its numbers BENCH-REG-frozen).
+// eval.score_recorded left when B5-4 became its producer; drift.finding left
+// when B5-6A (the S14.6 watchlist executor) became its producer. canary.result
+// stays — its producer is the sibling API-canary layer, the seam the packet
+// split at. benchmark.pair_recorded stays too: its producer is B5-7 and its
+// numbers are BENCH-REG-frozen.
 func TestDeclareOnlyFutureTypes(t *testing.T) {
 	reg := eventlog.Registry()
 	declareOnly := []string{
 		"stage.started", "stage.finished", "run.parked", "run.resumed",
 		"ask.observed", "ask.answered", "decision.recorded",
-		"drift.finding", "canary.result", "retention.compacted", "tool.called",
+		"canary.result", "retention.compacted", "tool.called",
 		"benchmark.pair_recorded", "run.summary_written",
 	}
-	if len(declareOnly) != 13 {
-		t.Fatalf("expected 13 declare-only types, listed %d", len(declareOnly))
+	if len(declareOnly) != 12 {
+		t.Fatalf("expected 12 declare-only types, listed %d", len(declareOnly))
 	}
 	for _, typ := range declareOnly {
 		ts, ok := reg.TypeSpec(typ)
@@ -621,6 +628,16 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"eval.score_recorded",
 			`{"suite_id":"adapter-anthropic","suite_version":"claudecli-conformance@2.1.215","asset_id":"engine:claude-cli","asset_version":"2.1.215","metrics":{"cases_total":42,"cases_passed":42},"runner":"go test ./internal/adapters/claudecli/","runner_version":"go1.26.5","result":"green"}`,
 			[]string{"suite_id", "suite_version", "asset_id", "asset_version", "metrics", "runner", "runner_version"},
+		},
+		{
+			// drift.finding (B5-6A): the FamilyDriftCanary contract minimum's
+			// drift half verbatim — source, lane(s), change class, severity,
+			// one-line summary, incident fingerprint. Keyed on the real
+			// watchlist.FindingPayload fields. The canary half (canary kind +
+			// lane + pass/fail/delta) arrives with canary.result at B5-6B.
+			"drift.finding",
+			`{"source":"https://claude.com/pricing","lanes":["anthropic"],"change_class":"price","severity":"flag-now","summary":"Opus input price moved","fingerprint":"9f2c1ab34de5f607","row_id":"t1-anthropic-pricing","kind":"page","classified":true,"revalidation":{"triggered":false,"reason":"no revalidation triggered: change class \"price\" names no model (OQ4(a))"}}`,
+			[]string{"source", "lanes", "change_class", "severity", "summary", "fingerprint"},
 		},
 	}
 	for _, c := range cases {

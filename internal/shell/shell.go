@@ -236,6 +236,7 @@ func Run(ctx context.Context, opts Options) error {
 	// The S14.4 watchdog suite (B5-3): composed in the production path, driven by
 	// shell-owned goroutines (sweep + Tier-0 tail + dead-man probe) after step 5.
 	var wd *watchdog.Watchdog
+	var wlSurf *watchlistSurface
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -522,11 +523,32 @@ func Run(ctx context.Context, opts Options) error {
 		// (their host machinery — is-active from the sinet user, logind wake
 		// wiring — is a later packet). The shell OWNS WHEN (the goroutines below);
 		// the suite owns the LOGIC.
+		// The S14.6 watchlist executor (B5-6A): the watch-row config store and
+		// its seeds, the config-as-code driver for the adopted
+		// changedetection.io page tier, the Sinet-native conditional-GET feed
+		// poller, the weekly aggregator jobs incl. the genai-prices
+		// refresh-as-proposal, the local-tier second pass, and the drift.finding
+		// emitter whose cards derive from the log. The organ is DISCOVERED, never
+		// installed (its host install is a B5-gate act) — absent, the page tier
+		// degrades and the feed/API tiers keep working. The shell OWNS WHEN (the
+		// goroutine below); the package owns the LOGIC.
+		wlSurf, err = buildWatchlistSurface(ctx, db, log, reg, localSurf.Duty,
+			advisoryMeter(runs, checkpoints), evalSurf.Runbook, logger)
+		if err != nil {
+			return err
+		}
+		logger.Info("watchlist: S14.6 executor wired (B5-6A)",
+			"rows_seeded", wlSurf.Rows, "page_tier_configured", wlSurf.PageTier)
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,
 			Meter: watchdog.AdvisoryMeter(advisoryMeter(runs, checkpoints)),
 			Spend: meterLedger,
+			// The organ-liveness seam goes live at B5-6A: the watchlist
+			// executor probes changedetection.io's GET /api/v1/systeminfo, and a
+			// down organ becomes a watchdog.organ_absence:watchlist digest flag.
+			Organs: watchlistOrgans(wlSurf),
 			Listener: func(context.Context) ([]watchdog.ForeignListener, error) {
 				// Recurring in-process listener audit (R25, drain D7): enumerate
 				// THIS process's listening sockets via /proc and flag any bound
@@ -663,6 +685,14 @@ func Run(ctx context.Context, opts Options) error {
 		go watchdogTailLoop(procCtx, wd, log, logger)
 		go watchdogSweepLoop(procCtx, wd, logger)
 		go watchdogDeadManLoop(procCtx, wd, logger)
+	}
+
+	// The S14.6 watchlist driver (B5-6A): the shell owns WHEN. It ticks on a
+	// structural interval and polls only the rows whose STORED cadence has
+	// elapsed, so the watchlist resumes correctly across a restart and a
+	// wall-clock jump.
+	if wlSurf != nil {
+		go watchlistLoop(procCtx, wlSurf, logger)
 	}
 
 	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,

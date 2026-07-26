@@ -443,6 +443,53 @@
       ],
       "last_review": "2026-07-26",
       "notes": "Standby entry materialized at P3-B5-5 alongside the promptfoo adoption: S16.2 requires a standby entry for every replacement path that names a concrete third-party component, and the Ollama row is the shape (observed now, pinned on activation). Live-verified VIABLE 2026-07-26: PyPI deepeval 4.1.3 uploaded 2026-07-22 under Apache-2.0; repo unarchived, pushed 2026-07-26. HONEST CROSS-ECOSYSTEM NOTE: DeepEval is a PYTHON tool while promptfoo is a Node CLI, so the pre-registered swap crosses ecosystems and would need a Python runtime on the host. That is survivable precisely because tools are runners-never-stores (P-T11-4): a swap replaces the runner adapter behind internal/evals.Runner and nothing is migrated — every score, floor, stamp and sweep verdict already lives in platform.db. No pin is consumed and no code imports it; the recorded 4.1.3 is the observed latest at the check date, not an adoption."
+    },
+    {
+      "name": "changedetection.io",
+      "kind": "organ-unit",
+      "pin": "0.55.8",
+      "license": {
+        "spdx": "Apache-2.0",
+        "scope": "entire repository at tag 0.55.8 — path-scoped carve-out scan run at the pinned ref (recursive git tree, 1192 paths, truncated:false): the only licence file is the root LICENSE (Apache-2.0, 'Copyright 2025 Web Technologies s.r.o.', unmodified appendix), there is NO enterprise/ or ee/ directory anywhere in the tree, and no dual-license or commercial-license trailer appears in README.md. Sinet consumes the running service over its REST API only — no directory is vendored, copied or linked",
+        "checked": "2026-07-26"
+      },
+      "role": {
+        "summary": "watchlist page-diff tier (T1): the adopted page-diff organ Sinet's watch rows are reconciled onto by REST, config-as-code",
+        "section": "S14.6"
+      },
+      "replacement": "process-seam swap per S01.3: the Sinet-native feed poller and the API canary layer carry the watch duty through any gap, so the page tier degrades to absent rather than failing [G2 Def.12]. A replacement page-differ is a unit + lock edit at the process/adoption seams; the config-as-code driver is one file against 13 documented REST routes",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7), tightened for a named bus-factor risk: the project is single-primary-maintainer (dgtlmoon) — the llama-swap row's posture. Execute the funeral plan on any of: 6 months without an upstream release while security advisories accumulate, the repo archived or the primary maintainer stepping away without a named successor, a licence change off Apache-2.0 at a bumped ref, or removal of the /api/v1 surface the config-as-code driver depends on",
+      "watch": [
+        "S2.8 changedetection.io drift canary — seeded watch row lock-changedetection-io (S16.4 #9; the S16.7 quarterly dependency pass reads it through watchlist.Store.PendingReview)",
+        "REST-surface watch: the driver depends on GET/POST /api/v1/watch, GET/PUT/DELETE /api/v1/watch/<uuid>, GET /api/v1/watch/<uuid>/difference/<from>/<to>, GET/POST /api/v1/tags + /api/v1/tag, and GET /api/v1/systeminfo. GET /api/v1/full-spec is the pin-coupled re-verification handle; re-verify the route set, the x-api-key header and the 403-on-failure behaviour on every pin bump — behaviour is asserted, documentation is never the check (S03.3 rule 4)",
+        "browser-fetcher watch: the escalation ladder's second rung asks for fetch_backend=html_webdriver, which at 0.55.8 requires an operator-provisioned EXTERNAL CDP service (PLAYWRIGHT_DRIVER_URL); playwright is not a dependency of the project. Re-check on any pin bump before claiming the rung works",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-26",
+      "notes": "Adopted at P3-B5-6A. Integration is REST + config ONLY — no upstream code is vendored, patched or forked (adopt-don't-fork, S16.1/G2 D2.2), and no `modules` claim applies (a Python service, not a Go module — the sandbox-runtime/promptfoo precedent). The HOST INSTALL is a B5-gate operator act: the packet installed nothing and changed no host state; CI is hermetic against an httptest stub and the real leg prints SANCTIONED SKIP (CONVENTIONS §10) when unreachable. Sinet GENERATES sinet-watchlist.service (Draft:true, never installed) under the B4-5 llama-swap carve-out, because a recursive tree read at tag 0.55.8 confirmed the project ships no *.service and no systemd/ path. Health at the pinned ref (2026-07-26): not archived, not disabled, pushed_at 2026-07-24, 32,495 stars, 365 open issues, default branch master; publisher-owned Docker Hub image dgtlmoon/changedetection.io at 10,834,296 pulls (not consumed — Sinet has no ratified container runtime). S16.4 #10 operator ratification is QUEUED FOR THE B5 GATE."
+    },
+    {
+      "name": "genai-prices data.json",
+      "kind": "data",
+      "pin": "v0.0.72+sha256:42e71b090d70007fa8f31851f5b09fcfe83b6764ec89cd42ee1a27a0502a4273",
+      "license": {
+        "spdx": "MIT",
+        "scope": "prices/ at tag v0.0.72 — path-scoped carve-out scan run at the pinned ref (recursive git tree, 193 paths, truncated:false): licence files are the root LICENSE (MIT, 'Copyright (c) Pydantic Services Inc. 2025 to present') plus packages/js/LICENSE and packages/python/LICENSE (both MIT); there is NO enterprise/ or ee/ directory and no separate licence under prices/, so the root MIT governs the vendored path. Only prices/data.json is vendored; the upstream LICENSE is kept in-tree beside it (S16.2)",
+        "checked": "2026-07-26"
+      },
+      "role": {
+        "summary": "vendored price-table baseline: the ONE consumer is the S14.6 refresh job's diff baseline, which lands upstream movement as an operator proposal",
+        "section": "S14.6"
+      },
+      "replacement": "LiteLLM-primary source plus a manual table — the S16.8 genai-prices-staleness row already proposes exactly that flip when upstream stops moving past ⚙ adoption.price_data_stale_days. Rebuild cost is near zero: the vendored file is a diff baseline, and an empty baseline degrades the refresh to a coarse whole-document 'changed' proposal rather than breaking it",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7). Additionally: upstream stalling past ⚙ adoption.price_data_stale_days while providers reprice is itself the documented trigger to propose the LiteLLM-primary replacement [S16.8; R14 §4.2]",
+      "watch": [
+        "S2.8 genai-prices refresh + staleness — seeded watch rows t3-genai-prices (the weekly refresh-as-proposal job) and s168-genai-prices-staleness (the S16.8 registration), plus lock-genai-prices-data-json for the quarterly pass (S16.4 #9)",
+        "schema watch: the document is a TOP-LEVEL LIST of providers whose models carry a `prices` block; a model's prices may be a LIST (effective-dated variants) or carry per-field conditional objects (tiered by context length), and those are surfaced for hand pricing rather than flattened. Re-verify the shape on any pin bump",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-26",
+      "notes": "Vendored at P3-B5-6A per G2 Def.16 + coordinator disposition OQ3(a): the pinned prices/data.json is committed content-hashed at internal/watchlist/pricedata/data.json (345,378 bytes, sha256 42e71b09…4273) with the upstream MIT LICENSE beside it, and a test asserts the file still hashes to the pin so the bytes can never drift from this manifest silently. No `modules` claim (data, not a Go module). Its ONE consumer is the diff baseline — the S10.3 loader, user overlay and persistence remain metering's follow-up and were deliberately NOT pulled into an S14 packet. The refresh ALWAYS lands as a proposal: no code path applies a price change and none auto-flips a billing-regime flag (S10.2/S14.6), proven by test. Health at the pinned ref (2026-07-26): pydantic/genai-prices, not archived, not disabled, pushed_at 2026-07-25, 331 stars, 78 open issues, default branch main; latest release v0.0.72 published 2026-07-22 (S16.3 recorded the v0.0.71 line — it has moved by one). S16.4 #10 operator ratification is QUEUED FOR THE B5 GATE."
     }
   ]
 }

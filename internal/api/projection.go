@@ -424,19 +424,62 @@ type InboxConformanceCard struct {
 	LastRunTS     time.Time `json:"last_run_ts"`
 }
 
+// InboxDriftCard is one outside-world drift card (B5-6A, S14.6 ¶2): a storm of
+// drift.finding rows sharing an incident fingerprint, folded into ONE card per
+// incident window. It is pure derivation over `run_events` — no card table and
+// no bare `asks` row (a watch hit has no run; asks.run_id is NOT NULL) — and
+// internal/api does not import internal/watchlist (it reads the canonical type
+// string directly, the watchdog-flags derive-from-log precedent). Findings are
+// platform-scope, so only the operator sees them; a member never does (S01.9).
+//
+// Severity is the S14.4 alert-routing class computed by the producer from the
+// change class and the WATCH ROW's lane — it is carried, never recomputed here.
+type InboxDriftCard struct {
+	// Seq is the fingerprint's FIRST finding in this window (the card's
+	// identity); LatestSeq is its most recent.
+	Seq       int64 `json:"seq"`
+	LatestSeq int64 `json:"latest_seq"`
+	// Fingerprint is the incident fingerprint over {source, lane, change class}.
+	Fingerprint string   `json:"fingerprint"`
+	Source      string   `json:"source"`
+	Lanes       []string `json:"lanes"`
+	ChangeClass string   `json:"change_class"`
+	Severity    string   `json:"severity"`
+	Summary     string   `json:"summary"`
+	RowID       string   `json:"row_id"`
+	// Hits is how many findings folded into this card — one card per storm.
+	Hits int `json:"hits"`
+	// Classified is false when the local second pass could not judge the hit;
+	// the card then reads "unclassified — the operator reads it".
+	Classified bool `json:"classified"`
+	// RevalidationTriggered / RevalidationNote make the S14.8 edge VISIBLE on
+	// every card, including when nothing was triggered (OQ4(a)).
+	RevalidationTriggered bool      `json:"revalidation_triggered"`
+	RevalidationNote      string    `json:"revalidation_note,omitempty"`
+	FirstTS               time.Time `json:"first_ts"`
+	LatestTS              time.Time `json:"latest_ts"`
+}
+
+// driftIncidentWindow is the fingerprint dedup window: findings sharing a
+// fingerprint within one window fold into ONE card ("one card per storm",
+// S14.6 ¶2; the S10.5 once-per-storm logging discipline), and the next window
+// opens a new card. Structural, not ⚙ — S18 ratifies no key (the §7
+// sseBatchSize precedent).
+const driftIncidentWindow = 24 * time.Hour
+
 // InboxSnapshot is the `inbox` topic projection (§3): open asks + proposed
-// approvals + OPEN watchdog flags (B5-3) + RED conformance cards (B5-4), plus
-// the declare-only drift seam (producer B5-6).
+// approvals + OPEN watchdog flags (B5-3) + RED conformance cards (B5-4) + open
+// drift cards (B5-6A).
 type InboxSnapshot struct {
 	Asks             []InboxAsk             `json:"asks"`
 	Approvals        []InboxApproval        `json:"approvals"`
 	WatchdogFlags    []InboxWatchdogFlag    `json:"watchdog_flags"`
 	ConformanceCards []InboxConformanceCard `json:"conformance_cards"`
-	DriftCards       []any                  `json:"drift_cards"`
+	DriftCards       []InboxDriftCard       `json:"drift_cards"`
 }
 
 func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot, error) {
-	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []any{}}
+	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []InboxDriftCard{}}
 
 	aq := `SELECT ask_id, run_id, status, observed_ts FROM asks WHERE answered_ts IS NULL`
 	aargs := []any{}
@@ -497,6 +540,97 @@ func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot,
 		return out, err
 	}
 	out.ConformanceCards = cards
+
+	drift, err := p.driftCards(ctx, scope)
+	if err != nil {
+		return out, err
+	}
+	out.DriftCards = drift
+	return out, nil
+}
+
+// driftCards derives the open drift cards from the `drift.finding` rows
+// (B5-6A, S14.6 ¶2). Findings are read in seq order and folded by incident
+// fingerprint: a finding joins the fingerprint's open card while it falls
+// inside driftIncidentWindow of that card's FIRST finding, and opens a new card
+// otherwise — N hits in one storm are one card, and a fresh storm is a fresh
+// card. Owner-scoped per S01.9: findings are platform-scope, so a member's
+// filter matches none and only the operator sees them.
+func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDriftCard, error) {
+	q := `SELECT event_seq, payload, ts FROM run_events WHERE type = 'drift.finding'`
+	args := []any{}
+	if !scope.Operator {
+		q += ` AND user_id = ?`
+		args = append(args, scope.UserID)
+	}
+	q += ` ORDER BY event_seq` // ascending: the first row of a window opens its card
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: drift cards: %w", err)
+	}
+	defer rows.Close()
+
+	open := map[string]*InboxDriftCard{}
+	out := []InboxDriftCard{}
+	// cards holds every card in open order; open[] points into it by
+	// fingerprint so a fold updates the card already in the list.
+	var cards []*InboxDriftCard
+	for rows.Next() {
+		var (
+			seq         int64
+			payload, ts string
+		)
+		if err := rows.Scan(&seq, &payload, &ts); err != nil {
+			return nil, fmt.Errorf("projection: drift card scan: %w", err)
+		}
+		var f struct {
+			Source       string   `json:"source"`
+			Lanes        []string `json:"lanes"`
+			ChangeClass  string   `json:"change_class"`
+			Severity     string   `json:"severity"`
+			Summary      string   `json:"summary"`
+			Fingerprint  string   `json:"fingerprint"`
+			RowID        string   `json:"row_id"`
+			Classified   bool     `json:"classified"`
+			Revalidation struct {
+				Triggered bool   `json:"triggered"`
+				Reason    string `json:"reason"`
+			} `json:"revalidation"`
+		}
+		if err := json.Unmarshal([]byte(payload), &f); err != nil {
+			// A non-conformant payload never breaks the inbox (S14.2 rule 3
+			// forward-tolerance); it is skipped, not fatal.
+			continue
+		}
+		at := parseTS(ts)
+		if card, ok := open[f.Fingerprint]; ok && at.Sub(card.FirstTS) < driftIncidentWindow {
+			card.Hits++
+			card.LatestSeq, card.LatestTS = seq, at
+			card.Summary, card.Severity, card.Classified = f.Summary, f.Severity, f.Classified
+			card.RevalidationTriggered = card.RevalidationTriggered || f.Revalidation.Triggered
+			card.RevalidationNote = f.Revalidation.Reason
+			continue
+		}
+		card := &InboxDriftCard{
+			Seq: seq, LatestSeq: seq, Fingerprint: f.Fingerprint, Source: f.Source,
+			Lanes: f.Lanes, ChangeClass: f.ChangeClass, Severity: f.Severity,
+			Summary: f.Summary, RowID: f.RowID, Hits: 1, Classified: f.Classified,
+			RevalidationTriggered: f.Revalidation.Triggered,
+			RevalidationNote:      f.Revalidation.Reason,
+			FirstTS:               at, LatestTS: at,
+		}
+		if card.Lanes == nil {
+			card.Lanes = []string{}
+		}
+		open[f.Fingerprint] = card
+		cards = append(cards, card)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, c := range cards {
+		out = append(out, *c)
+	}
 	return out, nil
 }
 

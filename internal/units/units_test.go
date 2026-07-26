@@ -38,6 +38,7 @@ func TestUnitSetIsComplete(t *testing.T) {
 		"sinet-restore-drill.service",
 		"sinet-restore-drill.timer",
 		"sinet-llamaswap.service",
+		"sinet-watchlist.service",
 		"sinet-local.slice",
 		"journald-sinet.conf",
 	}
@@ -211,5 +212,52 @@ func TestEveryFileCarriesGeneratedHeader(t *testing.T) {
 		if !strings.Contains(f.Content, "B0-gate operator decision") {
 			t.Errorf("%s lacks the never-installed notice", name)
 		}
+	}
+}
+
+// TestWatchlistUnitIsGeneratedForAnOrganWithNoUnit pins the P3-B5-6A extension
+// of the B4-5 carve-out: changedetection.io ships no unit file of its own
+// (verified by a recursive tree read at tag 0.55.8), so Sinet generates one —
+// but the unit is CONFIGURATION for the unmodified adopted binary, so its
+// ExecStart must run the operator-installed organ and never the sinet binary,
+// it must bind loopback (the organ's own default is 0.0.0.0), and it stays a
+// draft because generation never installs.
+func TestWatchlistUnitIsGeneratedForAnOrganWithNoUnit(t *testing.T) {
+	f := gen(t, units.Params{})["sinet-watchlist.service"]
+	if !f.Draft {
+		t.Error("sinet-watchlist.service must be draft — generation never installs; the host install is a B5-gate act")
+	}
+	for _, want := range []string{
+		"ExecStart=/usr/local/bin/changedetection.io -d /var/lib/sinet/watchlist -h 127.0.0.1 -p 5000",
+		"User=sinet",
+		"NoNewPrivileges=yes",
+		"PrivateTmp=yes",
+		"SystemCallFilter=@system-service",
+		"StateDirectory=sinet/watchlist",
+	} {
+		if !strings.Contains(f.Content, want) {
+			t.Errorf("sinet-watchlist.service lacks %q", want)
+		}
+	}
+	if strings.Contains(f.Content, "ExecStart=/usr/local/bin/sinet") {
+		t.Error("the watchlist unit must never ExecStart the sinet binary — it runs the adopted organ")
+	}
+	for _, line := range strings.Split(f.Content, "\n") {
+		if !strings.HasPrefix(line, "#") && strings.Contains(line, "0.0.0.0") {
+			t.Errorf("the watchlist unit must bind loopback (S01.1); directive %q carries the organ's 0.0.0.0 default", line)
+		}
+	}
+}
+
+// TestWatchlistUnitHonoursStructuralOverrides proves the composition-root
+// passthrough is real config, not a hardcoded path.
+func TestWatchlistUnitHonoursStructuralOverrides(t *testing.T) {
+	f := gen(t, units.Params{
+		WatchlistBinary:    "/opt/cdio/bin/changedetection.io",
+		WatchlistDatastore: "/srv/watch",
+		WatchlistListen:    "127.0.0.1:5999",
+	})["sinet-watchlist.service"]
+	if !strings.Contains(f.Content, "ExecStart=/opt/cdio/bin/changedetection.io -d /srv/watch -h 127.0.0.1 -p 5999") {
+		t.Errorf("overrides not rendered:\n%s", f.Content)
 	}
 }

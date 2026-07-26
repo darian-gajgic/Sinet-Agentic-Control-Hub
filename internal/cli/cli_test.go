@@ -157,8 +157,8 @@ func TestUnitsToDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read out dir: %v", err)
 	}
-	if len(entries) != 12 {
-		t.Fatalf("%d files written, want 12", len(entries))
+	if len(entries) != 13 {
+		t.Fatalf("%d files written, want 13", len(entries))
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "sinet-control.service"))
 	if err != nil {
