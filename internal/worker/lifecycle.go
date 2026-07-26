@@ -616,6 +616,126 @@ func (s *Store) flagWhere(ctx context.Context, subject, reason string,
 	return flagged, nil
 }
 
+// RevalidationStamp is the Spec S14.8 ¶3 / S08.10(a) DATED REVALIDATION STAMP:
+// the record through which a flagged template version returns to active
+// service. It answers who, when, which suites ran, and against which pinned
+// baseline. A red comparison stamps too — the version stays flagged and its red
+// is on the record.
+type RevalidationStamp struct {
+	ID             int64
+	TemplateID     string
+	VersionID      string
+	TriggerKind    string
+	TriggerSubject string
+	// Suites names the golden sets / planted-defect suites that ran.
+	Suites string
+	// Baseline names the pinned baseline the comparison ran against.
+	Baseline  string
+	Green     bool
+	Actor     string
+	StampedTS string
+}
+
+// Revalidate writes a dated revalidation stamp and, when the comparison is
+// GREEN, returns the flagged template to active service (Spec S14.8 ¶3 "green:
+// release with a dated revalidation stamp; red: asset stays flagged"). This is
+// the ONLY path from flagged back to active for an already-approved version:
+// approval and guardrails stand, so there is no second approval — the dated
+// record is what releases it (CONVENTIONS §18). A red stamp changes no status,
+// leaving the version supervised-only (S08.10(a)).
+//
+// The stamp row, the status flip, and the worker.validated event commit in ONE
+// WriteTx. No new event type is minted: revalidation is a validation of the
+// existing worker family, marked on the payload.
+func (s *Store) Revalidate(ctx context.Context, actor string, st RevalidationStamp) (RevalidationStamp, error) {
+	role, err := s.person(ctx, actor)
+	if err != nil {
+		return RevalidationStamp{}, err
+	}
+	if st.Suites == "" || st.Baseline == "" {
+		return RevalidationStamp{}, fmt.Errorf("%w: a revalidation stamp records which suites ran and against which baseline (Spec S14.8)", ErrInvalid)
+	}
+	t, err := s.Template(ctx, st.TemplateID)
+	if err != nil {
+		return RevalidationStamp{}, err
+	}
+	if t.Owner != actor && role != "operator" {
+		return RevalidationStamp{}, ErrNotOwner
+	}
+	v, err := s.VersionByID(ctx, st.VersionID)
+	if err != nil {
+		return RevalidationStamp{}, err
+	}
+	if v.TemplateID != st.TemplateID {
+		return RevalidationStamp{}, fmt.Errorf("%w: version %q belongs to another template", ErrInvalid, st.VersionID)
+	}
+	if v.ApprovedTS == "" {
+		return RevalidationStamp{}, fmt.Errorf("%w: revalidation releases an already approved version (S08.4)", ErrNotValidated)
+	}
+	stamped := st
+	stamped.Actor = actor
+	stamped.StampedTS = rfc3339(s.now())
+	green := 0
+	if st.Green {
+		green = 1
+	}
+	release := st.Green && t.Status == StatusFlagged && t.ActiveVersion == st.VersionID
+	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO revalidation_stamps
+			   (template_id, version_id, trigger_kind, trigger_subject, suites,
+			    baseline, green, actor, stamped_ts, user_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			stamped.TemplateID, stamped.VersionID, stamped.TriggerKind, stamped.TriggerSubject,
+			stamped.Suites, stamped.Baseline, green, stamped.Actor, stamped.StampedTS, t.Owner)
+		if err != nil {
+			return fmt.Errorf("worker: write revalidation stamp: %w", err)
+		}
+		if stamped.ID, err = res.LastInsertId(); err != nil {
+			return fmt.Errorf("worker: revalidation stamp id: %w", err)
+		}
+		if release {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE worker_templates SET status = ?, updated_ts = ? WHERE template_id = ?`,
+				string(StatusActive), stamped.StampedTS, stamped.TemplateID); err != nil {
+				return fmt.Errorf("worker: release revalidated template: %w", err)
+			}
+		}
+		_, err = s.log.AppendTx(ctx, tx, s.event(t.Owner, evValidated, map[string]any{
+			"template": stamped.TemplateID, "version": stamped.VersionID,
+			"revalidation": true, "trigger": stamped.TriggerKind, "subject": stamped.TriggerSubject,
+			"suites": stamped.Suites, "baseline": stamped.Baseline,
+			"green": stamped.Green, "released": release, "actor": actor,
+		}))
+		return err
+	})
+	if err != nil {
+		return RevalidationStamp{}, err
+	}
+	return stamped, nil
+}
+
+// LatestRevalidation returns the most recent revalidation stamp for a version,
+// or ErrNotFound when the version has never been revalidated.
+func (s *Store) LatestRevalidation(ctx context.Context, versionID string) (RevalidationStamp, error) {
+	var st RevalidationStamp
+	var green int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT stamp_id, template_id, version_id, trigger_kind, trigger_subject,
+		        suites, baseline, green, actor, stamped_ts
+		   FROM revalidation_stamps WHERE version_id = ? ORDER BY stamp_id DESC LIMIT 1`, versionID).
+		Scan(&st.ID, &st.TemplateID, &st.VersionID, &st.TriggerKind, &st.TriggerSubject,
+			&st.Suites, &st.Baseline, &green, &st.Actor, &st.StampedTS)
+	if err == sql.ErrNoRows {
+		return RevalidationStamp{}, fmt.Errorf("%w: no revalidation stamp for version %q", ErrNotFound, versionID)
+	}
+	if err != nil {
+		return RevalidationStamp{}, fmt.Errorf("worker: read revalidation stamp: %w", err)
+	}
+	st.Green = green == 1
+	return st, nil
+}
+
 // RecordSupervisedReview records one requester review of a supervised
 // first-N output (Spec S08.6: count-based, requester review regardless of
 // oversight settings). Reaching zero records the graduation event on the

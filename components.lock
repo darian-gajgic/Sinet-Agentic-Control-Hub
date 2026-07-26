@@ -397,6 +397,52 @@
       ],
       "last_review": "2026-07-22",
       "notes": "Materialized as the S16.3 Ollama STANDBY row at P3-B4-5 (S16.2 standby rule: a pre-registered fallback named by a funeral plan MUST exist as a standby entry — llama-swap's and llama.cpp's funeral plans both name it). kind:standby, named-only, nothing PLATFORM-managed runs — exempt from the CI running-unit rule. HOST OBSERVATION (drain F6): the OPERATOR's own pre-existing ollama is installed (0.30.10) and its ollama.service exists OUTSIDE platform management — 'nothing runs' here refers to PLATFORM acts (Sinet never starts/stops/pins it); the platform never touches the operator's ollama.service (host gate). Pin: observed-current upstream v0.32.1 ('pin on activation' per the S16.3 row — the real pin binds when/if activated via the S12.2 ladder). Operator ratification (#10): DEFERRED to activation per the S16.2 standby rule — a standby needs no B4-gate #10 (nothing runs); the full S16.4 checklist + #10 run at activation. No S16.4 host-install / behavioral probe until then. Not a Go module: no modules claim."
+    },
+    {
+      "name": "promptfoo",
+      "kind": "library",
+      "pin": "0.121.19",
+      "license": {
+        "spdx": "MIT",
+        "scope": "LICENSE at the repo root at the pinned ref (tag 0.121.19) — full MIT text VERIFIED 2026-07-26 (\"Copyright (c) Promptfoo 2025\", 1053 chars, not assumed); package.json declares license MIT and npm reports MIT. Carve-out scan at the pinned ref: NO enterprise/ or ee/ directory and no dual-license trailer in the tree (P-T16-2). Consumed UNMODIFIED as an external Node CLI (bin `promptfoo`/`pf` -> dist/src/entrypoint.js, engines node ^20.20.0 || >=22.22.0) — never vendored, never linked into the Go binary, no Go module (adopt-don't-fork, S16.1).",
+        "checked": "2026-07-26"
+      },
+      "role": {
+        "summary": "the pinned regression-eval RUNNER (S14.8 ¶1): runs the S14.8 eval objects — golden/planted-defect suites and the S03.3 limb-(b) engine-bump quality probe — as an external subprocess behind internal/evals' Runner seam; B5-6's behavioral canaries reuse the same seam. RUNNER, NEVER A STORE (P-T11-4): every score it emits is parsed and landed in platform.db as eval.score_recorded, telemetry is disabled at invocation, sharing is refused on the command line, and its own eval history is redirected to per-run scratch and never read back as a record",
+        "section": "S14.8"
+      },
+      "replacement": "DeepEval (standby entry in this manifest, pin-on-activation): the S14 pre-registered swap. The swap crosses ecosystems (DeepEval is Python, promptfoo is Node), which is survivable precisely BECAUSE tools are runners-never-stores — a swap replaces the runner adapter behind internal/evals.Runner; every record already lives in platform.db and nothing is migrated",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7). Re-entry condition for the pre-registered DeepEval swap is promptfoo GOVERNANCE DRIFT manifesting (S14 Deferred list) — a license change off MIT, an archived or stalled repo, or a self-hosting/telemetry posture that stops honouring the runner-never-store contract. The OpenAI acquisition alone is NOT the trigger; the observable drift is",
+      "watch": [
+        "OpenAI-acquisition governance-drift watch (S16.3 watch column): OpenAI announced the acquisition of Promptfoo 2026-03-09, stating it \"will remain open source under the current license\". As of 2026-07-26 the license is intact (MIT), the release cadence is healthy (0.121.13 2026-05-28 -> 0.121.19 2026-07-14, four releases since the announcement) and the repo is unarchived (pushed 2026-07-26) — so this watches a LIVE integration, not a rumour. Drift here fires the DeepEval swap",
+        "S2.8 promptfoo drift canary [XREF:S14; registered with the B5-6 watchlist executors]",
+        "results-schema watch: the parser accepts results.version 3 (recorded from examples/simple-cli/output.json at tag 0.121.19) and refuses any other version loudly — re-verify the config schema, the assertion vocabulary and the results shape on every pin bump",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-26",
+      "notes": "S16.3 promptfoo row MATERIALIZED at P3-B5-5 (first consumption: internal/evals' Runner seam). Pin LIVE-verified 2026-07-26: npm dist-tags.latest = 0.121.19 (published 2026-07-14), license MIT, engines node ^20.20.0 || >=22.22.0 (host node v22.22.1 satisfies); GitHub promptfoo/promptfoo NOT archived, pushed 2026-07-26, 23,621 stars. Not a Go module -> NO modules claim (the claude engine / sandbox-runtime precedent); no npm-side `modules` mechanics are invented — CONVENTIONS §4 defines that equivalent at B6, not before. S16.4 checklist walked: #1 niche/seam — the S01.3 adoption seam, owning section S14.8, behind internal/evals.Runner; #2 organ-grade — a single-purpose eval runner, no orchestration/session/store opinions; #3 health — active (0.121.19 2026-07-14, steady cadence, unarchived, 23.6k stars, MIT, npm publishes carry SLSA v1 provenance via GitHub Actions trusted publishing); #4 license — path-scoped above (verified, not assumed, with the carve-out scan); #5 behavior — the generated config (providers/prompts/tests with icontains / not-icontains assertions), the `eval -c <cfg> -o <results.json> --no-share --no-progress-bar --no-table` invocation, the documented exit code 100 for \"at least one test failed\" (1 = error), and the results.version-3 output shape were all read from the docs and the example output at the PINNED ref 0.121.19; the config is emitted as JSON into promptfoo's default .yaml config name (JSON is a subset of YAML), so Sinet stays stdlib-only; #6 unmodified — config-and-invocation only, no fork, no patch; #7 runner-never-store — ENFORCED: parsed output lands in platform.db as eval.score_recorded, PROMPTFOO_DISABLE_TELEMETRY=1 and PROMPTFOO_DISABLE_UPDATE=1 on an explicitly built child env, --no-share, and PROMPTFOO_CONFIG_DIR/PROMPTFOO_CACHE_PATH redirected into a per-run scratch dir that is removed after the run; #8 pin+funeral — this entry (funeral plan = the DeepEval standby); #9 watch — rows above; #10 operator ratification PENDING, queued for the B5 gate (the B0-5/B1-3 standing pattern: packet sessions propose, phase gates approve). CONSUMPTION POSTURE (B5-5 OQ1(a), the sandbox-runtime precedent verbatim): promptfoo is an external Node CLI installed on the host by an exact-version `npm install -g promptfoo@0.121.19` — a HOST ACT, so it batches at the B5 gate and NOTHING is installed by this packet. Discovery is PATH or the SINET_PROMPTFOO_PATH override (the operator/activation knob and the hermetic test-injection seam). CI stays hermetic on a stub binary under t.TempDir(); the real-binary leg auto-runs when promptfoo is installed and prints SANCTIONED SKIP (CONVENTIONS §10) otherwise. npx-per-invocation was REJECTED (a floating supply-chain surface on every cold run) and a container was REJECTED (no official image is documented — live-checked). Paid posture: this packet spent $0; the first REAL golden-set sweep leg is pre-registered (26x2 on claude-opus-4-8, projection $2.10, stop line $5.00) and executes only on coordinator say-so."
+    },
+    {
+      "name": "DeepEval",
+      "kind": "standby",
+      "pin": "4.1.3",
+      "license": {
+        "spdx": "Apache-2.0",
+        "scope": "OBSERVED at PyPI deepeval 4.1.3 (uploaded 2026-07-22, requires-python >=3.9,<4.0) and at GitHub confident-ai/deepeval (Apache-2.0, unarchived, pushed 2026-07-26, 17,137 stars) — recorded 2026-07-26, NOT path-scoped: a standby is not consumed, so the full P-T16-2 path-scoped carve-out check runs at ACTIVATION (the Ollama standby precedent, \"observed; pin on activation\")",
+        "checked": "2026-07-26"
+      },
+      "role": {
+        "summary": "STANDBY — the pre-registered replacement runner for promptfoo (S14.8 ¶1; S14 Deferred \"DeepEval swap\"). Not consumed at v0: it exists so the promptfoo funeral plan names a concrete, live-verified component rather than an intention (S16.2)",
+        "section": "S14.8"
+      },
+      "replacement": "n/a — this entry IS promptfoo's replacement path. If DeepEval itself became unviable before activation, the funeral plan reverts to the S14.1 adoption criteria and a fresh runner is chosen through the S16.4 onboarding checklist",
+      "abandonment": "n/a while dormant. Activation condition: promptfoo governance drift manifests (S14 Deferred). On activation this row is PINNED, its license is re-verified path-scoped at the pinned ref, its S16.4 checklist is walked in full, and it takes promptfoo's kind/role",
+      "watch": [
+        "activation-readiness watch: license (Apache-2.0), release cadence and repo liveness re-checked at each S16.7 quarterly pass, so the funeral plan is never discovered to be dead at the moment it is needed",
+        "quarterly dependency pass (S16.7)"
+      ],
+      "last_review": "2026-07-26",
+      "notes": "Standby entry materialized at P3-B5-5 alongside the promptfoo adoption: S16.2 requires a standby entry for every replacement path that names a concrete third-party component, and the Ollama row is the shape (observed now, pinned on activation). Live-verified VIABLE 2026-07-26: PyPI deepeval 4.1.3 uploaded 2026-07-22 under Apache-2.0; repo unarchived, pushed 2026-07-26. HONEST CROSS-ECOSYSTEM NOTE: DeepEval is a PYTHON tool while promptfoo is a Node CLI, so the pre-registered swap crosses ecosystems and would need a Python runtime on the host. That is survivable precisely because tools are runners-never-stores (P-T11-4): a swap replaces the runner adapter behind internal/evals.Runner and nothing is migrated — every score, floor, stamp and sweep verdict already lives in platform.db. No pin is consumed and no code imports it; the recorded 4.1.3 is the observed latest at the check date, not an adoption."
     }
   ]
 }

@@ -527,12 +527,14 @@ var v0Types = []TypeSpec{
 	declare("tool.called", FamilyToolsArtifacts, "no distinct producer today", "S14.2 names tool.called/completed; the engine surfaces tool_result → tool.completed; a tool-use-start producer is a later addition"),
 
 	// ── Family 14: Benchmark & eval (S2.11) — eval.score_recorded MINTED at
-	// B5-4 (the S14.5 conformance-registry recording surface); B5-5 (regression
-	// evals) and B5-7 (BENCH-REG pairs) are future co-producers of the family.
-	// benchmark.pair_recorded stays DECLARE — its numbers change only via
-	// BENCH-REG §17 (CF5). ───
+	// B5-4 (the S14.5 conformance-registry recording surface); B5-5 joined as a
+	// CO-PRODUCER (the S14.8 regression evals: per-asset results, the aggregate
+	// sweep verdict, the T15 battery record-through, and the S03.3 limb-(b)
+	// quality probe all record through that same surface), and B5-7
+	// (BENCH-REG pairs) is still to come. benchmark.pair_recorded stays DECLARE
+	// — its numbers change only via BENCH-REG §17 (CF5). ───
 	declare("benchmark.pair_recorded", FamilyBenchmarkEval, "producer: B5-7 (BENCH-REG §14 record verbatim; BENCH-REG numbers stay read-only)"),
-	minted("eval.score_recorded", FamilyBenchmarkEval, VerdictConforms, "internal/conformance/conformance.go (EventScoreRecorded); emitted internal/conformance RecordResult", "the S14.5 conformance-registry recording surface (B5-4); B5-5/B5-7 are future co-producers (S14.7/S14.8)"),
+	minted("eval.score_recorded", FamilyBenchmarkEval, VerdictConforms, "internal/conformance/conformance.go (EventScoreRecorded); emitted internal/conformance RecordResult, driven by internal/evals (S14.8)", "the S14.5 conformance-registry recording surface (B5-4), co-produced by the S14.8 regression evals through the same verb (B5-5); B5-7 is a future co-producer (S14.7)"),
 
 	// ── Family 15: Run summary (11.1) — DECLARE, producer B5-8 ──────────
 	declare("run.summary_written", FamilyRunSummary, "producer: B5-8 (S14.9)"),

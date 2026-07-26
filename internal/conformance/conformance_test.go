@@ -99,15 +99,15 @@ func (h *harness) evalScoreCount(t *testing.T) int {
 
 // ── migration + table (rubric 1) ──
 
-func TestMigrationContiguousUserVersion11(t *testing.T) {
+func TestMigrationContiguousUserVersion12(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	v, err := h.db.UserVersion(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 11 {
-		t.Fatalf("user_version = %d, want 11 (migration 0011 applied contiguously)", v)
+	if v != 12 {
+		t.Fatalf("user_version = %d, want 12 (migrations through 0012 applied contiguously)", v)
 	}
 	var n int
 	if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM conformance_registry`).Scan(&n); err != nil {
@@ -147,8 +147,10 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	// the dead-man canary drill (OQ5(c)).
 	find(t, states, "no-engine-sse-replay")
 	find(t, states, "dead-man-canary")
-	if len(states) != 9 {
-		t.Fatalf("seed produced %d rows, want 9 (7 spec-group rows + no-sse-replay + dead-man)", len(states))
+	// The S14.8 regression-sweep row (B5-5): the S14.8 results' recording home.
+	find(t, states, conformance.RowRegressionSweep)
+	if len(states) != 10 {
+		t.Fatalf("seed produced %d rows, want 10 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep)", len(states))
 	}
 
 	// The zai lane is OMITTED (R7): no row claims it, and the reason is recorded.
@@ -449,6 +451,9 @@ func TestBumpGatingSetSurfacesBLimbReference(t *testing.T) {
 	want := map[string]bool{
 		"adapter-anthropic": true, "adapter-local": true, "no-engine-sse-replay": true,
 		"d6-violation-attempts": true, "compaction-canary": true,
+		// The S14.8 regression sweep carries engine_bump because it is where
+		// limb (b) — the before/after quality probe — records (B5-5 OQ2(a)).
+		conformance.RowRegressionSweep: true,
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("BumpGatingRows returned %d rows, want %d (the engine_bump set)", len(rows), len(want))
@@ -493,8 +498,8 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 9 {
-		t.Fatalf("never-run: %d rows due, want all 9", len(due))
+	if len(due) != 10 {
+		t.Fatalf("never-run: %d rows due, want all 10", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).

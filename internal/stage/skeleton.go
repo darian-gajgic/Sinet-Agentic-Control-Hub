@@ -574,7 +574,12 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 		s.crash(ctx, r.ID, err.Error())
 		return err
 	}
-	out, err := s.newVerifier(in.Deliverable.Domain).Verify(ctx, in)
+	v, err := s.newVerifier(in.Deliverable.Domain)
+	if err != nil {
+		s.crash(ctx, r.ID, err.Error())
+		return err
+	}
+	out, err := v.Verify(ctx, in)
 	if err != nil {
 		s.crash(ctx, r.ID, "verification drain: "+err.Error())
 		return fmt.Errorf("stage: verify: %w", err)
@@ -584,10 +589,28 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 
 // newVerifier assembles the S07 Verifier over the skeleton's seams for one
 // domain (shared by the dispatch leg and the S07.7 resume leg).
-func (s *Skeleton) newVerifier(domain string) *verify.Verifier {
+//
+// This is the one judge-construction site, so it is where P-T06-5 is enforced
+// (Spec S14.8 ¶3): a judge-model change BLOCKS unsupervised judging until the
+// golden-set re-measurement passes. The gate is verify's pure check over the
+// rubric bundle's own pin and recorded rates against the seat that will
+// actually judge; the S14.8 revalidation runbook owns the re-measurement and
+// the rubric version bump that clears it. Refusing here means no verdict can be
+// minted under an unvalidated judge.
+func (s *Skeleton) newVerifier(domain string) (*verify.Verifier, error) {
+	// The rubric resolution mirrors the drain's own (a nil Rubric resolves to
+	// the software seed); it is set on the Verifier so the bundle the gate
+	// checks IS the bundle that judges.
+	rubric := verify.SeedSoftwareRubric()
 	judge := s.cfg.Judge
 	if judge == nil {
+		// The production path: the shell injects no Judge, so every real
+		// verification passes through the gate. An injected Judge is the
+		// composition root's own dev/test seam (the nil-Confiner precedent).
 		judge = &EngineJudge{s: s}
+		if err := verify.UnsupervisedJudgingGate(rubric, judge.Meta().Model); err != nil {
+			return nil, err
+		}
 	}
 	revise := s.cfg.Revise
 	if revise == nil {
@@ -603,6 +626,7 @@ func (s *Skeleton) newVerifier(domain string) *verify.Verifier {
 		Ledger:   s.cfg.Ledger,
 		Settings: s.cfg.Settings,
 		Judge:    judge,
+		Rubric:   rubric,
 		Pack:     s.cfg.CheckPacks[domain],
 		Runner:   s.cfg.CheckRunner,
 		Review:   sink,
@@ -612,7 +636,7 @@ func (s *Skeleton) newVerifier(domain string) *verify.Verifier {
 		// (Spec S07.3; flagged to the B2 gate with the egress batch).
 		Revise: revise,
 		Now:    s.cfg.Now,
-	}
+	}, nil
 }
 
 // verifyInput builds the drain input for one persisted deliverable

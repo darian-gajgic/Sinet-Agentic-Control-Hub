@@ -210,7 +210,8 @@ func Run(ctx context.Context, opts Options) error {
 	// surface (OQ3); the browse/render surface is B6's (the buildAcceptSurface
 	// reachability precedent, R22 — this compiles internal/conformance into the
 	// binary).
-	confRows, err := conformance.NewStore(db, log, reg).EnsureSeeded(ctx)
+	confStore := conformance.NewStore(db, log, reg)
+	confRows, err := confStore.EnsureSeeded(ctx)
 	if err != nil {
 		return fmt.Errorf("shell: seed conformance registry (Spec S14.5): %w", err)
 	}
@@ -327,6 +328,20 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 		logger.Info("worker: store open (Spec S08.1)", "root", workStore.Root())
+
+		// The S14.8 regression-eval surface (B5-5): the per-version floor
+		// registry, the revalidation runbook (flag → run → compare → dated
+		// stamp), and the sweep cadence. Floors register at the same 8.3
+		// knowledge-gate entry the B2 seed objects just rode. The runbook's own
+		// triggers are operator/coordinator acts and B5-6's drift emitter, so
+		// nothing calls it yet — it is composed here so the wiring is live and
+		// wall-clean (the held-dormant SandboxBroker precedent).
+		evalSurf, err := buildEvalSurface(ctx, db, confStore, reg, workStore)
+		if err != nil {
+			return err
+		}
+		logger.Info("evals: S14.8 regression-eval surface wired (B5-5)",
+			"floors_registered", evalSurf.FloorsRegistered)
 
 		// The S13.1–S13.4 review store (B4-1), shared by the stage pipeline
 		// (minting/drain) and the S13.6 accept orchestration (the accepted state

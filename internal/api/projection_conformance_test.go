@@ -85,3 +85,37 @@ func TestConformanceRedCardsInboxOwnerScoped(t *testing.T) {
 		t.Fatalf("a member must see no platform-scope conformance cards, got %d", len(m.ConformanceCards))
 	}
 }
+
+// TestRegressionSweepRedRaisesTheOwnerCard pins the B5-5 claim that a red
+// S14.8 regression sweep reaches its owner: the sweep row's resting state IS
+// the sweep verdict (red if any asset came back red), and a red RECORDED row
+// surfaces through this same derivation — never a bare asks row, since a suite
+// run has no platform run (Spec S14.8 ¶3/¶5; S14.5).
+func TestRegressionSweepRedRaisesTheOwnerCard(t *testing.T) {
+	ctx := context.Background()
+	const sweepRow = "regression-eval-sweep" // internal/api never imports internal/conformance
+
+	red, _, _ := wdTestDB(t)
+	insertConfRow(t, red, sweepRow, "none", "red")
+	op, err := (&projector{db: red}).inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(op.ConformanceCards) != 1 || op.ConformanceCards[0].RowID != sweepRow {
+		t.Fatalf("a red regression sweep must raise its card: %+v", op.ConformanceCards)
+	}
+	if op.ConformanceCards[0].FlagNow {
+		t.Error("the sweep row is neither lane- nor storage-affecting — an ordinary approval-class card")
+	}
+
+	// Non-tautological: the same row green raises nothing.
+	green, _, _ := wdTestDB(t)
+	insertConfRow(t, green, sweepRow, "none", "green")
+	op, err = (&projector{db: green}).inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(op.ConformanceCards) != 0 {
+		t.Fatalf("a green sweep must raise nothing: %+v", op.ConformanceCards)
+	}
+}

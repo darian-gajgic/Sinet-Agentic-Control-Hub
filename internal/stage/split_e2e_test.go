@@ -59,10 +59,15 @@ func newSplitHarness(t *testing.T) *harness {
 	}
 	root := t.TempDir()
 	seat := worker.Seat{Model: "claude-haiku-4-5", Lane: "anthropic", WindowTokens: 500}
+	// The ceremony seat carries the ratified judge model: this test forces a
+	// context overflow (the tiny window), not a judge change, and P-T06-5 blocks
+	// unsupervised judging under a seat the rubric was never measured on
+	// (Spec S14.8 ¶3).
+	ceremony := worker.Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: 500}
 	sk, err := stage.New(stage.Config{
 		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led, Settings: reg,
 		DutyMap: worker.DutyMap{
-			worker.DutyExecution: seat, worker.DutyPlanning: seat, worker.DutyJudge: seat,
+			worker.DutyExecution: seat, worker.DutyPlanning: ceremony, worker.DutyJudge: ceremony,
 		},
 		Adapters: map[string]adapters.Adapter{
 			adapters.SubstrateClaudeCLI: &claudecli.Adapter{

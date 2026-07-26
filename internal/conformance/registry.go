@@ -63,7 +63,18 @@ const (
 	TriggerWithEscalationDrill  = "with_escalation_drill"
 	TriggerPerS13Schedule       = "per_s13_schedule"
 	TriggerDaily                = "daily"
+	// The S14.8 revalidation triggers (B5-5): the spec's three classes plus the
+	// full-sweep cadence.
+	TriggerModelSwap    = "model_swap"
+	TriggerDriftFinding = "drift_finding"
+	TriggerSweepCadence = "sweep_cadence"
 )
+
+// RowRegressionSweep is the S14.8 regression-sweep row id — the single
+// recording home for every S14.8 result (B5-5 OQ2(a)): per-asset results record
+// against it carrying their asset in the payload, and one aggregate sweep-level
+// result records LAST, so the row's resting state is the sweep verdict.
+const RowRegressionSweep = "regression-eval-sweep"
 
 // The ⚙ dotted keys this package reads by dotted key (CONVENTIONS §2; §5 of the
 // brief). No new key is declared — the settings tally stays 118/33.
@@ -71,10 +82,10 @@ const (
 	keyBackupDrillInterval = "backup.drill_interval"              // months (S13); restore-drill dueness (OQ2(a))
 	keyVerifyDrillDays     = "verification.drill_interval_days"   // days (S07); forced-escalation dueness (OQ4(a))
 	keyVerifyCanaryHours   = "verification.canary_interval_hours" // hours (S07); the visible-only escalation-canary schedule (OQ4(a))
-	// keyEvalSweepInterval is the S14.8 regression-sweep knob. It is
-	// REFERENCED-NOT-CONSUMED here (OQ6(a)): it belongs to B5-5's revalidation
-	// sweep, not registry dueness — the bare quarterly/weekly literals are
-	// structural row data instead. Named for documentation; never read.
+	// keyEvalSweepInterval is the S14.8 regression-sweep cadence (months). It
+	// drives the regression-sweep row's dueness through the settings-backed
+	// cadence token, read live at evaluation time (B5-5); the other rows keep
+	// their structural quarterly/weekly/daily literals.
 	keyEvalSweepInterval = "eval.sweep_interval"
 )
 
@@ -251,6 +262,36 @@ func SeedRows() []Row {
 			CanaryCadence: keyVerifyCanaryHours,
 			AffectClass:   AffectNone,
 			Notes:         "OQ4(a): dueness reads ⚙ verification.drill_interval_days (the full escalation drill cadence); the daily escalation-canary schedule registers as VISIBLE DATA (⚙ verification.canary_interval_hours). The canary RUNNER and the CanaryWatch.Silent→operator-alert wiring stay in B5-6/B6; internal/verify logic is untouched. A finding that dies in a log is a platform defect (5.6). Neither lane- nor storage-affecting ⇒ an ordinary approval-class card.",
+		},
+		{
+			// The S14.8 regression-eval sweep + revalidation runbook [S14.8] —
+			// B5-5 OQ2(a). The single recording home for the S14.8 results.
+			ID:            RowRegressionSweep,
+			OwningSection: "S14.8",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/evals/ -run TestFloorCheckRedsBelowFloorRubric (S14.8 ¶5 rubric falsifiability: below the registered floor reds the version)", Pkg: "internal/evals", Run: "TestFloorCheckRedsBelowFloorRubric"},
+				{Handle: "go test ./internal/evals/ -run TestRunbookStampsGreenAndKeepsRedFlagged (S14.8 ¶3 flag → run → compare per slice → dated stamp)", Pkg: "internal/evals", Run: "TestRunbookStampsGreenAndKeepsRedFlagged"},
+				{Handle: "go test ./internal/worker/ -run TestRevalidateReleasesFlaggedVersionOnlyWithDatedStamp (S08.10(a) green stamp: flagged → active only through a dated record; red keeps it flagged)", Pkg: "internal/worker", Run: "TestRevalidateReleasesFlaggedVersionOnlyWithDatedStamp"},
+				{Handle: "go test ./internal/verify/ -run TestUnsupervisedJudgingGateBlocksAJudgeChange (P-T06-5: a judge change blocks unsupervised judging until the re-measurement passes)", Pkg: "internal/verify", Run: "TestUnsupervisedJudgingGateBlocksAJudgeChange"},
+				{Handle: "go test ./internal/evals/ -run TestBumpProbeRedsOnRegressedTask (S03.3 limb (b) before/after quality probe, P-T02-5)", Pkg: "internal/evals", Run: "TestBumpProbeRedsOnRegressedTask"},
+				{Handle: "go test ./internal/evals/ -run TestSweepDuenessSurvivesRestart (passive dueness from stored state + ⚙ eval.sweep_interval)", Pkg: "internal/evals", Run: "TestSweepDuenessSurvivesRestart"},
+				{Handle: "go test ./internal/evals/ -run TestPromptfooRealBinaryMatchesPin (tier R: real promptfoo when installed; SANCTIONED SKIP otherwise)", Pkg: "internal/evals", Run: "TestPromptfooRealBinaryMatchesPin"},
+			},
+			TriggerSet: []string{TriggerDriftFinding, TriggerEngineBump, TriggerModelSwap, TriggerSweepCadence},
+			Schedule:   "on a watchlist drift finding, an engine bump, or a model/duty-alias swap; plus the full sweep at ⚙ eval.sweep_interval",
+			Cadence:    settingCadence(keyEvalSweepInterval, "months"),
+			// Neither a lane freeze nor storage corruption: a red sweep means an
+			// asset is unvalidated, and the asset's own flag is the enforcement
+			// — the card is the notification ⇒ an ordinary approval-class card.
+			AffectClass: AffectNone,
+			Notes: "B5-5 OQ2(a): THIS ROW IS THE S14.8 RECORDING HOME. Per-asset regression results record against it " +
+				"(the asset rides the payload's asset id/version), and one aggregate sweep-level result records LAST — red if any " +
+				"per-asset result was red — so the row's resting state is the sweep verdict and a red raises the ordinary " +
+				"conformance card by the existing derivation. It closes the loop the engine_bump rows' bump-gate note opened: " +
+				"a bump lands only after (a) the candidate passes its per-lane conformance suite AND (b) the S14.8 before/after " +
+				"quality probe (B5-5) shows no regression (P-T02-5) — limb (b) records HERE, with the engine as the asset and the " +
+				"candidate pin as the asset version, so the per-lane adapter rows stay purely (a)-limb. Dueness reads " +
+				"⚙ eval.sweep_interval live (months).",
 		},
 		{
 			// Verified-restore drill [S02.9/S13] — OQ2(a), DERIVE.

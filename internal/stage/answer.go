@@ -174,7 +174,12 @@ func (s *Skeleton) answerRevise(ctx context.Context, actor, askID string, card v
 	if err != nil {
 		return err
 	}
-	out, err := s.newVerifier(in.Deliverable.Domain).ResumeWithGuidance(ctx, in, card, ans.Comments())
+	v, err := s.newVerifier(in.Deliverable.Domain)
+	if err != nil {
+		s.crash(ctx, card.RunID, err.Error())
+		return err
+	}
+	out, err := v.ResumeWithGuidance(ctx, in, card, ans.Comments())
 	if err != nil {
 		// The resumed drain died mid-flight: leave a classifiable corpse
 		// for the recovery ladder (the dispatch-leg posture). The answered
