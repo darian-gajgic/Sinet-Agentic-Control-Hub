@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -170,4 +172,142 @@ func TestAbsentOrganRaisesTheOrganAbsenceFlag(t *testing.T) {
 	if !found {
 		t.Fatal("no watchdog.organ_absence:watchlist flag — the organ seam was nil until this packet and must now fire")
 	}
+}
+
+// TestRevalidateHookDrivesTheRealRunbookEndToEnd is the D6 lock, and it guards
+// the exact five lines the packet's import-wall deviation rests on: the hook is
+// the ONLY thing standing between a watchlist drift finding and
+// worker.Store.FlagByModel, and testing it for nil alone would let a
+// Subject/Reason swap — or a wrong TriggerKind — pass the whole suite.
+//
+// It composes a REAL *evals.Runbook over a spy hook and drives a models-class
+// finding through the real emitter, asserting the model id and the drift
+// provenance arrive intact.
+func TestRevalidateHookDrivesTheRealRunbookEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	db, log, _ := watchlistTestDeps(t)
+
+	var gotModel, gotReason string
+	var calls int
+	rb := &evals.Runbook{
+		Hooks: evals.Hooks{
+			FlagByModel: func(ctx context.Context, model, reason string) ([]string, error) {
+				calls++
+				gotModel, gotReason = model, reason
+				return []string{"tmpl-alpha", "tmpl-beta"}, nil
+			},
+			// If the hook ever built the WRONG trigger kind, one of these would
+			// fire instead of FlagByModel and the assertions below would catch it.
+			FlagByEnginePin: func(ctx context.Context, pin, reason string) ([]string, error) {
+				t.Errorf("a drift finding reached FlagByEnginePin — the trigger kind is wrong")
+				return nil, nil
+			},
+		},
+	}
+
+	em := watchlist.NewEmitter(db, log)
+	em.Revalidate = watchlistRevalidateHook(rb)
+	em.Logger = testLogger()
+
+	got, emitted, err := em.Emit(ctx, watchlist.Hit{
+		RowID: "t3-modelsdev-api", Kind: watchlist.KindAPI,
+		Source: "https://example.invalid/api.json", Lane: "anthropic",
+		Class: watchlist.ClassModels, Subject: "claude-haiku-4-5",
+		Summary: "the observed model list moved",
+	})
+	if err != nil || !emitted {
+		t.Fatalf("emit: %v (emitted=%v)", err, emitted)
+	}
+	if calls != 1 {
+		t.Fatalf("FlagByModel called %d times, want exactly 1", calls)
+	}
+	if gotModel != "claude-haiku-4-5" {
+		t.Errorf("FlagByModel received subject %q — the model id must arrive intact, not the reason or the summary", gotModel)
+	}
+	if !strings.Contains(gotReason, "drift") {
+		t.Errorf("FlagByModel received reason %q — it must carry the drift provenance", gotReason)
+	}
+	if gotReason == gotModel {
+		t.Error("subject and reason are the same value — they are swapped or duplicated")
+	}
+	if !got.Revalidation.Triggered {
+		t.Error("the card does not record the revalidation as triggered")
+	}
+	if len(got.Revalidation.Flagged) != 2 {
+		t.Errorf("the flagged set was not carried onto the card: %+v", got.Revalidation.Flagged)
+	}
+
+	// And the negative through the SAME composed seam: a non-model class must
+	// not reach the runbook at all.
+	calls = 0
+	if _, _, err := em.Emit(ctx, watchlist.Hit{
+		RowID: "t1-anthropic-pricing", Kind: watchlist.KindPage,
+		Source: "https://example.invalid/pricing", Lane: "anthropic",
+		Class: watchlist.ClassPrice, Subject: "claude-haiku-4-5", Summary: "price moved",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Errorf("a price-class finding called FlagByModel %d times — only `models` may (OQ4(a))", calls)
+	}
+}
+
+// TestWatchRowOverrideIsReachableAtBoot is the D9 lock: R3's operator override
+// was machinery with no door — LoadRows/WriteSeed had no production consumer at
+// all. It is now loaded at composition, additively, and a malformed file fails
+// the boot LOUDLY rather than silently degrading to the in-code set.
+func TestWatchRowOverrideIsReachableAtBoot(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("absent override is silent", func(t *testing.T) {
+		db, log, reg := watchlistTestDeps(t)
+		t.Setenv(watchlist.WatchRowsOverrideEnv, filepath.Join(t.TempDir(), "nope.json"))
+		wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+		if err != nil {
+			t.Fatalf("an absent override must be silent, got: %v", err)
+		}
+		if wl.Rows != len(watchlist.SeedRows()) {
+			t.Errorf("seeded %d rows, want the in-code set of %d", wl.Rows, len(watchlist.SeedRows()))
+		}
+	})
+
+	t.Run("present override adds rows", func(t *testing.T) {
+		db, log, reg := watchlistTestDeps(t)
+		path := filepath.Join(t.TempDir(), "watch-rows.json")
+		body := `[{"id":"op-extra-feed","kind":"feed","url":"https://ops.invalid/f.atom",
+		  "parser_hint":"atom","tier":2,"cadence":"continuous","enabled":true,
+		  "notes":"operator-added row proving the override reaches boot"}]`
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(watchlist.WatchRowsOverrideEnv, path)
+
+		wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+		if err != nil {
+			t.Fatalf("buildWatchlistSurface: %v", err)
+		}
+		if wl.Rows != len(watchlist.SeedRows())+1 {
+			t.Errorf("seeded %d rows, want the in-code set plus the override row", wl.Rows)
+		}
+		if _, err := wl.Store.Row(ctx, "op-extra-feed"); err != nil {
+			t.Errorf("the operator's row did not reach the store: %v", err)
+		}
+		// The override is ADDITIVE: a standing obligation cannot vanish by
+		// omission from the operator's file.
+		if _, err := wl.Store.Row(ctx, "s168-awesome-harness-engineering"); err != nil {
+			t.Errorf("an S16.8 standing row vanished under an override: %v", err)
+		}
+	})
+
+	t.Run("malformed override fails the boot loudly", func(t *testing.T) {
+		db, log, reg := watchlistTestDeps(t)
+		path := filepath.Join(t.TempDir(), "watch-rows.json")
+		if err := os.WriteFile(path, []byte(`[{"id":"x","kind":"feed","url":"https://e.invalid/f","tier":2,"cadence":"weekly","notes":"n","typo":1}]`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(watchlist.WatchRowsOverrideEnv, path)
+		if _, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger()); err == nil {
+			t.Error("a malformed override was accepted — a typo must fail the boot, never degrade silently")
+		}
+	})
 }

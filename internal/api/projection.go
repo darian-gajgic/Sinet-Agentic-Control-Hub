@@ -43,6 +43,16 @@ type ownerScope struct {
 type projector struct {
 	db    *storage.DB
 	meter MeterReader
+	// now is the clock seam for horizon-bounded projections; nil ⇒ time.Now.
+	now func() time.Time
+}
+
+// clock returns the projector's clock, defaulting to the wall clock.
+func (p *projector) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
 }
 
 // activeStates are the non-terminal FSM states — a run still consuming or
@@ -463,9 +473,25 @@ type InboxDriftCard struct {
 // driftIncidentWindow is the fingerprint dedup window: findings sharing a
 // fingerprint within one window fold into ONE card ("one card per storm",
 // S14.6 ¶2; the S10.5 once-per-storm logging discipline), and the next window
-// opens a new card. Structural, not ⚙ — S18 ratifies no key (the §7
-// sseBatchSize precedent).
-const driftIncidentWindow = 24 * time.Hour
+// opens a new card.
+//
+// driftCardHorizon and driftCardCap BOUND the inbox. Unlike watchdog flags
+// (which close on a suppress or a resume) and conformance rows (which are RED
+// or absent), a drift finding has no close verb at v0 — the dismiss action is
+// the B6 inbox surface's — so without a bound every finding ever logged would
+// derive into a forever-listed card and a re-firing condition would grow the
+// inbox without limit. The horizon is what makes the list an INBOX rather than
+// an archive: older findings stay in `run_events` and remain queryable, they
+// simply stop being open cards. The cap is the belt for a storm of distinct
+// fingerprints inside one horizon.
+//
+// All three are structural, not ⚙ — S18 ratifies no key (the §7 sseBatchSize
+// precedent, interim under the standing settings-tab directive).
+const (
+	driftIncidentWindow = 24 * time.Hour
+	driftCardHorizon    = 30 * 24 * time.Hour
+	driftCardCap        = 100
+)
 
 // InboxSnapshot is the `inbox` topic projection (§3): open asks + proposed
 // approvals + OPEN watchdog flags (B5-3) + RED conformance cards (B5-4) + open
@@ -557,8 +583,15 @@ func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot,
 // card. Owner-scoped per S01.9: findings are platform-scope, so a member's
 // filter matches none and only the operator sees them.
 func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDriftCard, error) {
-	q := `SELECT event_seq, payload, ts FROM run_events WHERE type = 'drift.finding'`
-	args := []any{}
+	// Bounded at the source: only findings inside the horizon are candidates,
+	// and an `none`-class row is never a card. The producer already declines to
+	// emit `none` (S14.6 ¶2: RELEVANT hits become drift cards); this is the belt
+	// that also covers any row written before that rule existed.
+	q := `SELECT event_seq, payload, ts FROM run_events
+	        WHERE type = 'drift.finding'
+	          AND ts >= ?
+	          AND COALESCE(json_extract(payload, '$.change_class'), '') <> 'none'`
+	args := []any{p.clock().Add(-driftCardHorizon).UTC().Format(time.RFC3339Nano)}
 	if !scope.Operator {
 		q += ` AND user_id = ?`
 		args = append(args, scope.UserID)
@@ -627,6 +660,13 @@ func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDr
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	// Newest first, then capped: a storm of distinct fingerprints inside one
+	// horizon can still only fill the inbox to the cap, and what survives is the
+	// most recent — never an arbitrary prefix.
+	sort.Slice(cards, func(i, j int) bool { return cards[i].LatestSeq > cards[j].LatestSeq })
+	if len(cards) > driftCardCap {
+		cards = cards[:driftCardCap]
 	}
 	for _, c := range cards {
 		out = append(out, *c)

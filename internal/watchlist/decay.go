@@ -42,7 +42,7 @@ func (x *Executor) noteFailure(ctx context.Context, r Row, cause error) error {
 	if err := x.Store.SetDecayStage(ctx, r.ID, next); err != nil {
 		return err
 	}
-	_, err = x.Emitter.Emit(ctx, Hit{
+	_, _, err = x.Emitter.Emit(ctx, Hit{
 		RowID: r.ID, Kind: r.Kind, Source: sourceOf(r), Lane: r.Lane,
 		// Platform-authored: the platform, not a model, knows the watch is
 		// failing. A dead source is an ENDPOINTS-class change.

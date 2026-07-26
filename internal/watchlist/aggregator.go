@@ -151,6 +151,37 @@ func flattenJSON(body []byte) (map[string]string, error) {
 	return out, nil
 }
 
+// identityFields are the keys that stably identify an array element, in
+// preference order. genai-prices providers and models, and models.dev's entries,
+// all carry `id`.
+var identityFields = []string{"id", "uuid", "slug", "key", "name"}
+
+// arrayKey returns a STABLE key for an array element.
+//
+// Keying on the positional index makes an insertion at the head cascade: every
+// element after it shifts, so a one-item addition reads as a large run of
+// "changed" keys and raises a false drift finding on a document that barely
+// moved. Where an element carries its own identifier, that identifier is the key
+// and a reorder or an insertion is invisible.
+//
+// Arrays of SCALARS, and arrays of objects with no identifying field, still key
+// positionally — there is nothing stable to key on, so a reorder there is
+// genuinely indistinguishable from a change and is reported as one. That is the
+// honest direction: over-reporting a reordered scalar list is a noisy card, not
+// a missed drift.
+func arrayKey(child any, i int) string {
+	if m, ok := child.(map[string]any); ok {
+		for _, field := range identityFields {
+			if v, ok := m[field]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					return field + "=" + s
+				}
+			}
+		}
+	}
+	return "#" + strconv.Itoa(i)
+}
+
 func walkJSON(path string, v any, out map[string]string) {
 	switch t := v.(type) {
 	case map[string]any:
@@ -167,7 +198,7 @@ func walkJSON(path string, v any, out map[string]string) {
 			return
 		}
 		for i, child := range t {
-			walkJSON(path+"["+strconv.Itoa(i)+"]", child, out)
+			walkJSON(path+"["+arrayKey(child, i)+"]", child, out)
 		}
 	default:
 		out[path] = shortHash(fmt.Sprint(v))

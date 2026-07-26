@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/lockfile"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
 )
 
@@ -321,5 +322,145 @@ func TestAggregatorFirstFetchEstablishesTheBaselineQuietly(t *testing.T) {
 	}
 	if !strings.Contains(f[0].Detail, "$.models.b.ctx") {
 		t.Errorf("the finding does not name the changed key path: %q", f[0].Detail)
+	}
+}
+
+// TestArrayDiffKeysOnIdentityNotIndex is the D15 lock: keying array elements on
+// their position makes a head insertion cascade — every later element shifts, so
+// a one-item addition reads as a large run of "changed" keys and raises a false
+// drift finding. Where an element carries its own identifier, an insertion is
+// exactly one added key and a reorder is invisible.
+func TestArrayDiffKeysOnIdentityNotIndex(t *testing.T) {
+	before := []byte(`{"providers":[{"id":"anthropic","ctx":1},{"id":"openai","ctx":2},{"id":"zhipuai","ctx":3}]}`)
+	// One provider inserted at the HEAD; nothing else changed.
+	afterInsert := []byte(`{"providers":[{"id":"aws","ctx":9},{"id":"anthropic","ctx":1},{"id":"openai","ctx":2},{"id":"zhipuai","ctx":3}]}`)
+	// The same set, REORDERED; nothing changed at all.
+	afterReorder := []byte(`{"providers":[{"id":"zhipuai","ctx":3},{"id":"anthropic","ctx":1},{"id":"openai","ctx":2}]}`)
+
+	baseline, ok := watchlist.StructuralBaseline(before)
+	if !ok {
+		t.Fatal("StructuralBaseline refused a small document")
+	}
+
+	d := watchlist.DiffStructural(baseline, afterInsert)
+	if d.TotalAdded != 2 || d.TotalChanged != 0 || d.TotalRemoved != 0 {
+		t.Errorf("a head insertion diffed +%d -%d ~%d, want exactly the two added keys and no cascade (%v/%v/%v)",
+			d.TotalAdded, d.TotalRemoved, d.TotalChanged, d.Added, d.Removed, d.Changed)
+	}
+
+	if d := watchlist.DiffStructural(baseline, afterReorder); !d.Empty() {
+		t.Errorf("a pure reorder diffed +%d -%d ~%d, want empty", d.TotalAdded, d.TotalRemoved, d.TotalChanged)
+	}
+
+	// A genuine value change is still caught, keyed by identity.
+	afterChange := []byte(`{"providers":[{"id":"anthropic","ctx":99},{"id":"openai","ctx":2},{"id":"zhipuai","ctx":3}]}`)
+	d = watchlist.DiffStructural(baseline, afterChange)
+	if d.TotalChanged != 1 || d.TotalAdded != 0 {
+		t.Errorf("a real change diffed +%d ~%d, want exactly one change", d.TotalAdded, d.TotalChanged)
+	}
+	if len(d.Changed) != 1 || !strings.Contains(d.Changed[0], "id=anthropic") {
+		t.Errorf("the changed key is not identity-addressed: %v", d.Changed)
+	}
+
+	// Scalar arrays have nothing stable to key on and stay positional — the
+	// honest direction (a noisy card, never a missed drift).
+	sb, _ := watchlist.StructuralBaseline([]byte(`{"tags":["a","b"]}`))
+	if watchlist.DiffStructural(sb, []byte(`{"tags":["b","a"]}`)).Empty() {
+		t.Error("a reordered scalar array reported empty — it cannot be distinguished from a change and must be reported")
+	}
+}
+
+// TestPriceStaleDaysIsReadLiveByDottedKey is the D12 lock: checklist 19 requires
+// live-apply for BOTH consumed ⚙, and only watchlist.fetch_fail_streak had it.
+func TestPriceStaleDaysIsReadLiveByDottedKey(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	body := watchlist.VendoredPriceData()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	h.seedOne(t, watchlist.Row{
+		ID: watchlist.PriceRowID, Kind: watchlist.KindAPI, URL: srv.URL,
+		ParserHint: "json", Tier: 3, Cadence: watchlist.CadenceWeekly, Enabled: true,
+		Group: watchlist.GroupReport02, Notes: "the genai-prices refresh row",
+	})
+	// Raise the horizon to its clamp ceiling: 100 stale days is not yet stale.
+	if err := h.reg.Set(ctx, settings.SetRequest{
+		Key: "adoption.price_data_stale_days", Value: json.RawMessage(`180`),
+		Actor: settings.Actor{Kind: "operator", ID: "op"}, Reason: "raise the staleness horizon",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clk := &clock{t: mustTime(t, "2026-07-27T00:00:00Z")}
+	x := h.exec(clk, watchlist.Deps{HTTPClient: srv.Client()})
+	if _, err := x.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(100 * 24 * time.Hour)
+	if _, err := x.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(h.findings(t)); n != 0 {
+		t.Fatalf("%d findings at a 180-day horizon after 100 stale days, want 0", n)
+	}
+
+	// Lower it MID-RUN to the clamp floor: the very next pass proposes.
+	if err := h.reg.Set(ctx, settings.SetRequest{
+		Key: "adoption.price_data_stale_days", Value: json.RawMessage(`14`),
+		Actor: settings.Actor{Kind: "operator", ID: "op"}, Reason: "lower the staleness horizon mid-run",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(8 * 24 * time.Hour)
+	if _, err := x.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f := h.findings(t)
+	if len(f) != 1 || f[0].Proposal == nil || f[0].Proposal.Stale == "" {
+		t.Fatalf("%d findings after lowering the ⚙ mid-run, want 1 staleness proposal — the value is not read live", len(f))
+	}
+}
+
+// TestStalenessClockDoesNotResetOnItsOwnOutput is the D11 lock: a staleness
+// finding reports that NOTHING changed, so counting it as an observation would
+// reset the very clock that produced it — the row would re-propose one horizon
+// later, forever, instead of staying stale until upstream actually moves.
+func TestStalenessClockDoesNotResetOnItsOwnOutput(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	body := watchlist.VendoredPriceData()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	h.seedOne(t, watchlist.Row{
+		ID: watchlist.PriceRowID, Kind: watchlist.KindAPI, URL: srv.URL,
+		ParserHint: "json", Tier: 3, Cadence: watchlist.CadenceWeekly, Enabled: true,
+		Group: watchlist.GroupReport02, Notes: "the genai-prices refresh row",
+	})
+	clk := &clock{t: mustTime(t, "2026-07-27T00:00:00Z")}
+	x := h.exec(clk, watchlist.Deps{HTTPClient: srv.Client()})
+	if _, err := x.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(120 * 24 * time.Hour)
+	if _, err := x.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(h.findings(t)); n != 1 {
+		t.Fatalf("%d findings, want the first staleness proposal", n)
+	}
+
+	// Immediately after: the clock must NOT have been reset by that proposal,
+	// so the row is still stale and the last OBSERVED change is still the old one.
+	last, ok, err := h.em.LastObservedChangeAt(ctx, watchlist.PriceRowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok && last.After(mustTime(t, "2026-07-28T00:00:00Z")) {
+		t.Errorf("the staleness finding reset the observation clock to %s", last)
 	}
 }

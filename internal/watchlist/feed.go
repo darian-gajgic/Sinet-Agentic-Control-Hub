@@ -10,6 +10,24 @@ import (
 // elements are ignored, a malformed feed is a fetch failure and never a panic
 // and never fatal (the S03.1 stream discipline applied to feeds). Zero new Go
 // modules.
+//
+// MINIFLUX IS THE PRE-REGISTERED FALLBACK, DELIBERATELY UNBUILT [G2 Def.12;
+// S14 Deferred]. G2 Def.12 ratified "Sinet-native feed poller … Miniflux
+// pre-registered as fallback IF feed handling proves gnarly". It has not: this
+// file is stdlib `encoding/xml` over two small structs, and the poller it feeds
+// is conditional GET plus two hash comparisons. So no Miniflux code, no HMAC
+// webhook receiver, and NO `standby` components.lock entry is materialized —
+// S16.2 requires a standby entry for every replacement path naming a concrete
+// third-party component, and materializing one here would pin and carry a
+// component the funeral plan does not yet need.
+//
+// The deferral is recorded rather than assumed: if feed handling ever does prove
+// gnarly, the drop-in contract is Miniflux's documented HMAC-signed webhook, the
+// swap is a process-seam replacement (S01.3), and materializing the standby
+// entry is the first step of executing it. Re-entry condition: sustained
+// parse/fetch failures across unrelated origins that this file cannot absorb —
+// i.e. the decay ladder decaying many rows for parser reasons rather than
+// origin reasons.
 
 // Entry is one normalized feed item. Atom and RSS collapse onto this shape so
 // the classifier and the drift emitter never branch on feed dialect.
@@ -83,9 +101,14 @@ type rssItem struct {
 }
 
 // ParseFeed decodes an Atom or RSS body into normalized entries. hint is the
-// row's parser-hint (`atom` / `rss` / ""); an empty or unrecognized hint tries
-// Atom first, then RSS, so a mis-hinted row still parses. A body that is
-// neither is an error — a fetch failure, never a panic.
+// row's parser-hint (`atom` / `rss` / "").
+//
+// An explicit, RECOGNIZED hint is HARD-ROUTED: it selects the decoder outright
+// and does not fall back, so a row hinted at the wrong dialect fails every
+// cycle rather than silently parsing. (Reddit's /.rss serving Atom is the live
+// example — the seed row hints atom for exactly this reason.) An empty or
+// unrecognized hint sniffs: Atom first, then RSS. A body that is neither is an
+// error — a fetch failure, never a panic.
 func ParseFeed(body []byte, hint string) (title string, entries []Entry, err error) {
 	switch strings.ToLower(strings.TrimSpace(hint)) {
 	case "atom":

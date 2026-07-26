@@ -1,9 +1,12 @@
 package watchlist_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -183,5 +186,126 @@ func TestNon2xxIsAFetchFailure(t *testing.T) {
 	defer srv.Close()
 	if _, err := watchlist.NewFetcher(srv.Client()).Get(context.Background(), srv.URL, watchlist.FetchState{}); err == nil {
 		t.Error("a 410 was not a fetch failure")
+	}
+}
+
+// TestGzippedOriginIsDecompressed is the D1 regression lock. An earlier build
+// set Accept-Encoding: gzip by hand, which DISABLES net/http's transparent
+// negotiation — the transport then returned the raw compressed body and every
+// parser downstream was handed gzip magic. Live-verified origins in the seed set
+// (hnrss.org, models.dev, raw.githubusercontent.com and openrouter.ai) all
+// answer that header with Content-Encoding: gzip, so the feed rows, the
+// models.dev baseline and the genai-prices refresh all failed every cycle.
+//
+// Two origins are exercised: one that compresses only when the TRANSPORT
+// negotiates it (the normal case — the transport must decompress and strip the
+// header), and one that compresses UNSOLICITED (the belt must decompress).
+func TestGzippedOriginIsDecompressed(t *testing.T) {
+	gz := func(body string) []byte {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		if _, err := zw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+
+	for name, unsolicited := range map[string]bool{
+		"negotiated by the transport": false,
+		"unsolicited by the origin":   true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var sawExplicitHeader string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sawExplicitHeader = r.Header.Get("Accept-Encoding")
+				if !unsolicited && !strings.Contains(sawExplicitHeader, "gzip") {
+					_, _ = w.Write([]byte(atomBody))
+					return
+				}
+				w.Header().Set("Content-Encoding", "gzip")
+				w.Header().Set("Content-Type", "application/atom+xml")
+				_, _ = w.Write(gz(atomBody))
+			}))
+			defer srv.Close()
+
+			resp, err := watchlist.NewFetcher(srv.Client()).Get(context.Background(), srv.URL, watchlist.FetchState{})
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if len(resp.Body) >= 2 && resp.Body[0] == 0x1f && resp.Body[1] == 0x8b {
+				t.Fatal("the body is still gzip-compressed (magic 1f 8b) — the parsers would be handed compressed bytes")
+			}
+			if _, entries, err := watchlist.ParseFeed(resp.Body, "atom"); err != nil || len(entries) != 2 {
+				t.Fatalf("a gzipped feed did not parse: %d entries, err %v", len(entries), err)
+			}
+		})
+	}
+}
+
+// TestPollerSetsNoExplicitAcceptEncoding is the D1 negative, kept separate so
+// the intent is a checkable rule rather than a side effect: the poller must
+// never hand-set Accept-Encoding, because doing so silently turns off the
+// transport's decompression.
+func TestPollerSetsNoExplicitAcceptEncoding(t *testing.T) {
+	src, err := os.ReadFile("fetch.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), `Header.Set("Accept-Encoding"`) {
+		t.Error("fetch.go hand-sets Accept-Encoding — that disables net/http's transparent gzip decompression (D1)")
+	}
+}
+
+// TestRedditFeedIsHintedAtom is the D2 regression lock: report-02 §6 names
+// r/LocalLLaMA via /.rss by hand, but Reddit serves ATOM at that path
+// (live-verified: the root element is <feed xmlns=…Atom>). An explicit hint is
+// hard-routed with no fallback, so a wrong hint seeds a row that fails forever.
+func TestRedditFeedIsHintedAtom(t *testing.T) {
+	for _, r := range watchlist.SeedRows() {
+		if !strings.Contains(r.URL, "reddit.com") {
+			continue
+		}
+		if r.ParserHint != "atom" {
+			t.Errorf("row %q hints %q, but Reddit's /.rss serves Atom — an explicit hint is hard-routed, so a wrong hint fails forever", r.ID, r.ParserHint)
+		}
+		return
+	}
+	t.Fatal("the r/LocalLLaMA row is not seeded")
+}
+
+// TestWrongExplicitHintIsHardRouted pins the semantics the D2 doc comment now
+// states honestly: an UNRECOGNIZED hint sniffs, a WRONG one does not.
+func TestWrongExplicitHintIsHardRouted(t *testing.T) {
+	if _, _, err := watchlist.ParseFeed([]byte(atomBody), "rss"); err == nil {
+		t.Error("an atom body under an explicit rss hint parsed — explicit hints are hard-routed, and the doc must say so")
+	}
+	if _, e, err := watchlist.ParseFeed([]byte(atomBody), "not-a-dialect"); err != nil || len(e) != 2 {
+		t.Errorf("an UNRECOGNIZED hint must fall back to sniffing: %d entries, err %v", len(e), err)
+	}
+}
+
+// TestMinifluxDeferralIsRecorded is the D8 lock: R12 required either a `standby`
+// lock entry or a RECORDED deferral, and an unrecorded decision is exactly the
+// kind that evaporates. The record must name the ratifying gate, state why the
+// fallback was not built, and state the re-entry condition.
+func TestMinifluxDeferralIsRecorded(t *testing.T) {
+	src, err := os.ReadFile("feed.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	for _, want := range []string{"MINIFLUX", "G2 Def.12", "HMAC", "Re-entry condition"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Miniflux deferral record is missing %q", want)
+		}
+	}
+	// And it must stay a deferral: no HMAC webhook receiver was built.
+	for _, banned := range []string{"hmac.New", "MinifluxWebhook", "X-Miniflux-Signature"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("feed.go contains %q — Miniflux is the pre-registered fallback, deliberately unbuilt", banned)
+		}
 	}
 }

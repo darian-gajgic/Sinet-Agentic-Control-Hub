@@ -133,3 +133,16 @@ func (h *harness) exec(clk *clock, d watchlist.Deps) *watchlist.Executor {
 	h.em.Now = clk.now
 	return x
 }
+
+// fakeClassifier returns a fixed verdict, so a suite can exercise the emitter's
+// own derivations without a local stack.
+type fakeClassifier struct {
+	class string
+	lanes []string
+}
+
+func (f *fakeClassifier) Classify(ctx context.Context, h watchlist.Hit) watchlist.Classification {
+	return watchlist.Classification{
+		Lanes: f.lanes, Class: f.class, Summary: h.Title, Classified: true,
+	}
+}

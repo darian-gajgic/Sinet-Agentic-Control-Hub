@@ -18,6 +18,13 @@ import (
 // ONLY: no upstream code is vendored, patched or forked anywhere (adopt, never
 // fork — S16.1/G2 D2.2).
 //
+// The integration splits at what the pinned REST surface can express: the
+// per-watch config (url, title, `llm_intent`, `fetch_backend`,
+// `include_filters`, `subtractive_selectors`) is driven from here, while the
+// GLOBAL `LLMSettings.api_base`/`.model` that point the organ's native triage
+// at Sinet's local endpoint have no route at 0.55.8 and are an operator
+// install-time step (see LocalEndpointConfig).
+//
 // SINET'S WATCH ROWS ARE THE SOURCE OF TRUTH. Reconciliation drives the organ
 // to match them: a watch Sinet owns but the organ lacks is created, one whose
 // fields drifted is rewritten, and one the organ carries under Sinet's tag with
@@ -141,6 +148,16 @@ type WatchSpec struct {
 	// matter?" triage only: it never replaces Sinet's own second pass and never
 	// gates a card.
 	LLMIntent string `json:"llm_intent,omitempty"`
+	// IncludeFilters are CSS/XPath selectors narrowing the watch to the REGION
+	// of interest — S14.6 ¶T1's "region-filtered verbatim diffs". The field is
+	// WatchBase's own (`include_filters`, "CSS/XPath selectors to extract
+	// content", changedetectionio/model/__init__.py@0.55.8).
+	IncludeFilters []string `json:"include_filters,omitempty"`
+	// SubtractiveSelectors REMOVE elements before the diff (WatchBase's
+	// `subtractive_selectors`). Sinet applies a GENERIC page-chrome list to
+	// every page watch — site-agnostic and safe, unlike an invented per-site
+	// include filter.
+	SubtractiveSelectors []string `json:"subtractive_selectors,omitempty"`
 	// FetchBackend selects the fetcher: "system" (the organ's global default),
 	// "html_requests" (plain HTTP), or "html_webdriver" (the browser leg). At
 	// 0.55.8 the browser leg is an EXTERNAL CDP service selected on the organ
@@ -343,6 +360,26 @@ func (c *CDIO) EnsureTag(ctx context.Context) (string, error) {
 	return out.UUID, nil
 }
 
+// defaultSubtractiveSelectors is the generic page-chrome Sinet strips from
+// every page watch before the diff (S14.6 ¶T1 region filtering, the
+// noise-reduction half). These are site-AGNOSTIC element selectors, so applying
+// them by default cannot silently hide the region being watched — unlike a
+// guessed per-site include filter. Structural, not ⚙.
+var defaultSubtractiveSelectors = []string{"nav", "header", "footer", "script", "style", "noscript", "svg"}
+
+// RegionFilters returns the per-row include filters — the POSITIVE half of
+// S14.6 ¶T1 region filtering, narrowing a watch to the region of interest.
+//
+// It is EMPTY for every seeded row at v0, deliberately and not by omission: a
+// CSS/XPath selector is per-site tuning that can only be written against the
+// page as it actually renders, and a guessed selector is worse than none —
+// it would silently filter away the very pricing table the row exists to watch,
+// and the watch would go quiet rather than fail loudly. The mechanism is live
+// and reaches the organ; the selectors are operator data supplied through the
+// R3 override at bring-up, when the pages can be inspected. The generic
+// subtractive list above carries the noise reduction until then.
+func RegionFilters(r Row) []string { return nil }
+
 // specFor renders the organ-side config for one page row. The escalation
 // ladder's second rung is expressed here as configuration: a row escalated past
 // DecayPlain asks the organ for its browser backend.
@@ -352,11 +389,45 @@ func specFor(r Row) WatchSpec {
 		backend = FetchBackendBrowser
 	}
 	return WatchSpec{
-		URL:          r.URL,
-		Title:        r.ID,
-		LLMIntent:    r.watchIntent(),
-		FetchBackend: backend,
+		URL:                  r.URL,
+		Title:                r.ID,
+		LLMIntent:            r.watchIntent(),
+		FetchBackend:         backend,
+		IncludeFilters:       RegionFilters(r),
+		SubtractiveSelectors: defaultSubtractiveSelectors,
 	}
+}
+
+// LocalEndpointConfig is the organ-side configuration S14.6 ¶T1 requires for
+// "its native LLM rules pointed at Sinet's local OpenAI-compatible endpoint",
+// stated as DATA so the B5 gate proposal carries something concrete.
+//
+// It is NOT settable over REST, and that is a verified property of the pin, not
+// an omission: at tag 0.55.8 `changedetectionio/flask_app.py` registers exactly
+// thirteen `add_resource` routes (watch, watch/<uuid>, history, single-history,
+// difference, favicon, tags, tag, search, import, notifications, systeminfo,
+// full-spec) and NONE of them reads or writes application settings — a grep of
+// that file for `LLMSettings`, `api_base` or `application_settings` matches
+// nothing. `LLMSettings.api_base` / `.model` are GLOBAL organ settings written
+// through its own settings UI or datastore file.
+//
+// So Sinet drives the per-watch half over REST (LLMIntent above, WatchBase's
+// `llm_intent`) and the endpoint half is an operator install-time step. The
+// per-watch intent is what makes the first pass meaningful; without the
+// endpoint configured the organ simply runs no LLM triage, Sinet's own second
+// pass is unaffected, and nothing silently degrades.
+type LocalEndpointConfig struct {
+	// APIBase is LLMSettings.api_base — Sinet's local OpenAI-compatible
+	// endpoint (the llama-swap front, loopback).
+	APIBase string
+	// Model is LLMSettings.model — a duty-alias-shaped seat name.
+	Model string
+}
+
+// RequiredLocalEndpointConfig renders the organ-side settings the B5-gate
+// install must apply for the S14.6 ¶T1 first-pass triage to run.
+func RequiredLocalEndpointConfig(apiBase, model string) LocalEndpointConfig {
+	return LocalEndpointConfig{APIBase: apiBase, Model: model}
 }
 
 // watchIntent is the plain-English first-pass triage instruction handed to the

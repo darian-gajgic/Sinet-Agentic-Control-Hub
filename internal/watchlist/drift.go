@@ -109,12 +109,21 @@ type FindingPayload struct {
 // is honestly unwired and every finding records that.
 type Revalidate func(ctx context.Context, modelID, reason string) ([]string, error)
 
+// SecondPass is the S14.6 ¶2 classification seam. *Classifier is the production
+// implementation; the interface exists so the emitter's own derivations —
+// severity routing, the lane fallback, the OQ4 gate — are drivable end to end
+// without a local stack. A nil seam means every hit is unclassified, which is a
+// first-class honest state, not a test-only one.
+type SecondPass interface {
+	Classify(ctx context.Context, h Hit) Classification
+}
+
 // Emitter mints drift.finding events.
 type Emitter struct {
 	db  *storage.DB
 	log *eventlog.Log
 	// Classifier runs the second pass; nil ⇒ every hit is unclassified.
-	Classifier *Classifier
+	Classifier SecondPass
 	// Revalidate is the S14.8 edge; nil ⇒ unwired, recorded on every card.
 	Revalidate Revalidate
 	Logger     *slog.Logger
@@ -150,8 +159,14 @@ func Fingerprint(source, lane, class string) string {
 
 // Emit classifies a hit (unless it is platform-authored), computes its severity
 // and fingerprint, fires the S14.8 revalidation edge per the OQ4 disposition,
-// and appends one drift.finding. It returns the emitted payload.
-func (e *Emitter) Emit(ctx context.Context, h Hit) (FindingPayload, error) {
+// and appends one drift.finding.
+//
+// It returns the payload and whether a finding was actually appended. A hit the
+// second pass classifies `none` is NOT a finding: S14.6 ¶2 says RELEVANT hits
+// become drift cards, and the second pass answering "irrelevant" IS that filter.
+// The judgment is logged so the trace of having looked is not lost, but it never
+// reaches the log or the inbox.
+func (e *Emitter) Emit(ctx context.Context, h Hit) (FindingPayload, bool, error) {
 	var cl Classification
 	if h.Class != "" {
 		// Platform-authored: the platform knows what happened, so no model is
@@ -163,14 +178,36 @@ func (e *Emitter) Emit(ctx context.Context, h Hit) (FindingPayload, error) {
 			Classified: true,
 			Note:       "platform-authored finding (no model verdict was needed)",
 		}
+	} else if e.Classifier == nil {
+		cl = Classification{
+			Lanes: laneList(h.Lane, nil), Class: ClassUnclear, Summary: fallbackSummary(h),
+			Note: "no second pass is wired — the hit is recorded unclassified for the operator to read",
+		}
 	} else {
 		cl = e.Classifier.Classify(ctx, h)
 	}
 
-	// Severity derives SERVER-SIDE from the change class and the watch ROW's
-	// lane (S14.4's two alert-routing classes) — never from the hit body and
-	// never from the model.
-	severity := severityFor(cl.Class, []string{h.Lane})
+	if cl.Class == ClassNone {
+		e.logger().Info("watchlist: hit classified irrelevant — no card raised (S14.6 ¶2: RELEVANT hits become drift cards)",
+			"row", h.RowID, "source", h.Source, "summary", cl.Summary)
+		return FindingPayload{ChangeClass: ClassNone, Summary: cl.Summary, RowID: h.RowID}, false, nil
+	}
+
+	// Severity derives SERVER-SIDE from the change class and the lane set
+	// (S14.4's two alert-routing classes) — never from the hit body.
+	//
+	// The watch ROW's lane is authoritative when it has one. A row with NO lane
+	// is the case that matters: report-02 calls the cross-provider repo canaries
+	// the strongest signal precisely because they are not lane-scoped, and
+	// deriving from an empty lane would route a confirmed active-lane change to
+	// the daily digest while the card itself displayed that lane — the card and
+	// its severity disagreeing. So an empty row lane falls back to the lanes the
+	// second pass identified.
+	laneSet := []string{h.Lane}
+	if h.Lane == "" {
+		laneSet = cl.Lanes
+	}
+	severity := severityFor(cl.Class, laneSet)
 
 	payload := FindingPayload{
 		Source:         h.Source,
@@ -192,7 +229,7 @@ func (e *Emitter) Emit(ctx context.Context, h Hit) (FindingPayload, error) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return payload, fmt.Errorf("watchlist: marshal drift finding: %w", err)
+		return payload, false, fmt.Errorf("watchlist: marshal drift finding: %w", err)
 	}
 	if _, err := e.log.Append(ctx, eventlog.Append{
 		UserID:        platformUser,
@@ -201,9 +238,9 @@ func (e *Emitter) Emit(ctx context.Context, h Hit) (FindingPayload, error) {
 		Payload:       body,
 		Time:          e.now(),
 	}); err != nil {
-		return payload, fmt.Errorf("watchlist: append drift finding: %w", err)
+		return payload, false, fmt.Errorf("watchlist: append drift finding: %w", err)
 	}
-	return payload, nil
+	return payload, true, nil
 }
 
 // revalidate implements coordinator disposition OQ4(a) exactly. The gate is
@@ -231,20 +268,27 @@ func (e *Emitter) revalidate(ctx context.Context, class, subject, reason string)
 	}
 }
 
-// LastFindingAt returns the time of the most recent drift.finding for a watch
-// row, derived from the log — no side store. ok is false when the row has never
-// produced one.
-func (e *Emitter) LastFindingAt(ctx context.Context, rowID string) (time.Time, bool, error) {
+// LastObservedChangeAt returns the time of the most recent drift.finding for a
+// watch row that recorded an OBSERVED CHANGE, derived from the log — no side
+// store. ok is false when the row has never produced one.
+//
+// Staleness findings are excluded by construction. They are the row reporting
+// that NOTHING changed, so counting one as an observation would reset the very
+// clock that produced it: the row would report stale, restart its horizon, and
+// re-report one horizon later forever, instead of staying stale until upstream
+// actually moves.
+func (e *Emitter) LastObservedChangeAt(ctx context.Context, rowID string) (time.Time, bool, error) {
 	var ts string
 	err := e.db.QueryRowContext(ctx,
 		`SELECT ts FROM run_events
 		  WHERE type = ? AND json_extract(payload, '$.row_id') = ?
+		    AND COALESCE(json_extract(payload, '$.price_proposal.stale'), '') = ''
 		  ORDER BY event_seq DESC LIMIT 1`, EventDriftFinding, rowID).Scan(&ts)
 	if err == sql.ErrNoRows {
 		return time.Time{}, false, nil
 	}
 	if err != nil {
-		return time.Time{}, false, fmt.Errorf("watchlist: read last finding for %q: %w", rowID, err)
+		return time.Time{}, false, fmt.Errorf("watchlist: read last observed change for %q: %w", rowID, err)
 	}
 	t, perr := time.Parse(time.RFC3339Nano, ts)
 	if perr != nil {

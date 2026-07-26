@@ -3,7 +3,10 @@ package watchlist
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 )
 
@@ -215,7 +218,7 @@ func tier3Rows() []Row {
 		{
 			ID: "t3-artificial-analysis", Kind: KindStudy, Tier: 3, Cadence: CadenceWeekly,
 			Enabled: true, Group: GroupReport02,
-			Notes: "Artificial Analysis Data API (free tier 1,000 req/day — evals + a per-provider pricing snapshot). Registered but NOT yet a polled row: the endpoint needs an operator-supplied API key, and report-02 pins no URL. It activates through a LoadRows override once the operator supplies both — a fabricated endpoint would decay on its first fetch — " + report02Cite,
+			Notes: "Artificial Analysis Data API (free tier 1,000 req/day — evals + a per-provider pricing snapshot). Registered but NOT yet a polled row: the endpoint needs an operator-supplied API key, and report-02 pins no URL — a fabricated endpoint would decay on its first fetch. This registration row is the standing record and never becomes the polled row itself (a committed row's structure is immutable by trigger); the operator adds the concrete `api` row alongside it through the R3 override, and retiring this one is an S16.2 dated funeral edit — " + report02Cite,
 		},
 	}
 }
@@ -242,9 +245,12 @@ func tier4Rows() []Row {
 		hn("t4-hn-zai", "Z.ai+GLM", "zai"),
 		{
 			ID: "t4-localllama", Kind: KindFeed, URL: "https://www.reddit.com/r/LocalLLaMA/.rss",
-			ParserHint: "rss", Lane: "local", Tier: 4, Cadence: CadenceContinuous,
+			// Reddit serves ATOM at /.rss despite the path (verified at the
+			// source: the root element is <feed xmlns=…Atom>). An explicit hint
+			// is hard-routed, so hinting rss here would fail the row forever.
+			ParserHint: "atom", Lane: "local", Tier: 4, Cadence: CadenceContinuous,
 			Enabled: true, Group: GroupReport02,
-			Notes: "r/LocalLLaMA via /.rss — the local-tier community channel — " + report02Cite,
+			Notes: "r/LocalLLaMA via /.rss — the local-tier community channel; the path says rss but the payload is Atom — " + report02Cite,
 		},
 	}
 }
@@ -290,7 +296,7 @@ func standingRows() []Row {
 		{
 			ID: "s168-awesome-harness-engineering", Kind: KindStudy, Tier: 2,
 			Cadence: CadenceQuarterly, Enabled: true, Group: GroupS168,
-			Notes: "awesome-harness-engineering referents: watches BOTH leading referents — `walkinglabs/…` AND `ai-boost/…` — for activity; fires → DROP THIS ROW IF BOTH STALL [G2 Def.15]. One row carries both referents deliberately: the gate ratified a single drop-if-both-stall decision, not two independent watches. The gate text elides the repo paths beyond those prefixes, so no URL is fabricated here; the operator supplies the two concrete feeds through a LoadRows override — " + s168Cite,
+			Notes: "awesome-harness-engineering referents: watches BOTH leading referents — `walkinglabs/…` AND `ai-boost/…` — for activity; fires → DROP THIS ROW IF BOTH STALL [G2 Def.15]. One row carries both referents deliberately: the gate ratified a single drop-if-both-stall decision, not two independent watches. The gate text elides the repo paths beyond those prefixes, so no URL is fabricated here; the operator ADDS the two concrete feed rows alongside this one through the R3 override, and this registration row remains the standing record of the single drop-if-both-stall decision (a committed row's structure is immutable — editing one is an S16.2 dated funeral edit) — " + s168Cite,
 		},
 		std("s168-crush-fsl-mit", "",
 			"Crush FSL→MIT conversions: watches per-version MIT from ~mid-2027; fires → the operator may revisit the patterns-only policy (S16.5) [G2 D2.2]"),
@@ -333,6 +339,40 @@ func lockReviewRows() []Row {
 }
 
 // ── Operator override ──────────────────────────────────────────────────────
+
+// WatchRowsOverrideEnv points at the operator's strict-JSON watch-row file —
+// the R3 override, made reachable at boot. Structural deployment config (the
+// SINET_SRT_PATH / SINET_CDIO_URL precedent), not a ⚙ key.
+const WatchRowsOverrideEnv = "SINET_WATCHLIST_ROWS"
+
+// LoadRowsFile reads the operator override named by WatchRowsOverrideEnv.
+// found is false when no path is configured or the file is absent — the
+// override is optional, and its ABSENCE is silent while its presence-but-broken
+// is LOUD (a typo in a hand-edited seed must never degrade to "no rows").
+//
+// The override is ADDITIVE. A committed watch row's structure is immutable by
+// trigger and seeding is INSERT OR IGNORE, so an override adds rows the store
+// does not yet carry; it cannot rewrite one that is already there. Changing a
+// committed row is the S16.2 dated funeral edit, deliberately not something a
+// file drop can do — and deliberately not something this package pretends to
+// offer.
+func LoadRowsFile(path string) (rows []Row, found bool, err error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, false, nil
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("watchlist: read watch-row override %s: %w", path, err)
+	}
+	rows, err = LoadRows(data)
+	if err != nil {
+		return nil, true, err
+	}
+	return rows, true, nil
+}
 
 // LoadRows parses an operator-supplied strict-JSON watch-row set. Unknown
 // fields fail LOUDLY (the §14/§15/§17 seed precedent): a typo in a hand-edited

@@ -81,7 +81,7 @@ type Classifier struct {
 	Meter AdvisoryMeter
 }
 
-// Classify runs the second pass for one hit.
+// Classify runs the second pass for one hit. It satisfies SecondPass.
 func (c *Classifier) Classify(ctx context.Context, h Hit) Classification {
 	base := Classification{
 		Lanes:   laneList(h.Lane, nil),

@@ -27,11 +27,11 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This packet owns 0012; later packets add their own (0013 by B5-6A). The
-	// assertion is that migrations apply CONTIGUOUSLY through the current head
-	// and that this packet's tables exist — not that the head never moves.
-	if v < 12 {
-		t.Fatalf("user_version = %d, want at least 12 (migration 0012 applied contiguously)", v)
+	// EXACT pin, moved forward deliberately as each packet lands its migration:
+	// 0012 is this packet's, 0013 is B5-6A's (the S14.6 watch-row config store).
+	// A floor would let an unnoticed migration slip in.
+	if v != 13 {
+		t.Fatalf("user_version = %d, want 13 (migrations through 0013 applied contiguously)", v)
 	}
 	for _, table := range []string{"eval_floors", "revalidation_stamps"} {
 		var n int

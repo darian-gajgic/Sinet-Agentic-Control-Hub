@@ -209,3 +209,68 @@ func TestAPIDoesNotImportWatchlist(t *testing.T) {
 		t.Fatal("the scan read no files — it would pass vacuously")
 	}
 }
+
+// TestDriftCardsAreBounded is the D10 lock: a drift finding has no close verb at
+// v0 (dismiss is the B6 surface's), so without a bound every finding ever logged
+// would derive into a forever-listed card and a re-firing condition would grow
+// the inbox without limit — unlike OPEN-only watchdog flags and RED-only
+// conformance rows. Findings past the horizon stay in run_events and remain
+// queryable; they simply stop being open cards.
+func TestDriftCardsAreBounded(t *testing.T) {
+	ctx := context.Background()
+	db, log, _ := wdTestDB(t)
+	now := time.Date(2026, 7, 26, 9, 0, 0, 0, time.UTC)
+	p := &projector{db: db, now: func() time.Time { return now }}
+
+	// A stale incident, well past the horizon.
+	appendFinding(t, log, now.Add(-90*24*time.Hour), "platform", "fp-old", "price", "flag-now", "ancient")
+	// A live one.
+	appendFinding(t, log, now.Add(-2*time.Hour), "platform", "fp-live", "price", "flag-now", "recent")
+
+	snap, err := p.inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.DriftCards) != 1 || snap.DriftCards[0].Fingerprint != "fp-live" {
+		t.Fatalf("cards = %+v, want only the in-horizon incident", snap.DriftCards)
+	}
+
+	// A re-firing condition: far more distinct incidents than the cap, all live.
+	for i := 0; i < driftCardCap+40; i++ {
+		appendFinding(t, log, now.Add(-time.Duration(i)*time.Minute), "platform",
+			fmt.Sprintf("fp-storm-%d", i), "limits", "daily-digest", "re-fired")
+	}
+	snap, err = p.inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.DriftCards) > driftCardCap {
+		t.Fatalf("%d cards, want at most the cap %d — the inbox must be bounded", len(snap.DriftCards), driftCardCap)
+	}
+	// What survives is the NEWEST, never an arbitrary prefix.
+	if snap.DriftCards[0].LatestSeq < snap.DriftCards[len(snap.DriftCards)-1].LatestSeq {
+		t.Error("capped cards are not newest-first")
+	}
+}
+
+// TestIrrelevantFindingsNeverRenderAsCards is the D4 belt at the projection: the
+// producer already declines to emit a `none` classification, and any row written
+// before that rule existed still never becomes a card (S14.6 ¶2: RELEVANT hits
+// become drift cards).
+func TestIrrelevantFindingsNeverRenderAsCards(t *testing.T) {
+	ctx := context.Background()
+	db, log, _ := wdTestDB(t)
+	p := &projector{db: db}
+	now := time.Now()
+
+	appendFinding(t, log, now, "platform", "fp-none", "none", "daily-digest", "a docs typo")
+	appendFinding(t, log, now, "platform", "fp-real", "price", "flag-now", "a price moved")
+
+	snap, err := p.inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.DriftCards) != 1 || snap.DriftCards[0].ChangeClass != "price" {
+		t.Fatalf("cards = %+v, want only the relevant one", snap.DriftCards)
+	}
+}

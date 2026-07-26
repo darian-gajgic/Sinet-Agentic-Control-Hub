@@ -1,6 +1,7 @@
 package watchlist
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -90,7 +91,12 @@ func (f *Fetcher) Get(ctx context.Context, url string, prev FetchState) (Respons
 		return Response{}, fmt.Errorf("watchlist: build request for %s: %w", url, err)
 	}
 	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Accept-Encoding", "gzip")
+	// Accept-Encoding is deliberately NOT set here. Setting it by hand disables
+	// net/http's transparent gzip negotiation: the transport then hands back the
+	// raw compressed body and every parser downstream sees gzip magic instead of
+	// XML or JSON. Leaving it unset lets the transport add the header AND
+	// decompress. The belt below covers the remaining case — a server that
+	// answers with Content-Encoding: gzip when the transport did not ask.
 	if prev.ETag != "" {
 		req.Header.Set("If-None-Match", prev.ETag)
 	}
@@ -125,7 +131,21 @@ func (f *Fetcher) Get(ctx context.Context, url string, prev FetchState) (Respons
 		return out, fmt.Errorf("watchlist: fetch %s: status %d", url, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
+	// The transport decompresses whatever it negotiated itself and strips the
+	// header. A remaining Content-Encoding: gzip means the origin compressed
+	// unsolicited, so decompress it here — otherwise the feed/JSON parsers would
+	// be handed gzip magic bytes and every cycle would fail into decay.
+	src := io.Reader(resp.Body)
+	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+		zr, err := gzip.NewReader(io.LimitReader(resp.Body, maxBodyBytes+1))
+		if err != nil {
+			return out, fmt.Errorf("watchlist: gunzip %s: %w", url, err)
+		}
+		defer zr.Close()
+		src = zr
+	}
+
+	body, err := io.ReadAll(io.LimitReader(src, maxBodyBytes+1))
 	if err != nil {
 		return out, fmt.Errorf("watchlist: read %s: %w", url, err)
 	}

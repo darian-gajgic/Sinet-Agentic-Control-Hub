@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
@@ -52,7 +53,25 @@ func buildWatchlistSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 	runbook *evals.Runbook, logger *slog.Logger) (*watchlistSurface, error) {
 
 	store := watchlist.NewStore(db)
-	rows, err := store.EnsureSeeded(ctx, watchlist.SeedRows())
+	seed := watchlist.SeedRows()
+
+	// The R3 operator override, reachable at boot. It is ADDITIVE and loaded
+	// AFTER the in-code set, so an override can add rows the platform does not
+	// ship but can never delete a standing obligation (the S16.8 registrations
+	// and the per-lock-entry review rows) by omission. A present-but-malformed
+	// override fails the boot LOUDLY rather than degrading to "no rows" — the
+	// §14/§15/§17 strict-seed discipline.
+	override, found, err := watchlist.LoadRowsFile(os.Getenv(watchlist.WatchRowsOverrideEnv))
+	if err != nil {
+		return nil, fmt.Errorf("shell: load S14.6 watch-row override (%s): %w", watchlist.WatchRowsOverrideEnv, err)
+	}
+	if found {
+		seed = append(seed, override...)
+		logger.Info("watchlist: operator watch-row override loaded",
+			"path", os.Getenv(watchlist.WatchRowsOverrideEnv), "rows", len(override))
+	}
+
+	rows, err := store.EnsureSeeded(ctx, seed)
 	if err != nil {
 		return nil, fmt.Errorf("shell: seed S14.6 watch rows: %w", err)
 	}

@@ -52,7 +52,7 @@ func (h *harness) findings(t *testing.T) []watchlist.FindingPayload {
 // incident fingerprint — the S14.2 FamilyDriftCanary descriptor verbatim.
 func TestFindingSatisfiesTheFamilyContractMinimum(t *testing.T) {
 	h := newHarness(t)
-	got, err := h.em.Emit(context.Background(), watchlist.Hit{
+	got, _, err := h.em.Emit(context.Background(), watchlist.Hit{
 		RowID: "t1-anthropic-pricing", Kind: watchlist.KindPage,
 		Source: "https://example.invalid/pricing", Lane: "anthropic",
 		Class: watchlist.ClassPrice, Summary: "input price moved",
@@ -87,13 +87,12 @@ func TestSeverityDerivesFromClassAndRowLane(t *testing.T) {
 		{watchlist.ClassEndpoints, "anthropic", watchlist.SeverityFlagNow},
 		{watchlist.ClassTerms, "anthropic", watchlist.SeverityFlagNow},
 		{watchlist.ClassPrice, "cerebras", watchlist.SeverityDigest},
-		{watchlist.ClassNone, "anthropic", watchlist.SeverityDigest},
 		{watchlist.ClassUnclear, "anthropic", watchlist.SeverityDigest},
 		// A billing-regime change is load-bearing even on a candidate.
 		{watchlist.ClassBillingRegime, "cerebras", watchlist.SeverityFlagNow},
 	}
 	for _, c := range cases {
-		got, err := h.em.Emit(context.Background(), watchlist.Hit{
+		got, _, err := h.em.Emit(context.Background(), watchlist.Hit{
 			RowID: "r", Kind: watchlist.KindPage, Source: "https://x.invalid/" + c.class,
 			Lane: c.lane, Class: c.class, Summary: "s",
 		})
@@ -136,7 +135,7 @@ func TestRevalidationEdgeMatchesOQ4(t *testing.T) {
 	}
 
 	// (i) models + a model-id subject: the ONE case that fires.
-	got, err := h.em.Emit(context.Background(), watchlist.Hit{
+	got, _, err := h.em.Emit(context.Background(), watchlist.Hit{
 		RowID: "r", Kind: watchlist.KindAPI, Source: "https://x.invalid/api.json",
 		Lane: "anthropic", Class: watchlist.ClassModels, Subject: "claude-haiku-4-5",
 		Summary: "model list moved",
@@ -158,13 +157,15 @@ func TestRevalidationEdgeMatchesOQ4(t *testing.T) {
 	calls = nil
 	for _, class := range []string{
 		watchlist.ClassPrice, watchlist.ClassTerms, watchlist.ClassLimits,
-		watchlist.ClassEndpoints, watchlist.ClassBillingRegime,
-		watchlist.ClassNone, watchlist.ClassUnclear,
+		watchlist.ClassEndpoints, watchlist.ClassBillingRegime, watchlist.ClassUnclear,
 	} {
-		got, err := h.em.Emit(context.Background(), watchlist.Hit{
+		got, emitted, err := h.em.Emit(context.Background(), watchlist.Hit{
 			RowID: "r", Kind: watchlist.KindPage, Source: "https://x.invalid/" + class,
 			Lane: "anthropic", Class: class, Subject: "claude-haiku-4-5", Summary: "s",
 		})
+		if !emitted {
+			t.Errorf("class %s raised no finding", class)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +181,7 @@ func TestRevalidationEdgeMatchesOQ4(t *testing.T) {
 	}
 
 	// (iii) models WITHOUT a model-id subject: no call, and the gap is stated.
-	got, err = h.em.Emit(context.Background(), watchlist.Hit{
+	got, _, err = h.em.Emit(context.Background(), watchlist.Hit{
 		RowID: "r", Kind: watchlist.KindAPI, Source: "https://x.invalid/nosubject",
 		Lane: "anthropic", Class: watchlist.ClassModels, Summary: "s",
 	})
@@ -202,7 +203,7 @@ func TestRevalidationFailureNeverSuppressesTheCard(t *testing.T) {
 	h.em.Revalidate = func(ctx context.Context, modelID, reason string) ([]string, error) {
 		return nil, errors.New("worker store unavailable")
 	}
-	got, err := h.em.Emit(context.Background(), watchlist.Hit{
+	got, _, err := h.em.Emit(context.Background(), watchlist.Hit{
 		RowID: "r", Kind: watchlist.KindAPI, Source: "https://x.invalid/a", Lane: "anthropic",
 		Class: watchlist.ClassModels, Subject: "m1", Summary: "s",
 	})
@@ -221,7 +222,7 @@ func TestRevalidationFailureNeverSuppressesTheCard(t *testing.T) {
 // rather than implying the edge ran.
 func TestUnwiredRevalidationSeamIsRecorded(t *testing.T) {
 	h := newHarness(t)
-	got, err := h.em.Emit(context.Background(), watchlist.Hit{
+	got, _, err := h.em.Emit(context.Background(), watchlist.Hit{
 		RowID: "r", Kind: watchlist.KindAPI, Source: "https://x.invalid/a", Lane: "anthropic",
 		Class: watchlist.ClassModels, Subject: "m1", Summary: "s",
 	})
@@ -241,7 +242,7 @@ func TestUnwiredRevalidationSeamIsRecorded(t *testing.T) {
 func TestUnclassifiedHitStillBecomesACard(t *testing.T) {
 	h := newHarness(t)
 	h.em.Classifier = &watchlist.Classifier{} // no Duty, no Meter
-	got, err := h.em.Emit(context.Background(), watchlist.Hit{
+	got, _, err := h.em.Emit(context.Background(), watchlist.Hit{
 		RowID: "f1", Kind: watchlist.KindFeed, Source: "https://x.invalid/feed",
 		Lane: "anthropic", Title: "v2.4.0 released", Detail: "notes",
 	})
@@ -331,5 +332,70 @@ func TestSeverityVocabularyMatchesTheWatchdog(t *testing.T) {
 	}
 	if watchlist.SeverityDigest != watchdog.SeverityDailyDigest {
 		t.Errorf("digest vocabulary diverges: %q vs %q", watchlist.SeverityDigest, watchdog.SeverityDailyDigest)
+	}
+}
+
+// TestIrrelevantHitRaisesNoCard is the D4 lock: a hit the second pass
+// classifies `none` is not a finding at all. S14.6 ¶2 says RELEVANT hits become
+// drift cards, and the second pass answering "irrelevant" IS that filter — so
+// the hit never reaches the log or the inbox.
+func TestIrrelevantHitRaisesNoCard(t *testing.T) {
+	h := newHarness(t)
+	got, emitted, err := h.em.Emit(context.Background(), watchlist.Hit{
+		RowID: "f1", Kind: watchlist.KindFeed, Source: "https://x.invalid/feed",
+		Lane: "anthropic", Class: watchlist.ClassNone, Summary: "a docs typo was fixed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emitted {
+		t.Error("an irrelevant hit was emitted as a finding")
+	}
+	if got.ChangeClass != watchlist.ClassNone {
+		t.Errorf("the skipped hit reports class %q", got.ChangeClass)
+	}
+	if n := len(h.findings(t)); n != 0 {
+		t.Errorf("%d findings appended for an irrelevant hit, want 0", n)
+	}
+}
+
+// TestEmptyRowLaneFallsBackToClassifiedLanes is the D5 lock: report-02 calls the
+// cross-provider repo canaries the strongest signal, and those rows carry NO
+// lane. Deriving severity from an empty row lane routed a confirmed active-lane
+// change to the daily digest while the card displayed that lane — card and
+// severity disagreeing. A row WITH a lane still wins (server-side truth).
+func TestEmptyRowLaneFallsBackToClassifiedLanes(t *testing.T) {
+	h := newHarness(t)
+	h.em.Classifier = &fakeClassifier{class: watchlist.ClassPrice, lanes: []string{"anthropic"}}
+
+	got, emitted, err := h.em.Emit(context.Background(), watchlist.Hit{
+		RowID: "t2-opencode-releases", Kind: watchlist.KindFeed,
+		Source: "https://x.invalid/releases.atom", Lane: "", Title: "pricing change landed",
+	})
+	if err != nil || !emitted {
+		t.Fatalf("emit: %v (emitted=%v)", err, emitted)
+	}
+	if got.Severity != watchlist.SeverityFlagNow {
+		t.Errorf("a lane-less canary row naming an ACTIVE lane routed %q, want flag-now", got.Severity)
+	}
+	var named bool
+	for _, l := range got.Lanes {
+		named = named || l == "anthropic"
+	}
+	if !named {
+		t.Fatalf("the card does not name the lane its severity rests on: %v", got.Lanes)
+	}
+
+	// A candidate-only classification on a lane-less row stays digest.
+	h.em.Classifier = &fakeClassifier{class: watchlist.ClassPrice, lanes: []string{"cerebras"}}
+	got, _, err = h.em.Emit(context.Background(), watchlist.Hit{
+		RowID: "t2-opencode-releases", Kind: watchlist.KindFeed,
+		Source: "https://x.invalid/releases2.atom", Lane: "", Title: "candidate repriced",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Severity != watchlist.SeverityDigest {
+		t.Errorf("a candidate-only change routed %q, want daily-digest", got.Severity)
 	}
 }

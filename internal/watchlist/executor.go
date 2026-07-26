@@ -149,6 +149,22 @@ func (x *Executor) pollFeed(ctx context.Context, r Row) (int, error) {
 		return 0, err
 	}
 
+	// FIRST OBSERVATION establishes the baseline WITHOUT raising cards — the
+	// same rule pollAPI applies, for the same reason: a feed's existing window
+	// predates the watch, so there was no prior state for it to have drifted
+	// from. Without this a fresh boot floods the inbox with every entry of
+	// every seeded feed and burns a local classify call on each.
+	if !r.HasFetched {
+		seen := make([]string, 0, len(entries))
+		for _, e := range entries {
+			seen = append(seen, e.Hash())
+		}
+		st.SeenEntries = r.withSeen(seen...)
+		x.Logger.Info("watchlist: feed baseline established (no cards raised on first observation)",
+			"row", r.ID, "entries", len(entries))
+		return 0, x.Store.RecordSuccess(ctx, r.ID, st)
+	}
+
 	hits := 0
 	var fresh []string
 	for _, e := range entries {
@@ -157,17 +173,20 @@ func (x *Executor) pollFeed(ctx context.Context, r Row) (int, error) {
 			continue
 		}
 		fresh = append(fresh, h)
-		if _, err := x.Emitter.Emit(ctx, Hit{
+		_, emitted, err := x.Emitter.Emit(ctx, Hit{
 			RowID: r.ID, Kind: r.Kind, Source: r.URL, Lane: r.Lane,
 			Title:  e.Title,
 			Detail: feedDetail(e),
 			// A feed entry names no model id, so it can carry no model
 			// subject into the S14.8 runbook — the finding records that.
 			MigrateBias: r.MigrateBias,
-		}); err != nil {
+		})
+		if err != nil {
 			return hits, err
 		}
-		hits++
+		if emitted {
+			hits++
+		}
 	}
 	st.SeenEntries = r.withSeen(fresh...)
 	return hits, x.Store.RecordSuccess(ctx, r.ID, st)
@@ -208,7 +227,7 @@ func (x *Executor) pollAPI(ctx context.Context, r Row) (int, error) {
 	if diff.Empty() {
 		return 0, x.Store.RecordSuccess(ctx, r.ID, st)
 	}
-	if _, err := x.Emitter.Emit(ctx, Hit{
+	if _, _, err := x.Emitter.Emit(ctx, Hit{
 		RowID: r.ID, Kind: r.Kind, Source: r.URL, Lane: r.Lane,
 		Title:  diff.Summary(),
 		Detail: diff.Detail(),
@@ -246,7 +265,17 @@ func (x *Executor) pollPrices(ctx context.Context, r Row) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if _, err := x.Emitter.Emit(ctx, Hit{
+	// A refresh that proposes NOTHING raises nothing: the document moved for a
+	// provider Sinet runs no lane for, or only in fields this table never
+	// prices. Same relevance rule as the second pass — a card is for a change
+	// that is actionable, and the out-of-scope counts still ride the next real
+	// proposal.
+	if prop.TotalRows == 0 {
+		x.Logger.Info("watchlist: genai-prices moved but proposed no priced row (out of scope for Sinet's lanes)",
+			"row", r.ID, "out_of_scope", prop.OutOfScope)
+		return 0, x.Store.RecordSuccess(ctx, r.ID, st)
+	}
+	if _, _, err := x.Emitter.Emit(ctx, Hit{
 		RowID: r.ID, Kind: r.Kind, Source: r.URL, Lane: r.Lane,
 		Class:    ClassPrice,
 		Summary:  priceProposalSummary(prop),
@@ -267,7 +296,7 @@ func (x *Executor) checkPriceStaleness(ctx context.Context, r Row, now time.Time
 	if err != nil {
 		return 0, fmt.Errorf("watchlist: read ⚙ %s: %w", keyPriceDataStaleDays, err)
 	}
-	last, ok, err := x.Emitter.LastFindingAt(ctx, r.ID)
+	last, ok, err := x.Emitter.LastObservedChangeAt(ctx, r.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -286,7 +315,7 @@ func (x *Executor) checkPriceStaleness(ctx context.Context, r Row, now time.Time
 		UpstreamSHA256: r.ContentHash, Diff: "no upstream change observed",
 		Stale: stalenessNote(days, since),
 	}
-	if _, err := x.Emitter.Emit(ctx, Hit{
+	if _, _, err := x.Emitter.Emit(ctx, Hit{
 		RowID: r.ID, Kind: r.Kind, Source: r.URL, Lane: r.Lane,
 		Class:    ClassPrice,
 		Summary:  priceProposalSummary(prop),
@@ -334,7 +363,7 @@ func (x *Executor) pollPage(ctx context.Context, r Row) (int, error) {
 		return 0, x.Store.RecordSuccess(ctx, r.ID, st)
 	}
 	st.ContentHash = hash
-	if _, err := x.Emitter.Emit(ctx, Hit{
+	if _, _, err := x.Emitter.Emit(ctx, Hit{
 		RowID: r.ID, Kind: r.Kind, Source: r.URL, Lane: r.Lane,
 		Title:       firstNonEmpty(w.Title, w.PageTitle, r.ID),
 		Detail:      diff,

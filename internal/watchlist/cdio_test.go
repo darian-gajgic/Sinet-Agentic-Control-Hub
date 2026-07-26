@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/lockfile"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
@@ -148,7 +149,8 @@ func (s *organStub) serve(t *testing.T) *httptest.Server {
 			// driver sending an off-schema key fails here, not in production.
 			for k := range spec {
 				switch k {
-				case "url", "title", "llm_intent", "fetch_backend":
+				case "url", "title", "llm_intent", "fetch_backend",
+					"include_filters", "subtractive_selectors":
 				default:
 					http.Error(w, "Unknown field(s): "+k, http.StatusBadRequest)
 					return
@@ -349,8 +351,9 @@ func TestOrganLivenessReportsPinDeltaLoudly(t *testing.T) {
 func TestFeedAndAPITiersWorkWithThePageTierAbsent(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
+	body := atomBody
 	feedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(atomBody))
+		_, _ = w.Write([]byte(body))
 	}))
 	defer feedSrv.Close()
 
@@ -358,18 +361,38 @@ func TestFeedAndAPITiersWorkWithThePageTierAbsent(t *testing.T) {
 	h.seedOne(t, pageRow("p1", "https://example.invalid/pricing"))
 
 	// No CDIO configured at all: the page tier is absent.
-	x := watchlist.New(watchlist.Deps{
-		Store: h.st, Emitter: h.em, Settings: h.reg, HTTPClient: feedSrv.Client(),
-	})
+	clk := &clock{t: mustTime(t, "2026-07-01T00:00:00Z")}
+	x := h.exec(clk, watchlist.Deps{HTTPClient: feedSrv.Client()})
+
+	// Pass 1 baselines the feed (first observation raises nothing) and fails the
+	// page row honestly.
 	pass, err := x.RunDue(ctx)
 	if err != nil {
 		t.Fatalf("RunDue: %v", err)
 	}
-	if pass.Hits != 2 {
-		t.Errorf("the feed tier produced %d hits, want 2 — it must keep working without the organ", pass.Hits)
+	if pass.Hits != 0 {
+		t.Errorf("the first observation raised %d cards, want 0 (baseline)", pass.Hits)
 	}
 	if pass.Failures != 1 {
 		t.Errorf("the page row should have failed honestly (organ absent), failures=%d", pass.Failures)
+	}
+
+	// Pass 2 with a genuinely new entry: the feed tier keeps working without the
+	// organ.
+	body = strings.Replace(atomBody, "<entry>", `<entry>
+    <id>tag:github.com,2008:Repository/1/v2.5.0</id>
+    <title>v2.5.0</title>
+    <updated>2026-07-26T09:00:00Z</updated>
+    <link rel="alternate" href="https://example.invalid/releases/v2.5.0"/>
+  </entry>
+  <entry>`, 1)
+	clk.advance(time.Hour)
+	pass, err = x.RunDue(ctx)
+	if err != nil {
+		t.Fatalf("second RunDue: %v", err)
+	}
+	if pass.Hits != 1 {
+		t.Errorf("the feed tier produced %d hits for one new entry, want 1 — it must keep working without the organ", pass.Hits)
 	}
 }
 
@@ -421,5 +444,78 @@ func TestRealOrganLegOrSanctionedSkip(t *testing.T) {
 	}
 	if info.Version != watchlist.Pin {
 		t.Errorf("PIN DELTA: the installed changedetection.io reports %q, components.lock pins %q — report it, never retarget silently (CONVENTIONS §10)", info.Version, watchlist.Pin)
+	}
+}
+
+// TestPageWatchCarriesRegionFilteringAndIntent is the D3 lock: the per-watch
+// half of S14.6 ¶T1 that the pinned REST surface CAN express is actually sent —
+// the generic subtractive page-chrome list, the region-filter mechanism, and the
+// native-triage intent — and every key sent is one the pinned PUT schema
+// accepts (the stub rejects unknown fields exactly as 0.55.8 does).
+func TestPageWatchCarriesRegionFilteringAndIntent(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/tags":
+			writeJSON(w, http.StatusOK, map[string]any{})
+		case r.URL.Path == "/api/v1/tag":
+			writeJSON(w, http.StatusCreated, map[string]string{"uuid": "tag-1"})
+		case r.URL.Path == "/api/v1/watch" && r.Method == http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			writeJSON(w, http.StatusCreated, map[string]string{"uuid": "u1"})
+		default:
+			writeJSON(w, http.StatusOK, map[string]any{})
+		}
+	}))
+	defer srv.Close()
+
+	h.seedOne(t, pageRow("p", "https://example.invalid/pricing"))
+	rows, _ := h.st.PageRows(ctx)
+	if _, err := watchlist.NewCDIO(srv.URL, stubAPIKey, srv.Client()).Reconcile(ctx, h.st, rows); err != nil {
+		t.Fatal(err)
+	}
+
+	subs, ok := body["subtractive_selectors"].([]any)
+	if !ok || len(subs) == 0 {
+		t.Fatalf("the watch carries no subtractive selectors — region filtering is absent: %v", body["subtractive_selectors"])
+	}
+	for _, want := range []string{"nav", "footer", "script"} {
+		var found bool
+		for _, got := range subs {
+			found = found || got == want
+		}
+		if !found {
+			t.Errorf("generic page chrome %q is not stripped", want)
+		}
+	}
+	intent, _ := body["llm_intent"].(string)
+	if intent == "" {
+		t.Error("the watch carries no llm_intent — the organ's native first-pass triage has nothing to judge against")
+	}
+	if !strings.Contains(intent, "billing regime") {
+		t.Errorf("the intent does not name the change classes Sinet cares about: %q", intent)
+	}
+}
+
+// TestLocalEndpointConfigIsRecordedAsAnInstallStep is the other half of D3: the
+// endpoint pointing S14.6 ¶T1 asks for is NOT expressible over the pinned REST
+// surface, so it is recorded as concrete gate-proposal data rather than
+// silently skipped.
+func TestLocalEndpointConfigIsRecordedAsAnInstallStep(t *testing.T) {
+	cfg := watchlist.RequiredLocalEndpointConfig("http://127.0.0.1:8791/v1", "watchlist-triage")
+	if cfg.APIBase == "" || cfg.Model == "" {
+		t.Fatalf("the required organ-side config renders empty: %+v", cfg)
+	}
+	// The gap must be documented with its evidence, not merely absent.
+	src, err := os.ReadFile("cdio.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"thirteen", "api_base", "no route at 0.55.8"} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("the LLM-endpoint gap is not recorded with its source evidence (missing %q)", want)
+		}
 	}
 }
