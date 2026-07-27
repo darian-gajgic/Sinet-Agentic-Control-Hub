@@ -237,6 +237,9 @@ func Run(ctx context.Context, opts Options) error {
 	// shell-owned goroutines (sweep + Tier-0 tail + dead-man probe) after step 5.
 	var wd *watchdog.Watchdog
 	var wlSurf *watchlistSurface
+	// The S14.7 benchmark practice (B5-7): composed in the production path,
+	// driven by a shell-owned sampling loop after step 5.
+	var benchSurf *benchmarkSurface
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -541,6 +544,23 @@ func Run(ctx context.Context, opts Options) error {
 			"rows_seeded", wlSurf.Rows, "page_tier_configured", wlSurf.PageTier,
 			"canary_legs_armed", wlSurf.CanaryArmed)
 
+		// The S14.7 benchmark practice (B5-7): the machinery around the SIGNED
+		// registration Spec/benchmark-preregistration-v1.md. It samples accepted
+		// deliverables at the ⚙ rate, runs the §2 direct arm as ordinary
+		// background work under the requester's own budget, pairs both arms
+		// blind, records the §14 pair record before any reveal, tracks epochs,
+		// computes the §7 posterior G, and evaluates the §11 gate and §12 alarm.
+		// It SETS NOTHING: the gate is a readout, the alarm is a card plus a
+		// visible freeze, and none of BENCH-REG's registered numbers is this
+		// platform's to change (§17). The shell OWNS WHEN (the loop below).
+		benchSurf, err = buildBenchmarkSurface(ctx, db, log, reg, runs, sched,
+			meterLedger, evalSurf.Store, sk.Pipeline(), reviewStore, logger)
+		if err != nil {
+			return err
+		}
+		logger.Info("benchmark: S14.7 practice wired (B5-7)",
+			"domains", benchSurf.Domains, "gate_limb_d_evaluable", benchSurf.FloorsWired)
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,
@@ -701,6 +721,15 @@ func Run(ctx context.Context, opts Options) error {
 	// local-tier logprob canary and the conformance-dueness surfacer only.
 	if wlSurf != nil && wlSurf.Canaries != nil {
 		go canaryLoop(procCtx, wlSurf, logger)
+	}
+
+	// The S14.7 sampling hook (B5-7): the shell owns WHEN. It ticks on a
+	// structural interval and consumes the accepted-deliverable events past a
+	// DURABLE cursor, so a restart neither re-samples an accept nor silently
+	// skips one — sampling is uniform-random among eligible tasks and that
+	// uniformity is frozen (BENCH-REG §4.1).
+	if benchSurf != nil {
+		go benchmarkLoop(procCtx, benchSurf, logger)
 	}
 
 	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,

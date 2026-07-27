@@ -83,8 +83,52 @@ func SeedRows() []Row {
 	rows = append(rows, standingRows()...)
 	rows = append(rows, studyRows()...)
 	rows = append(rows, canarySetRows()...)
+	rows = append(rows, benchmarkQuestionRows()...)
 	rows = append(rows, lockReviewRows()...)
 	return rows
+}
+
+// ── The S14.7 standing benchmark/eval questions register (B5-7) ────────────
+//
+// S14.7's last bullet registers four "questions the practice must eventually
+// answer, recorded so they cannot evaporate". They live here, as `study` rows in
+// their own group, for the same reason the S14.6 ¶3 canary-set members do: this
+// is the one surface in the platform whose whole purpose is "recorded so it
+// cannot evaporate" — data-only, never polled, immutable by trigger, removable
+// only by a dated funeral edit, and surfaced through PendingReview for the S16.7
+// quarterly pass.
+//
+// They are REGISTRATIONS, not machinery. None of them has an answer the platform
+// can compute today, and building analysis for (b) or (c) at v0 would be
+// inventing a measurement rather than recording an obligation. The S06.9 hook
+// already RECORDS the delta-card data (b) needs; the analysis home is S14.7, and
+// when it is built it will read those rows.
+func benchmarkQuestionRows() []Row {
+	q := func(id, note string) Row {
+		return Row{
+			ID: id, Kind: KindStudy, Tier: 2, Cadence: CadenceQuarterly,
+			Enabled: true, Group: GroupBenchmarkQuestions, Notes: note,
+		}
+	}
+	return []Row{
+		q("s147-anchored-findings-vs-file-notes",
+			"R13-OQ6: do anchored [F#] findings beat file-level notes on retry quality? Registered as a standing "+
+				"question of the benchmark/eval practice; answering it needs paired retry outcomes the platform does not "+
+				"yet accrue. Spec S14.7 (standing benchmark/eval questions register) [G2 §Follow-ups]"),
+		q("s147-delta-card-rubber-stamp-analysis",
+			"P-T05-2: delta-card rubber-stamp measurement. The S06.9 hook ALREADY records presented-delta size, "+
+				"time-to-decision, decision and outcome linkage on every intake.delta_decision row; the ANALYSIS home is "+
+				"S14.7, and measured rubber-stamping proposes a card-format retune. No analysis machinery is built at v0 — "+
+				"this row is the registration that the recorded data is owed an analysis. Spec S14.7; S06.9"),
+		q("s147-stakes-classifier-pre-registered-eval",
+			"P-T05-4: a PRE-REGISTERED stakes-classifier eval before v1 household use. Pre-registered means the eval is "+
+				"designed and registered BEFORE it is run, so it cannot be tuned to its result — the same discipline "+
+				"BENCH-REG applies to the benchmark itself. Blocking for v1 household use, not for v0. Spec S14.7; S06"),
+		q("s147-intake-approval-ux-measured-only",
+			"Intake approval-UX changes are justified only by MEASURED outcomes, never by preference. Registered here so "+
+				"a future UX change to the approval surface has to name its measurement; the measurement itself would come "+
+				"from the P-T05-2 analysis above. Spec S14.7; S06.9"),
+	}
 }
 
 // ── The S14.6 ¶3 canary-set registrations (B5-6B) ──────────────────────────

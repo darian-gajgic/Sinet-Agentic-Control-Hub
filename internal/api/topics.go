@@ -59,7 +59,16 @@ func topicsForEvent(e eventlog.Event) []string {
 		case eventlog.FamilyGateAsk,
 			eventlog.FamilyHumanDecision,
 			eventlog.FamilyWatchdog,
-			eventlog.FamilyDriftCanary:
+			eventlog.FamilyDriftCanary,
+			// Benchmark & eval joins the inbox at B5-7 (S14.7): the S15.6 blind-pair
+			// verdict form is an inbox question card and the BENCH-REG §12 alarm is
+			// a flag-now inbox card, so their family's events must reach a
+			// topic-subscribed client LIVE rather than only on the next
+			// re-snapshot. Before this the family routed to NO topic and its events
+			// flowed on the unfiltered relay alone, which would have made a
+			// decision surface non-live (against S3.9). This is a DATA change to
+			// the map: the four-topic set {run, board, fleet, inbox} is untouched.
+			eventlog.FamilyBenchmarkEval:
 			tags = append(tags, topicInbox)
 		}
 	}

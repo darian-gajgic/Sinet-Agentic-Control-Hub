@@ -18,6 +18,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
@@ -39,10 +40,11 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
-// producerTypes is the complete inventory of the 82 event types minted by the
+// producerTypes is the complete inventory of the 85 event types minted by the
 // B0–B4 producers, the three B5-3 watchdog types, the B5-4 conformance
-// eval.score_recorded, the B5-6A watchlist drift.finding and the B5-6B
-// canary.result, referenced through each package's exported Event*
+// eval.score_recorded, the B5-6A watchlist drift.finding, the B5-6B
+// canary.result and the three B5-7 benchmark-practice types, referenced
+// through each package's exported Event*
 // constant so a producer-side value change (or a deleted constant) is caught
 // here at compile or assertion time. The 13 worker-asset lifecycle constants
 // are package-private (internal/worker/store.go:43-55, evTemplateCreated…), so
@@ -97,6 +99,11 @@ func producerTypes() []string {
 		// watchlist (2): the B5-6A S14.6 outside-world drift producer and the
 		// B5-6B S14.6 ¶3 API-canary producer — the two halves of family 11
 		watchlist.EventDriftFinding, watchlist.EventCanaryResult,
+		// benchmark (3): the B5-7 S14.7 practice around BENCH-REG. The pair
+		// record and the alarm complete family 14; decision.recorded flips from
+		// declare-only because the §12 alarm disposition and the §4.2.1 opt-in
+		// consent flip are both human decisions and both are logged as one.
+		benchmark.EventPairRecorded, benchmark.EventAlarm, benchmark.EventDecision,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -152,11 +159,13 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 
 // TestInventoryTotals pins the reconciliation counts (§2): B5-3 minted the
 // three watchdog types, B5-4 minted eval.score_recorded, B5-6A minted
-// drift.finding and B5-6B minted canary.result, so 82 minted + 11 declare-only
-// = 93 registered types. Family 11 (Drift & canary) is now fully minted.
+// drift.finding, B5-6B minted canary.result, and B5-7 minted
+// benchmark.pair_recorded + benchmark.alarm and flipped decision.recorded — so
+// 85 minted + 9 declare-only = 94 registered types. Families 11 (Drift &
+// canary) and 14 (Benchmark & eval) are both fully minted.
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 82 {
-		t.Errorf("producer inventory = %d, want 82 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B)", n)
+	if n := len(producerTypes()); n != 85 {
+		t.Errorf("producer inventory = %d, want 85 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -169,11 +178,11 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 82 {
-		t.Errorf("registered minted types = %d, want 82", minted)
+	if minted != 85 {
+		t.Errorf("registered minted types = %d, want 85", minted)
 	}
-	if declareOnly != 11 {
-		t.Errorf("declare-only types = %d, want 11", declareOnly)
+	if declareOnly != 9 {
+		t.Errorf("declare-only types = %d, want 9", declareOnly)
 	}
 }
 
@@ -409,25 +418,25 @@ func TestRenamedTypesAreCanonical(t *testing.T) {
 	}
 }
 
-// TestDeclareOnlyFutureTypes (§2, seams): the 11 types declared now with
+// TestDeclareOnlyFutureTypes (§2, seams): the 9 types declared now with
 // producers in later packets are present and marked declare-only. The three
 // watchdog types left this set when B5-3 became their producer;
 // eval.score_recorded left when B5-4 became its producer; drift.finding left
-// when B5-6A (the S14.6 watchlist executor) became its producer; and
-// canary.result left when B5-6B (the S14.6 ¶3 API canary layer) became its —
-// so family 11, the seam the packet split at, is now fully minted.
-// benchmark.pair_recorded stays: its producer is B5-7 and its numbers are
-// BENCH-REG-frozen.
+// when B5-6A (the S14.6 watchlist executor) became its producer;
+// canary.result left when B5-6B (the S14.6 ¶3 API canary layer) became its; and
+// benchmark.pair_recorded + decision.recorded left when B5-7 (the S14.7
+// benchmark practice) became theirs — so families 11 and 14 are both fully
+// minted, and the remaining declare-only set belongs to B5-8 and B6.
 func TestDeclareOnlyFutureTypes(t *testing.T) {
 	reg := eventlog.Registry()
 	declareOnly := []string{
 		"stage.started", "stage.finished", "run.parked", "run.resumed",
-		"ask.observed", "ask.answered", "decision.recorded",
+		"ask.observed", "ask.answered",
 		"retention.compacted", "tool.called",
-		"benchmark.pair_recorded", "run.summary_written",
+		"run.summary_written",
 	}
-	if len(declareOnly) != 11 {
-		t.Fatalf("expected 11 declare-only types, listed %d", len(declareOnly))
+	if len(declareOnly) != 9 {
+		t.Fatalf("expected 9 declare-only types, listed %d", len(declareOnly))
 	}
 	for _, typ := range declareOnly {
 		ts, ok := reg.TypeSpec(typ)
@@ -650,6 +659,37 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"canary.result",
 			`{"canary_kind":"auth","lane":"anthropic","result":"fail","delta":0,"summary":"auth canary on lane anthropic classified policy-revocation-suspected — lane-freeze","change_class":"terms","action":"lane-freeze","limit_class":4,"purpose_tag":"probe","workload_class":"probe","verified_on":"2026-07-27T09:00:00Z"}`,
 			[]string{"canary_kind", "lane", "result", "delta"},
+		},
+		{
+			// benchmark.pair_recorded (B5-7): the FamilyBenchmarkEval contract
+			// minimum is "the BENCH-REG §14 record schema verbatim", so the keys
+			// asserted here ARE §14's list. Fields beyond it are additive
+			// provenance — §14 registers minimums.
+			"benchmark.pair_recorded",
+			`{"pair_id":"bp-42","domain":"software-development","task_class":"software/standard","sampled_ts":"2026-08-01T12:00:00Z","recorded_ts":"2026-08-01T13:00:00Z","requester_id":"alice","epoch_id":"software-development#e1","platform_model":"claude-opus-4-8","direct_model":"claude-opus-4-8-consumer","platform_consumption_usd":1.2,"direct_consumption_usd":0.4,"direct_measured":true,"artifact_a_ref":"benchmark://pair/bp-42/a","artifact_b_ref":"benchmark://pair/bp-42/b","position":"platform-a","verdict":"A","platform_guess":"A","guess_correct":true,"declined":false,"task_id":"t1","deliverable_id":"t1.d1","platform_run_id":"t1.r1","direct_run_id":"bp-42.direct","domain_source":"verdict.recorded","phase":"pre-gate","rate_pct":100,"length_platform":2048,"length_direct":1400,"retention":"keep-forever","protocol_ref":"Spec/benchmark-preregistration-v1.md (BENCH-REG v1, signed 2026-07-18)"}`,
+			[]string{
+				"pair_id", "domain", "task_class", "sampled_ts", "recorded_ts",
+				"platform_model", "direct_model",
+				"platform_consumption_usd", "direct_consumption_usd",
+				"artifact_a_ref", "artifact_b_ref", "position",
+				"verdict", "platform_guess", "declined", "epoch_id", "requester_id",
+			},
+		},
+		{
+			// benchmark.alarm (B5-7): the BENCH-REG §12 alarm, carrying the full
+			// record it tripped on plus the standing expansion freeze. It kills
+			// nothing — the freeze binds by visibility and by gate limb (c).
+			"benchmark.alarm",
+			`{"action":"raise","domain":"software-development","epoch_id":"software-development#e1","severity":"flag-now","summary":"the platform is losing in software-development: 1−G = 0.969 exceeds the registered 0.95 at w=0, m=4 (BENCH-REG §12)","loss_g":0.969,"threshold":0.95,"rate":{"domain":"software-development","epoch_id":"software-development#e1","win_rate":0,"n":4,"w":0,"g":0.031,"loss_g":0.969,"tie_rate":0,"both_bad_rate":0,"decline_rate":0,"guess_accuracy":0.5,"guess_n":4,"honest_claims":[],"honest_claims_readout":"","arm_parity":[]},"expansion_freeze":true,"retention":"keep-forever"}`,
+			[]string{"action", "domain", "epoch_id", "severity", "loss_g", "threshold", "rate", "expansion_freeze"},
+		},
+		{
+			// decision.recorded (B5-7): the S14.2 Human-decision contract minimum
+			// verbatim — "actor, card id + type, decision, presented-at →
+			// decided-at (latency)".
+			"decision.recorded",
+			`{"actor":"op","card_id":"benchmark-alarm:software-development:412","card_type":"benchmark.alarm","decision":"fix-and-continue-accruing","presented_at":"2026-08-01T13:00:00Z","decided_at":"2026-08-01T14:30:00Z","latency_s":5400,"reason":"rubric bug found and fixed","subject":"software-development","ref":"BENCH-REG §12"}`,
+			[]string{"actor", "card_id", "card_type", "decision", "presented_at", "decided_at", "latency_s"},
 		},
 	}
 	for _, c := range cases {

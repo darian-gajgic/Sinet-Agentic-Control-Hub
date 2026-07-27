@@ -493,19 +493,84 @@ const (
 	driftCardCap        = 100
 )
 
+// InboxBenchmarkVerdict is one pending BENCH-REG §3.3 verdict form (B5-7,
+// S14.7): a blind pair awaiting its requester's vote. It is pure derivation over
+// the migration-0014 `benchmark_pairs` table — no card table and no bare `asks`
+// row (a pair has no run of its own; asks.run_id is NOT NULL) — and internal/api
+// does not import internal/benchmark (the §31 derive-from-log pattern).
+//
+// Scoping is the REQUESTER's, not the operator's: the requester is the voter
+// (BENCH-REG §2/§3.3), so this is one of the few inbox cards a member sees and
+// the operator does not own. The operator still sees all, as everywhere (S01.9).
+//
+// The card carries NO arm identity, NO position and NO model identity — not
+// because callers are trusted to ignore them, but because the struct has no such
+// field and the query below selects no such column. That is BENCH-REG §3.4
+// ("arm identity revealed only after the verdict is recorded") made structural.
+// The two rendered bodies are fetched by the B6 detail surface, which reads them
+// by SIDE; an inbox snapshot carries their lengths, which leak nothing and are
+// the §3.2 length confound the requester is entitled to see.
+type InboxBenchmarkVerdict struct {
+	PairID    string    `json:"pair_id"`
+	Owner     string    `json:"owner"`
+	Domain    string    `json:"domain"`
+	TaskID    string    `json:"task_id"`
+	SampledTS time.Time `json:"sampled_ts"`
+	LengthA   int       `json:"length_a"`
+	LengthB   int       `json:"length_b"`
+	// GuessRequired is always true and is carried so the B6 form cannot render
+	// without it: BENCH-REG §3.3 is frozen — "No verdict without a guess; the
+	// guess is never optional."
+	GuessRequired bool `json:"guess_required"`
+}
+
+// InboxBenchmarkAlarm is a standing BENCH-REG §12 alarm surfaced as the
+// flag-now card §12 requires, derived from the `benchmark.alarm` rows — the
+// latest per domain, standing unless a clear has superseded it (the
+// watchdog-flag / drift-card derive-from-log precedent). Alarms are
+// platform-scope, so only the operator sees them.
+//
+// The card carries the standing expansion freeze as DATA. It gates nothing by
+// itself: breadth is an operator act, so §12's hold binds by being visible here
+// and by gate limb (c). Nothing is auto-killed and running work is untouched.
+type InboxBenchmarkAlarm struct {
+	Seq             int64     `json:"seq"`
+	Domain          string    `json:"domain"`
+	EpochID         string    `json:"epoch_id"`
+	Severity        string    `json:"severity"`
+	Summary         string    `json:"summary"`
+	LossG           float64   `json:"loss_g"`
+	Threshold       float64   `json:"threshold"`
+	ExpansionFreeze bool      `json:"expansion_freeze"`
+	RaisedTS        time.Time `json:"raised_ts"`
+}
+
+// The canonical benchmark event/state strings this projection reads. They are
+// duplicated across the import wall rather than imported (internal/api imports
+// no producer package); internal/benchmark's importwall_test asserts the
+// reverse edge, and a rename must update both sites.
+const (
+	benchmarkAlarmType     = "benchmark.alarm"
+	benchmarkPairRendered  = "rendered"
+	benchmarkAlarmActionUp = "raise"
+)
+
 // InboxSnapshot is the `inbox` topic projection (§3): open asks + proposed
 // approvals + OPEN watchdog flags (B5-3) + RED conformance cards (B5-4) + open
-// drift cards (B5-6A).
+// drift cards (B5-6A) + pending benchmark verdict forms and standing benchmark
+// alarms (B5-7).
 type InboxSnapshot struct {
-	Asks             []InboxAsk             `json:"asks"`
-	Approvals        []InboxApproval        `json:"approvals"`
-	WatchdogFlags    []InboxWatchdogFlag    `json:"watchdog_flags"`
-	ConformanceCards []InboxConformanceCard `json:"conformance_cards"`
-	DriftCards       []InboxDriftCard       `json:"drift_cards"`
+	Asks              []InboxAsk              `json:"asks"`
+	Approvals         []InboxApproval         `json:"approvals"`
+	WatchdogFlags     []InboxWatchdogFlag     `json:"watchdog_flags"`
+	ConformanceCards  []InboxConformanceCard  `json:"conformance_cards"`
+	DriftCards        []InboxDriftCard        `json:"drift_cards"`
+	BenchmarkVerdicts []InboxBenchmarkVerdict `json:"benchmark_verdicts"`
+	BenchmarkAlarms   []InboxBenchmarkAlarm   `json:"benchmark_alarms"`
 }
 
 func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot, error) {
-	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []InboxDriftCard{}}
+	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []InboxDriftCard{}, BenchmarkVerdicts: []InboxBenchmarkVerdict{}, BenchmarkAlarms: []InboxBenchmarkAlarm{}}
 
 	aq := `SELECT ask_id, run_id, status, observed_ts FROM asks WHERE answered_ts IS NULL`
 	aargs := []any{}
@@ -572,6 +637,123 @@ func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot,
 		return out, err
 	}
 	out.DriftCards = drift
+
+	verdicts, err := p.benchmarkVerdicts(ctx, scope)
+	if err != nil {
+		return out, err
+	}
+	out.BenchmarkVerdicts = verdicts
+
+	alarms, err := p.benchmarkAlarms(ctx, scope)
+	if err != nil {
+		return out, err
+	}
+	out.BenchmarkAlarms = alarms
+	return out, nil
+}
+
+// benchmarkVerdicts derives the pending S15.6 verdict forms from the
+// `benchmark_pairs` table (B5-7, S14.7). The SELECT list is the whole
+// blindness guarantee: it names no arm, no position, no run and no model, so no
+// pre-record read surface can reveal what the vote is supposed to be blind to
+// (BENCH-REG §3.4). Owner-scoped per S01.9 — the REQUESTER is the voter, so a
+// member sees their own; the operator sees all.
+func (p *projector) benchmarkVerdicts(ctx context.Context, scope ownerScope) ([]InboxBenchmarkVerdict, error) {
+	q := `SELECT pair_id, user_id, domain, task_id, sampled_ts,
+	             length(render_a), length(render_b)
+	        FROM benchmark_pairs WHERE state = ?`
+	args := []any{benchmarkPairRendered}
+	if !scope.Operator {
+		q += ` AND user_id = ?`
+		args = append(args, scope.UserID)
+	}
+	q += ` ORDER BY sampled_ts, pair_id`
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: benchmark verdicts: %w", err)
+	}
+	defer rows.Close()
+	out := []InboxBenchmarkVerdict{}
+	for rows.Next() {
+		var (
+			v       InboxBenchmarkVerdict
+			sampled string
+		)
+		if err := rows.Scan(&v.PairID, &v.Owner, &v.Domain, &v.TaskID, &sampled,
+			&v.LengthA, &v.LengthB); err != nil {
+			return nil, fmt.Errorf("projection: benchmark verdict scan: %w", err)
+		}
+		v.SampledTS = parseTS(sampled)
+		v.GuessRequired = true
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// benchmarkAlarms derives the standing BENCH-REG §12 alarms: the latest
+// `benchmark.alarm` row per domain, surfaced only while its action is a raise
+// (a clear is the operator's logged disposition and supersedes it). Alarms are
+// platform-scope, so a member's owner filter matches none and only the operator
+// sees them (S01.9).
+func (p *projector) benchmarkAlarms(ctx context.Context, scope ownerScope) ([]InboxBenchmarkAlarm, error) {
+	q := `SELECT event_seq, payload, ts FROM run_events WHERE type = ?`
+	args := []any{benchmarkAlarmType}
+	if !scope.Operator {
+		q += ` AND user_id = ?`
+		args = append(args, scope.UserID)
+	}
+	q += ` ORDER BY event_seq`
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: benchmark alarms: %w", err)
+	}
+	defer rows.Close()
+	// Latest row per domain wins; ascending order means the last one read is it.
+	latest := map[string]InboxBenchmarkAlarm{}
+	standing := map[string]bool{}
+	var order []string
+	for rows.Next() {
+		var (
+			seq         int64
+			payload, ts string
+		)
+		if err := rows.Scan(&seq, &payload, &ts); err != nil {
+			return nil, fmt.Errorf("projection: benchmark alarm scan: %w", err)
+		}
+		var a struct {
+			Action          string  `json:"action"`
+			Domain          string  `json:"domain"`
+			EpochID         string  `json:"epoch_id"`
+			Severity        string  `json:"severity"`
+			Summary         string  `json:"summary"`
+			LossG           float64 `json:"loss_g"`
+			Threshold       float64 `json:"threshold"`
+			ExpansionFreeze bool    `json:"expansion_freeze"`
+		}
+		if err := json.Unmarshal([]byte(payload), &a); err != nil || a.Domain == "" {
+			// A non-conformant payload never breaks the inbox (S14.2 rule 3).
+			continue
+		}
+		if _, seen := latest[a.Domain]; !seen {
+			order = append(order, a.Domain)
+		}
+		latest[a.Domain] = InboxBenchmarkAlarm{
+			Seq: seq, Domain: a.Domain, EpochID: a.EpochID, Severity: a.Severity,
+			Summary: a.Summary, LossG: a.LossG, Threshold: a.Threshold,
+			ExpansionFreeze: a.ExpansionFreeze, RaisedTS: parseTS(ts),
+		}
+		standing[a.Domain] = a.Action == benchmarkAlarmActionUp
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Strings(order)
+	out := []InboxBenchmarkAlarm{}
+	for _, domain := range order {
+		if standing[domain] {
+			out = append(out, latest[domain])
+		}
+	}
 	return out, nil
 }
 

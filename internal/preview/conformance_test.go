@@ -111,9 +111,10 @@ func TestNoNewMigration(t *testing.T) {
 		// no durable table (R23). Later packets added their own: 0010 by B4-7
 		// (S12.5/S12.9 calibration + battery records), 0011 by B5-4 (S14.5
 		// conformance registry), 0012 by B5-5 (S14.8 eval floors +
-		// revalidation stamps) and 0013 by B5-6A (the S14.6 watch-row config store);
-		// anything beyond those would be an unexpected preview-side add.
-		if name >= "0014" {
+		// revalidation stamps), 0013 by B5-6A (the S14.6 watch-row config store)
+		// and 0014 by B5-7 (the S14.7 benchmark-practice state); anything beyond
+		// those would be an unexpected preview-side add.
+		if name >= "0015" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}

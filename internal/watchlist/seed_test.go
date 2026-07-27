@@ -249,3 +249,48 @@ func countGroup(group string) int {
 	}
 	return n
 }
+
+// TestS147StandingQuestionsAreRegistered is the B5-7 R25 obligation: S14.7's
+// four standing benchmark/eval questions are REGISTERED so they cannot
+// evaporate. They are data-only study rows — never polled, each naming its
+// spec reference — surfaced through PendingReview for the S16.7 quarterly pass.
+func TestS147StandingQuestionsAreRegistered(t *testing.T) {
+	want := map[string]string{
+		"s147-anchored-findings-vs-file-notes":       "R13-OQ6",
+		"s147-delta-card-rubber-stamp-analysis":      "P-T05-2",
+		"s147-stakes-classifier-pre-registered-eval": "P-T05-4",
+		"s147-intake-approval-ux-measured-only":      "MEASURED outcomes",
+	}
+	byID := seedByID(t)
+	group := 0
+	for _, r := range watchlist.SeedRows() {
+		if r.Group != watchlist.GroupBenchmarkQuestions {
+			continue
+		}
+		group++
+		// A registration is never a fetch: a study row has no URL to poll and
+		// no polling cadence could apply to it.
+		if r.Kind != watchlist.KindStudy {
+			t.Errorf("standing question %q is kind %q, want study — these are registrations, never probes", r.ID, r.Kind)
+		}
+		if r.URL != "" {
+			t.Errorf("standing question %q carries a URL %q — there is nothing to fetch", r.ID, r.URL)
+		}
+		if !strings.Contains(r.Notes, "S14.7") {
+			t.Errorf("standing question %q does not cite S14.7", r.ID)
+		}
+	}
+	if group != len(want) {
+		t.Errorf("%d rows in group %q, want the four S14.7 questions", group, watchlist.GroupBenchmarkQuestions)
+	}
+	for id, ref := range want {
+		r, ok := byID[id]
+		if !ok {
+			t.Errorf("standing question %q is not seeded — S14.7 registers it so it cannot evaporate", id)
+			continue
+		}
+		if !strings.Contains(r.Notes, ref) {
+			t.Errorf("standing question %q does not name its reference %q", id, ref)
+		}
+	}
+}

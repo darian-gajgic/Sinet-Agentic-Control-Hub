@@ -127,6 +127,12 @@ const (
 	// GroupCanarySet holds the S14.6 ¶3 canary-set members that the gates
 	// registered as WATCH ROWS rather than as probes (B5-6B).
 	GroupCanarySet = "S14.6-canary-set"
+	// GroupBenchmarkQuestions holds the four standing benchmark/eval questions
+	// S14.7's last bullet registers "so they cannot evaporate" (B5-7). They are
+	// registrations, never probes: each is a question the practice must
+	// eventually answer, surfaced through PendingReview for the S16.7 quarterly
+	// pass. No analysis machinery is built for them at v0.
+	GroupBenchmarkQuestions = "S14.7-questions"
 )
 
 // Package errors. Callers branch on these.

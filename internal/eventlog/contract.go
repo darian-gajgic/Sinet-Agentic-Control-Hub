@@ -403,12 +403,13 @@ var v0Families = []FamilySpec{
 
 // v0Types is the reconciliation of every event type minted by B0–B4 (76) plus
 // the three B5-3 watchdog types, the B5-4 conformance eval.score_recorded, the
-// B5-6A watchlist drift.finding and the B5-6B canary.result (82 minted total),
-// each mapped to a family
-// with its verdict and provenance, plus the declare-only types whose producers
-// are later packets. The declare-once contract test (contract_test.go) asserts
-// every producer Event* constant appears here; a newly-minted type absent from
-// this table fails the build.
+// B5-6A watchlist drift.finding, the B5-6B canary.result, and the three B5-7
+// benchmark-practice types (benchmark.pair_recorded, benchmark.alarm, and
+// decision.recorded flipped from declare) — 85 minted total, each mapped to a
+// family with its verdict and provenance, plus the declare-only types whose
+// producers are later packets. The declare-once contract test (contract_test.go)
+// asserts every producer Event* constant appears here; a newly-minted type
+// absent from this table fails the build.
 var v0Types = []TypeSpec{
 	// ── Family 1: Run lifecycle (S2.1) ──────────────────────────────────
 	minted("run.created", FamilyRunLifecycle, VerdictAdmit, "internal/run/run.go:121", "the ∅→new birth edge"),
@@ -438,7 +439,9 @@ var v0Types = []TypeSpec{
 	// ── Family 5: Human decision (S2.4) ─────────────────────────────────
 	minted("intake.delta_decision", FamilyHumanDecision, VerdictAdmit, "internal/intake/state.go:31", "the delta-card human decision (S06.9 / P-T05-2); homes under decision.recorded's family"),
 	minted("deliverable.accepted", FamilyHumanDecision, VerdictAdmit, "internal/review/review.go:227", "dual-home: the accept IS a human decision (primary) AND a deliverable-lifecycle marker (S13.6); registered once under Human decision"),
-	declare("decision.recorded", FamilyHumanDecision, "producer: B2+/B5 (generic approval-inbox card)", "the S14.2 canonical type; intake.delta_decision is the one concrete producer today"),
+	minted("decision.recorded", FamilyHumanDecision, VerdictConforms,
+		"internal/benchmark/benchmark.go (EventDecision); emitted internal/benchmark/gate.go DisposeAlarm and internal/benchmark/optin.go SetOptIn",
+		"the S14.2 canonical generic human-decision type, MINTED at B5-7 (S14.7) by the two acts the benchmark practice needs: the BENCH-REG §12 alarm disposition and the §4.2.1 standing-opt-in consent flip. Payload is the family's contract minimum verbatim {actor, card_id + card_type, decision, presented_at → decided_at + latency_s}. B6 joins as a co-producer when the generic approval-inbox verbs land (S15)"),
 
 	// ── Family 6: Verification verdict (S2.3) ───────────────────────────
 	minted("verdict.recorded", FamilyVerificationVerdict, VerdictRename, "internal/verify/record.go:36", "renamed from verify.round; roundPayload fields conform exactly (round, rubric, judge, golden_set, findings)"),
@@ -535,15 +538,20 @@ var v0Types = []TypeSpec{
 	minted("review.drained", FamilyToolsArtifacts, VerdictAdmit, "internal/review/review.go:221", "review-drain event (S13)"),
 	declare("tool.called", FamilyToolsArtifacts, "no distinct producer today", "S14.2 names tool.called/completed; the engine surfaces tool_result → tool.completed; a tool-use-start producer is a later addition"),
 
-	// ── Family 14: Benchmark & eval (S2.11) — eval.score_recorded MINTED at
-	// B5-4 (the S14.5 conformance-registry recording surface); B5-5 joined as a
-	// CO-PRODUCER (the S14.8 regression evals: per-asset results, the aggregate
-	// sweep verdict, the T15 battery record-through, and the S03.3 limb-(b)
-	// quality probe all record through that same surface), and B5-7
-	// (BENCH-REG pairs) is still to come. benchmark.pair_recorded stays DECLARE
-	// — its numbers change only via BENCH-REG §17 (CF5). ───
-	declare("benchmark.pair_recorded", FamilyBenchmarkEval, "producer: B5-7 (BENCH-REG §14 record verbatim; BENCH-REG numbers stay read-only)"),
-	minted("eval.score_recorded", FamilyBenchmarkEval, VerdictConforms, "internal/conformance/conformance.go (EventScoreRecorded); emitted internal/conformance RecordResult, driven by internal/evals (S14.8)", "the S14.5 conformance-registry recording surface (B5-4), co-produced by the S14.8 regression evals through the same verb (B5-5); B5-7 is a future co-producer (S14.7)"),
+	// ── Family 14: Benchmark & eval (S2.11) — FULLY MINTED at B5-7.
+	// eval.score_recorded was minted at B5-4 (the S14.5 conformance-registry
+	// recording surface) and co-produced by B5-5 (the S14.8 regression evals);
+	// benchmark.pair_recorded and benchmark.alarm are B5-7's (the S14.7
+	// benchmark practice around BENCH-REG). The registration's numbers remain
+	// READ-ONLY to the platform: they are marked data in internal/benchmark
+	// carrying their §-refs, and they change only via BENCH-REG §17. ───
+	minted("benchmark.pair_recorded", FamilyBenchmarkEval, VerdictConforms,
+		"internal/benchmark/benchmark.go (EventPairRecorded); emitted internal/benchmark/pair.go record",
+		"the BENCH-REG §14 record VERBATIM in its minimums: pair id · domain · task class · timestamps · both arms' exact observed model identities · both arms' measured consumption · refs to both rendered-blind artifacts · position assignment · verdict · requester's platform-guess · decline flag · epoch id · requester id. Owner-attributed to the REQUESTER (the pair is theirs, 15.6). Keep-forever (Spec S14.9); the class is marked on the payload, enforcement is B5-8's. The record and the pair row's move to `recorded` commit in ONE WriteTx, and arm identity is revealed only by reading this committed record (BENCH-REG §3.4)"),
+	minted("benchmark.alarm", FamilyBenchmarkEval, VerdictAdmit,
+		"internal/benchmark/benchmark.go (EventAlarm); emitted internal/benchmark/gate.go evaluateAlarmTx (raise) and DisposeAlarm (clear)",
+		"the BENCH-REG §12 alarm: raised at any per-pair update when 1−G passes the registered threshold in a launch domain's current epoch, cleared only by an operator disposition. Platform-scope. Alarm history is keep-forever, which is why it is an EVENT and not a table: raise/clear payloads carry the full record and the standing expansion freeze, and the card DERIVES from them (the drift.finding precedent). It NEVER kills, parks or gates a run (§12; G1 D1.3) — the freeze binds by visibility and by gate limb (c)"),
+	minted("eval.score_recorded", FamilyBenchmarkEval, VerdictConforms, "internal/conformance/conformance.go (EventScoreRecorded); emitted internal/conformance RecordResult, driven by internal/evals (S14.8)", "the S14.5 conformance-registry recording surface (B5-4), co-produced by the S14.8 regression evals through the same verb (B5-5). B5-7 added NO new producer: S14.7's v0 scope is pair-shaped, not suite-shaped — gate limb (d) READS the existing floor/sweep records through a shell seam, and the standing questions are registrations. The family surface is satisfied by benchmark.pair_recorded for pairs and by the B5-4/B5-5 producers for suite results"),
 
 	// ── Family 15: Run summary (11.1) — DECLARE, producer B5-8 ──────────
 	declare("run.summary_written", FamilyRunSummary, "producer: B5-8 (S14.9)"),
