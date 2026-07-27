@@ -21,20 +21,35 @@ import (
 // posture, not by this package)"; for the one surface that executes SQL a
 // model wrote, posture is not enough, so this is the mechanism.
 //
-// TWO INDEPENDENT LIMBS, and the measurement that says why both are needed
-// (recorded 2026-07-27 against the pinned modernc.org/sqlite):
+// TWO INDEPENDENT LIMBS, NEITHER OF WHICH IS SUFFICIENT ALONE. Both statements
+// below are measured against the pinned modernc.org/sqlite (2026-07-27, and
+// re-measured during the B5-8B drain), and the second one CORRECTS an earlier
+// version of this comment that overclaimed:
 //
-//   - `mode=ro` in the DSN opens the file with SQLITE_OPEN_READONLY. Every
-//     INSERT / UPDATE / DELETE / CREATE / DROP / VACUUM — and every write into
-//     an ATTACHed or TEMP database — fails with "attempt to write a readonly
-//     database (8)".
-//   - `PRAGMA query_only(1)` on every connection is the spec's named limb.
+//   - `mode=ro` opens the file with SQLITE_OPEN_READONLY. It protects THE MAIN
+//     DATABASE ONLY: every INSERT / UPDATE / DELETE / CREATE / DROP / VACUUM
+//     against platform.db fails with "attempt to write a readonly database
+//     (8)", permanently and undefeatably.
+//   - `PRAGMA query_only(1)` is the spec's named limb, and it is what covers
+//     the databases `mode=ro` does NOT: TEMP and anything ATTACHed.
 //
-// The measurement's finding is that `query_only` ALONE IS NOT SUFFICIENT: a
-// statement `PRAGMA query_only=0` executed on the handle SUCCEEDS SILENTLY
-// (no error, the flag clears). It is `mode=ro` that then still refuses the
-// write. Both limbs ship, and VerifyReadOnly proves the property at every open
-// rather than trusting either.
+// The two gaps, precisely:
+//
+//   - `query_only` is DEFEASIBLE. `PRAGMA query_only = 0` executed on this
+//     handle succeeds silently and the flag clears. `mode=ro` still refuses
+//     writes to the main database afterwards, so platform.db is never at risk.
+//   - But `mode=ro` DOES NOT COVER TEMP OR ATTACHED DATABASES. Measured: with
+//     `query_only` cleared, `CREATE TEMP TABLE`, a temp INSERT, `ATTACH`,
+//     `CREATE TABLE loot.stolen` and `INSERT INTO loot.stolen SELECT payload
+//     FROM run_events` ALL SUCCEED — which is an exfiltration path to a file
+//     outside platform.db, even though platform.db itself stays unwritable.
+//
+// Therefore `query_only` is RE-ASSERTED ON EVERY QUERY (assertQueryOnly
+// below), so a cleared flag cannot persist from one query to the next, and the
+// window in which the second gap is open is bounded by a single call. The
+// parser is the other half of that defense: internal/history refuses PRAGMA
+// and ATTACH outright, so a generated statement never gets to clear the flag
+// in the first place. VerifyReadOnly proves the whole property at open.
 //
 // The handle is opened AFTER the writing handle has created the database and
 // its WAL sidecars — a read-only connection cannot create them. That ordering
@@ -124,8 +139,28 @@ func (r *ReadOnly) VerifyReadOnly(ctx context.Context) error {
 
 // QueryContext runs a read. It is the only way to execute anything on this
 // handle.
+//
+// `query_only` is RE-ASSERTED first, every time. The flag is per-connection
+// state that a single statement can clear, and this handle keeps ONE
+// connection, so without this a cleared flag would persist for the life of the
+// process and every later query would run with the limb that covers TEMP and
+// ATTACHed databases silently switched off.
 func (r *ReadOnly) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if err := r.assertQueryOnly(ctx); err != nil {
+		return nil, err
+	}
 	return r.sql.QueryContext(ctx, query, args...)
+}
+
+// assertQueryOnly re-sets the pragma on the handle's single connection. It is a
+// SET rather than a check because setting is both cheaper and stronger: a check
+// would have to decide what to do about a cleared flag, and the answer is
+// always "set it back".
+func (r *ReadOnly) assertQueryOnly(ctx context.Context) error {
+	if _, err := r.sql.ExecContext(ctx, "PRAGMA query_only(1)"); err != nil {
+		return fmt.Errorf("storage: re-assert query_only: %w", err)
+	}
+	return nil
 }
 
 // Path returns the database file path.

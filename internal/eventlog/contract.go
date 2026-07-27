@@ -379,10 +379,18 @@ var v0Families = []FamilySpec{
 		Anchor:         "S2.8",
 	},
 	{
-		Name:           FamilyPlatform,
+		Name: FamilyPlatform,
+		// RequiredFields is VERBATIM from the frozen S14.2 table and is pinned
+		// byte-for-byte by TestFifteenFamiliesWithRequiredFields (§29). The
+		// B5-8B drain asked for the Layer-2 audit's contract minimum to be
+		// added here; it is NOT, because that string is spec text and this
+		// packet may not author spec text (§8: Spec wins; a conflict is a
+		// referral, never a silent resolution). The type's contract minimum is
+		// carried where a type's own minimum belongs — on its TypeSpec Note
+		// below, and in the required-field golden in contract_test.go.
 		RequiredFields: "settings: {actor, key, old, new, reason} (mirrors settings_events [S01.10]); auth: kind/user/device [S01.9]; compaction anomaly: {stage, lane, engine version, window fill at trigger, pinned sections at risk, summary artifact ref} [S05.7]; compaction pass logs itself",
 		Anchor:         "13.4; S2.1",
-		Scope:          "platform-scope operational + asset-lifecycle events: platform lifecycle/settings/auth/compaction/retention, plus the worker.* (S08), registry.* (S13), preview.* (S13.8), backup platform.* (S13.9), and local.* (S12) asset-lifecycle events admitted here by the reconciliation reading (OQ2-(A); CONVENTIONS §29)",
+		Scope:          "platform-scope operational + asset-lifecycle events: platform lifecycle/settings/auth/compaction/retention, plus the worker.* (S08), registry.* (S13), preview.* (S13.8), backup platform.* (S13.9), local.* (S12) asset-lifecycle events, and history.* (S14.10) query-surface audit events admitted here by the reconciliation reading (OQ2-(A); CONVENTIONS §29)",
 	},
 	{
 		Name:           FamilyToolsArtifacts,

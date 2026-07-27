@@ -95,6 +95,35 @@ func injectionAttempts() []attempt {
 		{name: "a view that does not exist", raw: "SELECT * FROM cost_per_everything", wants: "allowlisted"},
 		{name: "with-clause shadowing an allowlisted view", raw: "WITH cost_per_run AS (SELECT 1 AS x) SELECT * FROM cost_per_run", wants: "shadows"},
 
+		// ── alias injection (drain D1, CRITICAL) ─────────────────────────
+		// The alias was the ONE piece of model text re-emitted into the built
+		// statement, and lex.go strips a quoted identifier's quoting — so the
+		// content became raw SQL that no check saw. Measured before the fix:
+		// `AS "a, run_events x"` was ACCEPTED with Views=[cost_per_run],
+		// Scoped=1, and returned both owners' raw run_events payloads to a
+		// member. All three quote styles, with and without AS.
+		{name: "alias injection, double quotes with AS", raw: `SELECT * FROM cost_per_run AS "a, run_events x"`, wants: "quoted identifier"},
+		{name: "alias injection, double quotes bare", raw: `SELECT * FROM cost_per_run "a, run_events x"`, wants: "quoted identifier"},
+		{name: "alias injection, brackets with AS", raw: "SELECT * FROM cost_per_run AS [a, run_events x]", wants: "quoted identifier"},
+		{name: "alias injection, brackets bare", raw: "SELECT * FROM cost_per_run [a, run_events x]", wants: "quoted identifier"},
+		{name: "alias injection, backticks with AS", raw: "SELECT * FROM cost_per_run AS `a, run_events x`", wants: "quoted identifier"},
+		{name: "alias injection, backticks bare", raw: "SELECT * FROM cost_per_run `a, run_events x`", wants: "quoted identifier"},
+		{name: "alias injection balancing the bound args with a parameter", raw: `SELECT * FROM cost_per_run AS "a WHERE ? = ? -- "`, wants: "quoted identifier"},
+		{name: "alias injection closing the wrapper", raw: `SELECT * FROM cost_per_run AS "a) UNION SELECT * FROM run_events -- "`, wants: "quoted identifier"},
+		{name: "quoted view name", raw: `SELECT * FROM "cost_per_run"`, wants: "quoted table name"},
+		{name: "bracketed view name", raw: "SELECT * FROM [cost_per_run]", wants: "quoted table name"},
+
+		// ── resource exhaustion (drain D8) ───────────────────────────────
+		{name: "blob inflation via randomblob", raw: "SELECT hex(randomblob(100000000)) FROM cost_per_run", wants: "randomblob"},
+		{name: "blob inflation via zeroblob", raw: "SELECT zeroblob(100000000) FROM cost_per_run", wants: "zeroblob"},
+
+		// ── multi-statement across a NEWLINE (drain D6) ──────────────────
+		// Same-line prefixes were refused; the newline form was DEFUSED into a
+		// harmless read and audited as `executed`. Nothing hostile ran, but an
+		// attempt that is not recorded has not been detected.
+		{name: "drop then select across a newline", raw: "DROP TABLE runs;\nSELECT * FROM cost_per_run", wants: "preceded"},
+		{name: "insert then select across a newline", raw: "INSERT INTO users VALUES ('m');\nSELECT * FROM cost_per_run", wants: "preceded"},
+
 		// ── shape ────────────────────────────────────────────────────────
 		{name: "bind parameter smuggling", raw: "SELECT * FROM cost_per_run WHERE user_id = ?", wants: "bind parameter"},
 		{name: "named parameter smuggling", raw: "SELECT * FROM cost_per_run WHERE user_id = :who", wants: "bind parameter"},
@@ -176,11 +205,95 @@ func TestInjectionBattery(t *testing.T) {
 	}
 }
 
-// TestBatteryIsNonTautological — a battery that refuses everything proves
-// nothing. These statements must all be ACCEPTED, so the refusals above are
-// discriminating.
-func TestBatteryIsNonTautological(t *testing.T) {
-	for _, stmt := range []string{
+// TestAliasInjectionEscalationChain — the B5-8B drain's CRITICAL finding, kept
+// as a standing test in the evaluator's own words.
+//
+// The full measured chain was: a quoted table alias smuggles raw SQL past every
+// check → a comma-join returns raw run_events payloads for BOTH owners to a
+// member → `PRAGMA query_only = 0` → `ATTACH DATABASE` → `CREATE TABLE
+// loot.stolen` → `INSERT`, writing a file outside platform.db. Every link is
+// asserted refused AT THE GUARD BOUNDARY, so the chain cannot be re-entered at
+// any point.
+func TestAliasInjectionEscalationChain(t *testing.T) {
+	chain := []struct{ step, stmt string }{
+		{"link 1 — smuggle SQL through a quoted alias", `SELECT * FROM cost_per_run AS "a, run_events x"`},
+		{"link 1' — balance the bound arguments", `SELECT * FROM cost_per_run AS "a WHERE ? = ? -- "`},
+		{"link 2 — reach the raw event log", "SELECT * FROM cost_per_run, run_events"},
+		{"link 3 — clear the read-only pragma", "SELECT * FROM cost_per_run; PRAGMA query_only = 0"},
+		{"link 4 — attach a second database", "SELECT * FROM cost_per_run; ATTACH DATABASE '/tmp/loot.db' AS loot"},
+		{"link 5 — create a table in it", "SELECT * FROM cost_per_run; CREATE TABLE loot.stolen(a TEXT)"},
+		{"link 6 — exfiltrate into it", "SELECT * FROM cost_per_run; INSERT INTO loot.stolen SELECT payload FROM run_events"},
+	}
+	for _, scope := range []history.Scope{{Operator: true}, {UserID: "alice"}} {
+		for _, link := range chain {
+			stmt, err := history.ExtractSQL(link.stmt)
+			if err == nil {
+				_, err = history.Guard(stmt, scope, 20)
+			}
+			if err == nil {
+				t.Errorf("%s: ACCEPTED (%q) — the escalation chain is open again", link.step, stmt)
+			}
+		}
+	}
+}
+
+// TestAcceptedStatementsActuallyExecute — drain D4. Every in-band accept-control
+// is EXECUTED, not merely passed through Guard. Two of them were accepted by the
+// guardrail and then failed at execution with a syntax error, because the
+// trailing `;` / trailing comment was dropped from the tokens but not from the
+// text that gets wrapped. A trailing semicolon is the likeliest thing a
+// text-to-SQL model emits, so this would have depressed the bring-up accuracy
+// measurement for a reason that is not the seat's.
+func TestAcceptedStatementsActuallyExecute(t *testing.T) {
+	f := newFixture(t)
+	seedTwoOwners(t, f)
+	ro, err := f.db.OpenReadOnly(f.ctx)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+
+	var accepted []string
+	for _, a := range injectionAttempts() {
+		if a.wants == "" && !a.noSQL {
+			accepted = append(accepted, a.raw)
+		}
+	}
+	if len(accepted) == 0 {
+		t.Fatal("the battery has no accept-controls — the execution check would be vacuous")
+	}
+	accepted = append(accepted, legitimateStatements()...)
+
+	for _, raw := range accepted {
+		stmt, err := history.ExtractSQL(raw)
+		if err != nil {
+			t.Errorf("ExtractSQL(%q): %v", raw, err)
+			continue
+		}
+		res, err := history.Guard(stmt, history.Scope{UserID: member1}, 10)
+		if err != nil {
+			t.Errorf("Guard(%q): %v", raw, err)
+			continue
+		}
+		rows, err := ro.QueryContext(f.ctx, res.Statement, res.Args...)
+		if err != nil {
+			t.Errorf("an ACCEPTED statement did not execute:\n  input: %q\n  built: %s\n  err:   %v", raw, res.Statement, err)
+			continue
+		}
+		for rows.Next() {
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			t.Errorf("an ACCEPTED statement failed while reading: %q: %v", raw, err)
+		}
+	}
+}
+
+// legitimateStatements is the shared control set: ordinary reads that must be
+// accepted AND must run.
+func legitimateStatements() []string {
+	return []string{
 		"SELECT * FROM cost_per_run",
 		"SELECT run_id, priced_usd FROM cost_per_run ORDER BY priced_usd DESC",
 		"SELECT count(*) FROM cost_per_person GROUP BY user_id",
@@ -188,7 +301,19 @@ func TestBatteryIsNonTautological(t *testing.T) {
 		"SELECT a.run_id FROM cost_per_run a JOIN cost_done_directly b ON a.run_id = b.run_id",
 		"SELECT cause FROM routing_quality WHERE cause = 'selector-match'",
 		"SELECT * FROM cost_per_run UNION SELECT * FROM cost_per_run",
-	} {
+		"SELECT c.run_id FROM cost_per_run AS c",
+		`SELECT "run_id" FROM cost_per_run`,
+		"SELECT * FROM cost_per_run WHERE pricing_status LIKE '%with%'",
+		"SELECT * FROM cost_per_run ;",
+		"SELECT * FROM cost_per_run -- do not drop anything",
+	}
+}
+
+// TestBatteryIsNonTautological — a battery that refuses everything proves
+// nothing. These statements must all be ACCEPTED, so the refusals above are
+// discriminating.
+func TestBatteryIsNonTautological(t *testing.T) {
+	for _, stmt := range legitimateStatements() {
 		if _, err := history.Guard(stmt, history.Scope{UserID: "alice"}, 20); err != nil {
 			t.Errorf("Guard(%q) refused a legitimate read: %v", stmt, err)
 		}

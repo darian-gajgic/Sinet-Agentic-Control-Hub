@@ -96,13 +96,13 @@ func (s *Store) Search(ctx context.Context, question string, scope Scope, limit 
 			"the question carried a secret-shaped value; it was redacted and contributes no search term")
 	}
 	match, terms := matchExpression(stripMarkers(redacted))
-	if terms == 0 {
+	if len(terms) == 0 {
 		a.Notes = append(a.Notes, "the question carried no searchable term")
 		return a, nil
 	}
 
 	limit = clampLimit(limit)
-	stmt := `SELECT rowid, kind, ref, user_id, snippet(history_fts, 0, '', '', '…', ?) AS excerpt` +
+	stmt := `SELECT rowid, kind, ref, user_id, snippet(history_fts, 0, '', '', '…', ?) AS excerpt, body AS match_check` +
 		` FROM history_fts WHERE history_fts MATCH ?` +
 		OwnerScopeOpen + `user_id` + OwnerScopeClose +
 		` ORDER BY rank, rowid DESC LIMIT ?`
@@ -111,6 +111,24 @@ func (s *Store) Search(ctx context.Context, question string, scope Scope, limit 
 	if err := s.query(ctx, &a, stmt, args, limit); err != nil {
 		return Answer{}, err
 	}
+
+	// (1b) MARKER-ONLY HITS ARE DROPPED (drain D3). Stripping markers from the
+	// QUERY closes the accidental path but not the deliberate one: the corpus
+	// holds `[REDACTED:anthropic_key]` as ORDINARY TOKENS, so `REDACTED
+	// anthropic_key`, `[REDACTED:anthropic_key` and `REDACTED:anthropic_key]`
+	// all tokenized into terms that matched the marker itself — a class-level
+	// oracle, measured returning 1 row each.
+	//
+	// Censoring those words out of every query would be the obvious fix and the
+	// wrong one: "key", "session", "github" and "token" are ordinary words, and
+	// a search surface that cannot find them is broken to close a leak. So the
+	// MATCH is allowed to over-return and the ROW IS VERIFIED instead — a hit
+	// survives only if some query term still appears once the markers are gone.
+	// A row whose only "key" is inside a redaction marker is not a hit for
+	// "key", and a row that genuinely says "key" still is.
+	a.Rows = dropMarkerOnlyHits(a, terms)
+	dropColumn(&a, "match_check")
+	a.RowCount = len(a.Rows)
 
 	// (2) BOUND AND RE-REDACT THE EXCERPTS. The corpus is already redacted, so
 	// this is a second pass over inert text on the honest path; it is here so
@@ -127,15 +145,50 @@ func (s *Store) Search(ctx context.Context, question string, scope Scope, limit 
 	return a, nil
 }
 
-// markerPattern matches internal/redact's inert marker. It is derived from the
-// marker SHAPE (`[REDACTED:<class>]`), so a new secret class added to the
-// primitive is stripped here without this file changing.
-var markerPattern = regexp.MustCompile(`\[REDACTED:[a-z_]+\]`)
+// markerPattern matches internal/redact's inert marker AND its fragments. It is
+// derived from the marker SHAPE (`[REDACTED:<class>]`), so a new secret class
+// added to the primitive is handled here without this file changing.
+//
+// The brackets and the colon are all OPTIONAL (drain D3): a question does not
+// have to spell the marker correctly to be asking about it, and
+// `REDACTED anthropic_key`, `[REDACTED:anthropic_key` and
+// `REDACTED:anthropic_key]` were each measured returning a hit against a
+// well-formed marker in the corpus.
+var markerPattern = regexp.MustCompile(`(?i)\[?\s*REDACTED\s*:?\s*[a-z_]*\s*\]?`)
 
-// stripMarkers removes the redaction markers so they never become search terms.
-// This is the difference between "the secret is not in the corpus" (B5-8A's
-// property) and "asking for the secret confirms nothing" (this layer's).
+// stripMarkers removes the redaction markers and their fragments so they never
+// become search terms. This is the difference between "the secret is not in the
+// corpus" (B5-8A's property) and "asking for the secret confirms nothing"
+// (this layer's).
+//
+// It is the FIRST of two limbs; the second is dropMarkerOnlyHits, because a
+// query need not name the marker at all to match one.
 func stripMarkers(s string) string { return markerPattern.ReplaceAllString(s, " ") }
+
+// dropMarkerOnlyHits keeps a row only if a query term survives in its body once
+// the redaction markers are stripped out of it.
+//
+// The body column is read for this check and then discarded — it is already
+// redacted (B5-8A's corpus property), so this reads inert text, and it never
+// reaches the caller: only the bounded, re-redacted excerpt does.
+func dropMarkerOnlyHits(a Answer, terms []string) [][]any {
+	check := columnIndex(a.Columns, "match_check")
+	if check < 0 {
+		return a.Rows
+	}
+	kept := make([][]any, 0, len(a.Rows))
+	for _, row := range a.Rows {
+		body, _ := row[check].(string)
+		stripped := strings.ToLower(stripMarkers(body))
+		for _, term := range terms {
+			if strings.Contains(stripped, term) {
+				kept = append(kept, row)
+				break
+			}
+		}
+	}
+	return kept
+}
 
 // matchExpression turns free text into a safe FTS5 MATCH expression and reports
 // how many terms it carries.
@@ -145,26 +198,42 @@ func stripMarkers(s string) string { return markerPattern.ReplaceAllString(s, " 
 // the whole FTS5 query-syntax surface at once — column filters, NEAR, prefix
 // stars, boolean operators, and the redaction markers' own punctuation, which
 // would otherwise be parsed as syntax rather than matched as text.
-func matchExpression(text string) (string, int) {
+// It returns the bare terms alongside the expression, because the marker-only
+// verification (dropMarkerOnlyHits) has to know what was actually asked for.
+func matchExpression(text string) (string, []string) {
 	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return !('a' <= r && r <= 'z') && !('0' <= r && r <= '9')
 	})
-	var terms []string
+	var terms, quoted []string
 	seen := map[string]bool{}
 	for _, f := range fields {
 		if len(f) < 2 || seen[f] {
 			continue
 		}
 		seen[f] = true
-		terms = append(terms, `"`+f+`"`)
+		terms = append(terms, f)
+		quoted = append(quoted, `"`+f+`"`)
 		if len(terms) >= searchMaxTerms {
 			break
 		}
 	}
 	if len(terms) == 0 {
-		return "", 0
+		return "", nil
 	}
-	return strings.Join(terms, " OR "), len(terms)
+	return strings.Join(quoted, " OR "), terms
+}
+
+// dropColumn removes a working column from an answer, so a column read only to
+// VERIFY a hit never becomes part of what the hit returns.
+func dropColumn(a *Answer, name string) {
+	i := columnIndex(a.Columns, name)
+	if i < 0 {
+		return
+	}
+	a.Columns = append(a.Columns[:i:i], a.Columns[i+1:]...)
+	for r, row := range a.Rows {
+		a.Rows[r] = append(row[:i:i], row[i+1:]...)
+	}
 }
 
 // boundExcerpt caps an excerpt at SearchExcerptRunes, marking the truncation so

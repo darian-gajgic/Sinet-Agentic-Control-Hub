@@ -485,6 +485,9 @@ func TestOQ2AdmittedUnderBroadenedScope(t *testing.T) {
 		"registry.registered", "registry.drift", "preview.started", "preview.stopped",
 		"platform.snapshot", "platform.restore_drill_flag",
 		"local.unmetered_defect", "local.alias_retargeted",
+		// B5-8B drain D9: the Layer-2 query audit rides the same OQ2-(A)
+		// admission, so it is PINNED here rather than left as prose.
+		history.EventQueryAudited,
 	}
 	for _, typ := range underPlatform {
 		fam, known := reg.Classify(typ)

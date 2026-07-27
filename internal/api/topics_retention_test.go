@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 )
 
 // topics_retention_test.go — the B5-8A topic-routing READING (brief R17 / OQ7),
@@ -48,5 +49,20 @@ func TestRetentionCompactedReachesNoTopic(t *testing.T) {
 	}
 	if fam, known := eventlog.Classify("retention.compacted"); !known || fam != eventlog.FamilyPlatform {
 		t.Errorf("retention.compacted classifies as %q,%v; want FamilyPlatform", fam, known)
+	}
+}
+
+// TestHistoryQueryAuditedReachesNoTopic — B5-8B drain D9, the §30 rule applied
+// to the Layer-2 audit type, on the retention.compacted precedent above. A
+// query audit is platform machinery: it belongs in the audit trail and on the
+// unfiltered relay, never as a household card. Pinned by test rather than
+// asserted in prose.
+func TestHistoryQueryAuditedReachesNoTopic(t *testing.T) {
+	tags := topicsForEvent(eventlog.Event{Type: history.EventQueryAudited, SchemaVersion: 1})
+	if len(tags) != 0 {
+		t.Errorf("%s tags = %v, want none (platform-scope audit, §30)", history.EventQueryAudited, tags)
+	}
+	if fam, known := eventlog.Classify(history.EventQueryAudited); !known || fam != eventlog.FamilyPlatform {
+		t.Errorf("%s classifies as %q,%v; want FamilyPlatform", history.EventQueryAudited, fam, known)
 	}
 }

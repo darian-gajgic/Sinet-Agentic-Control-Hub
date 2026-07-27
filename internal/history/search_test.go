@@ -195,3 +195,72 @@ func TestSearchQuerySyntaxIsNeutralized(t *testing.T) {
 		}
 	}
 }
+
+// TestMarkerFragmentsAreNotAnOracle — drain D3. Stripping only the WELL-FORMED
+// marker closed the accidental path and left the deliberate one open: the
+// corpus holds `[REDACTED:anthropic_key]` as ordinary tokens, so a question
+// spelling the marker loosely still matched it.
+//
+// MEASURED before the fix, against a row redacted to `[REDACTED:anthropic_key]`:
+// the well-formed form returned 0 rows, but `REDACTED anthropic_key`,
+// `[REDACTED:anthropic_key` and `REDACTED:anthropic_key]` each returned 1 — a
+// class-level oracle.
+//
+// The fix does NOT censor the words, because "key", "token", "session" and
+// "github" are ordinary vocabulary and a search that cannot find them is broken
+// to close a leak. The MATCH may over-return and the ROW is verified against
+// its marker-stripped body instead. The last two cases are the control that
+// proves the difference.
+func TestMarkerFragmentsAreNotAnOracle(t *testing.T) {
+	f := newFixture(t)
+	seedTwoOwners(t, f)
+	f.event("r-"+member1, member1, "drift.finding", map[string]any{
+		"source": "src-" + member1, "change_class": "contract", "severity": "high",
+		"summary": "the token sk-ant-AAAAAAAAAAAAAAAAAAAAAA leaked; key rotation is due",
+	})
+	f.indexHistory()
+
+	for _, q := range []string{
+		"[REDACTED:anthropic_key]",
+		"REDACTED anthropic_key",
+		"[REDACTED:anthropic_key",
+		"REDACTED:anthropic_key]",
+		"redacted",
+		"REDACTED",
+		"sk-ant-AAAAAAAAAAAAAAAAAAAAAA",
+	} {
+		a, err := f.st.Search(f.ctx, q, opScope(), 10)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", q, err)
+		}
+		if len(a.Rows) != 0 {
+			t.Errorf("Search(%q) returned %d rows — a marker oracle", q, len(a.Rows))
+		}
+		if a.RowCount != len(a.Rows) {
+			t.Errorf("Search(%q): RowCount %d disagrees with %d rows", q, a.RowCount, len(a.Rows))
+		}
+	}
+
+	// The control: ordinary words that genuinely appear must still be found, or
+	// the fix would be "break search" rather than "close the oracle".
+	for _, q := range []string{"rotation", "key rotation", "leaked"} {
+		a, err := f.st.Search(f.ctx, q, opScope(), 10)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", q, err)
+		}
+		if len(a.Rows) == 0 {
+			t.Errorf("Search(%q) found nothing — ordinary vocabulary was censored", q)
+		}
+	}
+
+	// The working verification column never reaches a caller.
+	a, err := f.st.Search(f.ctx, "rotation", opScope(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range a.Columns {
+		if c == "match_check" {
+			t.Error("the marker-verification column leaked into the answer")
+		}
+	}
+}

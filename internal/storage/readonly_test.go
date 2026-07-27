@@ -210,3 +210,57 @@ func TestWritingHandleIsUnaffected(t *testing.T) {
 		t.Errorf("probe holds %d rows, want 2", n)
 	}
 }
+
+// TestClearingQueryOnlyDoesNotOpenTempOrAttachedWrites — the COMBINED sequence
+// the earlier tests avoided, and the one that corrects an overclaim.
+//
+// MEASURED before the drain fix: with `query_only` cleared by a single
+// statement, `CREATE TEMP TABLE`, a temp INSERT, `ATTACH`, `CREATE TABLE
+// loot.stolen` and `INSERT INTO loot.stolen SELECT payload FROM run_events` ALL
+// SUCCEEDED — an exfiltration path to a file outside platform.db, even though
+// platform.db itself stayed unwritable. `mode=ro` covers the MAIN database
+// only; `query_only` is what covers TEMP and ATTACHed ones, and it was
+// defeasible and never re-checked.
+//
+// The fix re-asserts `query_only` on every QueryContext, so a cleared flag
+// cannot survive into the next query. This test proves that by clearing it and
+// then attempting the whole chain.
+func TestClearingQueryOnlyDoesNotOpenTempOrAttachedWrites(t *testing.T) {
+	ctx, db, ro, dir := readOnlyFixture(t)
+	loot := filepath.Join(dir, "loot.db")
+
+	// Clear the limb, deliberately, exactly as a bypassed parser would.
+	_ = try(t, ctx, ro, `PRAGMA query_only = 0`)
+
+	// ATTACH is NOT a write and is not refused here — it never was, at any
+	// pragma setting. The parser is its limb (injection_test.go). Attaching
+	// makes the writes below real rather than hypothetical.
+	_ = try(t, ctx, ro, `ATTACH DATABASE '`+loot+`' AS loot`)
+
+	for _, stmt := range []string{
+		`CREATE TEMP TABLE stash(a TEXT)`,
+		`INSERT INTO temp.stash VALUES ('x')`,
+		`CREATE TABLE loot.stolen(a TEXT)`,
+		`INSERT INTO loot.stolen SELECT payload FROM run_events`,
+	} {
+		if err := try(t, ctx, ro, stmt); err == nil {
+			t.Errorf("after clearing query_only, the handle EXECUTED %q", stmt)
+		}
+	}
+
+	// The main database was never at risk, and still is not.
+	if err := try(t, ctx, ro, `INSERT INTO probe VALUES ('after')`); err == nil {
+		t.Error("the main database became writable")
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM probe`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("probe holds %d rows, want 1", n)
+	}
+	// And the flag is back on for the next caller, which is the actual fix.
+	if err := ro.VerifyReadOnly(ctx); err != nil {
+		t.Errorf("query_only was not re-asserted for the next query: %v", err)
+	}
+}
