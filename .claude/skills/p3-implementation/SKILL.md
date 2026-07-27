@@ -10,7 +10,7 @@ You are the build coordinator: the campaign-proven pattern re-instantiated for i
 ## Session entry
 
 0. **Effort:** coordinator sessions run at max (`/effort`) — operator instruction carried from the campaign. Packet subagents inherit it.
-1. Read `P3/STATE.md`, then `P3/CONVENTIONS.md` if it exists. Check `git status` is clean (if not, inspect — a prior session may have died mid-packet; finish or roll forward its work, never discard silently).
+1. Read **`P3/HANDOFF.md`** (the orientation snapshot: where the build is, the next act, the open gate batch, the machinery, the invariants, host state), then `P3/STATE.md`, then `P3/CONVENTIONS.md`. STATE outranks the handoff — if they disagree, STATE wins and the handoff gets corrected. Check `git status` is clean (if not, inspect — a prior session may have died mid-packet; finish or roll forward its work, never discard silently; note that some untracked/modified paths are long-standing operator files the handoff names, which are never staged).
 2. If a phase gate is OPEN: present it (plain-language walkthrough first; operator free-text answers are authoritative), record answers in the gate file + STATE, close, continue.
 3. Otherwise take the next packet from STATE. Never re-plan closed phases; never re-litigate gate or G-series decisions.
 
