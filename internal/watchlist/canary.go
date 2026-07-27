@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -97,13 +98,31 @@ func CanaryArmed() bool {
 
 // Canary layer errors. Callers branch on these.
 var (
-	// ErrCanaryDisarmed: a real-request leg has no probe wired because the
-	// operator has not armed it. It is an honest absence, never a failure.
-	ErrCanaryDisarmed = fmt.Errorf("watchlist: canary leg is disarmed (%s unset)", CanaryArmEnv)
+	// ErrCanaryDisarmed: a real-request leg has no probe because the operator
+	// has not armed it, or because arming it needs material that only exists
+	// after the B5-gate install. It is an honest absence, never a failure, and
+	// it always wraps the NAMED reason — a leg that cannot run must say why.
+	ErrCanaryDisarmed = errors.New("watchlist: canary leg is disarmed")
+	// ErrCanaryStackAbsent: a $0 local-tier canary could not run because the
+	// local stack or the advisory metering seam is absent. This is NOT an
+	// arming matter — the logprob canary costs no allowance and is never gated
+	// by CanaryArmEnv — so the two are distinct errors and the sweep counts
+	// them separately (drain D5).
+	ErrCanaryStackAbsent = errors.New("watchlist: canary leg has no local stack")
 	// ErrLaneNotLocal: the logprob canary was asked to run on a lane that
 	// exposes no logprobs (Spec S03.7).
-	ErrLaneNotLocal = fmt.Errorf("watchlist: the logprob canary runs on the local lane only")
+	ErrLaneNotLocal = errors.New("watchlist: the logprob canary runs on the local lane only")
 )
+
+// disarmedBecause builds the honest disarmed error for a named reason.
+func disarmedBecause(reason string) error {
+	return fmt.Errorf("%w: %s", ErrCanaryDisarmed, reason)
+}
+
+// DisarmedReasonNotArmed is the reason every real-request leg carries when the
+// operator has not armed the layer.
+const DisarmedReasonNotArmed = "the real-request legs are disarmed (" + CanaryArmEnv +
+	" unset); this build spends $0 until an operator arms them"
 
 // ⚙ dotted keys the canary layer consumes, read live at evaluation time so an
 // operator change applies without a restart. Both are DECLARED already
@@ -186,7 +205,7 @@ type CanaryResult struct {
 	// rather than from a side store. Nil for a canary that measures nothing.
 	Measurement *float64
 	// Observed is the raw list this run saw (the model-list canary's), stored
-	// for the same reason.
+	// for the same reason. It is bounded before it reaches the payload.
 	Observed []string
 	// Err records a probe that could not complete. A probe that did not answer
 	// is not proof of a policy revocation, so it fails the canary honestly and
@@ -220,6 +239,15 @@ type CanaryPayload struct {
 	// run derives its delta from the log instead of a side store.
 	Measurement *float64 `json:"measurement,omitempty"`
 	Observed    []string `json:"observed,omitempty"`
+	// ObservedCount is the FULL size of the observation, which differs from
+	// len(Observed) when the recorded list was truncated.
+	ObservedCount int `json:"observed_count,omitempty"`
+	// ObservedTruncated marks a recorded list bounded by observedListCap.
+	ObservedTruncated bool `json:"observed_truncated,omitempty"`
+	// ObservedDigest is a stable hash over the FULL observation, so drift is
+	// still detectable against a truncated baseline even though the individual
+	// ids cannot be named from it.
+	ObservedDigest string `json:"observed_digest,omitempty"`
 	// VerifiedOn is when this observation was made — the S03.6 "verified-on
 	// date" the observed model list is consumed with.
 	VerifiedOn time.Time `json:"verified_on"`
@@ -274,10 +302,41 @@ func (c *Canaries) logger() *slog.Logger {
 type CanarySweep struct {
 	Ran      int
 	Failures int
-	// Disarmed counts due legs that had no probe wired.
+	// Disarmed counts due REAL-REQUEST legs that had no probe: either the
+	// operator has not armed them, or arming needs gate-time material. A
+	// disarmed leg is still counted and still names its reason — it is never
+	// silently skipped (drain D1).
 	Disarmed int
+	// StackAbsent counts due $0 LOCAL-tier legs that could not run for want of
+	// a local stack or an advisory meter. Distinct from Disarmed: no arming
+	// decision is involved (drain D5).
+	StackAbsent int
+	// Reasons names, once per leg kind, why a leg did not run this sweep.
+	Reasons []string
 	// Cards counts the conformance-dueness cards raised this sweep.
 	Cards int
+}
+
+// note records a skip reason once per leg kind.
+func (s *CanarySweep) note(kind, reason string) {
+	line := kind + ": " + reason
+	for _, existing := range s.Reasons {
+		if existing == line {
+			return
+		}
+	}
+	s.Reasons = append(s.Reasons, line)
+}
+
+// skipReason strips the sentinel prefix so the sweep line carries the NAMED
+// reason rather than repeating the sentinel text.
+func skipReason(err, sentinel error) string {
+	reason := strings.TrimPrefix(err.Error(), sentinel.Error())
+	reason = strings.TrimPrefix(strings.TrimSpace(reason), ":")
+	if r := strings.TrimSpace(reason); r != "" {
+		return r
+	}
+	return err.Error()
 }
 
 // canaryJob is one due canary run.
@@ -300,8 +359,16 @@ func (c *Canaries) RunDue(ctx context.Context) (CanarySweep, error) {
 	for _, j := range jobs {
 		res, err := j.run(ctx)
 		if err != nil {
-			if err == ErrCanaryDisarmed {
+			// A leg that could not run is ACCOUNTED FOR and names its reason;
+			// it is never silently dropped (drain D1/D5).
+			switch {
+			case errors.Is(err, ErrCanaryDisarmed):
 				p.Disarmed++
+				p.note(j.kind, skipReason(err, ErrCanaryDisarmed))
+				continue
+			case errors.Is(err, ErrCanaryStackAbsent):
+				p.StackAbsent++
+				p.note(j.kind, skipReason(err, ErrCanaryStackAbsent))
 				continue
 			}
 			// A probe that could not complete is recorded as an honest failure
@@ -412,6 +479,7 @@ func (c *Canaries) record(ctx context.Context, res CanaryResult) error {
 	if res.Pass {
 		result = CanaryPass
 	}
+	recorded, truncated, digest := boundObserved(res.Observed)
 	body, err := json.Marshal(CanaryPayload{
 		CanaryKind:    res.Kind,
 		Lane:          res.Lane,
@@ -427,9 +495,15 @@ func (c *Canaries) record(ctx context.Context, res CanaryResult) error {
 		PurposeTag:    string(CanaryPurposeTag),
 		WorkloadClass: string(CanaryWorkloadClass),
 		Measurement:   res.Measurement,
-		Observed:      res.Observed,
-		VerifiedOn:    now,
-		Error:         res.Err,
+		Observed:      recorded,
+		ObservedCount: len(res.Observed),
+		// A degenerate catalogue must not push the payload past
+		// ⚙ state.event_payload_cap: an aborted Append would mean the lane
+		// never baselines and the canary silently stops working (drain D6).
+		ObservedTruncated: truncated,
+		ObservedDigest:    digest,
+		VerifiedOn:        now,
+		Error:             res.Err,
 	})
 	if err != nil {
 		return fmt.Errorf("watchlist: marshal canary result: %w", err)
@@ -482,6 +556,30 @@ func (c *Canaries) raiseCard(ctx context.Context, res CanaryResult) error {
 		}
 	}
 	return nil
+}
+
+// observedListCap bounds how many ids of an observation are RECORDED on the
+// payload. STRUCTURAL, not ⚙. ⚙ state.event_payload_cap (default 64 KiB) is a
+// hard Append gate: an oversized payload is refused, and a refused append means
+// the lane never baselines and the canary silently stops working — the exact
+// failure shape this codebase treats as worse than a loud one. 250 ids of a
+// realistic length sit around 8 KiB, comfortably inside the cap, and no real
+// provider catalogue approaches it.
+const observedListCap = 250
+
+// boundObserved bounds a recorded observation. It always returns a digest over
+// the FULL list, so drift stays DETECTABLE against a truncated baseline even
+// though the individual ids cannot be named from it — the honest degradation is
+// "something moved and I cannot name it", never "nothing moved".
+func boundObserved(observed []string) (recorded []string, truncated bool, digest string) {
+	if len(observed) == 0 {
+		return nil, false, ""
+	}
+	digest = shortHash(observed...)
+	if len(observed) <= observedListCap {
+		return observed, false, digest
+	}
+	return observed[:observedListCap], true, digest
 }
 
 // canarySubjectCap bounds how many model-id findings one canary run raises.
@@ -543,29 +641,45 @@ func (c *Canaries) LastMeasurement(ctx context.Context, kind, lane string) (floa
 	return value.Float64, value.Valid, nil
 }
 
-// LastObserved returns the list this canary last observed on this lane (the
-// model-list canary's), derived from the log. ok is false when it has never
-// observed one.
-func (c *Canaries) LastObserved(ctx context.Context, kind, lane string) ([]string, bool, error) {
-	var raw sql.NullString
+// Observation is one recorded model-list observation read back from the log.
+type Observation struct {
+	// List is the recorded id list. It is the FULL observation unless
+	// Truncated, in which case it is a bounded prefix and naming ids from it
+	// would invent removals.
+	List []string
+	// Truncated marks a list bounded by observedListCap.
+	Truncated bool
+	// Digest hashes the FULL observation, so an oversized catalogue is still
+	// comparable even when its ids are not recoverable.
+	Digest string
+}
+
+// LastObserved returns the observation this canary last recorded on this lane,
+// derived from the log. ok is false when it has never recorded one.
+func (c *Canaries) LastObserved(ctx context.Context, kind, lane string) (Observation, bool, error) {
+	var raw, digest sql.NullString
+	var truncated sql.NullBool
 	err := c.db.QueryRowContext(ctx,
-		`SELECT json_extract(payload, '$.observed') FROM run_events
+		`SELECT json_extract(payload, '$.observed'),
+		        json_extract(payload, '$.observed_truncated'),
+		        json_extract(payload, '$.observed_digest')
+		   FROM run_events
 		  WHERE type = ?
 		    AND json_extract(payload, '$.canary_kind') = ?
 		    AND json_extract(payload, '$.lane') = ?
 		    AND json_extract(payload, '$.observed') IS NOT NULL
-		  ORDER BY event_seq DESC LIMIT 1`, EventCanaryResult, kind, lane).Scan(&raw)
+		  ORDER BY event_seq DESC LIMIT 1`, EventCanaryResult, kind, lane).Scan(&raw, &truncated, &digest)
 	if err == sql.ErrNoRows {
-		return nil, false, nil
+		return Observation{}, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("watchlist: read last %s canary observation on %q: %w", kind, lane, err)
+		return Observation{}, false, fmt.Errorf("watchlist: read last %s canary observation on %q: %w", kind, lane, err)
 	}
-	var out []string
-	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
-		return nil, false, nil
+	var list []string
+	if err := json.Unmarshal([]byte(raw.String), &list); err != nil {
+		return Observation{}, false, nil
 	}
-	return out, true, nil
+	return Observation{List: list, Truncated: truncated.Bool, Digest: digest.String}, true, nil
 }
 
 // LaneLocal / the paid lanes, named here so the canary layer states its own

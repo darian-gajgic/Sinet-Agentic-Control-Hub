@@ -46,107 +46,133 @@ var (
 // killImports are the packages a killer would need and this one must not.
 var killImports = []string{"os/exec", "syscall"}
 
+// scanForKillPrimitives is the WALK ITSELF, factored out so the same code that
+// guards the package can be run against planted source (drain D3). It returns
+// one violation line per hit.
+func scanForKillPrimitives(t *testing.T, filename string, src any) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, src, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", filename, err)
+	}
+	var hits []string
+	for _, imp := range f.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		for _, banned := range killImports {
+			if path == banned {
+				hits = append(hits, filename+" imports "+banned+
+					" — the watchlist detects and records; it never executes or signals a process")
+			}
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.Ident:
+			for _, banned := range killIdents {
+				if node.Name == banned {
+					hits = append(hits, filename+" references "+banned+
+						" — a canary raises a card, NEVER a kill (S14.4 / G1 D1.3)")
+				}
+			}
+		case *ast.BasicLit:
+			if node.Kind != token.STRING {
+				return true
+			}
+			v := strings.ToLower(strings.Trim(node.Value, "`\""))
+			for _, banned := range killStateStrings {
+				if v == banned {
+					hits = append(hits, filename+" carries the terminal-state literal "+banned+
+						" — a state a canary must never construct")
+				}
+			}
+			for _, banned := range killVerbsExact {
+				if v == banned {
+					hits = append(hits, filename+" carries the kill-verb literal "+banned)
+				}
+			}
+			for _, banned := range killVerbsSubstring {
+				if strings.Contains(v, banned) {
+					hits = append(hits, filename+" carries the signal literal "+banned)
+				}
+			}
+		}
+		return true
+	})
+	return hits
+}
+
 func TestCanaryLayerHasNoKillPrimitive(t *testing.T) {
 	dir := filepath.Join(repoRoot, "internal/watchlist")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fset := token.NewFileSet()
 	scanned := 0
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
 		scanned++
-
-		for _, imp := range f.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			for _, banned := range killImports {
-				if path == banned {
-					t.Errorf("%s imports %s — the watchlist detects and records; it never executes or signals a process", name, banned)
-				}
-			}
+		for _, hit := range scanForKillPrimitives(t, filepath.Join(dir, name), nil) {
+			t.Error(hit)
 		}
-
-		ast.Inspect(f, func(n ast.Node) bool {
-			switch node := n.(type) {
-			case *ast.Ident:
-				for _, banned := range killIdents {
-					if node.Name == banned {
-						t.Errorf("%s references %s — a canary raises a card, NEVER a kill (S14.4 / G1 D1.3)", name, banned)
-					}
-				}
-			case *ast.BasicLit:
-				if node.Kind != token.STRING {
-					return true
-				}
-				v := strings.ToLower(strings.Trim(node.Value, "`\""))
-				for _, banned := range killStateStrings {
-					if v == banned {
-						t.Errorf("%s carries the terminal-state literal %q — a state a canary must never construct", name, banned)
-					}
-				}
-				for _, banned := range killVerbsExact {
-					if v == banned {
-						t.Errorf("%s carries the kill-verb literal %q", name, banned)
-					}
-				}
-				for _, banned := range killVerbsSubstring {
-					if strings.Contains(v, banned) {
-						t.Errorf("%s carries the signal literal %q", name, banned)
-					}
-				}
-			}
-			return true
-		})
 	}
 	if scanned == 0 {
 		t.Fatal("the no-kill wall scanned no files — it would pass vacuously")
 	}
 }
 
-// TestCanaryNoKillWallIsNotTautological feeds the wall's own matchers the
-// forbidden shapes: a wall that cannot fail guarantees nothing.
-func TestCanaryNoKillWallIsNotTautological(t *testing.T) {
-	for _, ident := range killIdents {
-		var hit bool
-		for _, banned := range killIdents {
-			hit = hit || ident == banned
-		}
-		if !hit {
-			t.Errorf("the ident matcher let %q through", ident)
-		}
-	}
-	for _, lit := range []string{"SIGKILL request", "sigterm"} {
-		var hit bool
-		low := strings.ToLower(lit)
-		for _, banned := range killVerbsSubstring {
-			hit = hit || strings.Contains(low, banned)
-		}
-		if !hit {
-			t.Errorf("the substring matcher let %q through", lit)
-		}
-	}
-	// And the wall must NOT reject the vocabulary this package legitimately
-	// uses: `lane-freeze` is a recorded scheduler ACTION, not a kill.
-	for _, ok := range []string{"lane-freeze", "flag-now", "policy-revocation-suspected", "park-probe"} {
-		low := strings.ToLower(ok)
-		for _, banned := range killVerbsExact {
-			if low == banned {
-				t.Errorf("the wall wrongly rejects the legitimate term %q", ok)
+// TestCanaryNoKillWallTripsOnPlantedSource runs the REAL WALK against source
+// that plants each forbidden shape, and asserts it trips (drain D3, the §31
+// scratch-constant precedent). Re-checking the banned lists against themselves
+// proves nothing; this exercises the AST walk that actually guards the package,
+// including the two shapes an ident-only check would miss: a forbidden state
+// built from a STRING literal, and a kill-capable IMPORT.
+func TestCanaryNoKillWallTripsOnPlantedSource(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{"terminate call", `package p
+func f(x interface{ Terminate() }) { x.Terminate() }`},
+		{"tombstone state ident", `package p
+import "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+func f() run.State { return run.StateTombstoned }`},
+		{"state built from a string literal", `package p
+import "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+func f() run.State { return run.State("tombstoned") }`},
+		{"os/exec import", `package p
+import "os/exec"
+func f() { _ = exec.Command }`},
+		{"syscall import", `package p
+import "syscall"
+func f() { _ = syscall.Getpid }`},
+		{"signal literal", `package p
+const s = "send SIGKILL to the engine"`},
+		{"kill verb literal", `package p
+const s = "kill"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if hits := scanForKillPrimitives(t, "planted.go", tc.src); len(hits) == 0 {
+				t.Fatalf("the no-kill wall did NOT trip on planted source:\n%s", tc.src)
 			}
-		}
-		for _, banned := range killVerbsSubstring {
-			if strings.Contains(low, banned) {
-				t.Errorf("the wall wrongly rejects the legitimate term %q", ok)
-			}
-		}
+		})
+	}
+
+	// And the walk must NOT trip on source shaped like this package's real
+	// content — a wall that rejects everything guards nothing.
+	honest := `package p
+const (
+	actionLaneFreeze = "lane-freeze"
+	severityFlagNow  = "flag-now"
+	reason           = "policy-revocation-suspected"
+	park             = "park-probe"
+)
+func f() string { return actionLaneFreeze + severityFlagNow + reason + park }`
+	if hits := scanForKillPrimitives(t, "honest.go", honest); len(hits) != 0 {
+		t.Fatalf("the no-kill wall trips on legitimate canary vocabulary: %v", hits)
 	}
 }
 

@@ -36,6 +36,8 @@ type ModelListProbe func(ctx context.Context, lane string) ([]string, error)
 type ModelListCanary struct {
 	// Probe is the real-request leg; nil ⇒ DISARMED (the v0 posture).
 	Probe ModelListProbe
+	// Unavailable NAMES why Probe is nil (drain D1).
+	Unavailable string
 	// Lanes are the accounts to diff.
 	Lanes []string
 	// Configured is the per-lane CONFIGURED model list — the S03.6 "config"
@@ -47,9 +49,16 @@ type ModelListCanary struct {
 	Configured map[string][]string
 }
 
-// NewModelListCanary builds the model-list canary over the paid lanes.
+// NewModelListCanary builds the model-list canary over the paid lanes with a
+// live probe.
 func NewModelListCanary(probe ModelListProbe, configured map[string][]string) *ModelListCanary {
 	return &ModelListCanary{Probe: probe, Lanes: PaidLanes(), Configured: configured}
+}
+
+// DisarmedModelListCanary builds the model-list canary with NO probe and a
+// named reason, so the sweep accounts for it (drain D1).
+func DisarmedModelListCanary(reason string) *ModelListCanary {
+	return &ModelListCanary{Lanes: PaidLanes(), Unavailable: reason}
 }
 
 func (m *ModelListCanary) runner(c *Canaries, lane string) func(context.Context) (CanaryResult, error) {
@@ -59,7 +68,7 @@ func (m *ModelListCanary) runner(c *Canaries, lane string) func(context.Context)
 // Run diffs one account's observed model list.
 func (m *ModelListCanary) Run(ctx context.Context, c *Canaries, lane string) (CanaryResult, error) {
 	if m.Probe == nil {
-		return CanaryResult{}, ErrCanaryDisarmed
+		return CanaryResult{}, disarmedBecause(firstNonEmpty(m.Unavailable, DisarmedReasonNotArmed))
 	}
 	observed, err := m.Probe(ctx, lane)
 	if err != nil {
@@ -88,7 +97,14 @@ func (m *ModelListCanary) Run(ctx context.Context, c *Canaries, lane string) (Ca
 			res.Detail = "no configured model list is registered at v0, so the first observation is the baseline (S03.6)"
 			return res, nil
 		}
-		baseline = prev
+		if prev.Truncated {
+			// The recorded baseline is a bounded PREFIX, so naming ids from it
+			// would invent removals for every id the cap dropped. Compare the
+			// full-list digests instead: drift stays detectable, the ids just
+			// cannot be named from a truncated record (drain D6).
+			return m.compareByDigest(res, lane, prev, observed), nil
+		}
+		baseline = prev.List
 	}
 	baseline = normalizeModelIDs(baseline)
 
@@ -107,6 +123,24 @@ func (m *ModelListCanary) Run(ctx context.Context, c *Canaries, lane string) (Ca
 	res.Detail = fmt.Sprintf("removed: %s\nadded: %s\nobserved (%d): %s",
 		join(removed), join(added), len(observed), join(observed))
 	return res, nil
+}
+
+// compareByDigest is the honest degradation for a catalogue too large to
+// record: "something moved and I cannot name it" — never "nothing moved".
+func (m *ModelListCanary) compareByDigest(res CanaryResult, lane string, prev Observation, observed []string) CanaryResult {
+	_, _, digest := boundObserved(observed)
+	if prev.Digest != "" && prev.Digest == digest {
+		res.Pass = true
+		res.Summary = fmt.Sprintf("model-list canary on lane %s passed: %d models, unchanged (compared by digest — the catalogue exceeds the recorded-list cap)",
+			lane, len(observed))
+		return res
+	}
+	res.Delta = 1
+	res.ChangeClass = ClassModels
+	res.Summary = fmt.Sprintf("model-list drift on lane %s: the catalogue changed (%d models)", lane, len(observed))
+	res.Detail = fmt.Sprintf("the previous observation exceeded the %d-id recording cap, so this diff ran on the full-list DIGEST and no model id can be named from it; "+
+		"no revalidation subject is claimed rather than a guessed one", observedListCap)
+	return res
 }
 
 func join(ids []string) string {

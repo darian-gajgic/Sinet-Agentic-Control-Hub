@@ -47,16 +47,26 @@ type AuthProbe func(ctx context.Context, lane string) (scheduler.LimitSignal, er
 type AuthCanary struct {
 	// Probe is the real-request leg; nil ⇒ DISARMED (the v0 posture).
 	Probe AuthProbe
+	// Unavailable NAMES why Probe is nil. A leg that cannot run must say why:
+	// the sweep counts it as disarmed and carries this reason, so a leg is
+	// never silently skipped (drain D1).
+	Unavailable string
 	// Lanes are the lanes to probe — the paid lanes, whose sanction can be
 	// revoked. The local lane holds no provider credential and has no sanction
 	// to lose, so it is not probed.
 	Lanes []string
 }
 
-// NewAuthCanary builds the auth canary over the paid lanes. A nil probe is the
-// disarmed v0 posture and is a legitimate construction.
+// NewAuthCanary builds the auth canary over the paid lanes with a live probe.
 func NewAuthCanary(probe AuthProbe) *AuthCanary {
 	return &AuthCanary{Probe: probe, Lanes: PaidLanes()}
+}
+
+// DisarmedAuthCanary builds the auth canary with NO probe and a named reason.
+// The legs still exist and are still scheduled, so every sweep accounts for
+// them out loud instead of skipping a nil (drain D1).
+func DisarmedAuthCanary(reason string) *AuthCanary {
+	return &AuthCanary{Lanes: PaidLanes(), Unavailable: reason}
 }
 
 func (a *AuthCanary) runner(c *Canaries, lane string) func(context.Context) (CanaryResult, error) {
@@ -66,7 +76,7 @@ func (a *AuthCanary) runner(c *Canaries, lane string) func(context.Context) (Can
 // Run probes one lane and classifies the answer.
 func (a *AuthCanary) Run(ctx context.Context, c *Canaries, lane string) (CanaryResult, error) {
 	if a.Probe == nil {
-		return CanaryResult{}, ErrCanaryDisarmed
+		return CanaryResult{}, disarmedBecause(firstNonEmpty(a.Unavailable, DisarmedReasonNotArmed))
 	}
 	cfg, err := scheduler.LoadLimitConfig(c.Settings)
 	if err != nil {

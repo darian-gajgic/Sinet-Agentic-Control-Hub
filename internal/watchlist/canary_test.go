@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,6 +213,8 @@ func TestDisarmedLegsRunNothing(t *testing.T) {
 	c.Auth = watchlist.NewAuthCanary(nil)
 	c.ModelList = watchlist.NewModelListCanary(nil, nil)
 	c.Behavioral = watchlist.NewBehavioralCanary(nil)
+	// A leg constructed with no probe and no named reason still accounts for
+	// itself, falling back to the default arming reason.
 
 	sweep, err := c.RunDue(context.Background())
 	if err != nil {
@@ -353,9 +356,58 @@ func TestLogprobCanaryOnlyEverSchedulesTheLocalLane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDue: %v", err)
 	}
-	// One job, on the local lane, disarmed (no duty stack).
-	if sweep.Disarmed != 1 || sweep.Ran != 0 {
-		t.Fatalf("sweep = %+v, want exactly one (local, disarmed) logprob job", sweep)
+	// Exactly ONE job, on the local lane. It cannot run for want of a stack —
+	// which is a STACK ABSENCE, not an arming matter: the logprob canary costs
+	// no allowance and CanaryArmEnv never gates it (drain D5).
+	if sweep.Ran != 0 || sweep.StackAbsent != 1 || sweep.Disarmed != 0 {
+		t.Fatalf("sweep = %+v, want exactly one local logprob job counted as stack-absent (not disarmed)", sweep)
+	}
+	if len(sweep.Reasons) != 1 || !strings.HasPrefix(sweep.Reasons[0], watchlist.CanaryLogprob+": ") {
+		t.Fatalf("reasons = %v, want one named logprob reason", sweep.Reasons)
+	}
+	if strings.Contains(sweep.Reasons[0], watchlist.CanaryArmEnv) {
+		t.Errorf("the logprob skip reason blames the arm env: %q — it is a local-stack absence", sweep.Reasons[0])
+	}
+}
+
+// TestDisarmedLegsAreCountedWithNamedReasons is the drain-D1 accounting proof: a
+// leg that cannot run is SCHEDULED, COUNTED and NAMES why — never a silent nil
+// skip that vanishes from the sweep.
+func TestDisarmedLegsAreCountedWithNamedReasons(t *testing.T) {
+	h := newHarness(t)
+	clk := &clock{t: mustTime(t, "2026-07-27T09:00:00Z")}
+	c := h.canaries(t, clk)
+	c.Auth = watchlist.DisarmedAuthCanary("endpoints are gate-time material")
+	c.ModelList = watchlist.DisarmedModelListCanary("endpoints are gate-time material")
+	c.Behavioral = watchlist.DisarmedBehavioralCanary("no pinned runner is installed")
+
+	sweep, err := c.RunDue(context.Background())
+	if err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	if sweep.Disarmed != 6 || sweep.Ran != 0 {
+		t.Fatalf("sweep = %+v, want 6 disarmed (3 legs × 2 paid lanes) and 0 ran", sweep)
+	}
+	// One named reason per LEG KIND, deduped across lanes.
+	if len(sweep.Reasons) != 3 {
+		t.Fatalf("reasons = %v, want one per leg kind", sweep.Reasons)
+	}
+	byKind := map[string]string{}
+	for _, r := range sweep.Reasons {
+		kind, reason, _ := strings.Cut(r, ": ")
+		byKind[kind] = reason
+	}
+	for kind, want := range map[string]string{
+		watchlist.CanaryAuth:       "endpoints are gate-time material",
+		watchlist.CanaryModelList:  "endpoints are gate-time material",
+		watchlist.CanaryBehavioral: "no pinned runner is installed",
+	} {
+		if byKind[kind] != want {
+			t.Errorf("leg %q reason = %q, want %q", kind, byKind[kind], want)
+		}
+	}
+	if got := h.canaryEvents(t); len(got) != 0 {
+		t.Errorf("a disarmed leg recorded %d canary results, want 0", len(got))
 	}
 }
 
@@ -825,5 +877,107 @@ func TestProbeErrorIsRecordedHonestly(t *testing.T) {
 	cards := h.findings(t)
 	if len(cards) != 1 || cards[0].Severity != watchlist.SeverityDigest {
 		t.Fatalf("an unreachable lane must raise a DIGEST card, got %+v", cards)
+	}
+}
+
+// ── drain D6: an oversized catalogue must still record and baseline ─────────
+
+// TestOversizedCatalogueStillRecordsAndBaselines: a degenerate model list must
+// not push the canary.result payload past ⚙ state.event_payload_cap. An aborted
+// Append would mean the lane never baselines and the canary silently stops
+// working — worse than a loud failure.
+func TestOversizedCatalogueStillRecordsAndBaselines(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	clk := &clock{t: mustTime(t, "2026-07-27T09:00:00Z")}
+	c := h.canaries(t, clk)
+
+	huge := make([]string, 5000)
+	for i := range huge {
+		huge[i] = fmt.Sprintf("vendor/family-%05d-instruct-preview-20260727", i)
+	}
+	observed := huge
+	c.ModelList = &watchlist.ModelListCanary{
+		Lanes: []string{watchlist.LaneAnthropic},
+		Probe: func(ctx context.Context, lane string) ([]string, error) { return observed, nil },
+	}
+
+	if _, err := c.RunDue(ctx); err != nil {
+		t.Fatalf("RunDue on an oversized catalogue: %v", err)
+	}
+	got := h.canaryEvents(t)
+	if len(got) != 1 {
+		t.Fatalf("canary.result rows = %d, want 1 — the append must not be refused", len(got))
+	}
+	if !got[0].Baseline {
+		t.Fatal("the oversized first observation did not baseline")
+	}
+	if !got[0].ObservedTruncated {
+		t.Error("the recorded list was not marked truncated")
+	}
+	if got[0].ObservedCount != len(huge) {
+		t.Errorf("observed_count = %d, want the FULL %d — the count is kept even when the list is not",
+			got[0].ObservedCount, len(huge))
+	}
+	if len(got[0].Observed) >= len(huge) {
+		t.Errorf("recorded %d ids, want a bounded prefix", len(got[0].Observed))
+	}
+	if got[0].ObservedDigest == "" {
+		t.Error("no digest was recorded, so the next run has nothing to compare against")
+	}
+
+	// The payload must sit inside the ⚙ cap — the gate that would have aborted
+	// the append. Read the key by dotted key rather than assuming its default.
+	capBytes, err := h.reg.Int("state.event_payload_cap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var size int64
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT MAX(LENGTH(payload)) FROM run_events WHERE type = ?`,
+		watchlist.EventCanaryResult).Scan(&size); err != nil {
+		t.Fatal(err)
+	}
+	if size >= capBytes {
+		t.Errorf("canary.result payload is %d bytes, at or past ⚙ state.event_payload_cap (%d)", size, capBytes)
+	}
+
+	// Next run, unchanged: the truncated baseline cannot be diffed by id, so it
+	// is compared by DIGEST — and an unchanged catalogue passes without
+	// inventing removals for every id the cap dropped.
+	clk.advance(48 * time.Hour)
+	if _, err := c.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got = h.canaryEvents(t)
+	if len(got) != 2 {
+		t.Fatalf("canary.result rows = %d, want 2", len(got))
+	}
+	if got[1].Result != watchlist.CanaryPass {
+		t.Fatalf("an UNCHANGED oversized catalogue was reported as drift: %+v", got[1])
+	}
+	if cards := h.findings(t); len(cards) != 0 {
+		t.Fatalf("an unchanged oversized catalogue raised %d cards, want 0", len(cards))
+	}
+
+	// And a real change is still DETECTED, without claiming ids it cannot name.
+	observed = huge[:4999]
+	clk.advance(48 * time.Hour)
+	if _, err := c.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got = h.canaryEvents(t)
+	if got[2].Result != watchlist.CanaryFail {
+		t.Fatalf("a changed oversized catalogue was reported as unchanged: %+v", got[2])
+	}
+	if len(got[2].Subjects) != 0 {
+		t.Errorf("subjects = %v, want none — ids cannot be named from a truncated baseline and a guess would flag the wrong assets", got[2].Subjects)
+	}
+	cards := h.findings(t)
+	if len(cards) != 1 {
+		t.Fatalf("drift.finding rows = %d, want 1", len(cards))
+	}
+	if cards[0].Revalidation.Triggered {
+		t.Error("a subjectless models-class finding must not claim a revalidation")
 	}
 }

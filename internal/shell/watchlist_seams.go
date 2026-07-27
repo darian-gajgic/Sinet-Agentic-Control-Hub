@@ -117,18 +117,44 @@ func buildWatchlistSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 	}, nil
 }
 
+// The named reasons a real-request leg is not composed. Every leg that cannot
+// run carries one, so a sweep accounts for it out loud instead of skipping a
+// nil (drain D1).
+const (
+	// canaryNoCredentialedEndpoint is the honest state of the auth and
+	// model-list legs on THIS tree. Both v0 paid lanes ride wrapped CLIs
+	// (claude-cli, opencode) — there is no per-lane HTTP endpoint and no
+	// broker credential accessor composed anywhere yet, and inventing either
+	// would be new structural config this packet has no mandate for. The
+	// probes themselves are built and stub-tested
+	// (watchlist.HTTPAuthProbe / HTTPModelListProbe); what is missing is
+	// gate-time material, so composing them is a B5-gate item.
+	canaryNoCredentialedEndpoint = "no credentialed per-lane endpoint is composed: the endpoint set and the " +
+		"broker credential accessor are B5-gate install material (D2/S11.5); the probe itself is built and stub-tested"
+	// canaryNoPinnedRunner is the carried B5-5 dependency.
+	canaryNoPinnedRunner = "no pinned runner is installed (" + evals.PromptfooPathEnv +
+		" or PATH): the exact-version install is a B5-gate HOST act"
+)
+
 // buildCanaryLayer composes the S14.6 ¶3 API canary layer (B5-6B).
 //
-// THE $0 POSTURE IS COMPOSED HERE, not hidden in the package: the three legs
-// that dial a provider — auth, behavioral, model-list — are wired ONLY when the
-// operator has armed them (watchlist.CanaryArmEnv). Unarmed, they are nil and
-// the layer skips them honestly rather than recording a canary that never ran.
-// The logprob canary is local-tier and costs no allowance, so it is wired
-// whenever the local stack is.
+// THE $0 POSTURE IS COMPOSED HERE, not hidden in the package: no leg that dials
+// a provider gets a probe unless the operator has armed the layer
+// (watchlist.CanaryArmEnv), so unarmed the layer physically cannot spend.
 //
-// The behavioral leg additionally needs the pinned runner, which is not
-// installed on the host until the B5-gate act: with no binary it stays nil and
-// the leg is absent for that second, independent reason.
+// Every real-request leg is CONSTRUCTED either way, carrying either a probe or
+// a NAMED reason it has none. That is deliberate: a nil leg is silently skipped
+// and disappears from the sweep accounting, whereas a constructed-but-disarmed
+// leg is scheduled, counted, and reports why it did not run (drain D1).
+//
+// Arming is necessary but NOT sufficient. On this tree the arm activates the
+// behavioral leg only, and only when the pinned runner is installed; the auth
+// and model-list legs additionally need per-lane endpoints and a broker
+// credential accessor that do not exist until the B5-gate install. The armed
+// log line names every leg it could not compose.
+//
+// The logprob canary is local-tier and costs no allowance, so it is never gated
+// by the arm — it is wired whenever the local stack is.
 func buildCanaryLayer(db *storage.DB, log *eventlog.Log, reg *settings.Registry,
 	duty *local.Duty, meter stage.AdvisoryMeter, emitter *watchlist.Emitter,
 	conf *conformance.Store, logger *slog.Logger) (*watchlist.Canaries, bool) {
@@ -143,25 +169,50 @@ func buildCanaryLayer(db *storage.DB, log *eventlog.Log, reg *settings.Registry,
 
 	armed := watchlist.CanaryArmed()
 	if !armed {
-		logger.Info("watchlist: API canary layer wired with the real-request legs DISARMED (B5-6B)",
+		reason := watchlist.DisarmedReasonNotArmed
+		c.Auth = watchlist.DisarmedAuthCanary(reason)
+		c.ModelList = watchlist.DisarmedModelListCanary(reason)
+		c.Behavioral = watchlist.DisarmedBehavioralCanary(reason)
+		logger.Info("watchlist: API canary layer wired, real-request legs DISARMED (B5-6B)",
 			"arm_with", watchlist.CanaryArmEnv,
-			"disarmed", "auth, behavioral, model-list",
+			"disarmed", "auth, model-list, behavioral",
 			"live", "logprob (local tier, $0), conformance dueness")
 		return c, false
 	}
 
-	// Armed. The auth and model-list probes need per-lane endpoints and a
-	// credential accessor, which the credential broker owns and which settle
-	// with the B5-gate install; until they are composed the armed layer runs
-	// whatever legs it can and says which it could not.
+	// Armed: compose what this tree can, and NAME what it cannot.
+	uncomposed := []string{}
+	c.Auth = watchlist.DisarmedAuthCanary(canaryNoCredentialedEndpoint)
+	c.ModelList = watchlist.DisarmedModelListCanary(canaryNoCredentialedEndpoint)
+	uncomposed = append(uncomposed, "auth ("+canaryNoCredentialedEndpoint+")",
+		"model-list ("+canaryNoCredentialedEndpoint+")")
+
 	if runner, err := evals.FindPromptfoo(); err == nil {
 		c.Behavioral = watchlist.NewBehavioralCanary(behavioralCanaryHook(runner))
 	} else {
-		logger.Warn("watchlist: behavioral canary armed but no pinned runner is installed — the leg stays absent",
-			"pin", evals.PromptfooPin, "override", evals.PromptfooPathEnv, "err", err)
+		c.Behavioral = watchlist.DisarmedBehavioralCanary(canaryNoPinnedRunner)
+		uncomposed = append(uncomposed, "behavioral ("+canaryNoPinnedRunner+": "+err.Error()+")")
 	}
-	logger.Info("watchlist: API canary layer ARMED (B5-6B)", "behavioral", c.Behavioral != nil)
+
+	logger.Info("watchlist: API canary layer ARMED (B5-6B)",
+		"composed", armedComposedLegs(c),
+		"not_composed", uncomposed)
 	return c, true
+}
+
+// armedComposedLegs names the real-request legs that actually hold a probe.
+func armedComposedLegs(c *watchlist.Canaries) []string {
+	out := []string{}
+	if c.Auth != nil && c.Auth.Probe != nil {
+		out = append(out, "auth")
+	}
+	if c.ModelList != nil && c.ModelList.Probe != nil {
+		out = append(out, "model-list")
+	}
+	if c.Behavioral != nil && c.Behavioral.Run != nil {
+		out = append(out, "behavioral")
+	}
+	return out
 }
 
 // behavioralCanaryHook satisfies the S14.6 ¶3 behavioral seam with the B5-5
@@ -272,7 +323,8 @@ func canaryLoop(ctx context.Context, wl *watchlistSurface, logger *slog.Logger) 
 			if sweep.Ran > 0 || sweep.Cards > 0 {
 				logger.Info("watchlist: canary sweep complete",
 					"ran", sweep.Ran, "failures", sweep.Failures,
-					"disarmed", sweep.Disarmed, "conformance_cards", sweep.Cards)
+					"disarmed", sweep.Disarmed, "stack_absent", sweep.StackAbsent,
+					"conformance_cards", sweep.Cards, "skipped", sweep.Reasons)
 			}
 		}
 	}

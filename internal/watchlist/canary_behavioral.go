@@ -51,15 +51,24 @@ type BehavioralRun func(ctx context.Context, lane string) (BehavioralOutcome, er
 type BehavioralCanary struct {
 	// Run is the S14.8 runner seam; nil ⇒ DISARMED/absent.
 	Run BehavioralRun
+	// Unavailable NAMES why Run is nil (drain D1).
+	Unavailable string
 	// Lanes are the lanes to probe. The subscription lanes are the ones that
 	// NEED it; the local lane also carries the logprob canary, which is the
 	// cheaper and sharper signal there.
 	Lanes []string
 }
 
-// NewBehavioralCanary builds the behavioral canary over the paid lanes.
+// NewBehavioralCanary builds the behavioral canary over the paid lanes with a
+// live runner seam.
 func NewBehavioralCanary(run BehavioralRun) *BehavioralCanary {
 	return &BehavioralCanary{Run: run, Lanes: PaidLanes()}
+}
+
+// DisarmedBehavioralCanary builds the behavioral canary with NO runner and a
+// named reason, so the sweep accounts for it (drain D1).
+func DisarmedBehavioralCanary(reason string) *BehavioralCanary {
+	return &BehavioralCanary{Lanes: PaidLanes(), Unavailable: reason}
 }
 
 func (b *BehavioralCanary) runner(c *Canaries, lane string) func(context.Context) (CanaryResult, error) {
@@ -70,7 +79,7 @@ func (b *BehavioralCanary) runner(c *Canaries, lane string) func(context.Context
 // previous run's, derived from the log.
 func (b *BehavioralCanary) RunLane(ctx context.Context, c *Canaries, lane string) (CanaryResult, error) {
 	if b.Run == nil {
-		return CanaryResult{}, ErrCanaryDisarmed
+		return CanaryResult{}, disarmedBecause(firstNonEmpty(b.Unavailable, DisarmedReasonNotArmed))
 	}
 	out, err := b.Run(ctx, lane)
 	if err != nil {

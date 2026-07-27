@@ -334,22 +334,45 @@ func TestCanaryLayerShipsDisarmed(t *testing.T) {
 	if wl.Canaries == nil {
 		t.Fatal("the canary layer was not composed at all")
 	}
-	for name, wired := range map[string]bool{
-		"auth":       wl.Canaries.Auth != nil,
-		"behavioral": wl.Canaries.Behavioral != nil,
-		"model-list": wl.Canaries.ModelList != nil,
+	// Each real-request leg is CONSTRUCTED but holds NO probe: constructed so
+	// the sweep schedules, counts and explains it (drain D1); probe-less so it
+	// physically cannot spend.
+	if wl.Canaries.Auth == nil || wl.Canaries.ModelList == nil || wl.Canaries.Behavioral == nil {
+		t.Fatal("a real-request leg is nil — a nil leg is silently skipped and vanishes from the sweep accounting")
+	}
+	for name, hasProbe := range map[string]bool{
+		"auth":       wl.Canaries.Auth.Probe != nil,
+		"model-list": wl.Canaries.ModelList.Probe != nil,
+		"behavioral": wl.Canaries.Behavioral.Run != nil,
 	} {
-		if wired {
-			t.Errorf("the %s canary leg is wired while disarmed — it could issue a real request", name)
+		if hasProbe {
+			t.Errorf("the %s canary leg holds a probe while disarmed — it could issue a real request", name)
 		}
 	}
-	// A disarmed sweep records nothing at all: no canary.result, no card.
+	for name, reason := range map[string]string{
+		"auth":       wl.Canaries.Auth.Unavailable,
+		"model-list": wl.Canaries.ModelList.Unavailable,
+		"behavioral": wl.Canaries.Behavioral.Unavailable,
+	} {
+		if !strings.Contains(reason, watchlist.CanaryArmEnv) {
+			t.Errorf("the %s leg's disarmed reason %q does not name the arm env", name, reason)
+		}
+	}
+
+	// A disarmed sweep RECORDS nothing and SPENDS nothing, and every leg it
+	// could not run is counted with its reason.
 	sweep, err := wl.Canaries.RunDue(ctx)
 	if err != nil {
 		t.Fatalf("RunDue: %v", err)
 	}
 	if sweep.Ran != 0 {
 		t.Errorf("a disarmed layer ran %d canaries, want 0", sweep.Ran)
+	}
+	if sweep.Disarmed != 6 {
+		t.Errorf("disarmed count = %d, want 6 (3 legs × 2 paid lanes) — a skipped leg must still be accounted for", sweep.Disarmed)
+	}
+	if len(sweep.Reasons) != 3 {
+		t.Errorf("sweep reasons = %v, want one per leg kind", sweep.Reasons)
 	}
 	var n int
 	if err := db.QueryRowContext(ctx,
@@ -380,8 +403,39 @@ func TestArmingWiresNoLegWithoutItsDependency(t *testing.T) {
 	if !wl.CanaryArmed {
 		t.Fatal("the arm env did not arm the legs")
 	}
-	if wl.Canaries.Behavioral != nil {
-		t.Error("the behavioral leg wired without a pinned runner — SANCTIONED SKIP (CONVENTIONS §10) is the honest state until the B5-gate install")
+	if wl.Canaries.Behavioral == nil {
+		t.Fatal("the behavioral leg is nil — it must exist to account for itself")
+	}
+	if wl.Canaries.Behavioral.Run != nil {
+		t.Error("the behavioral leg holds a runner without a pinned binary — SANCTIONED SKIP (CONVENTIONS §10) is the honest state until the B5-gate install")
+	}
+	if !strings.Contains(wl.Canaries.Behavioral.Unavailable, "B5-gate") {
+		t.Errorf("the behavioral leg's reason %q does not name the carried B5-5 install dependency", wl.Canaries.Behavioral.Unavailable)
+	}
+
+	// Arming is necessary but NOT sufficient: on this tree the auth and
+	// model-list legs still need gate-time endpoints and a broker credential
+	// accessor, and they say so rather than pretending to be armed.
+	for name, leg := range map[string]string{
+		"auth":       wl.Canaries.Auth.Unavailable,
+		"model-list": wl.Canaries.ModelList.Unavailable,
+	} {
+		if wl.Canaries.Auth.Probe != nil || wl.Canaries.ModelList.Probe != nil {
+			t.Errorf("the %s leg composed a probe with no endpoint or credential source in the tree", name)
+		}
+		if !strings.Contains(leg, "B5-gate install material") {
+			t.Errorf("the %s leg's armed reason %q does not name what it is still waiting for", name, leg)
+		}
+	}
+
+	// Armed but uncomposed legs are still COUNTED, so the gap is visible in
+	// every sweep line rather than only in a doc.
+	sweep, err := wl.Canaries.RunDue(ctx)
+	if err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	if sweep.Disarmed != 6 {
+		t.Errorf("armed-but-uncomposed disarmed count = %d, want 6", sweep.Disarmed)
 	}
 }
 

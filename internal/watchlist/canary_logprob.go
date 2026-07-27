@@ -74,11 +74,14 @@ func (l *LogprobCanary) Run(ctx context.Context, c *Canaries, lane string) (Cana
 	if lane != LaneLocal {
 		return CanaryResult{}, fmt.Errorf("%w: %q exposes no logprobs (S03.7)", ErrLaneNotLocal, lane)
 	}
+	// NOT an arming matter: this canary is local-tier and costs no allowance,
+	// so CanaryArmEnv never gates it. An absent stack or meter is a stack
+	// absence and is accounted for as one (drain D5).
 	if l.Duty == nil {
-		return CanaryResult{}, ErrCanaryDisarmed
+		return CanaryResult{}, fmt.Errorf("%w: no local tier is configured", ErrCanaryStackAbsent)
 	}
 	if l.Meter == nil {
-		return CanaryResult{}, ErrCanaryDisarmed
+		return CanaryResult{}, fmt.Errorf("%w: no advisory metering seam is wired, so the $0 D7 row could not be written and the probe was not issued unmetered", ErrCanaryStackAbsent)
 	}
 	runID, settle, err := l.Meter(ctx, "watchlist-canary")
 	if err != nil {
