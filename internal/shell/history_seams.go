@@ -34,6 +34,7 @@ import (
 // catalog. The reliability floor is the catalog, and the catalog is always
 // there.
 func buildHistorySurface(
+	ctx context.Context,
 	db *storage.DB,
 	log *eventlog.Log,
 	runs *run.Store,
@@ -41,21 +42,44 @@ func buildHistorySurface(
 	duty *local.Duty,
 	cal *local.CalStore,
 	logger *slog.Logger,
-) (*history.Store, error) {
+) (*history.Store, func() error, error) {
+	// The Layer-2 read-only handle (S14.10 ¶3, R29). It is opened HERE and not
+	// inside internal/history because opening the database is the storage
+	// seam's business and composition is the shell's — and because it must be
+	// opened after the writing handle has created the file and its WAL
+	// sidecars, which composing it at the root guarantees.
+	//
+	// A failure to open it is NOT fatal. Layer 2 is the escalation surface;
+	// Layers 0 and 1 are the floor and do not need it, so the platform comes up
+	// with an honest absence rather than not coming up.
+	var ro *storage.ReadOnly
+	closeRO := func() error { return nil }
+	ro, err := db.OpenReadOnly(ctx)
+	if err != nil {
+		logger.Warn("history: the Layer-2 read-only handle could not be opened — open SQL is unavailable, the canned catalog is unaffected",
+			"error", err)
+		ro = nil
+	} else {
+		closeRO = ro.Close
+	}
+
 	st, err := history.New(history.Config{
 		DB:       db,
+		ReadOnly: ro,
 		Log:      log,
 		Duty:     duty,
 		Cal:      cal,
 		Advisory: historyAdvisory(advisoryMeter(runs, checkpoints)),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("shell: wire the S14.10 query surface: %w", err)
+		_ = closeRO()
+		return nil, nil, fmt.Errorf("shell: wire the S14.10 query surface: %w", err)
 	}
 	logger.Info("history: S14.10 query surface wired (B5-8B)",
 		"views", len(history.Views()), "catalog", len(history.Catalog()),
-		"intent_wired", duty != nil, "calibrated_gate", cal != nil)
-	return st, nil
+		"intent_wired", duty != nil, "calibrated_gate", cal != nil,
+		"open_sql_wired", ro != nil && duty != nil)
+	return st, closeRO, nil
 }
 
 // historyAdvisory adapts the §31 OQ4 AdvisoryMeter to internal/history's seam.

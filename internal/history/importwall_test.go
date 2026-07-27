@@ -189,15 +189,33 @@ func TestPackageOwnsNoTicker(t *testing.T) {
 	}
 }
 
-// TestTheQueryLayerNeverWrites — the whole surface is READ-ONLY by
-// construction. Every statement in the package and every statement in the
-// catalog is a SELECT; nothing here opens a write transaction.
+// TestTheQueryLayerNeverWrites — the query surface executes no write. Every
+// statement in the package and every statement in the catalog is a SELECT, and
+// nothing here opens a write transaction or an Exec.
+//
+// HONESTLY NARROWED BY THE C HALF (B5-8B sitting 2). The B half could say "the
+// package never writes at all"; Layer 2 makes that false in one specific and
+// mandated way — S14.10 ¶3 requires every generated query to be audit-logged,
+// so layer2.go appends ONE event type. The scan therefore asserts the sharper
+// property: no file executes SQL of its own, and the ONLY append is the audit
+// row. `guard.go` is exempt from the write-verb literal scan for the obvious
+// reason that its whole job is to NAME those verbs in order to refuse them —
+// and TestGuardNamesEveryWriteVerbItRefuses below is the positive limb that
+// keeps the exemption honest.
 func TestTheQueryLayerNeverWrites(t *testing.T) {
 	files := 0
 	for _, name := range goFiles(t, ".") {
 		files++
 		src := readFile(t, name)
-		for _, verb := range []string{"WriteTx", "ExecContext", "INSERT ", "UPDATE ", "DELETE ", "CREATE ", "DROP ", "ALTER "} {
+		for _, verb := range []string{"WriteTx", "ExecContext"} {
+			if strings.Contains(src, verb) {
+				t.Errorf("%s contains %q — the query surface reads and never writes", name, verb)
+			}
+		}
+		if strings.HasSuffix(name, "guard.go") {
+			continue
+		}
+		for _, verb := range []string{"INSERT ", "UPDATE ", "DELETE ", "CREATE ", "DROP ", "ALTER "} {
 			if strings.Contains(src, verb) {
 				t.Errorf("%s contains %q — the query surface reads and never writes", name, verb)
 			}
@@ -209,6 +227,23 @@ func TestTheQueryLayerNeverWrites(t *testing.T) {
 	// Non-tautology probe.
 	if !strings.Contains(`db.WriteTx(ctx, func(tx *sql.Tx) error { return nil })`, "WriteTx") {
 		t.Fatal("the write scan cannot detect its own probe")
+	}
+}
+
+// TestGuardNamesEveryWriteVerbItRefuses — the positive limb behind guard.go's
+// exemption above. A guard that stopped naming the write verbs would have
+// stopped refusing them, and the exemption would then be hiding the regression
+// it was granted to permit.
+func TestGuardNamesEveryWriteVerbItRefuses(t *testing.T) {
+	src := readFile(t, filepath.Join(".", "guard.go"))
+	for _, verb := range []string{"insert", "update", "delete", "drop", "alter", "create", "attach", "pragma"} {
+		if !strings.Contains(src, `"`+verb+`"`) {
+			t.Errorf("guard.go no longer names %q as a refused statement word", verb)
+		}
+		stmt := strings.ToUpper(verb) + " something"
+		if _, err := history.Guard(stmt, history.Scope{Operator: true}, 10); err == nil {
+			t.Errorf("Guard accepted %q", stmt)
+		}
 	}
 }
 
@@ -248,19 +283,35 @@ func TestLimitEventTypesArePinnedToTheRegistry(t *testing.T) {
 	}
 }
 
-// TestNoNewEventTypeIsMinted — this packet ships a READ surface. It mints no
-// event type, so the §29 inventory is untouched (87 minted / 7 declare-only /
-// 94 registered, as B5-8A left it).
-func TestNoNewEventTypeIsMinted(t *testing.T) {
-	if n := len(eventlog.Registry().Types()); n != 94 {
-		t.Errorf("the S14.2 registry holds %d types, want 94 — this packet registers none", n)
+// TestExactlyOneEventTypeIsMinted — the §29 inventory, honestly restated by the
+// C half. The B half (Layers 0/1 + search) registered NOTHING and left the
+// registry at B5-8A's 94. The C half registers exactly ONE type,
+// history.query_audited, because S14.10 ¶3 requires every generated query to be
+// audit-logged — so 95 registered, and the append appears in exactly one file.
+//
+// The Layer 0/1 surface stays read-only, which is the part worth keeping: an
+// append anywhere but layer2.go is still a defect.
+func TestExactlyOneEventTypeIsMinted(t *testing.T) {
+	if n := len(eventlog.Registry().Types()); n != 95 {
+		t.Errorf("the S14.2 registry holds %d types, want 95 (B5-8A's 94 + history.query_audited)", n)
 	}
+	if _, ok := eventlog.Registry().TypeSpec(history.EventQueryAudited); !ok {
+		t.Errorf("%q is not registered in the S14.2 contract (CONVENTIONS §29)", history.EventQueryAudited)
+	}
+	appenders := 0
 	for _, name := range goFiles(t, ".") {
 		src := readFile(t, name)
-		if strings.Contains(src, "eventlog.Append{") {
-			t.Errorf("%s appends an event — the Layer 0/1 query surface is read-only", name)
+		if !strings.Contains(src, "eventlog.Append{") {
+			continue
+		}
+		appenders++
+		if !strings.HasSuffix(name, "layer2.go") {
+			t.Errorf("%s appends an event — only the Layer-2 audit record may (S14.10 ¶3)", name)
 		}
 	}
-	// The package's one eventlog use is the registry, for the pin above.
+	if appenders != 1 {
+		t.Errorf("%d files append events, want exactly 1 (layer2.go's audit record)", appenders)
+	}
+	// The package's one other eventlog use is the registry, for the type pins.
 	_ = history.CatalogNames
 }

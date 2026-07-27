@@ -323,5 +323,22 @@ func SeedRows() []Row {
 			DeriveKind:  DeriveDeadMan,
 			Notes:       "OQ5(c): the watchdog's own liveness probe is a genuine scheduled drill (the same G1 Def.3 superseded set the escalation row cites), so it earns a registry row — last-run DERIVED from the deadman events (the latest platform.deadman.* birth), NO import edge to internal/watchdog. The four watchdog platform-health checks (resume-reconcile/listener/organ-absence/event-log-size) are continuous DETECTION, S14.4-scheduled, and get NO rows (not fixture-backed proof suites). A red dead-man already raises the watchdog's own flag-now watchdog.dead_man card (§31), so this DERIVE row is dueness/visibility only, never a double-fire.",
 		},
+		{
+			// Layer-2 open-SQL injection-attempt battery [S14.10 ¶3] — B5-8B R36.
+			ID:            "layer2-open-sql-injection",
+			OwningSection: "S14.10",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/history/ -run TestInjectionBattery (the injection-attempt battery: DDL/DML, multi-statement smuggling, comment-hidden statements, ATTACH/PRAGMA, out-of-allowlist base tables, qualified names, bind-parameter smuggling and prompt-injection-through-event-content — every attempt refused, every refusal reason asserted)", Pkg: "internal/history", Run: "TestInjectionBattery"},
+				{Handle: "go test ./internal/history/ -run TestTheWholeBatteryChangesNothing (the same battery through the REAL Layer-2 verb against a real database, asserting the database is unchanged afterwards)", Pkg: "internal/history", Run: "TestTheWholeBatteryChangesNothing"},
+				{Handle: "go test ./internal/storage/ -run TestReadOnlyHandleRefusesEveryWrite (the read-only handle's write refusals, proven at the SQLite layer)", Pkg: "internal/storage", Run: "TestReadOnlyHandleRefusesEveryWrite"},
+				{Handle: "go test ./internal/history/ -run TestBatteryIsNonTautological (the control group: legitimate reads are ACCEPTED, so the refusals discriminate)", Pkg: "internal/history", Run: "TestBatteryIsNonTautological"},
+				{Handle: "the TBD-BRINGUP Layer-2 acceptance measurement (G3 Def.8 battery), PRE-REGISTERED before execution; the live-seat run is a bring-up act", File: "P3/measurements/2026-07-27-layer2-open-sql-bringup.md"},
+			},
+			TriggerSet:  []string{TriggerModelSwap, TriggerQuarterly},
+			Schedule:    "on any sql-open alias retarget or model swap; quarterly sweep",
+			Cadence:     CadenceQuarterly,
+			AffectClass: AffectNone,
+			Notes:       "S14.10 ¶3's guardrail stack is the consumer of the ADVERSE B4-7 finding (Arctic-Text2SQL-R1-7B scored 0/30 raw because it emits chain-of-thought before the statement — P3/measurements/2026-07-22-sql-open-arctic.md), so the surface's safety is a property of the GUARDRAIL, never of the seat. That makes the battery model-independent by design and re-runnable on any alias retarget: it asserts that whatever the seat emits dies at the guardrail. Tier F throughout ($0, no seat dialed); the live-seat acceptance run is a bring-up act recorded to P3/measurements, never a Go test (§3).",
+		},
 	}
 }

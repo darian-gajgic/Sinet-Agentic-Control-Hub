@@ -29,6 +29,7 @@ package history
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -134,6 +135,15 @@ type Config struct {
 	Cal *local.CalStore
 	// Advisory opens the metering run for a duty call. nil = no duty legs.
 	Advisory AdvisoryRun
+	// ReadOnly is the SECOND handle Layer 2 executes generated SQL on
+	// (S14.10 ¶3, R29): read-only by DSN and by query_only, opened from the
+	// same *storage.DB. nil = Layer 2 is unavailable, which is an honest
+	// absence — Layers 0 and 1 are unaffected and they are the floor.
+	//
+	// It is a separate handle because the writing handle keeps a single
+	// connection, so a query_only pragma on IT would disable the control
+	// plane's own writes.
+	ReadOnly *storage.ReadOnly
 	// Now is the clock seam. nil = time.Now.
 	Now func() time.Time
 }
@@ -141,6 +151,7 @@ type Config struct {
 // Store is the S14.10 query surface.
 type Store struct {
 	db       *storage.DB
+	ro       *storage.ReadOnly
 	log      *eventlog.Log
 	duty     *local.Duty
 	cal      *local.CalStore
@@ -155,6 +166,7 @@ func New(cfg Config) (*Store, error) {
 	}
 	s := &Store{
 		db:       cfg.DB,
+		ro:       cfg.ReadOnly,
 		log:      cfg.Log,
 		duty:     cfg.Duty,
 		cal:      cfg.Cal,
@@ -198,6 +210,10 @@ type Answer struct {
 	Truncated  bool            `json:"truncated"`
 	Notes      []string        `json:"notes,omitempty"`
 	Card       *Disambiguation `json:"card,omitempty"`
+	// Audit is the Layer-2 record (S14.10 ¶3), carried on the answer as well as
+	// written to the log so a refusal can be shown without a second read. It is
+	// nil for Layers 0 and 1, which generate nothing.
+	Audit *OpenSQLAudit `json:"audit,omitempty"`
 }
 
 // newAnswer is the ONLY constructor. It takes the layer and the query name
@@ -245,12 +261,24 @@ func clampLimit(limit int) int {
 	return limit
 }
 
-// query runs one read and folds it into an answer's columns and rows. Reads are
-// short-batch and outside any caller transaction (S02.1 read hygiene). It
+// rowSource is anything a read can run on. It exists so Layer 2 executes on
+// the READ-ONLY handle while Layers 0 and 1 stay on the control plane's own —
+// the two differ in nothing but which connection they are allowed to touch.
+type rowSource interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// query runs one read on the control plane's handle.
+func (s *Store) query(ctx context.Context, a *Answer, sqlText string, args []any, limit int) error {
+	return s.queryOn(ctx, s.db, a, sqlText, args, limit)
+}
+
+// queryOn runs one read and folds it into an answer's columns and rows. Reads
+// are short-batch and outside any caller transaction (S02.1 read hygiene). It
 // fetches one row beyond the limit so Truncated is OBSERVED rather than
 // inferred from a full page.
-func (s *Store) query(ctx context.Context, a *Answer, sqlText string, args []any, limit int) error {
-	rows, err := s.db.QueryContext(ctx, sqlText, args...)
+func (s *Store) queryOn(ctx context.Context, src rowSource, a *Answer, sqlText string, args []any, limit int) error {
+	rows, err := src.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return fmt.Errorf("history: run %q: %w", a.Query, err)
 	}

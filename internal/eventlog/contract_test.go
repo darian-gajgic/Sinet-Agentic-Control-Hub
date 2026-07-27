@@ -22,6 +22,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
@@ -110,6 +111,11 @@ func producerTypes() []string {
 		// appended at the run's terminal transition (family 15 becomes fully
 		// minted); retention.compacted is the compaction pass logging itself.
 		retention.EventSummaryWritten, retention.EventCompacted,
+		// history (1): the B5-8B C-half S14.10 ¶3 producer — the Layer-2
+		// open-SQL surface auditing every generated query, INCLUDING every
+		// refusal. It is the packet's only new type and the only reason the
+		// registry grows past B5-8A's 94.
+		history.EventQueryAudited,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -167,12 +173,17 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 // three watchdog types, B5-4 minted eval.score_recorded, B5-6A minted
 // drift.finding, B5-6B minted canary.result, B5-7 minted
 // benchmark.pair_recorded + benchmark.alarm and flipped decision.recorded, and
-// B5-8A flipped run.summary_written + retention.compacted — so 87 minted +
-// 7 declare-only = 94 registered types. Families 11 (Drift & canary), 14
+// B5-8A flipped run.summary_written + retention.compacted — 87 minted +
+// 7 declare-only = 94. B5-8B's C half then REGISTERS ONE GENUINELY NEW TYPE,
+// history.query_audited (§29: "a new minted type is a contract.go entry + a
+// producerTypes() inventory entry in the same packet"; a new FAMILY would have
+// been an S00.9 amendment and none is needed — it lands in family 12 under the
+// same OQ2-(A) reading as the other platform-operational groups). So 88 minted
+// + 7 declare-only = 95 registered types. Families 11 (Drift & canary), 14
 // (Benchmark & eval) and 15 (Run summary) are all fully minted.
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 87 {
-		t.Errorf("producer inventory = %d, want 87 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A)", n)
+	if n := len(producerTypes()); n != 88 {
+		t.Errorf("producer inventory = %d, want 88 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -185,8 +196,8 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 87 {
-		t.Errorf("registered minted types = %d, want 87", minted)
+	if minted != 88 {
+		t.Errorf("registered minted types = %d, want 88", minted)
 	}
 	if declareOnly != 7 {
 		t.Errorf("declare-only types = %d, want 7", declareOnly)
@@ -718,6 +729,16 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"retention.compacted",
 			`{"as_of":"2026-08-01T03:00:00Z","owners":[{"user_id":"alice","horizon_months":6,"boundary_ts":"2026-02-01T03:00:00Z","boundary_event_seq":9412,"events_stripped":318,"bytes_reclaimed":1048576,"by_family":{"tools_artifacts":301,"orchestration":17},"transcripts_stripped":4}],"events_stripped":318,"bytes_reclaimed":1048576}`,
 			[]string{"as_of", "owners", "events_stripped", "bytes_reclaimed"},
+		},
+		{
+			// history.query_audited (B5-8B C half): S14.10 3's "every generated
+			// query audit-logged". The contract minimum is what makes the record
+			// REVIEWABLE — what was asked, what the seat produced, what actually
+			// executed, and under which bounds — plus the outcome, because a
+			// refusal is a row too and is the interesting kind.
+			"history.query_audited",
+			`{"question":"which runs cost the most?","outcome":"refused","sql_generated":"SELECT payload FROM run_events","sql_executed":"","views":[],"limit_injected":200,"timeout_ms":5000,"refusal":"history: refused by the Layer-2 guardrail: \"run_events\" is not an allowlisted view","row_count":0,"truncated":false,"model":"Arctic-Text2SQL-R1-7B","alias":"sql-open","as_operator":true,"owner_scoped":0,"raw_output_len":412}`,
+			[]string{"question", "outcome", "sql_generated", "limit_injected", "timeout_ms", "alias"},
 		},
 	}
 	for _, c := range cases {

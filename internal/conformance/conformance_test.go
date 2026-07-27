@@ -152,8 +152,8 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	find(t, states, "dead-man-canary")
 	// The S14.8 regression-sweep row (B5-5): the S14.8 results' recording home.
 	find(t, states, conformance.RowRegressionSweep)
-	if len(states) != 10 {
-		t.Fatalf("seed produced %d rows, want 10 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep)", len(states))
+	if len(states) != 11 {
+		t.Fatalf("seed produced %d rows, want 11 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery)", len(states))
 	}
 
 	// The zai lane is OMITTED (R7): no row claims it, and the reason is recorded.
@@ -501,8 +501,8 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 10 {
-		t.Fatalf("never-run: %d rows due, want all 10", len(due))
+	if len(due) != 11 {
+		t.Fatalf("never-run: %d rows due, want all 11", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).

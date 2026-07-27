@@ -593,11 +593,13 @@ func Run(ctx context.Context, opts Options) error {
 		// query surface's WHEN is "when a question is asked" — and no HTTP
 		// route: the transport is B6's (the §31/§35 held-not-routed precedent,
 		// as with Accept/FollowUp/Preview).
-		histSurf, err = buildHistorySurface(db, log, runs, checkpoints,
+		var closeHistoryRO func() error
+		histSurf, closeHistoryRO, err = buildHistorySurface(ctx, db, log, runs, checkpoints,
 			localSurf.Duty, localSurf.CalStore, logger)
 		if err != nil {
 			return err
 		}
+		defer func() { _ = closeHistoryRO() }()
 
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,

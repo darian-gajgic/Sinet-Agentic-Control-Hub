@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -46,12 +47,19 @@ func TestHistorySurfaceComposesWithoutALocalStack(t *testing.T) {
 	runs := run.NewStore(db, log)
 	cps := gates.NewCheckpoints(db, log)
 
-	st, err := buildHistorySurface(db, log, runs, cps, nil, nil, testLogger())
+	st, closeRO, err := buildHistorySurface(ctx, db, log, runs, cps, nil, nil, testLogger())
 	if err != nil {
 		t.Fatalf("buildHistorySurface with no local stack: %v", err)
 	}
+	t.Cleanup(func() { _ = closeRO() })
 	if st == nil {
 		t.Fatal("nil store")
+	}
+	// Layer 2 composes its read-only handle here, but with no local stack there
+	// is nothing to generate SQL — so it is UNAVAILABLE, honestly, and the
+	// floor below it is unaffected (asserted through the rest of this test).
+	if _, err := st.AskOpenSQL(ctx, "anything", history.Scope{Operator: true}, 5); !errors.Is(err, history.ErrOpenSQLUnavailable) {
+		t.Errorf("AskOpenSQL with no local stack: %v, want ErrOpenSQLUnavailable", err)
 	}
 	scope := history.Scope{Operator: true}
 
