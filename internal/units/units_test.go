@@ -1,6 +1,7 @@
 package units_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -263,37 +264,102 @@ func TestWatchlistUnitHonoursStructuralOverrides(t *testing.T) {
 	}
 }
 
-// TestWatchlistUnitCarriesTheLocalLLMEndpoint is the drain-r2 R4 lock. S14.6 T1
-// wants the organ's native triage pointed at Sinet's local endpoint; the packet
-// first recorded that as "inexpressible, an operator UI step". It is not: at
-// 0.55.8 `changedetectionio/llm/evaluator.py` get_llm_config resolves
-// LLM_MODEL / LLM_API_KEY / LLM_API_BASE BEFORE the datastore, so the pointing
-// rides Environment= on this generated unit. Both variables must be present —
-// the env branch is chosen only on a non-empty LLM_MODEL — and the api_base
-// must track the llama-swap unit generated beside it, not a restated literal.
+// TestWatchlistUnitCarriesTheLocalLLMEndpoint is the drain-r2 R4 lock, tightened
+// at landing (re-check F1/F2). S14.6 T1 wants the organ's native triage pointed
+// at Sinet's local endpoint; the packet first recorded that as "inexpressible,
+// an operator UI step". It is not: at 0.55.8 `changedetectionio/llm/evaluator.py`
+// get_llm_config resolves LLM_MODEL / LLM_API_KEY / LLM_API_BASE BEFORE the
+// datastore, so the pointing rides Environment= on this generated unit. The
+// api_base must track the llama-swap unit generated beside it, and the MODEL
+// must be one that llama-swap actually serves: the swap config keys models by
+// seat MODEL ID and never hears duty aliases (S12.4/R15), so the rendered
+// default is the ⚙ local.alias-resolved seat's model id, not the alias.
 func TestWatchlistUnitCarriesTheLocalLLMEndpoint(t *testing.T) {
 	f := gen(t, units.Params{})["sinet-watchlist.service"]
 	for _, want := range []string{
 		"Environment=LLM_API_BASE=http://127.0.0.1:8791/v1",
-		"Environment=LLM_MODEL=openai/" + local.AliasWatchlist,
+		// Default ⚙ local.alias: watchlist-triage → fast → Qwen3.5-4B.
+		"Environment=LLM_MODEL=openai/Qwen3.5-4B",
+		// The organ's litellm/OpenAI-SDK client refuses a MISSING key before
+		// any request; the server checks none, so a fixed NON-SECRET
+		// placeholder rides the unit. Not a credential (S11.5).
+		"Environment=LLM_API_KEY=sk-local-no-auth",
 	} {
 		if !strings.Contains(f.Content, want) {
 			t.Errorf("the watchlist unit does not point the organ at the local endpoint (missing %q):\n%s", want, f.Content)
 		}
 	}
-	// A secret never rides a generated unit (S11.5): the local endpoint needs
-	// no key, so none is rendered.
-	if strings.Contains(f.Content, "LLM_API_KEY") {
-		t.Error("the watchlist unit renders LLM_API_KEY — a generated unit is never a place for a credential")
+	// The rendered alias must never leak into the model name: llama-swap has
+	// no models entry for the duty alias, so this exact string is the F1 bug.
+	if strings.Contains(f.Content, "LLM_MODEL=openai/"+local.AliasWatchlist) {
+		t.Error("the watchlist unit names the duty alias as the model — llama-swap never serves alias names (S12.4/R15)")
+	}
+	// Cross-artifact consistency (the F1 invariant): the model the unit names
+	// is a models: key of the llama-swap config generated from the SAME
+	// manifest — the two generated artifacts must agree by construction.
+	model := strings.TrimPrefix(lineValue(t, f.Content, "Environment=LLM_MODEL="), "openai/")
+	cfg, err := local.GenerateConfig(local.ConfigParams{
+		ModelCacheDir: "/tmp/models",
+		GPUUUIDs:      []string{"GPU-test-uuid"},
+		LlamaServer:   "/opt/llama/llama-server",
+		TTLFastS:      1, TTLWorkhorseS: 1, UnloadGraceS: 1,
+	})
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+	if !strings.Contains(cfg, fmt.Sprintf("%q:", model)) {
+		t.Errorf("unit LLM_MODEL %q is not a models: key of the generated llama-swap config — the two artifacts disagree:\n%s", model, cfg)
 	}
 	// The endpoint follows the llama-swap unit rather than a second literal.
 	moved := gen(t, units.Params{LlamaSwapListen: "127.0.0.1:9911"})["sinet-watchlist.service"]
 	if !strings.Contains(moved.Content, "Environment=LLM_API_BASE=http://127.0.0.1:9911/v1") {
 		t.Errorf("moving llama-swap did not move the organ's api_base:\n%s", moved.Content)
 	}
+	// An operator retarget of ⚙ local.alias is honored on regeneration — the
+	// default is DERIVED from the alias-resolved seat, never a constant.
+	retargeted, err := units.Files(aliasOverride{settings.New(), map[string]string{
+		local.AliasWatchlist: "workhorse",
+	}}, units.Params{})
+	if err != nil {
+		t.Fatalf("Files (retargeted alias): %v", err)
+	}
+	for _, uf := range retargeted {
+		if uf.Name != "sinet-watchlist.service" {
+			continue
+		}
+		if !strings.Contains(uf.Content, "Environment=LLM_MODEL=openai/Qwen3.5-9B") {
+			t.Errorf("retargeting watchlist-triage to the workhorse seat did not change the rendered model:\n%s", uf.Content)
+		}
+	}
 	// And the model string is deployment config, not a constant.
 	seat := gen(t, units.Params{WatchlistLLMModel: "openai/qwen3-4b"})["sinet-watchlist.service"]
 	if !strings.Contains(seat.Content, "Environment=LLM_MODEL=openai/qwen3-4b") {
 		t.Errorf("the model override is not rendered:\n%s", seat.Content)
 	}
+}
+
+// lineValue extracts the remainder of the first line starting with prefix.
+func lineValue(t *testing.T, content, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	t.Fatalf("no line with prefix %q:\n%s", prefix, content)
+	return ""
+}
+
+// aliasOverride shadows the real registry's ⚙ local.alias map — the units view
+// of an operator alias retarget (S12.4), everything else at declared defaults.
+type aliasOverride struct {
+	*settings.Registry
+	alias map[string]string
+}
+
+func (a aliasOverride) StringMap(key string) (map[string]string, error) {
+	if key == "local.alias" {
+		return a.alias, nil
+	}
+	return a.Registry.StringMap(key)
 }

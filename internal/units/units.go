@@ -39,6 +39,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // A1 hostname commitment (Spec S01.8, amendment A1, operator 2026-07-19):
@@ -59,6 +61,7 @@ const DefaultBinaryPath = "/usr/local/bin/sinet"
 type Settings interface {
 	Int(key string) (int64, error)
 	Duration(key string) (time.Duration, error)
+	StringMap(key string) (map[string]string, error)
 }
 
 // Dotted ⚙ keys rendered into the unit set (owned by Spec S01, plus the S13.10
@@ -68,6 +71,7 @@ const (
 	keyJournalMaxUse   = "shell.journal_max_use"
 	keyBackupInterval  = "backup.interval"       // seconds (snapshot cadence)
 	keyBackupDrillEach = "backup.drill_interval" // months (restore-drill cadence)
+	keyLocalAlias      = "local.alias"           // TypeMap duty→seat (S12.4; the watchlist LLM_MODEL derivation)
 )
 
 // File is one generated configuration file.
@@ -107,8 +111,12 @@ type Params struct {
 	// WatchlistLLMModel is the model string the watchlist organ's native
 	// first-pass triage sends to Sinet's local endpoint (S14.6 ¶T1), rendered
 	// as Environment=LLM_MODEL on the generated unit. Structural, not ⚙.
-	// Default below; override when the operator's llama-swap config names the
-	// seat directly instead of exposing the duty alias.
+	// Empty = derived from the seat ⚙ local.alias resolves for the
+	// watchlist-triage duty: the generated llama-swap config keys its models
+	// map by the seat's MODEL ID and never hears alias names (aliases are
+	// swap-invisible, S12.4/R15), so the seat's model id is the only name the
+	// endpoint beside this unit actually serves. Override only to point the
+	// organ at an endpoint Sinet did not generate.
 	WatchlistLLMModel string
 }
 
@@ -133,14 +141,16 @@ const (
 	defaultWatchlistBinary    = "/usr/local/bin/changedetection.io"
 	defaultWatchlistDatastore = "/var/lib/sinet/watchlist"
 	defaultWatchlistListen    = "127.0.0.1:5000"
-	// defaultWatchlistLLMModel points the organ's native triage at the duty
-	// alias Sinet reserves for it (local.AliasWatchlist, "watchlist-triage" —
-	// pinned against drift by test). The `openai/` prefix is litellm's
-	// custom-endpoint form: with an api_base set, that prefix is what routes
-	// the call to an OpenAI-compatible server instead of a hosted provider,
-	// and the organ passes the model string through to litellm unchanged
-	// (changedetectionio/llm/client.py@0.55.8).
-	defaultWatchlistLLMModel = "openai/watchlist-triage"
+	// watchlistLLMKeyPlaceholder is the FIXED, NON-SECRET api-key value the
+	// watchlist unit renders. llama-swap checks no key server-side, but the
+	// organ's client chain refuses a MISSING one client-side before any HTTP
+	// request: changedetectionio/llm/client.py@0.55.8 forwards api_key only
+	// when non-empty, litellm then falls back to OPENAI_API_KEY (absent in a
+	// unit env) and hands None to the OpenAI SDK, whose constructor raises.
+	// A fixed placeholder is not a credential — there is nothing to protect
+	// and the server ignores it — so S11.5 (no secret on a generated unit)
+	// is not implicated.
+	watchlistLLMKeyPlaceholder = "sk-local-no-auth"
 )
 
 // header is the shared provenance banner.
@@ -226,7 +236,35 @@ func Files(settings Settings, p Params) ([]File, error) {
 	}
 	watchLLMModel := p.WatchlistLLMModel
 	if watchLLMModel == "" {
-		watchLLMModel = defaultWatchlistLLMModel
+		// Derive the served model name from the seat ⚙ local.alias resolves
+		// for the watchlist-triage duty (same lookup as local's alias
+		// registry): the llama-swap config generated from the same manifest
+		// keys its models map by seat MODEL ID — the duty alias itself is
+		// swap-invisible (S12.4/R15), so rendering the alias here would name
+		// a model the endpoint beside this unit can never serve. The
+		// `openai/` prefix is litellm's custom-endpoint form: with an
+		// api_base set it routes the call to an OpenAI-compatible server,
+		// and the organ passes the model string through to litellm unchanged
+		// (changedetectionio/llm/client.py@0.55.8).
+		aliases, err := settings.StringMap(keyLocalAlias)
+		if err != nil {
+			return nil, fmt.Errorf("units: read ⚙ %s: %w", keyLocalAlias, err)
+		}
+		target, ok := aliases[local.AliasWatchlist]
+		if !ok {
+			return nil, fmt.Errorf("units: ⚙ %s has no %q entry (S12.4)", keyLocalAlias, local.AliasWatchlist)
+		}
+		var seatModel string
+		for _, s := range local.Manifest() {
+			if s.Seat == target {
+				seatModel = s.Model
+				break
+			}
+		}
+		if seatModel == "" {
+			return nil, fmt.Errorf("units: ⚙ %s %q → seat %q not in the S12.3 manifest", keyLocalAlias, local.AliasWatchlist, target)
+		}
+		watchLLMModel = "openai/" + seatModel
 	}
 	// The organ's LLM endpoint IS the llama-swap front generated above, so it
 	// is derived from that unit's listen address rather than restated: move
@@ -270,8 +308,13 @@ func Files(settings Settings, p Params) ([]File, error) {
 // endpoint pointing rides Environment= here, versioned like every other line
 // in this file, instead of a click in the organ's UI that no artifact records.
 // A non-empty LLM_MODEL is what makes the env branch win, so both variables are
-// rendered together. LLM_API_KEY is deliberately absent: the local endpoint
-// needs none and a generated unit never carries a secret (S11.5).
+// rendered together. The model string is the ALIAS-RESOLVED SEAT's model id
+// (derived in Files), because that is the name the generated llama-swap config
+// beside this unit actually serves. LLM_API_KEY carries a fixed non-secret
+// placeholder (see watchlistLLMKeyPlaceholder): the server checks no key, but
+// the organ's litellm/OpenAI-SDK client chain raises on a missing one before
+// any request leaves the process; a placeholder is not a credential, so S11.5
+// stays satisfied.
 func watchlistService(binary, datastore, host, port, llmAPIBase, llmModel string) File {
 	var b strings.Builder
 	b.WriteString(header())
@@ -294,14 +337,18 @@ ExecStart=%s -d %s -h %s -p %s
 # S14.6 T1 first-pass triage: the organ's own LLM rules, pointed at Sinet's
 # local OpenAI-compatible endpoint (the llama-swap front above). Environment
 # wins over the organ's datastore settings at 0.55.8, so this is Sinet
-# configuration, not an unversioned UI step. The endpoint must serve this model
-# name; regenerate with a different one if the llama-swap config names the seat
-# instead of the duty alias.
+# configuration, not an unversioned UI step. The model name is the seat model
+# id ⚙ local.alias resolves for watchlist-triage — the same key the generated
+# llama-swap config serves (aliases are swap-invisible, S12.4/R15); an alias
+# retarget means regenerating both files. The api key is a fixed non-secret
+# placeholder: the server ignores it, but the organ's client library refuses
+# to start a request without one.
 Environment=LLM_API_BASE=%s
 Environment=LLM_MODEL=%s
+Environment=LLM_API_KEY=%s
 Restart=on-failure
 StateDirectory=sinet/watchlist
-`, binary, datastore, host, port, llmAPIBase, llmModel)
+`, binary, datastore, host, port, llmAPIBase, llmModel, watchlistLLMKeyPlaceholder)
 	b.WriteString(staticUser)
 	b.WriteString(`# Standard hardening set (Spec S01.2), with one recorded exception:
 # ProtectSystem= is 'full' rather than 'strict' because the organ is a Python
