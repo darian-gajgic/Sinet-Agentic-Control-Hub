@@ -100,6 +100,20 @@ type Config struct {
 	// nil = os.Remove. Seamed so a test can observe the filesystem leg without
 	// a temp-file dance in every case.
 	RemoveFile func(path string) error
+	// AuditFault is a FAULT-INJECTION seam over the compaction pass's audit
+	// append, and exists for one reason: to make the S14.9 ¶2 atomicity
+	// OBSERVABLE (drain r2 R3).
+	//
+	// Every unit of compaction work is one transaction holding both the payload
+	// elisions and the retention.compacted row that counts them, so a committed
+	// strip is never unaudited. That coupling is invisible to a test that only
+	// checks the happy path — the audit append could be moved into a follow-up
+	// transaction and every other assertion would still pass. With this seam a
+	// test can fail the append INSIDE the unit tx and assert the strips rolled
+	// back, so a future decoupling edit fails loudly instead of silently.
+	//
+	// nil in production, always: nothing sets it outside a test.
+	AuditFault func() error
 }
 
 // Store is the S14.9/S14.10 retention surface.
@@ -110,6 +124,8 @@ type Store struct {
 	narrator Narrator
 	now      func() time.Time
 	remove   func(path string) error
+	// auditFault is the R3 atomicity-guard seam; nil in production.
+	auditFault func() error
 }
 
 // New builds a Store. DB, Log and Settings are required; the rest default.
@@ -118,12 +134,13 @@ func New(cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("retention: DB, Log and Settings are required")
 	}
 	s := &Store{
-		db:       cfg.DB,
-		log:      cfg.Log,
-		settings: cfg.Settings,
-		narrator: cfg.Narrator,
-		now:      cfg.Now,
-		remove:   cfg.RemoveFile,
+		db:         cfg.DB,
+		log:        cfg.Log,
+		settings:   cfg.Settings,
+		narrator:   cfg.Narrator,
+		now:        cfg.Now,
+		remove:     cfg.RemoveFile,
+		auditFault: cfg.AuditFault,
 	}
 	if s.now == nil {
 		s.now = func() time.Time { return time.Now().UTC() }

@@ -83,12 +83,23 @@ END;
 -- and the pass enforces the owner's own horizon on top (internal/retention,
 -- proven by test). The floor is the limb that can be made structural, and it is.
 --
--- The floor carries ONE MINUTE of slack ('-1 month','-1 minute'). Both the floor
--- and the pass's boundary are computed by SQLite strftime, so they share a clock
--- and a format; the slack absorbs the sub-second and rounding difference between
--- them so that at horizon = 1 (the clamp minimum, where the two coincide) a
--- LEGITIMATE strip can never be refused by the guard meant to bound it. One
--- minute out of a month does not weaken the guard in any way that matters.
+-- The floor carries ONE MINUTE of slack in the PERMISSIVE direction
+-- ('-1 month','+1 minute'). The trigger permits a strip iff OLD.ts <= floor and
+-- the pass selects rows with ts <= boundary, so "a legitimate strip is never
+-- refused" is exactly the ordering
+--
+--     boundary <= floor
+--
+-- for every boundary the pass can compute. The tightest case is horizon = 1 (the
+-- clamp minimum, S18), where boundary = now - 1 month and the two coincide; the
+-- slack must therefore move the floor LATER, not earlier. A minus sign here
+-- inverts the guarantee: it puts the floor a minute BEFORE the boundary, so a
+-- row inside that one-minute band is selected by the pass and refused by the
+-- trigger — and because each unit is one transaction, that refusal rolls back
+-- every legitimate strip batched with it. Both sides are computed by SQLite
+-- strftime, so they share a clock and a format and the minute only has to
+-- absorb sub-second and rounding difference. One minute out of a month does not
+-- weaken the bound in any way that matters.
 DROP TRIGGER run_events_no_update;
 
 -- Identity is immutable. BEFORE UPDATE OF fires only when the SET clause names
@@ -108,7 +119,7 @@ CREATE TRIGGER run_events_payload_compaction_only
     BEFORE UPDATE OF payload ON run_events
     WHEN NEW.payload <> '{"compacted":true,"reason":"trace payload stripped past the retention compaction horizon (Spec S14.9)"}'
       OR OLD.payload = '{"compacted":true,"reason":"trace payload stripped past the retention compaction horizon (Spec S14.9)"}'
-      OR OLD.ts > strftime('%Y-%m-%dT%H:%M:%S', 'now', '-1 month', '-1 minute')
+      OR OLD.ts > strftime('%Y-%m-%dT%H:%M:%S', 'now', '-1 month', '+1 minute')
       OR EXISTS (SELECT 1 FROM retention_keep_forever k WHERE k.type = OLD.type)
 BEGIN
     SELECT RAISE(ABORT, 'run_events is append-only: payload admits only the one-way S14.9 compaction strip — once, past the horizon floor, and NEVER on a keep-forever record (Spec S02.1/S14.9)');

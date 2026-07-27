@@ -64,6 +64,12 @@ func withRemoveFile(fn func(string) error) fixtureOpt {
 	return func(c *retention.Config, _ *fixture) { c.RemoveFile = fn }
 }
 
+// withAuditFault fails the compaction pass's audit append INSIDE the unit
+// transaction — the R3 atomicity guard.
+func withAuditFault(fn func() error) fixtureOpt {
+	return func(c *retention.Config, _ *fixture) { c.AuditFault = fn }
+}
+
 func newFixture(t *testing.T, opts ...fixtureOpt) *fixture {
 	t.Helper()
 	ctx := context.Background()

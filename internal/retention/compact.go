@@ -347,6 +347,13 @@ func (s *Store) stripUnit(ctx context.Context, leg *OwnerPass, asOf time.Time) (
 // inside that unit's own transaction. Platform-scope: the operator sees the
 // whole pass and no member's audit view gains another member's counts.
 func (s *Store) appendCompactedTx(ctx context.Context, tx *sql.Tx, asOf time.Time, unit OwnerPass) (int64, error) {
+	// The R3 atomicity guard (nil in production). A failure here must take the
+	// unit's elisions down with it — that is the property being observed.
+	if s.auditFault != nil {
+		if err := s.auditFault(); err != nil {
+			return 0, fmt.Errorf("retention: audit append fault: %w", err)
+		}
+	}
 	payload, err := json.Marshal(PassResult{
 		AsOf:           asOf.Format(time.RFC3339Nano),
 		Owners:         []OwnerPass{unit},

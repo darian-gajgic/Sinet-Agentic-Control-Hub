@@ -2,6 +2,9 @@ package retention_test
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +88,32 @@ func TestKeepForeverBodiesCannotBeElidedByAnyWriter(t *testing.T) {
 	if res.EventsStripped != 0 {
 		t.Errorf("the pass stripped %d keep-forever rows; the predicate and the trigger must agree", res.EventsStripped)
 	}
+}
+
+// triggerFloorExpr extracts the horizon-floor expression from migration 0015's
+// run_events_payload_compaction_only trigger, so the ordering assertion is
+// pinned to the SHIPPED text (the §35 registered_test source-scan precedent).
+func triggerFloorExpr(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "storage", "migrations", "0015_retention_history.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "OR OLD.ts > "
+	i := strings.Index(string(body), marker)
+	if i < 0 {
+		t.Fatal("migration 0015 no longer carries the horizon-floor comparison")
+	}
+	rest := string(body)[i+len(marker):]
+	j := strings.IndexByte(rest, '\n')
+	if j < 0 {
+		t.Fatal("the horizon-floor expression is unterminated")
+	}
+	expr := strings.TrimSpace(rest[:j])
+	if !strings.Contains(expr, "strftime") || !strings.Contains(expr, "minute") {
+		t.Fatalf("extracted floor expression looks wrong: %q", expr)
+	}
+	return expr
 }
 
 func truncate(s string) string {
@@ -391,16 +420,23 @@ func TestUnknownFSMStateIsDroppedNotCarried(t *testing.T) {
 // ── D9: the boundary and the trigger floor share a clock domain ─────────────
 
 // TestHorizonOneIsNotRefusedByTheTriggerFloor is the F9 probe at its tightest
-// point: at the clamp minimum (1 month) the pass's boundary and the trigger's
-// floor coincide, so any skew between them fails a legitimate strip.
+// point, recalibrated at drain r2 (R2).
+//
+// The round-1 version planted its row two minutes past the boundary — OUTSIDE
+// the one-minute slack band — so it passed under the WRONG sign, under no slack
+// and under the right sign alike, and could not catch the R1 regression it
+// existed to guard. The row now sits ONE SECOND past the boundary, inside the
+// band, so the assertion is sensitive to the sign: with the floor a minute
+// EARLIER than the boundary this row is selected by the pass and refused by the
+// trigger, and D2's unit atomicity rolls the whole batch back.
 func TestHorizonOneIsNotRefusedByTheTriggerFloor(t *testing.T) {
 	f := newFixture(t)
-	f.user("alice", "member")
-	f.setHorizon("alice", 1)
-	// A row a hair past one month — inside the window where the two comparisons
-	// must agree.
-	seq := f.appendAt("", "alice", "engine.message",
-		bulky(`{"text":"edge"}`), f.now.AddDate(0, -1, 0).Add(-2*time.Minute))
+	f.user("edge", "member")
+	f.setHorizon("edge", 1)
+	// One second past the boundary: old enough for the pass to select, and well
+	// inside the minute of slack the trigger floor carries.
+	seq := f.appendAt("", "edge", "engine.message",
+		bulky(`{"text":"edge"}`), f.now.AddDate(0, -1, 0).Add(-time.Second))
 
 	res, err := f.store.Compact(f.ctx, f.now)
 	if err != nil {
@@ -413,7 +449,127 @@ func TestHorizonOneIsNotRefusedByTheTriggerFloor(t *testing.T) {
 		t.Errorf("events stripped = %d, want 1 — the trigger floor must never refuse a legitimate strip", res.EventsStripped)
 	}
 	if f.payloadAt(seq) != retention.CompactedPayload {
-		t.Error("the row past a 1-month horizon was not stripped")
+		t.Error("the row one second past a 1-month horizon was not stripped")
+	}
+}
+
+// TestTriggerFloorIsNeverEarlierThanAnyBoundary states the R1 guarantee as the
+// ORDERING it actually is, measured directly rather than inferred from a strip.
+//
+// The trigger permits a strip iff OLD.ts <= floor; the pass selects rows with
+// ts <= boundary. "A legitimate strip is never refused" is therefore exactly
+// `boundary <= floor` for every boundary the pass can compute, and the tightest
+// case is the clamp minimum (1 month), where the two coincide. A minus sign on
+// the slack inverts this by exactly the minute it adds.
+func TestTriggerFloorIsNeverEarlierThanAnyBoundary(t *testing.T) {
+	f := newFixture(t)
+
+	// The floor expression is EXTRACTED FROM THE MIGRATION, not copied here: a
+	// test holding its own copy asserts the ordering of an expression that is
+	// not the one shipping, which is precisely how the sign regression survived.
+	floorExpr := triggerFloorExpr(t)
+	var floor string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT `+floorExpr).Scan(&floor); err != nil {
+		t.Fatalf("evaluate the shipped floor expression %s: %v", floorExpr, err)
+	}
+	// The boundary at every horizon the clamp admits, starting at its minimum.
+	for _, months := range []int64{1, 2, 3, 6, 12, 24} {
+		var boundary string
+		if err := f.db.QueryRowContext(f.ctx,
+			`SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?)`,
+			f.now.Format(time.RFC3339Nano), fmt.Sprintf("-%d months", months)).Scan(&boundary); err != nil {
+			t.Fatal(err)
+		}
+		// Compare on the shared second-precision prefix (the floor carries no Z).
+		if boundary[:19] > floor {
+			t.Errorf("horizon %d months: boundary %q is LATER than the trigger floor %q — rows in that band are selected by the pass and refused by the trigger",
+				months, boundary[:19], floor)
+		}
+	}
+
+	// The sign is the whole point: the inverted floor must violate the ordering
+	// at the clamp minimum, so this assertion is capable of failing.
+	var wrongFloor, tightest string
+	if err := f.db.QueryRowContext(f.ctx,
+		`SELECT `+strings.Replace(floorExpr, "'+1 minute'", "'-1 minute'", 1)).Scan(&wrongFloor); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.QueryRowContext(f.ctx,
+		`SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?, '-1 months')`,
+		f.now.Format(time.RFC3339Nano)).Scan(&tightest); err != nil {
+		t.Fatal(err)
+	}
+	if tightest[:19] <= wrongFloor {
+		t.Fatal("the ordering check is tautological — the inverted slack still satisfies it")
+	}
+}
+
+// TestCompactionUnitIsAtomicWithItsAuditRow is drain r2 R3: the S14.9 ¶2
+// coupling must be IMPOSSIBLE to break silently, not merely correct today.
+//
+// The evaluator rewrote stripUnit to commit its strips first and append the
+// audit row in a follow-up transaction, and the whole suite still passed — the
+// happy path cannot see the difference. This fails the audit append INSIDE the
+// unit transaction and asserts the elisions went with it: zero markers, zero
+// audit rows, every body intact. Decouple the append and this test fails loudly.
+func TestCompactionUnitIsAtomicWithItsAuditRow(t *testing.T) {
+	boom := errors.New("injected audit-append failure")
+	f := newFixture(t, withAuditFault(func() error { return boom }))
+	f.user("alice", "member")
+
+	const n = 5
+	seqs := make([]int64, 0, n)
+	for i := 0; i < n; i++ {
+		seqs = append(seqs, f.appendAt("", "alice", "engine.message",
+			bulky(`{"text":"BODY-`+itoa(int64(i))+`"}`), f.now.AddDate(0, -24, 0)))
+	}
+
+	res, err := f.store.Compact(f.ctx, f.now)
+	if err != nil {
+		t.Fatalf("an owner-level fault must not fail the PASS: %v", err)
+	}
+	if len(res.FailedOwners) != 1 || res.FailedOwners[0] != "alice" {
+		t.Errorf("FailedOwners = %v, want [alice]", res.FailedOwners)
+	}
+	if res.EventsStripped != 0 {
+		t.Errorf("the pass reports %d strips although its audit append failed", res.EventsStripped)
+	}
+
+	// EVERY body survived — the elisions rolled back with the append.
+	for i, seq := range seqs {
+		got := f.payloadAt(seq)
+		if got == retention.CompactedPayload {
+			t.Errorf("row %d was elided although its audit row was never written — the unit is not atomic", i)
+		}
+		if !strings.Contains(got, "BODY-"+itoa(int64(i))) {
+			t.Errorf("row %d body was lost: %q", i, truncate(got))
+		}
+	}
+	// …and no audit row was committed either.
+	var audits int
+	if err := f.db.QueryRowContext(f.ctx,
+		`SELECT count(*) FROM run_events WHERE type = ?`, retention.EventCompacted).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 0 {
+		t.Errorf("%d retention.compacted rows committed although the append faulted", audits)
+	}
+
+	// The guard is not vacuous: with no fault the very same fixture strips and
+	// audits normally, so the test above fails for the right reason.
+	clean := newFixture(t)
+	clean.user("alice", "member")
+	cleanSeq := clean.appendAt("", "alice", "engine.message",
+		bulky(`{"text":"BODY-clean"}`), clean.now.AddDate(0, -24, 0))
+	cleanRes, err := clean.store.Compact(clean.ctx, clean.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanRes.EventsStripped != 1 || len(cleanRes.AuditEventSeqs) != 1 {
+		t.Fatalf("without the fault the pass must strip and audit: %+v", cleanRes)
+	}
+	if clean.payloadAt(cleanSeq) != retention.CompactedPayload {
+		t.Error("the unfaulted pass did not strip")
 	}
 }
 
