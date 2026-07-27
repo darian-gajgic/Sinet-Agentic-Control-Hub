@@ -533,12 +533,13 @@ func Run(ctx context.Context, opts Options) error {
 		// degrades and the feed/API tiers keep working. The shell OWNS WHEN (the
 		// goroutine below); the package owns the LOGIC.
 		wlSurf, err = buildWatchlistSurface(ctx, db, log, reg, localSurf.Duty,
-			advisoryMeter(runs, checkpoints), evalSurf.Runbook, logger)
+			advisoryMeter(runs, checkpoints), evalSurf.Runbook, confStore, logger)
 		if err != nil {
 			return err
 		}
 		logger.Info("watchlist: S14.6 executor wired (B5-6A)",
-			"rows_seeded", wlSurf.Rows, "page_tier_configured", wlSurf.PageTier)
+			"rows_seeded", wlSurf.Rows, "page_tier_configured", wlSurf.PageTier,
+			"canary_legs_armed", wlSurf.CanaryArmed)
 
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
@@ -693,6 +694,13 @@ func Run(ctx context.Context, opts Options) error {
 	// wall-clock jump.
 	if wlSurf != nil {
 		go watchlistLoop(procCtx, wlSurf, logger)
+	}
+
+	// The S14.6 ¶3 API canary layer (B5-6B): the same WHEN posture on its own
+	// coarser tick. Its real-request legs ship DISARMED, so unarmed it runs the
+	// local-tier logprob canary and the conformance-dueness surfacer only.
+	if wlSurf != nil && wlSurf.Canaries != nil {
+		go canaryLoop(procCtx, wlSurf, logger)
 	}
 
 	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,

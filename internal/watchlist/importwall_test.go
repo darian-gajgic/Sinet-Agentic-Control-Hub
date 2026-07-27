@@ -89,6 +89,16 @@ func TestImportWallCatchesSubpackages(t *testing.T) {
 		modulePath + "internal/eventlog",
 		modulePath + "internal/local",
 		modulePath + "internal/metering",
+		// The two edges the B5-6B canary layer adds: the S10.5 five-class
+		// classifier it is the first production caller of, and the S14.5
+		// registry whose adapter-suite dueness it surfaces and whose
+		// RecordResult verb it records through. Both are leaves on this
+		// package's side of the graph (scheduler and conformance import
+		// neither evals nor verify), so the wall's REASON — keeping the
+		// evals→verify→intake→adapters graph out of an observability leaf —
+		// still holds.
+		modulePath + "internal/scheduler",
+		modulePath + "internal/conformance",
 		modulePath + "internal/apiary", // a name that merely starts with "api"
 		"strings",
 	} {

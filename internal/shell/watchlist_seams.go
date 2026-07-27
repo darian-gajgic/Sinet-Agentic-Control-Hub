@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
@@ -31,15 +32,30 @@ import (
 // watchlist-cadence key (the sseBatchSize precedent, §7).
 const watchlistLoopInterval = time.Minute
 
+// canaryLoopInterval is how often the shell asks the canary layer which
+// canaries are DUE. Like watchlistLoopInterval it is the TICK, never the
+// cadence: each canary's cadence is its ⚙ (or its structural interval) and
+// dueness derives from the last canary.result in the log, so a restart or a
+// suspend can neither skip nor double-fire a canary. Structural constant, not ⚙.
+// It is coarser than the executor's tick because the tightest canary cadence is
+// the clamp floor of ⚙ canary.auth_interval (6 h) — a minute-grained tick would
+// buy nothing but wake-ups.
+const canaryLoopInterval = 15 * time.Minute
+
 // watchlistSurface holds the composed S14.6 machinery.
 type watchlistSurface struct {
 	Store *watchlist.Store
 	Exec  *watchlist.Executor
+	// Canaries is the S14.6 ¶3 API canary layer (B5-6B).
+	Canaries *watchlist.Canaries
 	// Rows is the size of the seed set applied at this boot.
 	Rows int
 	// PageTier records whether the changedetection.io organ is configured at
 	// all. False is the honest default: the host install is a B5-gate act.
 	PageTier bool
+	// CanaryArmed records whether the operator armed the real-request canary
+	// legs. False is the honest default: the packet that built them spent $0.
+	CanaryArmed bool
 }
 
 // buildWatchlistSurface composes the S14.6 executor and seeds the watch rows.
@@ -50,7 +66,7 @@ type watchlistSurface struct {
 // and API tiers keep working.
 func buildWatchlistSurface(ctx context.Context, db *storage.DB, log *eventlog.Log,
 	reg *settings.Registry, duty *local.Duty, meter stage.AdvisoryMeter,
-	runbook *evals.Runbook, logger *slog.Logger) (*watchlistSurface, error) {
+	runbook *evals.Runbook, conf *conformance.Store, logger *slog.Logger) (*watchlistSurface, error) {
 
 	store := watchlist.NewStore(db)
 	seed := watchlist.SeedRows()
@@ -88,14 +104,94 @@ func buildWatchlistSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 	emitter.Logger = logger
 
 	cdio := watchlist.DiscoverCDIO(nil)
+	canaries, armed := buildCanaryLayer(db, log, reg, duty, meter, emitter, conf, logger)
 	return &watchlistSurface{
 		Store: store,
 		Exec: watchlist.New(watchlist.Deps{
 			Store: store, Emitter: emitter, Settings: reg, CDIO: cdio, Logger: logger,
 		}),
-		Rows:     rows,
-		PageTier: cdio != nil,
+		Canaries:    canaries,
+		Rows:        rows,
+		PageTier:    cdio != nil,
+		CanaryArmed: armed,
 	}, nil
+}
+
+// buildCanaryLayer composes the S14.6 ¶3 API canary layer (B5-6B).
+//
+// THE $0 POSTURE IS COMPOSED HERE, not hidden in the package: the three legs
+// that dial a provider — auth, behavioral, model-list — are wired ONLY when the
+// operator has armed them (watchlist.CanaryArmEnv). Unarmed, they are nil and
+// the layer skips them honestly rather than recording a canary that never ran.
+// The logprob canary is local-tier and costs no allowance, so it is wired
+// whenever the local stack is.
+//
+// The behavioral leg additionally needs the pinned runner, which is not
+// installed on the host until the B5-gate act: with no binary it stays nil and
+// the leg is absent for that second, independent reason.
+func buildCanaryLayer(db *storage.DB, log *eventlog.Log, reg *settings.Registry,
+	duty *local.Duty, meter stage.AdvisoryMeter, emitter *watchlist.Emitter,
+	conf *conformance.Store, logger *slog.Logger) (*watchlist.Canaries, bool) {
+
+	c := watchlist.NewCanaries(db, log, reg)
+	c.Emitter = emitter
+	c.Logger = logger
+	if duty != nil {
+		c.Logprob = watchlist.NewLogprobCanary(duty, watchlist.AdvisoryMeter(meter))
+	}
+	c.Conformance = watchlist.NewConformanceCanary(conf)
+
+	armed := watchlist.CanaryArmed()
+	if !armed {
+		logger.Info("watchlist: API canary layer wired with the real-request legs DISARMED (B5-6B)",
+			"arm_with", watchlist.CanaryArmEnv,
+			"disarmed", "auth, behavioral, model-list",
+			"live", "logprob (local tier, $0), conformance dueness")
+		return c, false
+	}
+
+	// Armed. The auth and model-list probes need per-lane endpoints and a
+	// credential accessor, which the credential broker owns and which settle
+	// with the B5-gate install; until they are composed the armed layer runs
+	// whatever legs it can and says which it could not.
+	if runner, err := evals.FindPromptfoo(); err == nil {
+		c.Behavioral = watchlist.NewBehavioralCanary(behavioralCanaryHook(runner))
+	} else {
+		logger.Warn("watchlist: behavioral canary armed but no pinned runner is installed — the leg stays absent",
+			"pin", evals.PromptfooPin, "override", evals.PromptfooPathEnv, "err", err)
+	}
+	logger.Info("watchlist: API canary layer ARMED (B5-6B)", "behavioral", c.Behavioral != nil)
+	return c, true
+}
+
+// behavioralCanaryHook satisfies the S14.6 ¶3 behavioral seam with the B5-5
+// pinned runner over the committed bump-probe battery. Building the
+// evals.RunConfig here is what keeps internal/watchlist free of an evals import
+// (the watchlistRevalidateHook precedent above); no second runner is
+// constructed and no eval case content is invented — the battery is B5-5's.
+func behavioralCanaryHook(runner evals.Runner) watchlist.BehavioralRun {
+	if runner == nil {
+		return nil
+	}
+	return func(ctx context.Context, lane string) (watchlist.BehavioralOutcome, error) {
+		name, version, err := runner.Identity(ctx)
+		if err != nil {
+			return watchlist.BehavioralOutcome{}, err
+		}
+		suite := evals.SeedProbeSuite()
+		out, err := runner.Run(ctx, evals.RunConfig{
+			Suite:    suite.Version,
+			Provider: lane,
+			Cases:    suite.Tasks,
+		})
+		if err != nil {
+			return watchlist.BehavioralOutcome{}, err
+		}
+		return watchlist.BehavioralOutcome{
+			Runner: name, RunnerVersion: version, Suite: suite.Version,
+			Cases: len(out.Cases), PassRate: out.PassRate(),
+		}, nil
+	}
 }
 
 // watchlistRevalidateHook satisfies the S14.8 revalidation seam with the B5-5
@@ -150,6 +246,33 @@ func watchlistLoop(ctx context.Context, wl *watchlistSurface, logger *slog.Logge
 				logger.Info("watchlist: pass complete",
 					"polled", pass.Polled, "hits", pass.Hits, "failures", pass.Failures,
 					"page_tier_absent", pass.PageTierAbsent)
+			}
+		}
+	}
+}
+
+// canaryLoop drives the S14.6 ¶3 API canary layer — the shell owns WHEN, as it
+// does for the executor half. It ticks on a structural interval and runs only
+// the canaries whose cadence has elapsed, derived from the last canary.result
+// in the log, so the layer survives restart and suspend and no ticker drives a
+// canary's cadence. A sweep error is logged and the next tick retries.
+func canaryLoop(ctx context.Context, wl *watchlistSurface, logger *slog.Logger) {
+	t := time.NewTicker(canaryLoopInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep, err := wl.Canaries.RunDue(ctx)
+			if err != nil {
+				logger.Warn("watchlist: canary sweep failed", "err", err)
+				continue
+			}
+			if sweep.Ran > 0 || sweep.Cards > 0 {
+				logger.Info("watchlist: canary sweep complete",
+					"ran", sweep.Ran, "failures", sweep.Failures,
+					"disarmed", sweep.Disarmed, "conformance_cards", sweep.Cards)
 			}
 		}
 	}

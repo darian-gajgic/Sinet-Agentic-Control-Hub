@@ -82,8 +82,44 @@ func SeedRows() []Row {
 	rows = append(rows, tier4Rows()...)
 	rows = append(rows, standingRows()...)
 	rows = append(rows, studyRows()...)
+	rows = append(rows, canarySetRows()...)
 	rows = append(rows, lockReviewRows()...)
 	return rows
+}
+
+// ── The S14.6 ¶3 canary-set registrations (B5-6B) ──────────────────────────
+
+// canarySetRows registers the two canary-set members the gates named without
+// giving them a probe: "Engine memory features and compaction behavior join the
+// canary set" [G2 §Follow-ups; S05.7; Spec S14.6 ¶3].
+//
+// They are ROWS, not probes, and deliberately so. Neither has a wire signal the
+// four built canaries can read: engine memory is a config-and-behaviour surface
+// of an adopted engine, and compaction behaviour shows up as the already-minted
+// compaction.anomaly on real runs, not as something a scheduled probe can ask
+// for. Building a probe for either would mean inventing an observation the
+// engines do not expose. So each is a standing review obligation surfaced
+// through PendingReview for the S16.7 quarterly pass — a registration that
+// makes the gap visible rather than a probe that fakes coverage.
+func canarySetRows() []Row {
+	const cite = "Spec S14.6 ¶3 (\"Engine memory features and compaction behavior join the canary set\") [G2 §Follow-ups; S05.7]"
+	return []Row{
+		{
+			ID: "canary-engine-memory-features", Kind: KindStudy, Tier: 3,
+			Cadence: CadenceQuarterly, Enabled: true, Group: GroupCanarySet,
+			Notes: cite + ". Registered as a ROW, not a probe: engine-native memory is default-off and contained " +
+				"(the platform-supplied config-root memory/ is wiped at session start, resume exempt — S09/B3-1), " +
+				"and no scheduled request reads an engine's memory posture, so a probe here would fake a measurement. " +
+				"Re-read at each engine pin bump; a change is an S03.3 deliberate-bump input",
+		},
+		{
+			ID: "canary-engine-compaction-behavior", Kind: KindStudy, Tier: 3,
+			Cadence: CadenceQuarterly, Enabled: true, Group: GroupCanarySet,
+			Notes: cite + ". Registered as a ROW, not a probe: compaction behaviour is observed on REAL runs as the " +
+				"already-minted compaction.anomaly event (S05.7), never by asking an engine about it out of band. " +
+				"Re-read at each engine pin bump alongside the S03.3 limb-(b) quality probe",
+		},
+	}
 }
 
 const (

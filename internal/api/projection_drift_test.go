@@ -175,12 +175,72 @@ func TestDriftFindingTagsInboxThroughTheExistingTopicMap(t *testing.T) {
 	if !hasInbox {
 		t.Errorf("drift.finding tags = %v, want the inbox topic", tags)
 	}
+	// canary.result is the OTHER half of family 11, minted at B5-6B. It routes
+	// the same way for the same reason, so topics.go still needed no edit when
+	// the API canary layer landed.
+	var canaryInbox bool
+	for _, tag := range topicsForEvent(eventlog.Event{Type: "canary.result", SchemaVersion: 1}) {
+		canaryInbox = canaryInbox || tag == topicInbox
+		if tag == topicRun {
+			t.Error("a platform-scope canary result must carry no run tag")
+		}
+	}
+	if !canaryInbox {
+		t.Error("canary.result does not tag the inbox topic")
+	}
+
 	// registry.drift is S13.7 project-topology drift under Platform — it must
 	// NOT route to the inbox through the Drift & canary family.
 	for _, tag := range topicsForEvent(eventlog.Event{Type: "registry.drift", SchemaVersion: 1}) {
 		if tag == topicInbox {
 			t.Error("registry.drift routed to the inbox as drift — the name collision must not mis-route")
 		}
+	}
+}
+
+// TestCanaryFailureDerivesIntoADriftCard is the B5-6B checkable negative on the
+// projection: a canary raises its card as a drift.finding through the SAME
+// emitter path, so it derives through the SAME query with the SAME fingerprint
+// dedup — internal/api gained no code and no import for the canary layer.
+func TestCanaryFailureDerivesIntoADriftCard(t *testing.T) {
+	ctx := context.Background()
+	db, log, _ := wdTestDB(t)
+	at := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+
+	// Two model-list findings from ONE canary run: same source, same lane, same
+	// change class, so one fingerprint and therefore ONE card.
+	for _, subject := range []string{"claude-opus-4-8", "claude-sonnet-4-6"} {
+		payload := []byte(`{"source":"canary:model-list:anthropic","lanes":["anthropic"],` +
+			`"change_class":"models","severity":"flag-now","summary":"model-list drift on lane anthropic",` +
+			`"fingerprint":"c0ffee00c0ffee00","row_id":"canary:model-list:anthropic","kind":"model-list",` +
+			`"classified":true,"revalidation":{"triggered":true,"subject":"` + subject + `","reason":"models class with a model id"}}`)
+		if _, err := log.Append(ctx, eventlog.Append{
+			UserID: "platform", Type: "drift.finding", SchemaVersion: 1, Payload: payload, Time: at,
+		}); err != nil {
+			t.Fatalf("append canary drift finding: %v", err)
+		}
+		at = at.Add(time.Second)
+	}
+
+	p := &projector{db: db}
+	snap, err := p.inbox(ctx, ownerScope{Operator: true})
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	if len(snap.DriftCards) != 1 {
+		t.Fatalf("%d drift cards, want 1 — the two subjects of one canary run fold into one card", len(snap.DriftCards))
+	}
+	if snap.DriftCards[0].Severity != "flag-now" {
+		t.Errorf("card severity = %q, want flag-now", snap.DriftCards[0].Severity)
+	}
+
+	// A member sees none: canary cards are platform-scope (S01.9).
+	memberSnap, err := p.inbox(ctx, ownerScope{UserID: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memberSnap.DriftCards) != 0 {
+		t.Errorf("a member sees %d platform-scope canary cards, want 0", len(memberSnap.DriftCards))
 	}
 }
 

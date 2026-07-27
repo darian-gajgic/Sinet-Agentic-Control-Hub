@@ -124,6 +124,9 @@ const (
 	GroupS168       = "S16.8"
 	GroupLockReview = "components.lock"
 	GroupStudy      = "G4-study"
+	// GroupCanarySet holds the S14.6 ¶3 canary-set members that the gates
+	// registered as WATCH ROWS rather than as probes (B5-6B).
+	GroupCanarySet = "S14.6-canary-set"
 )
 
 // Package errors. Callers branch on these.

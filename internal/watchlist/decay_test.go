@@ -173,10 +173,18 @@ func TestNoSettingsLiteralAppearsInCode(t *testing.T) {
 			t.Errorf("⚙ %s is not read by dotted key anywhere", key)
 		}
 	}
-	// The canary interval keys belong to the sibling API-canary layer, not here.
-	for _, key := range []string{"canary.auth_interval", "canary.behavioral_interval"} {
-		if strings.Contains(src, `"`+key+`"`) {
-			t.Errorf("⚙ %s is consumed here — it belongs to the API-canary layer", key)
+	// The canary interval keys are the sibling API-canary layer's (B5-6B) and
+	// are now consumed in this package too — by dotted key, live, never as a
+	// literal. Their DEFAULTS must still never appear as constants.
+	for key, literal := range map[string]string{
+		"canary.auth_interval":       "auth_interval = 86400",
+		"canary.behavioral_interval": "behavioral_interval = 604800",
+	} {
+		if strings.Contains(src, literal) {
+			t.Errorf("⚙ %s appears as a hardcoded constant", key)
+		}
+		if !strings.Contains(src, `"`+key+`"`) {
+			t.Errorf("⚙ %s is not read by dotted key anywhere", key)
 		}
 	}
 }

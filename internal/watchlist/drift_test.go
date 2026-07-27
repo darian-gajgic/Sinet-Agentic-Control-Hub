@@ -284,9 +284,21 @@ func TestDriftFindingIsMintedAndDistinctFromRegistryDrift(t *testing.T) {
 	if fam, _ := reg.Classify("registry.drift"); fam == eventlog.FamilyDriftCanary {
 		t.Error("registry.drift classified as Drift & canary — it is S13.7 project-topology drift under Platform")
 	}
-	// canary.result stays declare-only: it is the sibling half's to mint.
-	if cs, ok := reg.TypeSpec("canary.result"); !ok || cs.Status != eventlog.StatusDeclareOnly {
-		t.Errorf("canary.result status = %+v, want declare-only until the API-canary layer", cs)
+	// canary.result is MINTED at B5-6B (the sibling API-canary layer), so
+	// family 11 — the seam the packet split at — is now fully minted, and both
+	// halves live under the same family without either mis-owning the other.
+	cs, ok := reg.TypeSpec(watchlist.EventCanaryResult)
+	if !ok {
+		t.Fatal("canary.result is not registered")
+	}
+	if cs.Status != eventlog.StatusMinted {
+		t.Errorf("canary.result status = %q, want minted (B5-6B)", cs.Status)
+	}
+	if cs.Family != eventlog.FamilyDriftCanary {
+		t.Errorf("canary.result family = %q, want %q", cs.Family, eventlog.FamilyDriftCanary)
+	}
+	if watchlist.EventCanaryResult == watchlist.EventDriftFinding {
+		t.Error("the two family-11 types collapsed to one value")
 	}
 }
 

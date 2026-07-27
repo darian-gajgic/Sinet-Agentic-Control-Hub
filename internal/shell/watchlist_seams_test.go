@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,7 +59,7 @@ func TestBuildWatchlistSurfaceSeedsAndDegradesHonestly(t *testing.T) {
 	db, log, reg := watchlistTestDeps(t)
 	t.Setenv(watchlist.CDIOURLEnv, "")
 
-	wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+	wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
 	if err != nil {
 		t.Fatalf("buildWatchlistSurface: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestBuildWatchlistSurfaceSeedsAndDegradesHonestly(t *testing.T) {
 	}
 
 	// Idempotent across a second boot.
-	again, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+	again, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
 	if err != nil {
 		t.Fatalf("second boot: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestAbsentOrganRaisesTheOrganAbsenceFlag(t *testing.T) {
 	db, log, reg := watchlistTestDeps(t)
 	t.Setenv(watchlist.CDIOURLEnv, "")
 
-	wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+	wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func TestWatchRowOverrideIsReachableAtBoot(t *testing.T) {
 	t.Run("absent override is silent", func(t *testing.T) {
 		db, log, reg := watchlistTestDeps(t)
 		t.Setenv(watchlist.WatchRowsOverrideEnv, filepath.Join(t.TempDir(), "nope.json"))
-		wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+		wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
 		if err != nil {
 			t.Fatalf("an absent override must be silent, got: %v", err)
 		}
@@ -282,7 +283,7 @@ func TestWatchRowOverrideIsReachableAtBoot(t *testing.T) {
 		}
 		t.Setenv(watchlist.WatchRowsOverrideEnv, path)
 
-		wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger())
+		wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
 		if err != nil {
 			t.Fatalf("buildWatchlistSurface: %v", err)
 		}
@@ -306,8 +307,156 @@ func TestWatchRowOverrideIsReachableAtBoot(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv(watchlist.WatchRowsOverrideEnv, path)
-		if _, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, testLogger()); err == nil {
+		if _, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger()); err == nil {
 			t.Error("a malformed override was accepted — a typo must fail the boot, never degrade silently")
 		}
 	})
+}
+
+// ── B5-6B: the API canary layer's composition-root posture ─────────────────
+
+// TestCanaryLayerShipsDisarmed is the $0 proof at the composition root: with no
+// operator arm, the three legs that would dial a provider are nil, so the layer
+// physically cannot spend. It is not a policy comment — it is the wiring.
+func TestCanaryLayerShipsDisarmed(t *testing.T) {
+	ctx := context.Background()
+	db, log, reg := watchlistTestDeps(t)
+	t.Setenv(watchlist.CDIOURLEnv, "")
+	t.Setenv(watchlist.CanaryArmEnv, "")
+
+	wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
+	if err != nil {
+		t.Fatalf("buildWatchlistSurface: %v", err)
+	}
+	if wl.CanaryArmed {
+		t.Fatal("the canary legs composed ARMED with no operator act")
+	}
+	if wl.Canaries == nil {
+		t.Fatal("the canary layer was not composed at all")
+	}
+	for name, wired := range map[string]bool{
+		"auth":       wl.Canaries.Auth != nil,
+		"behavioral": wl.Canaries.Behavioral != nil,
+		"model-list": wl.Canaries.ModelList != nil,
+	} {
+		if wired {
+			t.Errorf("the %s canary leg is wired while disarmed — it could issue a real request", name)
+		}
+	}
+	// A disarmed sweep records nothing at all: no canary.result, no card.
+	sweep, err := wl.Canaries.RunDue(ctx)
+	if err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	if sweep.Ran != 0 {
+		t.Errorf("a disarmed layer ran %d canaries, want 0", sweep.Ran)
+	}
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM run_events WHERE type = ?`, watchlist.EventCanaryResult).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("a disarmed layer wrote %d canary.result rows, want 0", n)
+	}
+}
+
+// TestArmingWiresNoLegWithoutItsDependency: arming alone does not conjure a
+// runner. With no promptfoo binary the behavioral leg stays absent — the
+// carried B5-5 dependency is honoured, not faked.
+func TestArmingWiresNoLegWithoutItsDependency(t *testing.T) {
+	ctx := context.Background()
+	db, log, reg := watchlistTestDeps(t)
+	t.Setenv(watchlist.CDIOURLEnv, "")
+	t.Setenv(watchlist.CanaryArmEnv, "1")
+	// Point discovery at a path that does not exist, so the resolution fails
+	// deterministically whether or not the host happens to have the binary.
+	t.Setenv(evals.PromptfooPathEnv, filepath.Join(t.TempDir(), "no-such-promptfoo"))
+
+	wl, err := buildWatchlistSurface(ctx, db, log, reg, nil, nil, nil, nil, testLogger())
+	if err != nil {
+		t.Fatalf("buildWatchlistSurface: %v", err)
+	}
+	if !wl.CanaryArmed {
+		t.Fatal("the arm env did not arm the legs")
+	}
+	if wl.Canaries.Behavioral != nil {
+		t.Error("the behavioral leg wired without a pinned runner — SANCTIONED SKIP (CONVENTIONS §10) is the honest state until the B5-gate install")
+	}
+}
+
+// TestBehavioralCanaryHookReusesThePinnedRunnerSeam: the hook consumes the
+// S14.8 Runner interface and the committed probe battery; it constructs no
+// second runner and invents no eval case content.
+func TestBehavioralCanaryHookReusesThePinnedRunnerSeam(t *testing.T) {
+	spy := &spyRunner{}
+	hook := behavioralCanaryHook(spy)
+	out, err := hook(context.Background(), "anthropic")
+	if err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+	if spy.cfg.Provider != "anthropic" {
+		t.Errorf("provider = %q, want the lane", spy.cfg.Provider)
+	}
+	suite := evals.SeedProbeSuite()
+	if spy.cfg.Suite != suite.Version || len(spy.cfg.Cases) != len(suite.Tasks) {
+		t.Errorf("the hook ran %q with %d cases, want the committed %q battery (%d tasks)",
+			spy.cfg.Suite, len(spy.cfg.Cases), suite.Version, len(suite.Tasks))
+	}
+	if out.Runner != "promptfoo" || out.RunnerVersion != "0.121.19" {
+		t.Errorf("outcome identity = %q %q, want the runner's own reported identity", out.Runner, out.RunnerVersion)
+	}
+	if out.PassRate != 0.5 || out.Cases != 2 {
+		t.Errorf("outcome = %+v, want the runner's parsed pass rate", out)
+	}
+}
+
+// spyRunner is an evals.Runner that records its config and returns a fixed
+// outcome. It runs no process and dials nothing.
+type spyRunner struct{ cfg evals.RunConfig }
+
+func (s *spyRunner) Identity(ctx context.Context) (string, string, error) {
+	return "promptfoo", "0.121.19", nil
+}
+
+func (s *spyRunner) Run(ctx context.Context, cfg evals.RunConfig) (evals.RunOutcome, error) {
+	s.cfg = cfg
+	return evals.RunOutcome{
+		Suite: cfg.Suite, Provider: cfg.Provider,
+		Cases: []evals.CaseOutcome{{ID: "a", Pass: true}, {ID: "b", Pass: false}},
+	}, nil
+}
+
+// TestBehavioralCanaryRealRunnerLeg is the CONVENTIONS §10 tier-R leg for the
+// B5-6B behavioral canary: it auto-runs when the pinned runner is installed on
+// the host and prints the sanctioned skip otherwise. It asserts only that the
+// composed hook resolves a runner identity — it issues NO eval and therefore
+// makes NO paid call, because arming the paid leg is an operator act with a
+// pre-registered projection, not a test's to take.
+//
+// This packet installed nothing: `npm install -g promptfoo@<pin>` is a B5-gate
+// HOST act inherited from B5-5.
+func TestBehavioralCanaryRealRunnerLeg(t *testing.T) {
+	t.Setenv(evals.PromptfooPathEnv, "")
+	if _, err := exec.LookPath("promptfoo"); err != nil {
+		t.Skip("SANCTIONED SKIP (CONVENTIONS §10): promptfoo is not installed on this host, so the behavioral canary leg cannot be exercised against a real binary")
+	}
+	runner, err := evals.FindPromptfoo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hook := behavioralCanaryHook(runner); hook == nil {
+		t.Fatal("the behavioral canary hook is nil with a resolved runner")
+	}
+	name, version, err := runner.Identity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name == "" {
+		t.Error("the runner reported no identity")
+	}
+	if version != evals.PromptfooPin {
+		t.Errorf("installed promptfoo %s != pin %s — a pin↔installed delta is reported LOUDLY and never silently retargeted (CONVENTIONS §10)",
+			version, evals.PromptfooPin)
+	}
 }
