@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
 )
@@ -259,5 +260,40 @@ func TestWatchlistUnitHonoursStructuralOverrides(t *testing.T) {
 	})["sinet-watchlist.service"]
 	if !strings.Contains(f.Content, "ExecStart=/opt/cdio/bin/changedetection.io -d /srv/watch -h 127.0.0.1 -p 5999") {
 		t.Errorf("overrides not rendered:\n%s", f.Content)
+	}
+}
+
+// TestWatchlistUnitCarriesTheLocalLLMEndpoint is the drain-r2 R4 lock. S14.6 T1
+// wants the organ's native triage pointed at Sinet's local endpoint; the packet
+// first recorded that as "inexpressible, an operator UI step". It is not: at
+// 0.55.8 `changedetectionio/llm/evaluator.py` get_llm_config resolves
+// LLM_MODEL / LLM_API_KEY / LLM_API_BASE BEFORE the datastore, so the pointing
+// rides Environment= on this generated unit. Both variables must be present —
+// the env branch is chosen only on a non-empty LLM_MODEL — and the api_base
+// must track the llama-swap unit generated beside it, not a restated literal.
+func TestWatchlistUnitCarriesTheLocalLLMEndpoint(t *testing.T) {
+	f := gen(t, units.Params{})["sinet-watchlist.service"]
+	for _, want := range []string{
+		"Environment=LLM_API_BASE=http://127.0.0.1:8791/v1",
+		"Environment=LLM_MODEL=openai/" + local.AliasWatchlist,
+	} {
+		if !strings.Contains(f.Content, want) {
+			t.Errorf("the watchlist unit does not point the organ at the local endpoint (missing %q):\n%s", want, f.Content)
+		}
+	}
+	// A secret never rides a generated unit (S11.5): the local endpoint needs
+	// no key, so none is rendered.
+	if strings.Contains(f.Content, "LLM_API_KEY") {
+		t.Error("the watchlist unit renders LLM_API_KEY — a generated unit is never a place for a credential")
+	}
+	// The endpoint follows the llama-swap unit rather than a second literal.
+	moved := gen(t, units.Params{LlamaSwapListen: "127.0.0.1:9911"})["sinet-watchlist.service"]
+	if !strings.Contains(moved.Content, "Environment=LLM_API_BASE=http://127.0.0.1:9911/v1") {
+		t.Errorf("moving llama-swap did not move the organ's api_base:\n%s", moved.Content)
+	}
+	// And the model string is deployment config, not a constant.
+	seat := gen(t, units.Params{WatchlistLLMModel: "openai/qwen3-4b"})["sinet-watchlist.service"]
+	if !strings.Contains(seat.Content, "Environment=LLM_MODEL=openai/qwen3-4b") {
+		t.Errorf("the model override is not rendered:\n%s", seat.Content)
 	}
 }

@@ -169,6 +169,18 @@ var identityFields = []string{"id", "uuid", "slug", "key", "name"}
 // genuinely indistinguishable from a change and is reported as one. That is the
 // honest direction: over-reporting a reordered scalar list is a noisy card, not
 // a missed drift.
+//
+// The limitation this direction costs, stated plainly: identity keys are
+// assumed UNIQUE within their array. Two elements of one array sharing an
+// identity value collapse to a single leaf path, the later one overwrites the
+// earlier, and a change confined to the masked element is invisible — the one
+// place this diff can UNDER-report. `name`, last in the preference list, is the
+// weakest and likeliest to repeat; `id`/`uuid`/`slug` are unique by
+// construction in the documents actually watched (genai-prices providers and
+// models, models.dev entries), which is why they are preferred. Fixing it
+// properly means a compound key or an occurrence suffix, which reintroduces
+// exactly the positional cascade this keying exists to remove, so the trade is
+// recorded rather than papered over.
 func arrayKey(child any, i int) string {
 	if m, ok := child.(map[string]any); ok {
 		for _, field := range identityFields {

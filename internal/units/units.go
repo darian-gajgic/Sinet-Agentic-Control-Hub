@@ -104,6 +104,12 @@ type Params struct {
 	WatchlistBinary    string
 	WatchlistDatastore string
 	WatchlistListen    string
+	// WatchlistLLMModel is the model string the watchlist organ's native
+	// first-pass triage sends to Sinet's local endpoint (S14.6 ¶T1), rendered
+	// as Environment=LLM_MODEL on the generated unit. Structural, not ⚙.
+	// Default below; override when the operator's llama-swap config names the
+	// seat directly instead of exposing the duty alias.
+	WatchlistLLMModel string
 }
 
 // Default structural paths for the generated llama-swap unit (operator-set at
@@ -127,6 +133,14 @@ const (
 	defaultWatchlistBinary    = "/usr/local/bin/changedetection.io"
 	defaultWatchlistDatastore = "/var/lib/sinet/watchlist"
 	defaultWatchlistListen    = "127.0.0.1:5000"
+	// defaultWatchlistLLMModel points the organ's native triage at the duty
+	// alias Sinet reserves for it (local.AliasWatchlist, "watchlist-triage" —
+	// pinned against drift by test). The `openai/` prefix is litellm's
+	// custom-endpoint form: with an api_base set, that prefix is what routes
+	// the call to an OpenAI-compatible server instead of a hosted provider,
+	// and the organ passes the model string through to litellm unchanged
+	// (changedetectionio/llm/client.py@0.55.8).
+	defaultWatchlistLLMModel = "openai/watchlist-triage"
 )
 
 // header is the shared provenance banner.
@@ -210,6 +224,14 @@ func Files(settings Settings, p Params) ([]File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("units: watchlist listen address %q: %w", watchListen, err)
 	}
+	watchLLMModel := p.WatchlistLLMModel
+	if watchLLMModel == "" {
+		watchLLMModel = defaultWatchlistLLMModel
+	}
+	// The organ's LLM endpoint IS the llama-swap front generated above, so it
+	// is derived from that unit's listen address rather than restated: move
+	// llama-swap and the watchlist organ follows it.
+	watchLLMAPIBase := "http://" + swapListen + "/v1"
 	return []File{
 		controlService(bin, watchdogSec),
 		brokerService(bin),
@@ -221,7 +243,7 @@ func Files(settings Settings, p Params) ([]File, error) {
 		restoreDrillService(bin),
 		restoreDrillTimer(drillCal, keyBackupDrillEach),
 		llamaSwapService(swapBin, swapCfg, swapListen),
-		watchlistService(watchBin, watchStore, watchHost, watchPort),
+		watchlistService(watchBin, watchStore, watchHost, watchPort, watchLLMAPIBase, watchLLMModel),
 		localSlice(),
 		journaldDropIn(journalMaxUse),
 	}, nil
@@ -236,7 +258,21 @@ func Files(settings Settings, p Params) ([]File, error) {
 // The flags are the pinned version's own (`-d` datastore, `-h` host, `-p`
 // port — getopt string "6Csd:h:p:l:P:" at tag 0.55.8). Binding to loopback is
 // deliberate: the organ's default host is 0.0.0.0.
-func watchlistService(binary, datastore, host, port string) File {
+//
+// The unit also carries the organ's LLM configuration (S14.6 ¶T1 "its native
+// LLM rules pointed at Sinet's local OpenAI-compatible endpoint"). That
+// configuration has no REST route at the pin — none of the thirteen
+// `add_resource` registrations in flask_app.py touches application settings —
+// but it is NOT a manual UI step either: `changedetectionio/llm/evaluator.py`
+// `get_llm_config` resolves ENVIRONMENT FIRST, verbatim "Resolution order
+// (first non-empty model wins): 1. Environment variables: LLM_MODEL,
+// LLM_API_KEY, LLM_API_BASE  2. Datastore settings (set via UI)". So the
+// endpoint pointing rides Environment= here, versioned like every other line
+// in this file, instead of a click in the organ's UI that no artifact records.
+// A non-empty LLM_MODEL is what makes the env branch win, so both variables are
+// rendered together. LLM_API_KEY is deliberately absent: the local endpoint
+// needs none and a generated unit never carries a secret (S11.5).
+func watchlistService(binary, datastore, host, port, llmAPIBase, llmModel string) File {
 	var b strings.Builder
 	b.WriteString(header())
 	fmt.Fprintf(&b, `# GENERATED, not installed (P3-B5-6A; install = the B5 gate). This is SINET
@@ -255,9 +291,17 @@ Type=exec
 # so -h is load-bearing. Sinet drives its watch set over the REST API from the
 # control plane; hits are POLLED, so no inbound route exists.
 ExecStart=%s -d %s -h %s -p %s
+# S14.6 T1 first-pass triage: the organ's own LLM rules, pointed at Sinet's
+# local OpenAI-compatible endpoint (the llama-swap front above). Environment
+# wins over the organ's datastore settings at 0.55.8, so this is Sinet
+# configuration, not an unversioned UI step. The endpoint must serve this model
+# name; regenerate with a different one if the llama-swap config names the seat
+# instead of the duty alias.
+Environment=LLM_API_BASE=%s
+Environment=LLM_MODEL=%s
 Restart=on-failure
 StateDirectory=sinet/watchlist
-`, binary, datastore, host, port)
+`, binary, datastore, host, port, llmAPIBase, llmModel)
 	b.WriteString(staticUser)
 	b.WriteString(`# Standard hardening set (Spec S01.2), with one recorded exception:
 # ProtectSystem= is 'full' rather than 'strict' because the organ is a Python

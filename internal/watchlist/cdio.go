@@ -20,10 +20,11 @@ import (
 //
 // The integration splits at what the pinned REST surface can express: the
 // per-watch config (url, title, `llm_intent`, `fetch_backend`,
-// `include_filters`, `subtractive_selectors`) is driven from here, while the
-// GLOBAL `LLMSettings.api_base`/`.model` that point the organ's native triage
-// at Sinet's local endpoint have no route at 0.55.8 and are an operator
-// install-time step (see LocalEndpointConfig).
+// `include_filters`, `subtractive_selectors`) is driven from here. The GLOBAL
+// LLM config that points the organ's native triage at Sinet's local endpoint
+// has no route at 0.55.8 — but it is NOT an unversioned manual step either: it
+// rides `Environment=` on the unit Sinet generates (see localEndpointRecord
+// below and internal/units).
 //
 // SINET'S WATCH ROWS ARE THE SOURCE OF TRUTH. Reconciliation drives the organ
 // to match them: a watch Sinet owns but the organ lacks is created, one whose
@@ -141,10 +142,14 @@ type WatchSpec struct {
 	Title string `json:"title,omitempty"`
 	// LLMIntent is the organ's NATIVE per-watch LLM triage instruction —
 	// "Plain-English description of what the user cares about"
-	// (changedetectionio/model/__init__.py@0.55.8 `llm_intent`, resolved
-	// watch → tag → global by changedetectionio/llm/evaluator.py). Pointing the
-	// organ's LLM settings at Sinet's local OpenAI-compatible endpoint
-	// (LLMSettings.api_base + .model) makes this a FIRST-PASS "does this diff
+	// (changedetectionio/model/__init__.py@0.55.8 `llm_intent`). Resolution is
+	// watch → the first tag carrying an intent → ('', ''), i.e. NO global
+	// fallback and no evaluation at all (changedetectionio/llm/evaluator.py
+	// docstring line 8 and its `return '', ''`), which is what makes this
+	// per-watch field load-bearing rather than decorative. Pointing the organ's
+	// LLM config at Sinet's local OpenAI-compatible endpoint (the LLM_API_BASE
+	// + LLM_MODEL environment carried on the generated unit — see the
+	// local-endpoint record below) makes this a FIRST-PASS "does this diff
 	// matter?" triage only: it never replaces Sinet's own second pass and never
 	// gates a card.
 	LLMIntent string `json:"llm_intent,omitempty"`
@@ -367,18 +372,60 @@ func (c *CDIO) EnsureTag(ctx context.Context) (string, error) {
 // guessed per-site include filter. Structural, not ⚙.
 var defaultSubtractiveSelectors = []string{"nav", "header", "footer", "script", "style", "noscript", "svg"}
 
-// RegionFilters returns the per-row include filters — the POSITIVE half of
-// S14.6 ¶T1 region filtering, narrowing a watch to the region of interest.
+// pageIncludeFilters holds the per-row include filters — the POSITIVE half of
+// S14.6 ¶T1 region filtering, narrowing a watch to its region of interest. The
+// data lives HERE, in code, like every other structural row property: there is
+// no operator supply path for it (Row carries no filter field and LoadRows
+// rejects unknown fields), so an entry that is not in this map does not reach
+// the organ.
 //
-// It is EMPTY for every seeded row at v0, deliberately and not by omission: a
-// CSS/XPath selector is per-site tuning that can only be written against the
-// page as it actually renders, and a guessed selector is worse than none —
-// it would silently filter away the very pricing table the row exists to watch,
-// and the watch would go quiet rather than fail loudly. The mechanism is live
-// and reaches the organ; the selectors are operator data supplied through the
-// R3 override at bring-up, when the pages can be inspected. The generic
-// subtractive list above carries the noise reduction until then.
-func RegionFilters(r Row) []string { return nil }
+// Every entry was VERIFIED at build time (2026-07-27) by fetching the row's URL
+// with this poller's own User-Agent and reading the served HTML — the same
+// bytes the organ's plain fetcher sees. Each URL listed here served exactly ONE
+// `<main>` landmark, so `main` selects the document's main content and cannot
+// select some other region.
+//
+// Exactly one selector per row, deliberately: the organ CONCATENATES the
+// matches of every include filter it is given
+// (processors/text_json_diff/processor.py apply_include_filters@0.55.8), so
+// adding a nested landmark such as `article` would duplicate the region in the
+// diff rather than widen it.
+//
+// A row absent from this map carries NO include filter, and that too is a
+// verified fact rather than an omission: kimi.com/coding, synthetic.new/pricing,
+// www.byteplus.com, x.ai and www.alibabacloud.com served no main-content
+// landmark at all to a plain fetch (JS shells or bot walls — alibabacloud.com
+// answered 960 bytes), and both help.openai.com articles answered 403 to a
+// plain fetch, so their landmark belongs to an error page and not to the
+// article. Those rows are diffed whole, with the subtractive list above doing
+// the noise reduction, until the decay ladder's browser rung or a better source
+// changes what a fetch returns.
+//
+// A filter that matches nothing is LOUD, never quiet: the same upstream
+// function raises FilterNotFoundInResponse when the concatenation comes back
+// empty, which the organ records on the watch and returns as `last_error` in
+// the watch list Sinet already polls.
+var pageIncludeFilters = map[string][]string{
+	"t1-anthropic-pricing":       {"main"},
+	"t1-zai-devpack":             {"main"},
+	"t1-openai-pricing":          {"main"},
+	"t1-minimax-plans":           {"main"},
+	"t1-cerebras-code":           {"main"},
+	"t1-nanogpt-pricing":         {"main"},
+	"t1-stepfun-plans":           {"main"},
+	"t1-anthropic-release-notes": {"main"},
+	"t1-codex-changelog":         {"main"},
+	"t1-zai-release-notes":       {"main"},
+	"t1-minimax-release-notes":   {"main"},
+	"t1-cerebras-changelog":      {"main"},
+	"t1-deepseek-news":           {"main"},
+	"t3-usagepricing-activity":   {"main"},
+}
+
+// RegionFilters returns the include filters held for r, or nil for a row that
+// has none. A row id absent from the map is the verified no-landmark case
+// documented above.
+func RegionFilters(r Row) []string { return pageIncludeFilters[r.ID] }
 
 // specFor renders the organ-side config for one page row. The escalation
 // ladder's second rung is expressed here as configuration: a row escalated past
@@ -398,37 +445,43 @@ func specFor(r Row) WatchSpec {
 	}
 }
 
-// LocalEndpointConfig is the organ-side configuration S14.6 ¶T1 requires for
-// "its native LLM rules pointed at Sinet's local OpenAI-compatible endpoint",
-// stated as DATA so the B5 gate proposal carries something concrete.
+// ── The local-endpoint record (S14.6 ¶T1) ─────────────────────────────────
 //
-// It is NOT settable over REST, and that is a verified property of the pin, not
-// an omission: at tag 0.55.8 `changedetectionio/flask_app.py` registers exactly
-// thirteen `add_resource` routes (watch, watch/<uuid>, history, single-history,
-// difference, favicon, tags, tag, search, import, notifications, systeminfo,
-// full-spec) and NONE of them reads or writes application settings — a grep of
-// that file for `LLMSettings`, `api_base` or `application_settings` matches
-// nothing. `LLMSettings.api_base` / `.model` are GLOBAL organ settings written
-// through its own settings UI or datastore file.
+// This block states, for the B5-gate proposal, HOW S14.6 ¶T1's "its
+// native LLM rules pointed at Sinet's local OpenAI-compatible endpoint" is
+// actually configured — corrected at drain round 2, because the earlier record
+// here was wrong in the half the gate proposal rested on.
 //
-// So Sinet drives the per-watch half over REST (LLMIntent above, WatchBase's
-// `llm_intent`) and the endpoint half is an operator install-time step. The
-// per-watch intent is what makes the first pass meaningful; without the
-// endpoint configured the organ simply runs no LLM triage, Sinet's own second
-// pass is unaffected, and nothing silently degrades.
-type LocalEndpointConfig struct {
-	// APIBase is LLMSettings.api_base — Sinet's local OpenAI-compatible
-	// endpoint (the llama-swap front, loopback).
-	APIBase string
-	// Model is LLMSettings.model — a duty-alias-shaped seat name.
-	Model string
-}
-
-// RequiredLocalEndpointConfig renders the organ-side settings the B5-gate
-// install must apply for the S14.6 ¶T1 first-pass triage to run.
-func RequiredLocalEndpointConfig(apiBase, model string) LocalEndpointConfig {
-	return LocalEndpointConfig{APIBase: apiBase, Model: model}
-}
+// NOT SETTABLE OVER REST — verified: at tag 0.55.8 `changedetectionio/flask_app.py`
+// registers exactly thirteen `add_resource` routes (watch, watch/<uuid>,
+// history, single-history, difference, favicon, tags, tag, search, import,
+// notifications, systeminfo, full-spec) and none of them reads or writes
+// application settings; grepping that file for `LLMSettings`, `api_base` or
+// `application_settings` matches nothing.
+//
+// BUT SETTABLE VIA ENVIRONMENT, which the earlier record missed because it
+// grepped the REST routes only. `changedetectionio/llm/evaluator.py@0.55.8`
+// `get_llm_config` resolves ENVIRONMENT VARIABLES FIRST and the datastore
+// second — verbatim: "Resolution order (first non-empty model wins): 1.
+// Environment variables: LLM_MODEL, LLM_API_KEY, LLM_API_BASE  2. Datastore
+// settings (set via UI)", with the same three names documented in that module's
+// docstring. The datastore fallback lives at `settings.application.llm.{model,
+// api_key,api_base}` (`get_llm_settings` hydrates that dict into the
+// LLMSettings model — LLMSettings is the validation layer, not the storage
+// key). A non-empty LLM_MODEL is what makes the env branch win, so the two
+// variables are set together or not at all.
+//
+// So endpoint pointing IS expressible through Sinet's own versioned mechanism:
+// `Environment=LLM_API_BASE=…` + `Environment=LLM_MODEL=…` on the
+// `sinet-watchlist.service` THIS PACKET GENERATES (internal/units), not a
+// hand-made click in the organ's settings UI that no artifact records. It is
+// still an operator ACT to install and start that unit — like every other unit
+// Sinet generates — but the configuration itself is code.
+//
+// LLM_API_KEY is deliberately NOT rendered: the local endpoint needs none, and
+// a generated unit is never a place to put a secret (D2/S11.5).
+//
+// ──────────────────────────────────────────────────────────────────────────
 
 // watchIntent is the plain-English first-pass triage instruction handed to the
 // organ's native LLM rules. It states the lane at stake so the organ's cheap

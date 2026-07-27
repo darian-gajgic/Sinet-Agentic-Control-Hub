@@ -197,51 +197,44 @@ func TestNon2xxIsAFetchFailure(t *testing.T) {
 // answer that header with Content-Encoding: gzip, so the feed rows, the
 // models.dev baseline and the genai-prices refresh all failed every cycle.
 //
-// Two origins are exercised: one that compresses only when the TRANSPORT
-// negotiates it (the normal case — the transport must decompress and strip the
-// header), and one that compresses UNSOLICITED (the belt must decompress).
+// The origin here serves REAL gzip to whatever asked for it, and asserts that
+// the request carried a transport-added Accept-Encoding — the shape every
+// production fetch has, because net/http adds that header itself whenever the
+// caller did not. A body that arrives compressed, or fails to parse, is the
+// regression.
 func TestGzippedOriginIsDecompressed(t *testing.T) {
-	gz := func(body string) []byte {
+	var sawAcceptEncoding string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAcceptEncoding = r.Header.Get("Accept-Encoding")
+		// A correct origin honouring the negotiation: it declares the encoding
+		// and serves real gzip bytes. The transport undoes this ONLY when it
+		// added Accept-Encoding itself.
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "application/atom+xml")
 		var buf bytes.Buffer
 		zw := gzip.NewWriter(&buf)
-		if _, err := zw.Write([]byte(body)); err != nil {
-			t.Fatal(err)
+		if _, err := zw.Write([]byte(atomBody)); err != nil {
+			t.Error(err)
 		}
 		if err := zw.Close(); err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
-		return buf.Bytes()
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer srv.Close()
+
+	resp, err := watchlist.NewFetcher(srv.Client()).Get(context.Background(), srv.URL, watchlist.FetchState{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
 	}
-
-	for name, unsolicited := range map[string]bool{
-		"negotiated by the transport": false,
-		"unsolicited by the origin":   true,
-	} {
-		t.Run(name, func(t *testing.T) {
-			var sawExplicitHeader string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				sawExplicitHeader = r.Header.Get("Accept-Encoding")
-				if !unsolicited && !strings.Contains(sawExplicitHeader, "gzip") {
-					_, _ = w.Write([]byte(atomBody))
-					return
-				}
-				w.Header().Set("Content-Encoding", "gzip")
-				w.Header().Set("Content-Type", "application/atom+xml")
-				_, _ = w.Write(gz(atomBody))
-			}))
-			defer srv.Close()
-
-			resp, err := watchlist.NewFetcher(srv.Client()).Get(context.Background(), srv.URL, watchlist.FetchState{})
-			if err != nil {
-				t.Fatalf("Get: %v", err)
-			}
-			if len(resp.Body) >= 2 && resp.Body[0] == 0x1f && resp.Body[1] == 0x8b {
-				t.Fatal("the body is still gzip-compressed (magic 1f 8b) — the parsers would be handed compressed bytes")
-			}
-			if _, entries, err := watchlist.ParseFeed(resp.Body, "atom"); err != nil || len(entries) != 2 {
-				t.Fatalf("a gzipped feed did not parse: %d entries, err %v", len(entries), err)
-			}
-		})
+	if !strings.Contains(sawAcceptEncoding, "gzip") {
+		t.Fatalf("the request carried Accept-Encoding %q — the transport negotiates gzip on every fetch, so an origin that compresses is the ordinary case", sawAcceptEncoding)
+	}
+	if len(resp.Body) >= 2 && resp.Body[0] == 0x1f && resp.Body[1] == 0x8b {
+		t.Fatal("the body is still gzip-compressed (magic 1f 8b) — the parsers would be handed compressed bytes")
+	}
+	if _, entries, err := watchlist.ParseFeed(resp.Body, "atom"); err != nil || len(entries) != 2 {
+		t.Fatalf("a gzipped feed did not parse: %d entries, err %v", len(entries), err)
 	}
 }
 
@@ -287,24 +280,17 @@ func TestWrongExplicitHintIsHardRouted(t *testing.T) {
 	}
 }
 
-// TestMinifluxDeferralIsRecorded is the D8 lock: R12 required either a `standby`
-// lock entry or a RECORDED deferral, and an unrecorded decision is exactly the
-// kind that evaporates. The record must name the ratifying gate, state why the
-// fallback was not built, and state the re-entry condition.
-func TestMinifluxDeferralIsRecorded(t *testing.T) {
+// TestMinifluxFallbackStaysUnbuilt is the D8 lock's checkable half: Miniflux is
+// the PRE-REGISTERED fallback [G2 Def.12], so no HMAC webhook receiver may
+// appear in the file it would replace. (The deferral's prose record lives in
+// feed.go; a suite asserts behaviour, never documentation — CONVENTIONS §10.)
+func TestMinifluxFallbackStaysUnbuilt(t *testing.T) {
 	src, err := os.ReadFile("feed.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := string(src)
-	for _, want := range []string{"MINIFLUX", "G2 Def.12", "HMAC", "Re-entry condition"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the Miniflux deferral record is missing %q", want)
-		}
-	}
-	// And it must stay a deferral: no HMAC webhook receiver was built.
 	for _, banned := range []string{"hmac.New", "MinifluxWebhook", "X-Miniflux-Signature"} {
-		if strings.Contains(body, banned) {
+		if strings.Contains(string(src), banned) {
 			t.Errorf("feed.go contains %q — Miniflux is the pre-registered fallback, deliberately unbuilt", banned)
 		}
 	}

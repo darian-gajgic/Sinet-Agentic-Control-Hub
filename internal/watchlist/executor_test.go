@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -79,22 +80,45 @@ func TestWholeSeedSetDoesNotFloodOnFirstBoot(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "json") {
+		switch {
+		case strings.Contains(r.URL.Path, "json"):
 			_, _ = w.Write([]byte(`{"models":{"a":{"ctx":1}}}`))
-			return
+		case strings.HasSuffix(r.URL.Path, "/rss"):
+			_, _ = w.Write([]byte(rssBody))
+		default:
+			_, _ = w.Write([]byte(atomBody))
 		}
-		_, _ = w.Write([]byte(atomBody))
 	}))
 	defer srv.Close()
 
-	// Re-point every pollable seeded row at the stub; nothing dials outward.
+	// The dialect each seeded ORIGIN actually serves, live-verified 2026-07-27
+	// by reading the root element with this poller's own User-Agent:
+	// github.com `*.atom` → <feed>, openrouter.ai/blog/feed.xml → <rss>,
+	// hnrss.org → <rss>, reddit.com `/.rss` → <feed> (the D2 trap).
+	dialect := map[string]string{
+		"github.com": "atom", "openrouter.ai": "rss",
+		"hnrss.org": "rss", "www.reddit.com": "atom",
+	}
+	// Re-point every pollable seeded row at the stub, serving the dialect its
+	// ORIGIN serves while KEEPING the row's own seeded hint. Forcing one hint
+	// here (or serving whatever the hint claims) makes this check structurally
+	// blind to a D2-class mis-hint — an explicit hint is hard-routed, so a row
+	// hinted `rss` against an Atom origin fails on every cycle forever.
 	var rows []watchlist.Row
 	for _, r := range watchlist.SeedRows() {
-		if r.Kind == watchlist.KindFeed {
-			r.URL = srv.URL + "/feed.atom"
-			r.ParserHint = "atom"
-			rows = append(rows, r)
+		if r.Kind != watchlist.KindFeed {
+			continue
 		}
+		u, err := url.Parse(r.URL)
+		if err != nil {
+			t.Fatalf("row %q has an unparseable url %q", r.ID, r.URL)
+		}
+		served, ok := dialect[u.Host]
+		if !ok {
+			t.Fatalf("row %q polls %s, an origin whose dialect this check has never verified — verify it and add it, do not assume", r.ID, u.Host)
+		}
+		r.URL = srv.URL + "/feed/" + served
+		rows = append(rows, r)
 	}
 	if len(rows) < 8 {
 		t.Fatalf("only %d feed rows in the seed set — the flood check would be weak", len(rows))
@@ -110,6 +134,12 @@ func TestWholeSeedSetDoesNotFloodOnFirstBoot(t *testing.T) {
 	}
 	if pass.Polled != len(rows) {
 		t.Errorf("polled %d rows, want %d", pass.Polled, len(rows))
+	}
+	// Zero failures is what makes this a mis-hint check: an explicit hint that
+	// disagrees with the dialect its origin serves is a parse error, which the
+	// pass counts as a failure rather than a card.
+	if pass.Failures != 0 {
+		t.Errorf("%d of %d seeded feed rows failed to parse their origin's dialect — a hard-routed hint that disagrees with the origin fails forever", pass.Failures, len(rows))
 	}
 	if pass.Hits != 0 || len(h.findings(t)) != 0 {
 		t.Errorf("first boot over %d feeds raised %d cards — the inbox must stay empty", len(rows), pass.Hits)

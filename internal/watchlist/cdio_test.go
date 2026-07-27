@@ -471,10 +471,18 @@ func TestPageWatchCarriesRegionFilteringAndIntent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h.seedOne(t, pageRow("p", "https://example.invalid/pricing"))
+	// A REAL seeded page row: the include filters are code-held per row, so a
+	// synthetic id would exercise the empty case and prove nothing.
+	h.seedOne(t, pageRow("t1-anthropic-pricing", "https://example.invalid/pricing"))
 	rows, _ := h.st.PageRows(ctx)
 	if _, err := watchlist.NewCDIO(srv.URL, stubAPIKey, srv.Client()).Reconcile(ctx, h.st, rows); err != nil {
 		t.Fatal(err)
+	}
+
+	// The POSITIVE half: the row's verified region filter reaches the wire.
+	incl, ok := body["include_filters"].([]any)
+	if !ok || len(incl) != 1 || incl[0] != "main" {
+		t.Fatalf("the watch carries include_filters %v, want [main] — without it only the subtractive half of S14.6 T1 region filtering ever ships", body["include_filters"])
 	}
 
 	subs, ok := body["subtractive_selectors"].([]any)
@@ -499,23 +507,40 @@ func TestPageWatchCarriesRegionFilteringAndIntent(t *testing.T) {
 	}
 }
 
-// TestLocalEndpointConfigIsRecordedAsAnInstallStep is the other half of D3: the
-// endpoint pointing S14.6 ¶T1 asks for is NOT expressible over the pinned REST
-// surface, so it is recorded as concrete gate-proposal data rather than
-// silently skipped.
-func TestLocalEndpointConfigIsRecordedAsAnInstallStep(t *testing.T) {
-	cfg := watchlist.RequiredLocalEndpointConfig("http://127.0.0.1:8791/v1", "watchlist-triage")
-	if cfg.APIBase == "" || cfg.Model == "" {
-		t.Fatalf("the required organ-side config renders empty: %+v", cfg)
+// TestEveryHeldRegionFilterNamesASeededPageRow keeps the code-held include
+// filters honest: each was verified against the row's live URL, so a key that
+// matches no seeded page row is a typo that would silently send nothing.
+func TestEveryHeldRegionFilterNamesASeededPageRow(t *testing.T) {
+	// The rows whose live fetch showed NO main-content landmark (JS shells, bot
+	// walls, or a 403 whose landmark belongs to the error page). They carry no
+	// filter, and that is the verified fact rather than an omission.
+	noLandmark := map[string]bool{
+		"t1-kimi-coding": true, "t1-synthetic-pricing": true,
+		"t1-byteplus-codingplan": true, "t1-xai-pricing": true,
+		"t1-alibaba-codingplan":  true,
+		"t1-openai-help-6825453": true, "t1-openai-help-9624314": true,
 	}
-	// The gap must be documented with its evidence, not merely absent.
-	src, err := os.ReadFile("cdio.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"thirteen", "api_base", "no route at 0.55.8"} {
-		if !strings.Contains(string(src), want) {
-			t.Errorf("the LLM-endpoint gap is not recorded with its source evidence (missing %q)", want)
+	held := 0
+	for _, r := range watchlist.SeedRows() {
+		got := watchlist.RegionFilters(r)
+		switch {
+		case r.Kind != watchlist.KindPage:
+			if len(got) != 0 {
+				t.Errorf("row %q is kind %q but carries include filters %v", r.ID, r.Kind, got)
+			}
+		case noLandmark[r.ID]:
+			if len(got) != 0 {
+				t.Errorf("row %q served no landmark to a plain fetch, so it must carry no include filter; got %v", r.ID, got)
+			}
+		default:
+			if len(got) != 1 || got[0] != "main" {
+				t.Errorf("page row %q holds %v, want the verified single landmark [main] — the organ concatenates every filter, so a second one duplicates the region", r.ID, got)
+			}
+			held++
 		}
+	}
+	// A typo in a held key would leave its row filterless and drop this count.
+	if held != 14 {
+		t.Errorf("%d seeded page rows hold a verified include filter, want 14 — a key that names no seeded row silently sends nothing", held)
 	}
 }

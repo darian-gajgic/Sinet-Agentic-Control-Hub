@@ -265,13 +265,21 @@ func (x *Executor) pollPrices(ctx context.Context, r Row) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// A refresh that proposes NOTHING raises nothing: the document moved for a
-	// provider Sinet runs no lane for, or only in fields this table never
-	// prices. Same relevance rule as the second pass — a card is for a change
-	// that is actionable, and the out-of-scope counts still ride the next real
-	// proposal.
-	if prop.TotalRows == 0 {
-		x.Logger.Info("watchlist: genai-prices moved but proposed no priced row (out of scope for Sinet's lanes)",
+	// A refresh raises a card when anything IN SCOPE changed — a proposed row, a
+	// priced model that left upstream, or one whose price shape or tiers moved.
+	// The question is deliberately not "did we manage to propose a row?": that
+	// narrower gate suppresses every removal and every conditional-pricing move
+	// entirely, and since the content hash advances afterwards the change is
+	// never looked at again.
+	//
+	// Advancing the hash here is safe precisely BECAUSE the evaluation ran: the
+	// diff is against the STATIC vendored baseline, not the previous fetch, so
+	// every byte change that arrives is fully evaluated for in-scope impact
+	// before this branch is reached. What is skipped is a change that is
+	// genuinely out of scope — a provider Sinet runs no lane for — and the
+	// out-of-scope count rides the next in-scope proposal.
+	if !prop.HasInScopeChange() {
+		x.Logger.Info("watchlist: genai-prices moved with no in-scope change (no priced row, removal or shape change for Sinet's lanes)",
 			"row", r.ID, "out_of_scope", prop.OutOfScope)
 		return 0, x.Store.RecordSuccess(ctx, r.ID, st)
 	}

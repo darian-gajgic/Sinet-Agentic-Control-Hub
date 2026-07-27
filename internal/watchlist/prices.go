@@ -76,6 +76,20 @@ type PriceProposal struct {
 	// the operator to price by hand rather than silently flattened to a wrong
 	// number.
 	Structured []string `json:"structured,omitempty"`
+	// Removed lists in-scope models the baseline priced and upstream no longer
+	// carries — a retired model is real in-scope movement, and a diff assembled
+	// only from what upstream still carries can never see one.
+	Removed []string `json:"removed,omitempty"`
+	// ShapeChanged lists in-scope models whose upstream pricing is not a flat
+	// scalar shape AND does not match the baseline's block for that model:
+	// either it stopped being a flat rate, or its conditional/tiered numbers
+	// moved. Neither is expressible as one proposed row, so it is reported as
+	// change rather than dropped.
+	//
+	// Removed and ShapeChanged are bounded by the number of models the two
+	// priced lanes carry (a few dozen), not by upstream's ~1,400, so neither
+	// needs a cap.
+	ShapeChanged []string `json:"shape_changed,omitempty"`
 	// Stale, when set, is the S16.8 genai-prices staleness finding: upstream
 	// has not moved for longer than ⚙ adoption.price_data_stale_days while
 	// providers reprice, which PROPOSES the LiteLLM-primary fallback.
@@ -200,19 +214,27 @@ func BuildPriceProposal(upstream []byte, effectiveFrom time.Time) (*PriceProposa
 		return nil, fmt.Errorf("watchlist: parse vendored price data: %w", err)
 	}
 
+	// The baseline's in-scope models: their flat rows where they have one, and
+	// their raw price block either way. BOTH are needed — a model that leaves
+	// upstream, and one whose block stops being flat, are in-scope changes that
+	// a diff built only from what upstream still carries would never see.
 	old := map[string]ProposedPriceRow{}
+	prevBlock := map[string]string{}
 	for _, p := range prev {
 		lane, inScope := laneForProvider[p.ID]
 		if !inScope {
 			continue
 		}
 		for _, m := range p.Models {
+			key := p.ID + "/" + m.ID
+			prevBlock[key] = canonicalJSON(m.Prices)
 			if fp, ok := parseFlatPrices(m.Prices); ok {
-				old[p.ID+"/"+m.ID] = priceRowOf(lane, m.ID, fp, effectiveFrom)
+				old[key] = priceRowOf(lane, m.ID, fp, effectiveFrom)
 			}
 		}
 	}
 	var moved []ProposedPriceRow
+	stillUpstream := map[string]bool{}
 	for _, p := range fresh {
 		lane, inScope := laneForProvider[p.ID]
 		for _, m := range p.Models {
@@ -220,16 +242,29 @@ func BuildPriceProposal(upstream []byte, effectiveFrom time.Time) (*PriceProposa
 				prop.OutOfScope++
 				continue
 			}
+			key := p.ID + "/" + m.ID
+			stillUpstream[key] = true
 			fp, ok := parseFlatPrices(m.Prices)
 			if !ok {
-				prop.Structured = append(prop.Structured, p.ID+"/"+m.ID)
+				prop.Structured = append(prop.Structured, key)
+				// A non-flat block is a CHANGE when the baseline priced this
+				// model flat, or when the block itself moved. Unchanged tiered
+				// pricing is reported for hand-pricing but is not movement.
+				if base, known := prevBlock[key]; !known || base != canonicalJSON(m.Prices) {
+					prop.ShapeChanged = append(prop.ShapeChanged, key)
+				}
 				continue
 			}
 			row := priceRowOf(lane, m.ID, fp, effectiveFrom)
-			if b, seen := old[p.ID+"/"+m.ID]; seen && samePrices(b, row) {
+			if b, seen := old[key]; seen && samePrices(b, row) {
 				continue
 			}
 			moved = append(moved, row)
+		}
+	}
+	for key := range prevBlock {
+		if !stillUpstream[key] {
+			prop.Removed = append(prop.Removed, key)
 		}
 	}
 	sort.Slice(moved, func(i, j int) bool {
@@ -239,12 +274,44 @@ func BuildPriceProposal(upstream []byte, effectiveFrom time.Time) (*PriceProposa
 		return moved[i].Model < moved[j].Model
 	})
 	sort.Strings(prop.Structured)
+	sort.Strings(prop.ShapeChanged)
+	sort.Strings(prop.Removed)
 	prop.TotalRows = len(moved)
 	if len(moved) > proposedRowCap {
 		moved = moved[:proposedRowCap]
 	}
 	prop.Rows = moved
 	return prop, nil
+}
+
+// HasInScopeChange reports whether anything Sinet prices actually moved: a
+// proposed row, a model that left upstream, or one whose price shape or tiered
+// numbers moved. It is what gates the finding, so the question asked is "did
+// anything IN SCOPE change?" and never the narrower "did we manage to propose a
+// row?" — the narrow question silently swallows every removal and every
+// change to conditional pricing.
+func (p *PriceProposal) HasInScopeChange() bool {
+	return p.TotalRows > 0 || len(p.Removed) > 0 || len(p.ShapeChanged) > 0
+}
+
+// canonicalJSON renders a raw price block in a canonical form — object keys
+// sorted (json.Marshal sorts map keys), numbers in one format, no incidental
+// whitespace — so only a real change to a conditional/tiered block reads as
+// one. Upstream regenerating the document with a different key order or number
+// formatting must not manufacture drift findings.
+func canonicalJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
 }
 
 func priceRowOf(lane, model string, fp flatPrices, from time.Time) ProposedPriceRow {
@@ -293,7 +360,18 @@ func priceProposalSummary(p *PriceProposal) string {
 	if p.Stale != "" {
 		return "genai-prices data is stale — S16.8 proposes the LiteLLM-primary fallback"
 	}
-	return fmt.Sprintf("genai-prices refresh proposes %d price-table row(s) with effective dates — operator confirmation required, nothing applied", p.TotalRows)
+	var parts []string
+	if p.TotalRows > 0 {
+		parts = append(parts, fmt.Sprintf("%d price-table row(s) with effective dates", p.TotalRows))
+	}
+	if n := len(p.Removed); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d priced model(s) gone from upstream", n))
+	}
+	if n := len(p.ShapeChanged); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d model(s) whose pricing is no longer one flat rate", n))
+	}
+	return "genai-prices refresh: " + strings.Join(parts, ", ") +
+		" — operator confirmation required, nothing applied"
 }
 
 // priceProposalDetail renders the bounded human-readable proposal body.
@@ -308,6 +386,14 @@ func priceProposalDetail(p *PriceProposal) string {
 	fmt.Fprintf(&b, "proposed rows: %d (showing %d)\n", p.TotalRows, len(p.Rows))
 	for _, r := range p.Rows {
 		fmt.Fprintf(&b, "  %s/%s in=%g out=%g effective %s\n", r.Lane, r.Model, r.InputUSD, r.OutputUSD, r.EffectiveFrom)
+	}
+	if len(p.Removed) > 0 {
+		fmt.Fprintf(&b, "priced models gone from upstream (retired, renamed, or dropped — price them from the last known table until the operator decides): %s\n",
+			strings.Join(p.Removed, ", "))
+	}
+	if len(p.ShapeChanged) > 0 {
+		fmt.Fprintf(&b, "pricing no longer expressible as one flat rate (conditional or tiered upstream, or its tiers moved): %s\n",
+			strings.Join(p.ShapeChanged, ", "))
 	}
 	fmt.Fprintf(&b, "out of scope (providers Sinet runs no lane for): %d models\n", p.OutOfScope)
 	if len(p.Structured) > 0 {

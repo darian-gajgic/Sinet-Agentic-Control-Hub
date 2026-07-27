@@ -464,3 +464,214 @@ func TestStalenessClockDoesNotResetOnItsOwnOutput(t *testing.T) {
 		t.Errorf("the staleness finding reset the observation clock to %s", last)
 	}
 }
+
+// vendoredDoc decodes the vendored baseline into a mutable document, so a
+// suite can state exactly the upstream movement it exercises.
+func vendoredDoc(t *testing.T) []map[string]any {
+	t.Helper()
+	var doc []map[string]any
+	if err := json.Unmarshal(watchlist.VendoredPriceData(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// providerModels returns one provider's model list from a decoded document.
+func providerModels(t *testing.T, doc []map[string]any, id string) []any {
+	t.Helper()
+	for _, p := range doc {
+		if p["id"] == id {
+			models, _ := p["models"].([]any)
+			if len(models) == 0 {
+				t.Fatalf("provider %q carries no models in the vendored baseline", id)
+			}
+			return models
+		}
+	}
+	t.Fatalf("provider %q is absent from the vendored baseline", id)
+	return nil
+}
+
+// TestInScopeRemovalIsAChangeNotSilence is the drain-r2 R3 lock. The refresh
+// used to gate its finding on "did we manage to PROPOSE a row?", so upstream
+// dropping in-scope models — the most consequential move a price source can
+// make for a lane Sinet actually runs — produced TotalRows=0 and was suppressed
+// entirely, while the row's content hash advanced so it was never looked at
+// again. The gate asks whether anything IN SCOPE changed.
+func TestInScopeRemovalIsAChangeNotSilence(t *testing.T) {
+	doc := vendoredDoc(t)
+	models := providerModels(t, doc, "anthropic")
+	if len(models) < 3 {
+		t.Fatalf("only %d anthropic models in the baseline — the removal check would be weak", len(models))
+	}
+	kept := len(models) - 1
+	for _, p := range doc {
+		if p["id"] == "anthropic" {
+			p["models"] = models[:1] // upstream drops all but one
+		}
+	}
+	upstream, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prop, err := watchlist.BuildPriceProposal(upstream, mustTime(t, "2026-08-01T00:00:00Z"))
+	if err != nil {
+		t.Fatalf("BuildPriceProposal: %v", err)
+	}
+	if prop.TotalRows != 0 {
+		t.Fatalf("the fixture proposed %d rows — it must exercise the zero-proposal path", prop.TotalRows)
+	}
+	if len(prop.Removed) == 0 {
+		t.Fatalf("upstream dropped %d priced anthropic models and the proposal reports none removed", kept)
+	}
+	if !prop.HasInScopeChange() {
+		t.Error("a removal of priced models is not counted as an in-scope change — the finding would be suppressed and never re-evaluated")
+	}
+}
+
+// TestInScopePriceShapeChangeIsAChange: a model whose upstream pricing stops
+// being one flat rate cannot become a proposed row, so the old gate swallowed
+// it too. It is real in-scope movement and must raise.
+func TestInScopePriceShapeChangeIsAChange(t *testing.T) {
+	doc := vendoredDoc(t)
+	var target string
+	for _, m := range providerModels(t, doc, "anthropic") {
+		mm := m.(map[string]any)
+		prices, ok := mm["prices"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, flat := prices["input_mtok"].(float64); !flat {
+			continue
+		}
+		// Upstream re-expresses the rate as context-tiered, which no single
+		// effective-dated row can carry.
+		prices["input_mtok"] = map[string]any{"base": 3.0, "gt_200k_tokens": 6.0}
+		target, _ = mm["id"].(string)
+		break
+	}
+	if target == "" {
+		t.Fatal("no flat-priced anthropic model in the baseline — the shape-change fixture cannot be built")
+	}
+	upstream, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prop, err := watchlist.BuildPriceProposal(upstream, mustTime(t, "2026-08-01T00:00:00Z"))
+	if err != nil {
+		t.Fatalf("BuildPriceProposal: %v", err)
+	}
+	if prop.TotalRows != 0 {
+		t.Fatalf("the fixture proposed %d rows — it must exercise the zero-proposal path", prop.TotalRows)
+	}
+	want := "anthropic/" + target
+	var found bool
+	for _, s := range prop.ShapeChanged {
+		found = found || s == want
+	}
+	if !found {
+		t.Errorf("shape-changed models = %v, want %s", prop.ShapeChanged, want)
+	}
+	if !prop.HasInScopeChange() {
+		t.Error("a priced model whose rate stopped being flat is not counted as an in-scope change")
+	}
+}
+
+// TestOutOfScopeOnlyMovementStillRaisesNothing is the other side of the same
+// gate: the D4 rule stands. Upstream moves for a provider Sinet runs no lane
+// for, so there is nothing actionable and no card — the out-of-scope count
+// rides the next in-scope proposal.
+func TestOutOfScopeOnlyMovementStillRaisesNothing(t *testing.T) {
+	doc := vendoredDoc(t)
+	moved := false
+	for _, p := range doc {
+		id, _ := p["id"].(string)
+		if id == "anthropic" || id == "zhipuai" {
+			continue
+		}
+		models, _ := p["models"].([]any)
+		for _, m := range models {
+			prices, ok := m.(map[string]any)["prices"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, flat := prices["input_mtok"].(float64); !flat {
+				continue
+			}
+			prices["input_mtok"] = 42.0
+			moved = true
+			break
+		}
+		if moved {
+			break
+		}
+	}
+	if !moved {
+		t.Fatal("no out-of-scope flat price to move in the vendored baseline")
+	}
+	upstream, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prop, err := watchlist.BuildPriceProposal(upstream, mustTime(t, "2026-08-01T00:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prop.HasInScopeChange() {
+		t.Errorf("an out-of-scope price move was counted as in-scope change: rows=%d removed=%v shape=%v",
+			prop.TotalRows, prop.Removed, prop.ShapeChanged)
+	}
+}
+
+// TestRemovalRaisesACardEndToEnd drives the same removal through the executor:
+// the suppression bug was only observable at this level, because the proposal
+// itself was built correctly and then thrown away.
+func TestRemovalRaisesACardEndToEnd(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	doc := vendoredDoc(t)
+	models := providerModels(t, doc, "anthropic")
+	for _, p := range doc {
+		if p["id"] == "anthropic" {
+			p["models"] = models[:1]
+		}
+	}
+	upstream, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(upstream)
+	}))
+	defer srv.Close()
+
+	h.seedOne(t, watchlist.Row{
+		ID: watchlist.PriceRowID, Kind: watchlist.KindAPI, URL: srv.URL,
+		ParserHint: "json", Tier: 3, Cadence: watchlist.CadenceWeekly, Enabled: true,
+		Group: watchlist.GroupReport02, Notes: "the genai-prices refresh row",
+	})
+	clk := &clock{t: mustTime(t, "2026-08-01T00:00:00Z")}
+	x := h.exec(clk, watchlist.Deps{HTTPClient: srv.Client()})
+	pass, err := x.RunDue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pass.Hits != 1 {
+		t.Fatalf("upstream dropping every priced anthropic model but one raised %d cards, want 1", pass.Hits)
+	}
+	f := h.findings(t)
+	if len(f) != 1 || f[0].Proposal == nil {
+		t.Fatalf("%d findings with a proposal record, want 1", len(f))
+	}
+	if len(f[0].Proposal.Removed) == 0 {
+		t.Error("the card's proposal does not carry the removed models")
+	}
+	if !strings.Contains(f[0].Summary, "gone from upstream") {
+		t.Errorf("the card summary does not say that priced models disappeared: %q", f[0].Summary)
+	}
+	if !strings.Contains(f[0].Detail, "gone from upstream") {
+		t.Errorf("the card body does not name the removal:\n%s", f[0].Detail)
+	}
+}
