@@ -2,6 +2,10 @@ package shell
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +13,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // benchmark_seams_test.go — the B5-7 composition-root coverage. Hermetic and
@@ -178,5 +183,61 @@ func TestBenchmarkSurfaceSeedsOnlyDomainBookkeeping(t *testing.T) {
 func TestBenchmarkLoopIntervalIsATickNotACadence(t *testing.T) {
 	if benchmarkLoopInterval <= 0 || benchmarkLoopInterval > 5*time.Minute {
 		t.Errorf("benchmarkLoopInterval = %v; a tick should be brisk and cheap", benchmarkLoopInterval)
+	}
+}
+
+// TestBriefSeamSourcesTheArtifactOfRecord (D1): BENCH-REG §3.1 requires both
+// arms answer the IDENTICAL frozen statement, and the platform arm executed
+// from the CONFIRMED specification — so the seam reads the S06 artifact of
+// record, hash-verified, and never the arriving request.
+func TestBriefSeamSourcesTheArtifactOfRecord(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "SPEC-v3.md")
+	const confirmed = "# SPEC v3\n\n## Restatement\n\nthe CONFIRMED goal, after two rounds of interview\n"
+	if err := os.WriteFile(specPath, []byte(confirmed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(confirmed))
+	pin := hex.EncodeToString(sum[:])
+
+	// The seam reads its input from the intake state, so drive the underlying
+	// resolution directly against a state the pipeline would have written.
+	brief, err := briefFromState(ctx, "t1", &intake.State{
+		TaskID:  "t1",
+		Req:     intake.Request{TaskID: "t1", Text: "the RAW ask, before any revision"},
+		SpecRef: &intake.ArtifactRef{Path: specPath, SHA256: pin, Version: 3},
+	})
+	if err != nil {
+		t.Fatalf("briefFromState: %v", err)
+	}
+	if brief.Statement != confirmed {
+		t.Errorf("statement = %q, want the confirmed artifact of record — never the raw ask (BENCH-REG §3.1)", brief.Statement)
+	}
+	if strings.Contains(brief.Statement, "RAW ask") {
+		t.Error("the seam handed the direct arm the arriving request; the platform arm executed from the CONFIRMED spec")
+	}
+	if !strings.Contains(brief.StatementSource, "SPEC-v3.md") || !strings.Contains(brief.StatementSource, pin) {
+		t.Errorf("statement source = %q, want the artifact name pinned by content hash", brief.StatementSource)
+	}
+	if len(brief.Attachments) != 1 || brief.Attachments[0] != brief.StatementSource {
+		t.Errorf("attachments = %v; at v0 intake has no separate attachment channel, so the artifact ref is what travels", brief.Attachments)
+	}
+
+	// A DRIFTED artifact of record fails loudly rather than feeding the direct
+	// arm a statement the platform arm never answered.
+	if err := os.WriteFile(specPath, []byte(confirmed+"\nsomething else\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := briefFromState(ctx, "t1", &intake.State{
+		TaskID:  "t1",
+		SpecRef: &intake.ArtifactRef{Path: specPath, SHA256: pin, Version: 3},
+	}); err == nil {
+		t.Error("a drifted artifact of record must be refused, not used")
+	}
+
+	// No confirmed specification at all: there is no frozen statement to put.
+	if _, err := briefFromState(ctx, "t1", &intake.State{TaskID: "t1"}); err == nil {
+		t.Error("a task with no confirmed specification has no §2 statement and must be refused")
 	}
 }

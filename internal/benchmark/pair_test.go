@@ -565,3 +565,71 @@ func TestCleanDirectArmRecordsNoParityNote(t *testing.T) {
 		t.Errorf("a cleanly finished direct arm recorded a parity note: %q", got.ParityNote)
 	}
 }
+
+// TestStatementSourceIsCapturedAtDispatchAndRecorded (D1): §3.1 requires both
+// arms answer the IDENTICAL frozen statement, and the platform arm executed
+// from the CONFIRMED specification — so the direct arm's statement comes from
+// the S06 artifact of record, and WHICH artifact it came from is captured at
+// dispatch and lands on the §14 record. Capturing at dispatch (not at record
+// time) is the point: a later bounded revision must never rewrite which text
+// this pair's direct arm actually answered.
+func TestStatementSourceIsCapturedAtDispatchAndRecorded(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.user(t, "alice", true)
+	pair := h.sampledPair(t, "t1")
+	p := h.practice(t)
+
+	if _, err := p.DispatchDirectArm(ctx, pair.PairID); err != nil {
+		t.Fatal(err)
+	}
+	// It is durable the moment the arm is born, on the run's own birth event.
+	var payload string
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = 'run.created'`,
+		benchmark.DirectRunID(pair.PairID)).Scan(&payload); err != nil {
+		t.Fatalf("the direct arm's birth event is missing: %v", err)
+	}
+	if !strings.Contains(payload, testStatementSource) {
+		t.Errorf("the direct arm's birth event does not record its statement source: %s", payload)
+	}
+
+	// A LATER revision of the artifact of record changes the seam's answer —
+	// and must NOT change what this pair's record says the arm answered.
+	p.Briefs = func(_ context.Context, taskID string) (benchmark.TaskBrief, error) {
+		return benchmark.TaskBrief{TaskID: taskID, Statement: "a revised statement",
+			StatementSource: "s06-artifact-of-record:SPEC-v9.md@sha256:0000"}, nil
+	}
+	if _, err := p.RenderBlind(ctx, pair.PairID); err != nil {
+		t.Fatal(err)
+	}
+	a, err := benchmark.NewAnswer(benchmark.ChoiceA, benchmark.SideA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.RecordVerdict(ctx, pair.PairID, a); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := p.Reveal(ctx, pair.PairID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.StatementSource != testStatementSource {
+		t.Errorf("record statement source = %q, want the one captured AT DISPATCH (%q) — a later revision must not rewrite history",
+			rec.StatementSource, testStatementSource)
+	}
+
+	// A declined pair ran no direct arm, so it records no statement source
+	// rather than a guessed one.
+	other := h.sampledPair(t, "t2")
+	if _, err := p.Decline(ctx, other.PairID); err != nil {
+		t.Fatal(err)
+	}
+	declined, err := p.Reveal(ctx, other.PairID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declined.StatementSource != "" {
+		t.Errorf("a declined pair recorded a statement source %q — no direct arm ran", declined.StatementSource)
+	}
+}

@@ -2,9 +2,13 @@ package shell
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -155,7 +159,25 @@ func benchmarkFloorSeam(store *evals.Store) benchmark.SuiteFloors {
 
 // benchmarkBriefSeam satisfies BENCH-REG §2's "the same confirmed task
 // statement + the same attachments the specification had" from the S06 intake
-// artifact of record. Both arms answer this identical frozen text (§3.1/§6).
+// ARTIFACT OF RECORD. Both arms answer this identical frozen text (§3.1/§6).
+//
+// The statement is the CONFIRMED spec markdown of record — never the arriving
+// request. The platform arm executed from the confirmed specification, and
+// intake's bounded revisions (interview, clarification, critique, coverage) can
+// move that text a long way from what the requester first typed. Handing the
+// direct arm the raw ask would put the two arms on different questions, and
+// every comparison afterwards would be measuring the intake pipeline rather
+// than the platform — the confound §3.1 exists to forbid.
+//
+// The markdown is hash-verified against the artifact ref before it is used: a
+// drifted artifact of record fails LOUDLY rather than feeding the direct arm a
+// statement the platform arm never saw.
+//
+// Attachments: at v0 intake carries no attachment channel separate from the
+// specification — the requester's supplied inputs (S06.3) are rendered INTO the
+// markdown of record — so "identical attachments" holds by construction, and
+// what travels here is the artifact REF itself (refs, never bodies, P-T07-5).
+// A future separate attachment channel would extend this seam, not the package.
 func benchmarkBriefSeam(pipeline *intake.Pipeline) benchmark.BriefSource {
 	if pipeline == nil {
 		return nil
@@ -165,18 +187,38 @@ func benchmarkBriefSeam(pipeline *intake.Pipeline) benchmark.BriefSource {
 		if err != nil {
 			return benchmark.TaskBrief{}, err
 		}
-		brief := benchmark.TaskBrief{TaskID: taskID, Statement: st.Req.Text}
-		// The attachments the SPECIFICATION had: refs, never bodies (P-T07-5).
-		// The direct arm is handed the same references the platform arm's
-		// specification carried, and nothing the pipeline added afterwards.
-		if st.SpecRef != nil && st.SpecRef.Path != "" {
-			brief.Attachments = append(brief.Attachments, st.SpecRef.Path)
-		}
-		if st.RecordRef != nil && st.RecordRef.Path != "" {
-			brief.Attachments = append(brief.Attachments, st.RecordRef.Path)
-		}
-		return brief, nil
+		return briefFromState(ctx, taskID, st)
 	}
+}
+
+// briefFromState is the seam's resolution, split from the pipeline lookup so
+// the §3.1 obligation it implements is directly testable.
+func briefFromState(_ context.Context, taskID string, st *intake.State) (benchmark.TaskBrief, error) {
+	if st.SpecRef == nil || st.SpecRef.Path == "" {
+		return benchmark.TaskBrief{}, fmt.Errorf(
+			"shell: task %q has no confirmed S06 specification of record — the direct arm has no frozen statement to answer (BENCH-REG §2/§3.1)",
+			taskID)
+	}
+	body, err := os.ReadFile(st.SpecRef.Path)
+	if err != nil {
+		return benchmark.TaskBrief{}, fmt.Errorf(
+			"shell: read the S06 artifact of record for %q: %w", taskID, err)
+	}
+	sum := sha256.Sum256(body)
+	got := hex.EncodeToString(sum[:])
+	if st.SpecRef.SHA256 != "" && got != st.SpecRef.SHA256 {
+		return benchmark.TaskBrief{}, fmt.Errorf(
+			"shell: the S06 artifact of record for %q has drifted from its pin (%s vs %s) — refusing to hand the direct arm a statement the platform arm never answered (BENCH-REG §3.1)",
+			taskID, got, st.SpecRef.SHA256)
+	}
+	ref := fmt.Sprintf("s06-artifact-of-record:%s@sha256:%s",
+		filepath.Base(st.SpecRef.Path), got)
+	return benchmark.TaskBrief{
+		TaskID:          taskID,
+		Statement:       string(body),
+		StatementSource: ref,
+		Attachments:     []string{ref},
+	}, nil
 }
 
 // benchmarkPlatformTextSeam resolves the platform arm: "the accepted final

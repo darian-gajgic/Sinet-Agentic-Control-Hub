@@ -125,24 +125,39 @@ func TestHonestClaimsTableIsTheRegisteredOne(t *testing.T) {
 	}
 }
 
-// TestArmParityDeclarationIsTheRegisteredOne: §6 is declared, not paraphrased
-// away. Each distinctive clause of the shipped declaration is found in §6.
+// TestArmParityDeclarationIsTheRegisteredOne: §6 is declared VERBATIM, not
+// paraphrased and not tightened. Every bullet of the shipped declaration must
+// appear in §6 word for word once the file's markdown emphasis is stripped —
+// which is the only difference the shipped strings are allowed to have.
 func TestArmParityDeclarationIsTheRegisteredOne(t *testing.T) {
-	body := section(t, registrationText(t), "## 6.")
-	decl := strings.Join(benchmark.ArmParityDeclaration, " ")
-	for _, clause := range []string{
-		"That asymmetry is the treatment under test",
-		"cannot be pinned or controlled",
-		"identical frozen task statement",
-		"never silently absorbed",
-	} {
+	body := plainText(section(t, registrationText(t), "## 6."))
+	shipped := benchmark.ArmParityDeclaration
+	if len(shipped) != 4 {
+		t.Fatalf("the shipped §6 declaration has %d bullets, want the registration's 4", len(shipped))
+	}
+	for _, bullet := range shipped {
+		if !strings.Contains(body, plainText(bullet)) {
+			t.Errorf("this §6 bullet is not in the registration VERBATIM — never \"improve\" a registered label (BENCH-REG §17):\n  shipped: %s", bullet)
+		}
+	}
+	// The two parentheticals a paraphrase would be tempted to drop: an example
+	// makes the tool clause concrete, and the citation records that the absence
+	// of prior art is a FINDING rather than an absence of looking.
+	for _, clause := range []string{"(e.g., its own web search)", "(report 12 §2.6, negative finding)"} {
 		if !strings.Contains(body, clause) {
 			t.Errorf("BENCH-REG §6 no longer contains %q — the shipped declaration is pinned to it", clause)
 		}
-		if !strings.Contains(decl, clause) {
-			t.Errorf("the shipped §6 declaration omits %q", clause)
+		if !strings.Contains(strings.Join(shipped, " "), clause) {
+			t.Errorf("the shipped §6 declaration elides %q", clause)
 		}
 	}
+}
+
+// plainText strips the registration's markdown emphasis so a shipped string can
+// be compared to the file's prose. It touches nothing else: the comparison is
+// still word for word.
+func plainText(s string) string {
+	return strings.NewReplacer("**", "", "*", "").Replace(s)
 }
 
 // TestDoneDirectlyLabelsAgreeAcrossThePackages: the §13.1 heuristic label exists

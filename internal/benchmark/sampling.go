@@ -74,9 +74,13 @@ func cryptoRand(n int) int {
 	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
 	if err != nil {
 		// crypto/rand failing is a platform fault, not a benchmark condition.
-		// Returning n-1 makes the draw MISS rather than fabricate a sample, so
-		// a broken entropy source under-accrues visibly instead of polluting
-		// the record with draws that were never random.
+		// n-1 is the most conservative value available: the draw samples only
+		// when it lands strictly below the phase rate, so n-1 MISSES at every
+		// rate below 100%. At a 100% rate every eligible task is sampled
+		// whatever the draw returns, so the fallback still cannot manufacture a
+		// sample the rate did not already mandate. A broken entropy source
+		// therefore under-accrues visibly rather than polluting the record with
+		// draws that were never random.
 		return n - 1
 	}
 	return int(v.Int64())

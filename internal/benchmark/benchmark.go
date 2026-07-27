@@ -262,9 +262,19 @@ type FloorReport struct {
 // precedent, CONVENTIONS §31).
 type TaskBrief struct {
 	TaskID string
-	// Statement is the confirmed task statement, frozen — both arms answer
-	// this identical text (BENCH-REG §3.1/§6).
+	// Statement is the CONFIRMED task statement, frozen — both arms answer this
+	// identical text (BENCH-REG §3.1/§6). Its source is the S06 artifact of
+	// record, NOT the arriving request: the platform arm executed from the
+	// confirmed specification, and bounded revisions during intake may have
+	// moved that text away from what the requester first typed. Handing the
+	// direct arm the raw ask would silently break §3.1 — the two arms would be
+	// answering different questions and every comparison after it would be
+	// measuring the intake pipeline rather than the platform.
 	Statement string
+	// StatementSource names the artifact the statement was drawn from
+	// (document + content hash), so a record can be audited years later against
+	// the exact text both arms answered. It is recorded on the pair.
+	StatementSource string
 	// Attachments are the refs the specification carried, passed through
 	// unchanged. Refs, never bodies (P-T07-5).
 	Attachments []string

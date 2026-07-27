@@ -145,8 +145,18 @@ func (p *Practice) floorLimb(ctx context.Context, domain string) LimbResult {
 	return l
 }
 
-// noteFirstOpen records the durable first-open marker. The migration's
-// write-once trigger is the belt: the marker is history and never moves.
+// noteFirstOpen records the durable first-open marker.
+//
+// A DECLARED READING of the OQ3 disposition's "same tx as the evaluation": a
+// literal same-transaction write is not reachable here and never could be. Limb
+// (d) reads EXTERNAL, independently mutable suite state through a func seam, so
+// the evaluation is not a single transaction to join — wrapping it in one would
+// hold a write transaction open across an out-of-package call, which S02.1's
+// read hygiene forbids for good reason. What the disposition ASKS for is
+// achieved exactly: the marker is durable, and it opens once. The conditional
+// (`WHERE first_gate_opened_ts IS NULL`) makes the write idempotent under
+// concurrent evaluations, and migration 0014'"'"'s write-once trigger is the belt
+// beneath it — the marker is history and never moves.
 func (p *Practice) noteFirstOpen(ctx context.Context, domain string) error {
 	return p.Store.db.WriteTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
@@ -361,9 +371,16 @@ func (p *Practice) evaluateAlarmTx(ctx context.Context, tx *sql.Tx, domain, epoc
 	return nil
 }
 
-// DisposeAlarm is the operator act that clears a standing alarm (§12:
+// DisposeAlarm is the OPERATOR act that clears a standing alarm (§12:
 // "the card requires an operator disposition (logged as a decision event) —
 // investigate, fix-and-continue accruing, or re-register with rationale").
+//
+// The actor must hold the one S01.9 role bit, checked against the users row in
+// the data layer. §12 says "operator disposition", and the alarm exists because
+// the platform may be losing its own benchmark: letting any principal clear it
+// would make the one signal designed to be hard to ignore trivially ignorable.
+// The refusal is package-level, exactly as the §4.2.1 consent flip's is — B6's
+// HTTP surface is an additional gate, never the only one.
 //
 // The disposition is logged as BOTH a decision.recorded (it IS a human decision,
 // S14.2 family 5) and a benchmark.alarm clear (it IS alarm history, keep-forever
@@ -378,6 +395,13 @@ func (p *Practice) DisposeAlarm(ctx context.Context, actor, domain, disposition,
 		return fmt.Errorf("%w: %q is not a BENCH-REG §12 disposition (investigate | fix-and-continue-accruing | re-register)", ErrBadInput, disposition)
 	}
 	return p.Store.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		operator, err := p.Store.isOperatorTx(ctx, tx, actor)
+		if err != nil {
+			return err
+		}
+		if !operator {
+			return fmt.Errorf("%w: %q is not the operator — a benchmark alarm is cleared by an OPERATOR disposition (BENCH-REG §12; S01.9)", ErrBadInput, actor)
+		}
 		st, err := p.alarmStateTx(ctx, tx, domain)
 		if err != nil {
 			return err

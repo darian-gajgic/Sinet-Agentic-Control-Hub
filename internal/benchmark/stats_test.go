@@ -100,14 +100,41 @@ func TestAlarmZoneReferenceRecords(t *testing.T) {
 				c.w, c.m, p.LossG, benchmark.AlarmThreshold)
 		}
 	}
-	// The threshold is STRICTLY greater, exactly as registered: a record whose
-	// 1−G sits at or below 0.95 does not trip.
-	p, err := benchmark.ComputeG(3, 12)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.LossG > benchmark.AlarmThreshold != p.AlarmCondition() {
-		t.Errorf("AlarmCondition disagrees with the registered comparison at 1−G = %.4f", p.LossG)
+	// The boundary itself, asserted against EXACT fixtures rather than against
+	// the comparison's own definition (which could not fail):
+	//
+	//   3/12 → G = 378/8192, so 1−G = 7814/8192 ≈ 0.95386 — just OVER 0.95, trips.
+	//   2/9  → G = 56/1024,  so 1−G = 968/1024  ≈ 0.94531 — just UNDER, does not.
+	//
+	// One pair either side of the registered line, so a threshold edited from
+	// 0.95 in either direction breaks exactly one of them.
+	for _, c := range []struct {
+		w, m      int
+		exactG    string
+		wantLossG float64
+		wantTrip  bool
+	}{
+		{3, 12, "189/4096", 0.954, true},
+		{2, 9, "7/128", 0.945, false},
+	} {
+		p, err := benchmark.ComputeG(c.w, c.m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := benchmark.GExact(c.w, c.m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.String(); got != c.exactG {
+			t.Errorf("GExact(%d,%d) = %s, want %s", c.w, c.m, got, c.exactG)
+		}
+		if got := round3(p.LossG); got != c.wantLossG {
+			t.Errorf("1−G(%d/%d) = %.5f (rounded %.3f), want %.3f", c.w, c.m, p.LossG, got, c.wantLossG)
+		}
+		if p.AlarmCondition() != c.wantTrip {
+			t.Errorf("1−G(%d/%d) = %.5f: alarm trips = %v, want %v against the registered threshold %.2f (STRICTLY greater)",
+				c.w, c.m, p.LossG, p.AlarmCondition(), c.wantTrip, benchmark.AlarmThreshold)
+		}
 	}
 }
 

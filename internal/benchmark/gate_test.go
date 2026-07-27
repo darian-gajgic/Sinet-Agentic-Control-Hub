@@ -284,6 +284,8 @@ func TestAlarmRequiresAnOperatorDispositionToClear(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	h.user(t, "alice", true)
+	h.operator(t, "op")
+	h.user(t, "mallory", false)
 	p := h.practice(t)
 	h.recordWins(t, "l", 4, 0, "frontier-a")
 
@@ -307,6 +309,18 @@ func TestAlarmRequiresAnOperatorDispositionToClear(t *testing.T) {
 	}
 	if err := p.DisposeAlarm(ctx, "", benchmark.DomainSoftwareDevelopment, benchmark.DispositionInvestigate, ""); !errors.Is(err, benchmark.ErrBadInput) {
 		t.Error("a disposition without its acting principal must be refused")
+	}
+	// And only the OPERATOR clears it. §12 calls the disposition an operator
+	// act, and the alarm exists precisely because the platform may be losing:
+	// a member — even the pairs' own requester — must not be able to silence it.
+	for _, actor := range []string{"alice", "mallory", "nobody"} {
+		if err := p.DisposeAlarm(ctx, actor, benchmark.DomainSoftwareDevelopment,
+			benchmark.DispositionInvestigate, "please stop"); !errors.Is(err, benchmark.ErrBadInput) {
+			t.Errorf("DisposeAlarm as %q = %v, want a refusal — §12 requires an OPERATOR disposition", actor, err)
+		}
+	}
+	if st, err := p.AlarmState(ctx, benchmark.DomainSoftwareDevelopment); err != nil || !st.Standing {
+		t.Fatal("a refused disposition must leave the alarm standing")
 	}
 	if err := p.DisposeAlarm(ctx, "op", benchmark.DomainSoftwareDevelopment,
 		benchmark.DispositionFixAndAccrue, "rubric bug found and fixed"); err != nil {

@@ -28,9 +28,14 @@ import (
 type Accrual struct {
 	Domain  string `json:"domain"`
 	EpochID string `json:"epoch_id,omitempty"`
+	// Sampled is every pair DRAWN in scope, including those still in flight.
+	// It is the decline rate's denominator (brief R5: "the decline rate
+	// (declined ÷ sampled)"), and it is deliberately the wider denominator: a
+	// requester who is asked and never answers is also selective participation,
+	// and measuring only against answered pairs would hide exactly that.
+	Sampled int `json:"sampled"`
 	// Answered is every pair the requester answered — verdicts plus declines.
-	// It is the decline rate's denominator: selective participation is measured
-	// against what people were actually asked (§4.2.5).
+	// It is context for the tie/both-bad rates, never the decline denominator.
 	Answered int `json:"answered"`
 	Declined int `json:"declined"`
 	Wins     int `json:"wins"`
@@ -114,7 +119,33 @@ func (s *Store) accrualTx(ctx context.Context, tx *sql.Tx, domain, epochID strin
 			}
 		}
 	}
-	return a, rows.Err()
+	if err := rows.Err(); err != nil {
+		return a, err
+	}
+	// In-flight pairs are SAMPLED but not yet answered, so they belong in the
+	// decline rate's denominator. They carry no epoch id — an epoch is decided
+	// by the direct arm's observed identity, which is only known at record time
+	// — so an epoch-scoped accrual counts them only for the CURRENT epoch,
+	// which is where they will land unless that epoch closes first.
+	inFlight := 0
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM benchmark_pairs
+		   WHERE domain = ? AND state NOT IN (?, ?)`,
+		domain, StateRecorded, StateDeclined).Scan(&inFlight); err != nil {
+		return a, fmt.Errorf("benchmark: in-flight pairs for %q: %w", domain, err)
+	}
+	if epochID != "" && inFlight > 0 {
+		var current string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT current_epoch_id FROM benchmark_domains WHERE domain = ?`, domain).Scan(&current); err != nil {
+			return a, fmt.Errorf("benchmark: current epoch for %q: %w", domain, err)
+		}
+		if current != epochID {
+			inFlight = 0
+		}
+	}
+	a.Sampled = a.Answered + inFlight
+	return a, nil
 }
 
 // PublishedRate is the ONE shape a benchmark rate is published in. Every field
@@ -140,10 +171,21 @@ type PublishedRate struct {
 	// product-quality signal with NO automatic decision consequence (§8).
 	TieRate     float64 `json:"tie_rate"`
 	BothBadRate float64 `json:"both_bad_rate"`
-	// DeclineRate is declined ÷ answered: selective participation must be
-	// visible, not silent (§4.2.5).
+	// DeclineRate is declined ÷ SAMPLED — every pair drawn in scope, including
+	// those still awaiting an answer: selective participation must be visible,
+	// not silent (§4.2.5).
 	DeclineRate float64 `json:"decline_rate"`
-	// GuessAccuracy is the §5 blindness measurement, at GuessN votes.
+	// GuessAccuracy is the §5 blindness measurement, over GuessN VOTES.
+	//
+	// A DECLARED READING, recorded rather than assumed. §5 speaks per vote —
+	// "the measurement is the per-vote guess" — and a tie or a both-bad vote
+	// still saw both rendered responses, so it still measures blindness. The
+	// accuracy is therefore over every vote cast (GuessN), which is a WIDER
+	// sample than the win rate's n (=m, non-tied pairs only, §8). The brief's
+	// gloss "at the same n as the win rate" is satisfied in the sense that
+	// matters — the two travel together on one shape and neither can render
+	// alone — and GuessN is published beside n so a reader can always see which
+	// sample each figure rests on rather than having to assume they match.
 	GuessAccuracy float64 `json:"guess_accuracy"`
 	GuessN        int     `json:"guess_n"`
 	// BlindnessLabel is §5's "partially unblinded (guess accuracy g%)" when
@@ -188,7 +230,7 @@ func publishedRate(a Accrual, notes []string) (PublishedRate, error) {
 		WinRate: post.WinRate, N: post.M, W: post.W, G: post.G, LossG: post.LossG,
 		TieRate:      ratio(a.Ties, a.Verdicts),
 		BothBadRate:  ratio(a.BothBad, a.Verdicts),
-		DeclineRate:  ratio(a.Declined, a.Answered),
+		DeclineRate:  ratio(a.Declined, a.Sampled),
 		GuessN:       a.Guesses,
 		HonestClaims: HonestClaims(), HonestClaimsReadout: HonestClaimsReadout,
 		ArmParity: ArmParityDeclaration, ParityNotes: notes,

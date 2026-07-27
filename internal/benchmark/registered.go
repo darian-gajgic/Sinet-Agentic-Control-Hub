@@ -173,19 +173,28 @@ func HonestClaims() []HonestClaim {
 
 // ── The §6 arm-parity declaration (frozen) ───────────────────────────────────
 
-// ArmParityDeclaration is BENCH-REG §6's declaration, carried on every readout:
-// declared, not hidden. A parity gap beyond it is new registration material and
-// is flagged to the operator, never silently absorbed.
+// ArmParityDeclaration is BENCH-REG §6's four declared bullets, VERBATIM (the
+// markdown emphasis markers are the file's, not the text's). It is carried on
+// every readout: declared, not hidden. A parity gap beyond it is new
+// registration material and is flagged to the operator, never silently absorbed.
+//
+// Verbatim means verbatim. §6 is registered text under §1, so its
+// parentheticals — the example of a surface-native tool, and the citation
+// recording that the negative finding is a FINDING rather than an absence of
+// looking — are part of what was registered. Tightening them would be exactly
+// the "improving a registered label" §17 forbids, and the pin test in
+// registered_test.go asserts each bullet against the registration file.
 var ArmParityDeclaration = []string{
 	"The platform arm carries household memory, knowledge injection, multi-turn pipeline, tool use, " +
 		"and verification loops. That asymmetry is the treatment under test, not a confound.",
 	"The direct arm runs on a consumer surface whose model identity cannot be pinned or controlled; " +
 		"it is recorded as observed per pair. The direct arm has no household memory — arguably the thing being tested.",
 	"Both arms answer the identical frozen task statement with identical attachments; the direct arm's " +
-		"surface-native tools are allowed as-is — the baseline is \"what the requester's subscription actually does\", " +
-		"not a stripped model.",
-	"No published prior art exists for \"platform vs the user's own subscription surface\" — parity gaps beyond " +
-		"this declaration are treated as new registration material, never silently absorbed.",
+		"surface-native tools (e.g., its own web search) are allowed as-is — the baseline is " +
+		"\"what the requester's subscription actually does\", not a stripped model.",
+	"No published prior art exists for \"platform vs the user's own subscription surface\" " +
+		"(report 12 §2.6, negative finding) — parity gaps beyond this declaration are treated as " +
+		"new registration material, never silently absorbed.",
 }
 
 // ── The registered-value register (S18.4 R9 surface) ─────────────────────────

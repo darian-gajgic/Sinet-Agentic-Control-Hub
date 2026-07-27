@@ -28,6 +28,14 @@ import (
 // alarm.
 
 // Posterior is the §7 reading for one (domain, epoch) accrual record.
+//
+// It is DECISION-STATISTIC INTERNAL, not a published-rate surface. The gate and
+// the alarm read it directly because G is the only decision input (§7); nothing
+// renders it. The ONE shape a rate is published in is PublishedRate, which
+// carries the full §15 epistemics block — so a number that reaches a screen has
+// always travelled with n, G, the tie/both-bad rates, the decline rate and the
+// guess accuracy. WinRate below exists for the same reason it exists on
+// PublishedRate: to be carried, never to be handed out alone.
 type Posterior struct {
 	// W is platform wins, M is non-tied pairs. tie and both-bad enter neither
 	// (§8, frozen).

@@ -142,14 +142,31 @@ func (p *Practice) DispatchDirectArm(ctx context.Context, pairID string) (Pair, 
 		return Pair{}, fmt.Errorf("%w: task %q has no confirmed statement to put to the direct arm", ErrBadInput, pair.TaskID)
 	}
 
+	// The statement source rides the direct arm's BIRTH EVENT, captured at
+	// dispatch. It has to be captured here rather than re-resolved at record
+	// time: the artifact of record is versioned, and a later bounded revision
+	// must never rewrite which text this pair's direct arm actually answered.
+	// The event log is the durable home for it — no schema change, and the run
+	// becomes self-describing (derive-from-log, CONVENTIONS §31).
+	detail, err := json.Marshal(directArmBirth{
+		PairID: pairID, StatementSource: brief.StatementSource,
+		Attachments: brief.Attachments, StatementBytes: len(brief.Statement),
+	})
+	if err != nil {
+		return Pair{}, err
+	}
 	runID := DirectRunID(pairID)
-	if _, err := p.Runs.Create(ctx, run.NewRun{
-		ID:        runID,
-		UserID:    pair.UserID, // 3.4: the duplicate bills the requester
-		TaskID:    pair.TaskID,
-		Substrate: directSubstrate,
-		Lane:      directLane,
-	}); err != nil && !errors.Is(err, run.ErrExists) {
+	err = p.Store.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := p.Runs.CreateTx(ctx, tx, run.NewRun{
+			ID:        runID,
+			UserID:    pair.UserID, // 3.4: the duplicate bills the requester
+			TaskID:    pair.TaskID,
+			Substrate: directSubstrate,
+			Lane:      directLane,
+		}, run.EventCreated, detail)
+		return err
+	})
+	if err != nil && !errors.Is(err, run.ErrExists) {
 		return Pair{}, fmt.Errorf("benchmark: create direct-arm run for %q: %w", pairID, err)
 	}
 	if err := p.Queue.Enqueue(ctx, runID, scheduler.ClassBackground); err != nil {
@@ -163,8 +180,40 @@ func (p *Practice) DispatchDirectArm(ctx context.Context, pairID string) (Pair, 
 	}
 	p.logger().Info("benchmark: direct arm dispatched as ordinary background work",
 		"pair", pairID, "run", runID, "owner", pair.UserID,
-		"attachments", len(brief.Attachments))
+		"statement_source", brief.StatementSource, "attachments", len(brief.Attachments))
 	return p.Store.Pair(ctx, pairID)
+}
+
+// directArmBirth is the detail carried on the direct arm's run.created event:
+// which frozen text it was given, and where that text came from.
+type directArmBirth struct {
+	PairID          string   `json:"benchmark_pair_id"`
+	StatementSource string   `json:"benchmark_statement_source"`
+	Attachments     []string `json:"benchmark_attachments,omitempty"`
+	StatementBytes  int      `json:"benchmark_statement_bytes"`
+}
+
+// statementSourceTx reads back the statement source captured at dispatch. An
+// absent or unreadable birth detail yields "", and the record says so rather
+// than guessing which text the arm answered.
+func (p *Practice) statementSourceTx(ctx context.Context, tx *sql.Tx, runID string) string {
+	if runID == "" {
+		return ""
+	}
+	var payload string
+	err := tx.QueryRowContext(ctx,
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = ?
+		  ORDER BY event_seq LIMIT 1`, runID, run.EventCreated).Scan(&payload)
+	if err != nil {
+		return ""
+	}
+	var envelope struct {
+		Detail directArmBirth `json:"detail"`
+	}
+	if json.Unmarshal([]byte(payload), &envelope) != nil {
+		return ""
+	}
+	return envelope.Detail.StatementSource
 }
 
 // RenderBlind renders both arms through the ONE uniform presentation template
@@ -267,6 +316,10 @@ func (p *Practice) record(ctx context.Context, pairID string, a Answer, declined
 		pair.PlatformModel, pair.PlatformUSD = plat.model, plat.usd
 		pair.DirectModel, pair.DirectUSD = direct.model, direct.usd
 		pair.DirectMeasured = direct.measured
+		statementSource := ""
+		if !declined {
+			statementSource = p.statementSourceTx(ctx, tx, pair.DirectRunID)
+		}
 
 		// The epoch is decided by the DIRECT arm's observed identity and by
 		// nothing else — a platform-arm model change is recorded per pair and
@@ -278,7 +331,7 @@ func (p *Practice) record(ctx context.Context, pairID string, a Answer, declined
 		pair.EpochID = epoch
 		pair.RecordedTS = p.now()
 
-		payload, err := json.Marshal(recordPayload(pair))
+		payload, err := json.Marshal(recordPayload(pair, statementSource))
 		if err != nil {
 			return err
 		}
@@ -445,16 +498,21 @@ type RecordPayload struct {
 	Declined      bool   `json:"declined"`
 
 	// Additive provenance.
-	TaskID         string `json:"task_id"`
-	DeliverableID  string `json:"deliverable_id"`
-	PlatformRunID  string `json:"platform_run_id"`
-	DirectRunID    string `json:"direct_run_id"`
-	DomainSource   string `json:"domain_source"`
-	Phase          string `json:"phase"`
-	RatePct        int    `json:"rate_pct"`
-	LengthPlatform int    `json:"length_platform"`
-	LengthDirect   int    `json:"length_direct"`
-	ParityNote     string `json:"parity_note,omitempty"`
+	TaskID        string `json:"task_id"`
+	DeliverableID string `json:"deliverable_id"`
+	PlatformRunID string `json:"platform_run_id"`
+	DirectRunID   string `json:"direct_run_id"`
+	DomainSource  string `json:"domain_source"`
+	// StatementSource names the S06 artifact of record the §2 frozen statement
+	// was drawn from — the document both arms answered, pinned by content hash.
+	// Empty on a declined pair (no direct arm ran) and on a pair whose birth
+	// detail is unreadable; it is never guessed.
+	StatementSource string `json:"statement_source,omitempty"`
+	Phase           string `json:"phase"`
+	RatePct         int    `json:"rate_pct"`
+	LengthPlatform  int    `json:"length_platform"`
+	LengthDirect    int    `json:"length_direct"`
+	ParityNote      string `json:"parity_note,omitempty"`
 	// Retention names the record's class on the payload itself: benchmark
 	// records are keep-forever (BENCH-REG §14; Spec S14.9 keep-forever set).
 	// ENFORCEMENT of the class is B5-8's compaction pass; this marks it.
@@ -465,9 +523,10 @@ type RecordPayload struct {
 	ProtocolRef string `json:"protocol_ref"`
 }
 
-func recordPayload(p Pair) RecordPayload {
+func recordPayload(p Pair, statementSource string) RecordPayload {
 	rp := RecordPayload{
-		PairID: p.PairID, Domain: p.Domain, TaskClass: p.TaskClass,
+		StatementSource: statementSource,
+		PairID:          p.PairID, Domain: p.Domain, TaskClass: p.TaskClass,
 		SampledTS: p.SampledTS.Format(time.RFC3339Nano), RecordedTS: p.RecordedTS.Format(time.RFC3339Nano),
 		RequesterID: p.UserID, EpochID: p.EpochID,
 		PlatformModel: p.PlatformModel, DirectModel: p.DirectModel,

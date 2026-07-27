@@ -127,10 +127,15 @@ type dispatcherFunc func(context.Context, run.Run) error
 
 func (f dispatcherFunc) Dispatch(ctx context.Context, r run.Run) error { return f(ctx, r) }
 
+// testStatementSource is what the fixture brief reports as the artifact the
+// frozen statement was drawn from — the shape the real seam produces.
+const testStatementSource = "s06-artifact-of-record:SPEC-v2.md@sha256:deadbeefcafe"
+
 func fixedBrief(_ context.Context, taskID string) (benchmark.TaskBrief, error) {
 	return benchmark.TaskBrief{
 		TaskID: taskID, Statement: "the confirmed task statement, frozen",
-		Attachments: []string{"artifact://spec"},
+		StatementSource: testStatementSource,
+		Attachments:     []string{testStatementSource},
 	}, nil
 }
 
@@ -155,9 +160,21 @@ func (q *recordingQueue) Enqueue(ctx context.Context, runID string, c scheduler.
 
 func (h *harness) user(t *testing.T, id string, optedIn bool) {
 	t.Helper()
+	h.userAs(t, id, "member", optedIn)
+}
+
+// operator inserts the one S01.9 role holder — the principal §12 requires for
+// an alarm disposition.
+func (h *harness) operator(t *testing.T, id string) {
+	t.Helper()
+	h.userAs(t, id, "operator", false)
+}
+
+func (h *harness) userAs(t *testing.T, id, role string, optedIn bool) {
+	t.Helper()
 	ctx := context.Background()
-	if err := h.exec(ctx, `INSERT INTO users (user_id, role, created_ts) VALUES (?, 'member', ?)`,
-		id, h.clk.now().Format(time.RFC3339Nano)); err != nil {
+	if err := h.exec(ctx, `INSERT INTO users (user_id, role, created_ts) VALUES (?, ?, ?)`,
+		id, role, h.clk.now().Format(time.RFC3339Nano)); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
 	if optedIn {

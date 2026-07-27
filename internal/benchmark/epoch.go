@@ -94,12 +94,21 @@ func (p *Practice) EpochHistory(ctx context.Context, domain string) ([]Epoch, er
 	if err != nil {
 		return nil, err
 	}
+	// The epoch's IDENTITY is the direct-arm model that defines it, so the read
+	// takes the first NON-EMPTY one: a declined pair records no direct arm, and
+	// if a decline happened to be an epoch's earliest recorded pair, grouping on
+	// the raw column would display the epoch as having no identity at all —
+	// which would misreport the very thing §9 says an epoch IS. Ordering is by
+	// the epoch's earliest recorded pair either way, so the timeline is
+	// unaffected.
 	rows, err := p.Store.db.QueryContext(ctx,
-		`SELECT epoch_id, direct_model, MIN(recorded_ts)
+		`SELECT epoch_id,
+		        COALESCE(MIN(NULLIF(direct_model, '')), '') AS identity,
+		        MIN(recorded_ts) AS first_ts
 		   FROM benchmark_pairs
-		  WHERE domain = ? AND state = ? AND epoch_id <> ''
-		  GROUP BY epoch_id, direct_model
-		  ORDER BY MIN(recorded_ts), epoch_id`, domain, StateRecorded)
+		  WHERE domain = ? AND state IN (?, ?) AND epoch_id <> ''
+		  GROUP BY epoch_id
+		  ORDER BY first_ts, epoch_id`, domain, StateRecorded, StateDeclined)
 	if err != nil {
 		return nil, fmt.Errorf("benchmark: epoch history for %q: %w", domain, err)
 	}
@@ -111,9 +120,6 @@ func (p *Practice) EpochHistory(ctx context.Context, domain string) ([]Epoch, er
 		var started string
 		if err := rows.Scan(&e.ID, &e.Identity, &started); err != nil {
 			return nil, fmt.Errorf("benchmark: scan epoch: %w", err)
-		}
-		if seen[e.ID] {
-			continue
 		}
 		seen[e.ID] = true
 		e.Started, e.Current = parseTS(started), e.ID == st.CurrentEpochID

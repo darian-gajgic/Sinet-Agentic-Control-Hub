@@ -38,9 +38,11 @@ import (
 // EventScoreRecorded is the S14.2 Benchmark & eval family type this package
 // mints: a conformance-suite result recorded in Sinet's DB (Spec S14.5
 // "results land as eval.score_recorded events"; P-T11-4 runners-never-stores).
-// B5-5 (regression evals) and B5-7 (BENCH-REG pairs) are future co-producers
-// of the same family; benchmark.pair_recorded stays declare-only (its numbers
-// change only via BENCH-REG §17).
+// B5-5 (regression evals) co-produces this same type. B5-7 (the S14.7
+// benchmark practice) added NO producer of it — its v0 scope is pair-shaped,
+// not suite-shaped — and instead mints benchmark.pair_recorded and
+// benchmark.alarm in the same family. BENCH-REG's registered numbers stay
+// read-only to the platform either way: they change only via its §17.
 const EventScoreRecorded = "eval.score_recorded"
 
 // Settings is this package's narrow view of the settings registry (CONVENTIONS

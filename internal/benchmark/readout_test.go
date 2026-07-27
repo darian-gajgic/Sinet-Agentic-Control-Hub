@@ -274,3 +274,92 @@ func TestReadoutIsTheSixteenthSectionsViews(t *testing.T) {
 		}
 	}
 }
+
+// TestDeclineRateIsOverSampledNotAnswered is the brief R5 formula: the decline
+// rate is declined ÷ SAMPLED, per (domain, epoch). The denominator is every
+// pair drawn — including ones still awaiting an answer — because a requester
+// who is asked and never answers is also selective participation, and measuring
+// against answered pairs alone would hide exactly that (§4.2.5).
+func TestDeclineRateIsOverSampledNotAnswered(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.user(t, "alice", true)
+	p := h.practice(t)
+
+	// One decline, one verdict, and two pairs still in flight.
+	h.recordPair(t, pairSpec{task: "d1", decline: true})
+	h.recordPair(t, pairSpec{task: "w1", choice: benchmark.ChoiceA, guess: benchmark.SideA,
+		directModel: "frontier-a", units: 1})
+	h.sampledPair(t, "f1")
+	h.sampledPair(t, "f2")
+
+	st, err := h.store.Domain(ctx, benchmark.DomainSoftwareDevelopment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := h.store.Accrual(ctx, benchmark.DomainSoftwareDevelopment, st.CurrentEpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Answered != 2 {
+		t.Errorf("answered = %d, want the 2 pairs that got an answer", a.Answered)
+	}
+	if a.Sampled != 4 {
+		t.Errorf("sampled = %d, want all 4 drawn pairs (2 answered + 2 in flight)", a.Sampled)
+	}
+	rate, err := p.PublishedRate(ctx, benchmark.DomainSoftwareDevelopment, st.CurrentEpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 1.0 / 4.0; rate.DeclineRate != want {
+		t.Errorf("decline rate = %.4f, want %.4f (1 declined ÷ 4 sampled) — the R5 denominator is SAMPLED, not answered",
+			rate.DeclineRate, want)
+	}
+
+	// A CLOSED epoch counts only its own answered pairs: an in-flight pair
+	// belongs to the epoch it will land in, which is the current one.
+	h.recordPair(t, pairSpec{task: "b1", choice: benchmark.ChoiceB, guess: benchmark.SideA,
+		directModel: "frontier-b", units: 1})
+	closed, err := h.store.Accrual(ctx, benchmark.DomainSoftwareDevelopment, st.CurrentEpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Sampled != closed.Answered {
+		t.Errorf("a closed epoch counted %d sampled against %d answered — in-flight pairs belong to the CURRENT epoch",
+			closed.Sampled, closed.Answered)
+	}
+}
+
+// TestGuessAccuracyIsPerVoteAndPublishesItsOwnN is the D3 declared reading:
+// §5's measurement is per VOTE, so a tie still measures blindness, and the
+// sample it rests on is published as GuessN beside the win rate's n.
+func TestGuessAccuracyIsPerVoteAndPublishesItsOwnN(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.user(t, "alice", true)
+	p := h.practice(t)
+
+	h.recordPair(t, pairSpec{task: "w1", choice: benchmark.ChoiceA, guess: benchmark.SideA, directModel: "frontier-a", units: 1})
+	h.recordPair(t, pairSpec{task: "t1", choice: benchmark.ChoiceTie, guess: benchmark.SideA, directModel: "frontier-a", units: 1})
+	h.recordPair(t, pairSpec{task: "t2", choice: benchmark.ChoiceBothBad, guess: benchmark.SideB, directModel: "frontier-a", units: 1})
+
+	st, err := h.store.Domain(ctx, benchmark.DomainSoftwareDevelopment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rate, err := p.PublishedRate(ctx, benchmark.DomainSoftwareDevelopment, st.CurrentEpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The win rate rests on one non-tied pair; the blindness measurement rests
+	// on all three votes — and BOTH n's are published, so neither is assumed.
+	if rate.N != 1 {
+		t.Errorf("n = %d, want 1 non-tied pair (ties never enter m, §8)", rate.N)
+	}
+	if rate.GuessN != 3 {
+		t.Errorf("guess n = %d, want all 3 votes — a tie vote still saw both responses (§5)", rate.GuessN)
+	}
+	if want := 2.0 / 3.0; rate.GuessAccuracy != want {
+		t.Errorf("guess accuracy = %.4f, want %.4f over the 3 votes", rate.GuessAccuracy, want)
+	}
+}

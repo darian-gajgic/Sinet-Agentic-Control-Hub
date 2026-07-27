@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
 )
@@ -172,5 +173,56 @@ func TestBenchTwoIsStructurallyUnpoolable(t *testing.T) {
 	// current_epoch_id.
 	if n := strings.Count(readPackageSource(t), "current_epoch_id = ?"); n != 1 {
 		t.Errorf("%d sites write current_epoch_id, want exactly 1 (the §9 tracker)", n)
+	}
+}
+
+// TestEpochIdentityIgnoresDeclinedPairs (D9): an epoch's IDENTITY is the
+// direct-arm model that defines it (§9). A declined pair records no direct arm,
+// so if a decline happens to be an epoch's earliest recorded pair the history
+// view must still show the identity — reading the epoch as having none would
+// misreport the very thing §9 says an epoch IS.
+func TestEpochIdentityIgnoresDeclinedPairs(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.user(t, "alice", true)
+	p := h.practice(t)
+
+	// The domain's FIRST recorded pair is a decline: no observed identity.
+	declined := h.recordPair(t, pairSpec{task: "d1", decline: true})
+	h.clk.advance(time.Minute)
+	measured := h.recordPair(t, pairSpec{task: "w1", choice: benchmark.ChoiceA,
+		guess: benchmark.SideA, directModel: "frontier-a", units: 1})
+	if declined.EpochID != measured.EpochID {
+		t.Fatalf("precondition: both pairs should be in one epoch (%q vs %q)", declined.EpochID, measured.EpochID)
+	}
+
+	epochs, err := p.EpochHistory(ctx, benchmark.DomainSoftwareDevelopment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(epochs) != 1 {
+		t.Fatalf("%d epochs, want 1: %+v", len(epochs), epochs)
+	}
+	if epochs[0].Identity != "frontier-a" {
+		t.Errorf("epoch identity = %q, want frontier-a — the first NON-EMPTY observed identity defines the epoch (BENCH-REG §9)",
+			epochs[0].Identity)
+	}
+	if epochs[0].Started != declined.RecordedTS {
+		t.Errorf("epoch start = %v, want its earliest recorded pair's time %v — ordering is unaffected by the identity read",
+			epochs[0].Started, declined.RecordedTS)
+	}
+	// An epoch with ONLY declines has no observed identity, and says so
+	// honestly rather than borrowing one.
+	h.clk.advance(time.Minute)
+	h.recordPair(t, pairSpec{task: "b1", choice: benchmark.ChoiceA, guess: benchmark.SideA,
+		directModel: "frontier-b", units: 1})
+	h.clk.advance(time.Minute)
+	h.recordPair(t, pairSpec{task: "d2", decline: true})
+	epochs, err = p.EpochHistory(ctx, benchmark.DomainSoftwareDevelopment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(epochs) != 2 || epochs[1].Identity != "frontier-b" {
+		t.Errorf("second epoch identity = %+v, want frontier-b", epochs)
 	}
 }

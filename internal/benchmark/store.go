@@ -21,6 +21,16 @@ import (
 // benchmark.pair_recorded append commit in ONE WriteTx (CONVENTIONS §6/§8), and
 // the reveal reads that committed event — never this table's mutable state
 // (BENCH-REG §3.4).
+//
+// A recorded pair is frozen by trigger; a DECLINED pair's row is not, and that
+// is deliberate rather than an oversight. The record of record for a decline is
+// the append-only benchmark.pair_recorded EVENT — which carries the decline
+// flag, the epoch and the requester, and which the append-only run_events
+// triggers already protect. The table row is working state over that record, so
+// freezing it would harden the copy rather than the original. B5-8's retention
+// pass owns the keep-forever enforcement across both, and may harden this row
+// alongside it; noted here so the asymmetry is a recorded reading and not a
+// silent gap.
 
 // Store reads and writes the benchmark tables.
 type Store struct {
@@ -252,8 +262,12 @@ type PendingPair struct {
 	LengthB int `json:"length_b"`
 }
 
-// pendingColumns is the pre-record projection. Adding an arm-identifying column
-// here would break §3.4; pair_reveal_test.go asserts the set.
+// pendingColumns is the pre-record projection. Adding an arm-identifying
+// column here would break §3.4. The assertions that hold this: pair_test.go's
+// TestRevealOnlyAfterTheRecord (PendingPair has no revealing FIELD, and Reveal
+// refuses a pair with no committed record) and, for the inbox card built over
+// the same table, internal/api's TestVerdictCardRevealsNoArmIdentity (which
+// scans the projection's SQL literal itself).
 const pendingColumns = `pair_id, user_id, domain, task_id, sampled_ts, render_a, render_b,
 	length(render_a), length(render_b)`
 
@@ -426,6 +440,29 @@ func (s *Store) optedInTx(ctx context.Context, tx *sql.Tx, userID string) (bool,
 	}
 	return v == 1, nil
 }
+
+// isOperatorTx reports whether a user holds the one S01.9 role bit. AuthZ is
+// enforced in the control plane's DATA layer (S01.9: "enforced in the control
+// plane's data layer; every query passes through owner-scoped accessors"), so
+// the check reads the users row rather than trusting a caller's claim. An
+// absent user is not an operator.
+func (s *Store) isOperatorTx(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	var role string
+	err := tx.QueryRowContext(ctx, `SELECT role FROM users WHERE user_id = ?`, userID).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("benchmark: read role for %q: %w", userID, err)
+	}
+	return role == roleOperator, nil
+}
+
+// roleOperator is the users-row value of the one S01.9 role bit. It is
+// duplicated across the import wall rather than imported from internal/auth
+// (which this package must not depend on); the value is fixed by migration
+// 0001's CHECK constraint.
+const roleOperator = "operator"
 
 // OptedIn reports whether a user has the standing benchmark opt-in enabled.
 func (s *Store) OptedIn(ctx context.Context, userID string) (bool, error) {
