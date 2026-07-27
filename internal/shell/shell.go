@@ -240,6 +240,10 @@ func Run(ctx context.Context, opts Options) error {
 	// The S14.7 benchmark practice (B5-7): composed in the production path,
 	// driven by a shell-owned sampling loop after step 5.
 	var benchSurf *benchmarkSurface
+	// The S14.9 retention substrate (B5-8A): composed in the production path,
+	// driven by shell-owned index and compaction loops after step 5. Its run-end
+	// summary hook is installed on the run store at composition time.
+	var retSurf *retentionSurface
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -561,6 +565,23 @@ func Run(ctx context.Context, opts Options) error {
 		logger.Info("benchmark: S14.7 practice wired (B5-7)",
 			"domains", benchSurf.Domains, "gate_limb_d_evaluable", benchSurf.FloorsWired)
 
+		// The S14.9 retention substrate (B5-8A): the run summary written at the
+		// run's terminal transition, the compaction pass that strips bulky trace
+		// payloads past ⚙ retention.compaction_horizon, the keep-forever
+		// allowlist that makes the 11.3 exporter boundary structural, and the
+		// S14.10 ¶4 derived index (FTS5 + rollups) over what remains. Installing
+		// the run-end hook here is what makes "at run end, never later" hold for
+		// every terminal transition in the tree.
+		if err := assertStackAbsentMarker(); err != nil {
+			return err
+		}
+		retSurf, err = buildRetentionSurface(ctx, db, log, reg, runs, localSurf.Duty, checkpoints, logger)
+		if err != nil {
+			return err
+		}
+		logger.Info("retention: S14.9 substrate wired (B5-8A)",
+			"keep_forever_seeded", retSurf.KeepForever, "narrator_wired", retSurf.NarratorWired)
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,
@@ -730,6 +751,17 @@ func Run(ctx context.Context, opts Options) error {
 	// uniformity is frozen (BENCH-REG §4.1).
 	if benchSurf != nil {
 		go benchmarkLoop(procCtx, benchSurf, logger)
+	}
+
+	// The S14.9/S14.10 retention drivers (B5-8A): the shell owns WHEN. The index
+	// loop advances the derived FTS5/rollup index past its DURABLE cursor and
+	// narrates pending summaries; the compaction loop runs the daily-equivalent
+	// strip. Both verbs are idempotent and restart-safe from stored state, so a
+	// missed tick costs promptness and never correctness. Neither interval is a
+	// ⚙ row — the horizon is (⚙ retention.compaction_horizon, per-user, months).
+	if retSurf != nil {
+		go retentionIndexLoop(procCtx, retSurf, logger)
+		go retentionCompactLoop(procCtx, retSurf, logger)
 	}
 
 	// TODO(S01.7): logind sleep/wake seam — delay-mode inhibitor,

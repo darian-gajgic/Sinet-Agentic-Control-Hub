@@ -16,20 +16,27 @@ import (
 // backup package orchestrates the pipeline (VACUUM -> dump -> tar|zstd|age ->
 // push) through these primitives and never touches the driver itself.
 
-// RunEventsTable and its columns are named so the dump can strip trace payload
-// bodies past the compaction horizon (Spec S13.10/S02.9).
+// The 11.3 exporter boundary, BY CONSTRUCTION (Spec S14.9 ¶3): "the snapshot
+// exporter reads an allowlisted view containing only the keep-forever set; raw
+// trace payloads are structurally unreachable from it."
+//
+// The dump therefore reads run_events THROUGH the run_events_export view
+// (migration 0015), never from the table. The view keeps every ROW — event_seq
+// must stay gap-free, an S02.9 invariant CheckRestored asserts — and replaces
+// every non-keep-forever payload BODY with a marker, at ANY age. Keep-forever
+// status is the whole test, which is also the only boundary a PER-USER horizon
+// can express as one view.
+//
+// This supersedes the B4-3 placeholder, which blanked every payload at or below
+// a scalar seq (including keep-forever ones) and was wired to 0, so nothing was
+// stripped at all. S13.10 asks for exactly this ("raw trace payload bodies
+// excluded; full traces stay local"); S02.9's horizon phrasing is satisfied a
+// fortiori, since excluding every raw trace body necessarily excludes those
+// past the horizon.
 const (
-	runEventsTable   = "run_events"
-	runEventsPayload = "payload"
-	runEventsSeq     = "event_seq"
+	runEventsTable      = "run_events"
+	runEventsExportView = "run_events_export"
 )
-
-// compactedPayloadMarker replaces a run_events payload body stripped from the
-// dump past the 11.1 compaction horizon (Spec S02.9: "raw run_events payload
-// bodies past the 11.1 compaction horizon excluded — full traces stay local").
-// The ROW stays (so event_seq is gap-free, an S02.9 invariant); only the body
-// is elided.
-const compactedPayloadMarker = `"[trace payload past the 11.1 compaction horizon — stays local]"`
 
 // VacuumInto writes a transactionally-consistent copy of the live database to
 // dest (Spec S02.9: the durable-set snapshot shape — `VACUUM INTO` a temp file,
@@ -49,12 +56,11 @@ func (d *DB) VacuumInto(ctx context.Context, dest string) error {
 // DumpFrom serializes a snapshot database file (a VacuumInto copy) to a
 // text-first `.dump` (Spec S13.10: diffable, deleted-content-purged). Statement
 // order is tables -> data -> indexes/triggers/views (the standard .dump order,
-// so a load never trips a not-yet-existing table). run_events rows with
-// event_seq <= stripPayloadBeforeSeq keep their ROW but have the payload BODY
-// replaced by the compaction marker (traces stay local, S02.9); pass 0 to keep
-// every payload (the v0 posture — nothing is compacted yet, so nothing is past
-// the horizon). Returns the dump SQL and the source user_version.
-func DumpFrom(ctx context.Context, srcPath string, stripPayloadBeforeSeq int64) (string, int, error) {
+// so a load never trips a not-yet-existing table). run_events data is read
+// through the run_events_export view, so a raw trace payload body cannot reach
+// the dump at any age (the 11.3 boundary above). Returns the dump SQL and the
+// source user_version.
+func DumpFrom(ctx context.Context, srcPath string) (string, int, error) {
 	q := url.Values{}
 	q.Add("_pragma", "foreign_keys(0)")
 	db, err := sql.Open("sqlite", "file:"+srcPath+"?"+q.Encode())
@@ -132,8 +138,31 @@ func DumpFrom(ctx context.Context, srcPath string, stripPayloadBeforeSeq int64) 
 		b.WriteString(v.sql)
 		b.WriteString(";\n")
 	}
+	exportViewPresent := false
+	for _, o := range post {
+		if o.typ == "view" && o.name == runEventsExportView {
+			exportViewPresent = true
+		}
+	}
 	for _, t := range tables {
-		if err := dumpTableData(ctx, db, t.name, stripPayloadBeforeSeq, &b); err != nil {
+		source := t.name
+		if t.name == runEventsTable {
+			if !exportViewPresent {
+				// Fail LOUD. A dump that silently fell back to the raw table
+				// would ship raw trace payload bodies off the host — the exact
+				// thing S14.9 ¶3 makes structurally unreachable (the F9
+				// never-a-silent-drop precedent, inverted: never a silent leak).
+				return "", 0, fmt.Errorf("storage: %s is missing from the snapshot — refusing to dump run_events without the S14.9 11.3 export boundary", runEventsExportView)
+			}
+			source = runEventsExportView
+		}
+		// A VIEW has no rowid; run_events orders by its own event_seq, which is
+		// the sole ordering authority anyway (S14.1).
+		order := "rowid"
+		if source != t.name {
+			order = "event_seq"
+		}
+		if err := dumpTableData(ctx, db, t.name, source, order, &b); err != nil {
 			return "", 0, err
 		}
 	}
@@ -174,26 +203,20 @@ func shadowClass(name string, virtualNames map[string]bool) (shadow, unexpected 
 	return false, false
 }
 
-func dumpTableData(ctx context.Context, db *sql.DB, table string, stripBeforeSeq int64, b *strings.Builder) error {
-	rows, err := db.QueryContext(ctx, `SELECT * FROM "`+table+`" ORDER BY rowid`)
+// dumpTableData emits INSERTs INTO table, reading from source — the same name
+// for every table but run_events, which is read through its export view (the
+// 11.3 boundary). Reading through the view also keeps GENERATED columns out of
+// the INSERT: migration 0015 added two VIRTUAL generated columns to run_events,
+// which SELECT * would return and no INSERT may assign.
+func dumpTableData(ctx context.Context, db *sql.DB, table, source, orderBy string, b *strings.Builder) error {
+	rows, err := db.QueryContext(ctx, `SELECT * FROM "`+source+`" ORDER BY "`+orderBy+`"`)
 	if err != nil {
-		return fmt.Errorf("storage: read %s: %w", table, err)
+		return fmt.Errorf("storage: read %s: %w", source, err)
 	}
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
 		return err
-	}
-	payloadIdx, seqIdx := -1, -1
-	if table == runEventsTable {
-		for i, c := range cols {
-			if c == runEventsPayload {
-				payloadIdx = i
-			}
-			if c == runEventsSeq {
-				seqIdx = i
-			}
-		}
 	}
 	colList := make([]string, len(cols))
 	for i, c := range cols {
@@ -209,13 +232,6 @@ func dumpTableData(ctx context.Context, db *sql.DB, table string, stripBeforeSeq
 		if err := rows.Scan(ptrs...); err != nil {
 			return err
 		}
-		// Strip a trace payload body past the compaction horizon (S02.9); the
-		// row and its event_seq are preserved.
-		if payloadIdx >= 0 && seqIdx >= 0 && stripBeforeSeq > 0 {
-			if seq, ok := vals[seqIdx].(int64); ok && seq <= stripBeforeSeq {
-				vals[payloadIdx] = literalMarker(compactedPayloadMarker)
-			}
-		}
 		b.WriteString(prefix)
 		for i, v := range vals {
 			if i > 0 {
@@ -228,10 +244,6 @@ func dumpTableData(ctx context.Context, db *sql.DB, table string, stripBeforeSeq
 	return rows.Err()
 }
 
-// literalMarker tags a value as already-formatted SQL (the compaction marker
-// is a pre-quoted string literal, inserted verbatim).
-type literalMarker string
-
 // sqlLiteral formats a scanned value as a SQL literal (portable across the
 // dump round-trip; the platform-internal consistency posture, not cross-system
 // canonicality).
@@ -239,8 +251,6 @@ func sqlLiteral(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return "NULL"
-	case literalMarker:
-		return string(x)
 	case int64:
 		return strconv.FormatInt(x, 10)
 	case float64:

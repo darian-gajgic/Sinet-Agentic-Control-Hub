@@ -14,9 +14,9 @@ import (
 
 // The S13.10 snapshot triad (VacuumInto -> DumpFrom -> RebuildFromDump ->
 // CheckRestored) proven at the storage seam: a consistent copy, a text dump
-// with the trace-payload horizon strip, a faithful rebuild, and the S02.9
+// behind the S14.9 11.3 export boundary, a faithful rebuild, and the S02.9
 // invariants over the result.
-func TestSnapshotTriadRoundTripAndHorizonStrip(t *testing.T) {
+func TestSnapshotTriadRoundTripAndExportBoundary(t *testing.T) {
 	ctx := context.Background()
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
@@ -29,7 +29,8 @@ func TestSnapshotTriadRoundTripAndHorizonStrip(t *testing.T) {
 	}
 	log := eventlog.New(db, reg)
 
-	// Seed a user + task and three platform events with distinct payload bodies.
+	// Seed a user + task and three platform events with distinct payload bodies:
+	// two trace-class types and one keep-forever class (B5-8A).
 	if err := db.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO users (user_id, role, created_ts) VALUES ('op','operator','2026-07-22T00:00:00Z')`); err != nil {
@@ -41,13 +42,25 @@ func TestSnapshotTriadRoundTripAndHorizonStrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	var seqs []int64
-	for _, body := range []string{`{"trace":"OLDEST-BODY"}`, `{"trace":"MIDDLE-BODY"}`, `{"trace":"NEWEST-BODY"}`} {
-		seq, err := log.Append(ctx, eventlog.Append{UserID: "op", Type: "e", SchemaVersion: 1, Payload: []byte(body)})
-		if err != nil {
+	// The keep-forever allowlist is DATA seeded by internal/retention at boot;
+	// this package cannot import it (the driver seam is a leaf), so the row is
+	// planted directly — the view is the boundary either way.
+	if err := db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO retention_keep_forever (type, family, note) VALUES ('routing.decided','routing','routing records')`)
+		return err
+	}); err != nil {
+		t.Fatalf("seed keep-forever: %v", err)
+	}
+	for _, e := range []struct{ typ, body string }{
+		{"tool.completed", `{"trace":"TRACE-BODY-ONE"}`},
+		{"tool.completed", `{"trace":"TRACE-BODY-TWO"}`},
+		{"routing.decided", `{"plain_reason":"KEEP-FOREVER-BODY"}`},
+	} {
+		if _, err := log.Append(ctx, eventlog.Append{
+			UserID: "op", Type: e.typ, SchemaVersion: 1, Payload: []byte(e.body)}); err != nil {
 			t.Fatal(err)
 		}
-		seqs = append(seqs, seq)
 	}
 
 	vac := filepath.Join(t.TempDir(), "vac.db")
@@ -55,16 +68,19 @@ func TestSnapshotTriadRoundTripAndHorizonStrip(t *testing.T) {
 		t.Fatalf("VacuumInto: %v", err)
 	}
 
-	// Strip payload bodies at or below the FIRST event's seq (the horizon).
-	dumpSQL, uv, err := storage.DumpFrom(ctx, vac, seqs[0])
+	// The boundary is a TYPE boundary at every age (Spec S14.9 ¶3 / S13.10): a
+	// raw trace payload body never leaves the host, a keep-forever one does.
+	dumpSQL, uv, err := storage.DumpFrom(ctx, vac)
 	if err != nil {
 		t.Fatalf("DumpFrom: %v", err)
 	}
-	if strings.Contains(dumpSQL, "OLDEST-BODY") {
-		t.Error("oldest trace body was NOT stripped past the horizon")
+	for _, body := range []string{"TRACE-BODY-ONE", "TRACE-BODY-TWO"} {
+		if strings.Contains(dumpSQL, body) {
+			t.Errorf("raw trace payload body %q reached the dump — the 11.3 boundary is not structural", body)
+		}
 	}
-	if !strings.Contains(dumpSQL, "NEWEST-BODY") || !strings.Contains(dumpSQL, "MIDDLE-BODY") {
-		t.Error("bodies past the horizon were wrongly stripped")
+	if !strings.Contains(dumpSQL, "KEEP-FOREVER-BODY") {
+		t.Error("a keep-forever payload body was stripped from the dump; the allowlist must pass it through")
 	}
 
 	rebuilt := filepath.Join(t.TempDir(), "rebuilt.db")

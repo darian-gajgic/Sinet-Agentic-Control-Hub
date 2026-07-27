@@ -185,17 +185,44 @@ type Run struct {
 	UpdatedTS time.Time
 }
 
+// TerminalHook runs INSIDE a terminal transition's transaction, after the
+// runs.state update and its run_events append and before the transaction
+// commits — so whatever it writes commits with the run's ending or not at all
+// (Spec S02.3; CONVENTIONS §6/§8 state+event discipline).
+//
+// It exists for exactly one obligation: Spec S14.9's "at run end (never later):
+// the run summary". Terminal transitions are driven from ten call sites across
+// stage/intake/adapters/recovery/watchdog, so the run summary hangs on the ONE
+// edge they all cross rather than on ten remembered calls — and a call site
+// added later is covered without being told. The hook's implementation is
+// composed at the shell root (internal/retention); internal/run imports nothing
+// new for it.
+//
+// An error from the hook FAILS the transition. That is deliberate: the summary
+// is written in the same transaction as the state change, so a half-written
+// ending is not a state the log can hold. The local tier is nowhere near this
+// path — it enriches an already-committed summary out of band — so a run never
+// fails to end because the local stack is down (S14.9 ¶1).
+type TerminalHook func(ctx context.Context, tx *sql.Tx, r Run) error
+
 // Store reads and writes runs rows under the S02.3 discipline. Safe for
 // concurrent use (the underlying pool serializes writes, Spec S02.1).
 type Store struct {
 	db  *storage.DB
 	log *eventlog.Log
+	// terminal is set once at composition time (SetTerminalHook), before any
+	// transition runs; it is never swapped while the platform is serving.
+	terminal TerminalHook
 }
 
 // NewStore returns a Store over db appending through log.
 func NewStore(db *storage.DB, log *eventlog.Log) *Store {
 	return &Store{db: db, log: log}
 }
+
+// SetTerminalHook installs the run-end hook (see TerminalHook). Called once by
+// the composition root; nil (the default) leaves every transition unchanged.
+func (s *Store) SetTerminalHook(h TerminalHook) { s.terminal = h }
 
 // NewRun describes a run row to create. State defaults to StateNew and
 // Generation to 0; recovery sets the lineage fields when creating a
@@ -358,7 +385,18 @@ func (s *Store) TransitionTx(ctx context.Context, tx *sql.Tx, runID string, to S
 	}); err != nil {
 		return Run{}, err
 	}
-	return s.getTx(ctx, tx, runID)
+	updated, err := s.getTx(ctx, tx, runID)
+	if err != nil {
+		return Run{}, err
+	}
+	// The run has ENDED: Spec S14.9's run summary is written here, in this
+	// transaction, never later.
+	if s.terminal != nil && IsTerminal(to) {
+		if err := s.terminal(ctx, tx, updated); err != nil {
+			return Run{}, fmt.Errorf("run: terminal hook for %q: %w", runID, err)
+		}
+	}
+	return updated, nil
 }
 
 // SetLeaseTx sets the run's lease block (holder, wall-clock deadline,

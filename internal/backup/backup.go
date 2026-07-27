@@ -105,10 +105,6 @@ type Config struct {
 	// BrokerGitProfile is the broker git-ssh-key profile for the live ssh push
 	// (empty in dev = file:// transport, no key). The live leg is pure-config.
 	BrokerGitProfile string
-	// StripPayloadBeforeSeq elides run_events trace payload bodies at or below
-	// this event_seq from the dump (Spec S02.9). 0 at v0 — nothing is compacted
-	// yet, so nothing is past the 11.1 horizon; 11.1 compaction sets it.
-	StripPayloadBeforeSeq int64
 	// ChunkThresholdBytes overrides the ~90 MB blob-chunk threshold (Spec
 	// S13.10). 0 uses the default; the household path is single-chunk.
 	ChunkThresholdBytes int
@@ -163,13 +159,16 @@ func (s *Snapshotter) Snapshot(ctx context.Context) (LedgerRow, error) {
 	}
 	defer os.RemoveAll(work)
 
-	// Durable set -> consistent copy -> text dump (traces past the horizon
-	// excluded; secrets never here — platform.db + file stores only).
+	// Durable set -> consistent copy -> text dump. RAW TRACE PAYLOAD BODIES
+	// NEVER LEAVE THE HOST: DumpFrom reads run_events through the keep-forever
+	// allowlist view (Spec S14.9 ¶3 / S13.10), so the boundary is structural
+	// rather than a number this package holds. Secrets are never here either —
+	// platform.db + file stores only.
 	vac := filepath.Join(work, "vac.db")
 	if err := s.cfg.DB.VacuumInto(ctx, vac); err != nil {
 		return LedgerRow{}, err
 	}
-	dumpSQL, userVersion, err := storage.DumpFrom(ctx, vac, s.cfg.StripPayloadBeforeSeq)
+	dumpSQL, userVersion, err := storage.DumpFrom(ctx, vac)
 	if err != nil {
 		return LedgerRow{}, err
 	}

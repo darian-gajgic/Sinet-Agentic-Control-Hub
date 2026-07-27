@@ -29,6 +29,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/retention"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -40,10 +41,11 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
-// producerTypes is the complete inventory of the 85 event types minted by the
+// producerTypes is the complete inventory of the 87 event types minted by the
 // B0–B4 producers, the three B5-3 watchdog types, the B5-4 conformance
 // eval.score_recorded, the B5-6A watchlist drift.finding, the B5-6B
-// canary.result and the three B5-7 benchmark-practice types, referenced
+// canary.result, the three B5-7 benchmark-practice types and the two B5-8A
+// retention types, referenced
 // through each package's exported Event*
 // constant so a producer-side value change (or a deleted constant) is caught
 // here at compile or assertion time. The 13 worker-asset lifecycle constants
@@ -104,6 +106,10 @@ func producerTypes() []string {
 		// declare-only because the §12 alarm disposition and the §4.2.1 opt-in
 		// consent flip are both human decisions and both are logged as one.
 		benchmark.EventPairRecorded, benchmark.EventAlarm, benchmark.EventDecision,
+		// retention (2): the B5-8A S14.9 producers. run.summary_written is
+		// appended at the run's terminal transition (family 15 becomes fully
+		// minted); retention.compacted is the compaction pass logging itself.
+		retention.EventSummaryWritten, retention.EventCompacted,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -159,13 +165,14 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 
 // TestInventoryTotals pins the reconciliation counts (§2): B5-3 minted the
 // three watchdog types, B5-4 minted eval.score_recorded, B5-6A minted
-// drift.finding, B5-6B minted canary.result, and B5-7 minted
-// benchmark.pair_recorded + benchmark.alarm and flipped decision.recorded — so
-// 85 minted + 9 declare-only = 94 registered types. Families 11 (Drift &
-// canary) and 14 (Benchmark & eval) are both fully minted.
+// drift.finding, B5-6B minted canary.result, B5-7 minted
+// benchmark.pair_recorded + benchmark.alarm and flipped decision.recorded, and
+// B5-8A flipped run.summary_written + retention.compacted — so 87 minted +
+// 7 declare-only = 94 registered types. Families 11 (Drift & canary), 14
+// (Benchmark & eval) and 15 (Run summary) are all fully minted.
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 85 {
-		t.Errorf("producer inventory = %d, want 85 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7)", n)
+	if n := len(producerTypes()); n != 87 {
+		t.Errorf("producer inventory = %d, want 87 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -178,11 +185,11 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 85 {
-		t.Errorf("registered minted types = %d, want 85", minted)
+	if minted != 87 {
+		t.Errorf("registered minted types = %d, want 87", minted)
 	}
-	if declareOnly != 9 {
-		t.Errorf("declare-only types = %d, want 9", declareOnly)
+	if declareOnly != 7 {
+		t.Errorf("declare-only types = %d, want 7", declareOnly)
 	}
 }
 
@@ -418,25 +425,26 @@ func TestRenamedTypesAreCanonical(t *testing.T) {
 	}
 }
 
-// TestDeclareOnlyFutureTypes (§2, seams): the 9 types declared now with
+// TestDeclareOnlyFutureTypes (§2, seams): the 7 types declared now with
 // producers in later packets are present and marked declare-only. The three
 // watchdog types left this set when B5-3 became their producer;
 // eval.score_recorded left when B5-4 became its producer; drift.finding left
 // when B5-6A (the S14.6 watchlist executor) became its producer;
-// canary.result left when B5-6B (the S14.6 ¶3 API canary layer) became its; and
+// canary.result left when B5-6B (the S14.6 ¶3 API canary layer) became its;
 // benchmark.pair_recorded + decision.recorded left when B5-7 (the S14.7
-// benchmark practice) became theirs — so families 11 and 14 are both fully
-// minted, and the remaining declare-only set belongs to B5-8 and B6.
+// benchmark practice) became theirs; and run.summary_written +
+// retention.compacted left when B5-8A (the S14.9 retention substrate) became
+// theirs — so families 11, 14 and 15 are all fully minted, and the remaining
+// declare-only set belongs to the B5-8B query surface and B6.
 func TestDeclareOnlyFutureTypes(t *testing.T) {
 	reg := eventlog.Registry()
 	declareOnly := []string{
 		"stage.started", "stage.finished", "run.parked", "run.resumed",
 		"ask.observed", "ask.answered",
-		"retention.compacted", "tool.called",
-		"run.summary_written",
+		"tool.called",
 	}
-	if len(declareOnly) != 9 {
-		t.Fatalf("expected 9 declare-only types, listed %d", len(declareOnly))
+	if len(declareOnly) != 7 {
+		t.Fatalf("expected 7 declare-only types, listed %d", len(declareOnly))
 	}
 	for _, typ := range declareOnly {
 		ts, ok := reg.TypeSpec(typ)
@@ -690,6 +698,26 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"decision.recorded",
 			`{"actor":"op","card_id":"benchmark-alarm:software-development:412","card_type":"benchmark.alarm","decision":"fix-and-continue-accruing","presented_at":"2026-08-01T13:00:00Z","decided_at":"2026-08-01T14:30:00Z","latency_s":5400,"reason":"rubric bug found and fixed","subject":"software-development","ref":"BENCH-REG §12"}`,
 			[]string{"actor", "card_id", "card_type", "decision", "presented_at", "decided_at", "latency_s"},
+		},
+		{
+			// run.summary_written (B5-8A): the FamilyRunSummary contract minimum
+			// is exactly "summary artifact ref + generation inputs digest". The
+			// structured story lives in the run_summaries row the ref names —
+			// the summary must SURVIVE the compaction that strips the trace it
+			// was computed from, so it cannot ride the payload it outlives.
+			"run.summary_written",
+			`{"summary_ref":"run_summary:t1.r1","inputs_digest":"sha256:0f4b1c9d2e5a6b78c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6","final_state":"completed","aggregate_only":false}`,
+			[]string{"summary_ref", "inputs_digest"},
+		},
+		{
+			// retention.compacted (B5-8A): the S14.9 ¶2 pass logging itself. The
+			// FamilyPlatform descriptor ends "compaction pass logs itself"; the
+			// payload records WHAT it compacted — the horizon applied, the owner,
+			// the boundary event_seq, per-family strip counts and bytes
+			// reclaimed, one leg per owner because the horizon is per-user.
+			"retention.compacted",
+			`{"as_of":"2026-08-01T03:00:00Z","owners":[{"user_id":"alice","horizon_months":6,"boundary_ts":"2026-02-01T03:00:00Z","boundary_event_seq":9412,"events_stripped":318,"bytes_reclaimed":1048576,"by_family":{"tools_artifacts":301,"orchestration":17},"transcripts_stripped":4}],"events_stripped":318,"bytes_reclaimed":1048576}`,
+			[]string{"as_of", "owners", "events_stripped", "bytes_reclaimed"},
 		},
 	}
 	for _, c := range cases {

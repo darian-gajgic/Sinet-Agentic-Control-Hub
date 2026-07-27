@@ -403,10 +403,11 @@ var v0Families = []FamilySpec{
 
 // v0Types is the reconciliation of every event type minted by B0–B4 (76) plus
 // the three B5-3 watchdog types, the B5-4 conformance eval.score_recorded, the
-// B5-6A watchlist drift.finding, the B5-6B canary.result, and the three B5-7
+// B5-6A watchlist drift.finding, the B5-6B canary.result, the three B5-7
 // benchmark-practice types (benchmark.pair_recorded, benchmark.alarm, and
-// decision.recorded flipped from declare) — 85 minted total, each mapped to a
-// family with its verdict and provenance, plus the declare-only types whose
+// decision.recorded flipped from declare) and the two B5-8A retention types
+// (run.summary_written, retention.compacted) — 87 minted total, each mapped to
+// a family with its verdict and provenance, plus the declare-only types whose
 // producers are later packets. The declare-once contract test (contract_test.go)
 // asserts every producer Event* constant appears here; a newly-minted type
 // absent from this table fails the build.
@@ -527,7 +528,9 @@ var v0Types = []TypeSpec{
 	minted("worker.gap", FamilyPlatform, VerdictAdmit, "internal/worker/store.go:53"),
 	minted("worker.domain_maturity", FamilyPlatform, VerdictAdmit, "internal/worker/store.go:54"),
 	minted("worker.automation_run", FamilyPlatform, VerdictAdmit, "internal/worker/store.go:55"),
-	declare("retention.compacted", FamilyPlatform, "producer: B5-8 (S14.9 compaction pass logs itself)"),
+	minted("retention.compacted", FamilyPlatform, VerdictConforms,
+		"internal/retention/retention.go (EventCompacted); emitted internal/retention/compact.go Compact",
+		"the S14.9 ¶2 compaction pass logging ITSELF — \"the audit trail records its own compaction\". Platform-scope, ONE row per pass, with per-owner legs in the payload {as_of, owners:[{user_id, horizon_months, boundary_ts, boundary_event_seq, events_stripped, bytes_reclaimed, by_family, transcripts_stripped}]} — the operator sees the whole pass and no member's audit view gains another member's counts. The horizon is per-user (⚙ retention.compaction_horizon, read with IntFor), so one pass legitimately carries several boundaries. The pass elides payload BODIES only: 0015 narrowed the append-only UPDATE trigger to that one transition and left run_events_no_delete untouched"),
 
 	// ── Family 13: Tools & artifacts (S2.1) ─────────────────────────────
 	minted("tool.completed", FamilyToolsArtifacts, VerdictRename, "internal/adapters/adapters.go:68 (KindToolResult)", "renamed from engine.tool_result; a SECOND emitter is the B5-3 dead-man canary, which injects synthetic tool.completed rows on its platform.deadman.* run to exercise Tier-0 detection end-to-end (internal/watchdog/deadman.go injectLoopTrace) — same type, synthetic provenance"),
@@ -553,8 +556,10 @@ var v0Types = []TypeSpec{
 		"the BENCH-REG §12 alarm: raised at any per-pair update when 1−G passes the registered threshold in a launch domain's current epoch, cleared only by an operator disposition. Platform-scope. Alarm history is keep-forever, which is why it is an EVENT and not a table: raise/clear payloads carry the full record and the standing expansion freeze, and the card DERIVES from them (the drift.finding precedent). It NEVER kills, parks or gates a run (§12; G1 D1.3) — the freeze binds by visibility and by gate limb (c)"),
 	minted("eval.score_recorded", FamilyBenchmarkEval, VerdictConforms, "internal/conformance/conformance.go (EventScoreRecorded); emitted internal/conformance RecordResult, driven by internal/evals (S14.8)", "the S14.5 conformance-registry recording surface (B5-4), co-produced by the S14.8 regression evals through the same verb (B5-5). B5-7 added NO new producer: S14.7's v0 scope is pair-shaped, not suite-shaped — gate limb (d) READS the existing floor/sweep records through a shell seam, and the standing questions are registrations. The family surface is satisfied by benchmark.pair_recorded for pairs and by the B5-4/B5-5 producers for suite results"),
 
-	// ── Family 15: Run summary (11.1) — DECLARE, producer B5-8 ──────────
-	declare("run.summary_written", FamilyRunSummary, "producer: B5-8 (S14.9)"),
+	// ── Family 15: Run summary (11.1) — FULLY MINTED at B5-8A ───────────
+	minted("run.summary_written", FamilyRunSummary, VerdictConforms,
+		"internal/retention/retention.go (EventSummaryWritten); emitted internal/retention/summary.go WriteAtRunEndTx",
+		"the S14.9 ¶1 run summary, appended at the run's TERMINAL transition in the SAME transaction as the state change (S02.3; composed onto run.Store's terminal hook at the shell root, so all ten terminal call sites are covered by one edge). Payload is the family's contract minimum verbatim {summary_ref, inputs_digest} plus {final_state, aggregate_only}; the structured story itself lives in the run_summaries row the ref names (migration 0015), because the summary must SURVIVE the compaction that strips the trace it was computed from. The deterministic aggregate is the record and is frozen by trigger; the local tier enriches it afterwards and never gates — a platform-scope run mints no summary (no objective, no receipts, and the narrator's own advisory run would not terminate)"),
 }
 
 // v0Aliases maps each renamed type's OLD name to its family so a pre-existing
