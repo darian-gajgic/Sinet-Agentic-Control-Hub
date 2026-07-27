@@ -392,3 +392,30 @@ func TestEmittedAliasIsDefensivelyQuoted(t *testing.T) {
 		t.Errorf("quoteIdent(%q) = %q, want %q (doubled-quote escape)", `a"b`, got, `"a""b"`)
 	}
 }
+
+// TestOffsetBeltRefusesStaleSpans — the fail-closed belt behind the rewrite, on
+// its own. It is unreachable while the rewrite's arithmetic is right, which is
+// exactly why nothing else can assert it: the drain-r2 R1 panic proved that a
+// shifted span reaches a slice, so the belt must REFUSE such a span rather than
+// let it through. Neutering checkOffsets makes this test fail.
+func TestOffsetBeltRefusesStaleSpans(t *testing.T) {
+	const src = "select * from cost_per_run"
+	bad := map[string][][2]int{
+		"end past the source":   {{0, len(src) + 3}},            // the R1 shape
+		"end before start":      {{10, 4}},                      // inverted span
+		"out of order":          {{12, 20}, {0, 6}},             // second precedes the first
+		"overlapping":           {{0, 12}, {6, 20}},             // spans share bytes
+		"negative start":        {{-1, 6}},                      // underflow
+		"start past the source": {{len(src) + 1, len(src) + 2}}, // wholly outside
+	}
+	for name, spans := range bad {
+		if err := history.CheckOffsetsForTest(src, spans); err == nil {
+			t.Errorf("%s: the offset belt admitted %v — a stale span must refuse, never reach the slice", name, spans)
+		}
+	}
+	// A well-formed, ordered, in-range set still passes: the belt refuses stale
+	// spans, it does not refuse the rewrite itself.
+	if err := history.CheckOffsetsForTest(src, [][2]int{{0, 6}, {14, len(src)}}); err != nil {
+		t.Errorf("the offset belt refused a valid span set: %v", err)
+	}
+}

@@ -15,3 +15,15 @@ func QuoteIdentForTest(s string) string { return quoteIdent(s) }
 func DropMarkerOnlyHitsForTest(a Answer, terms []string) [][]any {
 	return dropMarkerOnlyHits(a, terms)
 }
+
+// CheckOffsetsForTest exposes the fail-closed offset belt with explicit spans.
+// The belt is unreachable while the rewrite's arithmetic is right, so only a
+// direct call can assert that a stale span REFUSES rather than reaching the
+// slice that would panic on it.
+func CheckOffsetsForTest(src string, spans [][2]int) error {
+	targets := make([]target, 0, len(spans))
+	for _, s := range spans {
+		targets = append(targets, target{start: s[0], end: s[1]})
+	}
+	return checkOffsets(src, targets)
+}
