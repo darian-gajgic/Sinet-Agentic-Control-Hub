@@ -253,3 +253,142 @@ func TestTheBoundIsTightenedNotTrusted(t *testing.T) {
 		t.Errorf("injected bound %d exceeds the Layer-2 ceiling %d", res.Limit, history.OpenSQLMaxRows)
 	}
 }
+
+// TestGuardDoesNotPanicOnLeadingWhitespace — drain r2 R1. The D4 tail
+// truncation used strings.TrimSpace, which strips the LEADING side too and
+// shifted the text against token offsets computed from the original — so
+// Guard PANICKED with a slice-bounds error instead of returning.
+//
+// Measured before the fix: `Guard("   SELECT * FROM cost_per_run", …)` →
+// panic: slice bounds out of range [29:26]; the leading-newline/tab and
+// leading-space-with-trailing-comment forms panicked the same way.
+//
+// A panic in a guardrail is a CRASH, not a refusal, and Guard is exported —
+// B6/S15 is its next caller. The precondition is enforced, not documented.
+func TestGuardDoesNotPanicOnLeadingWhitespace(t *testing.T) {
+	for _, stmt := range []string{
+		"   SELECT * FROM cost_per_run",
+		"\n\t SELECT * FROM cost_per_run",
+		"\n\nSELECT * FROM cost_per_run",
+		"   SELECT * FROM cost_per_run ;",
+		"\n\t SELECT * FROM cost_per_run ;",
+		"  SELECT * FROM cost_per_run -- trailing",
+		"\n  SELECT * FROM cost_per_run -- trailing\n",
+		"  SELECT c.run_id FROM cost_per_run AS c ;",
+		"\t WITH t AS (SELECT * FROM cost_per_run) SELECT * FROM t ;",
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Guard(%q) PANICKED: %v — a guardrail must refuse, never crash", stmt, r)
+				}
+			}()
+			res, err := history.Guard(stmt, history.Scope{UserID: "alice"}, 10)
+			if err != nil {
+				t.Errorf("Guard(%q) refused a legitimate read: %v", stmt, err)
+				return
+			}
+			if !strings.HasSuffix(res.Statement, "LIMIT ?") {
+				t.Errorf("Guard(%q) built %q — no injected bound", stmt, res.Statement)
+			}
+			if strings.Contains(res.Statement, ";") {
+				t.Errorf("Guard(%q) built %q — the separator survived", stmt, res.Statement)
+			}
+			if !strings.Contains(res.Statement, `AS "`) {
+				t.Errorf("Guard(%q) built %q — the alias is not defensively quoted", stmt, res.Statement)
+			}
+		}()
+	}
+}
+
+// TestLeadingWhitespaceStatementsExecute — the other half of R1: not panicking
+// is not enough, the statement it builds must still run.
+func TestLeadingWhitespaceStatementsExecute(t *testing.T) {
+	f := newFixture(t)
+	seedTwoOwners(t, f)
+	ro, err := f.db.OpenReadOnly(f.ctx)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+
+	for _, stmt := range []string{
+		"   SELECT * FROM cost_per_run",
+		"\n\t SELECT * FROM cost_per_run ;",
+		"  SELECT * FROM cost_per_run -- trailing",
+	} {
+		res, err := history.Guard(stmt, history.Scope{UserID: member1}, 10)
+		if err != nil {
+			t.Errorf("Guard(%q): %v", stmt, err)
+			continue
+		}
+		rows, err := ro.QueryContext(f.ctx, res.Statement, res.Args...)
+		if err != nil {
+			t.Errorf("built statement did not execute for %q: %v\n  %s", stmt, err, res.Statement)
+			continue
+		}
+		rows.Close()
+	}
+}
+
+// TestQuotedAliasIsRefusedEvenWhenItsContentIsPlain — drain r2 R4, limb
+// `checkAlias` on its own. Limb 3a (plainIdent over every quoted identifier)
+// already catches an alias carrying SQL, so it MASKS this one: the case that
+// separates them is a quoted alias whose content IS a plain name. 3a passes it;
+// checkAlias must not. Neutering checkAlias makes exactly this test fail.
+func TestQuotedAliasIsRefusedEvenWhenItsContentIsPlain(t *testing.T) {
+	for _, stmt := range []string{
+		`SELECT * FROM cost_per_run AS "alias"`,
+		`SELECT * FROM cost_per_run "alias"`,
+		"SELECT * FROM cost_per_run AS [alias]",
+		"SELECT * FROM cost_per_run AS `alias`",
+	} {
+		err := func() error {
+			_, err := history.Guard(stmt, history.Scope{UserID: "alice"}, 10)
+			return err
+		}()
+		if !errors.Is(err, history.ErrRefused) {
+			t.Errorf("Guard(%q) = %v — a quoted alias must be refused on its own limb", stmt, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), "quoted table alias") {
+			t.Errorf("Guard(%q) refused with %q — want the alias limb's own reason", stmt, err)
+		}
+	}
+	// The control: the same alias UNQUOTED is accepted, so the limb refuses the
+	// quoting and not the name.
+	if _, err := history.Guard("SELECT * FROM cost_per_run AS alias", history.Scope{UserID: "alice"}, 10); err != nil {
+		t.Errorf("an unquoted alias was refused: %v", err)
+	}
+}
+
+// TestEmittedAliasIsDefensivelyQuoted — drain r2 R4, limb `quoteIdent` on its
+// own. checkAlias already refuses anything that could carry SQL, so this limb
+// is redundant TODAY and exists against a future relaxation of the checks above
+// — which is precisely the scenario no other test would catch. Neutering
+// quoteIdent makes this test fail.
+func TestEmittedAliasIsDefensivelyQuoted(t *testing.T) {
+	cases := map[string]string{
+		"SELECT * FROM cost_per_run":                    `AS "cost_per_run"`,
+		"SELECT c.run_id FROM cost_per_run c":           `AS "c"`,
+		"SELECT c.run_id FROM cost_per_run AS c":        `AS "c"`,
+		"SELECT * FROM cost_per_run JOIN cost_per_task": `AS "cost_per_task"`,
+	}
+	for stmt, want := range cases {
+		res, err := history.Guard(stmt, history.Scope{UserID: "alice"}, 10)
+		if err != nil {
+			t.Errorf("Guard(%q): %v", stmt, err)
+			continue
+		}
+		if !strings.Contains(res.Statement, want) {
+			t.Errorf("Guard(%q) emitted\n  %s\nwant the alias quoted as %s — the emission limb is the belt behind checkAlias",
+				stmt, res.Statement, want)
+		}
+	}
+	// The escape is doubled, so a quote inside a name can never close its own
+	// quoting. Asserted on the helper's observable contract through a name that
+	// reaches emission as the view's own.
+	if got := history.QuoteIdentForTest(`a"b`); got != `"a""b"` {
+		t.Errorf("quoteIdent(%q) = %q, want %q (doubled-quote escape)", `a"b`, got, `"a""b"`)
+	}
+}

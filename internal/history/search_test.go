@@ -264,3 +264,66 @@ func TestMarkerFragmentsAreNotAnOracle(t *testing.T) {
 		}
 	}
 }
+
+// TestMarkerOnlyRowsAreDroppedByVerification — drain r2 R3. §37-C calls
+// dropMarkerOnlyHits the LOAD-BEARING half of the codor-C2 search property,
+// and it had no test: neutering it (`return a.Rows`) left the whole suite green
+// while `key`, `anthropic` and `anthropic_key` all reached the secret-bearing
+// row. An untested security property is one refactor from silently gone.
+//
+// The fixture is the part that matters. The row's honest text must NOT contain
+// the marker's own words, or the row would be returned legitimately and the
+// test would pass for the wrong reason — which is exactly the false positive
+// the earlier fixture had.
+func TestMarkerOnlyRowsAreDroppedByVerification(t *testing.T) {
+	f := newFixture(t)
+	seedTwoOwners(t, f)
+	// Redacts to: "the deploy credential [REDACTED:anthropic_key] appeared in a
+	// build log". Marker-only words: redacted, anthropic, key. Honest words:
+	// deploy, credential, appeared, build, log.
+	f.event("r-"+member1, member1, "drift.finding", map[string]any{
+		"source": "src-" + member1, "change_class": "contract", "severity": "high",
+		"summary": "the deploy credential sk-ant-AAAAAAAAAAAAAAAAAAAAAA appeared in a build log",
+	})
+	f.indexHistory()
+
+	// Bare class vocabulary: these SURVIVE stripMarkers (they do not spell
+	// REDACTED), so only the row verification can stop them.
+	for _, q := range []string{"key", "anthropic", "anthropic_key", "anthropic key"} {
+		a, err := f.st.Search(f.ctx, q, opScope(), 10)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", q, err)
+		}
+		if len(a.Rows) != 0 {
+			t.Errorf("Search(%q) returned %d rows — the row verification is not holding", q, len(a.Rows))
+		}
+	}
+	// The control: honest words in the SAME row stay findable, so the property
+	// is "markers do not match", not "the row is hidden".
+	for _, q := range []string{"deploy", "credential", "build log"} {
+		a, err := f.st.Search(f.ctx, q, opScope(), 10)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", q, err)
+		}
+		if len(a.Rows) == 0 {
+			t.Errorf("Search(%q) found nothing — the verification dropped an honest hit", q)
+		}
+	}
+
+	// And the limb directly, so a refactor that bypasses it is caught even if
+	// the query path changes shape.
+	marker := history.Answer{
+		Columns: []string{"ref", "match_check"},
+		Rows: [][]any{
+			{"a", "the deploy credential [REDACTED:anthropic_key] appeared in a build log"},
+			{"b", "the api key rotation is due"},
+		},
+	}
+	kept := history.DropMarkerOnlyHitsForTest(marker, []string{"key"})
+	if len(kept) != 1 {
+		t.Fatalf("verification kept %d of 2 rows, want 1 (the honest one only)", len(kept))
+	}
+	if kept[0][0] != "b" {
+		t.Errorf("verification kept row %v, want the row that honestly says \"key\"", kept[0][0])
+	}
+}

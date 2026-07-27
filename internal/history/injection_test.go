@@ -124,6 +124,16 @@ func injectionAttempts() []attempt {
 		{name: "drop then select across a newline", raw: "DROP TABLE runs;\nSELECT * FROM cost_per_run", wants: "preceded"},
 		{name: "insert then select across a newline", raw: "INSERT INTO users VALUES ('m');\nSELECT * FROM cost_per_run", wants: "preceded"},
 
+		// ── multi-statement across a BLANK LINE (drain r2 R2) ────────────
+		// Round 1 walked the prefix back only to the last blank line, so a
+		// blank line RESET the check and all four of these were defused and
+		// audited as `executed`. A reasoning model's output is full of blank
+		// lines, which makes this shape at least as likely as the one above.
+		{name: "drop then select across a blank line", raw: "DROP TABLE runs;\n\nSELECT * FROM cost_per_run", wants: "preceded"},
+		{name: "insert then select across a blank line", raw: "INSERT INTO users VALUES ('m');\n\nSELECT * FROM cost_per_run", wants: "preceded"},
+		{name: "blank-line split inside a fenced block", raw: "```sql\nDROP TABLE runs;\n\nSELECT * FROM cost_per_run\n```", wants: "preceded"},
+		{name: "blank-line split after reasoning prose", raw: "Let me think about this.\n\nDROP TABLE runs;\n\nSELECT * FROM cost_per_run", wants: "preceded"},
+
 		// ── shape ────────────────────────────────────────────────────────
 		{name: "bind parameter smuggling", raw: "SELECT * FROM cost_per_run WHERE user_id = ?", wants: "bind parameter"},
 		{name: "named parameter smuggling", raw: "SELECT * FROM cost_per_run WHERE user_id = :who", wants: "bind parameter"},

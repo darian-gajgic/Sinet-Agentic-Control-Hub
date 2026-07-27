@@ -191,14 +191,20 @@ func ExtractSQL(raw string) (string, error) {
 // a line that BEGINS with a banned statement word (statement position), and a
 // statement separator anywhere in the paragraph.
 func checkStatementPrefix(src string, idx int) error {
-	start := 0
-	if i := strings.LastIndex(src[:idx], "\n\n"); i >= 0 {
-		start = i + 2
-	}
-	prefix := src[start:idx]
+	// r2 R2: the WHOLE prefix is examined. Round 1 walked back only to the last
+	// BLANK LINE, which meant a blank line reset the check — so
+	// "DROP TABLE runs;\n\nSELECT …" was still defused into a harmless read and
+	// audited as `executed`. A reasoning model's output is full of blank lines,
+	// so that shape is at least as likely as the single-newline one, and it is
+	// exactly the detection gap this function exists to close: an attempt that
+	// is not recorded has not been detected.
+	prefix := src[:idx]
 	if strings.TrimSpace(prefix) == "" {
 		return nil
 	}
+	// Both signals are per LINE and deliberately narrow, so that widening the
+	// window to the whole prefix does not start refusing ordinary reasoning
+	// prose. A line is judged by the statement word it OPENS with.
 	for _, line := range strings.Split(prefix, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) == 0 {
@@ -211,19 +217,17 @@ func checkStatementPrefix(src string, idx int) error {
 		if w == createWord {
 			return refusal("the statement is preceded by a line beginning %q (schema change)", fields[0])
 		}
-	}
-	// A separator before the statement means there WAS another statement, even
-	// when both halves read. Guard's own single-statement check only sees what
-	// extraction returned, so without this a `SELECT a; SELECT b` would run its
-	// second half and say nothing about the first.
-	if toks, err := lex(prefix); err == nil {
-		for _, tk := range toks {
-			if tk.kind == tokPunct && tk.text == ";" {
-				return refusal("more than one statement — a statement separator precedes it")
-			}
+		// A separator on a line that OPENS a statement means there WAS another
+		// statement, even when both halves read: Guard's own single-statement
+		// check only sees what extraction returned, so without this a
+		// `SELECT a; SELECT b` would run its second half silently.
+		//
+		// Scoping the separator signal to statement-opening lines is what keeps
+		// English prose safe — a reasoning paragraph may well use a semicolon,
+		// but it does not begin with `select`.
+		if (w == "select" || w == "with") && strings.Contains(line, ";") {
+			return refusal("more than one statement — a statement separator precedes it")
 		}
-	} else if strings.Contains(prefix, ";") {
-		return refusal("more than one statement — a statement separator precedes it")
 	}
 	return nil
 }
@@ -434,9 +438,16 @@ func Guard(sqlText string, scope Scope, limit int) (GuardResult, error) {
 	// gets wrapped — so a trailing `;` or a trailing comment survived into the
 	// wrapper and turned an accepted statement into `… ;) LIMIT ?`, a syntax
 	// error at execution. Truncating to the end of the last real token drops
-	// both, and cannot disturb the target offsets, which all precede it. A
-	// trailing semicolon is the likeliest thing a text-to-SQL model emits.
-	sqlText = strings.TrimSpace(sqlText[:toks[len(toks)-1].end])
+	// both. A trailing semicolon is the likeliest thing a text-to-SQL model
+	// emits.
+	//
+	// r2 R1: this truncation must NOT trim the LEADING side. Token offsets were
+	// computed against the original text, and trimming the front shifts the
+	// string underneath them — which made `Guard("   SELECT …")` PANIC with a
+	// slice-bounds error in rewriteScope. Truncating at the last token's end is
+	// already sufficient: everything after it is whitespace, a comment or the
+	// separator, so there is nothing left to trim.
+	sqlText = sqlText[:toks[len(toks)-1].end]
 
 	// 2. It must OPEN as a read.
 	if first := toks[0]; first.kind != tokIdent || (first.lower != "select" && first.lower != "with") {
@@ -519,6 +530,15 @@ func Guard(sqlText string, scope Scope, limit int) (GuardResult, error) {
 	}
 
 	// 7. The owner predicate, applied to every view reference (S01.9).
+	//
+	// The offsets are validated FIRST, and a bad one is a REFUSAL rather than a
+	// slice-bounds panic (r2 R1). A guardrail that crashes has not refused
+	// anything — it has taken the process down — and this function is exported,
+	// so its next callers are B6/S15. Correctness above keeps the offsets
+	// valid; this makes any future mistake fail closed instead of fatally.
+	if err := checkOffsets(sqlText, targets); err != nil {
+		return GuardResult{}, err
+	}
 	statement, args, scoped := rewriteScope(sqlText, targets, ctes, scope)
 
 	// 8. The row bound. It WRAPS rather than edits, so the model's own text is
@@ -540,6 +560,22 @@ func Guard(sqlText string, scope Scope, limit int) (GuardResult, error) {
 
 func followedByOpenParen(toks []token, i int) bool {
 	return i+1 < len(toks) && toks[i+1].kind == tokPunct && toks[i+1].text == "("
+}
+
+// checkOffsets asserts every target's byte span still addresses the statement
+// text, in order. It is the fail-closed belt behind the rewrite: rewriteScope
+// slices the source at these offsets, and a stale or shifted offset would
+// panic rather than refuse.
+func checkOffsets(src string, targets []target) error {
+	prev := 0
+	for _, tg := range targets {
+		if tg.start < prev || tg.end < tg.start || tg.end > len(src) {
+			return refusal("the statement could not be scoped safely (internal offset %d:%d against %d bytes)",
+				tg.start, tg.end, len(src))
+		}
+		prev = tg.end
+	}
+	return nil
 }
 
 // checkAlias refuses a table alias that is not a plain bare identifier.

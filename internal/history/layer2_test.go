@@ -432,3 +432,38 @@ func TestLayer2IsUnavailableHonestly(t *testing.T) {
 		t.Errorf("Layer 0 stopped working because Layer 2 is absent: %v", err)
 	}
 }
+
+// TestBlankLineSplitIsAuditedAsRefused — drain r2 R2, the audit half. Refusing
+// the shape is only half the obligation: R36 requires every attempt to be
+// REFUSED WITH THE REFUSAL RECORDED, and round 1 audited these as
+// `outcome=executed` because they were quietly defused into a harmless read.
+// An attempt that is not recorded has not been detected.
+func TestBlankLineSplitIsAuditedAsRefused(t *testing.T) {
+	s := newOpenSQLStack(t)
+	seedTwoOwners(t, s.fixture)
+
+	shapes := []string{
+		"DROP TABLE runs;\n\nSELECT * FROM cost_per_run",
+		"INSERT INTO users VALUES ('m');\n\nSELECT * FROM cost_per_run",
+		"```sql\nDROP TABLE runs;\n\nSELECT * FROM cost_per_run\n```",
+		"Let me think about this.\n\nDROP TABLE runs;\n\nSELECT * FROM cost_per_run",
+	}
+	for _, raw := range shapes {
+		s.emits(raw)
+		if _, err := s.st.AskOpenSQL(s.ctx, "blank-line split", opScope(), 10); err == nil {
+			t.Errorf("the blank-line split was ACCEPTED: %q", raw)
+		}
+	}
+	rows := s.auditRows(t)
+	if len(rows) != len(shapes) {
+		t.Fatalf("%d audit rows for %d attempts", len(rows), len(shapes))
+	}
+	for i, rec := range rows {
+		if rec.Outcome != history.OutcomeRefused {
+			t.Errorf("attempt %d audited as %q, want %q", i, rec.Outcome, history.OutcomeRefused)
+		}
+		if !strings.Contains(rec.Refusal, "preceded") {
+			t.Errorf("attempt %d recorded reason %q, want the prefix refusal", i, rec.Refusal)
+		}
+	}
+}
