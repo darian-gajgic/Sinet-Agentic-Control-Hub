@@ -42,6 +42,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
@@ -244,6 +245,10 @@ func Run(ctx context.Context, opts Options) error {
 	// driven by shell-owned index and compaction loops after step 5. Its run-end
 	// summary hook is installed on the run store at composition time.
 	var retSurf *retentionSurface
+	// The S14.10 query surface (B5-8B): composed in the production path and
+	// HELD on the api Config for the S15 assistant. It has no loop — a query
+	// surface's WHEN is "when a question is asked" — and no route yet (B6).
+	var histSurf *history.Store
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -582,6 +587,18 @@ func Run(ctx context.Context, opts Options) error {
 		logger.Info("retention: S14.9 substrate wired (B5-8A)",
 			"keep_forever_seeded", retSurf.KeepForever, "narrator_wired", retSurf.NarratorWired)
 
+		// The Spec S14.10 query surface (B5-8B): Layer 0's named cost views,
+		// the Layer-1 canned catalog with grammar-constrained intent, and
+		// redact-before-match search over B5-8A's corpus. It has no loop — a
+		// query surface's WHEN is "when a question is asked" — and no HTTP
+		// route: the transport is B6's (the §31/§35 held-not-routed precedent,
+		// as with Accept/FollowUp/Preview).
+		histSurf, err = buildHistorySurface(db, log, runs, checkpoints,
+			localSurf.Duty, localSurf.CalStore, logger)
+		if err != nil {
+			return err
+		}
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,
@@ -639,6 +656,7 @@ func Run(ctx context.Context, opts Options) error {
 		Accept:     acceptAccepter(acceptSurf),
 		FollowUp:   acceptFollowUp(acceptSurf),
 		Preview:    previewSurf, // held for the B6 preview endpoints (F17); not routed
+		History:    histSurf,    // S14.10 layers, held for the S15 assistant; not routed
 		DB:         db,          // S14.3 snapshot projections (owner-scoped, OQ1)
 		Meter:      meterReader, // S14.3 run-card counters (§4)
 		Logger:     logger,

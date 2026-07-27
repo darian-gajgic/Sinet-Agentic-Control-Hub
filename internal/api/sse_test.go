@@ -526,6 +526,42 @@ func TestRedactionObservabilityEdgeOnly(t *testing.T) {
 			}
 		}
 	}
+
+	// B5-8B extension (§37): the primitive now has TWO declared importers, and
+	// the assertion covers both sides of the line.
+	//
+	//   * internal/retention  — the write side: the FTS corpus is redacted at
+	//                           index time, which is where the C2 property has
+	//                           to live (§36 drain D4).
+	//   * internal/history    — the read side: the S14.10 search QUERY is
+	//                           redacted before it is matched and excerpts are
+	//                           redacted on the way out (§30's final bullet).
+	//
+	// Asserting these POSITIVELY is what keeps the negative above non-vacuous:
+	// if the primitive stopped being used by the observability path entirely,
+	// the deliverable-path negative would pass for the wrong reason.
+	for pkg, why := range map[string]string{
+		"retention": "the redact-before-index corpus (§36 drain D4)",
+		"history":   "redact-before-match search and bounded redacted excerpts (§30, B5-8B)",
+	} {
+		files, _ := filepath.Glob(filepath.Join("..", pkg, "*.go"))
+		found := false
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			src, err := os.ReadFile(f)
+			if err != nil {
+				continue
+			}
+			if strings.Contains(string(src), "internal/redact") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("internal/%s no longer imports internal/redact — it is a DECLARED importer for %s; the deliverable-path negative above would pass for the wrong reason", pkg, why)
+		}
+	}
 }
 
 // TestSSEMemberScopedSnapshots proves the OQ1 owner scope on the SNAPSHOT

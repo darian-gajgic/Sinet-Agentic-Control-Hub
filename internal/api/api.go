@@ -25,6 +25,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -120,6 +121,13 @@ type Config struct {
 	// composed at the shell root and HELD here for the B6 /api/deliverables
 	// preview endpoints (S15.2); wired but NOT yet routed (F17).
 	Preview *preview.Manager
+	// History is the S14.10 three-layer queryable-history surface (B5-8B):
+	// Layer-0 named cost views, the Layer-1 canned catalog, and
+	// redact-before-match search. Composed at the shell root and HELD here for
+	// the S15 conversational assistant, which "consumes these layers and
+	// nothing else"; wired but NOT yet routed — the transport is B6's, the same
+	// posture Accept/FollowUp/Preview sit in.
+	History *history.Store
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -155,6 +163,9 @@ type Server struct {
 	// preview is the S13.8 preview surface, held for the B6
 	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
 	preview *preview.Manager
+	// history is the S14.10 query surface, held for the S15 assistant; the
+	// transport is B6's and it is not yet routed.
+	history *history.Store
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
 	// (the raw tail still serves).
 	proj *projector
@@ -177,6 +188,7 @@ func New(cfg Config) *Server {
 		accept:     cfg.Accept,
 		followUp:   cfg.FollowUp,
 		preview:    cfg.Preview,
+		history:    cfg.History,
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter}

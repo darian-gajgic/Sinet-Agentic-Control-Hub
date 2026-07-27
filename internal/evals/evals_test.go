@@ -30,8 +30,8 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	// EXACT pin, moved forward deliberately as each packet lands its migration:
 	// 0012 is this packet's, 0013 is B5-6A's (the S14.6 watch-row config store).
 	// A floor would let an unnoticed migration slip in.
-	if v != 15 {
-		t.Fatalf("user_version = %d, want 15 (migrations through 0015 applied contiguously)", v)
+	if v != 16 {
+		t.Fatalf("user_version = %d, want 16 (migrations through 0016 applied contiguously)", v)
 	}
 	for _, table := range []string{"eval_floors", "revalidation_stamps"} {
 		var n int
