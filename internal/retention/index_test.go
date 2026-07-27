@@ -284,82 +284,48 @@ func TestDottedOrderIsAnOrderedTreePath(t *testing.T) {
 	}
 }
 
-// TestIndexesServeThePreviouslyFullScanQueries is the B5-3 F16 discharge
-// (rubric 14): EXPLAIN QUERY PLAN must show an INDEX for each derive/projection
-// shape that scanned the whole table before migration 0015.
-func TestIndexesServeThePreviouslyFullScanQueries(t *testing.T) {
+// TestCompactionPredicateIsServedByAnIndex (drain D7): this package's OWN
+// production query, VERBATIM — a paraphrase could not catch it being edited
+// into a full scan. The api-side derives are pinned in
+// internal/api/projection_indexes_test.go against their own exported constants,
+// which is where those queries live.
+func TestCompactionPredicateIsServedByAnIndex(t *testing.T) {
 	f := newFixture(t)
 	f.user("alice", "member")
-	f.startRun("r1", "alice", "")
-	for i := 0; i < 50; i++ {
-		f.appendAt("", "alice", "watchdog.flagged", `{"rule":"loop"}`, f.now)
-		f.appendAt("", "alice", "drift.finding", `{"change_class":"price"}`, f.now)
+	for i := 0; i < 80; i++ {
+		f.appendAt("", "alice", "engine.message", `{"text":"x"}`, f.now.AddDate(0, -24, 0))
+		f.appendAt("", "alice", "verdict.recorded", `{"verdict":"pass"}`, f.now.AddDate(0, -24, 0))
 	}
 
-	plan := func(q string, args ...any) string {
-		t.Helper()
-		rows, err := f.db.QueryContext(f.ctx, "EXPLAIN QUERY PLAN "+q, args...)
-		if err != nil {
-			t.Fatalf("EXPLAIN %q: %v", q, err)
-		}
-		defer rows.Close()
-		var b strings.Builder
-		for rows.Next() {
-			var id, parent, notused int
-			var detail string
-			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
-				t.Fatal(err)
-			}
-			b.WriteString(detail)
-			b.WriteString("\n")
-		}
-		return b.String()
+	rows, err := f.db.QueryContext(f.ctx,
+		"EXPLAIN QUERY PLAN "+retention.CompactableRowsQuery,
+		"alice", "2020-01-01T00:00:00Z", retention.CompactedPayload,
+		int64(retention.BulkPayloadFloorBytes), 500)
+	if err != nil {
+		t.Fatalf("EXPLAIN the compaction predicate: %v", err)
 	}
-
-	for _, c := range []struct {
-		name string
-		q    string
-		args []any
-	}{
-		{
-			"watchdogFlags / benchmarkAlarms: WHERE type = ? ORDER BY event_seq",
-			`SELECT event_seq, payload FROM run_events WHERE type = ? ORDER BY event_seq`,
-			[]any{"watchdog.flagged"},
-		},
-		{
-			"the owner-scoped variant (S01.9 member view)",
-			`SELECT event_seq, payload FROM run_events WHERE type = ? AND user_id = ? ORDER BY event_seq`,
-			[]any{"watchdog.flagged", "alice"},
-		},
-		{
-			"driftCards: WHERE type = ? AND ts >= ?",
-			`SELECT event_seq, payload FROM run_events WHERE type = 'drift.finding' AND ts >= ? ORDER BY event_seq`,
-			[]any{"2020-01-01T00:00:00Z"},
-		},
-		{
-			"per-run derive: WHERE run_id = ? AND type IN (...)",
-			`SELECT payload FROM run_events WHERE run_id = ? AND type IN ('run.wedged','run.state_changed') ORDER BY event_seq DESC`,
-			[]any{"r1"},
-		},
-		{
-			"the compaction pass: WHERE user_id = ? AND ts <= ?",
-			`SELECT event_seq FROM run_events WHERE user_id = ? AND ts <= ?`,
-			[]any{"alice", "2030-01-01T00:00:00Z"},
-		},
-	} {
-		detail := plan(c.q, c.args...)
-		if !strings.Contains(detail, "USING INDEX") && !strings.Contains(detail, "USING COVERING INDEX") {
-			t.Errorf("%s still full-scans run_events (the F16 carry):\n%s", c.name, detail)
+	defer rows.Close()
+	var b strings.Builder
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
 		}
-		if strings.Contains(detail, "SCAN run_events\n") {
-			t.Errorf("%s reports a bare table scan:\n%s", c.name, detail)
-		}
+		b.WriteString(detail)
+		b.WriteString("\n")
 	}
-
-	// Non-tautology probe: a query no index serves DOES report a scan, so the
-	// assertion above is capable of failing.
-	if detail := plan(`SELECT event_seq FROM run_events WHERE schema_version = 1`); strings.Contains(detail, "USING INDEX") {
-		t.Fatalf("the query-plan assertion is tautological — an unindexed column reported an index:\n%s", detail)
+	detail := b.String()
+	// The owner+age scan rides run_events_user_ts_idx; the allowlist join rides
+	// the retention_keep_forever primary key.
+	if !strings.Contains(detail, "run_events_user_ts_idx") {
+		t.Errorf("the compaction predicate does not seek on (user_id, ts):\n%s", detail)
+	}
+	if strings.Contains(detail, "SCAN run_events") {
+		t.Errorf("the compaction predicate full-scans run_events:\n%s", detail)
+	}
+	if !strings.Contains(detail, "retention_keep_forever") {
+		t.Errorf("the keep-forever join is not visible in the plan:\n%s", detail)
 	}
 }
 

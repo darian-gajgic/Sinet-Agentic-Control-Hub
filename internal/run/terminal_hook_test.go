@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -21,7 +22,7 @@ func TestTerminalHookFiresOnlyAtTerminalStates(t *testing.T) {
 	_, _, store := newStore(t)
 
 	var fired []string
-	store.SetTerminalHook(func(_ context.Context, _ *sql.Tx, r run.Run) error {
+	mustHook(t, store, func(_ context.Context, _ *sql.Tx, r run.Run) error {
 		fired = append(fired, string(r.State))
 		return nil
 	})
@@ -65,7 +66,7 @@ func TestTerminalHookRunsInsideTheTransitionTransaction(t *testing.T) {
 	db, _, store := newStore(t)
 
 	boom := errors.New("the hook refused")
-	store.SetTerminalHook(func(ctx context.Context, tx *sql.Tx, r run.Run) error {
+	mustHook(t, store, func(ctx context.Context, tx *sql.Tx, r run.Run) error {
 		// A real write inside the caller's transaction, then a failure: both
 		// must vanish.
 		if _, err := tx.ExecContext(ctx,
@@ -129,7 +130,7 @@ func TestTerminalHookCoversEveryTerminalState(t *testing.T) {
 	ctx := context.Background()
 	_, _, store := newStore(t)
 	var fired []string
-	store.SetTerminalHook(func(_ context.Context, _ *sql.Tx, r run.Run) error {
+	mustHook(t, store, func(_ context.Context, _ *sql.Tx, r run.Run) error {
 		fired = append(fired, r.ID+":"+string(r.State))
 		return nil
 	})
@@ -168,5 +169,76 @@ func TestTerminalHookCoversEveryTerminalState(t *testing.T) {
 	}
 	if len(fired) != len(want) {
 		t.Errorf("hook fired %d times (%v), want %d", len(fired), fired, len(want))
+	}
+}
+
+// mustHook installs a terminal hook, failing the test if it is refused.
+func mustHook(t *testing.T, s *run.Store, h run.TerminalHook) {
+	t.Helper()
+	if err := s.SetTerminalHook(h); err != nil {
+		t.Fatalf("SetTerminalHook: %v", err)
+	}
+}
+
+// TestTerminalHookInstallsExactlyOnce is drain D11: the discipline is
+// structural. A second install is REFUSED, never a silent swap — a composition
+// defect that wired two summary writers would otherwise produce two summaries
+// per run, and the doc comment asking callers to behave was its only guard.
+func TestTerminalHookInstallsExactlyOnce(t *testing.T) {
+	_, _, store := newStore(t)
+	first := func(context.Context, *sql.Tx, run.Run) error { return nil }
+	if err := store.SetTerminalHook(first); err != nil {
+		t.Fatalf("the first install must succeed: %v", err)
+	}
+	if err := store.SetTerminalHook(first); err == nil {
+		t.Error("a second SetTerminalHook succeeded — the hook is install-once")
+	}
+	if err := store.SetTerminalHook(nil); err == nil {
+		t.Error("a nil hook was accepted")
+	}
+	// A fresh Store installs cleanly — once-ness is per-Store, not global.
+	_, _, other := newStore(t)
+	if err := other.SetTerminalHook(first); err != nil {
+		t.Errorf("a fresh store must accept its own hook: %v", err)
+	}
+}
+
+// TestTerminalHookIsRaceFree exercises the atomic read under concurrent
+// terminal transitions (-race is where this earns its keep).
+func TestTerminalHookIsRaceFree(t *testing.T) {
+	ctx := context.Background()
+	_, _, store := newStore(t)
+	var mu sync.Mutex
+	fired := 0
+	mustHook(t, store, func(context.Context, *sql.Tx, run.Run) error {
+		mu.Lock()
+		fired++
+		mu.Unlock()
+		return nil
+	})
+	ids := []string{"c1", "c2", "c3", "c4"}
+	for _, id := range ids {
+		if _, err := store.Create(ctx, run.NewRun{ID: id, UserID: "alice"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+			if _, err := store.Transition(ctx, id, st, run.TransitionOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			_, _ = store.Transition(ctx, id, run.StateCompleted, run.TransitionOptions{})
+		}(id)
+	}
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if fired != len(ids) {
+		t.Errorf("hook fired %d times for %d concurrent terminal transitions", fired, len(ids))
 	}
 }

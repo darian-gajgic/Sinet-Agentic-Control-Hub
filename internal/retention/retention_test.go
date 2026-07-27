@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +28,23 @@ type fixture struct {
 	reg      *settings.Registry
 	runs     *run.Store
 	store    *retention.Store
+	settings *faultySettings
 	now      time.Time
 	narrated int
+}
+
+// faultySettings wraps the real registry so a test can fail ONE owner's ⚙ read
+// — the drain-D2 probe needs an owner-scoped failure with no other effect.
+type faultySettings struct {
+	inner   retention.Settings
+	failFor string
+}
+
+func (fs *faultySettings) IntFor(key, userID string) (int64, error) {
+	if fs.failFor != "" && userID == fs.failFor {
+		return 0, fmt.Errorf("injected fault reading %s for %q", key, userID)
+	}
+	return fs.inner.IntFor(key, userID)
 }
 
 type fixtureOpt func(*retention.Config, *fixture)
@@ -64,7 +81,8 @@ func newFixture(t *testing.T, opts ...fixtureOpt) *fixture {
 		t.Fatalf("settings Attach: %v", err)
 	}
 	f := &fixture{t: t, ctx: ctx, db: db, log: log, reg: reg, now: time.Now().UTC()}
-	cfg := retention.Config{DB: db, Log: log, Settings: reg, Now: func() time.Time { return f.now }}
+	f.settings = &faultySettings{inner: reg}
+	cfg := retention.Config{DB: db, Log: log, Settings: f.settings, Now: func() time.Time { return f.now }}
 	for _, o := range opts {
 		o(&cfg, f)
 	}
@@ -77,10 +95,12 @@ func newFixture(t *testing.T, opts ...fixtureOpt) *fixture {
 		t.Fatalf("EnsureKeepForeverSeeded: %v", err)
 	}
 	f.runs = run.NewStore(db, log)
-	f.runs.SetTerminalHook(func(ctx context.Context, tx *sql.Tx, r run.Run) error {
+	if err := f.runs.SetTerminalHook(func(ctx context.Context, tx *sql.Tx, r run.Run) error {
 		_, _, err := store.WriteAtRunEndTx(ctx, tx, r.ID)
 		return err
-	})
+	}); err != nil {
+		t.Fatalf("SetTerminalHook: %v", err)
+	}
 	return f
 }
 
@@ -135,6 +155,15 @@ func (f *fixture) appendAt(runID, owner, typ, payload string, ts time.Time) int6
 		f.t.Fatalf("append %s: %v", typ, err)
 	}
 	return seq
+}
+
+// bulky pads a payload past retention.BulkPayloadFloorBytes so the S14.9
+// "bulky event payloads" predicate selects it. The padding rides a `filler`
+// field so the payload stays valid JSON and the interesting keys stay readable.
+func bulky(body string) string {
+	pad := strings.Repeat("x", retention.BulkPayloadFloorBytes)
+	trimmed := strings.TrimSuffix(strings.TrimSpace(body), "}")
+	return trimmed + `,"filler":"` + pad + `"}`
 }
 
 func (f *fixture) payloadAt(seq int64) string {
@@ -274,9 +303,9 @@ func TestKeepForeverIsOneWay(t *testing.T) {
 func TestNarrowedTriggerPermitsOnlyTheCompactionStrip(t *testing.T) {
 	f := newFixture(t)
 	f.user("alice", "member")
-	old := f.appendAt("", "alice", "tool.completed", `{"tool":"grep","secret":"OLD-BODY"}`,
+	old := f.appendAt("", "alice", "tool.completed", bulky(`{"tool":"grep","secret":"OLD-BODY"}`),
 		f.now.AddDate(0, -13, 0))
-	fresh := f.appendAt("", "alice", "tool.completed", `{"tool":"grep","secret":"FRESH-BODY"}`, f.now)
+	fresh := f.appendAt("", "alice", "tool.completed", bulky(`{"tool":"grep","secret":"FRESH-BODY"}`), f.now)
 
 	exec := func(q string, args ...any) error {
 		return f.db.WriteTx(f.ctx, func(tx *sql.Tx) error {

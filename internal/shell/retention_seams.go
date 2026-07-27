@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -82,7 +81,7 @@ func buildRetentionSurface(
 
 	// The run-end hook (Spec S14.9 ¶1: "at run end, never later"). One edge
 	// covers every terminal transition in the tree.
-	runs.SetTerminalHook(func(ctx context.Context, tx *sql.Tx, r run.Run) error {
+	if err := runs.SetTerminalHook(func(ctx context.Context, tx *sql.Tx, r run.Run) error {
 		written, reason, err := store.WriteAtRunEndTx(ctx, tx, r.ID)
 		if err != nil {
 			return err
@@ -91,7 +90,9 @@ func buildRetentionSurface(
 			logger.Debug("retention: no run summary for this ending", "run", r.ID, "reason", reason)
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("shell: install the S14.9 run-end hook: %w", err)
+	}
 
 	return &retentionSurface{Store: store, KeepForever: seeded, NarratorWired: narrator != nil}, nil
 }
@@ -162,12 +163,11 @@ func summaryNarratorPrompt(agg retention.Aggregate) string {
 	fmt.Fprintf(&b, "events: %d (seq %d..%d)\n", agg.EventCount, agg.FirstEventSeq, agg.LastEventSeq)
 	b.WriteString("stages:\n")
 	for _, st := range agg.Stages {
-		fmt.Fprintf(&b, "  [#%d] %s %s\n", st.EventSeq, st.Name, st.Outcome)
+		fmt.Fprintf(&b, "  [#%d] %s -> %s\n", st.EventSeq, orNone(st.From), st.Name)
 	}
-	fmt.Fprintf(&b, "tool calls: %d\n", agg.ToolCalls.Total)
-	for _, name := range sortedCountKeys(agg.ToolCalls.ByTool) {
-		fmt.Fprintf(&b, "  %s x%d\n", name, agg.ToolCalls.ByTool[name])
-	}
+	// Counts, never names (S14.9 ¶1 asks for tool-call COUNTS; drain D8).
+	fmt.Fprintf(&b, "tool calls: %d across %d distinct tools (%d unnamed)\n",
+		agg.ToolCalls.Total, agg.ToolCalls.Distinct, agg.ToolCalls.Unnamed)
 	b.WriteString("verdicts:\n")
 	for _, v := range agg.Verdicts {
 		fmt.Fprintf(&b, "  [#%d] round %d %s %s\n", v.EventSeq, v.Round, v.Verdict, v.RubricID)
@@ -186,15 +186,6 @@ func orNone(s string) string {
 		return "(the record does not say)"
 	}
 	return s
-}
-
-func sortedCountKeys(m map[string]int64) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // retentionIndexLoop drives the S14.10 ¶4 derived index and the S14.9 ¶1

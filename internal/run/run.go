@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -210,9 +211,12 @@ type TerminalHook func(ctx context.Context, tx *sql.Tx, r Run) error
 type Store struct {
 	db  *storage.DB
 	log *eventlog.Log
-	// terminal is set once at composition time (SetTerminalHook), before any
-	// transition runs; it is never swapped while the platform is serving.
-	terminal TerminalHook
+	// terminal is INSTALL-ONCE and race-free by construction: an atomic pointer
+	// that only a nil→h compare-and-swap can fill. A second SetTerminalHook is
+	// refused rather than silently winning, and a concurrent transition reads it
+	// through the same atomic — so the discipline is enforced by the type, not
+	// by a comment asking callers to behave (drain D11).
+	terminal atomic.Pointer[TerminalHook]
 }
 
 // NewStore returns a Store over db appending through log.
@@ -220,9 +224,20 @@ func NewStore(db *storage.DB, log *eventlog.Log) *Store {
 	return &Store{db: db, log: log}
 }
 
-// SetTerminalHook installs the run-end hook (see TerminalHook). Called once by
-// the composition root; nil (the default) leaves every transition unchanged.
-func (s *Store) SetTerminalHook(h TerminalHook) { s.terminal = h }
+// SetTerminalHook installs the run-end hook (see TerminalHook). It succeeds
+// exactly ONCE per Store: a second call is an error, never a silent swap, so a
+// composition defect that wires two summary writers is caught at boot instead
+// of producing two summaries per run. No hook installed (the default) leaves
+// every transition byte-for-byte as it was before B5-8A.
+func (s *Store) SetTerminalHook(h TerminalHook) error {
+	if h == nil {
+		return errors.New("run: terminal hook is nil")
+	}
+	if !s.terminal.CompareAndSwap(nil, &h) {
+		return errors.New("run: the terminal hook is installed once at composition time and is already set")
+	}
+	return nil
+}
 
 // NewRun describes a run row to create. State defaults to StateNew and
 // Generation to 0; recovery sets the lineage fields when creating a
@@ -391,8 +406,8 @@ func (s *Store) TransitionTx(ctx context.Context, tx *sql.Tx, runID string, to S
 	}
 	// The run has ENDED: Spec S14.9's run summary is written here, in this
 	// transaction, never later.
-	if s.terminal != nil && IsTerminal(to) {
-		if err := s.terminal(ctx, tx, updated); err != nil {
+	if hook := s.terminal.Load(); hook != nil && IsTerminal(to) {
+		if err := (*hook)(ctx, tx, updated); err != nil {
 			return Run{}, fmt.Errorf("run: terminal hook for %q: %w", runID, err)
 		}
 	}

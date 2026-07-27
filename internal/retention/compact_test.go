@@ -36,7 +36,7 @@ func TestCompactionStripsOnlyAtOrBelowHorizonNonKeepForever(t *testing.T) {
 	var rows []planted
 	plant := func(name, owner, typ string, ageMonths int, strip bool, reason string) {
 		seq := f.appendAt("", owner, typ,
-			`{"tool":"grep","secret":"`+name+`-BODY"}`, f.now.AddDate(0, -ageMonths, 0))
+			bulky(`{"tool":"grep","secret":"`+name+`-BODY"}`), f.now.AddDate(0, -ageMonths, 0))
 		rows = append(rows, planted{name, seq, strip, reason})
 	}
 	// alice, horizon 3 months
@@ -109,7 +109,7 @@ func TestCompactionStripsOnlyAtOrBelowHorizonNonKeepForever(t *testing.T) {
 func TestCompactionIsLiveApplyPerUser(t *testing.T) {
 	f := newFixture(t)
 	f.user("alice", "member")
-	seq := f.appendAt("", "alice", "tool.completed", `{"secret":"MID-BODY"}`, f.now.AddDate(0, -8, 0))
+	seq := f.appendAt("", "alice", "tool.completed", bulky(`{"secret":"MID-BODY"}`), f.now.AddDate(0, -8, 0))
 
 	f.setHorizon("alice", 12)
 	if _, err := f.store.Compact(f.ctx, f.now); err != nil {
@@ -133,14 +133,14 @@ func TestCompactionIsLiveApplyPerUser(t *testing.T) {
 func TestCompactionIsIdempotent(t *testing.T) {
 	f := newFixture(t)
 	f.user("alice", "member")
-	f.appendAt("", "alice", "tool.completed", `{"secret":"OLD"}`, f.now.AddDate(0, -9, 0))
+	f.appendAt("", "alice", "tool.completed", bulky(`{"secret":"OLD"}`), f.now.AddDate(0, -9, 0))
 
 	first, err := f.store.Compact(f.ctx, f.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.EventsStripped != 1 || first.EventSeq == 0 {
-		t.Fatalf("first pass = %+v, want 1 stripped and a logged retention.compacted row", first)
+	if first.EventsStripped != 1 || len(first.AuditEventSeqs) != 1 {
+		t.Fatalf("first pass = %+v, want 1 stripped and one logged retention.compacted row", first)
 	}
 	second, err := f.store.Compact(f.ctx, f.now)
 	if err != nil {
@@ -149,7 +149,7 @@ func TestCompactionIsIdempotent(t *testing.T) {
 	if second.EventsStripped != 0 {
 		t.Errorf("second pass stripped %d, want 0 (idempotent)", second.EventsStripped)
 	}
-	if second.EventSeq != 0 {
+	if len(second.AuditEventSeqs) != 0 {
 		t.Error("a no-op pass logged retention.compacted; the audit trail records COMPACTION, and none happened")
 	}
 	// Exactly one retention.compacted row exists.
@@ -163,49 +163,137 @@ func TestCompactionIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestCompactionPassLogsItself (rubric 10): platform-scope, per-owner counts.
+// TestCompactionPassLogsItself (rubric 10; drain D2): every committed unit of
+// work carries its OWN platform-scope retention.compacted row, written in the
+// same transaction as the elisions it counts. There is no window in which
+// bodies are gone and nothing records it.
 func TestCompactionPassLogsItself(t *testing.T) {
 	f := newFixture(t)
 	f.user("alice", "member")
 	f.user("bob", "member")
-	f.appendAt("", "alice", "tool.completed", `{"secret":"A"}`, f.now.AddDate(0, -9, 0))
-	f.appendAt("", "bob", "helper.spawned", `{"depth":1}`, f.now.AddDate(0, -9, 0))
+	f.appendAt("", "alice", "tool.completed", bulky(`{"secret":"A"}`), f.now.AddDate(0, -9, 0))
+	f.appendAt("", "bob", "helper.spawned", bulky(`{"depth":1}`), f.now.AddDate(0, -9, 0))
 
 	res, err := f.store.Compact(f.ctx, f.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var owner, payload string
-	var runID sql.NullString
+	if len(res.AuditEventSeqs) != 2 {
+		t.Fatalf("audit rows = %d, want one per committed unit (alice, bob)", len(res.AuditEventSeqs))
+	}
+
+	covered := map[string]int64{}
+	for _, seq := range res.AuditEventSeqs {
+		var owner, payload string
+		var runID sql.NullString
+		if err := f.db.QueryRowContext(f.ctx,
+			`SELECT user_id, run_id, payload FROM run_events WHERE event_seq = ?`, seq).
+			Scan(&owner, &runID, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if owner != "platform" {
+			t.Errorf("retention.compacted owner = %q, want platform (per-owner counts ride the payload)", owner)
+		}
+		if runID.Valid {
+			t.Error("retention.compacted must be platform-scope (run_id NULL)")
+		}
+		var decoded retention.PassResult
+		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+			t.Fatalf("payload is not a pass result: %v", err)
+		}
+		if decoded.AsOf == "" {
+			t.Error("the payload must carry the pass's as-of stamp")
+		}
+		if len(decoded.Owners) != 1 {
+			t.Fatalf("an audit row covers exactly ONE owner's unit; got %d legs", len(decoded.Owners))
+		}
+		leg := decoded.Owners[0]
+		if leg.BoundaryTS == "" || leg.HorizonMonths == 0 || leg.BoundaryEventSeq == 0 {
+			t.Errorf("%s leg is missing its horizon/boundary: %+v", leg.UserID, leg)
+		}
+		if leg.EventsStripped == 0 || leg.ByFamily == nil {
+			t.Errorf("%s leg records no strip counts: %+v", leg.UserID, leg)
+		}
+		covered[leg.UserID] += leg.EventsStripped
+	}
+	if covered["alice"] != 1 || covered["bob"] != 1 {
+		t.Errorf("committed strips covered by audit rows = %v, want one each for alice and bob", covered)
+	}
+	// The invariant, stated as arithmetic: every committed strip is counted by
+	// some committed audit row.
+	var total int64
+	for _, n := range covered {
+		total += n
+	}
+	if total != res.EventsStripped {
+		t.Errorf("audit rows cover %d strips but the pass committed %d", total, res.EventsStripped)
+	}
+}
+
+// TestOneOwnerFailureNeverStrandsAnotherOwnersStrips is the drain-D2 probe
+// scenario exactly: owner `aaa` succeeds and owner `zzz` fails. aaa's committed
+// elisions must be covered by aaa's committed audit event, the failure must be
+// recorded honestly on zzz's leg, and the pass must not abort.
+func TestOneOwnerFailureNeverStrandsAnotherOwnersStrips(t *testing.T) {
+	f := newFixture(t)
+	f.user("aaa", "member")
+	f.user("zzz", "member")
+	f.appendAt("", "aaa", "tool.completed", bulky(`{"secret":"AAA"}`), f.now.AddDate(0, -9, 0))
+	f.appendAt("", "zzz", "tool.completed", bulky(`{"secret":"ZZZ"}`), f.now.AddDate(0, -9, 0))
+
+	// Fail zzz's ⚙ read — the first thing its leg does, before any write.
+	f.settings.failFor = "zzz"
+
+	res, err := f.store.Compact(f.ctx, f.now)
+	if err != nil {
+		t.Fatalf("one owner's failure must not fail the PASS: %v", err)
+	}
+	if len(res.FailedOwners) != 1 || res.FailedOwners[0] != "zzz" {
+		t.Errorf("FailedOwners = %v, want [zzz] recorded honestly", res.FailedOwners)
+	}
+	aaa := ownerLeg(t, res, "aaa")
+	if aaa.EventsStripped != 1 {
+		t.Errorf("aaa's leg = %+v, want its strip committed despite zzz failing", aaa)
+	}
+	zzz := ownerLeg(t, res, "zzz")
+	if zzz.Error == "" {
+		t.Error("zzz's leg must carry its failure reason")
+	}
+
+	// aaa's audit event EXISTS and covers aaa's counts — the exact thing the
+	// evaluator's probe found missing.
+	if len(res.AuditEventSeqs) != 1 {
+		t.Fatalf("audit rows = %d, want 1 (aaa's committed unit)", len(res.AuditEventSeqs))
+	}
+	var payload string
 	if err := f.db.QueryRowContext(f.ctx,
-		`SELECT user_id, run_id, payload FROM run_events WHERE event_seq = ?`, res.EventSeq).
-		Scan(&owner, &runID, &payload); err != nil {
+		`SELECT payload FROM run_events WHERE event_seq = ?`, res.AuditEventSeqs[0]).Scan(&payload); err != nil {
 		t.Fatal(err)
-	}
-	if owner != "platform" {
-		t.Errorf("retention.compacted owner = %q, want platform (one row per pass, per-owner counts inside)", owner)
-	}
-	if runID.Valid {
-		t.Error("retention.compacted must be platform-scope (run_id NULL)")
 	}
 	var decoded retention.PassResult
 	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
-		t.Fatalf("payload is not the pass result: %v", err)
+		t.Fatal(err)
 	}
-	if decoded.AsOf == "" {
-		t.Error("the payload must carry the pass's as-of stamp")
+	if decoded.Owners[0].UserID != "aaa" || decoded.Owners[0].EventsStripped != 1 {
+		t.Errorf("aaa's audit row = %+v, want aaa's own counts", decoded.Owners[0])
 	}
-	stripped := map[string]retention.OwnerPass{}
-	for _, o := range decoded.Owners {
-		if o.BoundaryTS == "" || o.HorizonMonths == 0 {
-			t.Errorf("%s leg is missing its horizon/boundary: %+v", o.UserID, o)
-		}
-		if o.EventsStripped > 0 {
-			stripped[o.UserID] = o
-		}
+	// zzz's payload is untouched — it never reached a write.
+	var stripped int
+	if err := f.db.QueryRowContext(f.ctx,
+		`SELECT count(*) FROM run_events WHERE user_id = 'zzz' AND payload = ?`,
+		retention.CompactedPayload).Scan(&stripped); err != nil {
+		t.Fatal(err)
 	}
-	if len(stripped) != 2 || stripped["alice"].ByFamily == nil || stripped["bob"].ByFamily == nil {
-		t.Errorf("both owners' per-family counts must ride the one platform-scope row; got %+v", stripped)
+	if stripped != 0 {
+		t.Error("zzz's rows were elided although its leg failed")
+	}
+	// And the durable stamp records the pass, naming the failure.
+	st, err := f.store.PassState(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Ran || st.LastError == "" {
+		t.Errorf("pass state = %+v, want a run stamp naming the failed owner", st)
 	}
 }
 
@@ -332,8 +420,8 @@ func TestCompactedRowKeepsItsIdentity(t *testing.T) {
 	f := newFixture(t)
 	f.user("alice", "member")
 	seq := f.appendAt("", "alice", "drift.finding", `{"change_class":"price","summary":"x"}`, f.now.AddDate(0, -9, 0))
-	// drift.finding is keep-forever, so plant a trace row to actually strip.
-	traceSeq := f.appendAt("", "alice", "helper.spawned", `{"depth":2,"brief_hash":"h"}`, f.now.AddDate(0, -9, 0))
+	// drift.finding is keep-forever, so plant a BULKY trace row to actually strip.
+	traceSeq := f.appendAt("", "alice", "helper.spawned", bulky(`{"depth":2,"brief_hash":"h"}`), f.now.AddDate(0, -9, 0))
 	if _, err := f.store.Compact(f.ctx, f.now); err != nil {
 		t.Fatal(err)
 	}

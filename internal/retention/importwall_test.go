@@ -18,14 +18,23 @@ import (
 const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
 
 // allowed is the sanctioned forward allowlist for internal/retention: storage,
-// eventlog and settings + stdlib. internal/settings is PERMITTED but unused —
-// ⚙ values ride the package's own narrow Settings interface by dotted key, the
-// house pattern (§2, and the eventlog/storage/watchlist precedent) — so the
-// actual import set is a strict subset of what the disposition allows.
+// eventlog and settings + stdlib, plus internal/redact as a DECLARED drain-r1
+// addition. internal/settings is PERMITTED but unused — ⚙ values ride the
+// package's own narrow Settings interface by dotted key, the house pattern (§2,
+// and the eventlog/storage/watchlist precedent).
 var allowed = map[string]string{
 	"internal/storage":  "the DB seam (migration 0015's tables are this package's)",
 	"internal/eventlog": "the S14.2 family registry the keep-forever set derives from, and the append surface",
 	"internal/settings": "sanctioned by the OQ4 disposition; NOT imported today — ⚙ rides the narrow Settings interface",
+	// DECLARED at drain r1 (D4), with its reason. redact-before-match is not a
+	// query-time property: a full-text index over RAW text is an oracle however
+	// the reader is written, because a MATCH on a plaintext secret confirms its
+	// presence without returning it. The CORPUS must be redacted, so the
+	// primitive is imported by the projector that builds it. internal/redact is
+	// a stdlib-only LEAF with no in-repo imports — B5-2 OQ2 built it that way
+	// precisely so B5-8 could reuse it (§30 final bullet) — so this edge adds no
+	// transitive dependency and cannot cycle.
+	"internal/redact": "codor C2 redact-before-match (§30): the FTS corpus and every free-text field crossing the 11.3 export boundary are scrubbed at WRITE time; a stdlib-only leaf, no transitive edges",
 }
 
 // forbidden names representative packages internal/retention must never import,

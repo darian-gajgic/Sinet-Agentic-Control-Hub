@@ -696,13 +696,13 @@ func (p *projector) benchmarkVerdicts(ctx context.Context, scope ownerScope) ([]
 // platform-scope, so a member's owner filter matches none and only the operator
 // sees them (S01.9).
 func (p *projector) benchmarkAlarms(ctx context.Context, scope ownerScope) ([]InboxBenchmarkAlarm, error) {
-	q := `SELECT event_seq, payload, ts FROM run_events WHERE type = ?`
+	q := QueryByType
 	args := []any{benchmarkAlarmType}
 	if !scope.Operator {
-		q += ` AND user_id = ?`
+		q += OwnerScopeClause
 		args = append(args, scope.UserID)
 	}
-	q += ` ORDER BY event_seq`
+	q += OrderByEventSeq
 	rows, err := p.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("projection: benchmark alarms: %w", err)
@@ -769,16 +769,13 @@ func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDr
 	// and an `none`-class row is never a card. The producer already declines to
 	// emit `none` (S14.6 ¶2: RELEVANT hits become drift cards); this is the belt
 	// that also covers any row written before that rule existed.
-	q := `SELECT event_seq, payload, ts FROM run_events
-	        WHERE type = 'drift.finding'
-	          AND ts >= ?
-	          AND COALESCE(json_extract(payload, '$.change_class'), '') <> 'none'`
+	q := QueryDriftCards
 	args := []any{p.clock().Add(-driftCardHorizon).UTC().Format(time.RFC3339Nano)}
 	if !scope.Operator {
-		q += ` AND user_id = ?`
+		q += OwnerScopeClause
 		args = append(args, scope.UserID)
 	}
-	q += ` ORDER BY event_seq` // ascending: the first row of a window opens its card
+	q += OrderByEventSeq // ascending: the first row of a window opens its card
 	rows, err := p.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("projection: drift cards: %w", err)
@@ -906,14 +903,13 @@ func (p *projector) conformanceCards(ctx context.Context, scope ownerScope) ([]I
 // the canonical type strings directly.
 func (p *projector) watchdogFlags(ctx context.Context, scope ownerScope) ([]InboxWatchdogFlag, error) {
 	// latest watchdog.flagged per (run_id, anomaly_class)
-	fq := `SELECT event_seq, COALESCE(run_id, ''), user_id, payload, ts
-	         FROM run_events WHERE type = 'watchdog.flagged'`
+	fq := QueryWatchdogFlags
 	fargs := []any{}
 	if !scope.Operator {
-		fq += ` AND user_id = ?`
+		fq += OwnerScopeClause
 		fargs = append(fargs, scope.UserID)
 	}
-	fq += ` ORDER BY event_seq` // ascending: later rows overwrite earlier per key
+	fq += OrderByEventSeq // ascending: later rows overwrite earlier per key
 	frows, err := p.db.QueryContext(ctx, fq, fargs...)
 	if err != nil {
 		return nil, fmt.Errorf("projection: watchdog flags: %w", err)
@@ -1015,13 +1011,13 @@ func (p *projector) watchdogFlags(ctx context.Context, scope ownerScope) ([]Inbo
 // so a platform-scope clear of a run-less flag reaches the member's view without
 // widening which flags the member sees (drain D5).
 func (p *projector) maxSeqByKey(ctx context.Context, scope ownerScope, inclPlatform bool, typ string, keyFn func(runID string, pay json.RawMessage) string) (map[string]int64, error) {
-	q := `SELECT event_seq, COALESCE(run_id, ''), payload FROM run_events WHERE type = ?`
+	q := QueryMaxSeqByKey
 	args := []any{typ}
 	if !scope.Operator {
 		if inclPlatform {
-			q += ` AND (user_id = ? OR user_id = 'platform')`
+			q += OwnerOrPlatformScopeClause
 		} else {
-			q += ` AND user_id = ?`
+			q += OwnerScopeClause
 		}
 		args = append(args, scope.UserID)
 	}
@@ -1106,10 +1102,65 @@ func (p *projector) latestPayloadType(ctx context.Context, runID string, typ *st
 	return json.RawMessage(payload), true
 }
 
-func latestTypeQuery(runID string, types []string) (string, []any) {
-	q := `SELECT payload FROM run_events WHERE run_id = ? AND type IN (` + placeholders(len(types)) +
+// ── The run_events derive queries, as DATA (P3-B5-8A drain D7) ──────────────
+//
+// These are the VERBATIM texts the projections run. They are exported so the
+// index test asserts EXPLAIN QUERY PLAN against the production query itself
+// rather than a paraphrase of it — a paraphrase cannot catch a production query
+// edited into a full table scan, which is exactly the shape the B5-3 F16 carry
+// was about. Migration 0015 added the indexes that serve them; the test names
+// which index serves which query, including the two served by 0001's
+// run_events_run_idx rather than by anything 0015 added.
+//
+// The owner-scope clauses are appended per S01.9 (a member sees only their own
+// rows), so each query has two live forms and both are asserted.
+const (
+	// QueryByType is the `WHERE type = ?` shape: benchmarkAlarms and (through
+	// latestTypeQuery) several per-run derives. Served by run_events_type_seq_idx.
+	QueryByType = `SELECT event_seq, payload, ts FROM run_events WHERE type = ?`
+
+	// QueryWatchdogFlags derives the open watchdog flags. Served by
+	// run_events_type_seq_idx.
+	QueryWatchdogFlags = `SELECT event_seq, COALESCE(run_id, ''), user_id, payload, ts
+	         FROM run_events WHERE type = 'watchdog.flagged'`
+
+	// QueryMaxSeqByKey is the supersession read. Served by run_events_type_seq_idx.
+	QueryMaxSeqByKey = `SELECT event_seq, COALESCE(run_id, ''), payload FROM run_events WHERE type = ?`
+
+	// QueryDriftCards is the bounded drift-card window. It reads the GENERATED
+	// COLUMN change_class (migration 0015) rather than re-evaluating
+	// json_extract(payload,'$.change_class') per row — the column is the same
+	// expression, materialized once and indexed, and reading it is what makes
+	// run_events_change_class_idx reachable from production at all (drain D6).
+	// The COALESCE is preserved verbatim: a row whose payload names no change
+	// class must not be treated as class 'none'.
+	QueryDriftCards = `SELECT event_seq, payload, ts FROM run_events
+	        WHERE type = 'drift.finding'
+	          AND ts >= ?
+	          AND COALESCE(change_class, '') <> 'none'`
+
+	// OwnerScopeClause is the S01.9 member filter appended to each query above.
+	OwnerScopeClause = ` AND user_id = ?`
+	// OwnerOrPlatformScopeClause additionally admits platform-scope rows, so a
+	// platform-scope suppress of a run-less flag reaches a member's view.
+	OwnerOrPlatformScopeClause = ` AND (user_id = ? OR user_id = 'platform')`
+	// OrderByEventSeq is the ascending order every derive reads in — event_seq
+	// is the sole ordering authority (S14.1).
+	OrderByEventSeq = ` ORDER BY event_seq`
+)
+
+// QueryLatestTypeForRun is the per-run derive shape (`WHERE run_id = ? AND type
+// IN (…)`), exported for the same reason. It is served by 0001's
+// run_events_run_idx — NOT by anything migration 0015 added — because that
+// partial index already leads with run_id and the type set is a small residual
+// filter within one run's rows. Recorded honestly rather than credited to 0015.
+func QueryLatestTypeForRun(types int) string {
+	return `SELECT payload FROM run_events WHERE run_id = ? AND type IN (` + placeholders(types) +
 		`) ORDER BY event_seq DESC LIMIT 1`
-	return q, append([]any{runID}, toAny(types)...)
+}
+
+func latestTypeQuery(runID string, types []string) (string, []any) {
+	return QueryLatestTypeForRun(len(types)), append([]any{runID}, toAny(types)...)
 }
 
 func latestTypeQueryWithType(runID string, types []string) (string, []any) {

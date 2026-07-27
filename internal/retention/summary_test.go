@@ -76,8 +76,8 @@ func TestSummaryIsWrittenAtRunEndWithTheSevenFields(t *testing.T) {
 	if agg.Stages[len(agg.Stages)-1].Name != "completed" {
 		t.Errorf("last stage = %q, want completed", agg.Stages[len(agg.Stages)-1].Name)
 	}
-	if agg.ToolCalls.Total != 4 || agg.ToolCalls.ByTool["grep"] != 2 || agg.ToolCalls.ByTool["write"] != 1 {
-		t.Errorf("tool calls = %+v, want 4 total / grep 2 / write 1", agg.ToolCalls)
+	if agg.ToolCalls.Total != 4 || agg.ToolCalls.Distinct != 2 {
+		t.Errorf("tool calls = %+v, want 4 total across 2 distinct tools", agg.ToolCalls)
 	}
 	if agg.ToolCalls.Unnamed != 1 {
 		t.Errorf("unnamed tool calls = %d, want 1 counted honestly rather than bucketed", agg.ToolCalls.Unnamed)

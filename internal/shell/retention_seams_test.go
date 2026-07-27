@@ -39,8 +39,8 @@ func TestSummaryNarratorRidesTheDistillSummarizeAlias(t *testing.T) {
 		RunID: "t1.r1", Owner: "alice", Objective: "Ship the widget",
 		ObjectiveSource: "tasks.title", FinalState: "completed",
 		FirstEventSeq: 1, LastEventSeq: 9, EventCount: 9,
-		Stages:    []retention.Stage{{EventSeq: 4, Name: "running", Outcome: "claimed"}},
-		ToolCalls: retention.ToolCalls{Total: 2, ByTool: map[string]int64{"grep": 2}},
+		Stages:    []retention.Stage{{EventSeq: 4, Name: "running", From: "claimed"}},
+		ToolCalls: retention.ToolCalls{Total: 2, Distinct: 1},
 		Verdicts:  []retention.VerdictRef{{EventSeq: 7, Round: 1, Verdict: "pass", RubricID: "rubric-software"}},
 	}
 	nar, err := narrator(ctx, "t1.r1", agg)

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
 )
 
 // index.go — the S14.10 ¶4 index layer this packet owns:
@@ -28,6 +30,17 @@ import (
 // Idempotence is by ROWID: every indexed row's FTS rowid IS its source
 // event_seq, so re-indexing a row replaces it rather than duplicating it. That
 // is also what makes Rebuild safe to run at any time.
+//
+// REDACT BEFORE MATCH — the corpus itself is redacted (codor C2, §30). Every
+// string that enters history_fts passes through internal/redact FIRST, so a
+// planted secret is stored as its inert [REDACTED:<class>] marker and a search
+// for the plaintext returns nothing. This cannot be done at query time: a
+// full-text index over raw text IS an oracle regardless of how the reader is
+// written, because a MATCH on the plaintext confirms the secret's presence
+// without ever returning it. The corpus is the only place the property can
+// hold. run_events.payload itself is NEVER mutated by this (store-raw /
+// serve-redacted, §30 R19) — the raw body remains the audit truth and the
+// redaction exists only in the derived index.
 
 // IndexInterval is the shell driver's tick for the indexer — a STRUCTURAL
 // CONSTANT, not a ⚙ row (the §35 sampling-loop precedent). Its reason: the
@@ -193,7 +206,11 @@ func (s *Store) searchBody(ctx context.Context, tx *sql.Tx, kind, runID, payload
 		if err != nil {
 			return "", fmt.Errorf("retention: read summary body %q: %w", runID, err)
 		}
-		return strings.TrimSpace(objective + "\n" + narrative + "\n" + finalState), nil
+		// Redact each string VALUE separately (never a concatenation: the
+		// whitespace-bounded secret-pair class could otherwise span two fields).
+		return strings.TrimSpace(strings.Join([]string{
+			redact.Redact(objective), redact.Redact(narrative), redact.Redact(finalState),
+		}, "\n")), nil
 	case KindVerdict:
 		return textFields(payload,
 			"verdict", "rubric_id", "summary", "message", "findings", "failed", "unknown", "axis2_skipped"), nil
@@ -204,10 +221,12 @@ func (s *Store) searchBody(ctx context.Context, tx *sql.Tx, kind, runID, payload
 	return "", nil
 }
 
-// textFields flattens the named payload fields into searchable text. Values are
-// rendered as-is (strings, numbers, and the leaf strings of nested arrays and
-// objects); an unparseable payload yields no text rather than an error — the
-// index is a projection and a malformed row must never stop the pass.
+// textFields flattens the named payload fields into searchable text. Every leaf
+// STRING is redacted individually as it is appended (redact.Redact is documented
+// for individual string values; feeding it serialized JSON could let the
+// whitespace-bounded class span JSON syntax). Numbers and booleans carry no
+// secrets and pass through. An unparseable payload yields no text rather than an
+// error — the index is a projection and a malformed row must never stop the pass.
 func textFields(payload string, keys ...string) string {
 	var m map[string]any
 	if json.Unmarshal([]byte(payload), &m) != nil {
@@ -227,7 +246,7 @@ func textFields(payload string, keys ...string) string {
 func flatten(b *strings.Builder, v any) {
 	switch x := v.(type) {
 	case string:
-		b.WriteString(x)
+		b.WriteString(redact.Redact(x))
 		b.WriteByte(' ')
 	case float64:
 		fmt.Fprintf(b, "%v ", x)

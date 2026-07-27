@@ -2,25 +2,56 @@
 -- S14.10 indexing layer (DDL detail is P3's, S02.2).
 --
 -- What lands here:
---   A. run_events: the NARROWED append-only trigger set. S02.1's "history is
+--   A. retention_keep_forever: the S14.9 keep-forever allowlist. It is created
+--      FIRST because the narrowed trigger in section B consults it — the
+--      keep-forever boundary is enforced at the DB layer, not only by the pass.
+--   B. run_events: the NARROWED append-only trigger set. S02.1's "history is
 --      NEVER rewritten" stays checkable; S14.9's mandated payload strip becomes
 --      executable — and nothing else does.
---   B. run_events: generated columns over event-JSON hot fields, a
+--   C. run_events: generated columns over event-JSON hot fields, a
 --      dotted_order-style ordered-tree path, and the indexes that turn the
 --      B5-3/B5-2 derive queries from full scans into index seeks (the F16 carry).
---   C. run_summaries: the S14.9 run-summary record written at run end.
---   D. retention_keep_forever + run_events_export: the S14.9 keep-forever
---      allowlist and the 11.3 exporter boundary BY CONSTRUCTION.
---   E. history_fts + run_event_rollup + retention_index_cursor: the S14.10
---      FTS5 and rollup layer, both derived state rebuildable from the log.
---   F. benchmark_pairs: the B5-7 §35 drain D5(b) declined-row freeze.
+--   D. run_summaries: the S14.9 run-summary record written at run end.
+--   E. run_events_export: the 11.3 exporter boundary BY CONSTRUCTION.
+--   F. history_fts + run_event_rollup + the durable cursor/pass state: the
+--      S14.10 FTS5 and rollup layer, both derived state rebuildable from the
+--      log, and the compaction pass's durable liveness stamp.
+--   G. benchmark_pairs: the B5-7 §35 drain D5(b) declined-row freeze.
 --
 -- Applied in one transaction with its PRAGMA user_version bump by the migration
 -- runner (internal/storage/migrate.go, Spec S02.1). A committed migration is
 -- immutable (CONVENTIONS §6) — 0001–0014 stay byte-untouched, which is why the
 -- trigger change below is a DROP + CREATE here and never an edit to 0001.
 
--- ── A. The narrowed append-only trigger set on run_events (S02.1 / S14.9) ────
+-- ── A. The S14.9 keep-forever allowlist ──────────────────────────────────────
+--
+-- S14.9 ¶2 names seven keep-forever classes. The allowlist is DATA seeded from
+-- the S14.2 family registry in internal/eventlog (internal/retention.
+-- KeepForeverTypes) — one source of truth, seeded idempotently at boot, never a
+-- second hand-written type list.
+--
+-- It is created FIRST because THREE things consult it: the narrowed UPDATE
+-- trigger below (so a keep-forever body cannot be elided by ANY writer, not
+-- just by a correct pass), the compaction pass's predicate, and the 11.3 export
+-- view. One table, one boundary, three enforcement points.
+--
+-- No-delete: keep-forever is one-way. If a later packet demotes a class, the
+-- seeded row stays and MORE data is preserved, never less.
+CREATE TABLE retention_keep_forever (
+    type    TEXT PRIMARY KEY CHECK (type <> ''),
+    family  TEXT NOT NULL CHECK (family <> ''),
+    -- note records WHY the class is keep-forever, in the S14.9 ¶2 vocabulary.
+    note    TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT 'platform' CHECK (user_id = 'platform')
+);
+
+CREATE TRIGGER retention_keep_forever_no_delete
+    BEFORE DELETE ON retention_keep_forever
+BEGIN
+    SELECT RAISE(ABORT, 'the keep-forever allowlist is one-way; a class is never demoted by deletion (Spec S14.9)');
+END;
+
+-- ── B. The narrowed append-only trigger set on run_events (S02.1 / S14.9) ────
 --
 -- 0001 locked run_events with RAISE(ABORT) on BOTH UPDATE and DELETE. S14.9
 -- mandates that the scheduled compaction pass "strips bulky event payloads",
@@ -34,16 +65,30 @@
 --     event_seq/run_id/generation/user_id/type/schema_version/ts aborts —
 --     history is never re-authored, re-owned, re-typed or re-dated.
 --   * payload admits EXACTLY ONE transition: an arbitrary body → the single
---     compacted marker, once, and only on a row older than the SMALLEST horizon
---     ⚙ retention.compaction_horizon can ever hold (Min: 1 month, S18). Every
---     other payload write aborts, including marker → anything and a second
---     strip of an already-compacted row.
+--     compacted marker, once, on a NON-KEEP-FOREVER row older than the SMALLEST
+--     horizon ⚙ retention.compaction_horizon can ever hold (Min: 1 month, S18).
+--     Every other payload write aborts, including marker → anything, a second
+--     strip of an already-compacted row, and ANY elision of a keep-forever body.
+--
+-- The KEEP-FOREVER limb is enforced HERE, at the DB layer, not only in the
+-- pass's predicate: S14.9 ¶2's keep-forever set is a property of the record, so
+-- no writer — a correct pass, a future packet, an operator at a SQL prompt, a
+-- bulk UPDATE with no WHERE — may elide a verdict, a receipt, a routing record,
+-- a decision, a drift event, a benchmark record or a run summary. The allowlist
+-- table is section A above; the export view joins the same table.
 --
 -- The horizon that actually applies is per-user, live-read and months-valued
 -- (⚙ retention.compaction_horizon, PerUser) — a SQL trigger cannot read the
 -- settings registry, so the trigger enforces the RATIFIED FLOOR of that clamp
 -- and the pass enforces the owner's own horizon on top (internal/retention,
 -- proven by test). The floor is the limb that can be made structural, and it is.
+--
+-- The floor carries ONE MINUTE of slack ('-1 month','-1 minute'). Both the floor
+-- and the pass's boundary are computed by SQLite strftime, so they share a clock
+-- and a format; the slack absorbs the sub-second and rounding difference between
+-- them so that at horizon = 1 (the clamp minimum, where the two coincide) a
+-- LEGITIMATE strip can never be refused by the guard meant to bound it. One
+-- minute out of a month does not weaken the guard in any way that matters.
 DROP TRIGGER run_events_no_update;
 
 -- Identity is immutable. BEFORE UPDATE OF fires only when the SET clause names
@@ -63,12 +108,13 @@ CREATE TRIGGER run_events_payload_compaction_only
     BEFORE UPDATE OF payload ON run_events
     WHEN NEW.payload <> '{"compacted":true,"reason":"trace payload stripped past the retention compaction horizon (Spec S14.9)"}'
       OR OLD.payload = '{"compacted":true,"reason":"trace payload stripped past the retention compaction horizon (Spec S14.9)"}'
-      OR OLD.ts > strftime('%Y-%m-%dT%H:%M:%S', 'now', '-1 month')
+      OR OLD.ts > strftime('%Y-%m-%dT%H:%M:%S', 'now', '-1 month', '-1 minute')
+      OR EXISTS (SELECT 1 FROM retention_keep_forever k WHERE k.type = OLD.type)
 BEGIN
-    SELECT RAISE(ABORT, 'run_events is append-only: payload admits only the one-way S14.9 compaction strip, once, past the horizon floor — every other write is a rewrite of history (Spec S02.1)');
+    SELECT RAISE(ABORT, 'run_events is append-only: payload admits only the one-way S14.9 compaction strip — once, past the horizon floor, and NEVER on a keep-forever record (Spec S02.1/S14.9)');
 END;
 
--- ── B. Indexing: generated columns + the F16 index discharge (S14.10 ¶4) ─────
+-- ── C. Indexing: generated columns + the F16 index discharge (S14.10 ¶4) ─────
 --
 -- run_events carried EIGHT columns and exactly ONE index (the partial
 -- (run_id, event_seq)) before this migration. Every derive query in
@@ -122,8 +168,13 @@ CREATE INDEX run_events_user_ts_idx ON run_events (user_id, ts);
 -- index stays proportional to the drift log, not to the whole event log.
 CREATE INDEX run_events_change_class_idx ON run_events (change_class, event_seq)
     WHERE change_class IS NOT NULL;
+-- The ordered-tree prefix scan (`WHERE dotted_order LIKE '<run>.%' ORDER BY
+-- dotted_order`). A generated column is only worth its write cost if a query
+-- can seek on it; without this index the documented subtree read is a full
+-- scan, which is the whole thing dotted_order exists to avoid.
+CREATE INDEX run_events_dotted_order_idx ON run_events (dotted_order);
 
--- ── C. run_summaries — the S14.9 run summary (11.1) ──────────────────────────
+-- ── D. run_summaries — the S14.9 run summary (11.1) ──────────────────────────
 --
 -- Written at the run's TERMINAL transition, in the same transaction as the
 -- state update and its run_events append (S02.3 / CONVENTIONS §6, §8). The
@@ -185,7 +236,7 @@ BEGIN
     SELECT RAISE(ABORT, 'run summaries are keep-forever; a summary is never deleted (Spec S14.9)');
 END;
 
--- ── D. The keep-forever allowlist + the 11.3 exporter boundary ───────────────
+-- ── E. The 11.3 exporter boundary ────────────────────────────────────────────
 --
 -- S14.9 ¶3: "the snapshot exporter reads an allowlisted view containing only
 -- the keep-forever set; raw trace payloads are structurally unreachable from
@@ -194,24 +245,9 @@ END;
 -- every raw trace body necessarily excludes those past the horizon. A per-user
 -- horizon could not be expressed as one global boundary anyway.
 --
--- The allowlist is DATA seeded from the S14.2 family registry in
--- internal/eventlog (internal/retention.KeepForeverTypes) — one source of
--- truth, seeded idempotently at boot, never a second hand-written type list.
--- No-delete: keep-forever is one-way. If a later packet demotes a class, the
--- seeded row stays and MORE data is preserved, never less.
-CREATE TABLE retention_keep_forever (
-    type    TEXT PRIMARY KEY CHECK (type <> ''),
-    family  TEXT NOT NULL CHECK (family <> ''),
-    -- note records WHY the class is keep-forever, in the S14.9 ¶2 vocabulary.
-    note    TEXT NOT NULL DEFAULT '',
-    user_id TEXT NOT NULL DEFAULT 'platform' CHECK (user_id = 'platform')
-);
-
-CREATE TRIGGER retention_keep_forever_no_delete
-    BEFORE DELETE ON retention_keep_forever
-BEGIN
-    SELECT RAISE(ABORT, 'the keep-forever allowlist is one-way; a class is never demoted by deletion (Spec S14.9)');
-END;
+-- The view joins the SAME retention_keep_forever table section A created and
+-- section B's trigger consults, so the boundary the exporter enforces and the
+-- boundary the database enforces can never disagree.
 
 -- The exporter's ONLY run_events source. Every row is present (event_seq must
 -- stay gap-free across the S02.9 restore check) and every non-keep-forever
@@ -233,7 +269,7 @@ CREATE VIEW run_events_export AS
       FROM run_events e
       LEFT JOIN retention_keep_forever k ON k.type = e.type;
 
--- ── E. The S14.10 ¶4 index layer: FTS5 + rollups, both derived ───────────────
+-- ── F. The S14.10 ¶4 index layer: FTS5 + rollups, both derived ───────────────
 --
 -- FTS5 over run summaries, verdict texts and drift summaries (S14.10 ¶4). Plain
 -- FTS5 maintained Go-side (the 0006 precedent, not external-content): the three
@@ -273,7 +309,35 @@ CREATE TABLE retention_index_cursor (
 INSERT INTO retention_index_cursor (row_id, last_seq, updated_ts)
     VALUES ('indexer', 0, '1970-01-01T00:00:00Z');
 
--- ── F. B5-7 drain D5(b): the declined-pair row freeze ────────────────────────
+-- The compaction pass's DURABLE LIVENESS STAMP.
+--
+-- The pass itself is deliberately cursor-less — what to strip is a pure
+-- function of the horizon, the row's ts and its type, which is what makes it
+-- idempotent and restart-safe. But a pass that compacted nothing writes no
+-- event (the audit trail records COMPACTION, and none happened), so without
+-- this row a quiet year is indistinguishable from a driver goroutine that died
+-- at boot. That is below the S14.5 dueness bar: liveness must be a READ.
+--
+-- Updated on EVERY pass including a no-op, and on a FAILED pass (last_error
+-- records the reason honestly rather than leaving the stamp stale, which would
+-- look like a dead driver). It is bookkeeping OF the pass, never an input to
+-- it: nothing here decides what gets stripped.
+CREATE TABLE retention_pass_state (
+    row_id             TEXT PRIMARY KEY CHECK (row_id = 'compaction'),
+    last_run_ts        TEXT NOT NULL DEFAULT '',
+    last_events        INTEGER NOT NULL DEFAULT 0 CHECK (last_events >= 0),
+    last_bytes         INTEGER NOT NULL DEFAULT 0 CHECK (last_bytes >= 0),
+    last_error         TEXT NOT NULL DEFAULT '',
+    runs_total         INTEGER NOT NULL DEFAULT 0 CHECK (runs_total >= 0),
+    events_total       INTEGER NOT NULL DEFAULT 0 CHECK (events_total >= 0),
+    updated_ts         TEXT NOT NULL,
+    user_id            TEXT NOT NULL DEFAULT 'platform' CHECK (user_id = 'platform')
+);
+
+INSERT INTO retention_pass_state (row_id, updated_ts)
+    VALUES ('compaction', '1970-01-01T00:00:00Z');
+
+-- ── G. B5-7 drain D5(b): the declined-pair row freeze ────────────────────────
 --
 -- CONVENTIONS §35 drain r1 D5(b): "A DECLINED pair's row stays SQL-mutable
 -- while a recorded one is frozen … B5-8's retention pass may harden the row

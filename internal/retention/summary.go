@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
 )
 
 // summary.go — the S14.9 ¶1 run summary.
@@ -37,17 +38,32 @@ import (
 // run at a time, keyed on that run — never over a window of historical trace.
 
 // Stage is one step of the run's progression.
+//
+// D8: `Name` and `From` are S02.3 FSM STATE VALUES — a closed set the runs
+// CHECK constraint enforces — and an unrecognized value is dropped rather than
+// carried. The transition's free-text `reason` is deliberately NOT here: the
+// summary crosses the 11.3 export boundary (it is keep-forever), so it must not
+// smuggle unbounded trace-derived prose past a boundary the trace itself does
+// not cross. The reason stays in the run.state_changed payload, which is trace
+// and is stripped past the horizon exactly as S14.9's closed keep-forever list
+// prescribes.
 type Stage struct {
 	EventSeq int64  `json:"event_seq"`
 	Name     string `json:"name"`
-	Outcome  string `json:"outcome,omitempty"`
+	From     string `json:"from,omitempty"`
 	TS       string `json:"ts"`
 }
 
-// ToolCalls is the S14.9 "tool-call counts" leg.
+// ToolCalls is the S14.9 "tool-call COUNTS" leg — counts, and nothing else.
+//
+// D8: tool NAMES are deliberately absent. S14.9 ¶1 asks for tool-call counts,
+// and a name is trace-derived free text that would ride the summary across the
+// 11.3 export boundary the trace itself never crosses. Distinct preserves the
+// shape of the run's tool use without naming anything.
 type ToolCalls struct {
-	Total  int64            `json:"total"`
-	ByTool map[string]int64 `json:"by_tool,omitempty"`
+	Total int64 `json:"total"`
+	// Distinct is how many distinct tool names appeared — a count, not a list.
+	Distinct int64 `json:"distinct"`
 	// Unnamed counts tool.completed rows whose payload carried no recognizable
 	// tool name — counted honestly rather than bucketed under a guess.
 	Unnamed int64 `json:"unnamed,omitempty"`
@@ -271,7 +287,7 @@ func (s *Store) aggregateTx(ctx context.Context, tx *sql.Tx, runID, owner, taskI
 		switch err := tx.QueryRowContext(ctx,
 			`SELECT title FROM tasks WHERE task_id = ?`, taskID).Scan(&title); {
 		case err == nil:
-			agg.Objective, agg.ObjectiveSource = title, "tasks.title"
+			agg.Objective, agg.ObjectiveSource = safeTitle(title), "tasks.title"
 		case errors.Is(err, sql.ErrNoRows):
 			// The FK is nullable and a run can outlive nothing here; an absent
 			// task row is recorded, never invented.
@@ -315,19 +331,20 @@ func (s *Store) aggregateTx(ctx context.Context, tx *sql.Tx, runID, owner, taskI
 
 		switch typ {
 		case "run.state_changed", "run.state":
-			agg.Stages = append(agg.Stages, Stage{
-				EventSeq: seq,
-				Name:     str(payloadDecoded, "to"),
-				Outcome:  str(payloadDecoded, "reason"),
-				TS:       ts,
-			})
+			// Enumerated only: an unrecognized state value is DROPPED, so a
+			// malformed or hostile payload cannot inject free text here.
+			to, from := fsmState(str(payloadDecoded, "to")), fsmState(str(payloadDecoded, "from"))
+			if to != "" {
+				agg.Stages = append(agg.Stages, Stage{EventSeq: seq, Name: to, From: from, TS: ts})
+			}
 		case "stage.started", "stage.finished":
 			// Forward-tolerant: when B6 mints these, they are the better source
-			// and the list carries them alongside the lifecycle transitions.
+			// and the list carries them alongside the lifecycle transitions. A
+			// stage id is an identifier, not prose — redacted and bounded, never
+			// carried raw across the export boundary.
 			agg.Stages = append(agg.Stages, Stage{
 				EventSeq: seq,
-				Name:     firstStr(payloadDecoded, "stage", "stage_id", "name"),
-				Outcome:  firstStr(payloadDecoded, "outcome", "reason"),
+				Name:     safeLabel(firstStr(payloadDecoded, "stage", "stage_id", "name")),
 				TS:       ts,
 			})
 		case "tool.completed", "engine.tool_result":
@@ -343,15 +360,15 @@ func (s *Store) aggregateTx(ctx context.Context, tx *sql.Tx, runID, owner, taskI
 			agg.Verdicts = append(agg.Verdicts, VerdictRef{
 				EventSeq: seq,
 				Round:    num(payloadDecoded, "round"),
-				Verdict:  str(payloadDecoded, "verdict"),
-				RubricID: str(payloadDecoded, "rubric_id"),
+				Verdict:  safeLabel(str(payloadDecoded, "verdict")),
+				RubricID: safeLabel(str(payloadDecoded, "rubric_id")),
 			})
 		case "decision.recorded", "intake.delta_decision":
 			agg.Decisions = append(agg.Decisions, DecisionRef{
 				EventSeq: seq,
 				Type:     typ,
-				Decision: firstStr(payloadDecoded, "decision", "choice"),
-				Actor:    str(payloadDecoded, "actor"),
+				Decision: safeLabel(firstStr(payloadDecoded, "decision", "choice")),
+				Actor:    safeLabel(str(payloadDecoded, "actor")),
 			})
 		}
 	}
@@ -360,9 +377,7 @@ func (s *Store) aggregateTx(ctx context.Context, tx *sql.Tx, runID, owner, taskI
 		return Aggregate{}, "", err
 	}
 	rows.Close()
-	if len(byTool) > 0 {
-		agg.ToolCalls.ByTool = byTool
-	}
+	agg.ToolCalls.Distinct = int64(len(byTool))
 
 	if err := tx.QueryRowContext(ctx,
 		`SELECT count(*) FROM checkpoints WHERE run_id = ?`, runID).Scan(&agg.Receipts.Checkpoints); err != nil {
@@ -514,6 +529,64 @@ const StackAbsentMarker = "serving stack is not configured"
 
 func isStackAbsent(err error) bool {
 	return err != nil && strings.Contains(err.Error(), StackAbsentMarker)
+}
+
+// ── D8: what may cross the 11.3 export boundary ─────────────────────────────
+//
+// The run summary is keep-forever, so it LEAVES THE HOST in every snapshot
+// (S14.9 ¶3 / S13.10) while the trace it was computed from does not. Anything
+// the aggregate carries out of a payload is therefore a hole in that boundary
+// unless it is bounded and scrubbed. Three rules, applied at the one place the
+// aggregate is built:
+//
+//   - a state is ENUMERATED (fsmState): the closed S02.3 set or nothing;
+//   - a label is REDACTED and BOUNDED (safeLabel): identifiers and short
+//     enumerated-ish fields, never prose;
+//   - the objective is REDACTED and BOUNDED (safeTitle) at a title's length —
+//     it is the operator's own task title, which already travels in the tasks
+//     table, but it is scrubbed here too rather than trusted twice.
+//
+// Free-text trace fields (a transition's reason, a tool name) are not carried
+// at all. See Stage and ToolCalls.
+
+// fsmStates is the closed S02.3 stored-state set (the runs CHECK constraint's
+// vocabulary, held by value here — internal/retention cannot import
+// internal/run, and a state string is data either way).
+var fsmStates = map[string]bool{
+	"new": true, "queued": true, "claimed": true, "running": true,
+	"parked": true, "draining": true, "completed": true, "crashed": true,
+	"finalized": true, "tombstoned": true, "died-at-gate": true,
+}
+
+// fsmState passes through a recognized S02.3 state and drops anything else.
+func fsmState(s string) string {
+	if fsmStates[s] {
+		return s
+	}
+	return ""
+}
+
+// labelCap bounds an identifier-shaped field carried into the summary. A
+// STRUCTURAL CONSTANT: these are ids, verdict words and actor names, not prose,
+// and 96 bytes is generous for every one of them in the tree. Its reason is the
+// boundary, not aesthetics — an unbounded field is an unbounded leak.
+const labelCap = 96
+
+// titleCap bounds the objective. A task title is one line by construction
+// (internal/intake), so 200 bytes carries every honest one whole.
+const titleCap = 200
+
+func safeLabel(s string) string { return boundRunes(redact.Redact(s), labelCap) }
+func safeTitle(s string) string { return boundRunes(redact.Redact(s), titleCap) }
+
+// boundRunes truncates on a rune boundary and marks that it truncated, so a cut
+// field never reads as a complete one.
+func boundRunes(s string, cap int) string {
+	r := []rune(s)
+	if len(r) <= cap {
+		return s
+	}
+	return string(r[:cap]) + "…"
 }
 
 // ── small payload readers (forward-tolerant, never fatal) ───────────────────
