@@ -206,22 +206,16 @@ func TestPriceEditIsOperatorOnlyEndToEnd(t *testing.T) {
 // figure S10.3's coverage guard exists to keep off a receipt.
 func TestMalformedPriceRowIsTheCallersMistake(t *testing.T) {
 	e := newPriceEnv(t)
-	for _, c := range struct {
-		name []string
-		body []string
-	}{
-		name: []string{"no dates", "bad date", "unknown field", "no source", "row is not an object"},
-		body: []string{
-			`{"row":{"model":"m","lane":"l","source":"s"}}`,
-			`{"row":{"model":"m","lane":"l","source":"s","effective_from":"tomorrow","verified_on":"2026-07-28T00:00:00Z"}}`,
-			`{"row":{"model":"m","lane":"l","source":"s","effective_from":"2026-08-01T00:00:00Z","verified_on":"2026-07-28T00:00:00Z","inpt_usd":3}}`,
-			`{"row":{"model":"m","lane":"l","effective_from":"2026-08-01T00:00:00Z","verified_on":"2026-07-28T00:00:00Z"}}`,
-			`{"row":"a price"}`,
-		},
-	}.body {
-		code, out := e.do(t, "op", "POST", "/api/settings/prices", c)
+	for _, c := range []struct{ name, body string }{
+		{"no dates", `{"row":{"model":"m","lane":"l","source":"s"}}`},
+		{"an unparseable date", `{"row":{"model":"m","lane":"l","source":"s","effective_from":"tomorrow","verified_on":"2026-07-28T00:00:00Z"}}`},
+		{"a misspelled rate field", `{"row":{"model":"m","lane":"l","source":"s","effective_from":"2026-08-01T00:00:00Z","verified_on":"2026-07-28T00:00:00Z","inpt_usd":3}}`},
+		{"no source", `{"row":{"model":"m","lane":"l","effective_from":"2026-08-01T00:00:00Z","verified_on":"2026-07-28T00:00:00Z"}}`},
+		{"a row that is not an object", `{"row":"a price"}`},
+	} {
+		code, out := e.do(t, "op", "POST", "/api/settings/prices", c.body)
 		if code != http.StatusBadRequest {
-			t.Errorf("malformed row %q: status %d, want 400: %s", c, code, out)
+			t.Errorf("%s: status %d, want 400: %s", c.name, code, out)
 		}
 	}
 	rows, err := e.live.Rows(context.Background())

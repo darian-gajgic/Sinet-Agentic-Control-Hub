@@ -10,7 +10,9 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -511,6 +513,172 @@ func TestResetDeletesTheOverride(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("%d override cells remain after a reset", n)
+	}
+}
+
+// TestAnInternalWriteFailureIs500NotBadRequest is drain D1: a mid-write
+// storage/event-log failure is a PLATFORM fault, and answering it 400
+// "bad_request" would tell the operator their input was wrong when it was not.
+//
+// The path is reached by removing the audit table out from under the write: the
+// override cell upserts, the settings_events INSERT fails, and the registry
+// wraps that as "settings: audit row: ..." — the exact prefix the pre-drain
+// transport matched on to produce a 400. Nothing in production drops a table;
+// this is the smallest lever that reaches the real failure branch.
+func TestAnInternalWriteFailureIs500NotBadRequest(t *testing.T) {
+	e := newSettingsEnv(t)
+	ctx := context.Background()
+	const key = "orchestration.helper_turns"
+
+	// The control FIRST, so the fixture is proven to work before it is broken:
+	// an all-500 handler could not pass this test.
+	e.mustDo(t, "op", "POST", "/api/settings/"+key, `{"value":25}`)
+
+	if err := e.b.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DROP TABLE settings_events`)
+		return err
+	}); err != nil {
+		t.Fatalf("drop the audit table: %v", err)
+	}
+
+	code, out := e.do(t, "op", "POST", "/api/settings/"+key, `{"value":26}`)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("a mid-write audit failure answered %d: %s\nwant 500 — the caller's request was fine and the PLATFORM failed", code, out)
+	}
+	if !strings.Contains(out, `"internal"`) {
+		t.Errorf("the failure is not coded as internal: %s", out)
+	}
+	if strings.Contains(out, "bad_request") {
+		t.Errorf("a platform failure answered as the caller's mistake: %s", out)
+	}
+	// The body stays generic: the caller cannot act on it, and the real cause
+	// belongs in the ops log rather than on the wire.
+	if strings.Contains(out, "settings_events") || strings.Contains(out, "audit row") {
+		t.Errorf("the 500 body leaks the internal cause: %s", out)
+	}
+	// And the caller-fault classes are still 400 on the same broken store —
+	// they are refused BEFORE the write is attempted, so the store's state
+	// cannot change how a bad request is classified.
+	if code, out := e.do(t, "op", "POST", "/api/settings/"+key, `{"value":"twenty"}`); code != http.StatusBadRequest {
+		t.Errorf("a wrongly typed value answered %d, want 400: %s", code, out)
+	}
+	if code, _ := e.do(t, "op", "POST", "/api/settings/no.such_key", `{"value":1}`); code != http.StatusNotFound {
+		t.Errorf("an undeclared key answered %d, want 404", code)
+	}
+}
+
+// TestCallerFaultsAreMarkedNotMatchedOnText is D1's other half at the registry
+// boundary: the classes a transport must answer 400 for are marked as caller
+// faults, and the internal wrap is NOT — asserted on the error TYPE, which is
+// what the transport now reads.
+func TestCallerFaultsAreMarkedNotMatchedOnText(t *testing.T) {
+	e := newSettingsEnv(t)
+	ctx := context.Background()
+
+	for _, c := range []struct {
+		what string
+		req  settings.SetRequest
+	}{
+		{"a wrongly typed value", settings.SetRequest{
+			Key: "orchestration.helper_turns", Value: json.RawMessage(`"twenty"`),
+			Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}}},
+		{"a fractional integer", settings.SetRequest{
+			Key: "orchestration.helper_turns", Value: json.RawMessage(`20.5`),
+			Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}}},
+		{"a per-user scope on a platform-scope key", settings.SetRequest{
+			Key: "orchestration.helper_turns", ForUser: "alice", Value: json.RawMessage(`20`),
+			Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}}},
+	} {
+		err := e.reg.Set(ctx, c.req)
+		if err == nil {
+			t.Errorf("%s was accepted", c.what)
+			continue
+		}
+		if !errors.Is(err, settings.ErrInvalidRequest) {
+			t.Errorf("%s is not marked a caller fault: %v", c.what, err)
+		}
+	}
+	// A bounds edit on a key that carries none, and an inverted pair.
+	floor, ceiling := 9.0, 1.0
+	for _, c := range []struct {
+		what string
+		req  settings.SetBoundsRequest
+	}{
+		{"bounds on a non-numeric key", settings.SetBoundsRequest{
+			Key: "orchestration.stagger_identical_prefix", Ceiling: &ceiling,
+			Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}}},
+		{"an inverted floor/ceiling", settings.SetBoundsRequest{
+			Key: "orchestration.helper_turns", Floor: &floor, Ceiling: &ceiling,
+			Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}}},
+	} {
+		err := e.reg.SetBounds(ctx, c.req)
+		if err == nil {
+			t.Errorf("%s was accepted", c.what)
+			continue
+		}
+		if !errors.Is(err, settings.ErrInvalidRequest) {
+			t.Errorf("%s is not marked a caller fault: %v", c.what, err)
+		}
+	}
+	// The other direction: the internal wrap must NOT be marked, or the
+	// transport would answer 400 for a platform failure again.
+	if err := e.b.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DROP TABLE settings_events`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := e.reg.Set(ctx, settings.SetRequest{
+		Key: "orchestration.helper_turns", Value: json.RawMessage(`26`),
+		Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}})
+	if err == nil {
+		t.Fatal("a write with no audit table succeeded — an unaudited write must not exist")
+	}
+	if errors.Is(err, settings.ErrInvalidRequest) {
+		t.Errorf("a storage failure is marked as the caller's fault: %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "settings: ") {
+		t.Fatalf("the internal failure lost the prefix that made the old string match look safe: %v", err)
+	}
+}
+
+// TestAMemberCannotEditTheirOwnPerUserOverride is drain D2 — OQ8's most
+// distinctive consequence, and the one a reader is most likely to assume the
+// other way. The registry's actor model admits `operator` and `automation` and
+// no member kind, so there is no actor a member's write could be attributed to:
+// the operator administers a member's own per-user value via `for_user`.
+func TestAMemberCannotEditTheirOwnPerUserOverride(t *testing.T) {
+	e := newSettingsEnv(t)
+	const key = "retention.compaction_horizon"
+	const path = "/api/settings/" + key
+
+	if d, ok := settings.New().Decl(key); !ok || !d.PerUser {
+		t.Fatalf("fixture assumption broken: %s is not a per-user key", key)
+	}
+
+	// Both write forms, aimed by the member at their OWN override.
+	for _, c := range []struct{ what, body string }{
+		{"set", `{"value":9,"for_user":"alice"}`},
+		{"set without naming themselves", `{"value":9}`},
+		{"reset", `{"value":null,"for_user":"alice"}`},
+	} {
+		code, out := e.do(t, "alice", "POST", path, c.body)
+		if code != http.StatusForbidden {
+			t.Errorf("member %s of their own per-user override: status %d, want 403: %s", c.what, code, out)
+		}
+		if !strings.Contains(out, "operator") {
+			t.Errorf("the refusal does not name the authority: %s", out)
+		}
+	}
+	// Nothing landed for her.
+	if v := e.valueOf(t, "op", key); len(v.UserValues) != 0 {
+		t.Errorf("a refused member write stored an override: %v", v.UserValues)
+	}
+	// The non-tautological control: the OPERATOR administering the same value
+	// for the same member succeeds, and she can then READ her own.
+	e.mustDo(t, "op", "POST", path, `{"value":9,"for_user":"alice"}`)
+	if got := e.valueOf(t, "alice", key).UserValues["alice"]; got != float64(9) {
+		t.Errorf("alice reads her administered override as %v, want 9", got)
 	}
 }
 

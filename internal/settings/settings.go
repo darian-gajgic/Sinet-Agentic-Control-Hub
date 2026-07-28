@@ -151,7 +151,42 @@ var (
 	ErrNotAttached = errors.New("settings: registry not attached to storage (writes require the audit trail, Spec S01.10)")
 	ErrOutOfBounds = errors.New("settings: value outside (floor, ceiling) bounds")
 	ErrAutomation  = errors.New("settings: write not permitted for automation (G1 rider 1)")
+
+	// ErrInvalidRequest marks a refusal the REQUEST caused and the caller can
+	// fix by sending a different one: a value of the wrong type, an enum miss,
+	// a relational-rule violation, a per-user scope on a platform-scope key, a
+	// bounds edit on a key that carries none.
+	//
+	// It exists so a transport can tell a caller's mistake from a PLATFORM
+	// FAILURE without matching on message text. Every error this package
+	// returns is prefixed "settings: ", including the ones that wrap a storage
+	// or event-log failure mid-write (persist), so a prefix match would answer
+	// "your input was bad" to a caller whose input was fine and whose write
+	// half-failed. Marking the caller-fault classes POSITIVELY makes the
+	// default the safe one: an unmarked error is a platform fault until
+	// somebody says otherwise.
+	//
+	// ErrUnknownKey, ErrOutOfBounds and ErrAutomation are caller faults too and
+	// keep their own sentinels — they carry statuses of their own (an
+	// undeclared key is a 404, not a 400), so folding them in here would lose
+	// that distinction.
+	ErrInvalidRequest = errors.New("settings: request not admissible")
 )
+
+// invalidRequestError marks an error as a caller fault WITHOUT changing what it
+// says. The message stays exactly what it was — the registry knows why it
+// refused and a paraphrase would be a second, worse explanation — while
+// errors.Is(err, ErrInvalidRequest) becomes true through the multi-error
+// Unwrap, so any inner %w chain still resolves too.
+type invalidRequestError struct{ err error }
+
+func (e invalidRequestError) Error() string   { return e.err.Error() }
+func (e invalidRequestError) Unwrap() []error { return []error{e.err, ErrInvalidRequest} }
+
+// invalid builds a caller-fault error.
+func invalid(format string, a ...any) error {
+	return invalidRequestError{fmt.Errorf(format, a...)}
+}
 
 type boundsOverride struct {
 	floor, ceiling *float64
@@ -270,7 +305,7 @@ func checkType(d *Decl, v any) (any, error) {
 	case TypeString, TypeEnum:
 		if s, ok := v.(string); ok {
 			if d.Type == TypeEnum && !contains(d.Enum, s) {
-				return nil, fmt.Errorf("%q is not one of %v", s, d.Enum)
+				return nil, invalid("%q is not one of %v", s, d.Enum)
 			}
 			return s, nil
 		}
@@ -289,7 +324,7 @@ func checkType(d *Decl, v any) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown type %v", d.Type)
 	}
-	return nil, fmt.Errorf("value %T does not match declared type %v", v, d.Type)
+	return nil, invalid("value %T does not match declared type %v", v, d.Type)
 }
 
 func contains(list []string, s string) bool {
@@ -306,7 +341,7 @@ func contains(list []string, s string) bool {
 func decodeValue(d *Decl, raw json.RawMessage) (any, error) {
 	dec := func(target any) error {
 		if err := json.Unmarshal(raw, target); err != nil {
-			return fmt.Errorf("settings: %s expects a %v value: %w", d.Key, d.Type, err)
+			return invalid("settings: %s expects a %v value: %w", d.Key, d.Type, err)
 		}
 		return nil
 	}
@@ -323,7 +358,7 @@ func decodeValue(d *Decl, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		if f != math.Trunc(f) {
-			return nil, fmt.Errorf("settings: %s expects a whole number, got %v", d.Key, f)
+			return nil, invalid("settings: %s expects a whole number, got %v", d.Key, f)
 		}
 		return int64(f), nil
 	case TypeFloat:
@@ -631,7 +666,7 @@ func (r *Registry) checkRules(overlay map[string]any) error {
 	v := &view{r: r, overlay: overlay}
 	for _, ru := range r.rules {
 		if err := ru.check(v); err != nil {
-			return fmt.Errorf("settings: rule %q: %w", ru.name, err)
+			return invalid("settings: rule %q: %w", ru.name, err)
 		}
 	}
 	return nil

@@ -146,7 +146,7 @@ func (r *Registry) History(ctx context.Context, key string, limit int) ([]AuditE
 		return nil, err
 	}
 	if limit <= 0 {
-		return nil, fmt.Errorf("settings: history limit must be positive, got %d", limit)
+		return nil, invalid("settings: history limit must be positive, got %d", limit)
 	}
 	rows, err := db.QueryContext(ctx,
 		`SELECT settings_event_id, actor, key, user_id, old, new, ts, reason

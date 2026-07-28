@@ -130,7 +130,7 @@ func (r *Registry) Set(ctx context.Context, req SetRequest) error {
 		return err
 	}
 	if req.ForUser != "" && !d.PerUser {
-		return fmt.Errorf("settings: %s is not per-user scoped", d.Key)
+		return invalid("settings: %s is not per-user scoped", d.Key)
 	}
 	reset := req.Value == nil
 	if req.Actor.Kind == ActorAutomation {
@@ -251,11 +251,11 @@ func (r *Registry) SetBounds(ctx context.Context, req SetBoundsRequest) error {
 		return fmt.Errorf("%w: only the operator edits bounds", ErrAutomation)
 	}
 	if !d.Type.numeric() {
-		return fmt.Errorf("settings: %s is %v and carries no bounds", d.Key, d.Type)
+		return invalid("settings: %s is %v and carries no bounds", d.Key, d.Type)
 	}
 	reset := req.Floor == nil && req.Ceiling == nil
 	if req.Floor != nil && req.Ceiling != nil && *req.Floor > *req.Ceiling {
-		return fmt.Errorf("settings: %s: floor %v > ceiling %v", d.Key, *req.Floor, *req.Ceiling)
+		return invalid("settings: %s: floor %v > ceiling %v", d.Key, *req.Floor, *req.Ceiling)
 	}
 
 	// Every current effective value must remain inside the new bounds.

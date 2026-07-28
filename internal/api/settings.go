@@ -484,9 +484,22 @@ func (s *Server) valueOf(key string) (settings.Value, bool) {
 	return settings.Value{}, false
 }
 
-// settingsErr maps the registry's own refusals to statuses, carrying the
-// registry's message through unchanged: it knows why it refused, and a message
-// this transport paraphrased would be a second, worse explanation.
+// settingsErr maps the registry's own refusals to statuses ON THE ERROR'S TYPE,
+// never on its message text.
+//
+// The distinction the registry exports is caller-fault vs platform failure, and
+// it matters here because EVERY error that package returns is prefixed
+// "settings: " — including the ones wrapping a storage or event-log failure
+// mid-write. Classifying by that prefix answered 400 "bad_request" to a caller
+// whose request was fine and whose write half-failed, which is the same defect
+// shape the §39 drain fixed on the follow-up path and the reason §38 bans
+// error-string matching (drain D1).
+//
+// A caller fault carries the registry's own message: it knows why it refused,
+// and a paraphrase would be a second, worse explanation. An UNMARKED error is a
+// platform fault — the safe default — and answers a generic 500 with the real
+// cause in the ops log, because the caller cannot act on it and it may name
+// platform internals.
 func (s *Server) settingsErr(err error) error {
 	switch {
 	case err == nil:
@@ -495,15 +508,12 @@ func (s *Server) settingsErr(err error) error {
 		return &SurfaceError{Status: http.StatusNotFound, Code: "not_found", Msg: err.Error()}
 	case errors.Is(err, settings.ErrNotAttached):
 		return &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired", Msg: err.Error()}
-	case errors.Is(err, settings.ErrOutOfBounds), errors.Is(err, settings.ErrAutomation):
+	case errors.Is(err, settings.ErrOutOfBounds),
+		errors.Is(err, settings.ErrAutomation),
+		errors.Is(err, settings.ErrInvalidRequest):
 		return &SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: err.Error()}
 	}
-	// A type mismatch, an enum miss or a relational-rule violation is the
-	// caller's input being wrong, not the platform failing: the registry states
-	// each in its own words and this maps them all to 400 rather than guessing
-	// at a taxonomy the registry does not export.
-	if strings.HasPrefix(err.Error(), "settings: ") {
-		return &SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: err.Error()}
-	}
-	return err
+	s.logger.Error("settings: the registry refused a write for a reason it did not class as the caller's", "err", err)
+	return &SurfaceError{Status: http.StatusInternalServerError, Code: "internal",
+		Msg: "the settings write did not complete"}
 }
