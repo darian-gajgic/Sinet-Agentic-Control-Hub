@@ -664,6 +664,38 @@ func TestCompareRefusesNoTypeAndLabelsTheFallback(t *testing.T) {
 			t.Errorf("an unknown type gets the LABELED fallback, got %+v", cmp)
 		}
 	}
+
+	// PDF is extracted-text-diff only at v0 (G2 Def.13), and when extraction
+	// cannot run it DEGRADES to the metadata cards with the reason on the label
+	// — never a refusal. The fixture's bytes are not a real PDF, which is
+	// exactly the degrade path a corrupt or unsupported document takes.
+	if _, err := e.rev.EnsureDeliverable(e.ctx, review.EnsureInput{
+		ID: "d-pdf", Owner: "alice", TaskID: "t-a", Type: "pdf",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for n, body := range map[int]string{1: "not-a-pdf-old", 2: "not-a-pdf-new"} {
+		if _, err := e.rev.MintRevision(e.ctx, review.MintInput{
+			DeliverableID: "d-pdf", N: n, RunID: "r-a",
+			Objects: map[string][]byte{"doc.pdf": []byte(body)},
+			Types:   map[string]string{"doc.pdf": "application/pdf"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var pdf review.Comparison
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "GET", "/api/deliverables/d-pdf/compare", "")), &pdf); err != nil {
+		t.Fatalf("decode pdf comparison: %v", err)
+	}
+	if pdf.Surface != review.SurfaceBinaryCards || !pdf.Fallback || pdf.Label == "" {
+		t.Errorf("an unextractable PDF must degrade to LABELED metadata cards, got %+v", pdf)
+	}
+	if !strings.Contains(strings.ToLower(pdf.Label), "extraction") {
+		t.Errorf("the label must say WHY the rich surface is unavailable, got %q", pdf.Label)
+	}
+	if !pdf.Changed || len(pdf.OldObjects) == 0 || len(pdf.NewObjects) == 0 {
+		t.Errorf("the degraded PDF surface still carries both sides and the by-hash verdict, got %+v", pdf)
+	}
 }
 
 func TestCompareIsOwnerScoped(t *testing.T) {
