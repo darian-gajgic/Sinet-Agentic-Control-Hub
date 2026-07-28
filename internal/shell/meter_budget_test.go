@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -252,5 +253,47 @@ func TestMetersReadAgreesWithTheBudgetVerb(t *testing.T) {
 	other := meterLaneOf(t, body, "local")
 	if other.BudgetDeclared || other.PressureApplicable {
 		t.Errorf("an undeclared lane picked up another lane's budget: %+v", other)
+	}
+}
+
+// TestRunComposesTheBudgetReadIntoTheMeterReader pins the PRODUCTION
+// composition line (re-check residual R-A): the agreement test above builds
+// projMeter{…, budgets} itself, so severing the `budgets:` field from the
+// projMeter literal in Run() would leave every test green while the live
+// `/api/meters` regressed to the exact self-contradiction drain D2 closed.
+// A source pin with a vacuity guard (the repo's scan precedent): Run()'s
+// projMeter literal must wire a budgets field.
+func TestRunComposesTheBudgetReadIntoTheMeterReader(t *testing.T) {
+	src, err := os.ReadFile("shell.go")
+	if err != nil {
+		t.Fatalf("reading shell.go: %v", err)
+	}
+	text := string(src)
+
+	// Vacuity guard: the composition literal this test pins must exist at all.
+	idx := strings.Index(text, "projMeter{")
+	if idx < 0 {
+		t.Fatal("shell.go no longer builds a projMeter literal — this pin is scanning nothing; move it to wherever the MeterReader is now composed")
+	}
+	// Every projMeter composite literal in shell.go must wire budgets (today
+	// there is exactly one, in Run(); a second unwired one would be the same
+	// defect reappearing).
+	for n, rest := 0, text; ; n++ {
+		i := strings.Index(rest, "projMeter{")
+		if i < 0 {
+			if n == 0 {
+				t.Fatal("unreachable: guarded above")
+			}
+			break
+		}
+		lit := rest[i:]
+		end := strings.Index(lit, "}")
+		if end < 0 {
+			t.Fatal("unterminated projMeter literal — scan confused; fix the pin")
+		}
+		if !strings.Contains(lit[:end], "budgets:") {
+			t.Errorf("projMeter literal #%d in shell.go wires no budgets field — the meters read surface would silently report every budget undeclared (drain D2's F2)", n+1)
+		}
+		rest = lit[end:]
 	}
 }
