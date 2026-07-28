@@ -102,10 +102,13 @@ CDIO_BIN="$HOME/.local/bin/changedetection.io"
 if [ -x "$CDIO_BIN" ]; then
   ok "already installed — $CDIO_BIN"
 else
-  info "installing: uv tool install changedetection.io==$CDIO_PIN --python $CDIO_PYTHON"
+  info "installing: uv tool install changedetection.io==$CDIO_PIN --python $CDIO_PYTHON --prerelease=allow"
   info "(uv fetches a managed CPython $CDIO_PYTHON if needed; the host's Python 3.14 is newer than"
-  info " this dependency tree's wheel coverage, so the install is pinned to $CDIO_PYTHON deliberately)"
-  if uv tool install "changedetection.io==$CDIO_PIN" --python "$CDIO_PYTHON" \
+  info " this dependency tree's wheel coverage, so the install is pinned to $CDIO_PYTHON deliberately."
+  info " --prerelease=allow is required because 0.55.8 itself PINS pyppeteer-ng==2.0.0rc13, a"
+  info " pre-release uv would otherwise refuse to resolve — this satisfies upstream's own pin,"
+  info " it does not float anything)"
+  if uv tool install "changedetection.io==$CDIO_PIN" --python "$CDIO_PYTHON" --prerelease=allow \
        >/tmp/sinet-cdio-install.log 2>&1; then
     ok "uv tool install completed"
   else
@@ -114,7 +117,8 @@ else
   fi
 fi
 
-if uv tool list 2>/dev/null | grep -qiE "changedetection\.io[[:space:]]+v?$CDIO_PIN"; then
+# uv normalizes the PyPI name to "changedetection-io" (PEP 503), so match dot OR hyphen
+if uv tool list 2>/dev/null | grep -qiE "changedetection[.-]io[[:space:]]+v?$CDIO_PIN"; then
   ok "version verified against the pin: $(uv tool list 2>/dev/null | grep -i 'changedetection' | head -1)"
 elif uv tool list 2>/dev/null | grep -qi 'changedetection'; then
   bad "version MISMATCH: $(uv tool list 2>/dev/null | grep -i 'changedetection' | head -1) — pin is $CDIO_PIN"
