@@ -569,7 +569,11 @@ func TestReadRoutesAddNoMutatingVerb(t *testing.T) {
 			t.Errorf("%s %s = %d — the read families add no mutating verb (R19)", c.method, c.path, rr.Code)
 		}
 	}
-	if strings.Contains(mustString(t, "/v1"), "no") {
-		t.Fatal("unreachable")
+	// And no versioned prefix exists: the API is unversioned at v0 and
+	// evolution is additive-first (§7, S15.2).
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/v1/api/runs", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("GET /v1/api/runs = %d — the API is unversioned at v0", rr.Code)
 	}
 }
