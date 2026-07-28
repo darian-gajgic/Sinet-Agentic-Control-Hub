@@ -66,6 +66,7 @@ func TestTransitionMatrix(t *testing.T) {
 	allowed := [][2]run.State{
 		{run.StateNew, run.StateQueued},
 		{run.StateQueued, run.StateClaimed},
+		{run.StateQueued, run.StateFinalized}, // 4.5 human cancel of a queued run (P3-B6-2A OQ1)
 		{run.StateClaimed, run.StateRunning},
 		{run.StateClaimed, run.StateCrashed},
 		{run.StateRunning, run.StateParked},

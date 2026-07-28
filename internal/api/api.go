@@ -25,6 +25,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
@@ -130,6 +131,16 @@ type Config struct {
 	// composed at the shell root and HELD here for the B6 /api/deliverables
 	// preview endpoints (S15.2); wired but NOT yet routed (F17).
 	Preview *preview.Manager
+	// Effects is the S02.7 two-phase effect journal, ROUTED by the S15.6
+	// approvals family (approvals.go): an effect card's approve/deny answer is
+	// a journal act. Nothing here executes an effect — approval and execution
+	// stay different recorded facts and execution is the journal's own
+	// two-phase path (D7). nil leaves effect answers refusing 503.
+	Effects *gates.Journal
+	// Cancel is the S02.3 cancel choreography (feature 4.5, actions.go), the
+	// ONLY path from the HTTP verbs to the ratified cancel mapping. nil leaves
+	// the cancel routes answering 503.
+	Cancel CancelSurface
 	// History is the S14.10 three-layer queryable-history surface (B5-8B):
 	// Layer-0 named cost views, the Layer-1 canned catalog, redact-before-match
 	// search and the Layer-2 escalation. B6-1 ROUTES it under /api/events
@@ -165,10 +176,14 @@ type Server struct {
 	logger     *slog.Logger
 	nudge      *broadcast
 	intake     IntakeSurface
-	// accept + followUp are held for the B6 operator endpoints (F1); not yet
-	// routed.
-	accept   *accept.Accepter
+	// accept is held for the B6-3 deliverable content family; not yet routed.
+	accept *accept.Accepter
+	// followUp is the S13.9 spawn verb, routed by B6-2A (actions.go).
 	followUp *intake.FollowUp
+	// effects is the S02.7 journal behind the S15.6 effect approvals.
+	effects *gates.Journal
+	// cancel is the S02.3 cancel choreography behind the 4.5 cancel verbs.
+	cancel CancelSurface
 	// preview is the S13.8 preview surface, held for the B6
 	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
 	preview *preview.Manager
@@ -197,6 +212,8 @@ func New(cfg Config) *Server {
 		followUp:   cfg.FollowUp,
 		preview:    cfg.Preview,
 		history:    cfg.History,
+		effects:    cfg.Effects,
+		cancel:     cfg.Cancel,
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter}
@@ -266,10 +283,23 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/events/search", s.handleHistorySearch)
 	protected("GET /api/events/open-sql", s.handleHistoryOpenSQL)
 
-	// Walking-skeleton mutation surface (B2-4; the S15.6 decision plane is B6-2).
+	// Walking-skeleton mutation surface (B2-4). Paths are unchanged — evolution
+	// is additive-first (S15.2) — and the S15.6 decision plane below joins them
+	// rather than replacing them.
 	protected("POST /api/intake/requests", s.handleIntakeSubmit)
 	protected("POST /api/tasks/{task}/advance", s.handleTaskAdvance)
 	protected("POST /api/asks/{ask}/answer", s.handleAskAnswer)
+
+	// The S15.6 decision plane (B6-2A): the one risk-ranked approval inbox, its
+	// hash-pinned answer verbs, the 4.5 cancel verbs and the S13.9 follow-up
+	// spawn. Every route is owner-scoped server-side and fail-closed (S01.9);
+	// none performs a direct outward effect (D7).
+	protected("GET /api/approvals", s.handleApprovalList)
+	protected("POST /api/approvals/answer-batch", s.handleApprovalAnswerBatch)
+	protected("POST /api/approvals/{id}/answer", s.handleApprovalAnswer)
+	protected("POST /api/runs/{run}/cancel", s.handleRunCancel)
+	protected("POST /api/tasks/{task}/cancel", s.handleTaskCancel)
+	protected("POST /api/deliverables/{deliverable}/follow-up", s.handleFollowUpSpawn)
 
 	return s.identity(mux)
 }

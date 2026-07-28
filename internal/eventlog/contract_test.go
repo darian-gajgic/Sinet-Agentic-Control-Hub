@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
@@ -120,6 +121,13 @@ func producerTypes() []string {
 		// refusal. It is the packet's only new type and the only reason the
 		// registry grows past B5-8A's 94.
 		history.EventQueryAudited,
+		// api (1): the B6-2A S15.6 approval-inbox CO-PRODUCER of the already
+		// registered decision.recorded — the effect-card approve/deny, the two
+		// answer acts whose journal transitions leave no run_events row of
+		// their own. It mints no NEW type, so the inventory is unchanged; it is
+		// listed here so the declare-once assertion covers the second producer
+		// of a shared type as strictly as it covers the first (CONVENTIONS §29).
+		api.EventDecisionRecorded,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -188,9 +196,18 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 // so 90 minted + 5 declare-only = 95 registered types — the registry does not
 // grow, the minted share does. Families 1 (Run lifecycle), 11 (Drift & canary),
 // 14 (Benchmark & eval) and 15 (Run summary) are all fully minted.
+// B6-2A adds no type at all: internal/api joins internal/benchmark as a
+// CO-PRODUCER of decision.recorded, which is what its contract row
+// pre-authorized. The inventory is therefore counted over DISTINCT types — a
+// type produced from two places is still one registered type, and counting the
+// producer LIST would have turned a co-production into a phantom growth.
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 90 {
-		t.Errorf("producer inventory = %d, want 90 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1)", n)
+	distinct := map[string]bool{}
+	for _, typ := range producerTypes() {
+		distinct[typ] = true
+	}
+	if n := len(distinct); n != 90 {
+		t.Errorf("producer inventory = %d distinct types, want 90 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1; B6-2A co-produces decision.recorded and adds none)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {

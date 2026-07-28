@@ -231,6 +231,7 @@ func Run(ctx context.Context, opts Options) error {
 	// Spec S19.5 B2), and the intake API surface goes live.
 	var sched *scheduler.Scheduler
 	var intakeSurface api.IntakeSurface
+	var cancelSurface api.CancelSurface
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
 	var localSurf *localSurface
@@ -488,7 +489,12 @@ func Run(ctx context.Context, opts Options) error {
 		// reads the durable intake match (st.Registry.Project) through it (F3).
 		pseams.pipe = sk.Pipeline()
 		admission = sched
-		intakeSurface = sk.Surface()
+		surface := sk.Surface()
+		intakeSurface = surface
+		// The S15.6 cancel choreography (4.5, B6-2A) rides the same surface:
+		// one composition, two seams. Human-driven only — the HTTP verbs are
+		// its sole callers (NO AUTO-KILL, S14.4 / G1 D1.3).
+		cancelSurface = surface
 
 		// The S13.6 accept orchestration + the S13.9 follow-up verb, composed
 		// from the production stores (F1): compiled in and reachable, held by
@@ -655,6 +661,8 @@ func Run(ctx context.Context, opts Options) error {
 		HealthFn:   healthFn(st, maint, log),
 		Stopping:   st.stopping,
 		Intake:     intakeSurface,
+		Cancel:     cancelSurface, // S15.6 / 4.5 cancel verbs (B6-2A)
+		Effects:    effects,       // S02.7 journal behind the S15.6 effect approvals
 		Accept:     acceptAccepter(acceptSurf),
 		FollowUp:   acceptFollowUp(acceptSurf),
 		Preview:    previewSurf, // held for the B6 preview endpoints (F17); not routed

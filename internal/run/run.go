@@ -55,8 +55,24 @@ const (
 // anchor; edges marked "implied" are clearly-implied readings recorded in
 // the P3-B0-4 packet report.
 var transitions = map[State][]State{
-	StateNew:    {StateQueued},  // S02.3: new→queued (admitted)
-	StateQueued: {StateClaimed}, // S02.3: queued→claimed (CAS-claimed, lease held)
+	StateNew: {StateQueued}, // S02.3: new→queued (admitted)
+	StateQueued: {
+		StateClaimed, // S02.3: queued→claimed (CAS-claimed, lease held)
+		// 4.5 ("any run can be cancelled cleanly at any time") read through the
+		// ratified cancel mapping (S02.3 has no cancelled terminal; CONVENTIONS
+		// §14 reading 9 maps running→completed and parked→finalized) extended to
+		// the one state the mapping did not reach. A queued run has done no
+		// work, so `completed` would assert an execution that never happened;
+		// finalize-with-card is exactly the never-ran story, and it needs no
+		// generation bump because nothing was ever fenced. The queue row settles
+		// in the SAME transaction, so a cancelled run can never be claimed after
+		// its own cancellation committed (P3-B6-2A, OQ1).
+		//
+		// HUMAN-ONLY: the sole caller is the S15.6 cancel verb. No automated
+		// path reaches it — the NO-AUTO-KILL invariant (S14.4 / G1 D1.3) is
+		// untouched.
+		StateFinalized,
+	},
 	StateClaimed: {
 		StateRunning, // S02.3: claimed→running (engine subprocess live)
 		StateCrashed, // implied by S02.5 step 2: a claimed run whose lease died with no unit is DEAD → "mark crashed"

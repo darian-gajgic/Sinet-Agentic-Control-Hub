@@ -11,6 +11,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 )
@@ -21,7 +22,10 @@ import (
 // pipeline's domain errors map to *api.SurfaceError statuses.
 type Surface struct{ sk *Skeleton }
 
-var _ api.IntakeSurface = (*Surface)(nil)
+var (
+	_ api.IntakeSurface = (*Surface)(nil)
+	_ api.CancelSurface = (*Surface)(nil)
+)
 
 // Surface returns the api-facing adapter.
 func (s *Skeleton) Surface() *Surface { return &Surface{sk: s} }
@@ -213,6 +217,46 @@ func (u *Surface) Advance(ctx context.Context, userID, taskID string) (json.RawM
 		return nil, err
 	}
 	return u.taskView(ctx, taskID)
+}
+
+// CancelRun implements api.CancelSurface: the ratified S02.3 cancel mapping on
+// ONE run (feature 4.5; cancel.go). The transport has already resolved owner
+// scope; actor is the authenticated person, and a cancel is only ever a human
+// act — these two methods are the mapping's only callers (NO AUTO-KILL,
+// S14.4 / G1 D1.3).
+func (u *Surface) CancelRun(ctx context.Context, actor, runID string) (json.RawMessage, error) {
+	out, err := u.sk.CancelRun(ctx, actor, runID)
+	if err != nil {
+		return nil, mapCancelErr(err)
+	}
+	return json.Marshal(out)
+}
+
+// CancelTask implements api.CancelSurface: every non-terminal run of the task
+// under the same mapping.
+func (u *Surface) CancelTask(ctx context.Context, actor, taskID string) (json.RawMessage, error) {
+	out, err := u.sk.CancelTask(ctx, actor, taskID)
+	if err != nil {
+		return nil, mapCancelErr(err)
+	}
+	return json.Marshal(out)
+}
+
+// mapCancelErr maps the cancel path's errors onto transport statuses. The
+// transient CAS window answers 409-retry: a claimed run is between the
+// scheduler's claim and the dispatcher's first transition, and racing that is
+// how a cancel would corrupt a dispatch rather than stop it.
+func mapCancelErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrCancelInFlight):
+		return surfaceErr(http.StatusConflict, "claim_in_flight", err)
+	case errors.Is(err, run.ErrNotFound), errors.Is(err, sql.ErrNoRows):
+		return surfaceErr(http.StatusNotFound, "not_found", err)
+	default:
+		return err
+	}
 }
 
 // Receipt implements api.IntakeSurface: the materialized receipt row

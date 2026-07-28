@@ -48,6 +48,24 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 	return out, nil
 }
 
+// CanonicalHash is the platform's ONE payload hash, exported so every surface
+// that has to pin content to "the bytes the human was shown for" runs the same
+// canonicalization the journal runs (Spec S02.7; Spec S15.2 "pinned to the
+// payload hash they were shown for"). The S15.6 approvals family hashes an ask
+// card's stored snapshot through this function rather than re-implementing the
+// normalization: a second implementation is a second answer to "is this the
+// same payload?", and the whole retry-safety rule rests on there being one.
+//
+// An effect's own pinned payload_hash is served VERBATIM from its journal row —
+// this function is for content the journal does not already hash.
+func CanonicalHash(raw json.RawMessage) (string, error) {
+	canonical, err := canonicalJSON(raw)
+	if err != nil {
+		return "", err
+	}
+	return hashPayload(canonical), nil
+}
+
 // hashPayload is the normalized payload hash pinned at approval and
 // re-verified before execution (Spec S02.7).
 func hashPayload(canonical []byte) string {

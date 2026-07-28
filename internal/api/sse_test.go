@@ -499,9 +499,16 @@ func TestSSEStoreRawServeRedacted(t *testing.T) {
 // This is scope ARRIVING, not a guardrail change — store-raw / serve-redacted
 // is unchanged, and SPEC/PLAN artifacts, receipts and view rows stay
 // structurally exempt (§7-C2·2) and go out unwrapped.
+// B6-2A adds the third: approvals.go serves the watchdog / drift /
+// benchmark-alarm inbox cards, whose strings are lifted out of run_events
+// payload bodies, and redacts them per string VALUE before serialization. The
+// ask snapshots and effect payloads in the same response are S06/S02 decision
+// CONTENT and stay unwrapped — the line is CONTENT vs PROJECTION, exactly as
+// the task detail draws it (§38 ruling (b)).
 var redactionEdgeFiles = map[string]string{
-	"sse.go":   "the /events frames and snapshot states (B5-2)",
-	"reads.go": "the payload-bearing REST reads (B6-1 R20)",
+	"sse.go":       "the /events frames and snapshot states (B5-2)",
+	"reads.go":     "the payload-bearing REST reads (B6-1 R20)",
+	"approvals.go": "the payload-derived inbox cards on the S15.6 approvals list (B6-2A R3)",
 }
 
 // TestRedactionObservabilityEdgeOnly proves R16/R18/invariant #2: the redaction

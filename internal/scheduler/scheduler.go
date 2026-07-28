@@ -347,6 +347,28 @@ func (s *Scheduler) materializeQueueRowTx(ctx context.Context, tx *sql.Tx, runID
 	return nil
 }
 
+// SettleQueuedTx settles a QUEUED run's queue row inside the CALLER's
+// transaction — the queue half of the S15.6 human cancel of a run that never
+// ran (4.5; P3-B6-2A OQ1). The run's queued→finalized transition and this
+// settle commit together, so the claim loop can never pick up a run whose
+// cancellation has already committed; and it is scoped to `queued` rows, so a
+// claim that won the CAS race first is left strictly alone (that run is
+// `claimed`, and the cancel verb answers 409-retry for it rather than racing
+// the dispatcher).
+//
+// It settles the QUEUE only: no receipt is materialized, because a run that
+// never ran consumed nothing and a receipt would assert a measurement that was
+// never taken (Spec S10.1). The terminal transition's own run-end machinery
+// owns everything else.
+func (s *Scheduler) SettleQueuedTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE queue SET status = ? WHERE run_id = ? AND status = ?`,
+		queueDone, runID, queueQueued); err != nil {
+		return fmt.Errorf("scheduler: settle queued row for %q: %w", runID, err)
+	}
+	return nil
+}
+
 // claimPass runs one admission pass (Spec S10.7): materialize queue rows for
 // any queued run that lacks one (recovery successors), then claim eligible
 // candidates in priority order under per-(user, lane) concurrency slots. It

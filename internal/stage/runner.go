@@ -266,7 +266,14 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		CeilingCostUSD: ceilUSD,
 		CeilingSteps:   ceilSteps,
 		OnEvent:        onEvent,
-		OnSession:      split.capture,
+		// The live session reaches two control seams: the S05.3 stage-split
+		// pause, and the S15.6 human cancel ladder (cancel.go). Registration is
+		// what makes "cancel this run NOW" reach the engine; deregistration
+		// happens when DriveStage returns, below.
+		OnSession: func(sess adapters.Session) {
+			split.capture(sess)
+			s.cancels.register(in.RunID, sess)
+		},
 	}
 	if s.cfg.CredInject != nil {
 		req.CredInject = s.cfg.CredInject(r.UserID)
@@ -281,6 +288,7 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 	s.appendStageStarted(ctx, r, in.Stage, kind, briefHash)
 
 	out, err := s.driver.DriveStage(ctx, adapter, req)
+	s.cancels.deregister(in.RunID)
 	if err != nil {
 		s.appendStageFinished(ctx, r, in.Stage, kind, briefHash, StageOutcomeError, err.Error())
 		return SessionResult{}, err

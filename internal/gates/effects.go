@@ -311,6 +311,54 @@ func (j *Journal) Fail(ctx context.Context, effectID string, result json.RawMess
 	return j.finish(ctx, effectID, EffectFailed, result)
 }
 
+// Deny settles a PROPOSED effect terminally without ever executing it — the
+// human's refusal at the S15.6 approval card (proposed→failed).
+//
+// The 0001 state CHECK is immutable and declares no `denied` state, so the
+// honest terminal for a refused proposal is the journal's own finish state
+// `failed` carrying a machine-readable denial result {denied, actor, reason}:
+// the row is terminal, it was never executed (attempts stays 0, no
+// idempotency key was ever set), and the record says in so many words that a
+// human stopped it. The rejected alternative was to leave the row `proposed`
+// and hide it from the inbox, which is an unbounded zombie contradicting the
+// journal's own lifecycle — a proposal nobody can ever see or answer again.
+//
+// The human decision itself is recorded by the caller as the S14.2 family-5
+// row (Spec S15.6); this is the journal half, and the two compose in the
+// documented order — decision first, journal act second (CONVENTIONS §16).
+func (j *Journal) Deny(ctx context.Context, effectID, actor, reason string) (Effect, error) {
+	if actor == "" {
+		return Effect{}, errors.New("gates: denial without an actor")
+	}
+	result, err := json.Marshal(struct {
+		Denied bool   `json:"denied"`
+		Actor  string `json:"actor"`
+		Reason string `json:"reason,omitempty"`
+	}{Denied: true, Actor: actor, Reason: reason})
+	if err != nil {
+		return Effect{}, fmt.Errorf("gates: marshal denial result: %w", err)
+	}
+	var e Effect
+	err = j.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		cur, err := j.getTx(ctx, tx, effectID)
+		if err != nil {
+			return err
+		}
+		if cur.State != EffectProposed {
+			return fmt.Errorf("%w: deny wants proposed, effect %q is %s", ErrBadState, effectID, cur.State)
+		}
+		now := j.now().UTC().Format(time.RFC3339Nano)
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE effects SET state = 'failed', result = ?, updated_ts = ? WHERE effect_id = ?`,
+			string(result), now, effectID); err != nil {
+			return fmt.Errorf("gates: deny effect %q: %w", effectID, err)
+		}
+		e, err = j.getTx(ctx, tx, effectID)
+		return err
+	})
+	return e, err
+}
+
 // MarkUnknown records an unknowable outcome (executing→unknown): first-class
 // terminal plus the decision-card content telling the human what to check
 // (5.6, P-T07-3).

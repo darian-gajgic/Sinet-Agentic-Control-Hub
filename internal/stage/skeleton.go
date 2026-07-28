@@ -31,6 +31,10 @@ import (
 type Admitter interface {
 	Enqueue(ctx context.Context, runID string, class scheduler.WorkloadClass) error
 	SettleRun(ctx context.Context, runID string) error
+	// SettleQueuedTx settles a queued run's queue row inside the caller's
+	// transaction — the queue half of the S15.6 cancel of a run that never ran
+	// (cancel.go, OQ1): the transition and the settle commit together.
+	SettleQueuedTx(ctx context.Context, tx *sql.Tx, runID string) error
 }
 
 // Skeleton is the walking-skeleton composition (see the package comment).
@@ -47,6 +51,10 @@ type Skeleton struct {
 	// orchestration.max_concurrent_helpers; in-process — helper sessions
 	// die with the process, and death is salvage, S04.5).
 	helpers helperCounter
+	// cancels holds the live engine sessions the S15.6 human cancel verb runs
+	// the S03.1 ladder on (cancel.go). Human-driven ONLY — no automated path
+	// touches it (NO-AUTO-KILL, S14.4 / G1 D1.3).
+	cancels *liveSessions
 }
 
 var _ scheduler.Dispatcher = (*Skeleton)(nil)
@@ -77,7 +85,7 @@ func New(cfg Config) (*Skeleton, error) {
 	if _, ok := cfg.Adapters[cfg.Substrate]; !ok {
 		return nil, fmt.Errorf("stage: configured substrate %q has no registered adapter", cfg.Substrate)
 	}
-	s := &Skeleton{cfg: cfg}
+	s := &Skeleton{cfg: cfg, cancels: newLiveSessions()}
 	s.dutyMap = cfg.DutyMap
 	if s.dutyMap == nil {
 		s.dutyMap = worker.DefaultDutyMap()
@@ -260,6 +268,15 @@ func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 // spawn-failure precedent: a dispatch leg that cannot proceed leaves a
 // classifiable corpse for the recovery ladder, never a silent zombie.
 func (s *Skeleton) crash(ctx context.Context, runID, cause string) {
+	if s.cancels.cancelRequested(runID) {
+		// The leg is unwinding BECAUSE a human cancelled it (cancel.go): the
+		// run's ending is already recorded under the ratified mapping, and a
+		// crash corpse here would tell the recovery ladder to fork the very
+		// work the person just stopped.
+		s.logger().Info("stage: dispatch leg unwound by a human cancel; no crash corpse",
+			"run", runID, "cause", cause)
+		return
+	}
 	if _, err := s.cfg.Runs.Transition(ctx, runID, run.StateCrashed, run.TransitionOptions{
 		Reason: "stage dispatch failed", Actor: run.ActorPlatform,
 		Detail: reasonDetail(cause),

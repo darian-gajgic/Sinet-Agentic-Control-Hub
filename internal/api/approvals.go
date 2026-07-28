@@ -1,0 +1,1172 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
+)
+
+// approvals.go is the S15.6 approval inbox: the ONE queue where "the platform
+// needs you" lives, and the hash-pinned answer verbs behind it.
+//
+// It PROJECTS over machinery that already exists — the B5-2..B5-7 inbox
+// derivations (projection.go), the durable `asks` rows and their stored card
+// snapshots, the S02.7 effect journal — and rebuilds none of it. Four contract
+// rules bind every route here:
+//
+//   - Retry-safety is structural (S15.2; G2 D2.1): an answer is pinned to the
+//     payload hash it was shown for. A stale hash fires nothing, a repeat
+//     returns the already-resolved state, and a conflicting answer on a
+//     resolved item is refused — so a phone retry can never double-fire.
+//   - Risk tiers decide batching and step-up (S15.6): Low batches, Medium is
+//     individual, High is never batched and re-prompts the PIN in the same
+//     request (verify-at-act, S01.9 — no elevation is ever inherited).
+//   - Owner scope is server-side and fail-closed (S01.9), 404-before-403.
+//   - Payload-DERIVED card strings redact at this serving edge (§30 R19); the
+//     ask snapshots and effect payloads are S06/S02 decision CONTENT and go
+//     out unwrapped, exactly as the task detail does (§38 ruling (b)).
+
+// The two ⚙ keys this file consumes, by dotted key (never a constant).
+const (
+	// keyApprovalExpiry is the ask/approval expiry horizon (G2 Def.2). The
+	// S18 cross-check ties the same horizon to asks ("an answerable ask never
+	// outlives its session"), so the countdown a card displays is derived from
+	// it rather than from a second number.
+	keyApprovalExpiry = "effects.approval_expiry"
+	// keyFreshnessMaxAge is the pending-staleness threshold — the ratified fold
+	// of intake.approval_stale_hours (S18.4 R2). A card pending past it flags
+	// "assumptions may be stale" with one-click re-plan (S06.9, S15.6); the
+	// flag never blocks approving.
+	keyFreshnessMaxAge = "freshness.max_age"
+)
+
+// approvalsListCap bounds the ranked inbox. Structural, not ⚙ (S18 ratifies no
+// such key — the §7 sseBatchSize precedent, interim under the standing
+// settings-tab directive), with its reason: an inbox is a queue a person works
+// through, and a page is the unit a person works. The bound changes how many
+// cards arrive at once, never which cards are eligible — and it is the same
+// number as readPageDefault because this is one read surface with one page size.
+const approvalsListCap = readPageDefault
+
+// answerBatchCap bounds one Low-tier batch (S15.6 "one action answers a
+// selected set"). Structural, with its reason: a batch is a transport
+// convenience over answers that are still applied INDIVIDUALLY, each in its own
+// transaction on the control plane's single writer connection (S02.1), so the
+// bound is what keeps one request from monopolizing the writer everything else
+// shares. It is not a semantic merge and never becomes one.
+const answerBatchCap = 100
+
+// The inbox card kinds. Each names the landed derivation it is served from;
+// internal/api imports no producer package, so these are the transport's own
+// vocabulary over projections that already exist.
+const (
+	approvalKindAsk         = "ask"               // durable asks rows (S02.2) + their stored card
+	approvalKindEffect      = "effect"            // proposed effects (S02.7 journal)
+	approvalKindWatchdog    = "watchdog_flag"     // open watchdog flags (B5-3)
+	approvalKindConformance = "conformance_card"  // RED conformance rows (B5-4)
+	approvalKindDrift       = "drift_card"        // open drift incidents (B5-6A)
+	approvalKindVerdict     = "benchmark_verdict" // pending blind-pair verdicts (B5-7)
+	approvalKindAlarm       = "benchmark_alarm"   // standing BENCH-REG §12 alarms (B5-7)
+)
+
+// The S06.4 risk tiers, as the inbox ranks and gates them (S15.6). The four
+// intake tiers fold onto three inbox tiers: `trivial` is the zero-interaction
+// band and batches with Low.
+const (
+	tierLow    = "low"
+	tierMedium = "medium"
+	tierHigh   = "high"
+)
+
+// tierRank orders the inbox: High first. A card outside the vocabulary ranks
+// with Medium — the safe direction, since Medium is individual and un-stepped.
+var tierRank = map[string]int{tierHigh: 0, tierMedium: 1, tierLow: 2}
+
+// EffectApprovals is the D10 co-approval state of a proposed effect, DERIVED
+// from the decision.recorded rows rather than stored: the single `approved_by`
+// column records only the FINAL approver, so who else has already said yes has
+// to come from the log (S15.6 "both approver states visible on the card").
+type EffectApprovals struct {
+	// PlatformLevel marks an effect that needs the operator's co-approval as
+	// well as its owner's (S15.6; D10).
+	PlatformLevel      bool   `json:"platform_level"`
+	OwnerApproved      bool   `json:"owner_approved"`
+	OperatorApproved   bool   `json:"operator_approved"`
+	OwnerApprovedBy    string `json:"owner_approved_by,omitempty"`
+	OperatorApprovedBy string `json:"operator_approved_by,omitempty"`
+}
+
+// ApprovalItem is one inbox card, ranked by risk and carrying everything an
+// answer needs: the pin it must quote back, its expiry data, its staleness, its
+// action vocabulary, and the card content itself.
+//
+// There is no percent, fraction, ratio or ETA field here and none may be added
+// (§30 R12).
+type ApprovalItem struct {
+	// ID is the routable id the answer verb takes: "<kind>:<native id>".
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Owner string `json:"owner"`
+	RunID string `json:"run_id,omitempty"`
+	Tier  string `json:"tier"`
+
+	// Answerable is false for the kinds whose verbs are not this packet's; the
+	// reason names where the verb lives rather than pretending the card is inert.
+	Answerable          bool   `json:"answerable"`
+	NotAnswerableReason string `json:"not_answerable_reason,omitempty"`
+	// Batchable is Low-tier only (S15.6): Medium and High are individual.
+	Batchable bool `json:"batchable"`
+	// StepUpRequired demands the actor's PIN in the same request (S01.9
+	// verify-at-act; High tier).
+	StepUpRequired bool `json:"step_up_required"`
+
+	// PayloadHash is the pin an answer must quote back (S15.2). For an ask it
+	// is the canonical hash of the stored card; for an effect it is the
+	// journal's OWN pinned hash, served verbatim.
+	PayloadHash string    `json:"payload_hash,omitempty"`
+	ObservedTS  time.Time `json:"observed_ts"`
+	// ExpiryAt is the countdown a card displays: observed + ⚙
+	// effects.approval_expiry. EngineExpiryTS is the engine's own deadline
+	// where the ask carries one, served verbatim beside it.
+	ExpiryAt       *time.Time `json:"expiry_at,omitempty"`
+	EngineExpiryTS string     `json:"engine_expiry_ts,omitempty"`
+	// Stale is DERIVED AT READ — pending age past ⚙ freshness.max_age, OR'd
+	// with the flag the card itself already carries. No sweep, no ticker.
+	Stale        bool     `json:"stale"`
+	StaleReasons []string `json:"stale_reasons,omitempty"`
+
+	// Actions is the card's OWN action vocabulary, verbatim. No verb is
+	// invented here: S15.2's family-level "approve / deny / answer / re-plan"
+	// is what these map into.
+	Actions   []string         `json:"actions,omitempty"`
+	Approvals *EffectApprovals `json:"approvals,omitempty"`
+
+	// Card is the card content: the stored ask snapshot (the S06.9 Layer-1 /
+	// Layer-2 bodies including the 13.5 help block), the effect payload, or the
+	// landed projection row of the other five kinds.
+	Card json.RawMessage `json:"card,omitempty"`
+}
+
+// ApprovalList is the ranked inbox with its S15.3 tail cursor.
+type ApprovalList struct {
+	Items     []ApprovalItem `json:"items"`
+	Cursor    int64          `json:"cursor"`
+	Truncated bool           `json:"truncated"`
+}
+
+// ── GET /api/approvals ──────────────────────────────────────────────────────
+
+func (s *Server) handleApprovalList(w http.ResponseWriter, r *http.Request) {
+	if !s.projReady(w) {
+		return
+	}
+	scope := s.readScope(r)
+	expiry, stale, err := s.approvalHorizons()
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	cursor, err := s.head(r.Context())
+	if err != nil {
+		s.writeSurface(w, nil, fmt.Errorf("read head cursor: %w", err))
+		return
+	}
+	snap, err := s.proj.inbox(r.Context(), scope)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	items, err := s.proj.approvalItems(r.Context(), snap, expiry, stale)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	// Risk-ranked (S15.6 "cards arrive ranked by risk"), then oldest-first
+	// inside a tier so the queue drains in the order it filled.
+	sort.SliceStable(items, func(i, j int) bool {
+		ri, rj := tierRank[items[i].Tier], tierRank[items[j].Tier]
+		if ri != rj {
+			return ri < rj
+		}
+		if !items[i].ObservedTS.Equal(items[j].ObservedTS) {
+			return items[i].ObservedTS.Before(items[j].ObservedTS)
+		}
+		return items[i].ID < items[j].ID
+	})
+	out := ApprovalList{Items: items, Cursor: cursor}
+	if len(out.Items) > approvalsListCap {
+		out.Items, out.Truncated = out.Items[:approvalsListCap], true
+	}
+	// The response is NOT wrapped as a whole: ask snapshots and effect payloads
+	// are S06/S02 decision CONTENT, structurally exempt from the observability
+	// primitive (§7-C2·2, §38 ruling (b)) — an approval card is what the person
+	// is deciding about, not a projection of a trace. The cards that ARE lifted
+	// out of run_events payload bodies redact per string VALUE first (R3).
+	s.writeReadJSON(w, out)
+}
+
+// approvalHorizons reads the two ⚙ horizons this surface serves. Both keys are
+// declared (S18), so a read failure is a composition defect, not a runtime
+// condition: it fails loudly rather than serving a card with an invented
+// countdown.
+func (s *Server) approvalHorizons() (expiry, stale time.Duration, err error) {
+	if s.settings == nil {
+		return 0, 0, errors.New("api: no settings registry wired: the approval inbox serves expiry and staleness from ⚙ and will not invent them")
+	}
+	if expiry, err = s.settings.Duration(keyApprovalExpiry); err != nil {
+		return 0, 0, fmt.Errorf("read ⚙ %s: %w", keyApprovalExpiry, err)
+	}
+	if stale, err = s.settings.Duration(keyFreshnessMaxAge); err != nil {
+		return 0, 0, fmt.Errorf("read ⚙ %s: %w", keyFreshnessMaxAge, err)
+	}
+	return expiry, stale, nil
+}
+
+// approvalItems folds the seven landed inbox derivations into the one ranked
+// list, enriching the two ANSWERABLE kinds with their pin, expiry and tier.
+// The five oversight kinds are carried verbatim from their projections — their
+// verbs are later packets, and the card says so rather than going missing.
+func (p *projector) approvalItems(ctx context.Context, snap InboxSnapshot, expiry, stale time.Duration) ([]ApprovalItem, error) {
+	now := p.clock()
+	out := []ApprovalItem{}
+
+	asks, err := p.askCards(ctx, snap.Asks)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range asks {
+		it := ApprovalItem{
+			ID: approvalKindAsk + ":" + a.AskID, Kind: approvalKindAsk, Owner: a.Owner,
+			RunID: a.RunID, Tier: a.Tier, Answerable: true,
+			PayloadHash: a.Hash, ObservedTS: a.ObservedTS,
+			EngineExpiryTS: a.EngineExpiryTS, Actions: a.Actions, Card: a.Snapshot,
+		}
+		applyTierRules(&it)
+		applyExpiryAndStaleness(&it, expiry, stale, now, a.StoredStale, a.StoredStaleReasons)
+		out = append(out, it)
+	}
+
+	effects, err := p.effectCards(ctx, snap.Approvals)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range effects {
+		it := ApprovalItem{
+			ID: approvalKindEffect + ":" + e.EffectID, Kind: approvalKindEffect, Owner: e.Owner,
+			RunID: e.RunID,
+			// Every S02.7 effect approval is High by definition (S15.6: outward
+			// or irreversible). The tier is not read off the row because an
+			// effect that could downgrade itself out of the PIN re-prompt is
+			// exactly the hole the tier exists to close.
+			Tier: tierHigh, Answerable: true,
+			PayloadHash: e.PayloadHash, ObservedTS: e.CreatedTS,
+			Actions: []string{effectActionApprove, effectActionDeny},
+			Card:    e.Payload,
+		}
+		appr, aerr := p.effectApprovals(ctx, e)
+		if aerr != nil {
+			return nil, aerr
+		}
+		it.Approvals = &appr
+		applyTierRules(&it)
+		applyExpiryAndStaleness(&it, expiry, stale, now, false, nil)
+		out = append(out, it)
+	}
+
+	// The five oversight kinds. Their verbs (suppress / resume / dismiss /
+	// acknowledge / verdict / alarm disposition) are the LATER B6-2 parts; the
+	// cards are listed now because an inbox that hides what it cannot yet
+	// answer is worse than one that says where the answer lives.
+	for _, f := range snap.WatchdogFlags {
+		out = append(out, oversightItem(approvalKindWatchdog, f.RunID+"\x1f"+f.AnomalyClass, f.Owner, f.RunID,
+			severityTier(f.Severity), f.FlaggedTS,
+			"the watchdog suppress verb is B6-2B (S14.4)", redactWatchdogFlag(f)))
+	}
+	for _, c := range snap.ConformanceCards {
+		tier := tierMedium
+		if c.FlagNow {
+			tier = tierHigh
+		}
+		out = append(out, oversightItem(approvalKindConformance, c.RowID, platformOwner, "",
+			tier, c.LastRunTS, "the conformance acknowledge verb is B6-2B (S14.5)", c))
+	}
+	for _, d := range snap.DriftCards {
+		out = append(out, oversightItem(approvalKindDrift, d.Fingerprint, platformOwner, "",
+			severityTier(d.Severity), d.FirstTS,
+			"the drift-card dismiss verb is B6-2B (S14.6)", redactDriftCard(d)))
+	}
+	for _, v := range snap.BenchmarkVerdicts {
+		out = append(out, oversightItem(approvalKindVerdict, v.PairID, v.Owner, "",
+			// A blind-pair verdict is the requester's own judgement call: never
+			// batched (the mandatory arm-guess is per pair and structural,
+			// BENCH-REG §3.3) and never step-up (it releases nothing outward).
+			tierMedium, v.SampledTS,
+			"the blind-pair verdict backend is B6-2C (BENCH-REG §3.3 — the guess is structural)", v))
+	}
+	for _, a := range snap.BenchmarkAlarms {
+		out = append(out, oversightItem(approvalKindAlarm, a.Domain+"#"+a.EpochID, platformOwner, "",
+			tierHigh, a.RaisedTS,
+			"the alarm disposition verb is B6-2C (BENCH-REG §12, operator-only)", redactBenchmarkAlarm(a)))
+	}
+	return out, nil
+}
+
+// platformOwner is the reserved platform-scope owner id (S02.2 15.6): the
+// operator-only oversight kinds are attributed to it, exactly as their
+// projections are scoped.
+const platformOwner = "platform"
+
+// severityTier maps the S14.4 alert-routing class onto the inbox ranking. It
+// is a RANKING, not a re-derivation: the severity is carried from the producer
+// that computed it (§34 "severity derived never judged").
+func severityTier(severity string) string {
+	if severity == "flag-now" {
+		return tierHigh
+	}
+	return tierMedium
+}
+
+func oversightItem(kind, nativeID, owner, runID, tier string, ts time.Time, why string, card any) ApprovalItem {
+	raw, err := json.Marshal(card)
+	if err != nil {
+		raw = nil
+	}
+	return ApprovalItem{
+		ID: kind + ":" + nativeID, Kind: kind, Owner: owner, RunID: runID, Tier: tier,
+		Answerable: false, NotAnswerableReason: why, ObservedTS: ts, Card: raw,
+	}
+}
+
+// applyTierRules is the ONE place the S15.6 tier semantics are expressed:
+// Low batches, Medium is individual, High is never batched and always steps up.
+func applyTierRules(it *ApprovalItem) {
+	it.Batchable = it.Answerable && it.Tier == tierLow
+	it.StepUpRequired = it.Answerable && it.Tier == tierHigh
+}
+
+// applyExpiryAndStaleness derives the countdown and the staleness flag AT READ.
+// Nothing sweeps and nothing ticks: the flag is a function of the row's own
+// observed time and the ⚙ horizon, so it is correct the instant it is read and
+// cannot go stale in a side store (S14.1 derive-from-log).
+func applyExpiryAndStaleness(it *ApprovalItem, expiry, stale time.Duration, now time.Time, storedStale bool, storedReasons []string) {
+	if !it.ObservedTS.IsZero() && expiry > 0 {
+		at := it.ObservedTS.Add(expiry)
+		it.ExpiryAt = &at
+	}
+	it.StaleReasons = append([]string{}, storedReasons...)
+	it.Stale = storedStale
+	if !it.ObservedTS.IsZero() && stale > 0 && now.Sub(it.ObservedTS) > stale {
+		it.Stale = true
+		it.StaleReasons = append(it.StaleReasons,
+			fmt.Sprintf("pending longer than ⚙ %s — assumptions may be stale; re-plan is one click (S06.9)", keyFreshnessMaxAge))
+	}
+	if len(it.StaleReasons) == 0 {
+		it.StaleReasons = nil
+	}
+}
+
+// ── the two answerable kinds, enriched ──────────────────────────────────────
+
+// askCard is one open ask with the content an answer needs.
+type askCard struct {
+	AskID              string
+	RunID              string
+	Owner              string
+	Tier               string
+	Hash               string
+	ObservedTS         time.Time
+	EngineExpiryTS     string
+	Actions            []string
+	Snapshot           json.RawMessage
+	StoredStale        bool
+	StoredStaleReasons []string
+}
+
+// cardShape is the slice of a stored ask snapshot the inbox reads: the risk
+// tier and the action vocabulary the card itself declares. Everything else in
+// the snapshot is served through verbatim — the 13.5 help block included,
+// which is precisely why the whole snapshot travels rather than a summary.
+type cardShape struct {
+	Kind     string `json:"kind"`
+	Tier     string `json:"tier"`
+	Approval *struct {
+		Actions      []string `json:"actions"`
+		StaleFlag    bool     `json:"stale_flag"`
+		StaleReasons []string `json:"stale_reasons"`
+	} `json:"approval"`
+	Delta *struct {
+		Origin string `json:"origin"`
+	} `json:"delta"`
+	Decision *struct {
+		Choices []struct {
+			ID string `json:"id"`
+		} `json:"choices"`
+	} `json:"decision"`
+	// Verify cards (S07.7) declare their three verbs under `verbs`.
+	Verbs []string `json:"verbs"`
+}
+
+// askCards reads the stored snapshot of each listed ask and derives its pin,
+// tier and action vocabulary. The projection deliberately does NOT carry the
+// snapshot (it is the resume input, not a stream summary field, §30), so the
+// inbox reads it here — an extension of the landed derivation, not a second one.
+func (p *projector) askCards(ctx context.Context, asks []InboxAsk) ([]askCard, error) {
+	out := make([]askCard, 0, len(asks))
+	for _, a := range asks {
+		var (
+			c            askCard
+			snapshot     string
+			owner        string
+			engineExpiry sql.NullString
+		)
+		err := p.db.QueryRowContext(ctx,
+			`SELECT user_id, snapshot, engine_expiry_ts FROM asks WHERE ask_id = ?`, a.AskID).
+			Scan(&owner, &snapshot, &engineExpiry)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // answered between the projection and this read: it is no longer open
+		}
+		if err != nil {
+			return nil, fmt.Errorf("projection: ask card %q: %w", a.AskID, err)
+		}
+		c.AskID, c.RunID, c.Owner, c.ObservedTS = a.AskID, a.RunID, owner, a.ObservedTS
+		c.Snapshot = json.RawMessage(snapshot)
+		c.EngineExpiryTS = engineExpiry.String
+		if c.Hash, err = gates.CanonicalHash(c.Snapshot); err != nil {
+			return nil, fmt.Errorf("projection: pin ask %q: %w", a.AskID, err)
+		}
+		c.Tier, c.Actions, c.StoredStale, c.StoredStaleReasons = readCardShape(c.Snapshot)
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// readCardShape derives the inbox-relevant facts from a stored card.
+//
+// A card that declares NO tier reads as Medium: the untiered cards at v0 are
+// the S07.7 verify escalations and the S13.7 onboarding approval, which are
+// answered individually by their owner and release nothing outward (§16 — the
+// effects gate is untouched by a verify decision). Medium is therefore both
+// correct for them and the safe default: it never batches an unclassified card
+// and never demands a step-up the landed answer path does not demand.
+func readCardShape(snapshot json.RawMessage) (tier string, actions []string, stale bool, reasons []string) {
+	var c cardShape
+	if err := json.Unmarshal(snapshot, &c); err != nil {
+		return tierMedium, nil, false, nil
+	}
+	switch c.Tier {
+	case "high":
+		tier = tierHigh
+	case "low", "trivial": // trivial is the zero-interaction band (S06.4)
+		tier = tierLow
+	case "standard":
+		tier = tierMedium
+	default:
+		tier = tierMedium
+	}
+	switch {
+	case c.Approval != nil:
+		actions, stale, reasons = c.Approval.Actions, c.Approval.StaleFlag, c.Approval.StaleReasons
+	case len(c.Verbs) > 0:
+		actions = c.Verbs
+	case c.Decision != nil:
+		for _, ch := range c.Decision.Choices {
+			actions = append(actions, ch.ID)
+		}
+	}
+	return tier, actions, stale, reasons
+}
+
+// effectCard is one proposed effect with its journal-pinned hash.
+type effectCard struct {
+	EffectID    string
+	RunID       string
+	Owner       string
+	Class       string
+	PayloadHash string
+	Payload     json.RawMessage
+	CreatedTS   time.Time
+	// PlatformLevel: the effect is attributed to no run.
+	//
+	// The reading, with its reason: every run belongs to one person's task, so
+	// a run-attributed effect is that person's own outward act and its owner is
+	// the whole decision (D10). An effect with no run attribution is not
+	// anybody's task — it is the platform acting on shared ground, which is
+	// exactly what S15.6 means by "platform-level" and what D10 gives the
+	// operator a co-approval over. It is derived from data the journal already
+	// stores; the alternative (a new payload field producers would have to set)
+	// would have invented a contract no landed producer speaks.
+	PlatformLevel bool
+}
+
+func (p *projector) effectCards(ctx context.Context, approvals []InboxApproval) ([]effectCard, error) {
+	out := make([]effectCard, 0, len(approvals))
+	for _, a := range approvals {
+		c, found, err := p.effectCard(ctx, a.EffectID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (p *projector) effectCard(ctx context.Context, effectID string) (effectCard, bool, error) {
+	var (
+		c       effectCard
+		runID   sql.NullString
+		payload string
+		created string
+		state   string
+	)
+	err := p.db.QueryRowContext(ctx,
+		`SELECT effect_id, run_id, user_id, class, payload, payload_hash, state, created_ts
+		   FROM effects WHERE effect_id = ?`, effectID).
+		Scan(&c.EffectID, &runID, &c.Owner, &c.Class, &payload, &c.PayloadHash, &state, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return effectCard{}, false, nil
+	}
+	if err != nil {
+		return effectCard{}, false, fmt.Errorf("projection: effect card %q: %w", effectID, err)
+	}
+	c.RunID, c.Payload, c.CreatedTS = runID.String, json.RawMessage(payload), parseTS(created)
+	c.PlatformLevel = !runID.Valid || runID.String == ""
+	return c, true, nil
+}
+
+// effectApprovals derives the D10 co-approval state from the decision.recorded
+// rows for the effect. Derive-from-log, no side store: the effects row records
+// only the FINAL approver, and "who has already said yes" is a question about
+// the decision record.
+func (p *projector) effectApprovals(ctx context.Context, e effectCard) (EffectApprovals, error) {
+	appr := EffectApprovals{PlatformLevel: e.PlatformLevel}
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT payload FROM run_events WHERE type = ? ORDER BY event_seq`, EventDecisionRecorded)
+	if err != nil {
+		return appr, fmt.Errorf("projection: effect approvals %q: %w", e.EffectID, err)
+	}
+	defer rows.Close()
+	cardID := approvalKindEffect + ":" + e.EffectID
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return appr, err
+		}
+		var d decisionPayload
+		if err := json.Unmarshal([]byte(payload), &d); err != nil {
+			continue // a non-conformant payload never breaks the inbox (S14.2 rule 3)
+		}
+		if d.CardID != cardID || d.Decision != effectActionApprove {
+			continue
+		}
+		if d.Actor == e.Owner {
+			appr.OwnerApproved, appr.OwnerApprovedBy = true, d.Actor
+		}
+		if d.ActorIsOperator {
+			appr.OperatorApproved, appr.OperatorApprovedBy = true, d.Actor
+		}
+	}
+	return appr, rows.Err()
+}
+
+// ── the payload-derived cards, redacted per VALUE at this edge (R3) ─────────
+
+func redactWatchdogFlag(f InboxWatchdogFlag) InboxWatchdogFlag {
+	f.Rule, f.AnomalyClass = redact.Redact(f.Rule), redact.Redact(f.AnomalyClass)
+	f.Severity, f.Detail = redact.Redact(f.Severity), redact.Redact(f.Detail)
+	return f
+}
+
+func redactDriftCard(d InboxDriftCard) InboxDriftCard {
+	d.Source, d.ChangeClass = redact.Redact(d.Source), redact.Redact(d.ChangeClass)
+	d.Severity, d.Summary = redact.Redact(d.Severity), redact.Redact(d.Summary)
+	d.RevalidationNote = redact.Redact(d.RevalidationNote)
+	lanes := make([]string, len(d.Lanes))
+	for i, l := range d.Lanes {
+		lanes[i] = redact.Redact(l)
+	}
+	d.Lanes = lanes
+	return d
+}
+
+func redactBenchmarkAlarm(a InboxBenchmarkAlarm) InboxBenchmarkAlarm {
+	a.Severity, a.Summary = redact.Redact(a.Severity), redact.Redact(a.Summary)
+	a.Domain, a.EpochID = redact.Redact(a.Domain), redact.Redact(a.EpochID)
+	return a
+}
+
+// ── the answer verbs ────────────────────────────────────────────────────────
+
+// The effect action vocabulary (S15.2 family-level "approve / deny").
+const (
+	effectActionApprove = "approve"
+	effectActionDeny    = "deny"
+)
+
+// approvalAnswerBody is the one answer envelope (S15.2): the pin the card was
+// shown for, the optional same-request PIN (S01.9 step-up), and the answer in
+// the card's own vocabulary.
+type approvalAnswerBody struct {
+	PayloadHash string          `json:"payload_hash"`
+	PIN         string          `json:"pin,omitempty"`
+	Answer      json.RawMessage `json:"answer"`
+}
+
+// ApprovalAnswerResult is one applied (or already-resolved) answer.
+type ApprovalAnswerResult struct {
+	ID string `json:"id"`
+	// Applied is false on a repeat: the item was already resolved and this
+	// request changed nothing.
+	Applied bool `json:"applied"`
+	// State is the item's state after the call — the already-resolved state on
+	// a repeat, which is exactly what makes a phone retry safe.
+	State  string          `json:"state"`
+	Result json.RawMessage `json:"result,omitempty"`
+	// Approvals carries the D10 co-approval state back when an effect still
+	// needs another signature.
+	Approvals *EffectApprovals `json:"approvals,omitempty"`
+	Detail    string           `json:"detail,omitempty"`
+}
+
+// errStalePayload is the (a) limb of the retry-safety rule: the card moved
+// under the answerer. Nothing fires and the fresh card comes back with it.
+type staleAnswerError struct {
+	item ApprovalItem
+}
+
+func (e *staleAnswerError) Error() string {
+	return "the card changed since it was shown: re-read it and answer the current card (S15.2 payload-hash pin)"
+}
+
+func (s *Server) handleApprovalAnswer(w http.ResponseWriter, r *http.Request) {
+	if !s.projReady(w) {
+		return
+	}
+	raw, ok := s.readBody(w, r)
+	if !ok {
+		return
+	}
+	var body approvalAnswerBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_body", Msg: err.Error()})
+		return
+	}
+	id, _ := IdentityFrom(r.Context())
+	res, err := s.applyApprovalAnswer(r.Context(), id, s.readScope(r), r.PathValue("id"), body, false)
+	if err != nil {
+		s.writeApprovalErr(w, err)
+		return
+	}
+	s.writeReadJSON(w, res)
+}
+
+// ApprovalBatchItem is one member of a Low-tier batch: individually pinned,
+// individually answered.
+type ApprovalBatchItem struct {
+	ID          string          `json:"id"`
+	PayloadHash string          `json:"payload_hash"`
+	Answer      json.RawMessage `json:"answer"`
+}
+
+// ApprovalBatchOutcome is one member's own outcome. A batch is a transport
+// convenience, never a semantic merge — so every item carries its own status
+// and a refusal of one leaves the rest untouched.
+type ApprovalBatchOutcome struct {
+	ID     string                `json:"id"`
+	Status int                   `json:"status"`
+	Code   string                `json:"code,omitempty"`
+	Detail string                `json:"detail,omitempty"`
+	Result *ApprovalAnswerResult `json:"result,omitempty"`
+}
+
+// ApprovalBatchResult is the batch response: one outcome per item, in the order
+// submitted, plus the cursor a client tails the resulting events from.
+type ApprovalBatchResult struct {
+	Outcomes []ApprovalBatchOutcome `json:"outcomes"`
+	Cursor   int64                  `json:"cursor"`
+}
+
+func (s *Server) handleApprovalAnswerBatch(w http.ResponseWriter, r *http.Request) {
+	if !s.projReady(w) {
+		return
+	}
+	raw, ok := s.readBody(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Items []ApprovalBatchItem `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_body", Msg: err.Error()})
+		return
+	}
+	switch {
+	case len(body.Items) == 0:
+		s.writeSurface(w, nil, badRequest(`missing "items": a batch answers a selected set (S15.6)`))
+		return
+	case len(body.Items) > answerBatchCap:
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf("batch of %d exceeds the %d-item bound", len(body.Items), answerBatchCap)))
+		return
+	}
+	id, _ := IdentityFrom(r.Context())
+	scope := s.readScope(r)
+	out := ApprovalBatchResult{Outcomes: make([]ApprovalBatchOutcome, 0, len(body.Items))}
+	for _, item := range body.Items {
+		oc := ApprovalBatchOutcome{ID: item.ID, Status: http.StatusOK}
+		res, err := s.applyApprovalAnswer(r.Context(), id, scope,
+			item.ID, approvalAnswerBody{PayloadHash: item.PayloadHash, Answer: item.Answer}, true)
+		if err != nil {
+			se := s.approvalSurfaceErr(err)
+			oc.Status, oc.Code, oc.Detail = se.Status, se.Code, se.Msg
+		} else {
+			oc.Result = &res
+		}
+		out.Outcomes = append(out.Outcomes, oc)
+	}
+	cursor, err := s.head(r.Context())
+	if err != nil {
+		s.writeSurface(w, nil, fmt.Errorf("read head cursor: %w", err))
+		return
+	}
+	out.Cursor = cursor
+	s.writeReadJSON(w, out)
+}
+
+// applyApprovalAnswer is the ONE application path — the single verb the direct
+// route and every batch member run through, so the hash check, the scope check
+// and the tier gate cannot diverge between them.
+func (s *Server) applyApprovalAnswer(ctx context.Context, id Identity, scope ownerScope, routeID string, body approvalAnswerBody, batched bool) (ApprovalAnswerResult, error) {
+	kind, native, ok := strings.Cut(routeID, ":")
+	if !ok || native == "" {
+		return ApprovalAnswerResult{}, badRequest(fmt.Sprintf("bad approval id %q: want %q or %q",
+			routeID, approvalKindAsk+":<ask id>", approvalKindEffect+":<effect id>"))
+	}
+	expiry, stale, err := s.approvalHorizons()
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+
+	switch kind {
+	case approvalKindAsk:
+		return s.answerAsk(ctx, id, scope, native, body, batched, expiry, stale)
+	case approvalKindEffect:
+		return s.answerEffect(ctx, id, scope, native, body, batched)
+	}
+	return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusBadRequest, Code: "not_answerable",
+		Msg: fmt.Sprintf("cards of kind %q are not answered through this verb; the inbox item names where its verb lives", kind)}
+}
+
+// answerAsk applies an answer to a durable ask. The routing spine is the LANDED
+// one: Surface.Answer owns onboard / verify / intake semantics and this verb
+// invents no ask vocabulary — it adds the pin, the tier gate and the scope.
+func (s *Server) answerAsk(ctx context.Context, id Identity, scope ownerScope, askID string, body approvalAnswerBody, batched bool, expiry, stale time.Duration) (ApprovalAnswerResult, error) {
+	var (
+		owner, status, snapshot string
+		answeredTS, answer      sql.NullString
+		observed                string
+	)
+	err := s.proj.db.QueryRowContext(ctx,
+		`SELECT user_id, status, snapshot, observed_ts, answered_ts, answer FROM asks WHERE ask_id = ?`, askID).
+		Scan(&owner, &status, &snapshot, &observed, &answeredTS, &answer)
+	found := !errors.Is(err, sql.ErrNoRows)
+	if err != nil && found {
+		return ApprovalAnswerResult{}, fmt.Errorf("read ask %q: %w", askID, err)
+	}
+	// D10: the ask's OWNER answers. The role bit decides VISIBILITY, never
+	// authorship of somebody else's decision — so the operator reading another
+	// person's card still cannot answer it, which is what the landed pipeline
+	// already enforces and what this transport must not undercut.
+	if code, cerr := authorizeOwner(ownerScope{UserID: scope.UserID}, owner, found, "approval"); cerr != nil {
+		return ApprovalAnswerResult{}, &SurfaceError{Status: code, Code: httpCode(code), Msg: cerr.Error()}
+	}
+	routeID := approvalKindAsk + ":" + askID
+
+	// (b) repeat / (c) conflict: an already-resolved item never re-applies.
+	if answeredTS.Valid && answeredTS.String != "" {
+		return resolvedAnswer(routeID, status, json.RawMessage(answer.String), body.Answer)
+	}
+
+	tier, actions, storedStale, storedReasons := readCardShape(json.RawMessage(snapshot))
+	hash, err := gates.CanonicalHash(json.RawMessage(snapshot))
+	if err != nil {
+		return ApprovalAnswerResult{}, fmt.Errorf("pin ask %q: %w", askID, err)
+	}
+	item := ApprovalItem{
+		ID: routeID, Kind: approvalKindAsk, Owner: owner, Tier: tier, Answerable: true,
+		PayloadHash: hash, ObservedTS: parseTS(observed), Actions: actions,
+		Card: json.RawMessage(snapshot),
+	}
+	applyTierRules(&item)
+	applyExpiryAndStaleness(&item, expiry, stale, s.proj.clock(), storedStale, storedReasons)
+	if err := checkPin(item, body.PayloadHash); err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	if err := checkBatchable(item, batched); err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	pinVerified, err := s.stepUp(ctx, id, item, body.PIN)
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	if s.intake == nil {
+		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
+			Msg: "the pipeline surface that owns ask answers is not wired in this process"}
+	}
+	if len(body.Answer) == 0 {
+		return ApprovalAnswerResult{}, badRequest(`missing "answer" object`)
+	}
+	payload, err := s.intake.Answer(ctx, scope.UserID, askID, body.Answer, pinVerified)
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	// No decision.recorded here: an answered ask already mints its own canonical
+	// audit row (the intake pipeline's intake.state / intake.delta_decision, the
+	// S07.7 verify events, the ledger's human-decision entry). Minting a second
+	// row would make one decision look like two (OQ8).
+	return ApprovalAnswerResult{ID: routeID, Applied: true, State: "answered", Result: payload}, nil
+}
+
+// answerEffect applies approve/deny to a proposed effect through the S02.7
+// journal. Nothing executes here — approval and execution stay different
+// recorded facts, and execution is still the journal's own two-phase path (D7).
+func (s *Server) answerEffect(ctx context.Context, id Identity, scope ownerScope, effectID string, body approvalAnswerBody, batched bool) (ApprovalAnswerResult, error) {
+	if s.effects == nil {
+		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
+			Msg: "the S02.7 effect journal is not wired in this process"}
+	}
+	card, found, err := s.proj.effectCard(ctx, effectID)
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	routeID := approvalKindEffect + ":" + effectID
+	// Scope: the owner always; the operator additionally on a platform-level
+	// effect, which is precisely the co-approval D10 gives them.
+	visible := ownerScope{UserID: scope.UserID, Operator: scope.Operator && card.PlatformLevel}
+	if code, cerr := authorizeOwner(visible, card.Owner, found, "approval"); cerr != nil {
+		return ApprovalAnswerResult{}, &SurfaceError{Status: code, Code: httpCode(code), Msg: cerr.Error()}
+	}
+
+	var act struct {
+		Action string `json:"action"`
+		Reason string `json:"reason"`
+	}
+	if len(body.Answer) > 0 {
+		if err := json.Unmarshal(body.Answer, &act); err != nil {
+			return ApprovalAnswerResult{}, badRequest("bad answer object: " + err.Error())
+		}
+	}
+	if act.Action != effectActionApprove && act.Action != effectActionDeny {
+		return ApprovalAnswerResult{}, badRequest(fmt.Sprintf(`bad answer action %q: an effect card takes %q or %q`,
+			act.Action, effectActionApprove, effectActionDeny))
+	}
+
+	state, err := s.effectState(ctx, effectID)
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	if state != string(gates.EffectProposed) {
+		return resolvedEffect(routeID, state, act.Action)
+	}
+
+	item := ApprovalItem{
+		ID: routeID, Kind: approvalKindEffect, Owner: card.Owner, Tier: tierHigh, Answerable: true,
+		PayloadHash: card.PayloadHash, ObservedTS: card.CreatedTS, Card: card.Payload,
+	}
+	applyTierRules(&item)
+	if err := checkPin(item, body.PayloadHash); err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	if err := checkBatchable(item, batched); err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	if _, err := s.stepUp(ctx, id, item, body.PIN); err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+
+	appr, err := s.proj.effectApprovals(ctx, card)
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	actorIsOperator := scope.Operator
+	alreadyRecorded := (scope.UserID == card.Owner && appr.OwnerApproved) ||
+		(actorIsOperator && appr.OperatorApproved)
+	if act.Action == effectActionApprove && !alreadyRecorded {
+		if err := s.recordDecision(ctx, decisionPayload{
+			Actor: scope.UserID, ActorIsOperator: actorIsOperator,
+			CardID: routeID, CardType: approvalKindEffect, Decision: effectActionApprove,
+			Subject: card.RunID, Reason: act.Reason,
+			Ref: "S15.6 approval inbox; S02.7 effect journal",
+		}, card.Owner, card.CreatedTS); err != nil {
+			return ApprovalAnswerResult{}, err
+		}
+		if scope.UserID == card.Owner {
+			appr.OwnerApproved, appr.OwnerApprovedBy = true, scope.UserID
+		}
+		if actorIsOperator {
+			appr.OperatorApproved, appr.OperatorApprovedBy = true, scope.UserID
+		}
+	}
+
+	if act.Action == effectActionDeny {
+		// Either party may stop a proposal: a co-approval is a conjunction, so
+		// one refusal ends it. The decision records first, then the journal
+		// act (CONVENTIONS §16 ordering).
+		if err := s.recordDecision(ctx, decisionPayload{
+			Actor: scope.UserID, ActorIsOperator: actorIsOperator,
+			CardID: routeID, CardType: approvalKindEffect, Decision: effectActionDeny,
+			Subject: card.RunID, Reason: act.Reason,
+			Ref: "S15.6 approval inbox; S02.7 effect journal",
+		}, card.Owner, card.CreatedTS); err != nil {
+			return ApprovalAnswerResult{}, err
+		}
+		e, derr := s.effects.Deny(ctx, effectID, scope.UserID, act.Reason)
+		if derr != nil {
+			return ApprovalAnswerResult{}, derr
+		}
+		return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(e.State), Result: e.Result,
+			Detail: "denied: the effect is terminal and was never executed (S02.7)"}, nil
+	}
+
+	if !appr.OwnerApproved || (appr.PlatformLevel && !appr.OperatorApproved) {
+		return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(gates.EffectProposed),
+			Approvals: &appr,
+			Detail:    "recorded: a platform-level effect needs both the owner's and the operator's approval before it is approved (S15.6; D10)"}, nil
+	}
+	e, err := s.effects.Approve(ctx, effectID, scope.UserID)
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(e.State), Approvals: &appr,
+		Detail: "approved: execution is still the journal's two-phase path, never this verb (D7)"}, nil
+}
+
+func (s *Server) effectState(ctx context.Context, effectID string) (string, error) {
+	var state string
+	err := s.proj.db.QueryRowContext(ctx, `SELECT state FROM effects WHERE effect_id = ?`, effectID).Scan(&state)
+	if err != nil {
+		return "", fmt.Errorf("read effect %q: %w", effectID, err)
+	}
+	return state, nil
+}
+
+// checkPin is the (a) limb: an OPEN item whose current canonical hash differs
+// from the one the answerer quoted is rejected and nothing fires. The check
+// happens in ONE place, before any verb dispatch.
+func checkPin(item ApprovalItem, given string) error {
+	if strings.TrimSpace(given) == "" {
+		return badRequest(`missing "payload_hash": an answer is pinned to the payload hash it was shown for (S15.2)`)
+	}
+	if given != item.PayloadHash {
+		return &staleAnswerError{item: item}
+	}
+	return nil
+}
+
+func checkBatchable(item ApprovalItem, batched bool) error {
+	if batched && !item.Batchable {
+		return &SurfaceError{Status: http.StatusConflict, Code: "not_batchable",
+			Msg: fmt.Sprintf("a %s-tier card is answered individually, never in a batch (S15.6)", item.Tier)}
+	}
+	return nil
+}
+
+// stepUp enforces the S01.9 High-tier re-prompt: the actor's own PIN, in the
+// same request, verified at the act. There is no stored elevation — an idle
+// session never carries approval identity (G3 Def.1) — and the dev fallback
+// identity can never step up.
+func (s *Server) stepUp(ctx context.Context, id Identity, item ApprovalItem, pin string) (bool, error) {
+	if !item.StepUpRequired {
+		return false, nil
+	}
+	if pin == "" {
+		return false, ErrPINRequired
+	}
+	if id.Dev {
+		return false, &SurfaceError{Status: http.StatusForbidden, Code: "dev_identity",
+			Msg: "the dev identity cannot step up (S01.9); log in as a real user"}
+	}
+	if s.sessions == nil {
+		return false, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
+			Msg: "no session store is wired: a High-tier answer cannot be stepped up"}
+	}
+	if err := s.sessions.VerifyPIN(ctx, id.UserID, pin, "High-tier approval step-up (S01.9; S15.6)"); err != nil {
+		return false, &SurfaceError{Status: http.StatusUnauthorized, Code: "pin_rejected", Msg: "PIN verification failed"}
+	}
+	return true, nil
+}
+
+// resolvedAnswer is the (b)/(c) limb for asks: the same answer read back at
+// 200, a different one refused as a conflict. Comparison runs over the
+// CANONICAL form, so key order and whitespace never manufacture a conflict.
+func resolvedAnswer(routeID, state string, stored, given json.RawMessage) (ApprovalAnswerResult, error) {
+	same, err := sameAnswer(stored, given)
+	if err != nil {
+		return ApprovalAnswerResult{}, badRequest("bad answer object: " + err.Error())
+	}
+	if !same {
+		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
+			Msg: "this card was already answered differently; the recorded answer stands and is never re-applied (S15.2)"}
+	}
+	return ApprovalAnswerResult{ID: routeID, Applied: false, State: state, Result: stored,
+		Detail: "already answered: the recorded answer is returned and nothing fired again (S15.2 retry-safety)"}, nil
+}
+
+// resolvedEffect is the (b)/(c) limb for effects, read off the journal state:
+// an approve on an already-approved (or executed) effect is the same decision
+// read back; anything else is a conflict.
+func resolvedEffect(routeID, state, action string) (ApprovalAnswerResult, error) {
+	approvedStates := map[string]bool{
+		string(gates.EffectApproved): true, string(gates.EffectExecuting): true,
+		string(gates.EffectSucceeded): true, string(gates.EffectUnknown): true,
+	}
+	switch {
+	case action == effectActionApprove && approvedStates[state]:
+	case action == effectActionDeny && state == string(gates.EffectFailed):
+	default:
+		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
+			Msg: fmt.Sprintf("this effect is already %s; the recorded decision stands and is never re-applied (S15.2)", state)}
+	}
+	return ApprovalAnswerResult{ID: routeID, Applied: false, State: state,
+		Detail: "already decided: the recorded state is returned and nothing fired again (S15.2 retry-safety)"}, nil
+}
+
+func sameAnswer(stored, given json.RawMessage) (bool, error) {
+	if len(given) == 0 {
+		return false, errors.New(`missing "answer" object`)
+	}
+	g, err := gates.CanonicalHash(given)
+	if err != nil {
+		return false, err
+	}
+	if len(stored) == 0 {
+		return false, nil
+	}
+	sh, err := gates.CanonicalHash(stored)
+	if err != nil {
+		return false, nil
+	}
+	return sh == g, nil
+}
+
+// ── the S14.2 family-5 co-production ────────────────────────────────────────
+
+// EventDecisionRecorded is the S14.2 canonical generic human-decision type
+// (family 5). internal/api joins internal/benchmark as a CO-PRODUCER of it
+// here, which is exactly what the contract row pre-authorized: "B6 joins as a
+// co-producer when the generic approval-inbox verbs land (S15)". No new type
+// and no new family — the inventory is unchanged (CONVENTIONS §29).
+//
+// It covers exactly the acts with NO landed canonical audit row of their own:
+// the effect approve and the effect deny, whose journal transitions are
+// effects-row updates rather than run_events appends (§8). Answers that already
+// mint their own row (intake, verify) and cancels (carried by
+// run.state_changed) are never double-minted (OQ8).
+const EventDecisionRecorded = "decision.recorded"
+
+const decisionSchemaVersion = 1
+
+// decisionPayload is the S14.2 Human-decision contract minimum verbatim —
+// {actor, card id + type, decision, presented-at → decided-at (latency)} —
+// plus the optional context members the family admits.
+type decisionPayload struct {
+	Actor       string `json:"actor"`
+	CardID      string `json:"card_id"`
+	CardType    string `json:"card_type"`
+	Decision    string `json:"decision"`
+	PresentedAt string `json:"presented_at"`
+	DecidedAt   string `json:"decided_at"`
+	LatencyS    int64  `json:"latency_s"`
+	Reason      string `json:"reason,omitempty"`
+	Subject     string `json:"subject,omitempty"`
+	Ref         string `json:"ref,omitempty"`
+	// ActorIsOperator distinguishes the D10 co-approval limbs: the owner's
+	// approval and the operator's are two different facts about one card, and
+	// the co-approval state is derived from these rows.
+	ActorIsOperator bool `json:"actor_is_operator,omitempty"`
+}
+
+// recordDecision appends the family-5 row. presentedAt is the card's own issue
+// time, so the P-T05-2 decision-latency datum rides every decision rather than
+// needing a separate measurement.
+//
+// The row is owner-attributed (15.6) and carries no run id: the approvals
+// family answers cards that are not always run-scoped, and a run-scoped append
+// is generation-fenced against a run this transport does not own the generation
+// of. The run travels in the payload instead (the intake.followup_spawned
+// precedent).
+func (s *Server) recordDecision(ctx context.Context, d decisionPayload, owner string, presentedAt time.Time) error {
+	now := time.Now().UTC()
+	if presentedAt.IsZero() {
+		presentedAt = now
+	}
+	d.PresentedAt = presentedAt.UTC().Format(time.RFC3339Nano)
+	d.DecidedAt = now.Format(time.RFC3339Nano)
+	if latency := now.Sub(presentedAt.UTC()); latency > 0 {
+		d.LatencyS = int64(latency.Seconds())
+	}
+	payload, err := json.Marshal(d)
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", EventDecisionRecorded, err)
+	}
+	if _, err := s.log.Append(ctx, eventlog.Append{
+		UserID: owner, Type: EventDecisionRecorded, SchemaVersion: decisionSchemaVersion, Payload: payload,
+	}); err != nil {
+		return fmt.Errorf("append %s: %w", EventDecisionRecorded, err)
+	}
+	return nil
+}
+
+// ── error mapping ───────────────────────────────────────────────────────────
+
+// writeApprovalErr serves a stale-hash refusal WITH the fresh card, so the
+// answerer's next act is a re-read rather than a guess; everything else maps
+// through the shared status mapping.
+func (s *Server) writeApprovalErr(w http.ResponseWriter, err error) {
+	var stale *staleAnswerError
+	if errors.As(err, &stale) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(struct {
+			Error   string       `json:"error"`
+			Detail  string       `json:"detail"`
+			Current ApprovalItem `json:"current"`
+		}{"stale_payload", stale.Error(), stale.item})
+		return
+	}
+	s.writeSurfaceErr(w, s.approvalSurfaceErr(err))
+}
+
+// approvalSurfaceErr maps every answer-path error onto its transport status.
+func (s *Server) approvalSurfaceErr(err error) *SurfaceError {
+	var se *SurfaceError
+	if errors.As(err, &se) {
+		return se
+	}
+	var stale *staleAnswerError
+	switch {
+	case errors.As(err, &stale):
+		return &SurfaceError{Status: http.StatusConflict, Code: "stale_payload", Msg: stale.Error()}
+	case errors.Is(err, gates.ErrEffectNotFound):
+		return &SurfaceError{Status: http.StatusNotFound, Code: "not_found", Msg: err.Error()}
+	case errors.Is(err, gates.ErrBadState):
+		return &SurfaceError{Status: http.StatusConflict, Code: "conflict", Msg: err.Error()}
+	case errors.Is(err, gates.ErrApprovalExpired), errors.Is(err, gates.ErrPayloadDrift):
+		return &SurfaceError{Status: http.StatusConflict, Code: "stale_payload", Msg: err.Error()}
+	}
+	s.logger.Error("approvals", "err", err)
+	return &SurfaceError{Status: http.StatusInternalServerError, Code: "internal", Msg: err.Error()}
+}
