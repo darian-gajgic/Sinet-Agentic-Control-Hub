@@ -1,0 +1,530 @@
+package api_test
+
+// benchmark_test.go — the B6-2C verdict backend at the TRANSPORT (R20 + the
+// part-C slice of H). internal/api may not import internal/benchmark in either
+// direction (the reverse import wall), so this battery drives a FAKE surface and
+// asserts what the transport itself owns: scope, order, refusal and the negative
+// that no registered number lives in this package. The end-to-end over the REAL
+// practice is internal/shell's, where the composition root can see both sides.
+//
+// $0 and hermetic: no engine, no seat, no network.
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+)
+
+// ── the fake practice ───────────────────────────────────────────────────────
+
+// fakeBenchmark records the CALL ORDER as well as the calls. The order is the
+// point: BENCH-REG §3.4 freezes "record, then reveal", and a transport that
+// asked for a reveal first would be asking for arm identity the record had not
+// yet earned.
+type fakeBenchmark struct {
+	mu    sync.Mutex
+	calls []string
+	// requesters records the scope the pending list was asked for.
+	requesters []string
+	// verdicts records (pair, verdict, guess) triples.
+	verdicts []string
+	declines []string
+	disposes []string
+	optIns   []string
+	// recordErr, when set, refuses the verdict — the guess-less case.
+	recordErr error
+}
+
+func (f *fakeBenchmark) note(s string) {
+	f.mu.Lock()
+	f.calls = append(f.calls, s)
+	f.mu.Unlock()
+}
+
+func (f *fakeBenchmark) PendingVerdicts(_ context.Context, requester string) (json.RawMessage, error) {
+	f.note("pending")
+	f.mu.Lock()
+	f.requesters = append(f.requesters, requester)
+	f.mu.Unlock()
+	// The package's own pre-record shape: no arm, no position, no run, no model.
+	return json.RawMessage(`[{"pair_id":"bp-1","user_id":"alice","domain":"D","task_id":"t-1","render_a":"AAA","render_b":"BBB","length_a":3,"length_b":3}]`), nil
+}
+
+func (f *fakeBenchmark) RecordVerdict(_ context.Context, pairID, verdict, guess string) error {
+	f.note("record")
+	if f.recordErr != nil {
+		return f.recordErr
+	}
+	f.mu.Lock()
+	f.verdicts = append(f.verdicts, pairID+"/"+verdict+"/"+guess)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeBenchmark) Reveal(_ context.Context, pairID string) (json.RawMessage, error) {
+	f.note("reveal")
+	return json.RawMessage(`{"pair_id":"` + pairID + `","platform_side":"A"}`), nil
+}
+
+func (f *fakeBenchmark) Decline(_ context.Context, pairID string) error {
+	f.note("decline")
+	f.mu.Lock()
+	f.declines = append(f.declines, pairID)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeBenchmark) DisposeAlarm(_ context.Context, actor, domain, disposition, reason string) error {
+	f.note("dispose")
+	f.mu.Lock()
+	f.disposes = append(f.disposes, actor+"/"+domain+"/"+disposition)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeBenchmark) SetOptIn(_ context.Context, actor, subject string, enabled bool) error {
+	f.note("optin")
+	f.mu.Lock()
+	f.optIns = append(f.optIns, actor+"/"+subject)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeBenchmark) order() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.calls...)
+}
+
+// benchEnv is a real migrated DB (the pair rows and the alarm events the
+// transport scopes against) plus the fake practice behind the seam.
+type benchEnv struct {
+	b    *backend
+	fake *fakeBenchmark
+}
+
+func newBenchEnv(t *testing.T) *benchEnv {
+	t.Helper()
+	b := newBackend(t)
+	seedUser(t, b, "op", auth.RoleOperator)
+	seedUser(t, b, "alice", auth.RoleMember)
+	seedUser(t, b, "bob", auth.RoleMember)
+	seedTask(t, b, "t-alice", "alice", "Alice Task", "doing")
+	exec(t, b, `INSERT INTO benchmark_pairs
+	    (pair_id, user_id, domain, task_id, deliverable_id, phase, rate_pct, sampled_ts, state, render_a, render_b, updated_ts)
+	    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"bp-alice", "alice", "software-development", "t-alice", "d-1", "pre-gate", 100,
+		nowTS(), "rendered", "aaa", "bbb", nowTS())
+	return &benchEnv{b: b, fake: &fakeBenchmark{}}
+}
+
+func (e *benchEnv) do(t *testing.T, who, method, path, body string) (int, string) {
+	t.Helper()
+	srv := api.New(api.Config{
+		Log: e.b.log, Sessions: e.b.store, Auth: fixedIdentity{who},
+		Settings: fixedSettings{d: 20 * 1e9},
+		HealthFn: func() api.Health { return api.Health{Ready: true} },
+		DB:       e.b.db, Benchmark: e.fake,
+	})
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest(method, path, strings.NewReader(body)))
+	return rr.Code, rr.Body.String()
+}
+
+func (e *benchEnv) mustDo(t *testing.T, who, method, path, body string) string {
+	t.Helper()
+	code, out := e.do(t, who, method, path, body)
+	if code < 200 || code > 299 {
+		t.Fatalf("%s %s as %s: status %d: %s", method, path, who, code, out)
+	}
+	return out
+}
+
+// ── the §3.4 order at the transport (rubric 17) ─────────────────────────────
+
+// TestTransportRecordsBeforeItReveals: the handler asks for the record FIRST and
+// the reveal only after it returned — so a reveal can never precede the record
+// that entitles it. Asserted on the call ORDER rather than on the response,
+// because the response would look identical either way.
+func TestTransportRecordsBeforeItReveals(t *testing.T) {
+	e := newBenchEnv(t)
+	out := e.mustDo(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-alice/verdict",
+		`{"verdict":"A","guess":"B"}`)
+
+	if got := e.fake.order(); len(got) != 2 || got[0] != "record" || got[1] != "reveal" {
+		t.Fatalf("call order %v — BENCH-REG §3.4 freezes record-then-reveal", got)
+	}
+	if len(e.fake.verdicts) != 1 || e.fake.verdicts[0] != "bp-alice/A/B" {
+		t.Fatalf("the verdict did not travel verbatim: %v", e.fake.verdicts)
+	}
+	if !strings.Contains(out, "platform_side") {
+		t.Errorf("the response does not carry the committed reveal: %s", out)
+	}
+}
+
+// TestRefusedVerdictRevealsNothing: a refused verdict — the guess-less case
+// above all — fires nothing AND asks for no reveal. There is no record, so there
+// is nothing arm identity could be read out of.
+func TestRefusedVerdictRevealsNothing(t *testing.T) {
+	e := newBenchEnv(t)
+	e.fake.recordErr = &api.SurfaceError{Status: http.StatusBadRequest, Code: "guess_required",
+		Msg: "a verdict requires the arm-guess in the same form (BENCH-REG §3.3)"}
+
+	code, out := e.do(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-alice/verdict", `{"verdict":"A"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("guess-less verdict: status %d, want 400: %s", code, out)
+	}
+	if !strings.Contains(out, "guess_required") {
+		t.Errorf("the refusal does not name the rule: %s", out)
+	}
+	if got := e.fake.order(); len(got) != 1 || got[0] != "record" {
+		t.Fatalf("a refused verdict produced calls %v — no reveal may follow a refusal", got)
+	}
+}
+
+// ── scope, three ways per verb (R21) ────────────────────────────────────────
+
+// TestBenchmarkVerbsAreScopedThreeWays drives every new pair-scoped verb as the
+// owner, another member and the operator, in the non-tautological direction: the
+// OWNER's own act must succeed, or an all-refusing handler would pass.
+func TestBenchmarkVerbsAreScopedThreeWays(t *testing.T) {
+	for _, verb := range []string{"verdict", "decline"} {
+		t.Run(verb, func(t *testing.T) {
+			body := `{}`
+			if verb == "verdict" {
+				body = `{"verdict":"A","guess":"B"}`
+			}
+			path := "/api/approvals/benchmark_verdict:bp-alice/" + verb
+
+			// The owner: SUCCEEDS.
+			e := newBenchEnv(t)
+			e.mustDo(t, "alice", "POST", path, body)
+
+			// Another member: refused, and nothing fired.
+			e = newBenchEnv(t)
+			if code, _ := e.do(t, "bob", "POST", path, body); code != http.StatusForbidden {
+				t.Errorf("another member's %s: status %d, want 403", verb, code)
+			}
+			if got := e.fake.order(); len(got) != 0 {
+				t.Errorf("a refused %s reached the practice: %v", verb, got)
+			}
+
+			// The operator: refused too — the vote is not delegable.
+			e = newBenchEnv(t)
+			if code, _ := e.do(t, "op", "POST", path, body); code != http.StatusForbidden {
+				t.Errorf("the operator's %s: status %d, want 403", verb, code)
+			}
+			if got := e.fake.order(); len(got) != 0 {
+				t.Errorf("a refused operator %s reached the practice: %v", verb, got)
+			}
+
+			// An unknown pair is 404, never an existence oracle.
+			e = newBenchEnv(t)
+			if code, _ := e.do(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-nobody/"+verb, body); code != http.StatusNotFound {
+				t.Errorf("unknown pair %s: status %d, want 404", verb, code)
+			}
+		})
+	}
+}
+
+// TestPendingListIsRequesterScoped: a member is asked for by name; the operator
+// is asked for with an empty scope, which is the landed inbox derivation's own
+// rule (they see all, they own none).
+func TestPendingListIsRequesterScoped(t *testing.T) {
+	e := newBenchEnv(t)
+	e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", "")
+	e.mustDo(t, "op", "GET", "/api/benchmark/verdicts", "")
+	if len(e.fake.requesters) != 2 || e.fake.requesters[0] != "alice" || e.fake.requesters[1] != "" {
+		t.Fatalf("pending list scopes = %q — a member is scoped by name, the operator sees all", e.fake.requesters)
+	}
+}
+
+// TestPendingFormShapeCarriesNoArmIdentity: the served shape is the package's
+// own, so the blindness property travels intact. The scan is over the WIRE.
+func TestPendingFormShapeCarriesNoArmIdentity(t *testing.T) {
+	e := newBenchEnv(t)
+	out := e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", "")
+	// The scan is over the PAIRS document, not the response prose: the wrapper's
+	// explanatory detail necessarily talks about arms and guesses, and scanning
+	// English would make the assertion about wording rather than about data.
+	var resp struct {
+		Pairs json.RawMessage `json:"pairs"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("decode: %v: %s", err, out)
+	}
+	pairs := string(resp.Pairs)
+	for _, forbidden := range []string{"position", "platform-a", "platform-b", "direct_run", "platform_run", "_model", "\"arm"} {
+		if strings.Contains(pairs, forbidden) {
+			t.Errorf("the blind form leaks %q (BENCH-REG §3.4): %s", forbidden, pairs)
+		}
+	}
+	for _, required := range []string{"render_a", "render_b"} {
+		if !strings.Contains(pairs, required) {
+			t.Fatalf("the form is missing %q — the scan above would pass vacuously", required)
+		}
+	}
+	if !strings.Contains(out, "guess_required") {
+		t.Fatal("the form does not carry the frozen mandatory-guess fact")
+	}
+}
+
+// TestAlarmDisposeIsOperatorOnly: alarms are platform-scope, so a member's own
+// derivation returns none and asking it is both the authority check and the
+// existence check — the same shape the part-B card verbs use.
+func TestAlarmDisposeIsOperatorOnly(t *testing.T) {
+	e := newBenchEnv(t)
+	appendPlatformPayload(t, e.b, "benchmark.alarm",
+		`{"action":"raise","domain":"software-development","epoch_id":"e1","severity":"flag-now","summary":"S","loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`)
+	const path = "/api/approvals/benchmark_alarm:software-development#e1/dispose"
+
+	if code, _ := e.do(t, "alice", "POST", path, `{"disposition":"investigate"}`); code != http.StatusNotFound {
+		t.Errorf("a member dispositioning an alarm: status %d, want 404", code)
+	}
+	if got := e.fake.order(); len(got) != 0 {
+		t.Fatalf("a refused disposition reached the practice: %v", got)
+	}
+	e.mustDo(t, "op", "POST", path, `{"disposition":"investigate","reason":"why"}`)
+	if len(e.fake.disposes) != 1 || e.fake.disposes[0] != "op/software-development/investigate" {
+		t.Fatalf("the disposition did not travel verbatim with its actor: %v", e.fake.disposes)
+	}
+	// A card id of the wrong kind is a 400, not a mystery 404.
+	if code, _ := e.do(t, "op", "POST", "/api/approvals/drift_card:fp-1/dispose", `{"disposition":"investigate"}`); code != http.StatusBadRequest {
+		t.Errorf("dispose on a drift card: status %d, want 400", code)
+	}
+	// The alarm card id carries a `#` (domain#epoch, as the landed projection
+	// mints it), so a real client percent-encodes it. That form must route and
+	// resolve to the same domain — otherwise the card the inbox renders would be
+	// unusable from a browser and only from a test.
+	e2 := newBenchEnv(t)
+	appendPlatformPayload(t, e2.b, "benchmark.alarm",
+		`{"action":"raise","domain":"software-development","epoch_id":"e1","severity":"flag-now","summary":"S","loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`)
+	e2.mustDo(t, "op", "POST", "/api/approvals/benchmark_alarm:software-development%23e1/dispose",
+		`{"disposition":"investigate"}`)
+	if len(e2.fake.disposes) != 1 || e2.fake.disposes[0] != "op/software-development/investigate" {
+		t.Fatalf("the percent-encoded card id did not resolve: %v", e2.fake.disposes)
+	}
+}
+
+// TestOptInIsSelfOnlyAtTheTransport: consent is not delegable, and the operator
+// is refused by the same sentence as anybody else (OQ10; §35).
+func TestOptInIsSelfOnlyAtTheTransport(t *testing.T) {
+	e := newBenchEnv(t)
+	if code, out := e.do(t, "op", "POST", "/api/benchmark/opt-in", `{"person":"alice","enabled":true}`); code != http.StatusForbidden {
+		t.Fatalf("the operator setting another person's consent: status %d, want 403: %s", code, out)
+	}
+	if code, _ := e.do(t, "alice", "POST", "/api/benchmark/opt-in", `{"person":"bob","enabled":true}`); code != http.StatusForbidden {
+		t.Errorf("a member setting another person's consent: status %d, want 403", code)
+	}
+	if got := e.fake.order(); len(got) != 0 {
+		t.Fatalf("a refused consent flip reached the practice: %v", got)
+	}
+	// Your own consent works — both named explicitly and left implicit.
+	e.mustDo(t, "alice", "POST", "/api/benchmark/opt-in", `{"enabled":true}`)
+	e.mustDo(t, "alice", "POST", "/api/benchmark/opt-in", `{"person":"alice","enabled":false}`)
+	if len(e.fake.optIns) != 2 {
+		t.Fatalf("own-consent flips reached the practice %d times, want 2", len(e.fake.optIns))
+	}
+	for _, got := range e.fake.optIns {
+		if got != "alice/alice" {
+			t.Errorf("the consent flip's actor and subject disagree: %q", got)
+		}
+	}
+}
+
+// ── audit (rubric 18) ───────────────────────────────────────────────────────
+
+// TestBenchmarkVerbsMintNoTransportDecisionRow: every act on these routes has a
+// landed canonical row of its own — the §14 pair record for a verdict and a
+// decline, and the family-5 rows DisposeAlarm and SetOptIn write INSIDE their
+// own transactions. So the transport mints nothing (OQ8): a second row would
+// make one decision look like two.
+func TestBenchmarkVerbsMintNoTransportDecisionRow(t *testing.T) {
+	e := newBenchEnv(t)
+	appendPlatformPayload(t, e.b, "benchmark.alarm",
+		`{"action":"raise","domain":"software-development","epoch_id":"e1","severity":"flag-now","summary":"S","loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`)
+
+	before := len(decisionRows(t, e.b, ""))
+	e.mustDo(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-alice/verdict", `{"verdict":"A","guess":"B"}`)
+	e.mustDo(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-alice/decline", `{}`)
+	e.mustDo(t, "op", "POST", "/api/approvals/benchmark_alarm:software-development#e1/dispose", `{"disposition":"investigate"}`)
+	e.mustDo(t, "alice", "POST", "/api/benchmark/opt-in", `{"enabled":true}`)
+	e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", "")
+
+	if after := len(decisionRows(t, e.b, "")); after != before {
+		t.Fatalf("the transport minted %d decision.recorded rows — every part-C act carries its own canonical row (OQ8)",
+			after-before)
+	}
+	// The whole route set was exercised, so the assertion above is not vacuous.
+	if got := len(e.fake.order()); got != 6 {
+		t.Fatalf("the audit walk drove %d practice calls, want 6 (record+reveal, decline, dispose, optin, pending)", got)
+	}
+}
+
+// TestBenchmarkRoutesAreUnwiredHonestly: with no practice composed, every route
+// says so rather than pretending.
+func TestBenchmarkRoutesAreUnwiredHonestly(t *testing.T) {
+	b := newBackend(t)
+	seedUser(t, b, "alice", auth.RoleMember)
+	srv := api.New(api.Config{
+		Log: b.log, Sessions: b.store, Auth: fixedIdentity{"alice"},
+		Settings: fixedSettings{d: 20 * 1e9},
+		HealthFn: func() api.Health { return api.Health{Ready: true} },
+		DB:       b.db, // Benchmark deliberately nil
+	})
+	for _, r := range []struct{ method, path, body string }{
+		{"GET", "/api/benchmark/verdicts", ""},
+		{"POST", "/api/benchmark/opt-in", `{"enabled":true}`},
+		{"POST", "/api/approvals/benchmark_verdict:bp-alice/verdict", `{"verdict":"A","guess":"B"}`},
+		{"POST", "/api/approvals/benchmark_verdict:bp-alice/decline", `{}`},
+		{"POST", "/api/approvals/benchmark_alarm:D#e1/dispose", `{"disposition":"investigate"}`},
+	} {
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(r.method, r.path, strings.NewReader(r.body)))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s unwired: status %d, want 503", r.method, r.path, rr.Code)
+		}
+	}
+}
+
+// ── the negative that §35 turns on (rubric 17) ──────────────────────────────
+
+// TestNoRegisteredNumberIsRestatedInTheAPI: BENCH-REG's registered values are
+// read-only data in internal/benchmark, pinned to the registration file itself.
+// A copy anywhere in internal/api would be a second place a frozen number could
+// drift — and drift between the registration and the running platform is a
+// platform defect by BENCH-REG's own clause (§17). The scan is over every
+// non-test source file of this package.
+func TestNoRegisteredNumberIsRestatedInTheAPI(t *testing.T) {
+	// The registered values and labels, by their exact rendered forms. They are
+	// written here — in a TEST — precisely because the point is that they must
+	// not appear in the package's own source.
+	banned := []string{
+		"0.90", "0.95",
+		"m >= 20", "m ≥ 20", "n=20",
+		"direct-use estimate (heuristic)",
+		"partially unblinded",
+		"benchmark-preregistration-v1",
+		"software-development", "web-research",
+		"investigate", "fix-and-continue-accruing", "re-register",
+		"both-bad",
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanned := 0
+	for _, ent := range entries {
+		n := ent.Name()
+		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned++
+		for _, bad := range banned {
+			if strings.Contains(string(src), bad) {
+				t.Errorf("internal/api/%s contains the registered value/label %q — registered numbers live in internal/benchmark's registered.go and nowhere else (BENCH-REG §17; §35)", n, bad)
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("the scan read no files — it would pass vacuously")
+	}
+	// Non-tautological: the scan's matcher must catch a planted restatement.
+	planted := "const alarmThreshold = 0.95"
+	hit := false
+	for _, bad := range banned {
+		if strings.Contains(planted, bad) {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Fatal("the matcher does not catch a planted registered value — the scan guarantees nothing")
+	}
+}
+
+// TestPartCShapesNeverPercent extends the standing §30 R12 scan over the shapes
+// this packet adds: no percent, fraction, ratio or ETA field anywhere in them.
+func TestPartCShapesNeverPercent(t *testing.T) {
+	e := newBenchEnv(t)
+	appendPlatformPayload(t, e.b, "benchmark.alarm",
+		`{"action":"raise","domain":"software-development","epoch_id":"e1","severity":"flag-now","summary":"S","loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`)
+
+	for _, body := range []string{
+		e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", ""),
+		e.mustDo(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-alice/verdict", `{"verdict":"A","guess":"B"}`),
+		e.mustDo(t, "alice", "POST", "/api/approvals/benchmark_verdict:bp-alice/decline", `{}`),
+		e.mustDo(t, "op", "POST", "/api/approvals/benchmark_alarm:software-development#e1/dispose", `{"disposition":"investigate"}`),
+		e.mustDo(t, "alice", "POST", "/api/benchmark/opt-in", `{"enabled":true}`),
+	} {
+		var any map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(body), &any); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		for key := range any {
+			k := strings.ToLower(key)
+			// "eta" is matched as a WHOLE token, not as a substring: a field named
+			// `detail` contains the letters and means nothing of the kind.
+			if k == "eta" || strings.HasSuffix(k, "_eta") || strings.HasPrefix(k, "eta_") {
+				t.Errorf("part-C shape carries an ETA field %q (§30 R12)", key)
+			}
+			for _, bad := range []string{"_pct", "percent", "_ratio", "_fraction", "utiliz", "progress"} {
+				if strings.Contains(k, bad) {
+					t.Errorf("part-C shape carries %q — no percent, fraction or ETA field may exist (§30 R12)", key)
+				}
+			}
+		}
+	}
+}
+
+// ── counters (rubric 20) ───────────────────────────────────────────────────
+
+// TestPartCCountersArePinned holds the tally this packet is allowed to move and
+// the ones it is not: the ⚙ registry is byte-unchanged (118/33), the adoption
+// lock is unchanged (21), and exactly ONE migration is added — 0018 — with
+// user_version following it.
+func TestPartCCountersArePinned(t *testing.T) {
+	reg := settings.New()
+	decls := reg.Decls()
+	if len(decls) != 118 {
+		t.Errorf("⚙ index has %d keys, want 118 — B6-2C adds no key (R24)", len(decls))
+	}
+	domains := map[string]bool{}
+	for _, d := range decls {
+		domains[d.Domain()] = true
+	}
+	if len(domains) != 33 {
+		t.Errorf("⚙ index has %d domains, want 33", len(domains))
+	}
+	b := newBackend(t)
+	v, err := b.db.UserVersion(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 18 {
+		t.Errorf("user_version = %d, want 18 (0001–0017 untouched, 0018 is this packet's)", v)
+	}
+	// 0018 is the ONLY migration this packet adds.
+	sqls, err := filepath.Glob("../storage/migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range sqls {
+		if filepath.Base(p) > "0018_zzz" {
+			t.Errorf("unexpected migration %q — part C adds exactly 0018", filepath.Base(p))
+		}
+	}
+}

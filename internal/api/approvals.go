@@ -333,15 +333,17 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 			// batched (the mandatory arm-guess is per pair and structural,
 			// BENCH-REG §3.3) and never step-up (it releases nothing outward).
 			tierMedium, v.SampledTS, v)
-		setAnswerable(&it, false,
-			"the blind-pair verdict backend is B6-2C (BENCH-REG §3.3 — the guess is structural)")
+		it.Actions = []string{benchmarkActionVerdict, benchmarkActionDecline}
+		setAnswerable(&it, mayAnswerVerdict(scope, v.Owner),
+			"a blind-pair verdict is its REQUESTER's own judgement and is not delegable — you can see the card and cannot vote it (POST /api/approvals/{id}/verdict, BENCH-REG §3.3)")
 		out = append(out, it)
 	}
 	for _, a := range snap.BenchmarkAlarms {
 		it := oversightItem(approvalKindAlarm, a.Domain+"#"+a.EpochID, platformOwner, "",
 			tierHigh, a.RaisedTS, redactBenchmarkAlarm(a))
-		setAnswerable(&it, false,
-			"the alarm disposition verb is B6-2C (BENCH-REG §12, operator-only)")
+		it.Actions = []string{benchmarkActionDispose}
+		setAnswerable(&it, mayDisposeAlarm(scope),
+			"a benchmark alarm is platform-scope: the operator dispositions it (POST /api/approvals/{id}/dispose, BENCH-REG §12)")
 		out = append(out, it)
 	}
 	return out, nil
@@ -353,6 +355,16 @@ const (
 	oversightActionSuppress    = "suppress"
 	oversightActionDismiss     = "dismiss"
 	oversightActionAcknowledge = "acknowledge"
+)
+
+// The two benchmark card kinds' action vocabulary (B6-2C). The verdict card
+// carries BOTH of its acts, because §4.2.5's decline is a first-class answer to
+// the same card and a form that offered only "vote" would make declining look
+// like ignoring — which is the silence §4.2.5 exists to make visible.
+const (
+	benchmarkActionVerdict = "verdict"
+	benchmarkActionDecline = "decline"
+	benchmarkActionDispose = "dispose"
 )
 
 // platformOwner is the reserved platform-scope owner id (S02.2 15.6): the

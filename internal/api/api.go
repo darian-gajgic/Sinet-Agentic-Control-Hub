@@ -154,6 +154,12 @@ type Config struct {
 	Hints    HintSurface
 	Watchdog SuppressSurface
 	Resume   ResumeSurface
+	// Benchmark is the S14.7 / BENCH-REG practice behind the B6-2C verdict
+	// backend (benchmark.go): the blind form's data, the §3.3 one-act verdict,
+	// the §4.2.5 decline, the §12 alarm disposition and the §4.2.1 consent flip.
+	// Adapted at the shell root — internal/api imports internal/benchmark in
+	// neither direction — and nil leaves those routes answering 503.
+	Benchmark BenchmarkSurface
 	// History is the S14.10 three-layer queryable-history surface (B5-8B):
 	// Layer-0 named cost views, the Layer-1 canned catalog, redact-before-match
 	// search and the Layer-2 escalation. B6-1 ROUTES it under /api/events
@@ -203,6 +209,8 @@ type Server struct {
 	hints    HintSurface
 	watchdog SuppressSurface
 	resume   ResumeSurface
+	// benchmark is the S14.7 practice behind the B6-2C verdict backend.
+	benchmark BenchmarkSurface
 	// preview is the S13.8 preview surface, held for the B6
 	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
 	preview *preview.Manager
@@ -238,6 +246,7 @@ func New(cfg Config) *Server {
 		hints:      cfg.Hints,
 		watchdog:   cfg.Watchdog,
 		resume:     cfg.Resume,
+		benchmark:  cfg.Benchmark,
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter}
@@ -337,6 +346,17 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/runs/{run}/resume", s.handleRunResume)
 	protected("POST /api/approvals/{id}/dismiss", s.handleDriftDismiss)
 	protected("POST /api/approvals/{id}/acknowledge", s.handleConformanceAcknowledge)
+
+	// The B6-2C third of the decision plane: the BENCH-REG verdict backend
+	// (benchmark.go). The two card verbs join the approvals family their cards
+	// are listed in; the blind form's data and the §4.2.1 consent flip are their
+	// own routes because neither is a card decision. Same rules — owner-scoped
+	// server-side, fail-closed, no direct outward effect, no version prefix.
+	protected("GET /api/benchmark/verdicts", s.handleBenchmarkVerdicts)
+	protected("POST /api/benchmark/opt-in", s.handleBenchmarkOptIn)
+	protected("POST /api/approvals/{id}/verdict", s.handleBenchmarkVerdict)
+	protected("POST /api/approvals/{id}/decline", s.handleBenchmarkDecline)
+	protected("POST /api/approvals/{id}/dispose", s.handleBenchmarkAlarmDispose)
 
 	return s.identity(mux)
 }

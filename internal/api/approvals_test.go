@@ -1227,26 +1227,68 @@ func TestOversightCardsSayWhoCanAnswerThem(t *testing.T) {
 			t.Errorf("a member sees %d %s cards — they are operator-only (S01.9)", len(got), kind)
 		}
 	}
-	// The two benchmark kinds stay not-answerable HERE, with a reason naming
-	// where their verb lives (part C).
-	sevenKindsBenchmarkOnly(t, e)
+	// The two benchmark kinds joined the agreement at part C.
+	benchmarkKindsSayWhoCanAnswerThem(t, e)
 }
 
-// sevenKindsBenchmarkOnly asserts the part-C kinds still say where their verb
-// lives rather than going missing or pretending to be answerable.
-func sevenKindsBenchmarkOnly(t *testing.T, e *verbEnv) {
+// benchmarkKindsSayWhoCanAnswerThem is the part-C half of the D9 agreement: the
+// alarm card and the blind-pair verdict card now name LIVE verbs, and each
+// computes `answerable` from the same authority rule its verb enforces.
+//
+// The two rules point in OPPOSITE directions, which is why both are asserted:
+// an alarm is platform-scope and operator-only, while a verdict is its
+// REQUESTER's own judgement and the operator — who can see every card — is
+// refused it.
+func benchmarkKindsSayWhoCanAnswerThem(t *testing.T, e *verbEnv) {
 	t.Helper()
 	appendPlatformPayload(t, e.b, "benchmark.alarm",
 		`{"action":"raise","domain":"D","epoch_id":"e1","severity":"flag-now","summary":"S","loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`)
+	exec(t, e.b, `INSERT INTO benchmark_pairs
+	    (pair_id, user_id, domain, task_id, deliverable_id, phase, rate_pct, sampled_ts, state, render_a, render_b, updated_ts)
+	    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"PAIR-ALICE", "alice", "software-development", "t-alice", "d-1", "pre-gate", 100,
+		nowTS(), "rendered", "aaa", "bbb", nowTS())
+
 	got := inboxKinds(t, e, "op", "benchmark_alarm")
 	if len(got) != 1 {
 		t.Fatalf("operator sees %d alarm cards, want 1", len(got))
 	}
-	if got[0].Answerable {
-		t.Error("a benchmark alarm reads as answerable — its disposition verb is part C's")
+	if !got[0].Answerable {
+		t.Error("the operator's alarm card is not answerable — the §12 disposition verb is live")
 	}
-	if !strings.Contains(got[0].NotAnswerableReason, "B6-2C") {
-		t.Errorf("the alarm's reason does not name where its verb lives: %q", got[0].NotAnswerableReason)
+	if !containsAction(got[0].Actions, "dispose") {
+		t.Errorf("the alarm card does not name its live verb: %v", got[0].Actions)
+	}
+	if got[0].StepUpRequired || got[0].Batchable {
+		t.Error("an alarm disposition claims a step-up or a batch neither verb implements")
+	}
+
+	// The verdict card: answerable for its requester, NOT for the operator who
+	// can nonetheless see it. Visibility is not authorship.
+	mine := inboxKinds(t, e, "alice", "benchmark_verdict")
+	if len(mine) != 1 {
+		t.Fatalf("the requester sees %d verdict cards, want 1", len(mine))
+	}
+	if !mine[0].Answerable {
+		t.Error("the requester's own verdict card is not answerable — they are the voter (BENCH-REG §3.3)")
+	}
+	for _, want := range []string{"verdict", "decline"} {
+		if !containsAction(mine[0].Actions, want) {
+			t.Errorf("the verdict card does not offer %q: %v", want, mine[0].Actions)
+		}
+	}
+	if mine[0].Batchable {
+		t.Error("a blind-pair verdict is batchable — the arm-guess is per pair and structural")
+	}
+	seen := inboxKinds(t, e, "op", "benchmark_verdict")
+	if len(seen) != 1 {
+		t.Fatalf("the operator sees %d verdict cards, want 1 (they see all, S01.9)", len(seen))
+	}
+	if seen[0].Answerable {
+		t.Error("the operator reads a verdict card as answerable — the vote is the requester's and is not delegable")
+	}
+	if !strings.Contains(seen[0].NotAnswerableReason, "/api/approvals/{id}/verdict") {
+		t.Errorf("the refusal must name the live route it refuses: %q", seen[0].NotAnswerableReason)
 	}
 }
 
