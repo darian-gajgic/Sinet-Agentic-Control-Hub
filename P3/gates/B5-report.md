@@ -143,4 +143,13 @@ bash ~/Sinet-Agentic-Control-Hub/P3/gates/B5-organ-install.sh
 
 ## 8. Gate answers
 
-*(To be recorded at close — your free-text answer is authoritative and will not be re-asked via a form.)*
+*(Operator free-text answers are authoritative; recorded as given.)*
+
+**2026-07-28, first batch (chat):** "D1 ok. D2 ok. D4 ok. D5 ok."
+
+- **D1 — ANSWERED: ratified.** promptfoo 0.121.19, changedetection.io 0.55.8, genai-prices data v0.0.72 all ratified en bloc (S16.4 check #10 satisfied for all three lock entries).
+- **D2 — ANSWERED: approved per recommendation.** Both organ installs authorized; the coordinator ran `P3/gates/B5-organ-install.sh` on this authority (script is non-interactive, user-level, no secrets — result recorded in STATE). The `sinet-watchlist.service` unit install is DEFERRED to the hardening session (standing item 3).
+- **D3 — OPEN.** Operator questioned the behavioral-canary itemization premise (promptfoo runs locally, why is per-call usage unseen?); coordinator answered: locality is not the issue — promptfoo's process dials the provider itself, bypassing Sinet's adapter/metering path, so per-call usage rows are never minted; promptfoo's own result JSON is organ-self-reported, not Sinet-measured. Itemization options (organ-reported entry / projection-only / broker-path provider) tabled for the arming decision. Arming answer still awaited.
+- **D4 — ANSWERED: per recommendation.** (a) The 0.84 eval floor RATIFIED. (b) The paid golden sweep stays registered and UNEXECUTED until B6 gives its result a surface.
+- **D5 — ANSWERED: per recommendation.** (a) dispatch→render driver stands as named follow-on scope; (b) NO S00.9 amendment for the family-12 `RequiredFields` row — the not-restated reading stands; (c) carried suites/rows acknowledged.
+- **D6 — OPEN.** Operator asked for the full readings list with detail before ratifying; coordinator compiled it from CONVENTIONS §29–§37 + commit bodies and presented it. Answer awaited.
