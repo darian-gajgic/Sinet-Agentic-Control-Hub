@@ -1172,7 +1172,12 @@ func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.Lane
 	if err != nil {
 		return api.LaneMeter{}, err
 	}
-	lm := api.LaneMeter{WeightedConsumption: g.WeightedConsumption}
+	lm := api.LaneMeter{
+		WeightedConsumption: g.WeightedConsumption,
+		CacheReadWeight:     g.CacheReadWeight,
+		Assumed:             g.Assumed,
+		BudgetDeclared:      g.Budget.Declared,
+	}
 	if g.Applicable { // a budget is declared → utilization + remaining are meaningful
 		u := g.Pressure
 		lm.Utilization = &u

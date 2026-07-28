@@ -266,9 +266,14 @@ func (p *projector) latestRunForTask(ctx context.Context, taskID string) (BoardR
 // FleetLane is one (owner, lane)'s meter snapshot (§3): the active-run count
 // plus the S10.4 meter reads — weighted_consumption (always available),
 // utilization and budget_remaining (nil until an operator budget is declared,
-// S10.4 — v0 declares none). burn_rate is a SEAM: the S10.4 gauge exposes
-// cumulative weighted consumption, not a trailing-window rate; a real burn_rate
-// needs a windowed calc B4-5/B6 own — nil here, never faked.
+// S10.4 — v0 declares none). burn_rate STAYS NIL, and B6-1 settled why: the one
+// burn-rate figure the platform has is migration 0016's cost_burn_rate view,
+// whose grain is per PERSON (usd per observed day across the span between their
+// first and last receipt). This lane is (owner, lane). Filling it would mean
+// dividing a person's rate across their lanes — arithmetic over money, which
+// this platform reads and never computes (S14.10 ¶1). The burn-rate SURFACE is
+// therefore GET /api/meters, which serves those rows verbatim at the view's own
+// grain; the seam here is nil on purpose, never faked.
 type FleetLane struct {
 	Owner               string   `json:"owner"`
 	Lane                string   `json:"lane"`

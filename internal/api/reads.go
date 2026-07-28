@@ -130,12 +130,21 @@ func readLimit(r *http.Request) (int, error) {
 	if raw == "" {
 		return readPageDefault, nil
 	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return 0, badRequest(fmt.Sprintf("bad limit %q: want a positive integer", raw))
+	n, err := readLimitValue(raw)
+	if err != nil {
+		return 0, err
 	}
 	if n > readPageMax {
 		return readPageMax, nil
+	}
+	return n, nil
+}
+
+// readLimitValue is the shared boundary validation for `?limit=`.
+func readLimitValue(raw string) (int, error) {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, badRequest(fmt.Sprintf("bad limit %q: want a positive integer", raw))
 	}
 	return n, nil
 }

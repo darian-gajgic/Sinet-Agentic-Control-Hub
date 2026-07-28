@@ -56,6 +56,15 @@ type LaneMeter struct {
 	WeightedConsumption float64
 	Utilization         *float64
 	BudgetRemaining     *float64
+	// CacheReadWeight + Assumed carry the S10.4 gauge's own "assumed" label
+	// (G1 Def.10) onto the meters read: the cache-read weight is an assumption
+	// until subscription quota semantics publish, and the reading says so.
+	CacheReadWeight float64
+	Assumed         bool
+	// BudgetDeclared is the gauge's Budget.Declared bit. At v0 no operator
+	// budget is persisted anywhere, so it is false and the ABSENCE (with its
+	// reason) is what the meters surface serves — never a zero (S10.1).
+	BudgetDeclared bool
 }
 
 // MeterReader is the narrow metering read-seam for the S14.3 snapshots: the
@@ -122,11 +131,11 @@ type Config struct {
 	// preview endpoints (S15.2); wired but NOT yet routed (F17).
 	Preview *preview.Manager
 	// History is the S14.10 three-layer queryable-history surface (B5-8B):
-	// Layer-0 named cost views, the Layer-1 canned catalog, and
-	// redact-before-match search. Composed at the shell root and HELD here for
-	// the S15 conversational assistant, which "consumes these layers and
-	// nothing else"; wired but NOT yet routed — the transport is B6's, the same
-	// posture Accept/FollowUp/Preview sit in.
+	// Layer-0 named cost views, the Layer-1 canned catalog, redact-before-match
+	// search and the Layer-2 escalation. B6-1 ROUTES it under /api/events
+	// (historyapi.go) — the transport the S15 conversational assistant will
+	// call, which "consumes these layers and nothing else". nil leaves those
+	// routes answering 503; Layers 0 and 1 are the floor and say so.
 	History *history.Store
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
@@ -163,8 +172,7 @@ type Server struct {
 	// preview is the S13.8 preview surface, held for the B6
 	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
 	preview *preview.Manager
-	// history is the S14.10 query surface, held for the S15 assistant; the
-	// transport is B6's and it is not yet routed.
+	// history is the S14.10 query surface, routed under /api/events (B6-1).
 	history *history.Store
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
 	// (the raw tail still serves).
@@ -246,6 +254,17 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/runs/{run}/receipt", s.handleRunReceipt)
 	protected("GET /api/tasks", s.handleTaskList)
 	protected("GET /api/tasks/{task}", s.handleTask)
+	protected("GET /api/meters", s.handleMeters)
+
+	// The S14.10 query layers, routed (B6-1, historyapi.go). Layer 2 has its
+	// own route because escalation is an act, never a fallback.
+	protected("GET /api/events/views", s.handleHistoryViews)
+	protected("GET /api/events/views/{view}", s.handleHistoryView)
+	protected("GET /api/events/catalog", s.handleHistoryCatalog)
+	protected("GET /api/events/query/{query}", s.handleHistoryQuery)
+	protected("GET /api/events/ask", s.handleHistoryAsk)
+	protected("GET /api/events/search", s.handleHistorySearch)
+	protected("GET /api/events/open-sql", s.handleHistoryOpenSQL)
 
 	// Walking-skeleton mutation surface (B2-4; the S15.6 decision plane is B6-2).
 	protected("POST /api/intake/requests", s.handleIntakeSubmit)
