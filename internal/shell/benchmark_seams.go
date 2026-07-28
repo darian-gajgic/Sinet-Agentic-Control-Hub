@@ -22,6 +22,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 )
@@ -43,6 +44,11 @@ type benchmarkSurface struct {
 	Store    *benchmark.Store
 	Sampler  *benchmark.Sampler
 	Practice *benchmark.Practice
+	// Runs is the S02.3 run store, read by the dispatch→render DRIVER below to
+	// ask one question and nothing else: has this pair's direct-arm run ENDED?
+	// The driver never transitions a run — internal/benchmark's no-kill wall and
+	// this loop's own posture both hold — it only waits for one.
+	Runs *run.Store
 	// Domains counts the registered launch domains whose bookkeeping row exists
 	// after this boot.
 	Domains int
@@ -66,6 +72,9 @@ func buildBenchmarkSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 	if err := checkBenchmarkDomainMapping(); err != nil {
 		return nil, err
 	}
+	if err := checkBenchmarkDirectSuffix(); err != nil {
+		return nil, err
+	}
 	store := benchmark.NewStore(db, log)
 	domains := 0
 	for _, d := range benchmark.V0LaunchDomains() {
@@ -84,10 +93,11 @@ func buildBenchmarkSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 			Store: store, Log: log, Runs: runs, Queue: sched, Ledger: ledger,
 			Briefs:   benchmarkBriefSeam(pipeline),
 			Platform: benchmarkPlatformTextSeam(reviews),
-			Direct:   benchmarkDirectTextSeam(),
+			Direct:   benchmarkDirectTextSeam(store),
 			Floors:   floors,
 			Logger:   logger,
 		},
+		Runs:        runs,
 		Domains:     domains,
 		FloorsWired: floors != nil,
 	}, nil
@@ -263,20 +273,88 @@ func benchmarkPlatformTextSeam(reviews *review.Store) benchmark.PlatformText {
 
 // benchmarkDirectTextSeam resolves the direct arm's produced answer.
 //
-// It is HONESTLY ABSENT at v0 and says so. The direct arm's run is created and
-// admitted by this packet (as ordinary background work under the requester's own
-// user_id), but nothing executes it yet: the single-shot engine invocation and
-// its output capture belong to the dispatcher, and B6 wires the verdict form a
-// pair needs before it can complete anyway. Returning a clear error is the whole
-// point — a placeholder body would render a blind pair whose "direct arm" was
-// the platform talking to itself, and every statistic downstream would be
-// fiction. Real accrual is a bring-up act under BENCH-REG §4.1's own schedule.
-func benchmarkDirectTextSeam() benchmark.DirectText {
-	return func(_ context.Context, runID string) (string, error) {
-		return "", fmt.Errorf("shell: the direct arm of run %q has produced no captured output — "+
-			"single-shot execution and output capture land with the dispatcher, and no pair completes "+
-			"until they and the B6 verdict form do (BENCH-REG §2; Spec S15.6)", runID)
+// B5-7 shipped this as an HONEST ABSENCE — the direct arm's run was created and
+// admitted, but nothing executed it, so the seam named the clause it could not
+// satisfy. B6-2C makes it REAL: the dispatcher's `.direct` leg (internal/stage)
+// runs the single shot and writes its final text against the run (migration
+// 0018), and this is the read of that capture.
+//
+// The absence did not go away, it got NARROWER and it is still honest: a pair
+// whose arm has not run — or whose leg never reached its capture point — reads
+// back ErrNoDirectCapture and is simply not rendered. A placeholder body would
+// render a blind pair whose "direct arm" was the platform talking to itself and
+// every statistic downstream would be fiction, so absence stays an error rather
+// than becoming an empty string. A CAPTURED empty answer is a different thing
+// and reads back as one: the arm answered with nothing, which is a real
+// single-shot outcome.
+func benchmarkDirectTextSeam(store *benchmark.Store) benchmark.DirectText {
+	if store == nil {
+		return nil
 	}
+	return store.CapturedDirectText
+}
+
+// directArmSeams composes the two things the S05.3 dispatcher's `.direct` leg
+// needs across the §34/§35 seam boundary (B6-2C, OQ9). internal/stage never
+// imports internal/benchmark and internal/benchmark never imports internal/stage,
+// so the frozen §2 statement and the single-shot capture cross as func seams
+// satisfied HERE — the composition root is the one place that may see both.
+//
+// Both fields are LATE-BOUND, and that is composition order rather than
+// looseness: the intake pipeline is built by the skeleton (whose Config carries
+// these seams) and the benchmark store is built after the scheduler the practice
+// enqueues onto, so neither exists when stage.New is called. The pseams.pipe
+// precedent, applied to one more seam pair. An unbound seam refuses LOUDLY — the
+// leg never invents a prompt and never silently drops a capture.
+type directArmSeams struct {
+	pipe  *intake.Pipeline
+	store *benchmark.Store
+}
+
+// Statement is stage.Config.BenchmarkStatement: the CONFIRMED §2 task statement
+// from the S06 artifact of record, hash-verified, never the arriving request
+// (the §3.1 obligation briefFromState implements — one resolution, shared with
+// the benchmark package's own brief seam so both arms provably answer one text).
+func (d *directArmSeams) Statement(ctx context.Context, taskID string) (string, error) {
+	if d.pipe == nil {
+		return "", errors.New("shell: the intake pipeline is not composed, so the BENCH-REG §2 frozen statement cannot be read")
+	}
+	st, err := d.pipe.LoadState(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	brief, err := briefFromState(ctx, taskID, st)
+	if err != nil {
+		return "", err
+	}
+	return brief.Statement, nil
+}
+
+// Capture is stage.Config.BenchmarkCapture: the single shot's final text,
+// persisted against its run. Refs-not-blobs holds by construction — the text
+// goes to the pair row migration 0018 opened for it and never into an event
+// payload, so ⚙ state.event_payload_cap is respected by never being approached.
+func (d *directArmSeams) Capture(ctx context.Context, runID, text string) (bool, error) {
+	if d.store == nil {
+		return false, errors.New("shell: the S14.7 benchmark store is not composed, so a direct-arm capture has nowhere durable to land")
+	}
+	return d.store.CaptureDirectText(ctx, runID, text)
+}
+
+// checkBenchmarkDirectSuffix is the composition-root end of the second pinned
+// reading this area needs (the checkBenchmarkDomainMapping precedent, B6-2C):
+// internal/benchmark mints the direct arm's run id and internal/stage routes it
+// by suffix, and neither may import the other. If either side renames its half,
+// a `.direct` run becomes unroutable and every dispatched pair silently rests
+// forever — so the two halves are asserted against each other at boot.
+func checkBenchmarkDirectSuffix() error {
+	id := benchmark.DirectRunID("bp-1")
+	if !strings.HasSuffix(id, stage.RunSuffixDirect) {
+		return fmt.Errorf("shell: benchmark.DirectRunID mints %q but the dispatcher routes on %q — "+
+			"a direct-arm run that no role matches never runs, and its pair rests forever (BENCH-REG §2)",
+			id, stage.RunSuffixDirect)
+	}
+	return nil
 }
 
 // benchmarkLoopInterval is the sampling loop's TICK — never a cadence. The
@@ -287,11 +365,22 @@ func benchmarkDirectTextSeam() benchmark.DirectText {
 // is fresh, slow enough to cost nothing. Structural, not ⚙ — S18 ratifies no key.
 const benchmarkLoopInterval = time.Minute
 
-// benchmarkLoop drives the BENCH-REG §4 sampling hook. It consumes the accepted
-// deliverables past the durable cursor and applies the frozen eligibility
-// conjunction plus the uniform draw to each. The cursor lives in the database,
-// so a restart neither re-samples an accept nor silently skips one — a skipped
-// accept is a LOST DRAW, and §4.1's uniformity is frozen.
+// benchmarkDriverBatch bounds how many pairs ONE driver pass picks up per state
+// (B6-2C). Structural, not ⚙ — S18 ratifies no key here (the §35 tail-batch and
+// §7 sseBatchSize precedent, interim under the standing settings-tab directive)
+// — with its reason: a pass shares the control plane's single writer connection
+// (S02.1) and each dispatch is a run creation plus an enqueue, so the bound is
+// what keeps one pass from holding that writer against everything else. It never
+// decides WHICH pairs are due: dueness is the stored state, the listing is
+// oldest-draw-first, and a pair beyond the bound is the next pass's first item.
+const benchmarkDriverBatch = 32
+
+// benchmarkLoop drives the BENCH-REG §4 sampling hook and the §3 dispatch→render
+// DRIVER. It consumes the accepted deliverables past the durable cursor and
+// applies the frozen eligibility conjunction plus the uniform draw to each, then
+// walks the pairs whose STORED state says they are due to advance. The cursor
+// lives in the database, so a restart neither re-samples an accept nor silently
+// skips one — a skipped accept is a LOST DRAW, and §4.1's uniformity is frozen.
 func benchmarkLoop(ctx context.Context, bs *benchmarkSurface, logger *slog.Logger) {
 	t := time.NewTicker(benchmarkLoopInterval)
 	defer t.Stop()
@@ -303,15 +392,93 @@ func benchmarkLoop(ctx context.Context, bs *benchmarkSurface, logger *slog.Logge
 			pass, err := bs.Sampler.Tail(ctx)
 			if err != nil {
 				logger.Warn("benchmark: sampling pass failed", "err", err)
-				continue
-			}
-			if pass.Considered > 0 {
+			} else if pass.Considered > 0 {
 				logger.Info("benchmark: sampling pass complete",
 					"considered", pass.Considered, "sampled", pass.Sampled,
 					"skipped", pass.Skipped, "cursor", pass.Cursor)
 			}
+			benchmarkDriverPass(ctx, bs, logger)
 		}
 	}
+}
+
+// benchmarkDriverPass is the BENCH-REG §3 dispatch→render driver (B6-2C, R18):
+// production wiring that moves pairs sampled → dispatched → rendered and has NO
+// PROTOCOL AUTHORITY OF ITS OWN.
+//
+// Everything about WHETHER a pair may advance is the package's: DispatchDirectArm
+// refuses a pair that is not `sampled`, RenderBlind refuses one that is not
+// `dispatched`, and the runs table's primary key refuses a second direct arm for
+// a pair that already has one. This pass decides only WHEN to ask, which is the
+// shell's standing duty (§31/§34/§35 — the package owns the LOGIC, the shell owns
+// WHEN). It advances nothing synthetically: there is no state write here at all.
+//
+// Dueness is the STORED state, never the tick. The tick decides how promptly a
+// verdict card appears after an accept; a pass that finds nothing does nothing,
+// and a failure is logged and retried on the NEXT pass by re-reading state —
+// which is safe re-entry precisely because the verbs check state themselves.
+func benchmarkDriverPass(ctx context.Context, bs *benchmarkSurface, logger *slog.Logger) {
+	sampled, err := bs.Store.PairsInState(ctx, benchmark.StateSampled, benchmarkDriverBatch)
+	if err != nil {
+		logger.Warn("benchmark: driver could not list sampled pairs", "err", err)
+	}
+	for _, p := range sampled {
+		if _, err := bs.Practice.DispatchDirectArm(ctx, p.PairID); err != nil {
+			// Logged and left alone. The pair keeps its state, so the next pass
+			// re-reads it and tries again; nothing is marked failed, because a
+			// pair that could not be dispatched today is still a pair awaiting
+			// its arm and the practice records no failure state for one.
+			logger.Warn("benchmark: direct-arm dispatch failed; retried on the next pass",
+				"pair", p.PairID, "err", err)
+			continue
+		}
+		logger.Info("benchmark: direct arm dispatched (BENCH-REG §2, ordinary background admission)",
+			"pair", p.PairID, "owner", p.UserID)
+	}
+
+	dispatched, err := bs.Store.PairsInState(ctx, benchmark.StateDispatched, benchmarkDriverBatch)
+	if err != nil {
+		logger.Warn("benchmark: driver could not list dispatched pairs", "err", err)
+		return
+	}
+	for _, p := range dispatched {
+		if !benchmarkArmEnded(ctx, bs, p, logger) {
+			continue
+		}
+		if _, err := bs.Practice.RenderBlind(ctx, p.PairID); err != nil {
+			// The commonest reason is the honest one: the arm ended without
+			// producing a capture, so there is no direct text to render and the
+			// pair correctly waits rather than being rendered against nothing.
+			logger.Warn("benchmark: blind render failed; retried on the next pass",
+				"pair", p.PairID, "direct_run", p.DirectRunID, "err", err)
+			continue
+		}
+		logger.Info("benchmark: pair rendered blind and is awaiting its requester's verdict (BENCH-REG §3.2)",
+			"pair", p.PairID, "owner", p.UserID)
+	}
+}
+
+// benchmarkArmEnded reports whether a dispatched pair's direct-arm run has
+// finished, which is the ONE precondition the driver checks before asking for a
+// render.
+//
+// "Finished" is `run.IsTerminal` — a state that admits no further transitions.
+// `crashed` is deliberately NOT that (S02.3/S02.5: recovery supersedes a crash by
+// harvest, fork, tombstone or finalize), so a crashed arm waits for the recovery
+// ladder's disposition instead of being rendered out from under it. Whatever that
+// disposition turns out to be, the pair's §6 parity note at record time reports a
+// run that did not end on its own terms — the arm is never re-run (§17).
+func benchmarkArmEnded(ctx context.Context, bs *benchmarkSurface, p benchmark.Pair, logger *slog.Logger) bool {
+	if p.DirectRunID == "" || bs.Runs == nil {
+		return false
+	}
+	r, err := bs.Runs.Get(ctx, p.DirectRunID)
+	if err != nil {
+		logger.Warn("benchmark: driver could not read the direct-arm run",
+			"pair", p.PairID, "run", p.DirectRunID, "err", err)
+		return false
+	}
+	return run.IsTerminal(r.State)
 }
 
 // checkBenchmarkDomainMapping is the composition-root end of the ONE reading

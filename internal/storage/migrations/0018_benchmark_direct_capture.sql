@@ -1,0 +1,58 @@
+-- 0018_benchmark_direct_capture.sql — the BENCH-REG §2 direct arm's captured
+-- output, the ONE thing standing between a sampled pair and a blind comparison.
+--
+-- Exact DDL per the S02.2 schema-workshop mandate; applied in ONE transaction
+-- with its PRAGMA user_version bump by the migration runner
+-- (internal/storage/migrate.go, Spec S02.1). A committed migration is immutable
+-- (CONVENTIONS §6) — 0001–0017 stay byte-untouched, this file included once it
+-- lands.
+--
+-- ONE column lands, and this is its reason (P3-B6-2C, OQ9):
+--
+-- The §2 direct arm is "the same confirmed task statement … run once,
+-- single-shot … take what comes". Until B6-2C the platform created and admitted
+-- that run and nothing executed it, so `benchmarkDirectTextSeam` returned an
+-- honest error and no pair could ever complete. The dispatcher's `.direct` leg
+-- now runs the single session; its final text has to land somewhere DURABLE
+-- before the pair can be rendered blind, because the render is a separate act on
+-- a separate pass and an in-process value would not survive a restart.
+--
+-- The home is a `benchmark_pairs` column, on this table's OWN precedent: the two
+-- rendered blind bodies (render_a / render_b) already live here rather than in an
+-- object store, "because they are small text artifacts OF the practice: keeping
+-- them in platform.db puts them inside the S02.9 durable set and every S13.10
+-- archive by construction" (0014). The captured direct-arm text is the same kind
+-- of artifact — in fact it is literally the input one of those two columns is
+-- rendered from — so putting it anywhere else would split one artifact class
+-- across two durability stories.
+--
+-- It is NOT an event payload, and that is the refs-not-blobs discipline rather
+-- than a preference (P-T07-5; ⚙ state.event_payload_cap): a model's full answer
+-- is exactly the "bulky body" the event log must never carry, and the §14 record
+-- already carries REFS to both rendered artifacts, never their bodies.
+--
+-- NULLABLE, and the NULL is load-bearing. There are three distinguishable
+-- states and the schema has to keep them distinguishable:
+--
+--   NULL  — no capture: the direct arm has not run, or its leg never reached
+--           its capture point. The read verb returns an HONEST ERROR naming the
+--           clause it cannot satisfy, exactly as the pre-B6-2C seam did, and the
+--           pair is not rendered.
+--   ''    — the arm ran and produced nothing. That is a REAL single-shot
+--           outcome ("take what comes"), not an absence, and the §6 parity note
+--           records the run's own disposition at record time.
+--   text  — the arm's final text, verbatim and NEVER truncated by the platform
+--           (§3.2: length is reported, never corrected).
+--
+-- A default of '' would have collapsed the first two into each other and made
+-- every never-dispatched pair look like an arm that answered with silence.
+--
+-- The column is MUTABLE WORKING STATE, so it deliberately does not join the
+-- 0014 `benchmark_pairs_identity_immutable` trigger's column list: a pair's
+-- identity is what it was sampled as, and what its direct arm produced is
+-- discovered afterwards. The two freezes still bind — 0014's recorded-frozen and
+-- 0015's declined-frozen triggers refuse any update once the pair's §14 record
+-- is written — so a capture arriving after a decline or a record cannot rewrite
+-- a committed result (BENCH-REG §17). The write verb states the same rule in its
+-- WHERE clause so the trigger is a backstop and not the mechanism.
+ALTER TABLE benchmark_pairs ADD COLUMN direct_text TEXT;

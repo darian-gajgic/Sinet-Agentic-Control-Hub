@@ -108,10 +108,11 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	}
 	// EXACT pin, moved forward deliberately as each packet lands its migration:
 	// 0011 is this packet's, 0012 is B5-5's, 0013 is B5-6A's (the S14.6 watch-row
-	// config store), 0017 is B6-2B's (the S10.4 budgets/pause + the S15.5 hint).
+	// config store), 0017 is B6-2B's (the S10.4 budgets/pause + the S15.5 hint)
+	// and 0018 is B6-2C's (the BENCH-REG §2 direct-arm capture column).
 	// A floor would let an unnoticed migration slip in.
-	if v != 17 {
-		t.Fatalf("user_version = %d, want 17 (migrations through 0017 applied contiguously)", v)
+	if v != 18 {
+		t.Fatalf("user_version = %d, want 18 (migrations through 0018 applied contiguously)", v)
 	}
 	var n int
 	if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM conformance_registry`).Scan(&n); err != nil {

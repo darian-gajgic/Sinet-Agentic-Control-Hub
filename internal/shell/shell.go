@@ -315,6 +315,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		committer := proj.Committer()
 		pseams := &projectSeams{proj: proj, runs: runs, db: db}
+		// The BENCH-REG §2 direct-arm seams (B6-2C). Both halves are late-bound
+		// below — the intake pipeline is the skeleton's and the benchmark store is
+		// composed after the scheduler the practice enqueues onto — so the holder
+		// is created here and handed to stage.Config as bound methods, the
+		// pseams.pipe precedent applied to one more seam pair.
+		bseams := &directArmSeams{}
 
 		// The knowledge write gate carries the committer at every construction
 		// site (Spec S09.2/D9; R28): a file-backed approval commits with the
@@ -472,7 +478,13 @@ func Run(ctx context.Context, opts Options) error {
 			// between stage sessions and parks the run when its owner has paused
 			// their automation. A park, never a kill (CONVENTIONS §31).
 			Paused: pauseStore.Paused,
-			Logger: logger,
+			// The BENCH-REG §2 direct-arm leg's seams (B6-2C): the frozen task
+			// statement from the S06 artifact of record, and the single shot's
+			// durable capture. internal/stage never imports internal/benchmark —
+			// the §34/§35 seam posture — so they cross as func fields.
+			BenchmarkStatement: bseams.Statement,
+			BenchmarkCapture:   bseams.Capture,
+			Logger:             logger,
 		})
 		if err != nil {
 			return err
@@ -511,6 +523,10 @@ func Run(ctx context.Context, opts Options) error {
 		// Late-bind the pipeline into the project seams: run→project resolution
 		// reads the durable intake match (st.Registry.Project) through it (F3).
 		pseams.pipe = sk.Pipeline()
+		// Same late bind for the §2 statement seam: both arms answer the ONE
+		// confirmed specification of record, resolved through the same
+		// briefFromState the benchmark package's own brief seam uses (§3.1).
+		bseams.pipe = sk.Pipeline()
 		admission = sched
 		surface := sk.Surface()
 		intakeSurface = surface
@@ -600,7 +616,11 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return err
 		}
-		logger.Info("benchmark: S14.7 practice wired (B5-7)",
+		// The B6-2C direct-arm capture home, late-bound: the dispatcher's
+		// `.direct` leg writes through this seam and the practice's DirectText
+		// reads the same column back.
+		bseams.store = benchSurf.Store
+		logger.Info("benchmark: S14.7 practice wired (B5-7); §2 direct-arm leg + §3 driver live (B6-2C)",
 			"domains", benchSurf.Domains, "gate_limb_d_evaluable", benchSurf.FloorsWired)
 
 		// The S14.9 retention substrate (B5-8A): the run summary written at the
@@ -699,13 +719,18 @@ func Run(ctx context.Context, opts Options) error {
 		Hints:    hintSurface,
 		Watchdog: watchdogSuppressSeam(wd),
 		Resume:   resumeSurface,
-		Accept:   acceptAccepter(acceptSurf),
-		FollowUp: acceptFollowUp(acceptSurf),
-		Preview:  previewSurf, // held for the B6 preview endpoints (F17); not routed
-		History:  histSurf,    // S14.10 layers, held for the S15 assistant; not routed
-		DB:       db,          // S14.3 snapshot projections (owner-scoped, OQ1)
-		Meter:    meterReader, // S14.3 run-card counters (§4)
-		Logger:   logger,
+		// The B6-2C verdict backend (benchmark_verbs.go): the blind form, the
+		// §3.3 one-act verdict, the §4.2.5 decline, the §12 alarm disposition
+		// and the §4.2.1 consent flip. nil under injected admission, which
+		// leaves those routes at 503 rather than pretending a practice runs.
+		Benchmark: benchmarkVerbSeam(benchSurf),
+		Accept:    acceptAccepter(acceptSurf),
+		FollowUp:  acceptFollowUp(acceptSurf),
+		Preview:   previewSurf, // held for the B6 preview endpoints (F17); not routed
+		History:   histSurf,    // S14.10 layers, held for the S15 assistant; not routed
+		DB:        db,          // S14.3 snapshot projections (owner-scoped, OQ1)
+		Meter:     meterReader, // S14.3 run-card counters (§4)
+		Logger:    logger,
 	})
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),

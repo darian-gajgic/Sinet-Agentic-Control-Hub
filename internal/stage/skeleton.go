@@ -226,6 +226,11 @@ func runRole(runID string) (role, bool) {
 		return roleCompose, true
 	case strings.HasSuffix(id, RunSuffixOnboard):
 		return roleOnboard, true
+	case strings.HasSuffix(id, RunSuffixDirect):
+		// The BENCH-REG §2 direct arm (direct.go, B6-2C). Its run id is
+		// `<pair>.direct`, minted by internal/benchmark; the suffix is pinned to
+		// that construction at the composition root.
+		return roleDirect, true
 	}
 	return "", false
 }
@@ -247,8 +252,9 @@ func allDigits(s string) bool {
 func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 	rl, ok := runRole(r.ID)
 	if !ok {
-		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s|*%s|*%s)", r.ID,
-			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify, RunSuffixCompose, RunSuffixOnboard)
+		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s|*%s|*%s|*%s)", r.ID,
+			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify, RunSuffixCompose, RunSuffixOnboard,
+			RunSuffixDirect)
 	}
 	switch rl {
 	case roleIntake:
@@ -259,6 +265,8 @@ func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 		return s.dispatchCompose(ctx, r)
 	case roleOnboard:
 		return s.dispatchOnboard(ctx, r)
+	case roleDirect:
+		return s.dispatchDirect(ctx, r)
 	default:
 		return s.dispatchVerify(ctx, r)
 	}

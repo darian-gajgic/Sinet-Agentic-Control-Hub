@@ -284,6 +284,21 @@ type Config struct {
 	// *metering.Pause; nil ⇒ nobody is paused (the pre-0017 behavior).
 	Paused func(ctx context.Context, userID string) (bool, error)
 
+	// The BENCH-REG §2 direct-arm seams (direct.go, B6-2C), composed at the shell
+	// root over internal/benchmark. This package never imports internal/benchmark
+	// and that package never imports this one — the §34/§35 seam posture, held by
+	// the benchmark import wall — so the two things the `.direct` leg needs cross
+	// the boundary as func fields, exactly like Snapshot/LedgerRevision/Paused.
+	//
+	// BenchmarkStatement resolves the frozen §2 task statement from the S06
+	// artifact of record (hash-verified at the seam); BenchmarkCapture persists
+	// the single shot's final text against the run, reporting whether a pair took
+	// it. BOTH nil is the sanctioned no-benchmark posture (tests and any process
+	// composed without the S14.7 practice) and a `.direct` run dispatched there
+	// fails LOUDLY — the arm is never run on an invented prompt.
+	BenchmarkStatement func(ctx context.Context, taskID string) (string, error)
+	BenchmarkCapture   func(ctx context.Context, runID, text string) (bool, error)
+
 	Fingerprint        func(ctx context.Context, project string) (run.Fingerprint, error)
 	CitedEntryVersions func(ctx context.Context, keys []string) (map[string]string, error)
 	Snapshot           func(ctx context.Context, runID string) (string, error)

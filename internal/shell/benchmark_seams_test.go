@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,24 +113,46 @@ func TestFloorSeamIsHonestlyNotEvaluable(t *testing.T) {
 	}
 }
 
-// TestDirectArmTextSeamIsHonestlyAbsent: no pair can complete until the
-// dispatcher captures a single-shot direct-arm output and B6 wires the verdict
-// form. The seam says so instead of returning a placeholder — a fabricated
-// "direct arm" would make every statistic downstream fiction.
-func TestDirectArmTextSeamIsHonestlyAbsent(t *testing.T) {
-	seam := benchmarkDirectTextSeam()
+// TestDirectArmTextSeamIsHonestlyAbsentWithoutACapture: B5-7 shipped this seam
+// as a flat refusal because nothing executed the direct arm. B6-2C makes it the
+// real read of the dispatcher's capture (migration 0018), and the absence it
+// reports is now NARROWER — but it is still an absence, never a placeholder. A
+// fabricated "direct arm" would render a blind pair of the platform against
+// itself and make every statistic downstream fiction.
+func TestDirectArmTextSeamIsHonestlyAbsentWithoutACapture(t *testing.T) {
+	db, log, _ := watchlistTestDeps(t)
+	seam := benchmarkDirectTextSeam(benchmark.NewStore(db, log))
 	if seam == nil {
 		t.Fatal("the direct-arm text seam must exist so its absence is legible")
 	}
 	body, err := seam(context.Background(), "bp-1.direct")
 	if err == nil {
-		t.Fatal("the seam must report the gap, not return a body")
+		t.Fatal("with no capture the seam must report the gap, not return a body")
 	}
 	if body != "" {
 		t.Errorf("the seam returned %q — a placeholder arm would corrupt the record", body)
 	}
+	if !errors.Is(err, benchmark.ErrNoDirectCapture) {
+		t.Errorf("the absence must be the package's own, so callers can branch on it: %v", err)
+	}
 	if !strings.Contains(err.Error(), "BENCH-REG §2") {
-		t.Errorf("the error must cite the clause it cannot yet satisfy: %v", err)
+		t.Errorf("the error must cite the clause it cannot satisfy: %v", err)
+	}
+	// A nil store yields a nil seam rather than a fake one: a process without the
+	// practice composed has no capture home, and RenderBlind refuses a nil text
+	// seam loudly rather than rendering half a pair.
+	if benchmarkDirectTextSeam(nil) != nil {
+		t.Error("an uncomposed store must yield no seam at all")
+	}
+}
+
+// TestBenchmarkDirectSuffixIsPinnedAtComposition: internal/benchmark mints the
+// direct arm's run id and internal/stage routes it by suffix, and neither may
+// import the other. If either half is renamed, every dispatched pair rests
+// forever behind an unroutable run — so the boot asserts them against each other.
+func TestBenchmarkDirectSuffixIsPinnedAtComposition(t *testing.T) {
+	if err := checkBenchmarkDirectSuffix(); err != nil {
+		t.Fatalf("the §2 direct-arm run-id/role pin broke: %v", err)
 	}
 }
 
