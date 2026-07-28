@@ -29,6 +29,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
@@ -112,6 +113,20 @@ type Config struct {
 	// SessionAuthenticator over Sessions/DevPosture (the production stack).
 	Auth     Authenticator
 	Settings Settings
+	// Registry is the FULL S01.10 settings registry behind the S15.9 settings
+	// family (settings.go, B6-3A). Settings above stays the narrow Duration
+	// seam every other consumer reads ⚙ values through — this is the surface
+	// that serves and edits the registry ITSELF, which needs the declarations,
+	// the emitters, the effective bounds and the audit table. It is held
+	// directly rather than behind an interface for the same reason
+	// *gates.Journal and *accept.Accepter are (§39): internal/settings is a
+	// leaf over storage+eventlog, so the dependency is narrow and acyclic, and
+	// an eight-method interface would only be a second name for one type.
+	// nil leaves the settings routes answering 503.
+	Registry *settings.Registry
+	// Prices is the S10.3 stored price table (migration 0019), adapted at the
+	// shell root; nil leaves the price routes answering 503.
+	Prices PriceSurface
 	// HealthFn returns the current readiness snapshot.
 	HealthFn func() Health
 	// Stopping is closed when the shell begins shutdown: SSE handlers
@@ -189,12 +204,16 @@ type Server struct {
 	devPosture bool
 	auth       Authenticator
 	settings   Settings
-	healthFn   func() Health
-	stopping   <-chan struct{}
-	poll       time.Duration
-	logger     *slog.Logger
-	nudge      *broadcast
-	intake     IntakeSurface
+	// registry is the full S01.10 registry behind the S15.9 settings family;
+	// prices is the S10.3 stored price table (settings.go, B6-3A).
+	registry *settings.Registry
+	prices   PriceSurface
+	healthFn func() Health
+	stopping <-chan struct{}
+	poll     time.Duration
+	logger   *slog.Logger
+	nudge    *broadcast
+	intake   IntakeSurface
 	// accept is held for the B6-3 deliverable content family; not yet routed.
 	accept *accept.Accepter
 	// followUp is the S13.9 spawn verb, routed by B6-2A (actions.go).
@@ -229,6 +248,8 @@ func New(cfg Config) *Server {
 		devPosture: cfg.DevPosture,
 		auth:       cfg.Auth,
 		settings:   cfg.Settings,
+		registry:   cfg.Registry,
+		prices:     cfg.Prices,
 		healthFn:   cfg.HealthFn,
 		stopping:   cfg.Stopping,
 		poll:       cfg.PollInterval,
@@ -357,6 +378,24 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/approvals/{id}/verdict", s.handleBenchmarkVerdict)
 	protected("POST /api/approvals/{id}/decline", s.handleBenchmarkDecline)
 	protected("POST /api/approvals/{id}/dispose", s.handleBenchmarkAlarmDispose)
+
+	// The S15.9 settings family (B6-3A, settings.go): the one registry read
+	// (schema + UISchema + values + effective clamp bounds + the S18.4 R9
+	// registered block), the per-setting audit history from settings_events,
+	// the validated write verbs, and the S18.3 price-table surface. Reads are
+	// session-required and owner-scope only the per-user overrides; WRITES are
+	// operator-only, because the registry's actor model admits no member kind
+	// (OQ8). No route here performs an outward effect — a settings write is a
+	// control-plane-internal state act (D7).
+	//
+	// `prices` is a literal segment and every declared key is dotted, so it can
+	// never be shadowed by {key}; TestPriceRouteCannotBeShadowedByAKey pins it.
+	protected("GET /api/settings", s.handleSettingsRead)
+	protected("GET /api/settings/prices", s.handlePriceRead)
+	protected("POST /api/settings/prices", s.handlePriceAdd)
+	protected("GET /api/settings/{key}/history", s.handleSettingsHistory)
+	protected("POST /api/settings/{key}", s.handleSettingsSet)
+	protected("POST /api/settings/{key}/bounds", s.handleSettingsBounds)
 
 	return s.identity(mux)
 }

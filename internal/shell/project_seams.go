@@ -41,6 +41,11 @@ type projectSeams struct {
 	// pipe is late-bound after stage.New (the pipeline is built inside it);
 	// projectForTask reads the durable intake match through it.
 	pipe *intake.Pipeline
+	// prices supplies the S02.6 fingerprint's price-table member (B6-3A). It is
+	// the narrowest possible view of the composed table — a version string —
+	// because that is all a fingerprint needs and nothing here should be able
+	// to price anything.
+	prices interface{ Version() string }
 }
 
 // registrySeam is the production intake.Registry (S06.2 step 2): match a
@@ -183,19 +188,37 @@ func (s *projectSeams) CreateRevisionRef(ctx context.Context, runID, ref, snapsh
 	return s.proj.CreateRevisionRef(ctx, projectID, ref, snapshotSHA)
 }
 
-// Fingerprint supplies the matched project's real repo HEAD for the S02.6/
-// S09.6 approval-staleness fingerprint (R33); unobservable members stay empty.
+// Fingerprint supplies the observable members of the S02.6/S09.6 approval-
+// staleness fingerprint (R33): the matched project's real repo HEAD, and — from
+// B6-3A — the price table's version. Members nothing can observe stay empty.
+//
+// The price-table member is OBSERVABLE now, which it was not before: until the
+// table had a durable home (migration 0019) its version was a fixed label, so
+// filling this in would have been fabricating a constant. It is now the digest
+// of the stored row set, so it MOVES exactly when a price moves — which is the
+// whole point of the member. S10.3 makes price drift a first-class staleness
+// cause ("it re-prices the remaining plan, so any change fires the freshness
+// re-validation trigger", G1 Def.5), and this is the wire that carries it.
+//
+// It rides even when no project matched: a price is not a property of a
+// project, and a plan parked against a table that has since changed is stale
+// whether or not the platform could resolve its repo.
 func (s *projectSeams) Fingerprint(ctx context.Context, projectID string) (run.Fingerprint, error) {
+	fp := run.Fingerprint{}
+	if s.prices != nil {
+		fp.PriceTableVersion = s.prices.Version()
+	}
 	if projectID == "" {
-		return run.Fingerprint{}, nil
+		return fp, nil
 	}
 	head, err := s.proj.RepoHead(ctx, projectID)
 	if err != nil {
 		// A missing/pending project is not an error at the fingerprint probe —
 		// it simply supplies no repo HEAD (never faked, R33).
-		return run.Fingerprint{}, nil
+		return fp, nil
 	}
-	return run.Fingerprint{RepoHead: head}, nil
+	fp.RepoHead = head
+	return fp, nil
 }
 
 // BaseContent resolves a repo-backed deliverable's pre-task base content for

@@ -101,6 +101,16 @@ func (f *fakeBenchmark) SetOptIn(_ context.Context, actor, subject string, enabl
 	return nil
 }
 
+// RegisteredValues stands in for the package's S18.4 R9 block. It carries the
+// real marker string because that is the property the settings surface must
+// serve verbatim; the value itself is a stand-in, because internal/api names no
+// registered number and this test must not become the place one appears.
+func (f *fakeBenchmark) RegisteredValues(context.Context) (json.RawMessage, error) {
+	f.note("registered")
+	return json.RawMessage(`[{"name":"stand-in","value":"stand-in","ref":"BENCH-REG §1",` +
+		`"marker":"registered — changing this value requires a re-registration commit"}]`), nil
+}
+
 func (f *fakeBenchmark) order() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -519,17 +529,18 @@ func TestPartCCountersArePinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 18 {
-		t.Errorf("user_version = %d, want 18 (0001–0017 untouched, 0018 is this packet's)", v)
+	if v != 19 {
+		t.Errorf("user_version = %d, want 19 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's)", v)
 	}
-	// 0018 is the ONLY migration this packet adds.
+	// 0018 is the ONLY migration this packet adds; 0019 is B6-3A's (the S10.3
+	// price table's durable home) and moves this sentinel in lockstep.
 	sqls, err := filepath.Glob("../storage/migrations/*.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range sqls {
-		if filepath.Base(p) > "0018_zzz" {
-			t.Errorf("unexpected migration %q — part C adds exactly 0018", filepath.Base(p))
+		if filepath.Base(p) > "0019_zzz" {
+			t.Errorf("unexpected migration %q — part C adds exactly 0018 and B6-3A exactly 0019", filepath.Base(p))
 		}
 	}
 }

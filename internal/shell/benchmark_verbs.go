@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
@@ -112,6 +113,19 @@ func (b benchmarkVerbs) DisposeAlarm(ctx context.Context, actor, domain, disposi
 
 func (b benchmarkVerbs) SetOptIn(ctx context.Context, actor, subject string, enabled bool) error {
 	return benchmarkStatus(b.bs.Practice.SetOptIn(ctx, actor, subject, enabled))
+}
+
+// RegisteredValues is the S18.4 R9 block for the B6-3A settings surface: the
+// package's OWN marked values, marshaled and passed straight through. The ctx is
+// unused because there is nothing to read from storage — the values are frozen
+// in code and a registration is not a query — and the signature carries it so
+// the seam looks like every other read on it.
+func (b benchmarkVerbs) RegisteredValues(context.Context) (json.RawMessage, error) {
+	raw, err := json.Marshal(benchmark.RegisteredValues())
+	if err != nil {
+		return nil, fmt.Errorf("shell: marshal registered values: %w", err)
+	}
+	return raw, nil
 }
 
 // benchmarkStatus maps the package's sentinels onto transport statuses. Anything

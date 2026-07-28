@@ -269,6 +269,21 @@ func Run(ctx context.Context, opts Options) error {
 	// a switch that half-worked.
 	budgetStore := metering.NewBudgets(db)
 	pauseStore := metering.NewPause(db)
+	// The S10.3 price table, made durable at migration 0019 (B6-3A). Composed
+	// unconditionally for the budget store's reason: the pricing path and the
+	// S15.9 settings surface must read ONE table, and a process where only one
+	// of them had it would be two price truths. It builds from the stored rows
+	// here and re-composes on every operator edit (live-apply), so a price
+	// change needs no restart.
+	//
+	// It ships EMPTY and nothing seeds it: with no row for a {model, lane} at a
+	// date every usage row prices UNPRICED rather than $0, which is the ratified
+	// v0 posture (S10.1; CONVENTIONS §11), and filling the table is an operator
+	// act this surface now makes possible.
+	priceTable := metering.NewLivePriceTable(metering.NewPriceStore(db, log))
+	if err := priceTable.Reload(ctx); err != nil {
+		return fmt.Errorf("shell: compose price table: %w", err)
+	}
 	// resumeSurface is S14.4's "resume — I was wrong" (B6-2B): the ratified
 	// S02.3 parked→running edge, taken by a person, over the same stage surface
 	// the cancel verbs use.
@@ -278,7 +293,6 @@ func Run(ctx context.Context, opts Options) error {
 	var hintSurface api.HintSurface
 	admission := opts.Admission
 	if admission == nil {
-		priceTable := metering.NewEffectiveDatedTable("empty-v0")
 		exceptions := metering.NoMeteredExceptions()
 		meterLedger := metering.NewLedger(db, priceTable, exceptions, reg)
 		meterReader = projMeter{ledger: meterLedger, gauge: metering.NewPressureGauge(db, reg), budgets: budgetStore}
@@ -322,7 +336,7 @@ func Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("shell: init knowledge git repo (Spec S13.10): %w", err)
 		}
 		committer := proj.Committer()
-		pseams := &projectSeams{proj: proj, runs: runs, db: db}
+		pseams := &projectSeams{proj: proj, runs: runs, db: db, prices: priceTable}
 		// The BENCH-REG §2 direct-arm seams (B6-2C). Both halves are late-bound
 		// below — the intake pipeline is the skeleton's and the benchmark store is
 		// composed after the scheduler the practice enqueues onto — so the holder
@@ -713,11 +727,17 @@ func Run(ctx context.Context, opts Options) error {
 		Sessions:   auth.New(db, log),
 		DevPosture: devPosture(),
 		Settings:   reg,
-		HealthFn:   healthFn(st, maint, log),
-		Stopping:   st.stopping,
-		Intake:     intakeSurface,
-		Cancel:     cancelSurface, // S15.6 / 4.5 cancel verbs (B6-2A)
-		Effects:    effects,       // S02.7 journal behind the S15.6 effect approvals
+		// The B6-3A settings family: the FULL registry behind /api/settings
+		// (Settings above stays the narrow Duration seam the SSE keepalive
+		// reads through), and the S10.3 stored price table behind its S18.3
+		// surface.
+		Registry: reg,
+		Prices:   priceSurfaceSeam(priceTable),
+		HealthFn: healthFn(st, maint, log),
+		Stopping: st.stopping,
+		Intake:   intakeSurface,
+		Cancel:   cancelSurface, // S15.6 / 4.5 cancel verbs (B6-2A)
+		Effects:  effects,       // S02.7 journal behind the S15.6 effect approvals
 		// The B6-2B decision-plane seams: the S10.4 meters mutations, the S15.5
 		// board drag, and the two oversight verbs over landed internals. wd is
 		// nil under injected admission, which leaves the suppress route at 503

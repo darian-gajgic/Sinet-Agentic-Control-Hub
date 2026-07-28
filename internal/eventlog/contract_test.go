@@ -128,6 +128,15 @@ func producerTypes() []string {
 		// listed here so the declare-once assertion covers the second producer
 		// of a shared type as strictly as it covers the first (CONVENTIONS §29).
 		api.EventDecisionRecorded,
+		// metering (1): the B6-3A S10.3 price-table producer. The operator
+		// appending one effective-dated row to the durable price table
+		// (migration 0019) — the ONE genuinely new type this packet registers,
+		// and the only reason the registry grows past B6-1's 95. It is not a
+		// settings.changed because that type's contract minimum mirrors
+		// settings_events, whose `key` is a declared dotted registry key and
+		// whose old→new is a value replacement; an effective-dated append has
+		// neither (see its contract.go note).
+		metering.EventPriceRowAdded,
 	}
 	// worker-asset lifecycle (13) — package-private constants, by value.
 	types = append(types,
@@ -201,13 +210,19 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 // pre-authorized. The inventory is therefore counted over DISTINCT types — a
 // type produced from two places is still one registered type, and counting the
 // producer LIST would have turned a co-production into a phantom growth.
+// B6-2B and B6-2C likewise add no type — both extend the same co-production.
+// B6-3A REGISTERS ONE GENUINELY NEW TYPE, price.row_added (§29: "a new minted
+// type is a contract.go entry + a producerTypes() inventory entry in the same
+// packet"; no new FAMILY, so no S00.9 amendment — it lands in family 12 under
+// the same OQ2-(A) reading as the other platform-operational groups), so the
+// registry moves 90/5/95 → 91 minted + 5 declare-only = 96 registered.
 func TestInventoryTotals(t *testing.T) {
 	distinct := map[string]bool{}
 	for _, typ := range producerTypes() {
 		distinct[typ] = true
 	}
-	if n := len(distinct); n != 90 {
-		t.Errorf("producer inventory = %d distinct types, want 90 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1; B6-2A co-produces decision.recorded and adds none)", n)
+	if n := len(distinct); n != 91 {
+		t.Errorf("producer inventory = %d distinct types, want 91 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1, +1 price.row_added at B6-3A; B6-2A/B/C co-produce decision.recorded and add none)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -220,8 +235,8 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 90 {
-		t.Errorf("registered minted types = %d, want 90", minted)
+	if minted != 91 {
+		t.Errorf("registered minted types = %d, want 91", minted)
 	}
 	if declareOnly != 5 {
 		t.Errorf("declare-only types = %d, want 5", declareOnly)
@@ -784,6 +799,18 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"history.query_audited",
 			`{"question":"which runs cost the most?","outcome":"refused","sql_generated":"SELECT payload FROM run_events","sql_executed":"","views":[],"limit_injected":200,"timeout_ms":5000,"refusal":"history: refused by the Layer-2 guardrail: \"run_events\" is not an allowlisted view","row_count":0,"truncated":false,"model":"Arctic-Text2SQL-R1-7B","alias":"sql-open","as_operator":true,"owner_scoped":0,"raw_output_len":412}`,
 			[]string{"question", "outcome", "sql_generated", "limit_injected", "timeout_ms", "alias"},
+		},
+		{
+			// price.row_added (B6-3A): the operator appending one effective-dated
+			// row to the S10.3 price table. The contract minimum is the S10.3 row
+			// shape — a price is only auditable if you can see WHAT was priced, at
+			// WHAT rates, FROM WHEN, and on WHOSE authority — plus the source and
+			// verification date, because D5 quotes the provider actually serving
+			// the lane and a row whose provenance is unstated cannot be checked.
+			// There is no `old`: an effective-dated append replaces nothing.
+			"price.row_added",
+			`{"row_id":1,"model":"claude-sonnet-4-5","lane":"anthropic","unit_prices":{"input_usd":0.000003,"output_usd":0.000015,"cache_read_usd":0.0000003,"cache_creation_usd":0.00000375,"server_tool_usd":0},"effective_from":"2026-08-01T00:00:00Z","verified_on":"2026-07-28T00:00:00Z","source":"anthropic pricing page","actor":"op","reason":"list price flip announced"}`,
+			[]string{"row_id", "model", "lane", "unit_prices", "effective_from", "verified_on", "source", "actor"},
 		},
 	}
 	for _, c := range cases {

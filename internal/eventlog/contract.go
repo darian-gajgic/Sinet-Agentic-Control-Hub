@@ -496,6 +496,17 @@ var v0Types = []TypeSpec{
 
 	// ── Family 12: Platform (13.4; S2.1) ────────────────────────────────
 	minted("settings.changed", FamilyPlatform, VerdictConforms, "internal/settings/settings.go:36", "spec-named (G3 Def.2); payload {actor,key,old,new,reason}"),
+	minted("price.row_added", FamilyPlatform, VerdictAdmit,
+		"internal/metering/pricestore.go (EventPriceRowAdded); emitted internal/metering/pricestore.go AddRow",
+		"the operator adding one effective-dated row to the S10.3 price table — the first of the three S18.3 data-valued settings surfaces to get a durable home (migration 0019 `price_rows`, P3-B6-3A OQ1). "+
+			"Its own contract minimum, carried here because a TYPE's minimum belongs on its TypeSpec (the history.query_audited precedent) and the family descriptor above is frozen S14.2 text this packet may not author: "+
+			"{row_id, model, lane, unit_prices, effective_from, verified_on, source, actor, reason} — the S10.3 row shape plus who appended it and why. Platform-scope (a price is nobody's run), owner-attributed to the operator who acted. "+
+			"REGISTERED RATHER THAN FOLDED INTO settings.changed, deliberately: that type's contract minimum is {actor, key, old, new, reason} MIRRORING settings_events, whose `key` is a DECLARED dotted registry key and whose old→new is a value REPLACEMENT. "+
+			"A price row has neither — it is identified by {model, lane, effective_from}, and an effective-dated append leaves every earlier row in force for the dates it covers, so there is no value being replaced. "+
+			"Reusing settings.changed would have required a pseudo-key and a fabricated `old`: two false fields in the audit trail to avoid registering one honest type. "+
+			"ADMIT under the same broadened-Platform reading (OQ2-(A); CONVENTIONS §29) that homes registry.*, preview.*, local.* and history.* — a platform-operational data-surface act, not a run event. "+
+			"There is NO price.row_removed and no update type because there is no such act: the table is append-only by trigger, and a price change is a new effective-dated row (S10.3). "+
+			"The B5-6A watchlist's drift.finding stays what it was — a PROPOSAL about the outside world (G2 Def.16); this type records the operator APPLYING one, which is the act that moves run.Fingerprint.PriceTableVersion"),
 	minted("platform.started", FamilyPlatform, VerdictAdmit, "internal/shell/seams.go:68", "platform lifecycle (platform-scope, user_id=platform)"),
 	minted("platform.stopping", FamilyPlatform, VerdictAdmit, "internal/shell/seams.go:69", "platform lifecycle (platform-scope, user_id=platform)"),
 	minted("compaction.anomaly", FamilyPlatform, VerdictRename, "internal/stage/stage.go:121", "renamed from context.overflow (S05.7 compaction/overflow anomaly); FIELD-reconcile against the S14.2 compaction-anomaly minima at the B5-8 compaction packet"),

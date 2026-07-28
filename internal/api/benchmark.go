@@ -78,6 +78,17 @@ type BenchmarkSurface interface {
 	// package refuses any actor but the subject themselves — the operator
 	// included.
 	SetOptIn(ctx context.Context, actor, subject string, enabled bool) error
+	// RegisteredValues is the S18.4 R9 read: every value the registration
+	// freezes, each carrying its own §-ref and the read-only marker
+	// ("registered — changing this value requires a re-registration commit"),
+	// marshaled by the package that owns them. The settings surface displays
+	// this block read-only (B6-3A R5).
+	//
+	// It is a READ with no actor because there is no act: nothing on this path
+	// can change a registered value, which is the whole point of R9. Not one of
+	// the numbers is named in internal/api — a display that restated them could
+	// disagree with the machinery that decides on them.
+	RegisteredValues(ctx context.Context) (json.RawMessage, error)
 }
 
 // ── GET /api/benchmark/verdicts — the blind form's data (R20) ───────────────

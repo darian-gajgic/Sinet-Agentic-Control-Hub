@@ -288,12 +288,15 @@ func TestLimitEventTypesArePinnedToTheRegistry(t *testing.T) {
 // registry at B5-8A's 94. The C half registers exactly ONE type,
 // history.query_audited, because S14.10 ¶3 requires every generated query to be
 // audit-logged — so 95 registered, and the append appears in exactly one file.
+// B6-3A then registered one more, price.row_added (the S10.3 price table's
+// durable home), taking the registry to 96; THIS package registered none of it
+// and is byte-unchanged apart from this count.
 //
 // The Layer 0/1 surface stays read-only, which is the part worth keeping: an
 // append anywhere but layer2.go is still a defect.
 func TestExactlyOneEventTypeIsMinted(t *testing.T) {
-	if n := len(eventlog.Registry().Types()); n != 95 {
-		t.Errorf("the S14.2 registry holds %d types, want 95 (B5-8A's 94 + history.query_audited)", n)
+	if n := len(eventlog.Registry().Types()); n != 96 {
+		t.Errorf("the S14.2 registry holds %d types, want 96 (B5-8A's 94 + history.query_audited + B6-3A's price.row_added)", n)
 	}
 	if _, ok := eventlog.Registry().TypeSpec(history.EventQueryAudited); !ok {
 		t.Errorf("%q is not registered in the S14.2 contract (CONVENTIONS §29)", history.EventQueryAudited)
