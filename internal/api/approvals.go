@@ -186,7 +186,7 @@ func (s *Server) handleApprovalList(w http.ResponseWriter, r *http.Request) {
 		s.writeSurface(w, nil, err)
 		return
 	}
-	items, err := s.proj.approvalItems(r.Context(), snap, expiry, stale)
+	items, err := s.proj.approvalItems(r.Context(), scope, snap, expiry, stale)
 	if err != nil {
 		s.writeSurface(w, nil, err)
 		return
@@ -236,7 +236,7 @@ func (s *Server) approvalHorizons() (expiry, stale time.Duration, err error) {
 // list, enriching the two ANSWERABLE kinds with their pin, expiry and tier.
 // The five oversight kinds are carried verbatim from their projections — their
 // verbs are later packets, and the card says so rather than going missing.
-func (p *projector) approvalItems(ctx context.Context, snap InboxSnapshot, expiry, stale time.Duration) ([]ApprovalItem, error) {
+func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap InboxSnapshot, expiry, stale time.Duration) ([]ApprovalItem, error) {
 	now := p.clock()
 	out := []ApprovalItem{}
 
@@ -247,10 +247,12 @@ func (p *projector) approvalItems(ctx context.Context, snap InboxSnapshot, expir
 	for _, a := range asks {
 		it := ApprovalItem{
 			ID: approvalKindAsk + ":" + a.AskID, Kind: approvalKindAsk, Owner: a.Owner,
-			RunID: a.RunID, Tier: a.Tier, Answerable: true,
+			RunID: a.RunID, Tier: a.Tier,
 			PayloadHash: a.Hash, ObservedTS: a.ObservedTS,
 			EngineExpiryTS: a.EngineExpiryTS, Actions: a.Actions, Card: a.Snapshot,
 		}
+		setAnswerable(&it, mayAnswerAsk(scope, a.Owner),
+			"the card's owner answers it (D10); you can read it but not decide it")
 		applyTierRules(&it)
 		applyExpiryAndStaleness(&it, expiry, stale, now, a.StoredStale, a.StoredStaleReasons)
 		out = append(out, it)
@@ -268,16 +270,18 @@ func (p *projector) approvalItems(ctx context.Context, snap InboxSnapshot, expir
 			// or irreversible). The tier is not read off the row because an
 			// effect that could downgrade itself out of the PIN re-prompt is
 			// exactly the hole the tier exists to close.
-			Tier: tierHigh, Answerable: true,
+			Tier:        tierHigh,
 			PayloadHash: e.PayloadHash, ObservedTS: e.CreatedTS,
 			Actions: []string{effectActionApprove, effectActionDeny},
 			Card:    e.Payload,
 		}
-		appr, aerr := p.effectApprovals(ctx, e)
+		appr, aerr := p.effectApprovals(ctx, e, expiry)
 		if aerr != nil {
 			return nil, aerr
 		}
 		it.Approvals = &appr
+		setAnswerable(&it, mayAnswerEffect(scope, e),
+			"this effect is its owner's decision; the operator co-approves only a platform-level one (D10)")
 		applyTierRules(&it)
 		applyExpiryAndStaleness(&it, expiry, stale, now, false, nil)
 		out = append(out, it)
@@ -344,6 +348,32 @@ func oversightItem(kind, nativeID, owner, runID, tier string, ts time.Time, why 
 	return ApprovalItem{
 		ID: kind + ":" + nativeID, Kind: kind, Owner: owner, RunID: runID, Tier: tier,
 		Answerable: false, NotAnswerableReason: why, ObservedTS: ts, Card: raw,
+	}
+}
+
+// ── who may answer what: ONE authority rule, read by the card and the verb ──
+//
+// The list and the verb MUST agree, or the inbox renders a button that 403s
+// (drain D9). These two predicates are therefore the single source both read:
+// the card's `answerable` is computed from them per CALLER, and the answer path
+// authorizes with them too.
+
+// mayAnswerAsk: D10 — the ask's OWNER answers. The role bit decides visibility,
+// never authorship of somebody else's decision.
+func mayAnswerAsk(scope ownerScope, owner string) bool { return scope.UserID == owner }
+
+// mayAnswerEffect: the owner always; the operator additionally on a
+// platform-level effect, which is exactly the co-approval D10 gives them.
+func mayAnswerEffect(scope ownerScope, e effectCard) bool {
+	return scope.UserID == e.Owner || (scope.Operator && e.PlatformLevel)
+}
+
+// setAnswerable records the per-caller verdict WITH its reason, so a surface
+// that cannot answer a card knows why rather than rendering a dead control.
+func setAnswerable(it *ApprovalItem, ok bool, why string) {
+	it.Answerable = ok
+	if !ok {
+		it.NotAnswerableReason = why
 	}
 }
 
@@ -433,7 +463,12 @@ func (p *projector) askCards(ctx context.Context, asks []InboxAsk) ([]askCard, e
 			`SELECT user_id, snapshot, engine_expiry_ts FROM asks WHERE ask_id = ?`, a.AskID).
 			Scan(&owner, &snapshot, &engineExpiry)
 		if errors.Is(err, sql.ErrNoRows) {
-			continue // answered between the projection and this read: it is no longer open
+			// The ask ROW is gone, which is not the same thing as answered — an
+			// answered ask keeps its row (status/answered_ts move, §14). The only
+			// way a row disappears is deletion, so this is the honest "the
+			// subject vanished under the projection" case: skip it rather than
+			// fail the whole inbox for one missing card (drain D12).
+			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("projection: ask card %q: %w", a.AskID, err)
@@ -550,10 +585,28 @@ func (p *projector) effectCard(ctx context.Context, effectID string) (effectCard
 // rows for the effect. Derive-from-log, no side store: the effects row records
 // only the FINAL approver, and "who has already said yes" is a question about
 // the decision record.
-func (p *projector) effectApprovals(ctx context.Context, e effectCard) (EffectApprovals, error) {
+//
+// The derivation is CYCLE-SCOPED (drain D3), and that is what makes it correct
+// across the journal's own re-approval reversions. S02.7 sends an effect back
+// to `proposed` on approval EXPIRY or on payload DRIFT, and a signature from
+// the cycle before must not silently carry into the cycle after — otherwise an
+// expired owner-yes would let the operator alone complete a platform-level
+// conjunction, and a re-approval would dedup against the old row and fire
+// gates.Approve with no fresh audit trail at all. So a row counts IFF:
+//
+//   - its recorded payload_hash equals the effect's CURRENT canonical hash —
+//     a drift reversion changes the hash, so pre-drift signatures hash out; and
+//   - its decided_at is within ⚙ effects.approval_expiry of now — a time
+//     reversion happens exactly when that window lapses, so they age out.
+//
+// The same predicate bounds the SCAN (the `ts >=` limb): rows that cannot count
+// are not read (N14).
+func (p *projector) effectApprovals(ctx context.Context, e effectCard, expiry time.Duration) (EffectApprovals, error) {
 	appr := EffectApprovals{PlatformLevel: e.PlatformLevel}
+	now := p.clock().UTC()
 	rows, err := p.db.QueryContext(ctx,
-		`SELECT payload FROM run_events WHERE type = ? ORDER BY event_seq`, EventDecisionRecorded)
+		`SELECT payload FROM run_events WHERE type = ? AND ts >= ? ORDER BY event_seq`,
+		EventDecisionRecorded, now.Add(-expiry).Format(time.RFC3339Nano))
 	if err != nil {
 		return appr, fmt.Errorf("projection: effect approvals %q: %w", e.EffectID, err)
 	}
@@ -571,6 +624,9 @@ func (p *projector) effectApprovals(ctx context.Context, e effectCard) (EffectAp
 		if d.CardID != cardID || d.Decision != effectActionApprove {
 			continue
 		}
+		if !d.countsForCycle(e.PayloadHash, now, expiry) {
+			continue
+		}
 		if d.Actor == e.Owner {
 			appr.OwnerApproved, appr.OwnerApprovedBy = true, d.Actor
 		}
@@ -579,6 +635,20 @@ func (p *projector) effectApprovals(ctx context.Context, e effectCard) (EffectAp
 		}
 	}
 	return appr, rows.Err()
+}
+
+// countsForCycle is the cycle predicate (drain D3): a signature belongs to the
+// effect's CURRENT approval cycle only if it was given for the payload that is
+// on the row now, and given inside the still-live approval window.
+func (d decisionPayload) countsForCycle(currentHash string, now time.Time, expiry time.Duration) bool {
+	if d.PayloadHash == "" || d.PayloadHash != currentHash {
+		return false
+	}
+	decided, err := time.Parse(time.RFC3339Nano, d.DecidedAt)
+	if err != nil {
+		return false
+	}
+	return now.Sub(decided.UTC()) <= expiry
 }
 
 // ── the payload-derived cards, redacted per VALUE at this edge (R3) ─────────
@@ -873,12 +943,12 @@ func (s *Server) answerEffect(ctx context.Context, id Identity, scope ownerScope
 			act.Action, effectActionApprove, effectActionDeny))
 	}
 
-	state, err := s.effectState(ctx, effectID)
+	state, result, err := s.effectState(ctx, effectID)
 	if err != nil {
 		return ApprovalAnswerResult{}, err
 	}
 	if state != string(gates.EffectProposed) {
-		return resolvedEffect(routeID, state, act.Action)
+		return resolvedEffect(routeID, state, act.Action, result)
 	}
 
 	item := ApprovalItem{
@@ -896,70 +966,108 @@ func (s *Server) answerEffect(ctx context.Context, id Identity, scope ownerScope
 		return ApprovalAnswerResult{}, err
 	}
 
-	appr, err := s.proj.effectApprovals(ctx, card)
+	expiry, _, err := s.approvalHorizons()
+	if err != nil {
+		return ApprovalAnswerResult{}, err
+	}
+	appr, err := s.proj.effectApprovals(ctx, card, expiry)
 	if err != nil {
 		return ApprovalAnswerResult{}, err
 	}
 	actorIsOperator := scope.Operator
+	// The dedup runs on the SAME cycle-scoped derivation as the card (drain D3),
+	// so a signature that aged out or hashed out is not "already recorded": a
+	// re-approval after a journal reversion mints a FRESH row instead of firing
+	// gates.Approve on the strength of a lapsed one.
 	alreadyRecorded := (scope.UserID == card.Owner && appr.OwnerApproved) ||
 		(actorIsOperator && appr.OperatorApproved)
-	if act.Action == effectActionApprove && !alreadyRecorded {
-		if err := s.recordDecision(ctx, decisionPayload{
-			Actor: scope.UserID, ActorIsOperator: actorIsOperator,
-			CardID: routeID, CardType: approvalKindEffect, Decision: effectActionApprove,
-			Subject: card.RunID, Reason: act.Reason,
-			Ref: "S15.6 approval inbox; S02.7 effect journal",
-		}, card.Owner, card.CreatedTS); err != nil {
-			return ApprovalAnswerResult{}, err
-		}
-		if scope.UserID == card.Owner {
-			appr.OwnerApproved, appr.OwnerApprovedBy = true, scope.UserID
-		}
-		if actorIsOperator {
-			appr.OperatorApproved, appr.OperatorApprovedBy = true, scope.UserID
-		}
+
+	decision := decisionPayload{
+		Actor: scope.UserID, ActorIsOperator: actorIsOperator,
+		CardID: routeID, CardType: approvalKindEffect, Decision: act.Action,
+		// The pin the signature was given FOR: it is what makes the row
+		// cycle-scoped when it is read back (drain D3).
+		PayloadHash: card.PayloadHash,
+		Subject:     card.RunID, Reason: act.Reason,
+		Ref: "S15.6 approval inbox; S02.7 effect journal",
 	}
 
 	if act.Action == effectActionDeny {
 		// Either party may stop a proposal: a co-approval is a conjunction, so
-		// one refusal ends it. The decision records first, then the journal
-		// act (CONVENTIONS §16 ordering).
-		if err := s.recordDecision(ctx, decisionPayload{
-			Actor: scope.UserID, ActorIsOperator: actorIsOperator,
-			CardID: routeID, CardType: approvalKindEffect, Decision: effectActionDeny,
-			Subject: card.RunID, Reason: act.Reason,
-			Ref: "S15.6 approval inbox; S02.7 effect journal",
-		}, card.Owner, card.CreatedTS); err != nil {
-			return ApprovalAnswerResult{}, err
-		}
+		// one refusal ends it. The journal act commits FIRST and the decision row
+		// follows it (drain D6) — a row written before a Deny that then failed
+		// would be an audit record of a refusal that never took effect, and the
+		// effect would still be sitting in the inbox contradicting it.
 		e, derr := s.effects.Deny(ctx, effectID, scope.UserID, act.Reason)
 		if derr != nil {
 			return ApprovalAnswerResult{}, derr
+		}
+		if err := s.recordDecision(ctx, decision, card.Owner, card.CreatedTS); err != nil {
+			return ApprovalAnswerResult{}, err
 		}
 		return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(e.State), Result: e.Result,
 			Detail: "denied: the effect is terminal and was never executed (S02.7)"}, nil
 	}
 
-	if !appr.OwnerApproved || (appr.PlatformLevel && !appr.OperatorApproved) {
+	// An approval is a SIGNATURE. Whether it also completes the conjunction
+	// decides the order the two facts are written in, and both orders are
+	// honest: a signature that completes nothing is recorded on its own (it
+	// happened, and the effect legitimately stays proposed); a signature that
+	// completes the conjunction is recorded only once gates.Approve has
+	// actually approved, so no row ever claims an approval that did not take.
+	ownerSigned := appr.OwnerApproved || scope.UserID == card.Owner
+	operatorSigned := appr.OperatorApproved || actorIsOperator
+	if !ownerSigned || (appr.PlatformLevel && !operatorSigned) {
+		if !alreadyRecorded {
+			if err := s.recordDecision(ctx, decision, card.Owner, card.CreatedTS); err != nil {
+				return ApprovalAnswerResult{}, err
+			}
+			if scope.UserID == card.Owner {
+				appr.OwnerApproved, appr.OwnerApprovedBy = true, scope.UserID
+			}
+			if actorIsOperator {
+				appr.OperatorApproved, appr.OperatorApprovedBy = true, scope.UserID
+			}
+		}
 		return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(gates.EffectProposed),
 			Approvals: &appr,
 			Detail:    "recorded: a platform-level effect needs both the owner's and the operator's approval before it is approved (S15.6; D10)"}, nil
+	}
+	if scope.UserID == card.Owner {
+		appr.OwnerApproved, appr.OwnerApprovedBy = true, scope.UserID
+	}
+	if actorIsOperator {
+		appr.OperatorApproved, appr.OperatorApprovedBy = true, scope.UserID
 	}
 	e, err := s.effects.Approve(ctx, effectID, scope.UserID)
 	if err != nil {
 		return ApprovalAnswerResult{}, err
 	}
+	if !alreadyRecorded {
+		if err := s.recordDecision(ctx, decision, card.Owner, card.CreatedTS); err != nil {
+			return ApprovalAnswerResult{}, err
+		}
+	}
 	return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(e.State), Approvals: &appr,
 		Detail: "approved: execution is still the journal's two-phase path, never this verb (D7)"}, nil
 }
 
-func (s *Server) effectState(ctx context.Context, effectID string) (string, error) {
+// effectState reads the journal row's state AND its result. The result is not
+// decoration: `failed` is reached by two entirely different acts — a human
+// denial (OQ2) and a provider execution failure — and only the recorded result
+// tells them apart (drain D10).
+func (s *Server) effectState(ctx context.Context, effectID string) (string, json.RawMessage, error) {
 	var state string
-	err := s.proj.db.QueryRowContext(ctx, `SELECT state FROM effects WHERE effect_id = ?`, effectID).Scan(&state)
+	var result sql.NullString
+	err := s.proj.db.QueryRowContext(ctx,
+		`SELECT state, result FROM effects WHERE effect_id = ?`, effectID).Scan(&state, &result)
 	if err != nil {
-		return "", fmt.Errorf("read effect %q: %w", effectID, err)
+		return "", nil, fmt.Errorf("read effect %q: %w", effectID, err)
 	}
-	return state, nil
+	if result.Valid {
+		return state, json.RawMessage(result.String), nil
+	}
+	return state, nil, nil
 }
 
 // checkPin is the (a) limb: an OPEN item whose current canonical hash differs
@@ -1024,23 +1132,47 @@ func resolvedAnswer(routeID, state string, stored, given json.RawMessage) (Appro
 		Detail: "already answered: the recorded answer is returned and nothing fired again (S15.2 retry-safety)"}, nil
 }
 
-// resolvedEffect is the (b)/(c) limb for effects, read off the journal state:
-// an approve on an already-approved (or executed) effect is the same decision
-// read back; anything else is a conflict.
-func resolvedEffect(routeID, state, action string) (ApprovalAnswerResult, error) {
-	approvedStates := map[string]bool{
+// resolvedEffect is the (b)/(c) limb for effects, read off the journal state
+// AND the act that produced it.
+//
+// State alone is not enough (drain D10): `failed` is where a human DENIAL lands
+// (OQ2) and also where a provider execution failure lands, and the two are
+// different answers to "was this card already decided the way you are deciding
+// it?". Reading an approve-after-deny back as "already approved" would tell the
+// answerer their approval stood when a refusal is what is on the record. The
+// stored result disambiguates, so it is what this reads.
+func resolvedEffect(routeID, state, action string, result json.RawMessage) (ApprovalAnswerResult, error) {
+	denied := state == string(gates.EffectFailed) && isDenialResult(result)
+	// The states an APPROVAL has already passed through: approved, and every
+	// state reachable only by executing an approved effect.
+	approved := map[string]bool{
 		string(gates.EffectApproved): true, string(gates.EffectExecuting): true,
 		string(gates.EffectSucceeded): true, string(gates.EffectUnknown): true,
-	}
+	}[state] || (state == string(gates.EffectFailed) && !denied)
+
 	switch {
-	case action == effectActionApprove && approvedStates[state]:
-	case action == effectActionDeny && state == string(gates.EffectFailed):
+	case action == effectActionApprove && approved:
+	case action == effectActionDeny && denied:
+	case action == effectActionApprove && denied:
+		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
+			Msg: "this effect was DENIED; a denial is terminal and is never converted into an approval (S15.2; OQ2)"}
 	default:
 		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
 			Msg: fmt.Sprintf("this effect is already %s; the recorded decision stands and is never re-applied (S15.2)", state)}
 	}
-	return ApprovalAnswerResult{ID: routeID, Applied: false, State: state,
+	return ApprovalAnswerResult{ID: routeID, Applied: false, State: state, Result: result,
 		Detail: "already decided: the recorded state is returned and nothing fired again (S15.2 retry-safety)"}, nil
+}
+
+// isDenialResult reports the OQ2 denial marker on a `failed` row.
+func isDenialResult(result json.RawMessage) bool {
+	if len(result) == 0 {
+		return false
+	}
+	var r struct {
+		Denied bool `json:"denied"`
+	}
+	return json.Unmarshal(result, &r) == nil && r.Denied
 }
 
 func sameAnswer(stored, given json.RawMessage) (bool, error) {
@@ -1092,6 +1224,11 @@ type decisionPayload struct {
 	Reason      string `json:"reason,omitempty"`
 	Subject     string `json:"subject,omitempty"`
 	Ref         string `json:"ref,omitempty"`
+	// PayloadHash is the pin the decision was given FOR. It is what makes a
+	// recorded signature CYCLE-SCOPED when it is read back (drain D3): after a
+	// journal reversion to `proposed` on drift, the hash no longer matches and
+	// the old signature stops counting toward the D10 conjunction.
+	PayloadHash string `json:"payload_hash,omitempty"`
 	// ActorIsOperator distinguishes the D10 co-approval limbs: the owner's
 	// approval and the operator's are two different facts about one card, and
 	// the co-approval state is derived from these rows.

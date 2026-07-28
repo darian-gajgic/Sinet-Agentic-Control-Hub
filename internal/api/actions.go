@@ -96,6 +96,17 @@ func (s *Server) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
 
 // ── follow-up spawn (S13.9) ─────────────────────────────────────────────────
 
+// landedPresets is the S13.9 framing set, verbatim — presets over the ONE
+// successor link, never schema variants. "" is admitted as the plain follow-up
+// the package itself defaults to.
+var landedPresets = map[string]bool{
+	"":                               true,
+	string(intake.PresetPlain):       true,
+	string(intake.PresetRevision):    true,
+	string(intake.PresetExtension):   true,
+	string(intake.PresetCounterpart): true,
+}
+
 // followUpBody is the POST /api/deliverables/{deliverable}/follow-up payload:
 // the source revision plus the preset framing and the follow-up's own ask.
 type followUpBody struct {
@@ -166,6 +177,27 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 		s.writeSurface(w, nil, badRequest("bad revision: a follow-up links to a numbered revision of the source deliverable (S13.9)"))
 		return
 	}
+	// Client input is validated HERE, at the boundary, so the spawn call below
+	// can only fail for internal reasons (drain D7). Mapping every Spawn error
+	// to 400 told a caller their input was bad when the database was down; the
+	// two failure classes are genuinely different answers and now read as such.
+	if !landedPresets[body.Preset] {
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+			"unknown preset %q: the S13.9 framings are the landed set (revision / extension / counterpart, or none)", body.Preset)))
+		return
+	}
+	var exists int
+	switch err := s.proj.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM deliverable_revisions WHERE deliverable_id = ? AND n = ?`,
+		deliverableID, body.Revision).Scan(&exists); {
+	case errors.Is(err, sql.ErrNoRows):
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+			"no revision %d of %s: a follow-up links to a revision that exists (S13.9)", body.Revision, deliverableID)))
+		return
+	case err != nil:
+		s.writeSurface(w, nil, fmt.Errorf("read deliverable revision: %w", err))
+		return
+	}
 	// The successor is the AUTHENTICATED requester's own task (15.6): whoever
 	// asks for the follow-up owns the work it creates.
 	id, _ := IdentityFrom(r.Context())
@@ -180,10 +212,9 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 		Title:         body.Title,
 	})
 	if err != nil {
-		// A bad preset or an unreal (deliverable, revision) is the caller's
-		// input, not an internal failure: the composite FK is what makes the
-		// source referentially real (S13.9).
-		s.writeSurface(w, nil, badRequest(err.Error()))
+		// Every caller-input failure was refused above, so anything reaching
+		// here is the platform's own (drain D7): it answers 500, not 400.
+		s.writeSurface(w, nil, fmt.Errorf("spawn follow-up: %w", err))
 		return
 	}
 	out := FollowUpSpawned{

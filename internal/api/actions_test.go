@@ -10,6 +10,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -241,8 +242,8 @@ func TestFollowUpSpawnCrossOwnerAndBadInput(t *testing.T) {
 	if out.Owner != "op" {
 		t.Errorf("the successor owner = %q, want the authenticated requester", out.Owner)
 	}
-	// An unreal revision is the caller's input, refused rather than 500'd: the
-	// composite FK is what makes the source referentially real.
+	// Caller-input failures are 400 — validated at the boundary, before the
+	// spawn runs (drain D7).
 	if rr := doAs(t, fe.srv(t, "alice"), "POST",
 		"/api/deliverables/d-1/follow-up", `{"revision":99}`); rr.Code != http.StatusBadRequest {
 		t.Errorf("a link to a non-existent revision: status %d, want 400", rr.Code)
@@ -250,6 +251,10 @@ func TestFollowUpSpawnCrossOwnerAndBadInput(t *testing.T) {
 	if rr := doAs(t, fe.srv(t, "alice"), "POST",
 		"/api/deliverables/d-1/follow-up", `{"revision":1,"preset":"invented"}`); rr.Code != http.StatusBadRequest {
 		t.Errorf("an unknown preset: status %d, want 400 (presets are the landed set)", rr.Code)
+	}
+	// ...and a caller-input refusal never reaches the spawn at all.
+	if len(fe.started) != 1 {
+		t.Errorf("a refused input still drove the Start seam (%d entries)", len(fe.started))
 	}
 	// This route touches neither accept nor preview (B6-3's).
 	if n := countEvents(t, fe.b, "deliverable.accepted"); n != 0 {
@@ -289,4 +294,25 @@ func readTaskDetail(t *testing.T, fe *followUpEnv, who, taskID string) struct {
 		t.Fatalf("decode task detail: %v", err)
 	}
 	return out
+}
+
+// TestFollowUpInternalFailureIs500NotABadRequest (drain D7): the two failure
+// classes are different answers. Telling a caller their input was bad when the
+// platform's own machinery failed sends them to fix something that is not wrong.
+func TestFollowUpInternalFailureIs500NotABadRequest(t *testing.T) {
+	fe := newFollowUpEnv(t)
+	seedTask(t, fe.b, "t-src", "alice", "Source", "done")
+	seedRun(t, fe.b, "t-src.execute", "alice", "t-src", "completed", "lane")
+	seedDeliverable(t, fe.b, "d-1", "alice", "t-src", "", 1)
+	// The Start seam fails — a platform-side failure with perfectly valid input.
+	fe.fu.Start = func(context.Context, intake.Request) error {
+		return errors.New("intake pipeline unavailable")
+	}
+	rr := doAs(t, fe.srv(t, "alice"), "POST", "/api/deliverables/d-1/follow-up", `{"revision":1}`)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("an internal spawn failure: status %d, want 500 (drain D7): %s", rr.Code, rr.Body)
+	}
+	if strings.Contains(rr.Body.String(), "bad_request") {
+		t.Errorf("an internal failure was reported as bad input: %s", rr.Body)
+	}
 }

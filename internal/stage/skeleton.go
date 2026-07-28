@@ -268,13 +268,15 @@ func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 // spawn-failure precedent: a dispatch leg that cannot proceed leaves a
 // classifiable corpse for the recovery ladder, never a silent zombie.
 func (s *Skeleton) crash(ctx context.Context, runID, cause string) {
-	if s.cancels.cancelRequested(runID) {
-		// The leg is unwinding BECAUSE a human cancelled it (cancel.go): the
-		// run's ending is already recorded under the ratified mapping, and a
-		// crash corpse here would tell the recovery ladder to fork the very
-		// work the person just stopped.
+	// The suppression is consulted at the run's CURRENT generation and consumed
+	// on use (drain D1): it silences exactly the one unwind its own cancel
+	// caused. A mark left by a cancel that never committed, or one predating a
+	// resume (which bumps the generation, §8), can never match here — so a
+	// genuine crash after either always leaves its corpse for the ladder.
+	if cur, err := s.cfg.Runs.Get(ctx, runID); err == nil &&
+		s.cancels.consumeCancel(runID, cur.Generation) {
 		s.logger().Info("stage: dispatch leg unwound by a human cancel; no crash corpse",
-			"run", runID, "cause", cause)
+			"run", runID, "generation", cur.Generation, "cause", cause)
 		return
 	}
 	if _, err := s.cfg.Runs.Transition(ctx, runID, run.StateCrashed, run.TransitionOptions{

@@ -252,6 +252,12 @@ func mapCancelErr(err error) error {
 		return nil
 	case errors.Is(err, ErrCancelInFlight):
 		return surfaceErr(http.StatusConflict, "claim_in_flight", err)
+	case errors.Is(err, ErrCancelRaced):
+		// The state moved under the cancel: a conflict the caller resolves by
+		// re-reading, never an internal error (drain D8).
+		return surfaceErr(http.StatusConflict, "cancel_raced", err)
+	case errors.Is(err, ErrCancelQueueUnsettleable):
+		return surfaceErr(http.StatusServiceUnavailable, "not_wired", err)
 	case errors.Is(err, run.ErrNotFound), errors.Is(err, sql.ErrNoRows):
 		return surfaceErr(http.StatusNotFound, "not_found", err)
 	default:

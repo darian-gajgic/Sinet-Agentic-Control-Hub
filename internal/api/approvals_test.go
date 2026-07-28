@@ -700,6 +700,12 @@ func TestLowTierBatchAppliesIndividuallyAndRefusesPerItem(t *testing.T) {
 	if n := countEvents(t, e.b, "intake.state"); n != 2 {
 		t.Errorf("the batch produced %d audit rows; want one per applied item", n)
 	}
+	// The other half of the ratified ruling (drain D2): an act with a landed
+	// canonical row is NEVER double-minted, so a Low-tier batch of asks
+	// co-produces NO family-5 row at all (OQ8; §39).
+	if n := countEvents(t, e.b, api.EventDecisionRecorded); n != 0 {
+		t.Errorf("the batch minted %d decision.recorded rows; asks carry their own canonical row (OQ8)", n)
+	}
 	// The refused item is untouched.
 	var status string
 	if err := e.b.db.QueryRowContext(context.Background(), `SELECT status FROM asks WHERE ask_id='ask-h'`).Scan(&status); err != nil {
@@ -1016,5 +1022,236 @@ func TestEveryNewRouteHasANamedAuditRow(t *testing.T) {
 	// effect verbs — nothing else in this packet co-produces it (OQ8).
 	if n := countEvents(t, e.b, api.EventDecisionRecorded); n != 0 {
 		t.Errorf("the inventory walk itself recorded %d decisions; every probe was refused", n)
+	}
+}
+
+// ── drain D3: the co-approval derivation is CYCLE-SCOPED ────────────────────
+
+// TestExpiredApprovalDoesNotCarryIntoTheNextCycle: the journal sends an effect
+// back to `proposed` when its approval window lapses (S02.7). A signature from
+// the cycle before must not still count — otherwise a re-approval would dedup
+// against it and fire gates.Approve with no fresh audit row, and on a
+// platform-level effect the operator alone could complete a conjunction the
+// owner signed a fortnight ago.
+func TestExpiredApprovalDoesNotCarryIntoTheNextCycle(t *testing.T) {
+	e := newDecisionEnv(t)
+	ctx := context.Background()
+	effectID := seedProposal(t, e, "", "carol", `{"kind":"rotate","scope":"household"}`)
+	stored, _ := e.journal.Get(ctx, effectID)
+	cardID := "effect:" + effectID
+	body := `{"payload_hash":"` + stored.PayloadHash + `","pin":"` + fixturePIN + `","answer":{"action":"approve"}}`
+
+	// A signature from the PREVIOUS approval cycle: given for this very payload,
+	// but 8 days ago — past ⚙ effects.approval_expiry, which is exactly when the
+	// journal reverts the row to `proposed`.
+	appendAgedDecision(t, e, "carol", "carol", cardID, stored.PayloadHash, false, 8*24*time.Hour)
+
+	list := decodeList(t, e.mustDo(t, "opal", "GET", "/api/approvals", ""))
+	card, _ := itemByID(list, cardID)
+	if card.Approvals == nil || card.Approvals.OwnerApproved {
+		t.Fatalf("an EXPIRED owner signature still counts on the card: %+v", card.Approvals)
+	}
+	// The operator alone must NOT complete the conjunction now.
+	out := e.mustDo(t, "opal", "POST", "/api/approvals/"+cardID+"/answer", body)
+	if !strings.Contains(out, `"state":"proposed"`) {
+		t.Fatalf("the operator alone completed a conjunction whose owner-yes had expired; got %s", out)
+	}
+	if eff, _ := e.journal.Get(ctx, effectID); eff.State != gates.EffectProposed {
+		t.Fatalf("gates.Approve fired on an expired signature; effect is %s", eff.State)
+	}
+	// Carol re-approves in the NEW cycle. The dedup runs on the SAME cycle
+	// predicate, so this is not deduped against the expired row: a FRESH row is
+	// minted and only then does the conjunction complete.
+	out = e.mustDo(t, "carol", "POST", "/api/approvals/"+cardID+"/answer", body)
+	if !strings.Contains(out, `"state":"approved"`) {
+		t.Fatalf("the re-approval did not complete the conjunction; got %s", out)
+	}
+	if n := countEvents(t, e.b, api.EventDecisionRecorded); n != 3 {
+		t.Errorf("decision rows = %d, want 3 (the expired one + a fresh operator + a fresh owner) — a post-expiry re-approval must mint a FRESH row", n)
+	}
+}
+
+// TestDriftedPayloadDropsPriorSignatures: a drift reversion changes the pinned
+// hash, so signatures given for the OLD payload stop counting — nobody's
+// approval silently transfers to content they never saw.
+func TestDriftedPayloadDropsPriorSignatures(t *testing.T) {
+	e := newDecisionEnv(t)
+	ctx := context.Background()
+	effectID := seedProposal(t, e, "", "carol", `{"kind":"rotate","target":"before"}`)
+	stored, _ := e.journal.Get(ctx, effectID)
+	e.mustDo(t, "carol", "POST", "/api/approvals/effect:"+effectID+"/answer",
+		`{"payload_hash":"`+stored.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"approve"}}`)
+
+	list := decodeList(t, e.mustDo(t, "carol", "GET", "/api/approvals", ""))
+	if card, _ := itemByID(list, "effect:"+effectID); card.Approvals == nil || !card.Approvals.OwnerApproved {
+		t.Fatal("fixture invariant broken: the owner signature must count before the drift")
+	}
+
+	// The stored payload drifts (S02.7's drift case) — the row is re-pinned.
+	newPayload := `{"kind":"rotate","target":"AFTER"}`
+	newHash, _ := gates.CanonicalHash(json.RawMessage(newPayload))
+	exec(t, e.b, `UPDATE effects SET payload = ?, payload_hash = ? WHERE effect_id = ?`,
+		newPayload, newHash, effectID)
+
+	list = decodeList(t, e.mustDo(t, "carol", "GET", "/api/approvals", ""))
+	card, _ := itemByID(list, "effect:"+effectID)
+	if card.Approvals == nil || card.Approvals.OwnerApproved {
+		t.Fatalf("a signature given for the OLD payload still counts after drift: %+v", card.Approvals)
+	}
+	if card.PayloadHash != newHash {
+		t.Errorf("the card must serve the CURRENT pin; got %q", card.PayloadHash)
+	}
+	_ = ctx
+}
+
+// appendAgedDecision writes a decision.recorded row as it would have been
+// written in a PAST approval cycle: backdated both on the wire (the row's ts)
+// and in the payload (decided_at). It is an APPEND — run_events is append-only
+// by trigger and this fixture respects that rather than reaching around it.
+func appendAgedDecision(t *testing.T, e *decisionEnv, actor, owner, cardID, payloadHash string, isOperator bool, age time.Duration) {
+	t.Helper()
+	when := time.Now().UTC().Add(-age)
+	payload, err := json.Marshal(map[string]any{
+		"actor": actor, "card_id": cardID, "card_type": "effect", "decision": "approve",
+		"presented_at": when.Format(time.RFC3339Nano), "decided_at": when.Format(time.RFC3339Nano),
+		"latency_s": 0, "payload_hash": payloadHash, "actor_is_operator": isOperator,
+	})
+	if err != nil {
+		t.Fatalf("marshal aged decision: %v", err)
+	}
+	if _, err := e.b.log.Append(context.Background(), eventlog.Append{
+		UserID: owner, Type: api.EventDecisionRecorded, SchemaVersion: 1,
+		Payload: payload, Time: when,
+	}); err != nil {
+		t.Fatalf("append aged decision: %v", err)
+	}
+}
+
+// ── drain D9: `answerable` is the CALLER's, not the kind's ──────────────────
+
+// TestAnswerableMatchesTheAuthorityTheVerbEnforces: the list and the verb read
+// the same rule, so a surface never renders a control whose use would 403.
+func TestAnswerableMatchesTheAuthorityTheVerbEnforces(t *testing.T) {
+	e := newDecisionEnv(t)
+	seedTask(t, e.b, "t-1", "alice", "T", "doing")
+	seedRun(t, e.b, "r-1", "alice", "t-1", "running", "lane")
+	seedCard(t, e.b, "ask-1", "r-1", "alice", approvalCard("medium", "MINE"), time.Now())
+	owned := seedProposal(t, e, "r-1", "alice", `{"kind":"send"}`)   // run-attributed: alice's own
+	platform := seedProposal(t, e, "", "alice", `{"kind":"rotate"}`) // run-less: platform-level
+
+	cases := []struct {
+		who, id    string
+		answerable bool
+		why        string
+	}{
+		{"alice", "ask:ask-1", true, "the owner answers their own card"},
+		{"op", "ask:ask-1", false, "D10: the operator reads it but does not decide it"},
+		{"alice", "effect:" + owned, true, "the owner answers their own effect"},
+		{"op", "effect:" + owned, false, "an owner-scoped effect is not the operator's to answer"},
+		{"alice", "effect:" + platform, true, "the owner signs a platform-level effect"},
+		{"op", "effect:" + platform, true, "the operator co-approves a platform-level effect (D10)"},
+	}
+	for _, c := range cases {
+		list := decodeList(t, e.mustDo(t, c.who, "GET", "/api/approvals", ""))
+		it, ok := itemByID(list, c.id)
+		if !ok {
+			t.Fatalf("%s cannot see %s at all", c.who, c.id)
+		}
+		if it.Answerable != c.answerable {
+			t.Errorf("%s sees %s answerable=%v, want %v (%s)", c.who, c.id, it.Answerable, c.answerable, c.why)
+		}
+		if !it.Answerable && it.NotAnswerableReason == "" {
+			t.Errorf("%s sees %s un-answerable with no reason — a dead control with no explanation", c.who, c.id)
+		}
+		// The card and the verb must AGREE: what the card says is answerable
+		// must not 403, and what it says is not must not 200.
+		code, _ := e.do(t, c.who, "POST", "/api/approvals/"+c.id+"/answer",
+			`{"payload_hash":"deliberately-stale","answer":{"action":"approve"}}`)
+		refused := code == http.StatusForbidden
+		if refused == c.answerable {
+			t.Errorf("%s on %s: card says answerable=%v but the verb answered %d — the button and the door disagree",
+				c.who, c.id, c.answerable, code)
+		}
+	}
+}
+
+// ── drain D10: `failed` is reached by two different acts ────────────────────
+
+// TestDenyAndExecutionFailureAreDifferentAnswers: a denial is terminal and is
+// never read back as an approval, and an execution failure after an approval is
+// not read back as a denial.
+func TestDenyAndExecutionFailureAreDifferentAnswers(t *testing.T) {
+	e := newDecisionEnv(t)
+	ctx := context.Background()
+	seedTask(t, e.b, "t-1", "carol", "T", "doing")
+	seedRun(t, e.b, "r-1", "carol", "t-1", "running", "lane")
+
+	denied := seedProposal(t, e, "r-1", "carol", `{"kind":"send","to":"a"}`)
+	dh, _ := e.journal.Get(ctx, denied)
+	e.mustDo(t, "carol", "POST", "/api/approvals/effect:"+denied+"/answer",
+		`{"payload_hash":"`+dh.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"deny","reason":"no"}}`)
+
+	// deny-after-deny reads back at 200.
+	out := e.mustDo(t, "carol", "POST", "/api/approvals/effect:"+denied+"/answer",
+		`{"payload_hash":"`+dh.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"deny","reason":"no"}}`)
+	if !strings.Contains(out, `"applied":false`) {
+		t.Errorf("deny-after-deny must read back; got %s", out)
+	}
+	// approve-after-deny is a CONFLICT naming the denial — never "already approved".
+	code, body := e.do(t, "carol", "POST", "/api/approvals/effect:"+denied+"/answer",
+		`{"payload_hash":"`+dh.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"approve"}}`)
+	if code != http.StatusConflict {
+		t.Fatalf("approve-after-deny: status %d, want 409", code)
+	}
+	if !strings.Contains(body, "DENIED") {
+		t.Errorf("the conflict must say the effect was denied, not that it was approved; got %s", body)
+	}
+
+	// The other `failed`: an approved effect whose EXECUTION failed. An approve
+	// on it reads back (the approval did stand); a deny is a conflict.
+	exec := seedProposal(t, e, "r-1", "carol", `{"kind":"send","to":"b"}`)
+	eh, _ := e.journal.Get(ctx, exec)
+	if _, err := e.journal.Approve(ctx, exec, "carol"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := e.journal.BeginExecute(ctx, exec); err != nil {
+		t.Fatalf("begin execute: %v", err)
+	}
+	if _, err := e.journal.Fail(ctx, exec, json.RawMessage(`{"provider":"500"}`)); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	out = e.mustDo(t, "carol", "POST", "/api/approvals/effect:"+exec+"/answer",
+		`{"payload_hash":"`+eh.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"approve"}}`)
+	if !strings.Contains(out, `"applied":false`) || !strings.Contains(out, `"state":"failed"`) {
+		t.Errorf("approve on an execution-failed effect must read the approval back; got %s", out)
+	}
+	if code, _ := e.do(t, "carol", "POST", "/api/approvals/effect:"+exec+"/answer",
+		`{"payload_hash":"`+eh.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"deny"}}`); code != http.StatusConflict {
+		t.Errorf("deny on an already-executed effect: status %d, want 409", code)
+	}
+}
+
+// TestDenyRecordsItsDecisionOnlyAfterTheJournalActSucceeds (drain D6): a deny
+// that the journal refuses leaves NO audit row claiming a refusal that never
+// took effect.
+func TestDenyRecordsItsDecisionOnlyAfterTheJournalActSucceeds(t *testing.T) {
+	e := newDecisionEnv(t)
+	ctx := context.Background()
+	seedTask(t, e.b, "t-1", "carol", "T", "doing")
+	seedRun(t, e.b, "r-1", "carol", "t-1", "running", "lane")
+	id := seedProposal(t, e, "r-1", "carol", `{"kind":"send"}`)
+	stored, _ := e.journal.Get(ctx, id)
+	// Approve it out from under the deny: Deny wants `proposed` and will refuse.
+	if _, err := e.journal.Approve(ctx, id, "carol"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	before := countEvents(t, e.b, api.EventDecisionRecorded)
+	code, _ := e.do(t, "carol", "POST", "/api/approvals/effect:"+id+"/answer",
+		`{"payload_hash":"`+stored.PayloadHash+`","pin":"`+fixturePIN+`","answer":{"action":"deny"}}`)
+	if code == http.StatusOK {
+		t.Fatal("denying an approved effect must not succeed")
+	}
+	if got := countEvents(t, e.b, api.EventDecisionRecorded); got != before {
+		t.Errorf("a refused deny left %d orphan audit rows (drain D6)", got-before)
 	}
 }

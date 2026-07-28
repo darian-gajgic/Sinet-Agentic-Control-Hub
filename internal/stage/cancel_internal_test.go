@@ -174,6 +174,29 @@ func (e *cancelEnv) kanban(t *testing.T, taskID string) string {
 	return k
 }
 
+// countEvents counts one run's events of a type.
+func (e *cancelEnv) countEvents(t *testing.T, runID, typ string) int {
+	t.Helper()
+	var n int
+	if err := e.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND type = ?`, runID, typ).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", typ, err)
+	}
+	return n
+}
+
+// setKanbanFixture puts a task in a known board column.
+func (e *cancelEnv) setKanbanFixture(t *testing.T, taskID, status string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE tasks SET kanban_status = ? WHERE task_id = ?`, status, taskID)
+		return err
+	}); err != nil {
+		t.Fatalf("set kanban: %v", err)
+	}
+}
+
 // lastTransition returns the payload of the run's most recent state change.
 func (e *cancelEnv) lastTransition(t *testing.T, runID string) map[string]any {
 	t.Helper()
@@ -366,30 +389,178 @@ func TestCancelTaskCoversEveryNonTerminalRun(t *testing.T) {
 	}
 }
 
-// TestCancelledLegFilesNoCrashCorpse: the dispatch leg unwinding BECAUSE of a
-// human cancel must not tell the recovery ladder to fork the work the person
-// just stopped.
-func TestCancelledLegFilesNoCrashCorpse(t *testing.T) {
+// TestCancelSuppressionIsSingleUseAtItsOwnGeneration is the LOAD-BEARING race
+// (drain D1): the dispatch leg's crash() arriving BEFORE the cancel's terminal
+// transition, while the run is still `running`.
+//
+// This is the scenario the guard exists for, and it is non-tautological by
+// construction: running→crashed is a perfectly legal edge, so with the guard
+// removed the crash lands and the assertion below fails. (The first cut asserted
+// the post-transition case, where completed→crashed is refused by the FSM
+// anyway — it passed with the guard disabled and proved nothing.)
+func TestCancelSuppressionIsSingleUseAtItsOwnGeneration(t *testing.T) {
 	e := newCancelEnv(t)
 	ctx := context.Background()
-	r := e.seedRun(t, "t-7.execute", "t-7", "alice", run.StateRunning)
-	e.sk.cancels.register(r.ID, &fakeSession{})
-	if _, err := e.sk.CancelRun(ctx, "alice", r.ID); err != nil {
-		t.Fatalf("CancelRun: %v", err)
-	}
-	// The in-flight dispatch leg now unwinds and calls crash, as it would in
-	// production when the ladder ends its session.
+	r := e.seedRun(t, "t-8.execute", "t-8", "alice", run.StateRunning)
+	sess := &fakeSession{}
+	e.sk.cancels.register(r.ID, sess)
+
+	// The cancel takes its mark and runs the ladder; the leg unwinds and calls
+	// crash BEFORE the terminal transition commits.
+	e.sk.runLadder(ctx, r)
 	e.sk.crash(ctx, r.ID, "session ended canceled")
-	if got := e.state(t, r.ID); got != run.StateCompleted {
-		t.Errorf("run = %s after the unwind, want the cancel's own terminal", got)
+
+	if got := e.state(t, r.ID); got != run.StateRunning {
+		t.Fatalf("the leg's crash landed on a still-running cancelled run (state %s): the suppression did not hold", got)
 	}
-	var n int
-	if err := e.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND type = ?`, r.ID, run.EventWedged).Scan(&n); err != nil {
-		t.Fatalf("count: %v", err)
+	if n := e.countEvents(t, r.ID, run.EventState); n != 3 { // queued, claimed, running
+		t.Fatalf("a crash transition was recorded: %d state events, want the 3 fixture ones", n)
 	}
-	if n != 0 {
-		t.Errorf("the cancelled leg left %d wedge markers", n)
+
+	// SINGLE-USE: the mark is consumed, so a SECOND unwind — a genuine crash
+	// this cancel did not cause — files its corpse.
+	e.sk.crash(ctx, r.ID, "a real failure after the cancel")
+	if got := e.state(t, r.ID); got != run.StateCrashed {
+		t.Fatalf("the second crash was swallowed (state %s): the suppression is not single-use", got)
+	}
+}
+
+// TestStaleCancelMarkCannotSwallowALaterCrash: a mark that outlived its cancel
+// is rendered inert by the resume's generation bump (§8), so the run's next
+// genuine crash still leaves a corpse for the recovery ladder.
+func TestStaleCancelMarkCannotSwallowALaterCrash(t *testing.T) {
+	e := newCancelEnv(t)
+	ctx := context.Background()
+	r := e.seedRun(t, "t-9.execute", "t-9", "alice", run.StateRunning)
+	e.sk.cancels.register(r.ID, &fakeSession{})
+	e.sk.runLadder(ctx, r) // mark taken at generation 0; the cancel then fails to commit
+
+	// The run parks and is resumed by a human: parked→running bumps generation.
+	if _, err := e.runs.Transition(ctx, r.ID, run.StateParked, run.TransitionOptions{Reason: "gate", Actor: "platform"}); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	resumed, err := e.runs.Transition(ctx, r.ID, run.StateRunning, run.TransitionOptions{Reason: "resume", Actor: "alice"})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if resumed.Generation == r.Generation {
+		t.Fatalf("fixture invariant broken: the resume did not bump the generation")
+	}
+
+	// Now the run genuinely crashes. The stale mark is at the OLD generation and
+	// must not match.
+	e.sk.crash(ctx, r.ID, "a real crash after the resume")
+	if got := e.state(t, r.ID); got != run.StateCrashed {
+		t.Fatalf("a stale cancel mark swallowed a real crash (state %s) — the zombie of D1", got)
+	}
+}
+
+// TestFailedCancelClearsItsSuppression: when the terminal transition does NOT
+// commit, the mark is cleared, so the run's next crash is recorded.
+func TestFailedCancelClearsItsSuppression(t *testing.T) {
+	e := newCancelEnv(t)
+	ctx := context.Background()
+	// A terminal hook that fails FAILS the transition (§8) — the deterministic
+	// way to make a cancel not commit.
+	failing := true
+	if err := e.runs.SetTerminalHook(func(context.Context, *sql.Tx, run.Run) error {
+		if failing {
+			return errors.New("terminal hook refuses")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("SetTerminalHook: %v", err)
+	}
+	r := e.seedRun(t, "t-10.execute", "t-10", "alice", run.StateRunning)
+	e.sk.cancels.register(r.ID, &fakeSession{})
+
+	if _, err := e.sk.CancelRun(ctx, "alice", r.ID); err == nil {
+		t.Fatal("the cancel must fail when its terminal transition does")
+	}
+	if got := e.state(t, r.ID); got != run.StateRunning {
+		t.Fatalf("the failed cancel still moved the run to %s", got)
+	}
+	// The suppression must not have outlived the failed attempt.
+	failing = false
+	e.sk.crash(ctx, r.ID, "a real crash after the failed cancel")
+	if got := e.state(t, r.ID); got != run.StateCrashed {
+		t.Fatalf("a failed cancel's mark swallowed a real crash (state %s) — drain D1", got)
+	}
+}
+
+// TestCancelTaskLeavesKanbanAloneWhenNothingWasCancelled (drain D4): a task
+// whose runs had all already ended is not "cancelled" — it finished — and a
+// no-op cancel must not rewrite the board's record of that.
+func TestCancelTaskLeavesKanbanAloneWhenNothingWasCancelled(t *testing.T) {
+	e := newCancelEnv(t)
+	ctx := context.Background()
+	e.seedRun(t, "t-11.execute", "t-11", "alice", run.StateCompleted)
+	e.setKanbanFixture(t, "t-11", "done")
+
+	out, err := e.sk.CancelTask(ctx, "alice", "t-11")
+	if err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if out.Applied {
+		t.Errorf("nothing was cancellable; Applied = true")
+	}
+	if got := e.kanban(t, "t-11"); got != "done" {
+		t.Errorf("kanban = %q, want the untouched \"done\" — a no-op cancel rewrote the board (drain D4)", got)
+	}
+	if out.Kanban != "" {
+		t.Errorf("the outcome claims kanban %q for a no-op cancel", out.Kanban)
+	}
+	// The control: a task with a live run DOES move.
+	e.seedRun(t, "t-12.execute", "t-12", "alice", run.StateRunning)
+	e.setKanbanFixture(t, "t-12", "executing")
+	if _, err := e.sk.CancelTask(ctx, "alice", "t-12"); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if got := e.kanban(t, "t-12"); got != kanbanCancelled {
+		t.Errorf("a real cancel must move the column; got %q", got)
+	}
+}
+
+// TestRacedCancelIsAConflictNotAnInternalError (drain D8): the run's state moved
+// between the read and the transition. Staged deterministically by handing the
+// mapping a STALE run value, which is exactly what a race produces.
+func TestRacedCancelIsAConflictNotAnInternalError(t *testing.T) {
+	e := newCancelEnv(t)
+	ctx := context.Background()
+	stale := e.seedRun(t, "t-13.execute", "t-13", "alice", run.StateRunning)
+	// The world moves on: the run completes on its own.
+	if _, err := e.runs.Transition(ctx, stale.ID, run.StateCompleted, run.TransitionOptions{
+		Reason: "finished first", Actor: "platform"}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	_, err := e.sk.cancelOne(ctx, "alice", stale) // stale.State is still `running`
+	if !errors.Is(err, ErrCancelRaced) {
+		t.Fatalf("a raced cancel returned %v, want ErrCancelRaced (drain D8)", err)
+	}
+	if got := e.state(t, stale.ID); got != run.StateCompleted {
+		t.Errorf("the raced cancel changed the run to %s — nothing may double-fire", got)
+	}
+	// The classifier discriminates: a NON-raced failure stays itself.
+	if got := raced(errors.New("disk on fire")); errors.Is(got, ErrCancelRaced) {
+		t.Error("raced() swallowed an unrelated failure into a conflict")
+	}
+}
+
+// TestQueuedCancelWithoutASchedulerIsRefusedFailClosed (drain D11): the OQ1
+// edge and its queue settle commit together or not at all, so a process that
+// cannot settle the queue row must not half-commit the transition.
+func TestQueuedCancelWithoutASchedulerIsRefusedFailClosed(t *testing.T) {
+	e := newCancelEnv(t)
+	ctx := context.Background()
+	e.sk.sched = nil // a process with no scheduler bound
+	r := e.seedRun(t, "t-14.execute", "t-14", "alice", run.StateQueued)
+
+	_, err := e.sk.CancelRun(ctx, "alice", r.ID)
+	if !errors.Is(err, ErrCancelQueueUnsettleable) {
+		t.Fatalf("error = %v, want ErrCancelQueueUnsettleable", err)
+	}
+	if got := e.state(t, r.ID); got != run.StateQueued {
+		t.Errorf("the refused cancel still moved the run to %s — it half-committed (drain D11)", got)
 	}
 }
 
@@ -407,50 +578,77 @@ func TestCancelIsReachableFromTheHTTPVerbsOnly(t *testing.T) {
 	// machinery itself (stage/cancel.go). Anything else appearing here is an
 	// automated path acquiring a cancel, which is what D1.3 forbids.
 	sanctioned := map[string]bool{
-		filepath.Join("..", "stage", "cancel.go"):  true,
-		filepath.Join("..", "stage", "surface.go"): true,
-		filepath.Join("..", "api", "actions.go"):   true,
+		filepath.Join("..", "..", "internal", "stage", "cancel.go"):  true,
+		filepath.Join("..", "..", "internal", "stage", "surface.go"): true,
+		filepath.Join("..", "..", "internal", "api", "actions.go"):   true,
 	}
 	targets := map[string]bool{
 		"CancelRun": true, "CancelTask": true, "cancelOne": true,
 		"runLadder": true, "markRequested": true,
 	}
+	// The walk covers the WHOLE tree — internal/ including nested packages, plus
+	// cmd/ and tools/ (drain D5). The tree is clean today; the wall is what
+	// keeps it clean tomorrow, and a wall that only looked at one directory
+	// level would not have seen a caller added one level down.
 	var offenders []string
-	roots, err := filepath.Glob(filepath.Join("..", "*"))
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	var scanned int
 	fset := token.NewFileSet()
-	for _, dir := range roots {
-		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-			continue
+	err := filepath.WalkDir(filepath.Join("..", ".."), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		files, _ := filepath.Glob(filepath.Join(dir, "*.go"))
-		for _, f := range files {
-			if strings.HasSuffix(f, "_test.go") || sanctioned[f] {
-				continue
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "dist":
+				return filepath.SkipDir
 			}
-			src, err := parser.ParseFile(fset, f, nil, 0)
-			if err != nil {
-				continue
-			}
-			ast.Inspect(src, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				name := ""
-				switch fn := call.Fun.(type) {
-				case *ast.SelectorExpr:
-					name = fn.Sel.Name
-				case *ast.Ident:
-					name = fn.Name
-				}
-				if targets[name] {
-					offenders = append(offenders, f+": "+name)
-				}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		clean := filepath.Clean(path)
+		if sanctioned[clean] {
+			return nil
+		}
+		src, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			return nil
+		}
+		scanned++
+		ast.Inspect(src, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
 				return true
-			})
+			}
+			name := ""
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				name = fn.Sel.Name
+			case *ast.Ident:
+				name = fn.Name
+			}
+			if targets[name] {
+				offenders = append(offenders, clean+": "+name)
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	// The walk must actually have covered the tree, cmd/ and tools/ included —
+	// an empty or truncated walk would make the wall pass by doing nothing.
+	if scanned < 100 {
+		t.Fatalf("the wall scanned only %d files: it is not covering the tree", scanned)
+	}
+	for _, must := range []string{
+		filepath.Join("..", "..", "cmd"), filepath.Join("..", "..", "tools"),
+		filepath.Join("..", "..", "internal", "adapters", "claudecli"), // a NESTED package
+	} {
+		if fi, serr := os.Stat(must); serr != nil || !fi.IsDir() {
+			t.Fatalf("the wall expects %s to exist and be walked; got %v", must, serr)
 		}
 	}
 	if len(offenders) != 0 {
@@ -458,7 +656,7 @@ func TestCancelIsReachableFromTheHTTPVerbsOnly(t *testing.T) {
 	}
 	// Non-tautological: the scan DOES see the sanctioned caller when it is not
 	// excluded, so an empty offender list is a real result and not a broken walk.
-	src, err := parser.ParseFile(fset, filepath.Join("..", "stage", "surface.go"), nil, 0)
+	src, err := parser.ParseFile(fset, filepath.Join("..", "..", "internal", "stage", "surface.go"), nil, 0)
 	if err != nil {
 		t.Fatalf("parse surface.go: %v", err)
 	}
