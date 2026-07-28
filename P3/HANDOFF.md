@@ -8,7 +8,7 @@ Authority order for everything: **`Spec/core-architecture-v1.md` (frozen v1, tag
 
 ## 1. Where the build is
 
-**B0–B5 are ALL CLOSED.** The B5 gate closed 2026-07-28 — full record in `P3/gates/B5-report.md` §8 (FINAL). **B6 (frontend: the React SPA over every API — S15 + `Spec/frontend-components-v1.md`) is OPEN, is the LAST phase, and has NO packet queue yet. Cutting that queue is this session's first act.**
+**B0–B5 are ALL CLOSED.** The B5 gate closed 2026-07-28 — full record in `P3/gates/B5-report.md` §8 (FINAL). **B6 (frontend: the React SPA over every API — S15 + `Spec/frontend-components-v1.md`) is OPEN and is the LAST phase. Its queue was CUT 2026-07-28 (9 packets, recorded in STATE): B6-1..3 Go API completion → B6-4 SPA scaffold → B6-5..8 surfaces → B6-9 push/PWA + sweep. The next act is running the pending packets through the four-stage pipeline, in order.**
 
 What the B5 gate settled (do not re-litigate any of it):
 
@@ -41,11 +41,9 @@ Open with **"continue implementation"** (or `/p3-implementation`). Then, in orde
 
 1. **Session-entry checks:** read `P3/STATE.md`; confirm `git status` is clean apart from the operator items above; re-run the landing battery so you build on measured ground:
    `gofmt -l internal/ cmd/` · `go vet ./...` · `go build ./...` · `go test ./... -count=1` · `go run ./tools/lockgate`
-2. **Cut the B6 packet queue** from the S19.5 build order + **S15 (full read)** + **`Spec/frontend-components-v1.md` (full read — it is a BINDING sibling spec)**. Record the queue in STATE with the usual columns (read-first sections, acceptance headlines, model routing). Expect the queue to also absorb the named B6 seams B5 left wired-but-unrouted: the S15 assistant over `api.Config.History`, the benchmark verdict form + `DispatchDirectArm`/`RenderBlind` driver, the watchdog suppress/resume + drift-dismiss + conformance-card HTTP verbs and React surfaces, `stage.started/finished` production, and the settings surface (under the standing settings-tab directive — a UI over the registry; the constants amendment is its own later act).
+2. **The B6 queue is CUT (2026-07-28, 9 packets — in STATE).** The carried B5 seams are homed in it (assistant-over-History → B6-7; benchmark driver+verdict → B6-2/B6-6; watchdog/drift/conformance verbs → B6-2, surfaces → B6-5/B6-6; `stage.started/finished` → B6-1; settings surface → B6-3/B6-6). Take the next `pending` packet in queue order.
 3. **Run packets through the four-stage pipeline** (§4 below). B6's gate at the end = the phase decision batch **plus the operator's own acceptance: the UI click-through per their 2026-07-20 directive**.
 4. After the B6 gate: bring-up is next (the S19.6 measurement sequence + the accumulated TBD-BRINGUP rows — see the B5 report §3 table; the Layer-2 open-SQL acceptance measurement must count guardrail-conservatism refusals as an expected refusal source, per the ratified landing record).
-
-**Do not start B6 packets before the queue is cut and recorded in STATE.**
 
 ---
 
