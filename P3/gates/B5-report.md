@@ -95,13 +95,21 @@ Your personal acceptance test remains the B6 UI click-through per your 2026-07-2
 
 DeepEval `4.1.3` (Apache-2.0) is also in the lock as the pre-registered **standby** swap for promptfoo; a standby is observed now and pinned on activation (the Ollama precedent), so it needs no ratification today. **Recommendation: ratify all three en bloc.**
 
-**D2 — Host installs.** Two organs are adopted in code but **not installed** on this machine; nothing about the build changed host state. Per your standing hand-steps rule I have not written loose commands to paste — approving this decision means I write one guided, self-verifying script you run with a single command, which installs and then proves each install:
+**D2 — Host installs.** Two organs are adopted in code but **not installed** on this machine; nothing about the build changed host state. Per your standing hand-steps rule these are not loose commands to paste — the script is already written and validated:
 
-- promptfoo — `npm install -g promptfoo@0.121.19` (host node v22.22.1 satisfies the declared engines)
-- changedetection.io — pipx/venv from PyPI **0.55.8**
-- plus the separate question of installing the Sinet-**generated** `sinet-watchlist.service` (generated because upstream ships no unit; the B4-5 llama-swap carve-out). Installing a systemd unit is a host change, so it is its own yes/no.
+```
+bash ~/Sinet-Agentic-Control-Hub/P3/gates/B5-organ-install.sh
+```
 
-**Recommendation: install both organs; hold the unit install for the hardening session** unless you want the watchlist running unattended now.
+**Host preconditions checked live this session, and the news is better than the gate batch assumed: neither install needs sudo, apt, or a system change.**
+
+- **promptfoo `0.121.19`** — `npm install -g`. Your npm prefix is `/home/sinep/.npm-global` and is **user-writable**, so this is a `$HOME` install. Node v22.22.1 satisfies promptfoo's declared engines.
+- **changedetection.io `0.55.8`** — the gate batch said "pipx", but **pipx is not installed** and adding it would have meant an apt package and your vetting rule. **`uv 0.11.26` is already on the host** and `uv tool` is the pipx equivalent, so the install is `uv tool install changedetection.io==0.55.8 --python 3.11` — entirely user-level. The Python pin is deliberate: PyPI declares `requires-python >=3.10` (verified live), but your system Python is **3.14**, which is newer than that dependency tree's wheel coverage, so the script asks uv for a managed 3.11 rather than gambling on a source build.
+- The script is **idempotent, refuses to run as root, installs no systemd unit, arms no canary, and touches no secret.** It verifies each installed version against the pin in `components.lock`, then re-runs the Sinet-side conformance legs that activate once the organ exists, then the full battery. It prints an undo for both installs.
+- **Honest limit:** installing changedetection.io does not start it, so its real-organ conformance leg stays a sanctioned skip until the organ is running with `SINET_CDIO_URL` and `SINET_CDIO_API_KEY` set. The script says so rather than reporting a false green.
+- **Separately:** whether to install the Sinet-**generated** `sinet-watchlist.service` (generated because upstream ships no unit — the B4-5 carve-out). Installing a systemd unit is a real host change, so it is its own yes/no.
+
+**Recommendation: run the script to install both organs; hold the unit install for the hardening session** unless you want the watchlist polling unattended before B6 exists to show you what it found.
 
 **D3 — Canary arming.** The canary layer ships deliberately disarmed, and two of its four legs cannot honestly be armed today:
 
