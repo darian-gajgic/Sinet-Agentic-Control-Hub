@@ -45,6 +45,12 @@ func (r BudgetRow) Budget() Budget {
 	return Budget{PeriodTokens: r.PeriodTokens, PeriodStart: r.PeriodStart, Declared: true}
 }
 
+// ErrNoSuchPerson refuses an S10.4 switch aimed at somebody who does not exist.
+// Both switches make the same refusal for the same reason: a budget or a pause
+// declared for nobody is a decision recorded about nobody, and the tables behind
+// them carry no foreign key that would have caught it.
+var ErrNoSuchPerson = errors.New("metering: no such person")
+
 // Budgets is the durable S10.4 budget store (migration 0017 `budgets`).
 type Budgets struct {
 	db *storage.DB
@@ -77,6 +83,21 @@ func (b *Budgets) Declare(ctx context.Context, row BudgetRow) (prior BudgetRow, 
 		row.PeriodStart = row.DeclaredTS
 	}
 	err = b.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		// The person must EXIST. A budget is per-person durable operator data,
+		// and `budgets` carries no foreign key (the `lanes` precedent), so a
+		// typo would otherwise mint a row for nobody — which the recreated
+		// cost_budget_remainder view then faithfully serves, because the view
+		// unions the budgets table. Refusing here is the same refusal SetPause
+		// already makes, for the same reason: declaring a budget for nobody
+		// records a decision about nobody.
+		var exists int
+		switch err := tx.QueryRowContext(ctx,
+			`SELECT 1 FROM users WHERE user_id = ?`, row.UserID).Scan(&exists); {
+		case errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("%w: %q", ErrNoSuchPerson, row.UserID)
+		case err != nil:
+			return fmt.Errorf("metering: read person %q: %w", row.UserID, err)
+		}
 		p, ok, rerr := readBudget(ctx, tx.QueryRowContext, row.UserID, row.Lane)
 		if rerr != nil {
 			return rerr
@@ -202,7 +223,7 @@ func (p *Pause) SetPause(ctx context.Context, userID string, paused bool) (bool,
 		switch err := tx.QueryRowContext(ctx,
 			`SELECT automation_paused FROM users WHERE user_id = ?`, userID).Scan(&cur); {
 		case errors.Is(err, sql.ErrNoRows):
-			return fmt.Errorf("metering: no such person %q", userID)
+			return fmt.Errorf("%w: %q", ErrNoSuchPerson, userID)
 		case err != nil:
 			return fmt.Errorf("metering: read pause flag for %q: %w", userID, err)
 		}

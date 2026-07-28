@@ -146,7 +146,14 @@ func (s *Scheduler) reconcileQueueRows(ctx context.Context) error {
 
 // sortCandidates orders candidates by the S10.7 priority ladder + aging
 // (workload.go priorityLess), highest priority first.
+//
+// Two steps, in this order and never merged (drain D1): the S15.5 drag hint is
+// applied first as a key permutation WITHIN each (user, class) group, and only
+// then is the whole slice sorted by the resulting keys. Sorting by a fixed value
+// is what makes the claim order transitive and therefore independent of the row
+// order the candidates arrived in.
 func sortCandidates(cands []candidate, now time.Time) {
+	permuteHints(cands, now)
 	sort.SliceStable(cands, func(i, j int) bool { return priorityLess(cands[i], cands[j], now) })
 }
 

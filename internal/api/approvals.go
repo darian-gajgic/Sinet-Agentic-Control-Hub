@@ -287,43 +287,73 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 		out = append(out, it)
 	}
 
-	// The five oversight kinds. Their verbs (suppress / resume / dismiss /
-	// acknowledge / verdict / alarm disposition) are the LATER B6-2 parts; the
-	// cards are listed now because an inbox that hides what it cannot yet
-	// answer is worse than one that says where the answer lives.
+	// The five oversight kinds. THREE of them are answerable as of B6-2B — the
+	// suppress, dismiss and acknowledge verbs are live (oversight.go) — and their
+	// cards say so PER CALLER, computed from the same authority rules those verbs
+	// enforce, so the inbox never renders a control whose use would be refused
+	// (the part-A D9 principle, extended). The two benchmark kinds stay
+	// not-answerable-HERE with a reason naming part C: an inbox that hides what
+	// it cannot yet answer is worse than one that says where the answer lives.
+	//
+	// None of the three runs applyTierRules, and that is deliberate: their tier
+	// is a RANKING (severity/flag-now), not a gate. Batching and PIN step-up are
+	// the S15.6 answer-path semantics for asks and effects; a suppress demands no
+	// PIN, and a card claiming otherwise would describe a door that does not
+	// exist.
 	for _, f := range snap.WatchdogFlags {
-		out = append(out, oversightItem(approvalKindWatchdog, f.RunID+"\x1f"+f.AnomalyClass, f.Owner, f.RunID,
-			severityTier(f.Severity), f.FlaggedTS,
-			"the watchdog suppress verb is B6-2B (S14.4)", redactWatchdogFlag(f)))
+		it := oversightItem(approvalKindWatchdog, f.RunID+"\x1f"+f.AnomalyClass, f.Owner, f.RunID,
+			severityTier(f.Severity), f.FlaggedTS, redactWatchdogFlag(f))
+		it.Actions = []string{oversightActionSuppress}
+		setAnswerable(&it, mayAnswerWatchdogFlag(scope, f.Owner),
+			"suppressing a flag is its owner's or the operator's (POST /api/watchdog/flags/suppress, S14.4)")
+		out = append(out, it)
 	}
 	for _, c := range snap.ConformanceCards {
 		tier := tierMedium
 		if c.FlagNow {
 			tier = tierHigh
 		}
-		out = append(out, oversightItem(approvalKindConformance, c.RowID, platformOwner, "",
-			tier, c.LastRunTS, "the conformance acknowledge verb is B6-2B (S14.5)", c))
+		it := oversightItem(approvalKindConformance, c.RowID, platformOwner, "", tier, c.LastRunTS, c)
+		it.Actions = []string{oversightActionAcknowledge}
+		setAnswerable(&it, mayAnswerPlatformCard(scope),
+			"a conformance card is platform-scope: the operator acknowledges it (POST /api/approvals/{id}/acknowledge, S14.5)")
+		out = append(out, it)
 	}
 	for _, d := range snap.DriftCards {
-		out = append(out, oversightItem(approvalKindDrift, d.Fingerprint, platformOwner, "",
-			severityTier(d.Severity), d.FirstTS,
-			"the drift-card dismiss verb is B6-2B (S14.6)", redactDriftCard(d)))
+		it := oversightItem(approvalKindDrift, d.Fingerprint, platformOwner, "",
+			severityTier(d.Severity), d.FirstTS, redactDriftCard(d))
+		it.Actions = []string{oversightActionDismiss}
+		setAnswerable(&it, mayAnswerPlatformCard(scope),
+			"a drift card is platform-scope: the operator dismisses it (POST /api/approvals/{id}/dismiss, S14.6)")
+		out = append(out, it)
 	}
 	for _, v := range snap.BenchmarkVerdicts {
-		out = append(out, oversightItem(approvalKindVerdict, v.PairID, v.Owner, "",
+		it := oversightItem(approvalKindVerdict, v.PairID, v.Owner, "",
 			// A blind-pair verdict is the requester's own judgement call: never
 			// batched (the mandatory arm-guess is per pair and structural,
 			// BENCH-REG §3.3) and never step-up (it releases nothing outward).
-			tierMedium, v.SampledTS,
-			"the blind-pair verdict backend is B6-2C (BENCH-REG §3.3 — the guess is structural)", v))
+			tierMedium, v.SampledTS, v)
+		setAnswerable(&it, false,
+			"the blind-pair verdict backend is B6-2C (BENCH-REG §3.3 — the guess is structural)")
+		out = append(out, it)
 	}
 	for _, a := range snap.BenchmarkAlarms {
-		out = append(out, oversightItem(approvalKindAlarm, a.Domain+"#"+a.EpochID, platformOwner, "",
-			tierHigh, a.RaisedTS,
-			"the alarm disposition verb is B6-2C (BENCH-REG §12, operator-only)", redactBenchmarkAlarm(a)))
+		it := oversightItem(approvalKindAlarm, a.Domain+"#"+a.EpochID, platformOwner, "",
+			tierHigh, a.RaisedTS, redactBenchmarkAlarm(a))
+		setAnswerable(&it, false,
+			"the alarm disposition verb is B6-2C (BENCH-REG §12, operator-only)")
+		out = append(out, it)
 	}
 	return out, nil
 }
+
+// The oversight card action vocabulary (B6-2B). One verb per kind, named by the
+// card so a surface renders the control the route actually accepts.
+const (
+	oversightActionSuppress    = "suppress"
+	oversightActionDismiss     = "dismiss"
+	oversightActionAcknowledge = "acknowledge"
+)
 
 // platformOwner is the reserved platform-scope owner id (S02.2 15.6): the
 // operator-only oversight kinds are attributed to it, exactly as their
@@ -340,14 +370,14 @@ func severityTier(severity string) string {
 	return tierMedium
 }
 
-func oversightItem(kind, nativeID, owner, runID, tier string, ts time.Time, why string, card any) ApprovalItem {
+func oversightItem(kind, nativeID, owner, runID, tier string, ts time.Time, card any) ApprovalItem {
 	raw, err := json.Marshal(card)
 	if err != nil {
 		raw = nil
 	}
 	return ApprovalItem{
 		ID: kind + ":" + nativeID, Kind: kind, Owner: owner, RunID: runID, Tier: tier,
-		Answerable: false, NotAnswerableReason: why, ObservedTS: ts, Card: raw,
+		ObservedTS: ts, Card: raw,
 	}
 }
 
@@ -367,6 +397,19 @@ func mayAnswerAsk(scope ownerScope, owner string) bool { return scope.UserID == 
 func mayAnswerEffect(scope ownerScope, e effectCard) bool {
 	return scope.UserID == e.Owner || (scope.Operator && e.PlatformLevel)
 }
+
+// mayAnswerWatchdogFlag: S14.4 suppress — the flag's owner, or the operator.
+// A run-less platform-scope flag is attributed to `platform`, so only the
+// operator matches it, which is the landed visibility rule stated as authority:
+// you can suppress exactly what you can see.
+func mayAnswerWatchdogFlag(scope ownerScope, owner string) bool {
+	return scope.Operator || scope.UserID == owner
+}
+
+// mayAnswerPlatformCard: the S14.6 drift dismiss and the S14.5 conformance
+// acknowledge are operator-only, exactly as the projections that produce those
+// cards are scoped.
+func mayAnswerPlatformCard(scope ownerScope) bool { return scope.Operator }
 
 // setAnswerable records the per-caller verdict WITH its reason, so a surface
 // that cannot answer a card knows why rather than rendering a dead control.

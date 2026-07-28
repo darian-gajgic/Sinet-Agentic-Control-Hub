@@ -195,6 +195,11 @@ func (s *Skeleton) dispatchCompose(ctx context.Context, r run.Run) error {
 	}); err != nil {
 		return err
 	}
+	// The S10.4 pause boundary for the COMPOSE leg (pause.go): the ceremony's
+	// one shot has not been taken yet, so this is a clean place to park.
+	if s.pauseParkPoint(ctx, r, "compose") {
+		return nil
+	}
 	if s.cfg.Workers == nil {
 		s.crash(ctx, r.ID, "compose run without a worker store")
 		return errors.New("stage: compose run without a worker store")

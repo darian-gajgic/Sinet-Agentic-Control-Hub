@@ -73,9 +73,6 @@ func (f *fakePauseStore) Paused(_ context.Context, userID string) (bool, error) 
 func (f *fakePauseStore) SetPause(_ context.Context, userID string, paused bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.paused[userID]; !ok && userID == "ghost" {
-		return false, sql.ErrNoRows
-	}
 	prior := f.paused[userID]
 	f.paused[userID] = paused
 	return prior, nil
@@ -312,6 +309,7 @@ func TestBudgetViewIsTrueInBothStates(t *testing.T) {
 	ctx := context.Background()
 	seedUser(t, b, "alice", "member")
 	seedUser(t, b, "bob", "member")
+	seedUser(t, b, "carol", "member")
 	// Consumption for both, so both appear in cost_per_person.
 	for _, u := range []string{"alice", "bob"} {
 		seedTask(t, b, "t-"+u, u, "T", "doing")
@@ -583,6 +581,35 @@ func TestMetersVerbsNotWiredAre503(t *testing.T) {
 	}
 }
 
+// TestBothSwitchesRefuseAPersonWhoDoesNotExist is drain D5/D6: `person` is
+// client input, and whether it names somebody is a question about that input —
+// so it is answered at the boundary, and answered 404. Before this an operator
+// typo reached the store, whose own refusal the transport could only render as
+// a 500: a caller's mistake surfacing as a platform fault.
+func TestBothSwitchesRefuseAPersonWhoDoesNotExist(t *testing.T) {
+	e := newVerbEnv(t)
+	for _, tc := range []struct{ name, path, body string }{
+		{"budget", "/api/meters/budget", `{"person":"ghost","lane":"anthropic","period_tokens":10,"period_days":7}`},
+		{"pause", "/api/meters/pause", `{"person":"ghost","paused":true}`},
+	} {
+		code, out := e.do(t, "op", "POST", tc.path, tc.body)
+		if code != http.StatusNotFound {
+			t.Errorf("%s for a nonexistent person: status %d, want 404: %s", tc.name, code, out)
+		}
+	}
+	if len(e.budgets.rows) != 0 {
+		t.Error("a refused declaration still wrote a budget row")
+	}
+	if e.pause.paused["ghost"] {
+		t.Error("a refused pause still flipped a switch")
+	}
+	if n := len(decisionRows(t, e.b, "")); n != 0 {
+		t.Errorf("a refused switch recorded %d decisions", n)
+	}
+	// The non-tautological direction: a real person still works.
+	e.mustDo(t, "op", "POST", "/api/meters/pause", `{"person":"bob","paused":true}`)
+}
+
 // ── counters (rubric 20) ───────────────────────────────────────────────────
 
 // TestPartBCountersArePinned holds the tally this packet is allowed to move and
@@ -628,10 +655,20 @@ func TestPartBShapesNeverPercent(t *testing.T) {
 	seedTask(t, e.b, "t-alice", "alice", "Alice Task", "doing")
 	seedRun(t, e.b, "r-alice", "alice", "t-alice", "queued", "lane-a")
 
+	// The oversight fixtures, so the three card-verb shapes are scanned too
+	// (drain D7).
+	seedFlag(t, e.b, "alice", "r-alice", "watchdog.loop", "flag-now")
+	seedFindingAt(t, e.b, "fp-1", "STORM", time.Now())
+	seedRedConformanceRow(t, e.b, "CONF-ROW", "lane", nowTS())
+
 	bodies := []string{
 		e.mustDo(t, "alice", "POST", "/api/meters/budget", `{"lane":"anthropic","period_tokens":10,"period_days":7}`),
 		e.mustDo(t, "alice", "POST", "/api/meters/pause", `{"paused":true}`),
 		e.mustDo(t, "alice", "POST", "/api/tasks/t-alice/priority-hint", `{"rank":-1}`),
+		e.mustDo(t, "alice", "POST", "/api/watchdog/flags/suppress",
+			`{"run_id":"r-alice","anomaly_class":"watchdog.loop"}`),
+		e.mustDo(t, "op", "POST", "/api/approvals/drift_card:fp-1/dismiss", `{}`),
+		e.mustDo(t, "op", "POST", "/api/approvals/conformance_card:CONF-ROW/acknowledge", `{}`),
 	}
 	keys := map[string]bool{}
 	for _, body := range bodies {

@@ -465,6 +465,11 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 			return nil
 		}
 		res, err := s.runPlannedStage(ctx, r, er, step)
+		if errors.Is(err, errPausedPark) {
+			// The owner paused mid-stage and a SPLIT successor boundary caught
+			// it. The run is parked; the leg returns cleanly (pause.go).
+			return nil
+		}
 		if err != nil {
 			s.crash(ctx, r.ID, fmt.Sprintf("step %s session: %v", step.ID, err))
 			return fmt.Errorf("stage: execute step %s: %w", step.ID, err)
@@ -594,6 +599,12 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 		Reason: "verification drain (S07.1)", Actor: run.ActorPlatform,
 	}); err != nil {
 		return err
+	}
+	// The S10.4 pause boundary for the VERIFY leg (pause.go): a paused owner's
+	// run parks at its next stage-session boundary whichever leg it is in, and
+	// the drain's first judge session has not started yet.
+	if s.pauseParkPoint(ctx, r, "verify") {
+		return nil
 	}
 	in, err := s.verifyInput(ctx, r.ID, r.TaskID, 1)
 	if err != nil {

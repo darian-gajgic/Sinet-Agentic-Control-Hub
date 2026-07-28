@@ -105,6 +105,67 @@ func TestTheExecuteLegChecksThePauseBetweenSessions(t *testing.T) {
 	}
 }
 
+// TestANonExecuteLegParksAtItsOwnBoundaryAndResumesCleanly is drain D4: OQ5(ii)
+// says the leg loop checks the flag BETWEEN SESSIONS, and "the leg" is whichever
+// leg the run is in — not the execute leg alone.
+//
+// The verify leg is the proof, and the fixture is deliberately bare: there is no
+// deliverable to verify, so if the pause boundary did NOT fire, verifyInput
+// would fail and the leg would crash the run. Parked-and-clean is therefore only
+// reachable by the boundary actually working.
+func TestANonExecuteLegParksAtItsOwnBoundaryAndResumesCleanly(t *testing.T) {
+	e := newCancelEnv(t)
+	r := e.seedRun(t, "r-1", "t-1", "alice", run.StateClaimed)
+	e.sk.cfg.Paused = func(context.Context, string) (bool, error) { return true, nil }
+
+	if err := e.sk.dispatchVerify(context.Background(), r); err != nil {
+		t.Fatalf("the verify leg returned an error on a pause park: %v — a pause is not a failure", err)
+	}
+	if got := e.state(t, "r-1"); got != run.StateParked {
+		t.Fatalf("run is %s after the verify leg met a paused owner, want parked", got)
+	}
+	pay := lastStatePayload(t, e, "r-1")
+	if !strings.Contains(pay, "automation paused") || !strings.Contains(pay, "verify") {
+		t.Errorf("the verify leg's park does not name the pause and the boundary: %s", pay)
+	}
+	// …and it RESUMES cleanly: an ask-less park is exactly what the S14.4 verb
+	// releases.
+	out, err := e.sk.ResumeRun(context.Background(), "alice", "r-1")
+	if err != nil {
+		t.Fatalf("ResumeRun after a pause park: %v", err)
+	}
+	if out.To != string(run.StateRunning) || out.Generation != r.Generation+1 {
+		t.Fatalf("resume outcome = %+v, want running at a bumped generation", out)
+	}
+}
+
+// TestEveryDispatchLegHasAPauseBoundary is the structural half of D4: a leg
+// added later without a boundary would silently ignore the switch, and no
+// behavioral test would notice because the leg would not exist yet. The scan
+// pins the four boundaries that exist and names where they are.
+func TestEveryDispatchLegHasAPauseBoundary(t *testing.T) {
+	want := map[string]int{
+		"skeleton.go": 2, // the execute step loop + the verify drain
+		"compose.go":  1, // the composition ceremony's one shot
+		"split.go":    1, // each split successor INSIDE a planned stage
+	}
+	total := 0
+	for file, n := range want {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := strings.Count(string(src), "s.pauseParkPoint(ctx, r,")
+		if got != n {
+			t.Errorf("%s has %d pause boundaries, want %d — every dispatch leg checks the switch between its sessions (OQ5(ii))", file, got, n)
+		}
+		total += got
+	}
+	if total == 0 {
+		t.Fatal("the scan found no pause boundaries at all — it would pass vacuously")
+	}
+}
+
 // TestPauseParkTakesNoTerminalEdge is the NO-AUTO-KILL complement in this file's
 // own terms (§31; the tree-wide cancel-reachability wall covers the rest): the
 // pause path's only transition target is `parked`, so no code path here can end

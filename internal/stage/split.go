@@ -63,6 +63,13 @@ func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRou
 			in.Tools = nil // the compiled unit carries the granted toolset
 			in.PermissionMode = ""
 		}
+		// The S10.4 pause boundary INSIDE a planned stage (pause.go): a stage
+		// that splits runs several sessions, and each successor boundary is a
+		// place the run can park. Without this, a long split chain would ignore
+		// the switch until the whole step finished.
+		if s.pauseParkPoint(ctx, r, stageName) {
+			return SessionResult{}, errPausedPark
+		}
 		res, err := s.Session(ctx, in)
 		if err != nil {
 			return res, err

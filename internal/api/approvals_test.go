@@ -1175,6 +1175,81 @@ func TestAnswerableMatchesTheAuthorityTheVerbEnforces(t *testing.T) {
 	}
 }
 
+// TestOversightCardsSayWhoCanAnswerThem extends the D9 agreement rule to the
+// three oversight kinds whose verbs went live at B6-2B (drain D3). Before this
+// the cards carried a hardcoded `answerable:false` and a FUTURE-TENSE reason
+// ("the … verb is B6-2B") describing verbs that now exist — so a surface reading
+// the inbox would render no control for an act the caller could perform.
+//
+// The agreement is asserted the same way part A asserts it: drive the card and
+// the door for each caller and require them to say the same thing.
+func TestOversightCardsSayWhoCanAnswerThem(t *testing.T) {
+	e := newVerbEnv(t)
+	seedTask(t, e.b, "t-alice", "alice", "T", "doing")
+	seedRun(t, e.b, "r-alice", "alice", "t-alice", "running", "lane-a")
+	seedFlag(t, e.b, "alice", "r-alice", "watchdog.loop", "flag-now")
+	seedFindingAt(t, e.b, "fp-1", "STORM", time.Now())
+	seedRedConformanceRow(t, e.b, "CONF-ROW", "lane", nowTS())
+
+	for _, c := range []struct {
+		who, kind, id string
+		answerable    bool
+		action        string
+		why           string
+	}{
+		{"alice", "watchdog_flag", "", true, "suppress", "the flag's owner suppresses it"},
+		{"op", "watchdog_flag", "", true, "suppress", "the operator sees and suppresses everything"},
+		{"op", "drift_card", "drift_card:fp-1", true, "dismiss", "drift cards are the operator's"},
+		{"op", "conformance_card", "conformance_card:CONF-ROW", true, "acknowledge", "conformance cards are the operator's"},
+	} {
+		got := inboxKinds(t, e, c.who, c.kind)
+		if len(got) != 1 {
+			t.Fatalf("%s sees %d %s cards, want 1", c.who, len(got), c.kind)
+		}
+		it := got[0]
+		if it.Answerable != c.answerable {
+			t.Errorf("%s sees %s answerable=%v, want %v (%s)", c.who, c.kind, it.Answerable, c.answerable, c.why)
+		}
+		if !containsAction(it.Actions, c.action) {
+			t.Errorf("%s sees %s with actions %v, want the live verb %q named", c.who, c.kind, it.Actions, c.action)
+		}
+		// The tier is a RANKING for these kinds, never a gate: no oversight card
+		// may claim a PIN step-up or a batch the verb does not implement.
+		if it.StepUpRequired || it.Batchable {
+			t.Errorf("%s card claims step-up=%v batchable=%v — neither is an oversight verb's semantics",
+				c.kind, it.StepUpRequired, it.Batchable)
+		}
+	}
+	// A member sees no platform-scope card at all, which is the other half of
+	// the agreement: nothing is rendered for them to be refused at.
+	for _, kind := range []string{"drift_card", "conformance_card"} {
+		if got := inboxKinds(t, e, "alice", kind); len(got) != 0 {
+			t.Errorf("a member sees %d %s cards — they are operator-only (S01.9)", len(got), kind)
+		}
+	}
+	// The two benchmark kinds stay not-answerable HERE, with a reason naming
+	// where their verb lives (part C).
+	sevenKindsBenchmarkOnly(t, e)
+}
+
+// sevenKindsBenchmarkOnly asserts the part-C kinds still say where their verb
+// lives rather than going missing or pretending to be answerable.
+func sevenKindsBenchmarkOnly(t *testing.T, e *verbEnv) {
+	t.Helper()
+	appendPlatformPayload(t, e.b, "benchmark.alarm",
+		`{"action":"raise","domain":"D","epoch_id":"e1","severity":"flag-now","summary":"S","loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`)
+	got := inboxKinds(t, e, "op", "benchmark_alarm")
+	if len(got) != 1 {
+		t.Fatalf("operator sees %d alarm cards, want 1", len(got))
+	}
+	if got[0].Answerable {
+		t.Error("a benchmark alarm reads as answerable — its disposition verb is part C's")
+	}
+	if !strings.Contains(got[0].NotAnswerableReason, "B6-2C") {
+		t.Errorf("the alarm's reason does not name where its verb lives: %q", got[0].NotAnswerableReason)
+	}
+}
+
 // ── drain D10: `failed` is reached by two different acts ────────────────────
 
 // TestDenyAndExecutionFailureAreDifferentAnswers: a denial is terminal and is

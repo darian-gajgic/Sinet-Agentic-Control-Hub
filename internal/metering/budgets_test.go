@@ -3,6 +3,7 @@ package metering
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 )
@@ -26,6 +27,8 @@ func seedUser(t *testing.T, e *env, id string) {
 // PRIOR row back so the edit can be audited old→new.
 func TestBudgetRoundTripsAndReturnsWhatItReplaced(t *testing.T) {
 	e := newEnv(t)
+	seedUser(t, e, "alice")
+	seedUser(t, e, "bob")
 	b := NewBudgets(e.db)
 	ctx := context.Background()
 	start := time.Now().UTC().Truncate(time.Second)
@@ -83,6 +86,7 @@ func TestBudgetRoundTripsAndReturnsWhatItReplaced(t *testing.T) {
 // refuses, so a defect never becomes a row.
 func TestBudgetRefusesWhatIsNotABudget(t *testing.T) {
 	e := newEnv(t)
+	seedUser(t, e, "alice")
 	b := NewBudgets(e.db)
 	now := time.Now().UTC()
 	base := BudgetRow{UserID: "alice", Lane: "anthropic", PeriodTokens: 10, PeriodDays: 7,
@@ -112,6 +116,7 @@ func TestBudgetRefusesWhatIsNotABudget(t *testing.T) {
 // is untouched — only where its Budget comes from changed.
 func TestDeclaredBudgetMakesTheGaugeApplicable(t *testing.T) {
 	e := newEnv(t)
+	seedUser(t, e, "alice")
 	ctx := context.Background()
 	e.runningRun(t, "r1", "alice", "anthropic", "claude-cli")
 	e.checkpoint(t, "r1", "claude-sonnet-4-5", `{"input_tokens":900,"output_tokens":100}`)
@@ -198,5 +203,41 @@ func TestPauseFlipsAndReportsItsPriorValue(t *testing.T) {
 	// Pausing somebody who does not exist records a decision about nobody.
 	if _, err := p.SetPause(ctx, "ghost", true); err == nil {
 		t.Error("SetPause accepted an unknown person")
+	}
+}
+
+// TestDeclareRefusesAPersonWhoDoesNotExist is drain D5: `budgets` carries no
+// foreign key (the `lanes` precedent), so without this check an operator typo
+// mints a ghost row that the recreated cost_budget_remainder view then serves
+// as a real declaration.
+func TestDeclareRefusesAPersonWhoDoesNotExist(t *testing.T) {
+	e := newEnv(t)
+	seedUser(t, e, "alice")
+	b := NewBudgets(e.db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	row := BudgetRow{UserID: "ghost", Lane: "anthropic", PeriodTokens: 100, PeriodDays: 30,
+		PeriodStart: now, DeclaredTS: now, DeclaredBy: "op"}
+
+	if _, _, err := b.Declare(ctx, row); !errors.Is(err, ErrNoSuchPerson) {
+		t.Fatalf("Declare for a nonexistent person: err = %v, want ErrNoSuchPerson", err)
+	}
+	// NO ROW LANDED — which is the half that matters, because the view unions
+	// the budgets table and would have reported the ghost's declaration.
+	var n int
+	if err := e.db.QueryRowContext(ctx, `SELECT count(*) FROM budgets`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("a refused declaration left %d budget rows", n)
+	}
+	// The same refusal, from the same sentinel, on the other switch.
+	if _, err := NewPause(e.db).SetPause(ctx, "ghost", true); !errors.Is(err, ErrNoSuchPerson) {
+		t.Fatalf("SetPause for a nonexistent person: err = %v, want ErrNoSuchPerson", err)
+	}
+	// …and a real person still works, so the check is not refusing everything.
+	row.UserID = "alice"
+	if _, _, err := b.Declare(ctx, row); err != nil {
+		t.Fatalf("Declare for a real person: %v", err)
 	}
 }

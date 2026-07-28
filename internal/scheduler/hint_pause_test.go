@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,46 +160,222 @@ func backdateEnqueue(t *testing.T, e *schedEnv, runID string, delta time.Duratio
 	}
 }
 
-// TestDragHintNeverCrossesClassOrOwner is the pair of negatives the hint's
-// safety rests on, asserted against the ordering function itself so the claim
-// order cannot disagree with it.
-func TestDragHintNeverCrossesClassOrOwner(t *testing.T) {
+// ── D1: the ordering is a permutation, and these are its properties ────────
+//
+// The hint used to be a comparator limb, which was not a strict weak ordering:
+// a hint order disagreeing with the aging order, plus an outsider scoring
+// between the two, produced a genuine CYCLE, and sort.SliceStable on a cyclic
+// relation is undefined — three initial row orders gave three different claim
+// winners, one of them the other owner's run. The tests below pin the four
+// properties the replacement is built to have, each of them a property of the
+// CLAIM ORDER rather than of a pairwise comparison.
+
+// hintFloorProbe is the strongest hint the transport admits, used here so the
+// properties are asserted at the extreme rather than at a gentle nudge.
+const hintFloorProbe = 1000
+
+// orderingFixture is a scenario plus the claim order it produces.
+type orderingCand struct {
+	id      string
+	user    string
+	class   WorkloadClass
+	ageHrs  float64
+	hint    int64
+	queueID int64
+}
+
+func buildCands(specs []orderingCand, now time.Time) []candidate {
+	out := make([]candidate, 0, len(specs))
+	for i, s := range specs {
+		qid := s.queueID
+		if qid == 0 {
+			qid = int64(i + 1)
+		}
+		out = append(out, candidate{
+			queueID: qid, runID: s.id, userID: s.user, lane: "l", class: s.class,
+			enqueuedTS: now.Add(-time.Duration(s.ageHrs * float64(time.Hour))), hintRank: s.hint,
+		})
+	}
+	return out
+}
+
+// claimOrder sorts a COPY of the scenario and returns the run ids in order.
+func claimOrder(specs []orderingCand, now time.Time) []string {
+	cands := buildCands(specs, now)
+	sortCandidates(cands, now)
+	return runIDs(cands)
+}
+
+// TestClaimOrderIsIndependentOfRowOrder is property (a): the ordering is
+// transitive, so the claim order is a function of the CANDIDATES and not of the
+// order the rows happened to come back from SQLite in. This is the property the
+// comparator limb did not have, and it is asserted over the exact fixture that
+// broke it — plus every permutation of it.
+func TestClaimOrderIsIndependentOfRowOrder(t *testing.T) {
 	now := time.Now()
-	fresh := now.Add(-time.Minute)
-	old := now.Add(-6 * time.Hour)
-
-	// (a) A maximally-hinted BACKGROUND run never outranks interactive work.
-	// Interactive is never starved by automation (3.3), and a person dragging
-	// their own board cannot promote automation past it.
-	hintedBackground := candidate{queueID: 1, runID: "r-bg", userID: "alice", lane: "l",
-		class: ClassBackground, enqueuedTS: old, hintRank: -hintFloorProbe}
-	freshInteractive := candidate{queueID: 2, runID: "r-int", userID: "alice", lane: "l",
-		class: ClassInteractive, enqueuedTS: fresh}
-	if priorityLess(hintedBackground, freshInteractive, now) {
-		t.Error("a hinted background run outranked interactive work — the hint crossed the S10.7 class ladder")
+	// The F1 cycle fixture: within (alice, background) the hint order disagrees
+	// with the aging order, and bob's run scores BETWEEN the two.
+	specs := []orderingCand{
+		{id: "alice-old", user: "alice", class: ClassBackground, ageHrs: 3},
+		{id: "alice-new", user: "alice", class: ClassBackground, ageHrs: 1, hint: -5},
+		{id: "bob-mid", user: "bob", class: ClassBackground, ageHrs: 2},
 	}
-	if !priorityLess(freshInteractive, hintedBackground, now) {
-		t.Error("interactive lost to a hinted background run — 3.3 says interactive is never starved by automation")
+	want := claimOrder(specs, now)
+	// Under the old comparator this fixture produced a different winner per row
+	// order; the winner must now be one run, whichever order the rows arrive in.
+	for _, perm := range permutations(len(specs)) {
+		shuffled := make([]orderingCand, len(specs))
+		for i, p := range perm {
+			shuffled[i] = specs[p]
+		}
+		if got := claimOrder(shuffled, now); !equalStrings(got, want) {
+			t.Fatalf("row order %v produced claim order %v, want %v — the ordering is not transitive", perm, got, want)
+		}
 	}
-
-	// (b) A maximally-hinted run of ANOTHER owner never reorders against mine.
-	// Both are background, so only the hint could move them — and it must not,
-	// because the hint orders one person's own queue and nobody else's.
-	bobHinted := candidate{queueID: 3, runID: "r-bob", userID: "bob", lane: "l",
-		class: ClassBackground, enqueuedTS: fresh, hintRank: -hintFloorProbe}
-	aliceOld := candidate{queueID: 4, runID: "r-alice", userID: "alice", lane: "l",
-		class: ClassBackground, enqueuedTS: old}
-	if priorityLess(bobHinted, aliceOld, now) {
-		t.Error("bob's hint outranked alice's older run — a drag reached across owners")
-	}
-	if !priorityLess(aliceOld, bobHinted, now) {
-		t.Error("alice's older run lost to bob's hint — cross-owner ordering must still be the aging score")
+	// …and the hint did what it was asked to do: alice's hinted run took her
+	// group's best position.
+	if want[0] != "alice-new" {
+		t.Fatalf("claim order = %v, want alice's hinted run first", want)
 	}
 }
 
-// hintFloorProbe is the strongest hint the transport admits, used here to prove
-// the negatives hold even at the extreme.
-const hintFloorProbe = 1000
+// TestHintIsHonoredWithinTheOwnersOwnGroup is property (d).
+func TestHintIsHonoredWithinTheOwnersOwnGroup(t *testing.T) {
+	now := time.Now()
+	specs := []orderingCand{
+		{id: "a1", user: "alice", class: ClassBackground, ageHrs: 5},
+		{id: "a2", user: "alice", class: ClassBackground, ageHrs: 3},
+		{id: "a3", user: "alice", class: ClassBackground, ageHrs: 1, hint: -hintFloorProbe},
+	}
+	// Baseline: oldest first.
+	if got := claimOrder([]orderingCand{specs[0], specs[1], {id: "a3", user: "alice", class: ClassBackground, ageHrs: 1}}, now); got[0] != "a1" {
+		t.Fatalf("baseline claim order = %v, want the oldest first", got)
+	}
+	got := claimOrder(specs, now)
+	if got[0] != "a3" {
+		t.Fatalf("claim order = %v, want the hinted run first within its owner's own group", got)
+	}
+	// The rest keep their own relative order: a hint moves ONE run, it does not
+	// scramble the queue.
+	if got[1] != "a1" || got[2] != "a2" {
+		t.Fatalf("claim order = %v, want the un-hinted runs still oldest-first behind it", got)
+	}
+}
+
+// TestHintCannotMoveAnotherOwnersPosition is property (b), the cross-user
+// SET-invariance: a group's multiset of keys is preserved, so every other owner
+// faces the identical field of competitors and their positions cannot move.
+func TestHintCannotMoveAnotherOwnersPosition(t *testing.T) {
+	now := time.Now()
+	base := []orderingCand{
+		{id: "alice-1", user: "alice", class: ClassBackground, ageHrs: 6},
+		{id: "bob-1", user: "bob", class: ClassBackground, ageHrs: 5},
+		{id: "alice-2", user: "alice", class: ClassBackground, ageHrs: 4},
+		{id: "bob-2", user: "bob", class: ClassBackground, ageHrs: 3},
+		{id: "alice-3", user: "alice", class: ClassBackground, ageHrs: 2},
+		{id: "bob-3", user: "bob", class: ClassBackground, ageHrs: 1},
+	}
+	baseline := claimOrder(base, now)
+
+	hinted := append([]orderingCand(nil), base...)
+	hinted[4].hint = -hintFloorProbe // alice drags her newest run to the top
+	hinted[0].hint = hintFloorProbe  // …and her oldest to the bottom
+	after := claimOrder(hinted, now)
+
+	for i := range baseline {
+		wasBob := strings.HasPrefix(baseline[i], "bob-")
+		isBob := strings.HasPrefix(after[i], "bob-")
+		if wasBob != isBob || (wasBob && baseline[i] != after[i]) {
+			t.Fatalf("alice's drag moved bob's work: baseline %v, after %v (position %d)", baseline, after, i)
+		}
+	}
+}
+
+// TestHintNeverCrossesAClassBoundary is property (c), for interactive AND
+// non-interactive neighbours.
+//
+// GUARD-REMOVAL PROBE: the permutation groups by (user, CLASS). Group by user
+// alone — the plausible mistake — and alice's hinted background run would take
+// the key of her own scheduled run and jump it, which is exactly what these
+// assertions catch.
+func TestHintNeverCrossesAClassBoundary(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		name      string
+		neighbour WorkloadClass
+	}{
+		{"interactive is never starved by automation (3.3)", ClassInteractive},
+		{"a hinted background run never jumps its owner's human-blocked work", ClassHumanBlocked},
+		{"a hinted background run never jumps its owner's scheduled work", ClassScheduled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			specs := []orderingCand{
+				// The neighbour is BRAND NEW, so only a boundary crossing could
+				// put a background run ahead of it.
+				{id: "neighbour", user: "alice", class: tc.neighbour, ageHrs: 0},
+				{id: "bg-old", user: "alice", class: ClassBackground, ageHrs: 0.5},
+				{id: "bg-hinted", user: "alice", class: ClassBackground, ageHrs: 0.1, hint: -hintFloorProbe},
+			}
+			got := claimOrder(specs, now)
+			if got[0] != "neighbour" {
+				t.Fatalf("claim order = %v, want the %s run first — a hint may never cross a class boundary", got, tc.neighbour)
+			}
+			// …and the hint still worked INSIDE the background group.
+			if got[1] != "bg-hinted" {
+				t.Fatalf("claim order = %v, want the hinted background run ahead of its own group", got)
+			}
+		})
+	}
+}
+
+// TestPermutationWithNoHintsIsTheIdentity: an un-dragged queue admits exactly as
+// it did before B6-2B. Without this the new machinery could silently change the
+// ordering of every platform that has never used the feature.
+func TestPermutationWithNoHintsIsTheIdentity(t *testing.T) {
+	now := time.Now()
+	specs := []orderingCand{
+		{id: "i", user: "alice", class: ClassInteractive, ageHrs: 0},
+		{id: "bg-old", user: "alice", class: ClassBackground, ageHrs: 5},
+		{id: "sched", user: "bob", class: ClassScheduled, ageHrs: 0},
+		{id: "bg-new", user: "bob", class: ClassBackground, ageHrs: 0},
+		{id: "hb", user: "alice", class: ClassHumanBlocked, ageHrs: 0},
+	}
+	cands := buildCands(specs, now)
+	permuteHints(cands, now)
+	for _, c := range cands {
+		if c.key != c.naturalKey(now) {
+			t.Errorf("%s: key moved with no hint anywhere (%v → %v)", c.runID, c.naturalKey(now), c.key)
+		}
+	}
+}
+
+func permutations(n int) [][]int {
+	if n == 0 {
+		return [][]int{{}}
+	}
+	var out [][]int
+	for _, rest := range permutations(n - 1) {
+		for pos := 0; pos <= len(rest); pos++ {
+			p := append([]int(nil), rest[:pos]...)
+			p = append(p, n-1)
+			p = append(p, rest[pos:]...)
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // TestPriorityHintOnANonQueuedRunIsAnHonestNoOp: a claimed run has left the
 // queue the hint sorts, so the write matches no row and says so.

@@ -273,7 +273,7 @@ func Run(ctx context.Context, opts Options) error {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
 		exceptions := metering.NoMeteredExceptions()
 		meterLedger := metering.NewLedger(db, priceTable, exceptions, reg)
-		meterReader = projMeter{ledger: meterLedger, gauge: metering.NewPressureGauge(db, reg)}
+		meterReader = projMeter{ledger: meterLedger, gauge: metering.NewPressureGauge(db, reg), budgets: budgetStore}
 		// The S11 composer probes the host once at startup (probe-at-
 		// compose, S16.3) and logs the result. ENGINE spawns run through it
 		// only OUTSIDE dev posture: a confined engine holds a credential
@@ -1238,10 +1238,21 @@ func watchdogSuppressSeam(wd *watchdog.Watchdog) api.SuppressSurface {
 // cost so far (subscription lanes price UNPRICED under the empty v0 table — the
 // counter is honest, never money-by-generation, S10.1). LaneMeter reads one
 // (owner, lane) weighted consumption + utilization/budget-remaining against the
-// operator budget (undeclared at v0 → nil, honest).
+// DECLARED operator budget.
+//
+// The budget read is what makes the READ surface agree with itself (drain D2).
+// Before B6-2B no budget was persisted anywhere, so this passed
+// UndeclaredBudget() unconditionally and that was honest. Once the S10.4 verb
+// can declare one, a hardcoded undeclared read makes `GET /api/meters`
+// CONTRADICT ITSELF — the Layer-0 view block reporting a declared budget while
+// the gauge block beside it reports none and serves no pressure — and the S14.3
+// fleet snapshot shows the same absence. The budget is therefore read from the
+// same store the verb writes, per (person, lane), which is the grain the gauge's
+// one-denominator rule needs (D4). A nil store keeps the pre-0017 posture.
 type projMeter struct {
-	ledger *metering.Ledger
-	gauge  *metering.PressureGauge
+	ledger  *metering.Ledger
+	gauge   *metering.PressureGauge
+	budgets *metering.Budgets
 }
 
 func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, error) {
@@ -1261,7 +1272,15 @@ func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, er
 }
 
 func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.LaneMeter, error) {
-	g, err := m.gauge.Read(ctx, userID, lane, metering.UndeclaredBudget())
+	budget := metering.UndeclaredBudget()
+	if m.budgets != nil {
+		b, err := m.budgets.Budget(ctx, userID, lane)
+		if err != nil {
+			return api.LaneMeter{}, err
+		}
+		budget = b
+	}
+	g, err := m.gauge.Read(ctx, userID, lane, budget)
 	if err != nil {
 		return api.LaneMeter{}, err
 	}

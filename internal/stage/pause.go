@@ -3,6 +3,7 @@ package stage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 )
@@ -39,6 +40,12 @@ import (
 // mid-call would either abandon a paid call's result or fake a checkpoint, and
 // both are worse than parking one session later.
 const pausedPerPaidCallGate = "S10.8 per-paid-call budget/pause gate — post-B6 hardening; the v0 approximation is the stage-session boundary below (OQ5(iii))"
+
+// errPausedPark unwinds a leg that parked at a session boundary. It is NOT a
+// failure and must never be treated as one: the leg's caller returns cleanly, so
+// no crash corpse is filed and the recovery ladder is never told to fork work
+// the person just asked to stop.
+var errPausedPark = errors.New("stage: leg parked at a stage-session boundary (automation paused, S10.4)")
 
 // paused reports whether the run's OWNER has paused their automation. With no
 // pause seam wired (tests, and any process composed without the S10.4 store)

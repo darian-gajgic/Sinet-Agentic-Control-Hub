@@ -146,6 +146,9 @@ func (s *Server) handleBudgetDeclare(w http.ResponseWriter, r *http.Request) {
 			Msg: "declaring another person's automation budget is the operator's (S15.2 \"budget edits (own)\"; D10)"})
 		return
 	}
+	if !s.requirePerson(w, r, owner) {
+		return
+	}
 	lane := strings.TrimSpace(body.Lane)
 	switch {
 	case lane == "":
@@ -277,6 +280,9 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 	if owner != scope.UserID && !scope.Operator {
 		s.writeSurface(w, nil, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
 			Msg: "pausing another person's automation is the operator's (D10)"})
+		return
+	}
+	if !s.requirePerson(w, r, owner) {
 		return
 	}
 	prior, err := s.pause.SetPause(r.Context(), owner, *body.Paused)
@@ -426,6 +432,40 @@ func hintSnapshot(rank int64, applied bool) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// personExists is the boundary check both S10.4 switches share (drain D5/D6).
+//
+// `person` is CLIENT INPUT, and whether it names somebody is a question about
+// that input — so it is answered here, at the boundary, and answered 404 (the
+// part-A drain-D7 principle: a caller's bad input must not surface as a platform
+// fault). Without it an operator typo reached the store, which refuses too, but
+// as an error the transport could only render as a 500.
+func (s *Server) personExists(ctx context.Context, userID string) (bool, error) {
+	var exists int
+	switch err := s.proj.db.QueryRowContext(ctx,
+		`SELECT 1 FROM users WHERE user_id = ?`, userID).Scan(&exists); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("read person %q: %w", userID, err)
+	}
+	return true, nil
+}
+
+// requirePerson resolves the switch's subject or writes the refusal.
+func (s *Server) requirePerson(w http.ResponseWriter, r *http.Request, owner string) bool {
+	ok, err := s.personExists(r.Context(), owner)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return false
+	}
+	if !ok {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusNotFound, Code: "not_found",
+			Msg: fmt.Sprintf("no such person %q: a budget or a pause is declared for somebody", owner)})
+		return false
+	}
+	return true
 }
 
 // queuedRunsOfTask lists the task's runs that are still QUEUED — the only runs a
