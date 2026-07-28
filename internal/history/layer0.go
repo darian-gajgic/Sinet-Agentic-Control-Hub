@@ -114,7 +114,7 @@ var layer0Views = []View{
 	},
 	{
 		Name: ViewBudgetRemainder, Question: QuestionBudgetRemainder, OwnerColumn: viewOwnerColumnOwner,
-		Description: "the budget remainder — a RECORDED ABSENCE at v0: no operator budget is persisted anywhere, so the remainder has no minuend and the view says so instead of reporting a number",
+		Description: "the budget remainder — the declared automation budget where one exists (in weighted-consumption units, never dollars: a flat-rate lane has no dollar remainder), and a RECORDED ABSENCE with its reason where none is declared. The dollar columns are NULL either way",
 		Order:       "user_id",
 	},
 	{

@@ -141,6 +141,19 @@ type Config struct {
 	// ONLY path from the HTTP verbs to the ratified cancel mapping. nil leaves
 	// the cancel routes answering 503.
 	Cancel CancelSurface
+	// The B6-2B seams — the S10.4 meters mutations and the oversight verbs over
+	// LANDED internals. Each is nil-able and nil leaves its route answering 503;
+	// none of them re-implements anything (meters_verbs.go, oversight.go).
+	//
+	// Budgets/Pause persist the S10.4 operator switches (migration 0017); Hints
+	// carries the S15.5 board drag onto the scheduler's queue row; Watchdog
+	// routes the landed S14.4 Suppress; Resume takes the ratified S02.3
+	// parked→running edge for a person.
+	Budgets  BudgetStore
+	Pause    PauseStore
+	Hints    HintSurface
+	Watchdog SuppressSurface
+	Resume   ResumeSurface
 	// History is the S14.10 three-layer queryable-history surface (B5-8B):
 	// Layer-0 named cost views, the Layer-1 canned catalog, redact-before-match
 	// search and the Layer-2 escalation. B6-1 ROUTES it under /api/events
@@ -184,6 +197,12 @@ type Server struct {
 	effects *gates.Journal
 	// cancel is the S02.3 cancel choreography behind the 4.5 cancel verbs.
 	cancel CancelSurface
+	// The B6-2B decision-plane seams (meters_verbs.go, oversight.go).
+	budgets  BudgetStore
+	pause    PauseStore
+	hints    HintSurface
+	watchdog SuppressSurface
+	resume   ResumeSurface
 	// preview is the S13.8 preview surface, held for the B6
 	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
 	preview *preview.Manager
@@ -214,6 +233,11 @@ func New(cfg Config) *Server {
 		history:    cfg.History,
 		effects:    cfg.Effects,
 		cancel:     cfg.Cancel,
+		budgets:    cfg.Budgets,
+		pause:      cfg.Pause,
+		hints:      cfg.Hints,
+		watchdog:   cfg.Watchdog,
+		resume:     cfg.Resume,
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter}
@@ -300,6 +324,19 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/runs/{run}/cancel", s.handleRunCancel)
 	protected("POST /api/tasks/{task}/cancel", s.handleTaskCancel)
 	protected("POST /api/deliverables/{deliverable}/follow-up", s.handleFollowUpSpawn)
+
+	// The B6-2B half of the decision plane: the S10.4 meters mutations (budget +
+	// pause), the S15.5 board-drag hint, and the four oversight verbs over the
+	// landed watchdog / run-FSM / drift / conformance internals. Same rules —
+	// owner-scoped server-side, fail-closed, no direct outward effect, no
+	// version prefix (S15.2 additive-first).
+	protected("POST /api/meters/budget", s.handleBudgetDeclare)
+	protected("POST /api/meters/pause", s.handlePauseSet)
+	protected("POST /api/tasks/{task}/priority-hint", s.handlePriorityHint)
+	protected("POST /api/watchdog/flags/suppress", s.handleFlagSuppress)
+	protected("POST /api/runs/{run}/resume", s.handleRunResume)
+	protected("POST /api/approvals/{id}/dismiss", s.handleDriftDismiss)
+	protected("POST /api/approvals/{id}/acknowledge", s.handleConformanceAcknowledge)
 
 	return s.identity(mux)
 }

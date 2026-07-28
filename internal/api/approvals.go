@@ -1233,6 +1233,13 @@ type decisionPayload struct {
 	// approval and the operator's are two different facts about one card, and
 	// the co-approval state is derived from these rows.
 	ActorIsOperator bool `json:"actor_is_operator,omitempty"`
+	// Old / New carry the before-and-after of an EDIT (B6-2B): the budget verb,
+	// the pause switch and the drag hint change a stored value, and "who set
+	// what, from what" is the whole audit obligation for that class of act
+	// (OQ4). They are optional context members the family admits; the acts that
+	// decide a card rather than edit a value leave them empty.
+	Old json.RawMessage `json:"old,omitempty"`
+	New json.RawMessage `json:"new,omitempty"`
 }
 
 // recordDecision appends the family-5 row. presentedAt is the card's own issue

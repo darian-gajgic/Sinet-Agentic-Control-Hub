@@ -277,7 +277,13 @@ type Config struct {
 	// repo-backed deliverable's pre-task base for Compare's old-side 0 (R25);
 	// WorkspaceCwd swaps the plain run dir for the project worktree on an
 	// execute leg of a registered project (R34).
-	Registry           intake.Registry
+	Registry intake.Registry
+	// Paused is the S10.4 pause-my-automation read seam (pause.go, B6-2B): the
+	// execute leg consults it between stage sessions and parks the run when the
+	// owner has paused their automation. Composed at the shell root over
+	// *metering.Pause; nil ⇒ nobody is paused (the pre-0017 behavior).
+	Paused func(ctx context.Context, userID string) (bool, error)
+
 	Fingerprint        func(ctx context.Context, project string) (run.Fingerprint, error)
 	CitedEntryVersions func(ctx context.Context, keys []string) (map[string]string, error)
 	Snapshot           func(ctx context.Context, runID string) (string, error)

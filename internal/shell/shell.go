@@ -254,6 +254,20 @@ func Run(ctx context.Context, opts Options) error {
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
 	var meterReader api.MeterReader
+	// The S10.4 operator switches, made durable at migration 0017 (B6-2B). They
+	// are composed unconditionally because three subsystems read them — the
+	// scheduler's admission pass, the stage skeleton's leg loop, and the two
+	// HTTP verbs — and a store that some of them had and others did not would be
+	// a switch that half-worked.
+	budgetStore := metering.NewBudgets(db)
+	pauseStore := metering.NewPause(db)
+	// resumeSurface is S14.4's "resume — I was wrong" (B6-2B): the ratified
+	// S02.3 parked→running edge, taken by a person, over the same stage surface
+	// the cancel verbs use.
+	var resumeSurface api.ResumeSurface
+	// hintSurface carries the S15.5 board drag onto the scheduler's queue row;
+	// nil under injected admission, where there is no queue to reorder.
+	var hintSurface api.HintSurface
 	admission := opts.Admission
 	if admission == nil {
 		priceTable := metering.NewEffectiveDatedTable("empty-v0")
@@ -454,7 +468,11 @@ func Run(ctx context.Context, opts Options) error {
 			// registry machinery (Spec S13, B4) — software-domain verifies
 			// fail LOUDLY rather than run a degraded launch domain.
 			CheckRunner: &verify.SandboxCheckRunner{Confiner: composer, WorkDir: filepath.Join(stateDir, "check-work")},
-			Logger:      logger,
+			// The S10.4 pause read seam (B6-2B): the execute leg consults it
+			// between stage sessions and parks the run when its owner has paused
+			// their automation. A park, never a kill (CONVENTIONS §31).
+			Paused: pauseStore.Paused,
+			Logger: logger,
 		})
 		if err != nil {
 			return err
@@ -471,12 +489,17 @@ func Run(ctx context.Context, opts Options) error {
 			localLane = localSurf.LocalLane
 		}
 		sched, err = scheduler.New(scheduler.Config{
-			DB:          db,
-			Runs:        runs,
-			Settings:    reg,
-			Dispatcher:  sk,
-			Pressure:    metering.NewPressureGauge(db, reg),
-			Receipts:    metering.NewReceipts(db, meterLedger, exceptions),
+			DB:         db,
+			Runs:       runs,
+			Settings:   reg,
+			Dispatcher: sk,
+			Pressure:   metering.NewPressureGauge(db, reg),
+			Receipts:   metering.NewReceipts(db, meterLedger, exceptions),
+			// The S10.4 denominator and the pause switch (B6-2B): with a budget
+			// declared the background admission stop becomes real; with none, the
+			// gauge still reports not-applicable exactly as before.
+			Budgets:     budgetStore,
+			Pause:       pauseStore,
 			GPUAdmitter: gpuAdmitter,
 			LocalLane:   localLane,
 			Logger:      logger,
@@ -495,6 +518,10 @@ func Run(ctx context.Context, opts Options) error {
 		// one composition, two seams. Human-driven only — the HTTP verbs are
 		// its sole callers (NO AUTO-KILL, S14.4 / G1 D1.3).
 		cancelSurface = surface
+		// …and so does the S14.4 resume verb (B6-2B): three seams, one
+		// composition. Human-driven only, and a resume takes no cancel path.
+		resumeSurface = surface
+		hintSurface = sched
 
 		// The S13.6 accept orchestration + the S13.9 follow-up verb, composed
 		// from the production stores (F1): compiled in and reachable, held by
@@ -663,13 +690,22 @@ func Run(ctx context.Context, opts Options) error {
 		Intake:     intakeSurface,
 		Cancel:     cancelSurface, // S15.6 / 4.5 cancel verbs (B6-2A)
 		Effects:    effects,       // S02.7 journal behind the S15.6 effect approvals
-		Accept:     acceptAccepter(acceptSurf),
-		FollowUp:   acceptFollowUp(acceptSurf),
-		Preview:    previewSurf, // held for the B6 preview endpoints (F17); not routed
-		History:    histSurf,    // S14.10 layers, held for the S15 assistant; not routed
-		DB:         db,          // S14.3 snapshot projections (owner-scoped, OQ1)
-		Meter:      meterReader, // S14.3 run-card counters (§4)
-		Logger:     logger,
+		// The B6-2B decision-plane seams: the S10.4 meters mutations, the S15.5
+		// board drag, and the two oversight verbs over landed internals. wd is
+		// nil under injected admission, which leaves the suppress route at 503
+		// rather than pretending a watchdog is running.
+		Budgets:  budgetAdapter{b: budgetStore},
+		Pause:    pauseStore,
+		Hints:    hintSurface,
+		Watchdog: watchdogSuppressSeam(wd),
+		Resume:   resumeSurface,
+		Accept:   acceptAccepter(acceptSurf),
+		FollowUp: acceptFollowUp(acceptSurf),
+		Preview:  previewSurf, // held for the B6 preview endpoints (F17); not routed
+		History:  histSurf,    // S14.10 layers, held for the S15 assistant; not routed
+		DB:       db,          // S14.3 snapshot projections (owner-scoped, OQ1)
+		Meter:    meterReader, // S14.3 run-card counters (§4)
+		Logger:   logger,
 	})
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),
@@ -1145,6 +1181,55 @@ func (p routePressure) Pressure(ctx context.Context, owner, lane string) (float6
 		return gauge.Pressure, nil
 	}
 	return gauge.WeightedConsumption, nil
+}
+
+// budgetAdapter adapts the S10.4 budget store to the api.BudgetStore seam
+// (B6-2B). The transport speaks its own record type so internal/api never
+// imports internal/metering — the same wall projMeter keeps below, for the same
+// reason (§11: money and consumption are READ through a seam).
+//
+// It converts and nothing else: the unit stays the gauge's weighted-consumption
+// unit on both sides, and nothing here multiplies, prices or rescales anything.
+type budgetAdapter struct{ b *metering.Budgets }
+
+func (a budgetAdapter) DeclareBudget(ctx context.Context, rec api.BudgetRecord) (api.BudgetRecord, bool, error) {
+	prior, existed, err := a.b.Declare(ctx, metering.BudgetRow{
+		UserID: rec.Owner, Lane: rec.Lane, PeriodTokens: rec.PeriodTokens,
+		PeriodStart: rec.PeriodStart, PeriodDays: rec.PeriodDays,
+		DeclaredTS: rec.DeclaredTS, DeclaredBy: rec.DeclaredBy,
+	})
+	if err != nil {
+		return api.BudgetRecord{}, false, err
+	}
+	return budgetRecord(prior), existed, nil
+}
+
+func (a budgetAdapter) Budget(ctx context.Context, userID, lane string) (api.BudgetRecord, bool, error) {
+	row, ok, err := a.b.Row(ctx, userID, lane)
+	if err != nil || !ok {
+		return api.BudgetRecord{}, false, err
+	}
+	return budgetRecord(row), true, nil
+}
+
+func budgetRecord(row metering.BudgetRow) api.BudgetRecord {
+	return api.BudgetRecord{
+		Owner: row.UserID, Lane: row.Lane, PeriodTokens: row.PeriodTokens,
+		PeriodStart: row.PeriodStart, PeriodDays: row.PeriodDays,
+		DeclaredTS: row.DeclaredTS, DeclaredBy: row.DeclaredBy,
+	}
+}
+
+// watchdogSuppressSeam hands the S14.4 suppression verb its watchdog, or a true
+// nil interface when no watchdog is composed (injected admission). The
+// concrete-nil check is the gpuAdmitter precedent: assigning a typed nil pointer
+// straight into an interface produces a NON-nil interface, and the route would
+// then call through it instead of answering the honest 503.
+func watchdogSuppressSeam(wd *watchdog.Watchdog) api.SuppressSurface {
+	if wd == nil {
+		return nil
+	}
+	return wd
 }
 
 // projMeter adapts the S10 metering ledger + S10.4 pressure gauge to the

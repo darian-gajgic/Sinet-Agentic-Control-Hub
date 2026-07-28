@@ -99,6 +99,30 @@ type GPUAdmitter interface {
 	AdmitLoad(ctx context.Context, model string) (ok bool, reason string, err error)
 }
 
+// BudgetReader reads the operator-declared S10.4 budget for a (person, lane) —
+// the pressure gauge's DENOMINATOR, and the one thing the B1-2 posture could not
+// supply because no budget was persisted anywhere. *metering.Budgets satisfies
+// it (migration 0017). Nil keeps the landed behavior exactly: every read is
+// UndeclaredBudget(), the gauge reports not-applicable, and background admission
+// has nothing to gate against.
+//
+// Declared as an interface here for the GPUAdmitter reason — the seam stays
+// nil-able and hermetically testable — not to avoid the metering import, which
+// this package already carries.
+type BudgetReader interface {
+	Budget(ctx context.Context, userID, lane string) (metering.Budget, error)
+}
+
+// PauseReader reads the S10.4 pause-my-automation switch. *metering.Pause
+// satisfies it; nil means nobody is paused.
+//
+// It is read LIVE inside the claim pass, never cached across passes: a person
+// pausing their automation expects the next admission decision to honor it, and
+// a cached flag would admit work after the switch was flipped.
+type PauseReader interface {
+	Paused(ctx context.Context, userID string) (bool, error)
+}
+
 // Config assembles a Scheduler. DB, Runs, Settings and Dispatcher are
 // mandatory; the metering hooks default to inert if omitted.
 type Config struct {
@@ -112,6 +136,12 @@ type Config struct {
 	// Receipts materializes a receipt when a dispatched run reaches a terminal
 	// state (Spec S10.1/S10.10). Nil skips receipt materialization.
 	Receipts *metering.Receipts
+	// Budgets supplies the S10.4 pressure denominator (B6-2B). Nil ⇒ every
+	// budget reads undeclared, which is exactly the pre-0017 behavior.
+	Budgets BudgetReader
+	// Pause is the S10.4 pause-my-automation switch (B6-2B). Nil ⇒ nobody is
+	// paused.
+	Pause PauseReader
 	// GPUAdmitter is the S10.9 GPU-admission policy hook (Spec S12.7 mechanics).
 	// Nil ⇒ no GPU gate. Consulted only for candidates on LocalLane (below).
 	GPUAdmitter GPUAdmitter
@@ -142,6 +172,8 @@ type Scheduler struct {
 	dispatcher  Dispatcher
 	pressure    *metering.PressureGauge
 	receipts    *metering.Receipts
+	budgets     BudgetReader
+	pause       PauseReader
 	gpuAdmitter GPUAdmitter
 	localLane   string
 	logger      *slog.Logger
@@ -174,6 +206,8 @@ func New(cfg Config) (*Scheduler, error) {
 		dispatcher:  cfg.Dispatcher,
 		pressure:    cfg.Pressure,
 		receipts:    cfg.Receipts,
+		budgets:     cfg.Budgets,
+		pause:       cfg.Pause,
 		gpuAdmitter: cfg.GPUAdmitter,
 		localLane:   cfg.LocalLane,
 		logger:      cfg.Logger,
@@ -396,6 +430,17 @@ func (s *Scheduler) claimPass(ctx context.Context) (int, error) {
 	now := s.now()
 	sortCandidates(cands, now)
 
+	// The S10.4 pause-my-automation flags of the people with candidates in THIS
+	// pass, read once per pass. Reading per pass rather than per candidate keeps
+	// one person's ten queued runs from being ten identical reads; reading per
+	// PASS rather than caching across passes keeps the switch live, which is the
+	// property S10.4 actually needs — flip it, and the next admission decision
+	// honors it.
+	paused, err := s.pausedOwners(ctx, cands)
+	if err != nil {
+		return 0, err
+	}
+
 	dispatched := 0
 	for _, c := range cands {
 		if ctx.Err() != nil {
@@ -406,6 +451,14 @@ func (s *Scheduler) claimPass(ctx context.Context) (int, error) {
 			continue // lane full
 		}
 		if c.class == ClassBackground {
+			if paused[c.userID] {
+				// Paused: this person's automation is stopped, so nothing
+				// background-class is admitted for them. The queue row is left
+				// exactly as it is — nothing dequeued, nothing state-changed —
+				// which is what makes a pause preserving rather than destructive
+				// (P-T08-4). Their interactive work is not consulted here at all.
+				continue
+			}
 			ok, err := s.backgroundAdmits(ctx, c, bgStop)
 			if err != nil {
 				return dispatched, err
@@ -561,16 +614,54 @@ func (s *Scheduler) settleTerminal(ctx context.Context, r run.Run) {
 	}
 }
 
+// pausedOwners reads the S10.4 pause flag of every owner with a BACKGROUND
+// candidate in this pass. Only background owners are read, because only
+// background admission consults the flag — a person whose only queued work is
+// interactive is never asked, so the switch cannot become a way to notice them.
+func (s *Scheduler) pausedOwners(ctx context.Context, cands []candidate) (map[string]bool, error) {
+	if s.pause == nil {
+		return nil, nil
+	}
+	out := map[string]bool{}
+	for _, c := range cands {
+		if c.class != ClassBackground {
+			continue
+		}
+		if _, seen := out[c.userID]; seen {
+			continue
+		}
+		p, err := s.pause.Paused(ctx, c.userID)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: read pause flag for %q: %w", c.userID, err)
+		}
+		out[c.userID] = p
+	}
+	return out, nil
+}
+
 // backgroundAdmits applies the S10.4 background admission stop: background work
 // stops being admitted once consumption pressure reaches ⚙ pressure.bg_admit_stop,
 // leaving the remainder as interactive headroom (3.3). With no pressure gauge
-// or no declared budget the gate is inert (nothing to gate against) — honest at
-// v0, where operator budgets are not yet declared.
+// or no declared budget the gate is inert (nothing to gate against).
+//
+// The denominator is the person's DECLARED budget, read live (B6-2B): before
+// migration 0017 nothing persisted one anywhere, so this necessarily passed
+// UndeclaredBudget() and the gate was inert for everyone. It is still inert for
+// everyone who has declared nothing — the gauge's Applicable bit decides, and a
+// fabricated denominator would be worse than no number (D4).
 func (s *Scheduler) backgroundAdmits(ctx context.Context, c candidate, bgStop float64) (bool, error) {
 	if s.pressure == nil {
 		return true, nil
 	}
-	g, err := s.pressure.Read(ctx, c.userID, c.lane, metering.UndeclaredBudget())
+	budget := metering.UndeclaredBudget()
+	if s.budgets != nil {
+		b, err := s.budgets.Budget(ctx, c.userID, c.lane)
+		if err != nil {
+			return false, err
+		}
+		budget = b
+	}
+	g, err := s.pressure.Read(ctx, c.userID, c.lane, budget)
 	if err != nil {
 		return false, err
 	}

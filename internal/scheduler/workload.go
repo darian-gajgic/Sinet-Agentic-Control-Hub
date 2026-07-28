@@ -78,6 +78,10 @@ type candidate struct {
 	substrate  string // the run's substrate — the model key for the S10.9 GPU hook (dormant)
 	class      WorkloadClass
 	enqueuedTS time.Time
+	// hintRank is the S15.5 board-drag priority hint carried on the queue row
+	// (migration 0017). Lower sorts earlier; 0 is "no hint", which is where
+	// every row starts and where every row stayed before B6-2B.
+	hintRank int64
 }
 
 // score is the aging score: class head-start plus accumulated wait. Higher
@@ -97,10 +101,23 @@ func (c candidate) score(now time.Time) float64 {
 // automation); among interactive peers, and among all automation classes, the
 // aging score orders them (oldest-effective first), so background never
 // starves (S10.7).
+// priorityLess also honors the S15.5 board-drag hint, and WHERE it honors it is
+// the whole design: only when both candidates belong to the SAME person and the
+// SAME workload class. Inside that bucket, classBias is identical for both, so
+// the hint cannot promote a class — and both rows belong to one owner, so it
+// cannot reach across owners into anybody else's slots. What it does decide is
+// the order of a person's own same-class queue, which is exactly what "the
+// sanctioned v0 drag interaction is reordering one's OWN queued tasks as a
+// scheduler priority hint" (S15.5) asks for. Interactive still wins outright,
+// the S10.7 ladder is untouched, and aging across classes is untouched, so
+// background still never starves.
 func priorityLess(a, b candidate, now time.Time) bool {
 	ai, bi := a.class == ClassInteractive, b.class == ClassInteractive
 	if ai != bi {
 		return ai // interactive first
+	}
+	if a.userID == b.userID && a.class == b.class && a.hintRank != b.hintRank {
+		return a.hintRank < b.hintRank
 	}
 	sa, sb := a.score(now), b.score(now)
 	if sa != sb {

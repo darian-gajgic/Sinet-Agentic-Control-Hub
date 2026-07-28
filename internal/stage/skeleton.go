@@ -457,6 +457,13 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	// overflow within one planned stage escalates to a re-plan proposal").
 	deliverable := ""
 	for i, step := range pair.Plan.Steps {
+		// The S10.4 pause-my-automation boundary (pause.go): between stage
+		// sessions, never inside one. A parked leg returns cleanly with
+		// everything it has already done recorded — nothing is killed, nothing
+		// is rolled back, and the queue is untouched (P-T08-4).
+		if s.pauseParkPoint(ctx, r, step.ID) {
+			return nil
+		}
 		res, err := s.runPlannedStage(ctx, r, er, step)
 		if err != nil {
 			s.crash(ctx, r.ID, fmt.Sprintf("step %s session: %v", step.ID, err))

@@ -25,6 +25,7 @@ type Surface struct{ sk *Skeleton }
 var (
 	_ api.IntakeSurface = (*Surface)(nil)
 	_ api.CancelSurface = (*Surface)(nil)
+	_ api.ResumeSurface = (*Surface)(nil)
 )
 
 // Surface returns the api-facing adapter.
@@ -258,6 +259,42 @@ func mapCancelErr(err error) error {
 		return surfaceErr(http.StatusConflict, "cancel_raced", err)
 	case errors.Is(err, ErrCancelQueueUnsettleable):
 		return surfaceErr(http.StatusServiceUnavailable, "not_wired", err)
+	case errors.Is(err, run.ErrNotFound), errors.Is(err, sql.ErrNoRows):
+		return surfaceErr(http.StatusNotFound, "not_found", err)
+	default:
+		return err
+	}
+}
+
+// ResumeRun implements api.ResumeSurface: S14.4's "resume — I was wrong" on an
+// ASK-LESS park (resume.go). The transport has already resolved owner scope;
+// actor is the authenticated person, and the resume is only ever a human act —
+// nothing automated takes this edge.
+func (u *Surface) ResumeRun(ctx context.Context, actor, runID string) (json.RawMessage, error) {
+	out, err := u.sk.ResumeRun(ctx, actor, runID)
+	if err != nil {
+		return nil, mapResumeErr(err)
+	}
+	return json.Marshal(out)
+}
+
+// mapResumeErr maps the resume path's errors onto transport statuses. The
+// open-ask refusal carries the ask id in its message, because the answer to
+// "why can't I resume this?" is "answer that card — that IS the resume".
+func mapResumeErr(err error) error {
+	var openAsk *ResumeOpenAskError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &openAsk):
+		return surfaceErr(http.StatusConflict, "ask_open", err)
+	case errors.Is(err, ErrResumeNotParked):
+		return surfaceErr(http.StatusConflict, "not_parked", err)
+	case errors.Is(err, ErrCancelRaced):
+		// The same lost-CAS classifier the cancel path uses: the run moved
+		// between the read and the transition, which the caller resolves by
+		// re-reading rather than by a retry loop here.
+		return surfaceErr(http.StatusConflict, "resume_raced", err)
 	case errors.Is(err, run.ErrNotFound), errors.Is(err, sql.ErrNoRows):
 		return surfaceErr(http.StatusNotFound, "not_found", err)
 	default:

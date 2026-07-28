@@ -430,13 +430,18 @@ type InboxWatchdogFlag struct {
 // from the inbox Low/Medium/High risk tiers. Rows are platform-scope, so only
 // the operator sees them (R16); a member never does.
 type InboxConformanceCard struct {
-	RowID         string    `json:"row_id"`
-	OwningSection string    `json:"owning_section"`
-	Schedule      string    `json:"schedule"`
-	AffectClass   string    `json:"affect_class"`
-	FlagNow       bool      `json:"flag_now"`
-	LastResult    string    `json:"last_result"`
-	LastRunTS     time.Time `json:"last_run_ts"`
+	RowID         string `json:"row_id"`
+	OwningSection string `json:"owning_section"`
+	Schedule      string `json:"schedule"`
+	AffectClass   string `json:"affect_class"`
+	FlagNow       bool   `json:"flag_now"`
+	// Acknowledged is the B6-2B operator acknowledgement of THIS result (OQ6):
+	// the red stops counting as flag-now attention and stays listed red. It is
+	// derived from the decision log, never a registry column — the conformance
+	// registry's structure is immutable and no verb writes to it.
+	Acknowledged bool      `json:"acknowledged"`
+	LastResult   string    `json:"last_result"`
+	LastRunTS    time.Time `json:"last_run_ts"`
 }
 
 // InboxDriftCard is one outside-world drift card (B5-6A, S14.6 ¶2): a storm of
@@ -775,7 +780,16 @@ func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDr
 	// emit `none` (S14.6 ¶2: RELEVANT hits become drift cards); this is the belt
 	// that also covers any row written before that rule existed.
 	q := QueryDriftCards
-	args := []any{p.clock().Add(-driftCardHorizon).UTC().Format(time.RFC3339Nano)}
+	horizon := p.clock().Add(-driftCardHorizon).UTC().Format(time.RFC3339Nano)
+	// The B6-2B dismissals, read BEFORE the finding cursor opens: the control
+	// plane shares one connection (S02.1), so a second query while the cursor
+	// below is live would deadlock. Same horizon, because a card outside it is
+	// not listed anyway.
+	dismissed, err := p.decisionSubjects(ctx, cardTypeDrift, decisionDismiss, horizon)
+	if err != nil {
+		return nil, err
+	}
+	args := []any{horizon}
 	if !scope.Operator {
 		q += OwnerScopeClause
 		args = append(args, scope.UserID)
@@ -845,6 +859,23 @@ func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDr
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// Dismissed incidents leave the OPEN list (B6-2B, OQ7). The dismissal is
+	// scoped to the incident — fingerprint plus the seq of the finding that
+	// OPENED this window — so it closes the storm the operator actually read and
+	// nothing else: a later finding that opens a NEW window has a new
+	// window-start seq, so it derives into a new card the dismissal does not
+	// touch. The findings themselves are untouched and stay queryable forever;
+	// this closes a card, it does not delete a watch (S16.2).
+	if len(dismissed) > 0 {
+		kept := cards[:0]
+		for _, c := range cards {
+			if dismissed[driftIncidentSubject(c.Fingerprint, c.Seq)] {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		cards = kept
+	}
 	// Newest first, then capped: a storm of distinct fingerprints inside one
 	// horizon can still only fill the inbox to the cap, and what survives is the
 	// most recent — never an arbitrary prefix.
@@ -868,6 +899,14 @@ func (p *projector) driftCards(ctx context.Context, scope ownerScope) ([]InboxDr
 // matches none and only the operator sees them (R16). internal/api reads the
 // table directly — it never imports internal/conformance (the §31 pattern).
 func (p *projector) conformanceCards(ctx context.Context, scope ownerScope) ([]InboxConformanceCard, error) {
+	// The B6-2B acknowledgements, read BEFORE the registry cursor opens (one
+	// connection, S02.1). There is no time bound: a red obligation has no
+	// horizon — it stands until a real green clears it — so neither does the
+	// question of whether somebody has already seen it.
+	acked, err := p.decisionSubjects(ctx, cardTypeConformance, decisionAcknowledge, "")
+	if err != nil {
+		return nil, err
+	}
 	q := `SELECT row_id, owning_section, schedule, affect_class, last_run
 	        FROM conformance_registry WHERE last_result = 'red'`
 	args := []any{}
@@ -894,6 +933,17 @@ func (p *projector) conformanceCards(ctx context.Context, scope ownerScope) ([]I
 		c.LastResult = "red"
 		if lastRun.Valid {
 			c.LastRunTS = parseTS(lastRun.String)
+		}
+		// The OQ6 acknowledgement: an acknowledged red stops counting as
+		// flag-now ATTENTION and stays LISTED, red, until a real green result
+		// (§32 — no verb fakes green, and `last_result` is written only by
+		// RecordResult). The acknowledgement is scoped to the RESULT it was
+		// given for, the same cycle-scoping the co-approval derivation uses
+		// (part A, drain D3): a later suite run — even another red — is a new
+		// failure, and yesterday's acknowledgement does not silence it.
+		c.Acknowledged = acked[conformanceResultSubject(c.RowID, c.LastRunTS)]
+		if c.Acknowledged {
+			c.FlagNow = false
 		}
 		out = append(out, c)
 	}

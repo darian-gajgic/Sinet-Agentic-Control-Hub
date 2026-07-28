@@ -113,10 +113,11 @@ func TestNoNewMigration(t *testing.T) {
 		// conformance registry), 0012 by B5-5 (S14.8 eval floors +
 		// revalidation stamps), 0013 by B5-6A (the S14.6 watch-row config store),
 		// 0014 by B5-7 (the S14.7 benchmark-practice state), 0015 by B5-8A
-		// (the S14.9 retention substrate) and 0016 by B5-8B (the S14.10 Layer-0
-		// query views); anything beyond
+		// (the S14.9 retention substrate), 0016 by B5-8B (the S14.10 Layer-0
+		// query views) and 0017 by B6-2B (the S10.4 durable budgets + pause
+		// switch and the S15.5 queue-row drag hint); anything beyond
 		// those would be an unexpected preview-side add.
-		if name >= "0017" {
+		if name >= "0018" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}
