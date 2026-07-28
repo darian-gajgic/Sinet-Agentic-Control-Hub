@@ -86,6 +86,7 @@ func (c *EngineComposer) ComposeOnce(ctx context.Context, req worker.ComposeRequ
 		Stage:        "compose",
 		Assemble:     false, // inputs by policy replace stage-brief assembly (Spec S08.6)
 		Instructions: b.String(),
+		Kind:         markerCompose,
 		Class:        "C1",
 	}, &out); err != nil {
 		return worker.ComposeOutput{}, fmt.Errorf("composer session: %w", err)
@@ -118,6 +119,7 @@ func (e *EngineDryRun) DryRun(ctx context.Context, req worker.DryRunRequest) (wo
 		Instructions: stageMarker(markerDryRun) +
 			"This is a sandboxed validation dry run (Spec S08.6 station 3). Perform the sample task; output the complete result as your final message.\n\n=== sample task ===\n" +
 			req.SampleTask + "\n",
+		Kind:     markerDryRun,
 		Class:    req.Class,
 		Compiled: &compiled,
 	})

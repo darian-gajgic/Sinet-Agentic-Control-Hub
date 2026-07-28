@@ -49,6 +49,15 @@ type SessionInput struct {
 	// duty is explicit in the prompt frame.
 	Instructions string
 
+	// Kind names the session's DUTY for the S14.2 stage boundary record
+	// (stageevents.go) — the marker vocabulary: execute, plan-draft,
+	// critique, judge-compliance, judge-sanity, revise, compose, dryrun,
+	// helper. The dispatching stage knows it, so it is stated rather than
+	// re-read out of prompt text: a brief carries model-authored content and
+	// the record must not be nameable by it. "" falls back to the marker line
+	// the platform-authored instruction block opens with.
+	Kind string
+
 	// Class is the confinement class compiled for this session (Spec
 	// S11.6); Tools the default-deny allowlist (empty = tool-less).
 	Class string
@@ -263,10 +272,21 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 		req.CredInject = s.cfg.CredInject(r.UserID)
 	}
 
+	// The S14.2 family-1 stage boundary (stageevents.go): one stage.started
+	// before the engine session, one stage.finished with its outcome after.
+	// Both ride the run's generation; a session whose process dies gets no
+	// synthetic finish.
+	kind := sessionKind(in)
+	briefHash := stageBriefHash(prompt)
+	s.appendStageStarted(ctx, r, in.Stage, kind, briefHash)
+
 	out, err := s.driver.DriveStage(ctx, adapter, req)
 	if err != nil {
+		s.appendStageFinished(ctx, r, in.Stage, kind, briefHash, StageOutcomeError, err.Error())
 		return SessionResult{}, err
 	}
+	outcome, detail := stageOutcome(out, split.requested)
+	s.appendStageFinished(ctx, r, in.Stage, kind, briefHash, outcome, detail)
 	// Recitation deliveries become manifest events for EVERY session
 	// disposition — a delivery into a session that then failed still
 	// happened and must not vanish from the trace (§7-C1 condition 3).

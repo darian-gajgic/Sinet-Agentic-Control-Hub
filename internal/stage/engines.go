@@ -133,7 +133,7 @@ func (p *EnginePlanner) Draft(ctx context.Context, in intake.DraftInput) (intake
 			"Read the interview record in the %s block above; honor registry-supplied facts and recorded assumptions.\n"+
 			"Emit SPEC version %d and PLAN version %d (plan.spec_version %d).\n%s",
 		in.Request.TaskID, in.Family, in.Tier, itemDraftInput, in.SpecVersion, in.PlanVersion, in.SpecVersion, pairSchema)
-	return p.pairSession(ctx, in.Request.TaskID, in.Request.UserID, in.Tier, extra, instructions,
+	return p.pairSession(ctx, in.Request.TaskID, in.Request.UserID, in.Tier, extra, markerPlanDraft, instructions,
 		in.SpecVersion, in.PlanVersion)
 }
 
@@ -147,12 +147,12 @@ func (p *EnginePlanner) Revise(ctx context.Context, in intake.ReviseInput) (inta
 			"Address EXACTLY the numbered findings/resolutions in the %s block above — criteria do not drift (Spec S06.7(a)/S06.8).\n"+
 			"Emit SPEC version %d and PLAN version %d (plan.spec_version %d).\n%s",
 		in.Pair.Spec.TaskID, in.Reason, itemReviseInput, in.SpecVersion, in.PlanVersion, in.SpecVersion, pairSchema)
-	return p.pairSession(ctx, in.Pair.Spec.TaskID, in.Pair.Spec.Owner, in.Pair.Spec.Tier, extra, instructions,
+	return p.pairSession(ctx, in.Pair.Spec.TaskID, in.Pair.Spec.Owner, in.Pair.Spec.Tier, extra, markerPlanRevise, instructions,
 		in.SpecVersion, in.PlanVersion)
 }
 
 func (p *EnginePlanner) pairSession(ctx context.Context, taskID, owner string, tier intake.Tier,
-	extra ledger.Item, instructions string, specV, planV int) (intake.Pair, error) {
+	extra ledger.Item, kind, instructions string, specV, planV int) (intake.Pair, error) {
 	var pair intake.Pair
 	err := p.s.jsonSession(ctx, SessionInput{
 		RunID:    taskID + RunSuffixIntake,
@@ -163,6 +163,7 @@ func (p *EnginePlanner) pairSession(ctx context.Context, taskID, owner string, t
 		Sources:      ledger.Sources{Knowledge: p.s.cfg.Knowledge},
 		Extra:        []ledger.Item{extra},
 		Instructions: instructions,
+		Kind:         kind,
 		Class:        "C1", // read-only planning sandbox (Spec S06.6, P-T05-1)
 	}, &pair)
 	if err != nil {
@@ -290,6 +291,7 @@ func (c *EngineCritic) session(ctx context.Context, pair intake.Pair, recheck []
 		Stage:        "critique",
 		Assemble:     false, // artifact-only (Spec S06.8)
 		Instructions: b.String(),
+		Kind:         markerCritique,
 		Class:        "C1",
 	}, &v)
 	if err != nil {
@@ -335,7 +337,7 @@ func (j *EngineJudge) Compliance(ctx context.Context, in verify.JudgeInput) (ver
 		"You are the spec-compliance judge (Spec S07.5 axis 1): one binary verdict per numbered AC over the input slice above.\n" +
 		axis1Schema + "\n"
 	var out verify.Axis1Result
-	if err := j.session(ctx, in, instructions, &out); err != nil {
+	if err := j.session(ctx, in, markerCompliance, instructions, &out); err != nil {
 		return verify.Axis1Result{}, err
 	}
 	return out, nil
@@ -348,13 +350,13 @@ func (j *EngineJudge) Sanity(ctx context.Context, in verify.JudgeInput) (verify.
 		"any unrequested side effects? does it meet the expert standard?\n" +
 		axis2Schema + "\n"
 	var out verify.Axis2Result
-	if err := j.session(ctx, in, instructions, &out); err != nil {
+	if err := j.session(ctx, in, markerSanity, instructions, &out); err != nil {
 		return verify.Axis2Result{}, err
 	}
 	return out, nil
 }
 
-func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, instructions string, out any) error {
+func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, kind, instructions string, out any) error {
 	// BuildJudgeInput already ran the clean-context assembly (manifest
 	// appended); the brief is re-used for pinned placement so a compaction
 	// inside the judge session re-injects the frozen ACs (Spec S05.7). The
@@ -367,6 +369,7 @@ func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, instruc
 		Assemble:     false,
 		PlaceBrief:   &brief,
 		Instructions: in.BriefText + "\n" + instructions,
+		Kind:         kind,
 		Class:        "C1",
 	}, out)
 	if err != nil {
@@ -410,6 +413,7 @@ func (s *Skeleton) engineRevise(ctx context.Context, pkg verify.RetryPackage) (v
 		Stage:        fmt.Sprintf("revise-r%d", pkg.Round),
 		Assemble:     false,
 		Instructions: instructions,
+		Kind:         markerRevise,
 		Class:        "C1",
 		Model:        reviseModel,
 		WindowTokens: reviseWindow,

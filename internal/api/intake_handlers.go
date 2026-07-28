@@ -33,6 +33,13 @@ type IntakeSurface interface {
 	Answer(ctx context.Context, userID, askID string, answer json.RawMessage, pinVerified bool) (json.RawMessage, error)
 	// Task returns the task view (state, open card, runs, receipts).
 	Task(ctx context.Context, taskID string) (json.RawMessage, error)
+	// Artifacts returns the task's CURRENT SPEC/PLAN pair as stored JSON
+	// (intake.Pair) for the S15.2 task-detail read. The pipeline owns the
+	// artifact store and its sha256 + re-render integrity checks, so the
+	// transport reads through it rather than around it. A task with no
+	// drafted pair yet returns an error the detail renders as an honest
+	// absence — never an error that hides the task.
+	Artifacts(ctx context.Context, taskID string) (json.RawMessage, error)
 	// Receipt returns a run's materialized receipt (Spec S10.10).
 	Receipt(ctx context.Context, runID string) (json.RawMessage, error)
 	// Advance re-drives a task's intake pipeline in place (dev nudge; the
@@ -123,15 +130,6 @@ func (s *Server) handleIntakeSubmit(w http.ResponseWriter, r *http.Request) {
 	s.writeSurface(w, payload, err)
 }
 
-// GET /api/tasks/{task}
-func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
-	if !s.surfaceReady(w) {
-		return
-	}
-	payload, err := s.intake.Task(r.Context(), r.PathValue("task"))
-	s.writeSurface(w, payload, err)
-}
-
 // POST /api/tasks/{task}/advance
 func (s *Server) handleTaskAdvance(w http.ResponseWriter, r *http.Request) {
 	if !s.surfaceReady(w) {
@@ -185,14 +183,5 @@ func (s *Server) handleAskAnswer(w http.ResponseWriter, r *http.Request) {
 		pinVerified = true
 	}
 	payload, err := s.intake.Answer(r.Context(), id.UserID, r.PathValue("ask"), body.Answer, pinVerified)
-	s.writeSurface(w, payload, err)
-}
-
-// GET /api/runs/{run}/receipt
-func (s *Server) handleRunReceipt(w http.ResponseWriter, r *http.Request) {
-	if !s.surfaceReady(w) {
-		return
-	}
-	payload, err := s.intake.Receipt(r.Context(), r.PathValue("run"))
 	s.writeSurface(w, payload, err)
 }

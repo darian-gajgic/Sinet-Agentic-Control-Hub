@@ -427,8 +427,8 @@ var v0Types = []TypeSpec{
 	minted("run.wedged", FamilyRunLifecycle, VerdictAdmit, "internal/run/run.go:131", "recovery-side pause-and-flag (S02.5); distinct from watchdog.flagged — B5-3 must not double-own wedged"),
 	minted("run.harvest", FamilyRunLifecycle, VerdictAdmit, "internal/run/run.go:135", "finished-during-outage harvest append (S02.5)"),
 	minted("intake.state", FamilyRunLifecycle, VerdictAdmit, "internal/intake/state.go:26", "the S06 intake-pipeline FSM state (pipeline lifecycle)"),
-	declare("stage.started", FamilyRunLifecycle, "producer: B6 (S15/9.1 board); stages today only setKanban"),
-	declare("stage.finished", FamilyRunLifecycle, "producer: B6 (S15/9.1 board)"),
+	minted("stage.started", FamilyRunLifecycle, VerdictConforms, "internal/stage/stageevents.go:124", "the S05.3 fresh-context stage-session boundary opening — one row per engine session across every role (ceremony leg, execute step, verify, compose, helper, split successor); payload {stage, kind, brief_hash}"),
+	minted("stage.finished", FamilyRunLifecycle, VerdictConforms, "internal/stage/stageevents.go:129", "the same boundary's close; payload adds outcome ∈ {completed, split, error}. A session whose PROCESS dies gets no synthetic finish — the crash story is the run-lifecycle rows (S02.5)"),
 
 	// ── Family 2: Checkpoint (D7) ───────────────────────────────────────
 	minted("checkpoint.written", FamilyCheckpoint, VerdictRename, "internal/gates/checkpoints.go:26", "renamed from run.checkpoint; event carries refs, the S02.4(a)–(e) blocks live in the checkpoints row (in-substrate)"),

@@ -236,12 +236,21 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/auth/grants", s.handleAuthGrantCreate)
 	protected("POST /api/auth/grants/revoke", s.handleAuthGrantRevoke)
 
-	// Walking-skeleton surface (B2-4; provisional pending S15.2/B6).
-	protected("POST /api/intake/requests", s.handleIntakeSubmit)
+	// The S15.2 read families (B6-1, reads.go): runs + tasks, owner-scoped,
+	// filterable, bounded. GET /api/tasks/{task} and GET
+	// /api/runs/{run}/receipt keep their walking-skeleton paths and are now
+	// owner-scoped server-side; the mutation verbs below stay as B2-4 left
+	// them (the decision plane is B6-2's).
+	protected("GET /api/runs", s.handleRunList)
+	protected("GET /api/runs/{run}", s.handleRunDetail)
+	protected("GET /api/runs/{run}/receipt", s.handleRunReceipt)
+	protected("GET /api/tasks", s.handleTaskList)
 	protected("GET /api/tasks/{task}", s.handleTask)
+
+	// Walking-skeleton mutation surface (B2-4; the S15.6 decision plane is B6-2).
+	protected("POST /api/intake/requests", s.handleIntakeSubmit)
 	protected("POST /api/tasks/{task}/advance", s.handleTaskAdvance)
 	protected("POST /api/asks/{ask}/answer", s.handleAskAnswer)
-	protected("GET /api/runs/{run}/receipt", s.handleRunReceipt)
 
 	return s.identity(mux)
 }

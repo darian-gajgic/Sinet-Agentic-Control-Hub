@@ -73,8 +73,12 @@ func producerTypes() []string {
 		ledger.EventContextManifest, ledger.EventLedgerUpdate,
 		// intake (3)
 		intake.EventState, intake.EventDeltaDecision, intake.EventFollowUp,
-		// stage (4)
+		// stage (6): the S04 spawn/helper trio, the S05.3 overflow record, and
+		// the B6-1 S14.2 family-1 stage-session boundary pair — one row per
+		// fresh engine stage session across every role, its close carrying the
+		// outcome (stageevents.go).
 		stage.EventSpawn, stage.EventSpawnRefused, stage.EventHelper, stage.EventContextOverflow,
+		stage.EventStageStarted, stage.EventStageFinished,
 		// verify (4)
 		verify.EventV0, verify.EventV1, verify.EventRound, verify.EventEscalation,
 		// worker (2 exported: routing + compiled)
@@ -178,12 +182,15 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 // history.query_audited (§29: "a new minted type is a contract.go entry + a
 // producerTypes() inventory entry in the same packet"; a new FAMILY would have
 // been an S00.9 amendment and none is needed — it lands in family 12 under the
-// same OQ2-(A) reading as the other platform-operational groups). So 88 minted
-// + 7 declare-only = 95 registered types. Families 11 (Drift & canary), 14
-// (Benchmark & eval) and 15 (Run summary) are all fully minted.
+// same OQ2-(A) reading as the other platform-operational groups). B6-1 then
+// FLIPS stage.started + stage.finished declare→minted (§29 flip mechanics: the
+// producer is internal/stage's Session boundary; no new type, no new family),
+// so 90 minted + 5 declare-only = 95 registered types — the registry does not
+// grow, the minted share does. Families 1 (Run lifecycle), 11 (Drift & canary),
+// 14 (Benchmark & eval) and 15 (Run summary) are all fully minted.
 func TestInventoryTotals(t *testing.T) {
-	if n := len(producerTypes()); n != 88 {
-		t.Errorf("producer inventory = %d, want 88 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B)", n)
+	if n := len(producerTypes()); n != 90 {
+		t.Errorf("producer inventory = %d, want 90 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -196,11 +203,11 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 88 {
-		t.Errorf("registered minted types = %d, want 88", minted)
+	if minted != 90 {
+		t.Errorf("registered minted types = %d, want 90", minted)
 	}
-	if declareOnly != 7 {
-		t.Errorf("declare-only types = %d, want 7", declareOnly)
+	if declareOnly != 5 {
+		t.Errorf("declare-only types = %d, want 5", declareOnly)
 	}
 }
 
@@ -445,17 +452,21 @@ func TestRenamedTypesAreCanonical(t *testing.T) {
 // benchmark.pair_recorded + decision.recorded left when B5-7 (the S14.7
 // benchmark practice) became theirs; and run.summary_written +
 // retention.compacted left when B5-8A (the S14.9 retention substrate) became
-// theirs — so families 11, 14 and 15 are all fully minted, and the remaining
-// declare-only set belongs to the B5-8B query surface and B6.
+// theirs; and stage.started + stage.finished left when B6-1 put the producer on
+// internal/stage's Session boundary — so family 1 joins 11, 14 and 15 as fully
+// minted. The remaining five are the ones B6-1 deliberately did NOT mint:
+// run.parked/resumed are manifested as run.state_changed transitions,
+// ask.observed/answered are projected from the asks table, and a
+// tool-use-START producer does not exist (the engine surfaces tool_result).
 func TestDeclareOnlyFutureTypes(t *testing.T) {
 	reg := eventlog.Registry()
 	declareOnly := []string{
-		"stage.started", "stage.finished", "run.parked", "run.resumed",
+		"run.parked", "run.resumed",
 		"ask.observed", "ask.answered",
 		"tool.called",
 	}
-	if len(declareOnly) != 7 {
-		t.Fatalf("expected 7 declare-only types, listed %d", len(declareOnly))
+	if len(declareOnly) != 5 {
+		t.Fatalf("expected 5 declare-only types, listed %d", len(declareOnly))
 	}
 	for _, typ := range declareOnly {
 		ts, ok := reg.TypeSpec(typ)
@@ -587,6 +598,20 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"verdict.recorded",
 			`{"round":2,"verdict":"pass","ac_ids":["AC1"],"rubric_id":"rb","rubric_version":1,"judge_model":"j","golden_set":{"measured":false},"domain":"software","revision":1,"content_sha256":"abc","retention":"keep-forever"}`,
 			[]string{"round", "ac_ids", "golden_set"},
+		},
+		{
+			// Family 1's stage limb: "stage id/kind, stage-brief hash,
+			// outcome". The opening row carries the identity and the hash; the
+			// outcome is the CLOSE's field and is deliberately absent here — a
+			// stage that has only started has no outcome to report (B6-1).
+			"stage.started",
+			`{"stage":"step-2","kind":"execute","brief_hash":"2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"}`,
+			[]string{"stage", "kind", "brief_hash"},
+		},
+		{
+			"stage.finished",
+			`{"stage":"step-2","kind":"execute","brief_hash":"2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae","outcome":"completed"}`,
+			[]string{"stage", "kind", "brief_hash", "outcome"},
 		},
 		{
 			"helper.spawned",

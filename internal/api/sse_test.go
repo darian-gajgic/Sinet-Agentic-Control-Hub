@@ -491,14 +491,29 @@ func TestSSEStoreRawServeRedacted(t *testing.T) {
 	}
 }
 
+// redactionEdgeFiles ENUMERATES the observability serving edges — no wildcard,
+// so a new file cannot join by accident. B6-1 added the REST half of the edge
+// Research/18 §7-C2·1 always scoped as "SSE/REST": reads.go serves run_events
+// payload content (the run detail's spawn/routing records, the payload-derived
+// list rows) and redacts it at serialization, the writeSnapshotFrame precedent.
+// This is scope ARRIVING, not a guardrail change — store-raw / serve-redacted
+// is unchanged, and SPEC/PLAN artifacts, receipts and view rows stay
+// structurally exempt (§7-C2·2) and go out unwrapped.
+var redactionEdgeFiles = map[string]string{
+	"sse.go":   "the /events frames and snapshot states (B5-2)",
+	"reads.go": "the payload-bearing REST reads (B6-1 R20)",
+}
+
 // TestRedactionObservabilityEdgeOnly proves R16/R18/invariant #2: the redaction
-// primitive fires ONLY at the SSE serving edge (sse.go), never as blanket
-// middleware, and the deliverable/review/preview serve paths never import it.
+// primitive fires ONLY at the enumerated observability serving edges, never as
+// blanket middleware, and the deliverable/review/preview serve paths never
+// import it.
 func TestRedactionObservabilityEdgeOnly(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("readdir: %v", err)
 	}
+	uses := map[string]bool{}
 	for _, e := range entries {
 		n := e.Name()
 		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") {
@@ -508,8 +523,20 @@ func TestRedactionObservabilityEdgeOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", n, err)
 		}
-		if strings.Contains(string(src), "redact.") && n != "sse.go" {
-			t.Fatalf("redact.* is called in %s — the observability edge is sse.go only (R16/R18)", n)
+		if !strings.Contains(string(src), "redact.") {
+			continue
+		}
+		uses[n] = true
+		if _, ok := redactionEdgeFiles[n]; !ok {
+			t.Fatalf("redact.* is called in %s — the observability edge is the enumerated set only (R16/R18, B6-1 R20)", n)
+		}
+	}
+	// The enumeration stays honest in the other direction too: a listed file
+	// that no longer redacts would leave a stale name standing in for a
+	// serving edge that has stopped protecting anything.
+	for n, why := range redactionEdgeFiles {
+		if !uses[n] {
+			t.Fatalf("%s is enumerated as a redaction edge for %s but no longer calls the primitive", n, why)
 		}
 	}
 	// The deliverable/review/preview/intake serve paths must NEVER import the

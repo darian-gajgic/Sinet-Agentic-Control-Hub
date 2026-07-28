@@ -155,6 +155,29 @@ func TestDeriveQueriesAreServedByAnIndex(t *testing.T) {
 			[]any{"r1", "run.state_changed"},
 			"run_events_run",
 		},
+		{
+			// B6-1: the run-detail record shape (spawn/routing records) and the
+			// task-detail stage-progress derivation share one text. It is served
+			// by 0015's run_events_run_type_idx — (run_id, type, event_seq) is
+			// exactly the lead-filter-order this query wants, so no new index and
+			// no migration 0017.
+			"run detail / QueryRunEventsByType (3 types)",
+			QueryRunEventsByType(3),
+			[]any{"r1", "helper.spawned", "spawn.refused", "orchestration.helper", 500},
+			"run_events_run",
+		},
+		{
+			// The MEMBER form. A member reaching this derive has already been
+			// authorized against the RUN itself (authorizeOwner), so the owner
+			// predicate is on the authorization, not on the query — the same
+			// posture QueryLatestTypeForRun sits in behind authorizeRun. Adding
+			// user_id here would be a second, weaker copy of a check that has
+			// already passed. The plan must still seek, whichever caller runs it.
+			"run detail / QueryRunEventsByType (member-authorized, 1 type)",
+			QueryRunEventsByType(1),
+			[]any{"r1", "run.state_changed", 500},
+			"run_events_run",
+		},
 	}
 
 	for _, c := range cases {

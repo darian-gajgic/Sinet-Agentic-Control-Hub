@@ -26,6 +26,7 @@ type fakeSurface struct {
 	submitErr   error
 	answerErr   error
 	taskPayload json.RawMessage
+	artifacts   json.RawMessage
 }
 
 func (f *fakeSurface) Submit(_ context.Context, userID string, body json.RawMessage) (json.RawMessage, error) {
@@ -49,6 +50,13 @@ func (f *fakeSurface) Task(context.Context, string) (json.RawMessage, error) {
 		return f.taskPayload, nil
 	}
 	return json.RawMessage(`{"task_id":"t-1"}`), nil
+}
+
+func (f *fakeSurface) Artifacts(context.Context, string) (json.RawMessage, error) {
+	if f.artifacts != nil {
+		return f.artifacts, nil
+	}
+	return nil, &api.SurfaceError{Status: http.StatusNotFound, Code: "not_found", Msg: "no drafted artifact pair yet"}
 }
 
 func (f *fakeSurface) Receipt(context.Context, string) (json.RawMessage, error) {
@@ -77,7 +85,10 @@ func intakeServer(t *testing.T, surface api.IntakeSurface, id api.Identity, b *b
 		Auth:       staticAuth{id: id},
 		Settings:   fixedSettings{d: 20 * time.Second},
 		HealthFn:   func() api.Health { return api.Health{Ready: true} },
-		Intake:     surface,
+		// The read routes are owner-scoped in the data layer (B6-1 R6/R17), so
+		// the transport tests wire the DB the scope resolves against.
+		DB:     b.db,
+		Intake: surface,
 	})
 }
 
@@ -175,11 +186,21 @@ func TestIntakeSurfaceErrorMapsStatus(t *testing.T) {
 	}
 }
 
+// TestIntakeNotWiredIs503 covers the routes that genuinely need the pipeline
+// surface. The S15.2 task DETAIL is not one of them any more: it projects the
+// task from the DB and renders the missing artifacts as an honest absence
+// (B6-1 R5), so its not-wired case is a task rendered without a spec, not a
+// 503 that hides the task.
 func TestIntakeNotWiredIs503(t *testing.T) {
 	srv := intakeServer(t, nil, api.Identity{UserID: "alice"}, nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/tasks/t-1", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status %d, want 503 when the surface is not wired", rr.Code)
+	for _, route := range []struct{ method, path, body string }{
+		{"POST", "/api/intake/requests", `{"title":"x","text":"y"}`},
+		{"GET", "/api/runs/r-1/receipt", ""},
+	} {
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(route.method, route.path, strings.NewReader(route.body)))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s: status %d, want 503 when the surface is not wired", route.method, route.path, rr.Code)
+		}
 	}
 }

@@ -37,6 +37,7 @@ func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRou
 			Assemble:       true,
 			Sources:        ledger.Sources{Plan: &intake.PlanSource{P: s.pipe}, Knowledge: s.cfg.Knowledge},
 			Instructions:   executeInstructions(r.TaskID, step, stageName, sub),
+			Kind:           markerExecute,
 			Class:          step.Class,
 			Tools:          execTools,
 			PermissionMode: execPermissionMode,

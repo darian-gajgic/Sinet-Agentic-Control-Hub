@@ -177,6 +177,23 @@ func (u *Surface) Task(ctx context.Context, taskID string) (json.RawMessage, err
 	return u.taskView(ctx, taskID)
 }
 
+// Artifacts implements api.IntakeSurface: the task's CURRENT drafted
+// SPEC/PLAN pair, loaded through the pipeline's own artifact store (sha256
+// + re-render integrity checks included, Spec S06.6). Nothing EXECUTES from
+// this read — execution still demands ApprovedPair (D10) — it is the read
+// seam the S15.2 task detail renders.
+func (u *Surface) Artifacts(ctx context.Context, taskID string) (json.RawMessage, error) {
+	pair, err := u.sk.pipe.CurrentPair(ctx, taskID)
+	if err != nil {
+		return nil, mapIntakeErr(err)
+	}
+	out, err := json.Marshal(pair)
+	if err != nil {
+		return nil, fmt.Errorf("stage: marshal artifact pair: %w", err)
+	}
+	return out, nil
+}
+
 // Advance implements api.IntakeSurface: the dev nudge — re-drive a task's
 // intake in place (owner-only; useful when a continuation error left the
 // run running without an open card).

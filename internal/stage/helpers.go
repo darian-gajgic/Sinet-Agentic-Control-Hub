@@ -481,6 +481,7 @@ func (s *Skeleton) runHelper(ctx context.Context, r run.Run, req SpawnRequest, d
 		Stage:        rec.ChildSession,
 		Assemble:     false, // the brief IS the whole context — no coordinator history, ever (S04.3)
 		Instructions: brief,
+		Kind:         markerHelper,
 		Class:        req.Brief.Class,
 		Tools:        req.Brief.Tools,
 		Model:        decision.Model,
