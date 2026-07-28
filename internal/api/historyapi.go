@@ -89,7 +89,19 @@ func (s *Server) handleHistoryView(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a, err := s.history.SelectView(r.Context(), r.PathValue("view"), scope, limit)
+	name := r.PathValue("view")
+	// A view with no owner column cannot be member-scoped, so the store refuses
+	// it to a member outright (S01.9). That is an AuthZ refusal, not an internal
+	// failure, and it must not read as a 500 (drain D5). The operator-only bit
+	// is registry METADATA — View.OwnerColumn == "" — so the transport reads the
+	// same closed registry the store does and answers 403 before asking. The
+	// decision is never made by matching an error string.
+	if v, ok := history.ViewByName(name); ok && v.OwnerColumn == "" && !scope.Operator {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
+			Msg: "view " + v.Name + " carries no owner column and is operator-only (S01.9)"})
+		return
+	}
+	a, err := s.history.SelectView(r.Context(), name, scope, limit)
 	s.writeAnswer(w, a, err)
 }
 

@@ -25,6 +25,9 @@ type backend struct {
 	db    *storage.DB
 	log   *eventlog.Log
 	store *auth.Store
+	// reg is the settings registry the DB was opened against. It is exposed so
+	// the drain-D4 Layer-2 rig can build a real local.Registry over it.
+	reg *settings.Registry
 }
 
 func newBackend(t *testing.T) *backend {
@@ -40,7 +43,7 @@ func newBackend(t *testing.T) *backend {
 		t.Fatalf("migrate: %v", err)
 	}
 	log := eventlog.New(db, reg)
-	return &backend{db: db, log: log, store: auth.New(db, log)}
+	return &backend{db: db, log: log, store: auth.New(db, log), reg: reg}
 }
 
 func appendEvents(t *testing.T, log *eventlog.Log, types ...string) []int64 {

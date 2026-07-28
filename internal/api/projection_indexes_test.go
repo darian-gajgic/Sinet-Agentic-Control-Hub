@@ -102,7 +102,7 @@ func TestDeriveQueriesAreServedByAnIndex(t *testing.T) {
 			"benchmarkAlarms / QueryByType (member, owner-scoped)",
 			QueryByType + OwnerScopeClause + OrderByEventSeq,
 			[]any{"benchmark.alarm", "alice"},
-			"run_events_type_",
+			"run_events_type_user_idx",
 		},
 		{
 			"watchdogFlags / QueryWatchdogFlags (operator)",
@@ -114,19 +114,19 @@ func TestDeriveQueriesAreServedByAnIndex(t *testing.T) {
 			"watchdogFlags / QueryWatchdogFlags (member, owner-scoped)",
 			QueryWatchdogFlags + OwnerScopeClause + OrderByEventSeq,
 			[]any{"alice"},
-			"run_events_type_",
+			"run_events_type_user_idx",
 		},
 		{
 			"maxSeqByKey / QueryMaxSeqByKey (operator)",
 			QueryMaxSeqByKey,
 			[]any{"watchdog.suppressed"},
-			"run_events_type_",
+			"run_events_type_ts_idx",
 		},
 		{
 			"maxSeqByKey / QueryMaxSeqByKey (member, owner-or-platform)",
 			QueryMaxSeqByKey + OwnerOrPlatformScopeClause,
 			[]any{"watchdog.suppressed", "alice"},
-			"run_events_type_",
+			"run_events_type_user_idx",
 		},
 		{
 			"driftCards / QueryDriftCards (operator) — the generated column + its index",
@@ -147,36 +147,36 @@ func TestDeriveQueriesAreServedByAnIndex(t *testing.T) {
 			"per-run derive / QueryLatestTypeForRun (2 types)",
 			QueryLatestTypeForRun(2),
 			[]any{"r1", "run.wedged", "run.state_changed"},
-			"run_events_run",
+			"run_events_run_idx",
 		},
 		{
 			"per-run derive / QueryLatestTypeForRun (1 type)",
 			QueryLatestTypeForRun(1),
 			[]any{"r1", "run.state_changed"},
-			"run_events_run",
+			"run_events_run_type_idx",
 		},
 		{
 			// B6-1: the run-detail record shape (spawn/routing records) and the
-			// task-detail stage-progress derivation share one text. It is served
-			// by 0015's run_events_run_type_idx — (run_id, type, event_seq) is
-			// exactly the lead-filter-order this query wants, so no new index and
-			// no migration 0017.
+			// task-detail stage-progress derivation share one text. The
+			// production MULTI-type form is served by 0001's run_events_run_idx,
+			// NOT by 0015's run_events_run_type_idx — the type set is a residual
+			// filter inside the one run's rows. Recorded honestly rather than
+			// credited to 0015 (drain D3).
 			"run detail / QueryRunEventsByType (3 types)",
 			QueryRunEventsByType(3),
 			[]any{"r1", "helper.spawned", "spawn.refused", "orchestration.helper", 500},
-			"run_events_run",
+			"run_events_run_idx",
 		},
 		{
-			// The MEMBER form. A member reaching this derive has already been
-			// authorized against the RUN itself (authorizeOwner), so the owner
-			// predicate is on the authorization, not on the query — the same
-			// posture QueryLatestTypeForRun sits in behind authorizeRun. Adding
-			// user_id here would be a second, weaker copy of a check that has
-			// already passed. The plan must still seek, whichever caller runs it.
+			// The ONE-type form DOES reach 0015's composite: run_id and type are
+			// both equality-usable there. A member reaching either form has
+			// already been authorized against the RUN itself (authorizeOwner), so
+			// the owner predicate is on the authorization, not on the query — the
+			// same posture QueryLatestTypeForRun sits in behind authorizeRun.
 			"run detail / QueryRunEventsByType (member-authorized, 1 type)",
 			QueryRunEventsByType(1),
 			[]any{"r1", "run.state_changed", 500},
-			"run_events_run",
+			"run_events_run_type_idx",
 		},
 	}
 

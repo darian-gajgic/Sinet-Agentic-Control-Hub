@@ -1155,10 +1155,13 @@ const (
 )
 
 // QueryLatestTypeForRun is the per-run derive shape (`WHERE run_id = ? AND type
-// IN (…)`), exported for the same reason. It is served by 0001's
-// run_events_run_idx — NOT by anything migration 0015 added — because that
-// partial index already leads with run_id and the type set is a small residual
-// filter within one run's rows. Recorded honestly rather than credited to 0015.
+// IN (…)`), exported for the same reason. WHICH index serves it depends on the
+// type count, and pinning the test to FULL index names is what showed it
+// (drain D3): the MULTI-type form seeks through 0001's run_events_run_idx —
+// that partial index already leads with run_id and the type set is a residual
+// filter within one run's rows — while the ONE-type form reaches 0015's
+// run_events_run_type_idx, where run_id and type are both equality-usable.
+// Both SEEK; the attribution is recorded per form rather than averaged.
 func QueryLatestTypeForRun(types int) string {
 	return `SELECT payload FROM run_events WHERE run_id = ? AND type IN (` + placeholders(types) +
 		`) ORDER BY event_seq DESC LIMIT 1`

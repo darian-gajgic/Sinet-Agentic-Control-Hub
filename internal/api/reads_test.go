@@ -215,7 +215,7 @@ func TestRunDetailScopeAndRecords(t *testing.T) {
 		t.Errorf("unknown run: %d, want 404", code)
 	}
 	if code, _ := get(t, b, "alice", "/api/runs/r-bob"); code != http.StatusForbidden {
-		t.Errorf("другой owner's run: %d, want 403", code)
+		t.Errorf("another owner's run: %d, want 403", code)
 	}
 	if code, _ := get(t, b, "op", "/api/runs/r-bob"); code != http.StatusOK {
 		t.Errorf("operator reading any run: %d, want 200", code)
@@ -530,9 +530,21 @@ func TestReadShapesNeverPercent(t *testing.T) {
 		"eta": true, "eta_s": true, "eta_seconds": true,
 	}
 	keys := map[string]bool{}
-	for _, path := range []string{"/api/runs", "/api/runs/r-alice", "/api/tasks", "/api/tasks/t-alice"} {
+	// Every REST read shape B6-1 ships, including the meters family and each
+	// query-layer answer (drain D9): a progress key must not enter through the
+	// money surface or through a routed answer either.
+	for _, path := range []string{
+		"/api/runs", "/api/runs/r-alice", "/api/tasks", "/api/tasks/t-alice",
+		"/api/meters",
+		"/api/events/views", "/api/events/catalog",
+		"/api/events/views/cost_per_run",
+		"/api/events/query/status.runs_active",
+		"/api/events/ask?q=what+is+running",
+		"/api/events/search?q=deployment",
+		"/api/events/open-sql?q=show+me+everything",
+	} {
 		var body any
-		if err := json.Unmarshal([]byte(getOK(t, b, "op", path)), &body); err != nil {
+		if err := json.Unmarshal([]byte(historyGetOK(t, b, "op", path)), &body); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
 		collectKeys(body, keys)
@@ -545,6 +557,31 @@ func TestReadShapesNeverPercent(t *testing.T) {
 		if forbiddenExact[lk] || strings.Contains(lk, "percent") {
 			t.Fatalf("a REST read shape exposes forbidden progress key %q — the never-percent negative (§30)", k)
 		}
+	}
+
+	// The two DECLARED near-misses, stated so they cannot drift into the
+	// forbidden set by accident and so a THIRD one cannot arrive unnoticed:
+	// `pressure` and `pressure_applicable` are the S10.4 gauge's own named
+	// quantity against a DECLARED denominator, not a completion estimate — and
+	// with no budget declared the number is absent rather than invented.
+	nearMiss := map[string]bool{"pressure": true, "pressure_applicable": true}
+	found := map[string]bool{}
+	for k := range keys {
+		lk := strings.ToLower(k)
+		if nearMiss[lk] {
+			found[lk] = true
+			continue
+		}
+		// Anything else that reads like a bounded ratio would be a new
+		// near-miss nobody declared.
+		for _, shape := range []string{"_pct", "_ratio", "_fraction", "utiliz"} {
+			if strings.Contains(lk, shape) {
+				t.Errorf("undeclared ratio-shaped key %q reached a REST read shape — declare it or drop it (§30 R10)", k)
+			}
+		}
+	}
+	if len(found) != len(nearMiss) {
+		t.Errorf("the declared near-misses are %v but the meters shape exposed %v — the declaration must track the shape", nearMiss, found)
 	}
 }
 
@@ -575,5 +612,163 @@ func TestReadRoutesAddNoMutatingVerb(t *testing.T) {
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/v1/api/runs", nil))
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("GET /v1/api/runs = %d — the API is unversioned at v0", rr.Code)
+	}
+}
+
+// ── drain round 1 ───────────────────────────────────────────────────────────
+
+// TestDateFiltersNormalizeToUTC is drain D1. The stored *_ts columns are UTC
+// text and the filters compare them LEXICOGRAPHICALLY, so a bound carrying a
+// non-UTC offset must be re-rendered in UTC before it is bound. Fails on the
+// pre-drain code: `2026-06-01T23:59:59+12:00` is 11:59:59Z, but as raw text it
+// sorts above a row stored at 15:00:00Z and wrongly excluded it.
+func TestDateFiltersNormalizeToUTC(t *testing.T) {
+	b := newBackend(t)
+	seedUser(t, b, "op", auth.RoleOperator)
+	exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
+		"t-utc", "op", "UTC Task", "doing", "2026-06-01T15:00:00Z")
+	exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,0,?,?)`, "r-utc", "op", "t-utc", "running", "lane-utc",
+		"2026-06-01T15:00:00Z", "2026-06-01T15:00:00Z")
+
+	// 11:59:59Z expressed with a +12:00 offset. The row at 15:00:00Z is AFTER
+	// that instant and must be included.
+	for _, path := range []string{
+		"/api/runs?since=" + url.QueryEscape("2026-06-01T23:59:59+12:00"),
+		"/api/tasks?since=" + url.QueryEscape("2026-06-01T23:59:59+12:00"),
+	} {
+		body := getOK(t, b, "op", path)
+		if !strings.Contains(body, "utc") {
+			t.Errorf("%s excluded a row that is after the bound's INSTANT — the offset was compared as text: %s", path, body)
+		}
+	}
+	// And the bound still excludes what genuinely precedes it: 15:00:01Z
+	// expressed as +12:00 is 03:00:01Z the next day, which is after the row.
+	if body := getOK(t, b, "op", "/api/runs?since="+url.QueryEscape("2026-06-02T15:00:01+12:00")); strings.Contains(body, "r-utc") {
+		t.Errorf("the normalized bound stopped excluding: %s", body)
+	}
+}
+
+// seedFollowUp wires one S13.9 follow-up edge: successorTask was spawned from
+// revision n of sourceTask's deliverable.
+func seedFollowUp(t *testing.T, b *backend, sourceTask, deliverable, successorTask, owner string, n int) {
+	t.Helper()
+	exec(t, b, `INSERT INTO deliverables (deliverable_id, user_id, task_id, dtype, state, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,?,?)`, deliverable, owner, sourceTask, "note", "accepted", nowTS(), nowTS())
+	exec(t, b, `INSERT INTO deliverable_revisions (deliverable_id, n, user_id, pin_kind, content_sha256, platform_ref, created_ts)
+	            VALUES (?,?,?,?,?,?,?)`, deliverable, n, owner, "content", "sha", "ref", nowTS())
+	exec(t, b, `INSERT INTO task_successor_of (task_id, deliverable_id, revision_n, user_id, created_ts)
+	            VALUES (?,?,?,?,?)`, successorTask, deliverable, n, owner, nowTS())
+}
+
+// TestTaskDetailLineageBothDirections is drain D2: the S13.9 follow-up edges
+// were implemented and untested. It asserts CONTENT in both directions — what
+// this task succeeded, and what succeeded it — plus the cross-owner posture.
+func TestTaskDetailLineageBothDirections(t *testing.T) {
+	b := twoOwners(t)
+	seedTask(t, b, "t-alice-follow", "alice", "Follow-up of Alice Task", "doing")
+	seedFollowUp(t, b, "t-alice", "d-alice", "t-alice-follow", "alice", 2)
+	// Bob's own disjoint edge, so a dropped owner predicate shows as a leak.
+	seedTask(t, b, "t-bob-follow", "bob", "Follow-up of Bob Task", "doing")
+	seedFollowUp(t, b, "t-bob", "d-bob", "t-bob-follow", "bob", 1)
+
+	type lineage struct {
+		Lineage struct {
+			Succeeds []struct {
+				TaskID        string `json:"task_id"`
+				DeliverableID string `json:"deliverable_id"`
+				RevisionN     int64  `json:"revision_n"`
+			} `json:"succeeds"`
+			SucceededBy []struct {
+				TaskID        string `json:"task_id"`
+				DeliverableID string `json:"deliverable_id"`
+				RevisionN     int64  `json:"revision_n"`
+			} `json:"succeeded_by"`
+		} `json:"lineage"`
+	}
+
+	// The SOURCE task: nothing before it, one thing after it.
+	var src lineage
+	if err := json.Unmarshal([]byte(getOK(t, b, "alice", "/api/tasks/t-alice")), &src); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(src.Lineage.Succeeds) != 0 {
+		t.Errorf("the source task succeeded nothing: %+v", src.Lineage.Succeeds)
+	}
+	if len(src.Lineage.SucceededBy) != 1 {
+		t.Fatalf("succeeded_by = %+v, want the one follow-up", src.Lineage.SucceededBy)
+	}
+	if got := src.Lineage.SucceededBy[0]; got.TaskID != "t-alice-follow" || got.DeliverableID != "d-alice" || got.RevisionN != 2 {
+		t.Errorf("succeeded_by content = %+v, want t-alice-follow via d-alice rev 2", got)
+	}
+
+	// The SUCCESSOR task: one thing before it, nothing after it.
+	var suc lineage
+	if err := json.Unmarshal([]byte(getOK(t, b, "alice", "/api/tasks/t-alice-follow")), &suc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(suc.Lineage.SucceededBy) != 0 {
+		t.Errorf("nothing has succeeded the follow-up yet: %+v", suc.Lineage.SucceededBy)
+	}
+	if len(suc.Lineage.Succeeds) != 1 {
+		t.Fatalf("succeeds = %+v, want the source edge", suc.Lineage.Succeeds)
+	}
+	if got := suc.Lineage.Succeeds[0]; got.DeliverableID != "d-alice" || got.RevisionN != 2 {
+		t.Errorf("succeeds content = %+v, want d-alice rev 2", got)
+	}
+
+	// Cross-owner: bob's edges never appear in alice's lineage, and the whole
+	// detail is refused to the wrong member in the first place.
+	if strings.Contains(mustString(t, src.Lineage)+mustString(t, suc.Lineage), "bob") {
+		t.Error("alice's lineage carries bob's edges")
+	}
+	if code, _ := get(t, b, "alice", "/api/tasks/t-bob-follow"); code != http.StatusForbidden {
+		t.Errorf("another owner's follow-up task: %d, want 403", code)
+	}
+	var opView lineage
+	if err := json.Unmarshal([]byte(getOK(t, b, "op", "/api/tasks/t-bob")), &opView); err != nil {
+		t.Fatal(err)
+	}
+	if len(opView.Lineage.SucceededBy) != 1 || opView.Lineage.SucceededBy[0].TaskID != "t-bob-follow" {
+		t.Errorf("the operator reads every owner's lineage: %+v", opView.Lineage)
+	}
+}
+
+// TestTaskDetailRedactsPayloadDerivedStageStrings is drain D10: stage-progress
+// strings are lifted OUT of run_events payloads, so they are payload content on
+// a REST response and must redact at the serving edge (R20) even though the
+// task detail as a whole is not wrapped. The task's stored TITLE stays
+// as-stored — a task object is not an observability projection.
+func TestTaskDetailRedactsPayloadDerivedStageStrings(t *testing.T) {
+	b := twoOwners(t)
+	const secret = "sk-ant-api03-STAGESECRETSTAGESECRETSTAGESECRETXX"
+	appendRun(t, b, "alice", "r-alice", "stage.started",
+		`{"stage":"`+secret+`","kind":"execute","brief_hash":"abc"}`)
+
+	body := getOK(t, b, "alice", "/api/tasks/t-alice")
+	if strings.Contains(body, secret) {
+		t.Fatalf("a payload-derived stage string carried a planted secret to the wire: %s", body)
+	}
+	if !strings.Contains(body, "[REDACTED:") {
+		t.Fatalf("no redaction marker on the stage story: %s", body)
+	}
+	// Store-raw: the row still holds it verbatim.
+	var stored string
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT payload FROM run_events WHERE run_id = 'r-alice' AND type = 'stage.started'
+		  ORDER BY event_seq DESC LIMIT 1`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, secret) {
+		t.Fatal("the STORED row was mutated — store-raw / serve-redacted (R19)")
+	}
+	// The task's own stored title is NOT redacted: task content is structurally
+	// exempt (§7-C2·2), and over-redacting it would corrupt a task object.
+	if !strings.Contains(body, "Alice Task") {
+		t.Error("the task's stored title must be served as-stored")
+	}
+	// Honest content in the stage story survives byte-for-byte.
+	if !strings.Contains(body, "execute") {
+		t.Error("an honest stage kind was altered by the redaction pass")
 	}
 }

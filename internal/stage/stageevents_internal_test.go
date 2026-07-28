@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -118,6 +119,35 @@ func TestStageDetailIsBounded(t *testing.T) {
 	}
 }
 
+// TestStageDetailTruncationIsRuneSafe is drain D7: cutting at a byte offset can
+// split a multi-byte rune, and the fragment marshals as U+FFFD — corruption in
+// the one field that exists to say why a stage ended. Every offset around the
+// cap is checked, so whichever byte the boundary lands on is covered.
+func TestStageDetailTruncationIsRuneSafe(t *testing.T) {
+	// Three-byte runes, so the cap lands mid-rune for two offsets in three.
+	for pad := 0; pad < 6; pad++ {
+		in := strings.Repeat("a", pad) + strings.Repeat("界", stageDetailCap)
+		got := boundDetail(in)
+		if !utf8.ValidString(got) {
+			t.Fatalf("pad %d: truncation produced invalid UTF-8", pad)
+		}
+		if strings.ContainsRune(got, utf8.RuneError) && !strings.ContainsRune(in, utf8.RuneError) {
+			t.Fatalf("pad %d: truncation introduced U+FFFD: %q", pad, got[len(got)-12:])
+		}
+		if !strings.HasSuffix(got, "…") {
+			t.Fatalf("pad %d: truncation must be MARKED", pad)
+		}
+		if len(got) > stageDetailCap+len("…") {
+			t.Fatalf("pad %d: truncation exceeded the cap (%d bytes)", pad, len(got))
+		}
+	}
+	// And a non-ASCII detail that FITS is carried verbatim.
+	const fits = "the engine refused: 界面 error"
+	if got := boundDetail(fits); got != fits {
+		t.Fatalf("an in-bounds non-ASCII detail was altered: %q", got)
+	}
+}
+
 // refusingAdapter starts nothing: the S03.1 spawn fails, so DriveStage returns
 // an error and the session ends short.
 type refusingAdapter struct{ err error }
@@ -193,6 +223,83 @@ func TestStageErrorPathRecordsAFinishThroughTheRealBoundary(t *testing.T) {
 	}
 	if rows[1].pay["detail"] == nil || rows[1].pay["detail"] == "" {
 		t.Error("an error outcome must record WHY the session ended")
+	}
+}
+
+// cancellingAdapter fails its spawn only after the caller's context is
+// cancelled — the shape of a session that ends BECAUSE the request went away.
+type cancellingAdapter struct{ cancel context.CancelFunc }
+
+func (a cancellingAdapter) Substrate() string { return adapters.SubstrateClaudeCLI }
+func (a cancellingAdapter) Start(ctx context.Context, _ adapters.StartRequest) (adapters.Session, error) {
+	a.cancel()
+	return nil, ctx.Err()
+}
+func (a cancellingAdapter) Resume(ctx context.Context, _ adapters.ParkRecord, _ *adapters.Answer) (adapters.Session, error) {
+	return nil, ctx.Err()
+}
+
+// TestStageFinishSurvivesContextCancellation is drain D11. The finish append
+// rides context.WithoutCancel (the §37-C audit-append precedent), because a
+// session that ends BECAUSE its context was cancelled is exactly the ending
+// whose record matters most — and writing it on the cancelled context loses
+// precisely those rows. OQ3 is untouched: process DEATH still writes nothing,
+// since nothing is left running to write it.
+func TestStageFinishSurvivesContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reg := settings.New()
+	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), storage.DBFileName), reg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Migrate(context.Background()); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	log := eventlog.New(db, reg)
+	runs := run.NewStore(db, log)
+	root := t.TempDir()
+	sk, err := New(Config{
+		DB: db, Log: log, Runs: runs, Checkpoints: gates.NewCheckpoints(db, log),
+		Ledger: ledger.NewStore(db, log), Settings: reg,
+		Adapters:     map[string]adapters.Adapter{adapters.SubstrateClaudeCLI: cancellingAdapter{cancel: cancel}},
+		ArtifactRoot: filepath.Join(root, "artifacts"),
+		RunRoot:      filepath.Join(root, "runs"),
+	})
+	if err != nil {
+		t.Fatalf("stage.New: %v", err)
+	}
+	if _, err := runs.Create(context.Background(), run.NewRun{
+		ID: "r-cancel.execute", UserID: "alice", Lane: "anthropic", Substrate: adapters.SubstrateClaudeCLI,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+		if _, err := runs.Transition(context.Background(), "r-cancel.execute", st, run.TransitionOptions{Actor: "platform"}); err != nil {
+			t.Fatalf("transition %s: %v", st, err)
+		}
+	}
+
+	if _, err := sk.Session(ctx, SessionInput{
+		RunID:        "r-cancel.execute",
+		Stage:        "S-1",
+		Kind:         "execute",
+		Instructions: stageMarker("execute") + "do the thing",
+	}); err == nil {
+		t.Fatal("the cancelled session must fail")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("the context was not actually cancelled — the test would prove nothing")
+	}
+
+	rows := stageRowsFor(t, db, "r-cancel.execute")
+	if len(rows) != 2 {
+		t.Fatalf("want the started/finished PAIR even under cancellation, got %d: %+v", len(rows), rows)
+	}
+	if rows[1].typ != EventStageFinished || rows[1].pay["outcome"] != StageOutcomeError {
+		t.Fatalf("the finish row must land with its error outcome: %+v", rows[1])
 	}
 }
 

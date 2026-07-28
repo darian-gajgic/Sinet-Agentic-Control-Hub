@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -155,6 +156,13 @@ func (s *Skeleton) appendStageEvent(ctx context.Context, r run.Run, typ string, 
 		s.logger().Error("stage: marshal "+typ, "err", err)
 		return
 	}
+	// The append rides context.WithoutCancel (drain D11, the §37-C audit-append
+	// precedent). A session that ends BECAUSE its context was cancelled is
+	// precisely the ending whose record matters most, and writing it on the
+	// cancelled context would lose exactly those rows. This does not weaken
+	// OQ3's rule: a session whose PROCESS dies still writes nothing, because
+	// nothing is left running to write it.
+	ctx = context.WithoutCancel(ctx)
 	if _, err := s.cfg.Log.Append(ctx, eventlog.Append{
 		RunID: r.ID, Generation: r.Generation, UserID: r.UserID,
 		Type: typ, SchemaVersion: StageEventSchemaVersion, Payload: payload,
@@ -163,9 +171,17 @@ func (s *Skeleton) appendStageEvent(ctx context.Context, r run.Run, typ string, 
 	}
 }
 
+// boundDetail truncates on a RUNE boundary (drain D7). Cutting at a byte offset
+// can split a multi-byte rune, and the fragment marshals as U+FFFD — a payload
+// whose last character is corruption, in the one field that exists to say why a
+// stage ended.
 func boundDetail(s string) string {
 	if len(s) <= stageDetailCap {
 		return s
 	}
-	return s[:stageDetailCap] + "…"
+	cut := stageDetailCap
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }

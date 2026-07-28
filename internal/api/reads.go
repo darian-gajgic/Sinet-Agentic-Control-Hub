@@ -120,6 +120,20 @@ func (s *Server) writeReadJSON(w http.ResponseWriter, v any) {
 	_, _ = w.Write(raw)
 }
 
+// redactStageProgress applies the codor-C2 primitive to the payload-DERIVED
+// strings of the stage story (drain D10). It runs per string VALUE, which is
+// how the primitive is defined (§30: RedactJSON deep-walks and calls Redact per
+// value), so honest stage ids and duty names are byte-unchanged and a secret
+// that reached a payload's `stage`/`phase`/`name` field does not reach the
+// wire. The stored row is untouched — store-raw / serve-redacted (R19).
+func redactStageProgress(steps []StageStep) {
+	for i := range steps {
+		steps[i].Stage = redact.Redact(steps[i].Stage)
+		steps[i].Kind = redact.Redact(steps[i].Kind)
+		steps[i].Outcome = redact.Redact(steps[i].Outcome)
+	}
+}
+
 func badRequest(msg string) *SurfaceError {
 	return &SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: msg}
 }
@@ -165,7 +179,16 @@ func readPerson(r *http.Request, scope ownerScope) (string, error) {
 	return person, nil
 }
 
-// readTimeRange parses the optional `?since=`/`?until=` RFC3339 bounds.
+// readTimeRange parses the optional `?since=`/`?until=` RFC3339 bounds and
+// NORMALIZES them to UTC.
+//
+// The normalization is load-bearing, not cosmetic (drain D1). Stored `*_ts`
+// columns are UTC RFC3339Nano text and the filters compare them
+// LEXICOGRAPHICALLY in SQL, so a bound carrying a non-UTC offset compares as
+// the characters the caller typed rather than as the instant they meant:
+// `2026-06-01T23:59:59+12:00` is 11:59:59Z, but as text it sorts ABOVE a row
+// stored at 15:00:00Z and wrongly excludes it. Re-rendering the parsed instant
+// in UTC puts both sides of every compare in one representation.
 func readTimeRange(r *http.Request) (since, until string, err error) {
 	for _, p := range []struct {
 		name string
@@ -175,10 +198,11 @@ func readTimeRange(r *http.Request) (since, until string, err error) {
 		if v == "" {
 			continue
 		}
-		if _, perr := time.Parse(time.RFC3339, v); perr != nil {
+		t, perr := time.Parse(time.RFC3339, v)
+		if perr != nil {
 			return "", "", badRequest(fmt.Sprintf("bad %s %q: want an RFC3339 timestamp", p.name, v))
 		}
-		*p.dst = v
+		*p.dst = t.UTC().Format(time.RFC3339Nano)
 	}
 	return since, until, nil
 }
@@ -693,11 +717,16 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	}
 	s.fillTaskArtifacts(r.Context(), taskID, &detail)
 
-	// Not redacted: SPEC/PLAN artifacts, receipts and the pipeline's own card
-	// are S13/S06 product content, structurally exempt from the observability
-	// primitive (§7-C2·2). The payload-derived members here are enumerated
-	// structural fields — a stage id, a duty name, a sha256, an outcome from a
-	// closed vocabulary — never a payload body served verbatim.
+	// The task detail is NOT wrapped as a whole: SPEC/PLAN artifacts, receipts,
+	// the pipeline's own card and the task's stored title are S13/S06 product
+	// and task content, structurally exempt from the observability primitive
+	// (§7-C2·2) — a task object is not an observability projection.
+	//
+	// Its stage-progress entries ARE run_events payload content, though: they
+	// are lifted out of payload bodies by key, and "enumerated by key" is not
+	// the same property as "cannot carry a secret" (drain D10). They redact at
+	// this serving edge, per R20, before the unwrapped body goes out.
+	redactStageProgress(detail.StageProgress)
 	s.writeReadJSON(w, detail)
 }
 
@@ -726,12 +755,16 @@ func (s *Server) fillTaskArtifacts(ctx context.Context, taskID string, detail *T
 	detail.Spec, detail.Plan = &pair.Spec, &pair.Plan
 }
 
-// taskRuns lists the task's runs with their receipts served verbatim.
+// taskRuns lists the task's runs with their receipts served verbatim, bounded
+// by the same page cap as the list surface (drain D8): a task's runs are its
+// intake/compose/execute/verify legs plus any recovery successors, which is a
+// handful — but an unbounded read on the shared single connection is a
+// liveness risk whatever the expected shape, and expectation is not a bound.
 func (p *projector) taskRuns(ctx context.Context, taskID string) ([]TaskRunView, error) {
 	rows, err := p.db.QueryContext(ctx,
 		`SELECT r.run_id, r.state, r.created_ts, rc.usage_json
 		   FROM runs r LEFT JOIN receipts rc ON rc.run_id = r.run_id
-		  WHERE r.task_id = ? ORDER BY r.created_ts, r.run_id`, taskID)
+		  WHERE r.task_id = ? ORDER BY r.created_ts, r.run_id LIMIT ?`, taskID, readPageDefault)
 	if err != nil {
 		return nil, fmt.Errorf("projection: task runs %q: %w", taskID, err)
 	}
@@ -885,10 +918,20 @@ func (s *Server) handleRunReceipt(w http.ResponseWriter, r *http.Request) {
 // test asserts the PRODUCTION text rather than a paraphrase of it — a
 // paraphrase cannot catch a production query edited into a scan.
 //
-// It is served by migration 0015's run_events_run_type_idx (run_id, type,
-// event_seq): the index leads with run_id, filters on type, and delivers
-// event_seq order, which is the whole shape. No new index is needed and
-// migration 0017 is therefore not opened.
+// WHICH index serves it depends on the type count, and the first cut of this
+// comment got it wrong (drain D3). Measured by EXPLAIN QUERY PLAN:
+//
+//   - the ONE-type form seeks through migration 0015's run_events_run_type_idx
+//     (run_id=? AND type=?) — both columns are equality-usable;
+//   - the MULTI-type form (`type IN (?,?,?)`, which is what the production
+//     spawn-record and stage-progress reads use) seeks through migration
+//     0001's run_events_run_idx (run_id=?), with the type set as a residual
+//     filter inside the one run's rows.
+//
+// Both SEEK, which is the property that matters, and no new index is needed —
+// so migration 0017 is not opened. Crediting 0015 for the multi-type form
+// would have been a false attribution of the kind §36 D7 exists to prevent,
+// and the index test now pins FULL index names so a misattribution fails.
 func QueryRunEventsByType(types int) string {
 	return `SELECT event_seq, type, ts, payload FROM run_events WHERE run_id = ? AND type IN (` +
 		placeholders(types) + `) ORDER BY event_seq LIMIT ?`

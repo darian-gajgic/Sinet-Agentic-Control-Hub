@@ -14,11 +14,16 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // historyServer builds a server with the REAL query store over the fixture DB.
@@ -394,4 +399,253 @@ func stripGoComments(src string) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// ── drain round 1 ───────────────────────────────────────────────────────────
+
+// TestOperatorOnlyViewIsForbiddenNotInternal is drain D5. `task_project` has no
+// owner column, so the store refuses it to a member DELIBERATELY (S01.9). That
+// is an AuthZ refusal and must read as 403, not as a 500 that looks like the
+// platform broke. The transport decides on registry METADATA — the exported
+// View.OwnerColumn bit — never by matching an error string.
+func TestOperatorOnlyViewIsForbiddenNotInternal(t *testing.T) {
+	b := twoOwners(t)
+
+	code, body := historyGet(t, b, "alice", "/api/events/views/task_project")
+	if code != http.StatusForbidden {
+		t.Fatalf("member reading an operator-only view = %d, want 403: %s", code, body)
+	}
+	if !strings.Contains(body, "forbidden") {
+		t.Errorf("the refusal must be an AuthZ code: %s", body)
+	}
+	// The operator still reads it.
+	if code, body := historyGet(t, b, "op", "/api/events/views/task_project"); code != http.StatusOK {
+		t.Errorf("operator reading task_project = %d, want 200: %s", code, body)
+	}
+	// Non-tautological: the bit is the registry's, and an owner-scoped view is
+	// NOT refused to the same member.
+	if v, ok := history.ViewByName("task_project"); !ok || v.OwnerColumn != "" {
+		t.Fatalf("task_project must be the operator-only view in the registry: %+v", v)
+	}
+	if v, ok := history.ViewByName("cost_per_run"); !ok || v.OwnerColumn == "" {
+		t.Fatalf("cost_per_run must carry an owner column: %+v", v)
+	}
+	if code, _ := historyGet(t, b, "alice", "/api/events/views/cost_per_run"); code != http.StatusOK {
+		t.Errorf("an owner-scoped view must still serve a member: %d", code)
+	}
+}
+
+// seedSearchCorpus plants one searchable record per owner in the FTS corpus the
+// S14.10 search layer reads (drain D12). Without it both members matched zero
+// rows and the member-scope assertion proved nothing. The corpus is written
+// directly because internal/api does not import internal/retention (the
+// projector that maintains it) — the rows are the same shape it writes: a
+// bounded body, its kind, its ref and its owner.
+func seedSearchCorpus(t *testing.T, b *backend) {
+	t.Helper()
+	for _, c := range []struct{ ref, owner, text string }{
+		{"r-alice", "alice", "alice deployment note about the sqlite appreciation walkthrough"},
+		{"r-bob", "bob", "bob deployment note about the postgres appreciation walkthrough"},
+	} {
+		exec(t, b, `INSERT INTO history_fts (body, kind, ref, user_id) VALUES (?,?,?,?)`,
+			c.text, "run_summary", c.ref, c.owner)
+	}
+}
+
+// TestHistorySearchIsOwnerScopedOverARealCorpus is drain D12: the transport
+// search test was vacuous against an empty index. With a searchable row per
+// owner the member-scope assertion is real — each member matches their OWN row
+// and NOT the other's, and the operator matches both.
+func TestHistorySearchIsOwnerScopedOverARealCorpus(t *testing.T) {
+	b := twoOwners(t)
+	seedSearchCorpus(t, b)
+	const q = "deployment appreciation walkthrough"
+
+	op := decodeAnswer(t, historyGetOK(t, b, "op", "/api/events/search?q="+url.QueryEscape(q)))
+	if op.RowCount < 2 {
+		t.Fatalf("the operator must match both owners' rows, got %d: %s", op.RowCount, mustString(t, op.Rows))
+	}
+	for _, c := range []struct{ who, own, other string }{
+		{"alice", "r-alice", "r-bob"},
+		{"bob", "r-bob", "r-alice"},
+	} {
+		a := decodeAnswer(t, historyGetOK(t, b, c.who, "/api/events/search?q="+url.QueryEscape(q)))
+		rows := mustString(t, a.Rows)
+		if a.RowCount == 0 {
+			t.Errorf("%s matched nothing over a corpus containing their own row — empty is not scoped", c.who)
+		}
+		if !strings.Contains(rows, c.own) {
+			t.Errorf("%s: own row %q missing from %s", c.who, c.own, rows)
+		}
+		if strings.Contains(rows, c.other) {
+			t.Errorf("%s: search LEAKED another owner's row %q: %s", c.who, c.other, rows)
+		}
+	}
+}
+
+// openSQLServer builds a server whose history store has the FULL Layer-2 stack
+// wired (drain D4): a local.FakeServer standing in for the seat, a REAL
+// local.Duty over it, the real read-only handle and a real advisory run. It is
+// tier-F and costs $0 — the fake serves the completion, and the GUARDRAIL under
+// test is real. The seat-not-servable case skips rather than dials.
+//
+// This exists because the transport's load-bearing property — a refusal arrives
+// as a 200 ANSWER carrying its audit, never as a bare status — was previously
+// exercised only through the unavailable path. That path has no outcome branch
+// of its own, so a refactor that started mapping audited outcomes to statuses
+// would not have been caught.
+func openSQLServer(t *testing.T, b *backend, who string) (*api.Server, *local.FakeServer) {
+	t.Helper()
+	ctx := context.Background()
+	fake := local.NewFakeServer()
+	t.Cleanup(fake.Close)
+
+	if err := b.reg.Attach(ctx, b.db, b.log); err != nil {
+		t.Fatalf("settings Attach: %v", err)
+	}
+	duty := local.NewDuty(local.DutyDeps{
+		Registry:    local.NewRegistry(b.reg),
+		Client:      local.NewClient(fake.URL),
+		Checkpoints: gates.NewCheckpoints(b.db, b.log),
+		Events:      b.log,
+	})
+	seat, err := duty.ResolveSeat(local.AliasSQLOpen)
+	if err != nil {
+		t.Fatalf("resolve the %s seat: %v", local.AliasSQLOpen, err)
+	}
+	if !seat.Servable {
+		t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): the %s seat is not servable in this manifest (%s)", local.AliasSQLOpen, seat.Note)
+	}
+	ro, err := b.db.OpenReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+
+	runs := run.NewStore(b.db, b.log)
+	advisory := func(ctx context.Context, label string) (string, func()) {
+		id := "platform.advisory." + label + "." + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if _, err := runs.Create(ctx, run.NewRun{
+			ID: id, UserID: run.ActorPlatform, Lane: local.LaneLocal, Substrate: "local",
+		}); err != nil {
+			return "", nil
+		}
+		for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+			if _, err := runs.Transition(ctx, id, st, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+				return "", nil
+			}
+		}
+		return id, func() {
+			_, _ = runs.Transition(context.WithoutCancel(ctx), id, run.StateCompleted,
+				run.TransitionOptions{Actor: run.ActorPlatform})
+		}
+	}
+	st, err := history.New(history.Config{
+		DB: b.db, ReadOnly: ro, Log: b.log, Duty: duty, Advisory: advisory,
+	})
+	if err != nil {
+		t.Fatalf("history.New: %v", err)
+	}
+	return api.New(api.Config{
+		Log: b.log, Sessions: b.store, Auth: fixedIdentity{who},
+		Settings: fixedSettings{d: 20 * 1e9},
+		HealthFn: func() api.Health { return api.Health{Ready: true} },
+		DB:       b.db, Meter: fakeMeter{}, History: st,
+	}), fake
+}
+
+// TestLayer2RealRefusalArrivesAsAnAuditedAnswer is drain D4: a REAL guardrail
+// refusal — the seat emits a write statement, the guardrail refuses it — must
+// reach the client as a 200 answer carrying its audit block and its
+// lower-confidence flag, and must be recorded as a history.query_audited row.
+// A refusal that is not recorded has not been detected, and a refusal collapsed
+// into an HTTP status has thrown away the artifact the guardrail exists for.
+func TestLayer2RealRefusalArrivesAsAnAuditedAnswer(t *testing.T) {
+	b := twoOwners(t)
+	srv, fake := openSQLServer(t, b, "alice")
+
+	// The seat emits a statement that IS a well-formed SELECT and is refused on
+	// its merits: it reads a BASE TABLE, which is outside the allowlisted
+	// Layer-0 view set. This is the outcome branch the transport must carry —
+	// a statement was produced, judged and declined.
+	fake.SetResponse(local.FakeResponse{
+		Content:      "```sql\nSELECT payload FROM run_events\n```",
+		InputTokens:  40,
+		OutputTokens: 20,
+	})
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET",
+		"/api/events/open-sql?q="+url.QueryEscape("delete everything"), nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("a REFUSED Layer-2 attempt must arrive as an answer, got %d: %s", rr.Code, rr.Body)
+	}
+	a := decodeAnswer(t, rr.Body.String())
+	if a.Layer != 2 || a.Confidence != "lower-confidence" {
+		t.Errorf("a refused answer is still flagged: layer %d confidence %q", a.Layer, a.Confidence)
+	}
+	if a.Audit == nil || a.Audit.Refusal == "" {
+		t.Fatalf("the refusal must ride the answer with its reason: %s", rr.Body)
+	}
+	if a.Audit.Outcome != history.OutcomeRefused {
+		t.Fatalf("audit outcome = %q, want %q — this case exercises the REFUSED branch specifically", a.Audit.Outcome, history.OutcomeRefused)
+	}
+	if !strings.Contains(a.Audit.Refusal, "run_events") {
+		t.Errorf("the refusal must name what it declined, got %q", a.Audit.Refusal)
+	}
+
+	// The attempt is recorded, scoped to the asker, with the refusal in it.
+	var owner, payload string
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT user_id, payload FROM run_events WHERE type = ? ORDER BY event_seq DESC LIMIT 1`,
+		history.EventQueryAudited).Scan(&owner, &payload); err != nil {
+		t.Fatalf("no history.query_audited row for the refused attempt: %v", err)
+	}
+	if owner != "alice" {
+		t.Errorf("the audit row is scoped to %q, want the asker", owner)
+	}
+	if !strings.Contains(payload, "refused") {
+		t.Errorf("the audit row does not record the refusal: %s", payload)
+	}
+
+	// And nothing of the household's was disturbed. The advisory run the duty
+	// call meters against is an EXPECTED platform-scope addition (S12.1 R18:
+	// every local call writes one D7 checkpoint on a consuming run), so the
+	// assertion is over the owners' own rows rather than a raw table count.
+	var n int
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runs WHERE user_id IN ('alice','bob')`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("the household's runs were disturbed (%d rows, err %v)", n, err)
+	}
+}
+
+// TestLayer2RealAcceptedStatementAnswersOverHTTP is the non-tautological
+// control for the test above: the SAME rig with a legitimate statement must
+// EXECUTE and return rows, so the refusal case is not passing because the whole
+// path is broken.
+func TestLayer2RealAcceptedStatementAnswersOverHTTP(t *testing.T) {
+	b := twoOwners(t)
+	receiptsFixture(t, b)
+	srv, fake := openSQLServer(t, b, "op")
+
+	fake.SetResponse(local.FakeResponse{
+		Content:      "```sql\nSELECT run_id, user_id FROM cost_per_run\n```",
+		InputTokens:  40,
+		OutputTokens: 20,
+	})
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET",
+		"/api/events/open-sql?q="+url.QueryEscape("what did each run cost"), nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body)
+	}
+	a := decodeAnswer(t, rr.Body.String())
+	if a.Audit == nil || a.Audit.Outcome != "executed" {
+		t.Fatalf("the control statement must EXECUTE, got %+v: %s", a.Audit, rr.Body)
+	}
+	if a.RowCount == 0 {
+		t.Errorf("the executed control returned no rows: %s", rr.Body)
+	}
+	if a.Confidence != "lower-confidence" {
+		t.Errorf("even a successful Layer-2 answer is flagged: %q", a.Confidence)
+	}
 }
