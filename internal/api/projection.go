@@ -563,7 +563,24 @@ const (
 	benchmarkAlarmType     = "benchmark.alarm"
 	benchmarkPairRendered  = "rendered"
 	benchmarkAlarmActionUp = "raise"
+	// The two TERMINAL pair states: a pair that has written its §14 record is
+	// done, whichever way it ended, and no card derives from one.
+	benchmarkPairRecorded = "recorded"
+	benchmarkPairDeclined = "declined"
 )
+
+// terminalRunStates is the S02.3 set of run states that admit no further
+// transition — the same set run.IsTerminal computes, duplicated here because the
+// failed-pair derivation needs it inside a SQL filter and internal/api imports no
+// producer package. It is not a second definition of record: a test in this
+// package cross-checks every entry against run.IsTerminal over the full stored
+// vocabulary, so an FSM edge added later fails loudly here instead of silently
+// changing which pairs read as failed.
+//
+// `crashed` is deliberately ABSENT, exactly as the driver's own wait is: S02.5
+// makes recovery the owner of a crashed run's disposition, so a crashed arm is
+// still being decided and its pair is not yet stuck.
+var terminalRunStates = []string{"completed", "finalized", "tombstoned", "died-at-gate"}
 
 // InboxSnapshot is the `inbox` topic projection (§3): open asks + proposed
 // approvals + OPEN watchdog flags (B5-3) + RED conformance cards (B5-4) + open
@@ -577,10 +594,17 @@ type InboxSnapshot struct {
 	DriftCards        []InboxDriftCard        `json:"drift_cards"`
 	BenchmarkVerdicts []InboxBenchmarkVerdict `json:"benchmark_verdicts"`
 	BenchmarkAlarms   []InboxBenchmarkAlarm   `json:"benchmark_alarms"`
+	// BenchmarkFailedPairs is the EIGHTH kind (B6-2C drain r1): a sampled pair
+	// whose §2 direct arm ended without producing anything, so the pair can never
+	// be rendered and never be voted on. It is derived ENTIRELY from state that
+	// already exists — no side store, no new pair state, no new event type, no
+	// schema change — and it exists because the alternative is a pair that is
+	// invisible to everyone and retried by the driver forever.
+	BenchmarkFailedPairs []InboxBenchmarkFailedPair `json:"benchmark_failed_pairs"`
 }
 
 func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot, error) {
-	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []InboxDriftCard{}, BenchmarkVerdicts: []InboxBenchmarkVerdict{}, BenchmarkAlarms: []InboxBenchmarkAlarm{}}
+	out := InboxSnapshot{Asks: []InboxAsk{}, Approvals: []InboxApproval{}, WatchdogFlags: []InboxWatchdogFlag{}, ConformanceCards: []InboxConformanceCard{}, DriftCards: []InboxDriftCard{}, BenchmarkVerdicts: []InboxBenchmarkVerdict{}, BenchmarkAlarms: []InboxBenchmarkAlarm{}, BenchmarkFailedPairs: []InboxBenchmarkFailedPair{}}
 
 	aq := `SELECT ask_id, run_id, status, observed_ts FROM asks WHERE answered_ts IS NULL`
 	aargs := []any{}
@@ -654,6 +678,12 @@ func (p *projector) inbox(ctx context.Context, scope ownerScope) (InboxSnapshot,
 	}
 	out.BenchmarkVerdicts = verdicts
 
+	failed, err := p.benchmarkFailedPairs(ctx, scope)
+	if err != nil {
+		return out, err
+	}
+	out.BenchmarkFailedPairs = failed
+
 	alarms, err := p.benchmarkAlarms(ctx, scope)
 	if err != nil {
 		return out, err
@@ -698,6 +728,93 @@ func (p *projector) benchmarkVerdicts(ctx context.Context, scope ownerScope) ([]
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// InboxBenchmarkFailedPair is one sampled pair whose BENCH-REG §2 direct arm
+// ended without producing anything — the pair can never be rendered blind, so it
+// can never be voted on, and it is not going to fix itself (B6-2C drain r1).
+//
+// It exists because the honest alternative to a fake completion is a VISIBLE
+// stuck pair, not an invisible one. Before this card the driver retried the
+// render every minute forever and no surface showed the requester anything; now
+// the state that makes it impossible is exactly what surfaces it, and the ONE
+// action is the landed decline — a human closing the pair with its §14 record,
+// which is how a pair that cannot complete is supposed to end (§4.2.5).
+//
+// It is a pure DERIVATION over rows that already exist: pair not yet terminal +
+// its direct-arm run terminal + no capture. No side store, no new pair state, no
+// new event type, no schema change — and no arm identity, exactly like the
+// pending-verdict card it sits beside (BENCH-REG §3.4: this pair may still be
+// declined, and a decline is a pre-record act).
+type InboxBenchmarkFailedPair struct {
+	PairID    string    `json:"pair_id"`
+	Owner     string    `json:"owner"`
+	Domain    string    `json:"domain"`
+	TaskID    string    `json:"task_id"`
+	SampledTS time.Time `json:"sampled_ts"`
+	// ArmState is the direct-arm run's own terminal state — the platform's
+	// account of HOW the arm ended, carried so the card explains itself rather
+	// than asserting a failure with no evidence. It is a closed-vocabulary FSM
+	// value, never a payload string.
+	ArmState string `json:"arm_state"`
+	// Reason is the honest story in one line: what happened, what it means for
+	// the pair, and what the person can do about it.
+	Reason string `json:"reason"`
+}
+
+// benchmarkFailedPairs derives the eighth inbox kind. Owner-scoped to the
+// REQUESTER exactly as the pending-verdict card is: it is their pair, their
+// deliverable and their decline to make; the operator sees all, as everywhere
+// (S01.9).
+//
+// The terminal-arm filter runs in GO rather than in SQL, over run.IsTerminal's
+// own vocabulary mirrored in terminalRunStates, so the SQL stays a plain join and
+// the state set has one cross-checked home.
+func (p *projector) benchmarkFailedPairs(ctx context.Context, scope ownerScope) ([]InboxBenchmarkFailedPair, error) {
+	q := `SELECT b.pair_id, b.user_id, b.domain, b.task_id, b.sampled_ts, r.state
+	        FROM benchmark_pairs b JOIN runs r ON r.run_id = b.direct_run_id
+	       WHERE b.state NOT IN (?, ?) AND b.direct_text IS NULL`
+	args := []any{benchmarkPairRecorded, benchmarkPairDeclined}
+	if !scope.Operator {
+		q += ` AND b.user_id = ?`
+		args = append(args, scope.UserID)
+	}
+	q += ` ORDER BY b.sampled_ts, b.pair_id`
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: benchmark failed pairs: %w", err)
+	}
+	defer rows.Close()
+	out := []InboxBenchmarkFailedPair{}
+	for rows.Next() {
+		var (
+			c       InboxBenchmarkFailedPair
+			sampled string
+		)
+		if err := rows.Scan(&c.PairID, &c.Owner, &c.Domain, &c.TaskID, &sampled, &c.ArmState); err != nil {
+			return nil, fmt.Errorf("projection: benchmark failed-pair scan: %w", err)
+		}
+		if !isTerminalRunState(c.ArmState) {
+			continue // the arm has not ended, or recovery still owns its disposition
+		}
+		c.SampledTS = parseTS(sampled)
+		c.Reason = "the single-shot direct arm of this benchmark pair ended in state " + c.ArmState +
+			" without producing an answer, so the pair can never be shown as a blind comparison. " +
+			"Declining closes it with its record — declines are counted and reported, so a pair that " +
+			"could not run is visible rather than silently missing (BENCH-REG §2/§4.2.5)."
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// isTerminalRunState reports whether an FSM state admits no further transition.
+func isTerminalRunState(state string) bool {
+	for _, s := range terminalRunStates {
+		if s == state {
+			return true
+		}
+	}
+	return false
 }
 
 // benchmarkAlarms derives the standing BENCH-REG §12 alarms: the latest

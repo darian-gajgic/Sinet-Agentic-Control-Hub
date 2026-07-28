@@ -192,6 +192,14 @@ func Run(ctx context.Context, opts Options) error {
 			Effects:     effects,
 			Settings:    reg,
 			Logger:      logger,
+			// The B6-2C fork-refusal seam: a crashed BENCH-REG §2 direct arm is
+			// FINALIZED, never forked. §2's "run once, single-shot, no retries" is
+			// frozen registered text, and a fork would be a second billed engine
+			// run on the same statement whose output the capture could not take
+			// anyway (it is keyed on the parent run id). internal/recovery names
+			// no run class of its own — the convention lives in internal/stage and
+			// is composed here, where both packages are visible.
+			NoFork: stage.IsDirectArmRun,
 			// Units/Harvest default to the B0 probes: real systemd and
 			// engine-store observation arrive with run units and adapters
 			// (B1, Spec S02.5 step 1, S03).

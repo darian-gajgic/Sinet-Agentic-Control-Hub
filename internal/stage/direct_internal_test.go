@@ -402,6 +402,36 @@ func TestDirectArmTakesWhatComes(t *testing.T) {
 	}
 }
 
+// TestCrashedArmCapturesNothing is the drain-r1 correction (D2): a crash is
+// different in KIND from a truncation. An engine that died — or never spawned —
+// did not answer the frozen statement at all, so capturing an empty string would
+// render "the platform versus a platform failure" and ask a person to vote on
+// it. The capture stays absent, which is what makes the pair a visible
+// failed-pair card instead of a fake comparison.
+func TestCrashedArmCapturesNothing(t *testing.T) {
+	a := &directAdapter{startErr: errors.New("the engine binary is not there")}
+	e := newDirectEnv(t, a)
+	r := e.seedDirectRun(t, "bp-9.direct", "t-9", "alice")
+
+	if err := e.sk.Dispatch(context.Background(), r); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if got := e.captures(); len(got) != 0 {
+		t.Fatalf("a crashed arm captured %q — an engine that never answered must not render as an empty answer", got)
+	}
+	cur, err := e.runs.Get(context.Background(), r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.State != run.StateCrashed {
+		t.Errorf("the crashed arm's run is %s, want crashed — the FSM records what happened", cur.State)
+	}
+	// Still single-shot: a crash is not a reason to try again.
+	if got := len(e.started(t)); got != 1 {
+		t.Errorf("the arm was attempted %d times after a crash — §2 has no retry", got)
+	}
+}
+
 // TestDirectArmRefusesWithoutItsSeams: a `.direct` run in a process with no
 // benchmark composition fails LOUDLY. The only thing servable without the
 // statement seam is a prompt the platform invented, and an arm answering a

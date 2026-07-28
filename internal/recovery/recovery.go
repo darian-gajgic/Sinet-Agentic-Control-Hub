@@ -59,8 +59,21 @@ type Config struct {
 	Units       UnitLiveness
 	Harvest     HarvestSource
 	Settings    Settings
-	Logger      *slog.Logger
-	Now         func() time.Time
+	// NoFork names the run classes whose crashed disposition is FINALIZE rather
+	// than the step-3 default fork. It is a PREDICATE SEAM composed at the shell
+	// root (this package imports nothing of the classes it names), nil meaning
+	// "every crashed run takes the ordinary ladder" — the pre-B6-2C behavior
+	// exactly.
+	//
+	// The one class at v0 is the BENCH-REG §2 direct arm. §2 is frozen: the arm
+	// runs ONCE, single-shot, "no retries, no follow-up turns, take what comes".
+	// A fork is a SECOND billed engine run on the same frozen statement, and its
+	// output could never be used anyway (the capture is keyed on the parent run
+	// id), so forking one would spend the requester's own budget to produce
+	// nothing while breaking the protocol the spend exists to measure.
+	NoFork func(runID string) bool
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // Ladder is the reconcile pass. It satisfies shell.RecoveryLadder.
@@ -514,6 +527,36 @@ func (l *Ladder) reconcileCrashed(ctx context.Context, now time.Time, staleFinal
 // caller's transaction.
 func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, interrupted time.Duration, staleFinalize time.Duration, maxAttempts int64, rpt *Report) error {
 	switch {
+	case l.cfg.NoFork != nil && l.cfg.NoFork(crashed.ID):
+		// PER-EDGE CITATION (crashed→finalized, a ratified S02.3 edge): for a
+		// no-fork run class the class's own contract OUTRANKS the step-3 default
+		// disposition. The v0 class is the BENCH-REG §2 direct arm, whose "run
+		// once, single-shot, no retries" is FROZEN registered text — so a fork
+		// here would not be a recovery, it would be a protocol breach that also
+		// bills the requester a second time for an output nothing can consume.
+		// Finalize-with-card is the honest terminal: the run ended, it ended
+		// badly, and the record says so. Its partial spend is already on the
+		// ledger and the checkpoints, so nothing is lost by not re-running it.
+		detail, err := json.Marshal(struct {
+			InterruptedS int64  `json:"interrupted_s"`
+			Card         string `json:"card"`
+			NoFork       string `json:"no_fork_reason"`
+		}{int64(interrupted.Seconds()),
+			"finalized-with-card: this run class is never forked",
+			"single-shot run class: the class contract outranks the S02.5 step-3 default fork (BENCH-REG §2 for the direct arm)"})
+		if err != nil {
+			return fmt.Errorf("recovery: marshal no-fork finalize detail: %w", err)
+		}
+		if _, err := l.cfg.Runs.TransitionTx(ctx, tx, crashed.ID, run.StateFinalized, run.TransitionOptions{
+			Reason: "recovery: single-shot run class is finalized, never forked (Spec S02.5 step 3; BENCH-REG §2)",
+			Actor:  run.ActorPlatform,
+			Detail: detail,
+		}); err != nil {
+			return err
+		}
+		rpt.Finalized++
+		return nil
+
 	case interrupted > staleFinalize:
 		// Finalize-with-card rather than blind resume (Spec S02.5 step 3;
 		// the S02.6 freshness pass precedes any RESUME regardless — here

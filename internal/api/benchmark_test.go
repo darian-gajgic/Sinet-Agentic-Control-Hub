@@ -22,6 +22,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
@@ -493,9 +494,13 @@ func TestPartCShapesNeverPercent(t *testing.T) {
 // ── counters (rubric 20) ───────────────────────────────────────────────────
 
 // TestPartCCountersArePinned holds the tally this packet is allowed to move and
-// the ones it is not: the ⚙ registry is byte-unchanged (118/33), the adoption
-// lock is unchanged (21), and exactly ONE migration is added — 0018 — with
-// user_version following it.
+// the ones it is not: the ⚙ registry is byte-unchanged (118/33), and exactly ONE
+// migration is added — 0018 — with user_version following it.
+//
+// The ADOPTION LOCK is deliberately NOT asserted here (drain r1, D4). `go run
+// ./tools/lockgate` is the real gate and it checks coverage in both directions;
+// a hand-counted "21" in this file would be a second, weaker authority that
+// could pass while the real gate failed. The count belongs to lockgate.
 func TestPartCCountersArePinned(t *testing.T) {
 	reg := settings.New()
 	decls := reg.Decls()
@@ -527,4 +532,100 @@ func TestPartCCountersArePinned(t *testing.T) {
 			t.Errorf("unexpected migration %q — part C adds exactly 0018", filepath.Base(p))
 		}
 	}
+}
+
+// ── drain r1: the eighth kind (D2) ──────────────────────────────────────────
+
+// TestTerminalRunStatesAgreeWithTheFSM: the failed-pair derivation needs the
+// terminal-state set inside a SQL-shaped filter, so internal/api mirrors it. The
+// mirror is CROSS-CHECKED against run.IsTerminal here — the one definition of
+// record — over the whole stored vocabulary, so an FSM edge added later fails
+// loudly instead of silently changing which pairs read as failed.
+func TestTerminalRunStatesAgreeWithTheFSM(t *testing.T) {
+	stored := []run.State{
+		run.StateNew, run.StateQueued, run.StateClaimed, run.StateRunning, run.StateParked,
+		run.StateDraining, run.StateCompleted, run.StateCrashed, run.StateFinalized,
+		run.StateTombstoned, run.StateDiedAtGate,
+	}
+	mirrored := map[string]bool{}
+	for _, s := range api.TerminalRunStatesForTest() {
+		mirrored[s] = true
+	}
+	for _, st := range stored {
+		if want, got := run.IsTerminal(st), mirrored[string(st)]; want != got {
+			t.Errorf("state %q: run.IsTerminal=%v but the api mirror says %v", st, want, got)
+		}
+	}
+	// `crashed` is deliberately excluded on BOTH sides: recovery owns a crashed
+	// run's disposition, so a crashed arm's pair is still being decided.
+	if mirrored[string(run.StateCrashed)] {
+		t.Error("the mirror treats `crashed` as terminal — recovery still owns that run")
+	}
+}
+
+// TestFailedPairCardIsRequesterOwnedAndOffersTheDecline: the eighth kind is a
+// pure derivation over existing rows and carries the same authority rule as the
+// verdict card it replaces — the requester closes it, the operator sees it.
+func TestFailedPairCardIsRequesterOwnedAndOffersTheDecline(t *testing.T) {
+	e := newBenchEnv(t)
+	// A dispatched pair whose direct arm ended terminal with NO capture.
+	exec(t, e.b, `INSERT INTO benchmark_pairs
+	    (pair_id, user_id, domain, task_id, deliverable_id, phase, rate_pct, sampled_ts, state, direct_run_id, updated_ts)
+	    VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		"bp-stranded", "alice", "software-development", "t-alice", "d-2", "pre-gate", 100,
+		nowTS(), "dispatched", "bp-stranded.direct", nowTS())
+	seedRun(t, e.b, "bp-stranded.direct", "alice", "t-alice", "finalized", "anthropic")
+
+	card := findCard(t, e, "alice", "benchmark_verdict:bp-stranded")
+	if !card.Answerable {
+		t.Error("the requester cannot close their own stranded pair")
+	}
+	if len(card.Actions) != 1 || card.Actions[0] != "decline" {
+		t.Errorf("the card offers %v, want only the landed decline", card.Actions)
+	}
+	if card.Tier != "low" {
+		t.Errorf("the card is tier %q — nothing is at risk and nothing is blocked", card.Tier)
+	}
+	if card.Batchable || card.StepUpRequired {
+		t.Error("closing a failed pair claims a batch or a step-up neither verb implements")
+	}
+	if !strings.Contains(string(card.Card), "finalized") {
+		t.Errorf("the card does not carry the arm's own terminal state: %s", card.Card)
+	}
+	// The operator SEES it and cannot close it; another member sees nothing.
+	if op := findCard(t, e, "op", "benchmark_verdict:bp-stranded"); op.Answerable {
+		t.Error("the operator's copy reads answerable — closing it is the requester's act")
+	}
+	for _, it := range listItems(t, e, "bob") {
+		if it.ID == "benchmark_verdict:bp-stranded" {
+			t.Error("another member sees alice's stranded pair")
+		}
+	}
+	// A pair whose arm is still CRASHED is NOT a card yet: recovery owns it.
+	exec(t, e.b, `UPDATE runs SET state = 'crashed' WHERE run_id = ?`, "bp-stranded.direct")
+	for _, it := range listItems(t, e, "alice") {
+		if it.ID == "benchmark_verdict:bp-stranded" {
+			t.Error("a pair whose arm is still crashed shows a failed card — recovery has not dispositioned it yet")
+		}
+	}
+}
+
+func listItems(t *testing.T, e *benchEnv, who string) []api.ApprovalItem {
+	t.Helper()
+	var list api.ApprovalList
+	if err := json.Unmarshal([]byte(e.mustDo(t, who, "GET", "/api/approvals", "")), &list); err != nil {
+		t.Fatalf("decode approvals: %v", err)
+	}
+	return list.Items
+}
+
+func findCard(t *testing.T, e *benchEnv, who, id string) api.ApprovalItem {
+	t.Helper()
+	for _, it := range listItems(t, e, who) {
+		if it.ID == id {
+			return it
+		}
+	}
+	t.Fatalf("%s sees no card %q", who, id)
+	return api.ApprovalItem{}
 }

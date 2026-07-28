@@ -14,6 +14,7 @@ package shell
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
@@ -29,6 +31,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -71,6 +74,8 @@ type driverEngine struct {
 	starts int
 	text   string
 	kind   adapters.OutcomeKind
+	// startErr crashes the spawn — the arm never answers at all.
+	startErr error
 }
 
 func (e *driverEngine) Substrate() string { return adapters.SubstrateClaudeCLI }
@@ -82,6 +87,9 @@ func (e *driverEngine) Start(_ context.Context, req adapters.StartRequest) (adap
 	// frozen statement and nothing else reached it.
 	if req.Worker.Prompt != driverStatement {
 		return nil, errors.New("the direct arm was handed something other than the frozen statement: " + req.Worker.Prompt)
+	}
+	if e.startErr != nil {
+		return nil, e.startErr
 	}
 	return driverSession{text: e.text, kind: e.kind}, nil
 }
@@ -101,6 +109,7 @@ type driverEnv struct {
 	log    *eventlog.Log
 	runs   *run.Store
 	sched  *scheduler.Scheduler
+	ladder *recovery.Ladder
 	bs     *benchmarkSurface
 	engine *driverEngine
 
@@ -163,6 +172,21 @@ func newDriverEnv(t *testing.T, engine *driverEngine) *driverEnv {
 	}
 	sk.Bind(sched)
 	e.sched = sched
+
+	// The recovery ladder, composed with the B6-2C fork-refusal predicate exactly
+	// as shell.Run composes it.
+	journal, err := gates.NewJournal(gates.JournalConfig{DB: db, Settings: reg})
+	if err != nil {
+		t.Fatalf("gates.NewJournal: %v", err)
+	}
+	ladder, err := recovery.New(recovery.Config{
+		DB: db, Log: log, Runs: runs, Checkpoints: gates.NewCheckpoints(db, log),
+		Effects: journal, Settings: reg, NoFork: stage.IsDirectArmRun,
+	})
+	if err != nil {
+		t.Fatalf("recovery.New: %v", err)
+	}
+	e.ladder = ladder
 
 	evalStore := evals.NewStore(db, conformance.NewStore(db, log, reg), reg)
 	bs, err := buildBenchmarkSurface(ctx, db, log, reg, runs, sched, meterLedger, evalStore, nil, nil, testLogger())
@@ -516,4 +540,210 @@ func TestDirectArmSeamsRefuseWhenUnbound(t *testing.T) {
 	if took {
 		t.Error("a capture for a run no pair claims must take nothing")
 	}
+}
+
+// ── drain r1: the crashed arm, end to end (D1 + D2) ─────────────────────────
+
+// TestCrashedArmIsNeverForkedAndItsPairBecomesCloseable is the drain's whole
+// story in one walk, over the real composition:
+//
+//	the §2 arm crashes → the ladder FINALIZES it instead of forking (a fork would
+//	be a second billed run on the same frozen statement) → the capture stays
+//	absent → the driver stops visiting the pair instead of retrying forever → the
+//	requester sees a card that explains it → they decline → the pair closes with
+//	its §14 record and leaves every list.
+func TestCrashedArmIsNeverForkedAndItsPairBecomesCloseable(t *testing.T) {
+	e := newDriverEnv(t, &driverEngine{startErr: errors.New("no engine here")})
+	e.operator(t, "op")
+	pair := e.seedPair(t, "bp-20", "t-20", "alice")
+	e.seedPair(t, "bp-21", "t-21", "bob") // another member's pair, never touched
+	ctx := context.Background()
+
+	e.pass(t)
+	e.claim(t)
+
+	// The arm crashed and produced nothing.
+	armID := benchmark.DirectRunID(pair.PairID)
+	armRun, err := e.runs.Get(ctx, armID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if armRun.State != run.StateCrashed {
+		t.Fatalf("the arm ended %s, want crashed", armRun.State)
+	}
+	if _, err := e.bs.Store.CapturedDirectText(ctx, armID); !errors.Is(err, benchmark.ErrNoDirectCapture) {
+		t.Fatalf("a crashed arm left a capture (%v) — an engine that never answered must not render as an answer", err)
+	}
+
+	// D1: the ladder finalizes it. No fork, no second engine run, ever.
+	if _, err := e.ladder.ReconcilePass(ctx); err != nil {
+		t.Fatalf("ReconcilePass: %v", err)
+	}
+	armRun, err = e.runs.Get(ctx, armID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if armRun.State != run.StateFinalized {
+		t.Fatalf("the crashed arm is %s after recovery, want finalized (BENCH-REG §2 outranks the fork default)", armRun.State)
+	}
+	var successors int
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM runs WHERE parent_run_id = ?`, armID).Scan(&successors); err != nil {
+		t.Fatal(err)
+	}
+	if successors != 0 {
+		t.Fatalf("%d fork(s) of the direct arm exist — §2 is single-shot", successors)
+	}
+
+	// D2(a): the driver stops visiting it. Several passes change nothing and the
+	// engine is never reached again. (Both members' arms were dispatched, so the
+	// count is compared against itself rather than pinned to a literal.)
+	attempted := e.engine.started()
+	for range 3 {
+		e.pass(t)
+	}
+	if got := e.pair(t, pair.PairID); got.State != benchmark.StateDispatched {
+		t.Fatalf("the stranded pair moved to %s — nothing may advance it synthetically", got.State)
+	}
+	if e.engine.started() != attempted {
+		t.Fatalf("the engine ran again (%d → %d) — a crashed arm is never re-attempted",
+			attempted, e.engine.started())
+	}
+
+	// D2(b): the requester sees a card that says what happened; another member
+	// does not; the operator does (the landed inbox scoping).
+	card := failedPairCard(t, e, "alice", pair.PairID)
+	if !card.Answerable {
+		t.Error("the requester cannot act on their own failed pair")
+	}
+	if !containsStr(card.Actions, "decline") {
+		t.Errorf("the failed-pair card offers %v, want the landed decline verb", card.Actions)
+	}
+	for _, want := range []string{"single-shot direct arm", "can never be shown", string(run.StateFinalized)} {
+		if !strings.Contains(string(card.Card), want) {
+			t.Errorf("the card does not carry the honest story (%q): %s", want, card.Card)
+		}
+	}
+	// Another member sees their OWN stranded pair and never alice's — the
+	// non-tautological direction, since bob's arm crashed in the same pass.
+	bobSees := listKinds(t, e, "bob", "benchmark_verdict")
+	if len(bobSees) != 1 || bobSees[0].ID != "benchmark_verdict:bp-21" {
+		t.Errorf("bob's inbox is %v, want exactly his own failed pair", bobSees)
+	}
+	if opSees := failedPairCard(t, e, "op", pair.PairID); opSees.Answerable {
+		t.Error("the operator's copy of the card reads answerable — closing it is the requester's act")
+	}
+
+	// D2(c): the decline closes it, with its §14 record.
+	e.mustDo(t, "alice", "POST", "/api/approvals/benchmark_verdict:"+pair.PairID+"/decline", `{}`)
+	if got := e.pair(t, pair.PairID); got.State != benchmark.StateDeclined {
+		t.Fatalf("the pair is %s after the decline", got.State)
+	}
+	if n := e.recordedEvents(t, benchmark.EventPairRecorded, pair.PairID); n != 1 {
+		t.Fatalf("the closed pair wrote %d §14 records, want exactly 1", n)
+	}
+	// The crash CAUSE stays derivable without extending the registered §14
+	// schema: the record names the direct run, and the run's own state says how
+	// it ended.
+	rec, err := e.bs.Practice.Reveal(ctx, pair.PairID)
+	if err != nil {
+		t.Fatalf("Reveal of the decline record: %v", err)
+	}
+	if rec.DirectRunID != armID {
+		t.Errorf("the record names direct run %q — the join to the arm's state is how the cause stays derivable", rec.DirectRunID)
+	}
+	if !rec.Declined {
+		t.Error("the closing record is not marked declined")
+	}
+
+	// And the card is gone from every list, for everybody.
+	if got := listKinds(t, e, "alice", "benchmark_verdict"); len(got) != 0 {
+		t.Errorf("the closed pair still shows %d card(s)", len(got))
+	}
+	if got := listKinds(t, e, "op", "benchmark_verdict"); len(got) != 1 || got[0].ID != "benchmark_verdict:bp-21" {
+		t.Errorf("the operator's inbox is %v, want only the pair still open", got)
+	}
+	e.pass(t)
+	if got := e.pair(t, pair.PairID); got.State != benchmark.StateDeclined {
+		t.Errorf("a driver pass disturbed a closed pair: %s", got.State)
+	}
+}
+
+// TestDispatchIsSingleShotEvenWhenStateIsFlippedBack is the drain-r1 probe for
+// D3. The precise property is NOT "the PK refuses a second row" — pair.go
+// deliberately tolerates run.ErrExists for B5-7 crash-resume idempotency — it is
+// that no second arm RUN can exist. Flipping a dispatched pair back to `sampled`
+// by hand (a corrupted row, an operator at a SQL prompt) re-enters the dispatch,
+// and the walk still ends with one run, one queue row and one engine execution.
+func TestDispatchIsSingleShotEvenWhenStateIsFlippedBack(t *testing.T) {
+	e := newDriverEnv(t, &driverEngine{text: driverArmAnswer})
+	pair := e.seedPair(t, "bp-22", "t-22", "alice")
+	ctx := context.Background()
+
+	e.pass(t)
+	e.claim(t)
+
+	// The hostile fixture: the pair's state is put back by hand.
+	if err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`UPDATE benchmark_pairs SET state = ? WHERE pair_id = ?`, benchmark.StateSampled, pair.PairID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.pass(t)  // re-dispatches
+	e.claim(t) // and would re-run the arm if anything let it
+
+	var runRows, queueRows int
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM runs WHERE run_id LIKE ?`, pair.PairID+".direct%").Scan(&runRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM queue WHERE run_id = ?`, benchmark.DirectRunID(pair.PairID)).Scan(&queueRows); err != nil {
+		t.Fatal(err)
+	}
+	if runRows != 1 || queueRows != 1 {
+		t.Errorf("%d run rows / %d queue rows after a state flip-back, want 1 / 1", runRows, queueRows)
+	}
+	if e.engine.started() != 1 {
+		t.Fatalf("the engine executed %d times after a state flip-back — no second arm RUN may exist (BENCH-REG §2)", e.engine.started())
+	}
+}
+
+// failedPairCard reads one caller's approvals list and returns the card for a
+// pair, through the REAL handler.
+func failedPairCard(t *testing.T, e *driverEnv, who, pairID string) api.ApprovalItem {
+	t.Helper()
+	for _, it := range listKinds(t, e, who, "benchmark_verdict") {
+		if it.ID == "benchmark_verdict:"+pairID {
+			return it
+		}
+	}
+	t.Fatalf("%s sees no card for pair %q", who, pairID)
+	return api.ApprovalItem{}
+}
+
+func listKinds(t *testing.T, e *driverEnv, who, kind string) []api.ApprovalItem {
+	t.Helper()
+	var list api.ApprovalList
+	if err := json.Unmarshal([]byte(e.mustDo(t, who, "GET", "/api/approvals", "")), &list); err != nil {
+		t.Fatalf("decode approvals: %v", err)
+	}
+	var out []api.ApprovalItem
+	for _, it := range list.Items {
+		if it.Kind == kind {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func containsStr(hay []string, needle string) bool {
+	for _, s := range hay {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }

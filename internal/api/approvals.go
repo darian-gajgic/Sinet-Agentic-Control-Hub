@@ -338,6 +338,18 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 			"a blind-pair verdict is its REQUESTER's own judgement and is not delegable — you can see the card and cannot vote it (POST /api/approvals/{id}/verdict, BENCH-REG §3.3)")
 		out = append(out, it)
 	}
+	for _, f := range snap.BenchmarkFailedPairs {
+		// The eighth kind (drain r1). Low tier: nothing is at risk and nothing is
+		// blocked — the pair is already over, and the card exists so a person can
+		// close it rather than so they must hurry. It rides the SAME verdict-card
+		// id space, because it is the same pair and the verb that closes it is the
+		// landed decline.
+		it := oversightItem(approvalKindVerdict, f.PairID, f.Owner, "", tierLow, f.SampledTS, f)
+		it.Actions = []string{benchmarkActionDecline}
+		setAnswerable(&it, mayAnswerVerdict(scope, f.Owner),
+			"closing a failed benchmark pair is its REQUESTER's own act (POST /api/approvals/{id}/decline, BENCH-REG §4.2.5)")
+		out = append(out, it)
+	}
 	for _, a := range snap.BenchmarkAlarms {
 		it := oversightItem(approvalKindAlarm, a.Domain+"#"+a.EpochID, platformOwner, "",
 			tierHigh, a.RaisedTS, redactBenchmarkAlarm(a))

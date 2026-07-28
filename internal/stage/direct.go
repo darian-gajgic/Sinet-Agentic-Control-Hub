@@ -60,6 +60,20 @@ const RunSuffixDirect = ".direct"
 // roleDirect is the §2 direct-arm leg's dispatch role.
 const roleDirect role = "direct"
 
+// IsDirectArmRun reports whether a run id names a BENCH-REG §2 direct arm. It is
+// the ONE definition of the convention: Skeleton.Dispatch routes on it, and the
+// composition root hands it to the recovery ladder as the NoFork predicate — so
+// "which runs are single-shot" is one fact with one home, and the router and the
+// fork-refusal can never disagree about a run.
+//
+// Recovery forks append `.gN` segments, so the check tolerates them: a fork that
+// somehow exists must still be recognized as a direct arm rather than routed as
+// an unknown role. With the NoFork predicate composed, none should ever exist.
+func IsDirectArmRun(runID string) bool {
+	rl, ok := runRole(runID)
+	return ok && rl == roleDirect
+}
+
 // directStage names the leg's per-run work/cwd directory. The direct arm is one
 // session, so it has exactly one.
 const directStage = "direct"
@@ -149,12 +163,26 @@ func (s *Skeleton) dispatchDirect(ctx context.Context, r run.Run) error {
 		return fmt.Errorf("stage: direct-arm session on %q: %w", r.ID, err)
 	}
 
-	// TAKE WHAT COMES. Whatever the single shot produced is captured — including
-	// nothing at all, which is a real outcome and not a missing measurement. The
-	// capture happens on EVERY disposition, because the pair's honest completion
-	// depends on it: a truncated or failed arm becomes the §6 parity note the
-	// record writes, and that note is only reachable if the pair can be rendered
-	// and voted on at all.
+	// TAKE WHAT COMES — but only from an arm that actually ran.
+	//
+	// A session that ended on its own terms, or that an ordinary ceiling cut
+	// short, PRODUCED something (possibly nothing at all, which is a real
+	// single-shot outcome), so its text is captured verbatim and the pair goes on
+	// to be rendered and voted on; the §6 parity note records at verdict time that
+	// the run did not end cleanly.
+	//
+	// A CRASH is different in kind and is deliberately NOT captured (drain r1). An
+	// engine that died — or never spawned — did not answer the frozen statement at
+	// all, so an empty capture would render "the platform versus a platform
+	// failure" and ask a person to vote on it, which is exactly the fiction the
+	// honest-absence rule exists to prevent. The capture stays NULL, the pair
+	// becomes the requester-facing failed-pair card, and a human closes it with a
+	// §14 decline record. The arm is never re-run either way (§2; §17).
+	if out.Kind == adapters.OutcomeCrashed {
+		s.logger().Warn("stage: direct arm crashed without producing an answer; the pair cannot complete and its requester is shown a card (BENCH-REG §2)",
+			"run", r.ID, "detail", out.Detail)
+		return nil
+	}
 	took, cerr := s.cfg.BenchmarkCapture(ctx, r.ID, out.ResultText)
 	if cerr != nil {
 		// A failed capture is LOUD and does not fail the run: the run's own

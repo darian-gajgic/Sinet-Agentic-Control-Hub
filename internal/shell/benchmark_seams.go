@@ -445,10 +445,18 @@ func benchmarkDriverPass(ctx context.Context, bs *benchmarkSurface, logger *slog
 		if !benchmarkArmEnded(ctx, bs, p, logger) {
 			continue
 		}
+		// The arm ENDED and produced nothing: the pair can never be rendered,
+		// because there is no second answer to render. Retrying that forever was
+		// the drain-r1 finding — a per-minute warning about a state that will not
+		// change, and no surface anywhere showing the requester a pair stuck on a
+		// crashed arm. The pair is SKIPPED here (state-derived, silent) and is
+		// picked up instead by the failed-pair inbox card, whose one action is the
+		// landed decline — a human closing it with a §14 record, which is the only
+		// honest way a pair that cannot complete ends.
+		if _, err := bs.Store.CapturedDirectText(ctx, p.DirectRunID); errors.Is(err, benchmark.ErrNoDirectCapture) {
+			continue
+		}
 		if _, err := bs.Practice.RenderBlind(ctx, p.PairID); err != nil {
-			// The commonest reason is the honest one: the arm ended without
-			// producing a capture, so there is no direct text to render and the
-			// pair correctly waits rather than being rendered against nothing.
 			logger.Warn("benchmark: blind render failed; retried on the next pass",
 				"pair", p.PairID, "direct_run", p.DirectRunID, "err", err)
 			continue

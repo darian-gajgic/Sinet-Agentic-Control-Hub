@@ -203,7 +203,10 @@ func TestVerdictIsTheRequestersAndNotDelegable(t *testing.T) {
 	if code != http.StatusForbidden {
 		t.Fatalf("operator vote: status %d, want 403: %s", code, body)
 	}
-	// Another member cannot even see it exists.
+	// Another member is refused the same way — 403, not 404, because the PAIR
+	// exists and the house rule is 404-for-missing / 403-for-another-owner
+	// (`authorizeOwner`'s shape). It is their READ that is scoped, asserted just
+	// below: the pending list does not carry the pair at all.
 	code, _ = e.do(t, "bob", "POST", "/api/approvals/benchmark_verdict:"+pair.PairID+"/verdict",
 		`{"verdict":"A","guess":"A"}`)
 	if code != http.StatusForbidden {
