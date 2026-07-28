@@ -1,4 +1,4 @@
-# P3 handoff — written 2026-07-28 at the close of B5 (gate CLOSED same day)
+# P3 handoff — last rewritten 2026-07-29, mid-B6 (5/13 packets landed; session ended on the operator stop directive after landing P3-B6-3A)
 
 **Read this first, then `P3/STATE.md`.** This file is a *snapshot* meant to get a fresh session oriented in two minutes. It is deliberately short and it goes stale; **`P3/STATE.md` is the single source of truth and outranks anything here.** If the two disagree, STATE wins and this file should be corrected.
 
@@ -8,7 +8,7 @@ Authority order for everything: **`Spec/core-architecture-v1.md` (frozen v1, tag
 
 ## 1. Where the build is
 
-**B0–B5 are ALL CLOSED.** The B5 gate closed 2026-07-28 — full record in `P3/gates/B5-report.md` §8 (FINAL). **B6 (frontend: the React SPA over every API — S15 + `Spec/frontend-components-v1.md`) is OPEN and is the LAST phase. Its queue was CUT 2026-07-28 (9 packets, recorded in STATE): B6-1..3 Go API completion → B6-4 SPA scaffold → B6-5..8 surfaces → B6-9 push/PWA + sweep. The next act is running the pending packets through the four-stage pipeline, in order.**
+**B0–B5 are ALL CLOSED** (B5 gate record: `P3/gates/B5-report.md` §8 FINAL). **B6 (frontend — S15 + FC-v1) is OPEN, is the LAST phase, and stands at 5/13 packets done + validated.** The queue (in STATE) grew from 9 to 13 via two ratified A/B/C splits (B6-2, B6-3). **LANDED:** B6-1 (read-side APIs: /api/runs, /api/tasks, /api/meters, /api/events query layers; stage events minted), B6-2A (approvals core: ranked 7-kind inbox, hash-pinned retry-safe answers, tiers/step-up/co-approval, cancel mapping + no-auto-kill AST wall, follow-up spawn), B6-2B (budgets/pause + oversight verbs + transitive drag-hint comparator; migration 0017), B6-2C (benchmark driver + single-shot `.direct` leg + verdict backend; NoFork recovery seam + failed-pair card; migration 0018), B6-3A (settings API: UISchema emitter, registry reads/writes/history operator-only, price surface on append-only migration 0019 shipping EMPTY; new event type `price.row_added`). **PENDING, in order: B6-3B (deliverables+accept+preview APIs) → B6-3C (memory API) → B6-4 (SPA scaffold — the frontend tree first appears here) → B6-5..8 (surfaces) → B6-9 (push/PWA + sweep).** Groundings for B6-3B/C are DONE (one brief serves all three parts); their OQ dispositions are ratified in the STATE log ("B6-3 grounding DONE" entry) — the next session launches the B6-3B EXECUTOR directly.
 
 What the B5 gate settled (do not re-litigate any of it):
 
@@ -19,17 +19,17 @@ What the B5 gate settled (do not re-litigate any of it):
 - **D5** — **no S00.9 amendment** for the family-12 `RequiredFields` row (not-wrong-merely-not-restated reading stands). B5-7's **dispatch→render driver** (single-shot direct-arm capture + the B6 verdict form) is named follow-on scope — B6 is where the verdict form lands.
 - **D6** — **35 readings ratified en bloc** (the report's "~30" honestly decomposed; compiled from CONVENTIONS §29–§37 + commit bodies). All are **binding precedent for B6** — including the cross-phase patterns: derive-from-log/no side stores, no tickers (dueness from stored state), structural constants with named reasons interim under the settings-tab directive.
 
-**Counters at the close (assert these still hold before you change anything):**
+**Counters at this handoff (assert these still hold before you change anything):**
 
 | Thing | Value |
 |---|---|
-| Event inventory | **88 minted / 7 declare-only = 95 registered** |
-| ⚙ settings | **118 keys / 33 domains** — `internal/settings/index.go` byte-unchanged through all of B5 |
-| `components.lock` | **21 entries** (lockgate green) |
-| Migrations | **0001–0016** (`user_version` 16) |
-| Test packages green | **42** |
-| CONVENTIONS | §1–§37 (earlier sections never rewritten) |
-| Paid spend, all of B5 | **$0** |
+| Event inventory | **91 minted / 5 declare-only = 96 registered** (B6-1 flipped `stage.started/finished`; B6-3A added `price.row_added`) |
+| ⚙ settings | **118 keys / 33 domains** — `internal/settings/index.go` byte-unchanged through ALL of B5+B6 (the UISchema emitter is a separate file) |
+| `components.lock` | **21 entries** (lockgate green; no new dependency in all of B6 so far) |
+| Migrations | **0001–0019** (`user_version` 19: 0017 budgets/pause/hint, 0018 benchmark capture, 0019 price_rows) |
+| Test packages green | **42** (no new package dirs in B6 — new files live in existing packages) |
+| CONVENTIONS | §1–§40 (earlier sections never rewritten; §38 B6-1, §39+B/C B6-2, §40 B6-3A) |
+| Paid spend, all of B6 | **$0** (every stage fake-engine/hermetic) |
 
 Git: everything through the B5-close commit is pushed to `origin/main`. The working tree carries the known **pre-existing operator items — do not stage, revert, or "clean" them**: `Research/02-provider-watchlist-and-onboarding-criteria.md` (modified, deliberately unstaged), untracked `Presentation/`, `Research/Presentation/`, `Sinet-Logo.jpeg`, `tools/dbpeek/`.
 
@@ -41,17 +41,17 @@ Open with **"continue implementation"** (or `/p3-implementation`). Then, in orde
 
 1. **Session-entry checks:** read `P3/STATE.md`; confirm `git status` is clean apart from the operator items above; re-run the landing battery so you build on measured ground:
    `gofmt -l internal/ cmd/` · `go vet ./...` · `go build ./...` · `go test ./... -count=1` · `go run ./tools/lockgate`
-2. **The B6 queue is CUT (2026-07-28, 9 packets — in STATE).** The carried B5 seams are homed in it (assistant-over-History → B6-7; benchmark driver+verdict → B6-2/B6-6; watchdog/drift/conformance verbs → B6-2, surfaces → B6-5/B6-6; `stage.started/finished` → B6-1; settings surface → B6-3/B6-6). Take the next `pending` packet in queue order.
-3. **Run packets through the four-stage pipeline** (§4 below). B6's gate at the end = the phase decision batch **plus the operator's own acceptance: the UI click-through per their 2026-07-20 directive**.
-4. After the B6 gate: bring-up is next (the S19.6 measurement sequence + the accumulated TBD-BRINGUP rows — see the B5 report §3 table; the Layer-2 open-SQL acceptance measurement must count guardrail-conservatism refusals as an expected refusal source, per the ratified landing record).
+2. **Launch the B6-3B EXECUTOR directly** (opus; grounding is DONE — brief `P3/briefs/P3-B6-3.md`, part B = R7–R17 + the F block; the ratified OQ2 (comments = Create+Read only), OQ3 (bounded-revision doors-as-data), OQ4 (merge card return-only) dispositions in the STATE log bind; B6-2's landed surfaces are consumed never rebuilt; **hermetic preview tests NEVER touch the live Caddy admin chain** — standing host hazard). Then eval → triage → drain → land per the pipeline. Then B6-3C (part C, OQ5/OQ6 bind), then B6-4 onward in queue order.
+3. **Carried notes that must not fall between chairs:** the B6-6 grounding absorbs the NINTH derived inbox kind (memory conflicts, B6-3 OQ6) and the D4(b) eval-results-surface unlock; the bring-up ledger carries the BENCH-REG amendment-queue items (tool-less direct arm; crash-vs-consent decline-rate separation) and the storage-down operator-resolution mislabel observation (landed B6-1 machinery, fail-closed, low urgency).
+4. **Run packets through the four-stage pipeline** (§4 below). B6's gate at the end = the phase decision batch **plus the operator's own acceptance: the UI click-through per their 2026-07-20 directive**.
+5. After the B6 gate: bring-up is next (the S19.6 measurement sequence + the accumulated TBD-BRINGUP rows — see the B5 report §3 table; the Layer-2 open-SQL acceptance measurement must count guardrail-conservatism refusals as an expected refusal source, per the ratified landing record).
 
 ---
 
-## 3. What changed on the host at the B5 gate (this session)
+## 3. What changed on the host recently
 
-- **promptfoo 0.121.19** and **changedetection.io 0.55.8** are now INSTALLED (user-level; undo: `npm uninstall -g promptfoo` / `uv tool uninstall changedetection.io`). Two live-discovered fixes are in the committed install script: `--prerelease=allow` (0.55.8 itself pins `pyppeteer-ng==2.0.0rc13`) and the PEP-503 name-normalization grep (`changedetection[.-]io`).
-- changedetection.io is **not running** and has no API key placed; both belong to the hardening session (with the unit install) or to whenever the operator wants the page-diff tier live. The key is broker-custody — never via chat or shell history.
-- Nothing else: no sudo, no apt, no unit, no canary arm, no secret.
+- **The 2026-07-28/29 build sessions changed NOTHING on the host** — pure repo work (Go code, migrations applied only to test DBs, $0 spend, no sudo/apt/unit/secret/canary).
+- From the B5 gate (2026-07-28): **promptfoo 0.121.19** and **changedetection.io 0.55.8** are INSTALLED (user-level; undo: `npm uninstall -g promptfoo` / `uv tool uninstall changedetection.io`). changedetection.io is **not running**, no API key placed; both belong to the hardening session (with the unit install). The key is broker-custody — never via chat or shell history.
 
 ---
 
