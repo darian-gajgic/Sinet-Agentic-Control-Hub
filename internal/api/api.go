@@ -29,6 +29,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
@@ -136,15 +137,23 @@ type Config struct {
 	// Intake is the walking-skeleton pipeline surface (intake_handlers.go);
 	// nil leaves those routes answering 503 (surface not wired).
 	Intake IntakeSurface
+	// Review is the S13.1–S13.4 deliverable/review data layer behind the S15.2
+	// deliverables family (deliverables.go, B6-3B): the revision lineage, the
+	// per-type comparison, the anchored comments and their placements. It is
+	// held directly rather than behind an interface for the same reason
+	// *gates.Journal and *accept.Accepter are (§39): internal/review is a leaf
+	// over storage+eventlog, so the dependency is narrow and acyclic, and an
+	// interface would only be a second name for one type. nil leaves the
+	// deliverables routes answering 503.
+	Review *review.Store
 	// Accept + FollowUp are the S13.6/S13.9 operator surfaces, composed at the
-	// shell root and HELD here for the B6 endpoints (the S01.9 PIN step-up rides
-	// that surface, seam §3). They are wired but NOT yet routed — the invocation
-	// endpoints land with the B6 operator surfaces (F1).
+	// shell root (the S01.9 PIN step-up rides this surface, seam §3). FollowUp
+	// is routed by B6-2A (actions.go); Accept is routed by B6-3B (accept.go).
 	Accept   *accept.Accepter
 	FollowUp *intake.FollowUp
 	// Preview is the S13.8 preview surface (launch/stop/list/before-vs-after),
-	// composed at the shell root and HELD here for the B6 /api/deliverables
-	// preview endpoints (S15.2); wired but NOT yet routed (F17).
+	// composed at the shell root and ROUTED by B6-3B (previewapi.go); nil leaves
+	// those routes answering 503.
 	Preview *preview.Manager
 	// Effects is the S02.7 two-phase effect journal, ROUTED by the S15.6
 	// approvals family (approvals.go): an effect card's approve/deny answer is
@@ -214,7 +223,9 @@ type Server struct {
 	logger   *slog.Logger
 	nudge    *broadcast
 	intake   IntakeSurface
-	// accept is held for the B6-3 deliverable content family; not yet routed.
+	// review is the S13.1–S13.4 store behind the deliverables family (B6-3B).
+	review *review.Store
+	// accept is the S13.6 orchestration behind the one outward act (B6-3B).
 	accept *accept.Accepter
 	// followUp is the S13.9 spawn verb, routed by B6-2A (actions.go).
 	followUp *intake.FollowUp
@@ -230,8 +241,7 @@ type Server struct {
 	resume   ResumeSurface
 	// benchmark is the S14.7 practice behind the B6-2C verdict backend.
 	benchmark BenchmarkSurface
-	// preview is the S13.8 preview surface, held for the B6
-	// /api/deliverables preview endpoints (S15.2); not yet routed (F17).
+	// preview is the S13.8 preview surface behind the preview verbs (B6-3B).
 	preview *preview.Manager
 	// history is the S14.10 query surface, routed under /api/events (B6-1).
 	history *history.Store
@@ -256,6 +266,7 @@ func New(cfg Config) *Server {
 		logger:     cfg.Logger,
 		nudge:      newBroadcast(),
 		intake:     cfg.Intake,
+		review:     cfg.Review,
 		accept:     cfg.Accept,
 		followUp:   cfg.FollowUp,
 		preview:    cfg.Preview,
@@ -396,6 +407,28 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/settings/{key}/history", s.handleSettingsHistory)
 	protected("POST /api/settings/{key}", s.handleSettingsSet)
 	protected("POST /api/settings/{key}/bounds", s.handleSettingsBounds)
+
+	// The S15.2 deliverables family (B6-3B: deliverables.go, accept.go,
+	// previewapi.go) — the S13 content family. Reads are owner-scoped
+	// server-side with 404 before 403; the comment verb is Create only, because
+	// S13.3 makes a comment immutable and never deleted and THE drain is its one
+	// consumer (OQ2); and the accept is the ONE outward act on this whole API,
+	// which exits through the S02.7 journal and the broker inside
+	// accept.Accepter and nowhere else (D7).
+	//
+	// `previews` is its own root because a preview session outlives the surface
+	// it was launched from: a person lists and stops sessions, not deliverables.
+	protected("GET /api/deliverables", s.handleDeliverableList)
+	protected("GET /api/deliverables/{deliverable}", s.handleDeliverableDetail)
+	protected("GET /api/deliverables/{deliverable}/compare", s.handleDeliverableCompare)
+	protected("GET /api/deliverables/{deliverable}/comments", s.handleCommentList)
+	protected("POST /api/deliverables/{deliverable}/comments", s.handleCommentCreate)
+	protected("GET /api/deliverables/{deliverable}/accept-card", s.handleAcceptCard)
+	protected("POST /api/deliverables/{deliverable}/accept", s.handleAccept)
+	protected("POST /api/deliverables/{deliverable}/preview", s.handlePreviewLaunch)
+	protected("POST /api/deliverables/{deliverable}/preview/compare", s.handlePreviewCompare)
+	protected("GET /api/previews", s.handlePreviewList)
+	protected("POST /api/previews/{session}/stop", s.handlePreviewStop)
 
 	return s.identity(mux)
 }

@@ -242,6 +242,11 @@ func Run(ctx context.Context, opts Options) error {
 	var cancelSurface api.CancelSurface
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
+	// reviewStore is the S13.1–S13.4 store (B4-1): the stage pipeline mints and
+	// drains through it, the S13.6 accept commits its state verb, and from B6-3B
+	// the S15.2 deliverables family reads and comments through it. Declared here
+	// so the api composition below can hold it.
+	var reviewStore *review.Store
 	var localSurf *localSurface
 	// The S14.4 watchdog suite (B5-3): composed in the production path, driven by
 	// shell-owned goroutines (sweep + Tier-0 tail + dead-man probe) after step 5.
@@ -402,7 +407,7 @@ func Run(ctx context.Context, opts Options) error {
 		// The S13.1–S13.4 review store (B4-1), shared by the stage pipeline
 		// (minting/drain) and the S13.6 accept orchestration (the accepted state
 		// verb, F1).
-		reviewStore := &review.Store{
+		reviewStore = &review.Store{
 			DB: db, Log: log, Settings: reg,
 			Root: filepath.Join(stateDir, "review"),
 		}
@@ -752,13 +757,17 @@ func Run(ctx context.Context, opts Options) error {
 		// and the §4.2.1 consent flip. nil under injected admission, which
 		// leaves those routes at 503 rather than pretending a practice runs.
 		Benchmark: benchmarkVerbSeam(benchSurf),
-		Accept:    acceptAccepter(acceptSurf),
-		FollowUp:  acceptFollowUp(acceptSurf),
-		Preview:   previewSurf, // held for the B6 preview endpoints (F17); not routed
-		History:   histSurf,    // S14.10 layers, held for the S15 assistant; not routed
-		DB:        db,          // S14.3 snapshot projections (owner-scoped, OQ1)
-		Meter:     meterReader, // S14.3 run-card counters (§4)
-		Logger:    logger,
+		// The B6-3B deliverables family: the S13 review store behind the reads,
+		// diffs and comments; the S13.6 accept orchestration behind the one
+		// outward act; and the S13.8 preview surface behind the try-it verbs.
+		Review:   reviewStore,
+		Accept:   acceptAccepter(acceptSurf),
+		FollowUp: acceptFollowUp(acceptSurf),
+		Preview:  previewSurf,
+		History:  histSurf,    // S14.10 layers, held for the S15 assistant; not routed
+		DB:       db,          // S14.3 snapshot projections (owner-scoped, OQ1)
+		Meter:    meterReader, // S14.3 run-card counters (§4)
+		Logger:   logger,
 	})
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),
