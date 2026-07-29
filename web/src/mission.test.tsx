@@ -57,7 +57,8 @@ test('every bucket is filled from served rows, and no run falls off the screen',
   const by = (id: string) => buckets.find((b) => b.id === id)!.runs.map((r) => r.run_id)
 
   expect(by('running')).toEqual(['r-ship'])
-  expect(by('queued').sort()).toEqual(['r-archive', 'r-triage'])
+  // Three queued runs: two of alice's and the operator's own.
+  expect(by('queued').sort()).toEqual(['r-archive', 'r-ops', 'r-triage'])
   expect(by('blocked'), 'the run with an open ask is not under the human bucket').toEqual(['r-audit'])
   expect(by('parked'), 'blocked-on-a-human must not also appear as merely parked').toEqual(['r-stall'])
   expect(by('finished')).toEqual(['r-notes'])

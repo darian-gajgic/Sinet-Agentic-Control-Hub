@@ -125,6 +125,10 @@ func fixtureWorld(t *testing.T) *backend {
 		{"t-notes", "alice", "Write the weekly note", "done", fxT4},
 		{"t-stall", "bob", "Re-index the archive", "verifying", fxT4},
 		{"t-claim", "alice", "Rebuild the search index", "executing", fxT4},
+		// An OPERATOR-owned task. The operator's own priority hint on it is the
+		// one act that mints a TASK-SCOPED decision carrying the D10 operator
+		// limb, so it is what the task page can render "(as operator)" from.
+		{"t-ops", "op", "Rotate the household keys", "intake", fxT4},
 	} {
 		exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
 			tk.id, tk.owner, tk.title, tk.kanban, tk.created)
@@ -147,6 +151,7 @@ func fixtureWorld(t *testing.T) *backend {
 		{"r-notes", "alice", "t-notes", "completed", "anthropic", fxT4},
 		{"r-stall", "bob", "t-stall", "parked", "zai", fxT4},
 		{"r-claim", "alice", "t-claim", "claimed", "anthropic", fxT4},
+		{"r-ops", "op", "t-ops", "queued", "anthropic", fxT4},
 	} {
 		exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
 		            VALUES (?,?,?,?,?,0,?,?)`, r.id, r.owner, r.task, r.state, r.lane, r.created, r.created)
@@ -156,6 +161,11 @@ func fixtureWorld(t *testing.T) *backend {
 	// waiting-on-human true (it is derived, never a stored flag).
 	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
 		"ask-audit", "r-audit", "bob", "{}", "gate", fxT2)
+	// An ask ALICE owns, so the inbox has a card she can actually answer: D10
+	// says the owner answers, so with only bob's ask every card read as
+	// not-yours and the "yours to answer" branch had no fixture (drain r2 R4b).
+	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
+		"ask-ship", "r-ship", "alice", "{}", "question", fxT2)
 
 	// Two queued runs carry RECORDED drag order; spaced ranks, 1-based, as the
 	// board writes them. r-archive is deliberately left at the default 0 — "no
@@ -164,6 +174,8 @@ func fixtureWorld(t *testing.T) *backend {
 	            VALUES (?,?,?,?,?,?)`, "r-triage", "alice", "queued", "", fxT1, 10)
 	exec(t, b, `INSERT INTO queue (run_id, user_id, status, priority_lane, enqueued_ts, hint_rank)
 	            VALUES (?,?,?,?,?,?)`, "r-archive", "alice", "queued", "", fxT3, 0)
+	exec(t, b, `INSERT INTO queue (run_id, user_id, status, priority_lane, enqueued_ts, hint_rank)
+	            VALUES (?,?,?,?,?,?)`, "r-ops", "op", "queued", "", fxT4, 10)
 
 	for _, e := range []struct{ owner, run, typ, payload, ts string }{
 		// Effort mode with NO disclosed downgrade: the routing reason is
@@ -226,9 +238,15 @@ func fixtureWorld(t *testing.T) *backend {
 	// so the id (a surrogate) is pinned afterwards while the PAYLOAD and its
 	// journal-computed HASH, which are what the approval verb actually checks,
 	// stay the producer's own. Same class of concession as the injected clock.
-	for _, id := range []string{"e-publish", "e-notify"} {
+	// e-rotate has NO run: an effect attributed to no run is PLATFORM-LEVEL,
+	// which is exactly what makes it need the operator's D10 co-approval.
+	for _, id := range []string{"e-publish", "e-notify", "e-rotate"} {
+		run := "r-ship"
+		if id == "e-rotate" {
+			run = ""
+		}
 		e, err := fixtureJournal(t, b).Propose(context.Background(), gates.Proposal{
-			RunID: "r-ship", UserID: "alice", Class: gates.ClassC,
+			RunID: run, UserID: "alice", Class: gates.ClassC,
 			Payload: json.RawMessage(`{"kind":"publish","target":"` + id + `"}`),
 		})
 		if err != nil {
@@ -290,6 +308,25 @@ func driveFixtureDecisions(t *testing.T, b *backend) {
 	srv.Handler().ServeHTTP(ans, httptest.NewRequest("POST", "/api/approvals/effect:e-publish/answer", strings.NewReader(body)))
 	if ans.Code != http.StatusOK {
 		t.Fatalf("drive effect answer: %d: %s", ans.Code, ans.Body.String())
+	}
+
+	// 1b. The D10 CO-APPROVAL, driven for real: the owner signs, then the
+	//     OPERATOR signs the same platform-level card. Two rows, one card, and
+	//     the second carries actor_is_operator.
+	answerEffect(t, b, "alice", "e-rotate")
+	answerEffect(t, b, "op", "e-rotate")
+
+	// 1c. The operator's own priority hint. `answerEffect` above proves the
+	//     operator limb on the APPROVALS family; this proves it where a TASK
+	//     page can show it — a platform-level effect is attributed to no run,
+	//     so by construction it is nobody's task decision, while a hint names
+	//     its task as the subject.
+	hint := httptest.NewRequest("POST", "/api/tasks/t-ops/priority-hint",
+		strings.NewReader(`{"rank":10,"reason":"key rotation is due"}`))
+	hr := httptest.NewRecorder()
+	fixtureServer(t, b, "op").Handler().ServeHTTP(hr, hint)
+	if hr.Code != http.StatusOK {
+		t.Fatalf("drive operator priority hint: %d: %s", hr.Code, hr.Body.String())
 	}
 
 	// 2. A REAL deliverable accept through review.Accept — platform-scoped,
@@ -416,6 +453,43 @@ func (f fixtureIntake) Receipt(_ context.Context, runID string) (json.RawMessage
 
 // fixtureReview and fixtureJournal carry the FIXED clock, so a row minted
 // through a real producer is reproducible and can therefore be committed.
+// answerEffect approves one effect card as one identity, reading the card for
+// its pinned hash exactly as a client does.
+func answerEffect(t *testing.T, b *backend, who, effectID string) {
+	t.Helper()
+	srv := fixtureServer(t, b, who)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/approvals", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read approvals as %s: %d: %s", who, rr.Code, rr.Body.String())
+	}
+	var inbox struct {
+		Items []struct {
+			ID          string `json:"id"`
+			PayloadHash string `json:"payload_hash"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &inbox); err != nil {
+		t.Fatalf("decode approvals: %v", err)
+	}
+	var hash string
+	for _, it := range inbox.Items {
+		if it.ID == "effect:"+effectID {
+			hash = it.PayloadHash
+		}
+	}
+	if hash == "" {
+		t.Fatalf("%s cannot see effect %s: %s", who, effectID, rr.Body.String())
+	}
+	body := fmt.Sprintf(`{"payload_hash":%q,"pin":%q,"answer":{"action":"approve","reason":"agreed"}}`, hash, fixturePIN)
+	ans := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(ans,
+		httptest.NewRequest("POST", "/api/approvals/effect:"+effectID+"/answer", strings.NewReader(body)))
+	if ans.Code != http.StatusOK {
+		t.Fatalf("answer %s as %s: %d: %s", effectID, who, ans.Code, ans.Body.String())
+	}
+}
+
 func fixtureReview(t *testing.T, b *backend) *review.Store {
 	t.Helper()
 	return &review.Store{
@@ -468,6 +542,12 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Settings: fixedSettings{d: 20 * 1e9},
 		HealthFn: func() api.Health { return api.Health{Ready: true} },
 		DB:       b.db, Meter: fixtureMeter{}, History: st, Intake: fixtureIntake{t: t},
+		// The scheduler's STORAGE seam is the landed double: constructing a real
+		// scheduler is out of proportion here, and what this fixture is proving
+		// is the decision ROW the verb mints, which recordDecision writes
+		// itself. The verb, its D10 authorization and its row are all real; the
+		// queue row below carries the rank the real scheduler would persist.
+		Hints:   newFakeHints("r-ops"),
 		Review:  fixtureReview(t, b),
 		Effects: fixtureJournal(t, b),
 		Now:     func() time.Time { return mustTime(t, fxT4) },
@@ -478,23 +558,28 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 // The identity is the operator, because the surfaces this packet builds are
 // read at the household altitude — a member's narrower answer is the same
 // SHAPE, and owner scope has its own three-way tests (reads_test.go).
-var webAPIFixtures = []struct{ name, path string }{
-	{"tasks", "/api/tasks"},
-	{"runs", "/api/runs"},
-	{"meters", "/api/meters"},
-	{"history-views", "/api/events/views"},
-	{"history-catalog", "/api/events/catalog"},
-	{"history-view-answer", "/api/events/views/cost_per_run"},
-	{"history-query-answer", "/api/events/query/status.runs_active"},
-	{"task-detail", "/api/tasks/t-ship"},
-	{"task-detail-draft", "/api/tasks/t-triage"},
-	{"task-detail-bare", "/api/tasks/t-archive"},
-	{"receipt", "/api/runs/r-ship/receipt"},
-	{"deliverables-in-review", "/api/deliverables?state=in-review"},
-	{"deliverables-of-task", "/api/deliverables?task=t-ship"},
-	{"deliverable-detail", "/api/deliverables/d-notes"},
-	{"run-detail", "/api/runs/r-ship"},
-	{"approvals", "/api/approvals"},
+var webAPIFixtures = []struct{ name, path, who string }{
+	{"tasks", "/api/tasks", ""},
+	{"runs", "/api/runs", ""},
+	{"meters", "/api/meters", ""},
+	{"history-views", "/api/events/views", ""},
+	{"history-catalog", "/api/events/catalog", ""},
+	{"history-view-answer", "/api/events/views/cost_per_run", ""},
+	{"history-query-answer", "/api/events/query/status.runs_active", ""},
+	{"task-detail", "/api/tasks/t-ship", ""},
+	{"task-detail-draft", "/api/tasks/t-triage", ""},
+	{"task-detail-bare", "/api/tasks/t-archive", ""},
+	{"task-detail-ops", "/api/tasks/t-ops", ""},
+	{"receipt", "/api/runs/r-ship/receipt", ""},
+	{"deliverables-in-review", "/api/deliverables?state=in-review", ""},
+	{"deliverables-of-task", "/api/deliverables?task=t-ship", ""},
+	{"deliverable-detail", "/api/deliverables/d-notes", ""},
+	{"run-detail", "/api/runs/r-ship", ""},
+	{"approvals", "/api/approvals", ""},
+	// The same read as the person whose cards they are: `answerable` is
+	// computed PER CALLER (D10), so the "yours to answer" branch only exists in
+	// a body read by an owner.
+	{"approvals-mine", "/api/approvals", "alice"},
 }
 
 func TestWebAPIFixtures(t *testing.T) {
@@ -507,8 +592,12 @@ func TestWebAPIFixtures(t *testing.T) {
 	}
 	for _, fx := range webAPIFixtures {
 		t.Run(fx.name, func(t *testing.T) {
+			who := fx.who
+			if who == "" {
+				who = "op"
+			}
 			rr := httptest.NewRecorder()
-			fixtureServer(t, b, "op").Handler().ServeHTTP(rr, httptest.NewRequest("GET", fx.path, nil))
+			fixtureServer(t, b, who).Handler().ServeHTTP(rr, httptest.NewRequest("GET", fx.path, nil))
 			if rr.Code != http.StatusOK {
 				t.Fatalf("GET %s: status %d: %s", fx.path, rr.Code, rr.Body.String())
 			}
@@ -540,8 +629,12 @@ func TestWebAPIFixtures(t *testing.T) {
 // every run after, so the instability is caught HERE, naming the read.
 func TestWebAPIFixturesAreStable(t *testing.T) {
 	for _, fx := range webAPIFixtures {
-		first := canonicalJSON(t, fixtureBody(t, fixtureWorld(t), fx.path))
-		second := canonicalJSON(t, fixtureBody(t, fixtureWorld(t), fx.path))
+		who := fx.who
+		if who == "" {
+			who = "op"
+		}
+		first := canonicalJSON(t, fixtureBody(t, fixtureWorld(t), who, fx.path))
+		second := canonicalJSON(t, fixtureBody(t, fixtureWorld(t), who, fx.path))
 		if string(first) != string(second) {
 			t.Errorf("%s is not byte-stable across two identical seedings — it carries a live reading, "+
 				"so it cannot be a committed fixture:\n%s\n%s", fx.path, first, second)
@@ -568,10 +661,10 @@ func TestFixtureWriterIsNeverAutomated(t *testing.T) {
 	}
 }
 
-func fixtureBody(t *testing.T, b *backend, path string) []byte {
+func fixtureBody(t *testing.T, b *backend, who, path string) []byte {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	fixtureServer(t, b, "op").Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
+	fixtureServer(t, b, who).Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET %s: status %d: %s", path, rr.Code, rr.Body.String())
 	}

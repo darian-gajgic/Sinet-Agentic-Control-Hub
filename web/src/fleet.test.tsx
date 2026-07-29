@@ -54,9 +54,9 @@ test('every fleet row says whose account it is', async () => {
     expect(row.getAttribute('data-owner'), 'a fleet row does not name its owner (D2/S3.10)').toBeTruthy()
     expect(row.querySelector('.owner')).not.toBeNull()
   }
-  // Both owners are present, which is what makes the no-cross-owner-total rule
-  // meaningful rather than vacuous.
-  expect(new Set(rows.map((r) => r.getAttribute('data-owner')))).toEqual(new Set(['alice', 'bob']))
+  // Three owners are present, which is what makes the no-cross-owner-total
+  // rule meaningful rather than vacuous.
+  expect(new Set(rows.map((r) => r.getAttribute('data-owner')))).toEqual(new Set(['alice', 'bob', 'op']))
 })
 
 test('nothing is summed across owners: there is no total row and no total figure', async () => {

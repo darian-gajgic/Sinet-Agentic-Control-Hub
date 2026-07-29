@@ -8,6 +8,7 @@ package api_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -291,5 +292,115 @@ func TestTaskDecisionsRedactAtTheEdge(t *testing.T) {
 	}
 	if !strings.Contains(stored, secret) {
 		t.Error("the STORED payload was rewritten — redaction belongs at the serving edge, not in the log")
+	}
+}
+
+// TestOperatorCoApprovalLimbIsRecorded is drain r2 R2: the D10 co-approval limb
+// (`actor_is_operator`) had no coverage after the round-1 rewrite, because the
+// driven world had one person answering her own card.
+//
+// Two facts, and they are different facts:
+//
+//   - On the APPROVALS family the limb belongs to a PLATFORM-LEVEL effect —
+//     one attributed to no run, which is exactly what gives the operator a
+//     say (mayAnswerEffect). Both signatures are driven for real below.
+//   - On a TASK page the limb arrives a different way. A platform-level effect
+//     is by construction nobody's task decision (its recorded subject is the
+//     card's run id, and it has none), so what a task detail can render is the
+//     operator acting on their OWN task — the priority hint, whose subject is
+//     the task itself.
+func TestOperatorCoApprovalLimbIsRecorded(t *testing.T) {
+	b := fixtureWorld(t)
+
+	// The approvals half: two rows for one card, one per limb.
+	var limbs []bool
+	rows, err := b.db.QueryContext(context.Background(),
+		`SELECT json_extract(payload, '$.actor_is_operator') FROM run_events
+		  WHERE type = 'decision.recorded' AND json_extract(payload, '$.card_id') = 'effect:e-rotate'
+		  ORDER BY event_seq`)
+	if err != nil {
+		t.Fatalf("read co-approval rows: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v sql.NullBool
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		limbs = append(limbs, v.Bool)
+	}
+	if len(limbs) != 2 {
+		t.Fatalf("co-approval rows = %d, want the owner's and the operator's: %v", len(limbs), limbs)
+	}
+	if limbs[0] || !limbs[1] {
+		t.Errorf("limbs = %v, want [owner=false, operator=true] — firstBool reads a payload BOOLEAN, and a "+
+			"string read would flatten both into one", limbs)
+	}
+
+	// The task half: the operator's own hint, rendered on the operator's task.
+	var detail wireTaskDetail
+	if err := json.Unmarshal([]byte(fixtureGet(t, b, "op", "/api/tasks/t-ops")), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var seen bool
+	for _, d := range detail.Decisions {
+		if d.CardID == "priority_hint:t-ops" && d.ActorIsOperator && d.Actor == "op" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("the operator limb is not on the operator's own task page: %+v", detail.Decisions)
+	}
+
+	// And the platform-level effect is NOT a task decision, which is the same
+	// rule read from the other side rather than an accident of this fixture.
+	var ship wireTaskDetail
+	if err := json.Unmarshal([]byte(fixtureGet(t, b, "op", "/api/tasks/t-ship")), &ship); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, d := range ship.Decisions {
+		if d.CardID == "effect:e-rotate" {
+			t.Error("a platform-level effect (attributed to no run) surfaced as a task decision")
+		}
+	}
+}
+
+// TestDeliverablesTaskFilterIsOwnerScoped is drain r2 R4(a): the additive
+// `?task=` filter narrows an already-scoped read, proven the standard three
+// ways rather than asserted in a comment.
+func TestDeliverablesTaskFilterIsOwnerScoped(t *testing.T) {
+	b := fixtureWorld(t)
+	ids := func(who, path string) []string {
+		var list struct {
+			Deliverables []struct {
+				ID     string `json:"deliverable_id"`
+				Owner  string `json:"owner"`
+				TaskID string `json:"task_id"`
+			} `json:"deliverables"`
+		}
+		if err := json.Unmarshal([]byte(fixtureGet(t, b, who, path)), &list); err != nil {
+			t.Fatalf("decode %s as %s: %v", path, who, err)
+		}
+		out := []string{}
+		for _, d := range list.Deliverables {
+			if d.TaskID != "t-ship" {
+				t.Errorf("?task=t-ship returned a deliverable of %s", d.TaskID)
+			}
+			out = append(out, d.ID)
+		}
+		return out
+	}
+
+	// operator: both of the task's deliverables.
+	if got := ids("op", "/api/deliverables?task=t-ship"); len(got) != 2 {
+		t.Errorf("operator sees %v, want both of the task's deliverables", got)
+	}
+	// owner: their own, present.
+	if got := ids("alice", "/api/deliverables?task=t-ship"); len(got) != 2 {
+		t.Errorf("the owner sees %v, want their own deliverables", got)
+	}
+	// another member: none — the filter narrows, it does not widen.
+	if got := ids("bob", "/api/deliverables?task=t-ship"); len(got) != 0 {
+		t.Errorf("another member sees %v of alice's deliverables, want none", got)
 	}
 }

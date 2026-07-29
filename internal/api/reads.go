@@ -777,13 +777,18 @@ type TaskDetail struct {
 	//     one task, so they render on the surfaces that are about a person.
 	//     Widening this to "everything the owner ever decided" would put
 	//     another task's approvals on this task's page.
-	//   - A CANCEL (drain r1 D3). Cancelling work is a human decision in the
-	//     ordinary sense, but the landed server carries it as
-	//     `run.state_changed` and deliberately does not double-mint a decision
-	//     row for it. It is therefore visible in `stage_progress`, where a
-	//     lifecycle transition belongs, and not here. Reading a lifecycle type
-	//     as a decision to close the gap would make this derive disagree with
-	//     the family the contract defines.
+	//   - A CANCEL (drain r1 D3, corrected in drain r2). Cancelling work is a
+	//     human decision in the ordinary sense, but the landed server carries
+	//     it as `run.state_changed` and deliberately does not double-mint a
+	//     decision row for it, so it is not in this family.
+	//
+	//     Where it IS visible: `runs[].state` on this response, and the
+	//     `cancelled` kanban column (internal/stage/skeleton.go sets the
+	//     status). NOT in `stage_progress` — that derive reads only
+	//     stage.started/stage.finished/intake.state, and stageOutcome's
+	//     vocabulary is {completed, split, error}, so a cancelled queued run
+	//     appears in no stage row at all. Saying otherwise pointed a reader at
+	//     a surface that would never show it.
 	Decisions []TaskDecision `json:"decisions"`
 
 	// Pipeline is the intake pipeline's own task view (phase, tier, the open

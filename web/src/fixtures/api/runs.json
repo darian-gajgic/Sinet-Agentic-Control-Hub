@@ -16,6 +16,21 @@
       "last_activity_ts": null
     },
     {
+      "run_id": "r-ops",
+      "owner": "op",
+      "task_id": "t-ops",
+      "state": "queued",
+      "waiting_on_human": false,
+      "parked_until": null,
+      "wedged": false,
+      "stage": "",
+      "lane": "anthropic",
+      "generation": 0,
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z",
+      "last_activity_ts": null
+    },
+    {
       "run_id": "r-notes",
       "owner": "alice",
       "task_id": "t-notes",
@@ -106,6 +121,6 @@
       "last_activity_ts": "2026-07-20T09:04:00Z"
     }
   ],
-  "cursor": 13,
+  "cursor": 18,
   "truncated": false
 }

@@ -71,6 +71,16 @@ export const activityEventTypes = [
   'engine.tool_result',
   'checkpoint.written',
   'helper.spawned',
+  // The message-grain trace steps (drain r2 R3), so "every run-scoped frame"
+  // is true rather than nearly true and the activity line does not lag behind
+  // what the run is actually doing. All three are REGISTERED types
+  // (internal/eventlog/contract.go): engine.message and engine.done are
+  // minted by the adapter envelope; `tool.called` is registered DECLARE-ONLY —
+  // no producer emits it today, so declaring it is inert now and correct the
+  // day one lands. Naming an unregistered type here would be inventing one.
+  'engine.message',
+  'engine.done',
+  'tool.called',
 ] as const
 
 /** Mission control watches everything the board does plus the meter movements,

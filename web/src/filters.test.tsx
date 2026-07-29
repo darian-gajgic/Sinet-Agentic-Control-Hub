@@ -73,7 +73,7 @@ test('what-needs-me shows approvals, questions and review-ready work, each linki
   const text = view.container.textContent ?? ''
 
   // The approval/question feed.
-  expect(text).toContain('ask:ask-audit')
+  expect(text).toContain('ask:ask-ship')
   // The review-ready feed.
   expect(text).toContain('d-changelog')
   expect(text).toContain('Ready to review')
@@ -81,15 +81,33 @@ test('what-needs-me shows approvals, questions and review-ready work, each linki
   // The honest doors: answering is the inbox's, reviewing is the review
   // surface's — this filter says what is waiting and takes you there.
   const hrefs = [...view.container.querySelectorAll('.rows a')].map((a) => a.getAttribute('href'))
-  expect(hrefs).toContain('/inbox/ask%3Aask-audit')
+  expect(hrefs).toContain('/inbox/ask%3Aask-ship')
   expect(hrefs).toContain('/deliverables/d-changelog')
 })
 
 test('a card that is not yours to answer says so, in the server&apos;s own words', async () => {
-  const { view } = await open('/?view=what-needs-me')
+  // Read as somebody who does NOT own the cards: `answerable` is computed per
+  // caller, so this is a different served body, not a different render.
+  const { view } = await open('/?view=what-needs-me', {
+    'GET /api/approvals': { body: fixtures.approvals() },
+  })
   const served = (fixtures.approvals() as { items: { not_answerable_reason?: string }[] }).items[0]
   expect(served.not_answerable_reason).toBeTruthy()
   expect(view.container.textContent).toContain(served.not_answerable_reason ?? '')
+})
+
+test('a card that IS yours to answer says so — the other direction (drain r2 R4b)', async () => {
+  const { view } = await open('/?view=what-needs-me')
+  const served = (fixtures.approvalsMine() as { items: { id: string; answerable: boolean }[] }).items
+  expect(served.some((i) => i.answerable), 'the fixture carries no answerable card').toBe(true)
+
+  const text = view.container.textContent ?? ''
+  expect(text, 'the answerable branch never renders').toContain('yours to answer')
+  // And the honest absence is NOT rendered for a card that is answerable.
+  const rows = [...view.container.querySelectorAll('.rows .row')]
+  const mine = rows.find((r) => r.textContent?.includes('ask:ask-ship'))!
+  expect(mine.textContent).toContain('yours to answer')
+  expect(mine.querySelector('.absent'), 'an answerable card carried a not-answerable reason').toBeNull()
 })
 
 test('empty feeds say nothing is waiting rather than rendering nothing', async () => {

@@ -33,6 +33,7 @@ async function task(id: string, extra: Record<string, { body?: unknown; status?:
 
 const detailRoutes = () => ({
   'GET /api/tasks/t-ship': { body: fixtures.taskDetail() },
+  'GET /api/tasks/t-ops': { body: fixtures.taskDetailOps() },
   'GET /api/tasks/t-triage': { body: fixtures.taskDetailDraft() },
   'GET /api/tasks/t-archive': { body: fixtures.taskDetailBare() },
 })
@@ -316,4 +317,19 @@ test('follow-up lineage renders as lineage, and never as a deliverable revision'
   // …and not among the deliverables, which are a different fact.
   const deliverables = view.container.querySelector('[data-deliverable="d-notes"]')!
   expect(deliverables.textContent, 'a follow-up task was listed as a deliverable revision').not.toContain('t-followup')
+})
+
+test('the D10 operator limb renders as "(as operator)" (drain r2 R2)', async () => {
+  const { view } = await task('t-ops', detailRoutes())
+  const rows = [...view.container.querySelectorAll('.decisions li')]
+  expect(rows.length, 'the operator task has no decisions').toBeGreaterThan(0)
+
+  const text = view.container.textContent ?? ''
+  expect(text, 'the co-approval limb is invisible — an operator act reads as a member&apos;s').toContain('(as operator)')
+  expect(text).toContain('priority_hint:t-ops')
+
+  // The other direction, from the served body: alice's own decisions on her
+  // own task carry no operator marker.
+  const { view: mine } = await task('t-ship', detailRoutes())
+  expect(mine.container.textContent, 'a member act was marked as the operator&apos;s').not.toContain('(as operator)')
 })

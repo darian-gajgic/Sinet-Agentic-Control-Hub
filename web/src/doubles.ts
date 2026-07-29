@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 
 import type { EventSourceLike } from './events'
 
+import approvalsMineRaw from './fixtures/api/approvals-mine.json?raw'
 import approvalsRaw from './fixtures/api/approvals.json?raw'
 import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
@@ -16,6 +17,7 @@ import receiptRaw from './fixtures/api/receipt.json?raw'
 import runDetailRaw from './fixtures/api/run-detail.json?raw'
 import taskDetailBareRaw from './fixtures/api/task-detail-bare.json?raw'
 import taskDetailDraftRaw from './fixtures/api/task-detail-draft.json?raw'
+import taskDetailOpsRaw from './fixtures/api/task-detail-ops.json?raw'
 import taskDetailRaw from './fixtures/api/task-detail.json?raw'
 import tasksRaw from './fixtures/api/tasks.json?raw'
 
@@ -148,6 +150,10 @@ export const fixtures = {
   taskDetailBare: () => parse<Record<string, unknown>>(taskDetailBareRaw),
   receipt: () => parse<Record<string, unknown>>(receiptRaw),
   approvals: () => parse<Record<string, unknown>>(approvalsRaw),
+  /** The same read as its OWNER: `answerable` is per-caller (D10), so the
+   *  "yours to answer" branch only exists in a body an owner read. */
+  approvalsMine: () => parse<Record<string, unknown>>(approvalsMineRaw),
+  taskDetailOps: () => parse<Record<string, unknown>>(taskDetailOpsRaw),
   deliverablesInReview: () => parse<Record<string, unknown>>(deliverablesRaw),
   deliverablesOfTask: () => parse<Record<string, unknown>>(deliverablesOfTaskRaw),
   deliverableDetail: () => parse<Record<string, unknown>>(deliverableDetailRaw),
@@ -163,7 +169,9 @@ export function oversightRoutes(): Record<string, Scripted> {
     'GET /api/meters': { body: fixtures.meters() },
     'GET /api/events/views': { body: fixtures.historyViews() },
     'GET /api/events/catalog': { body: fixtures.historyCatalog() },
-    'GET /api/approvals': { body: fixtures.approvals() },
+    // The signed-in identity in these suites is alice, so the inbox read is
+    // the one SHE would get — including the cards she can answer.
+    'GET /api/approvals': { body: fixtures.approvalsMine() },
     'GET /api/deliverables?state=in-review': { body: fixtures.deliverablesInReview() },
     'GET /api/deliverables?task=t-ship': { body: fixtures.deliverablesOfTask() },
     'GET /api/deliverables/d-notes': { body: fixtures.deliverableDetail() },
@@ -200,5 +208,7 @@ export function oversightRoutes(): Record<string, Scripted> {
       },
     },
     'GET /api/runs/r-ship': { body: fixtures.runDetail() },
+    'GET /api/tasks/t-ops': { body: fixtures.taskDetailOps() },
+    'GET /api/deliverables?task=t-ops': { body: { deliverables: [], cursor: 15, truncated: false } },
   }
 }
