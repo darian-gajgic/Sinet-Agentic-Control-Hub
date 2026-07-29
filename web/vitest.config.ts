@@ -10,6 +10,9 @@ export default defineConfig((env) =>
       // jsdom is the default DOM environment: the probes render real React
       // trees, and import-compiles is not the bar (S16.4 #5).
       environment: 'jsdom',
+      // Vitest stubs CSS to empty by default. The responsive skeleton is
+      // asserted from the stylesheet itself, so it has to be real here.
+      css: true,
       globals: false,
       setupFiles: ['./src/test-setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
