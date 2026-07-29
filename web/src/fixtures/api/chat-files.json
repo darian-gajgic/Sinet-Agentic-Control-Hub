@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "file_id": "cf-0000000000000002",
+      "owner": "alice",
+      "name": "quarterly-numbers.csv",
+      "size_bytes": 23,
+      "sha256": "6f1f5e35bbed6b1ed334173e81a28cd190459c68b6d61a94f7e8b270597b1a71",
+      "uploaded_ts": "2026-07-20T09:02:00Z"
+    }
+  ]
+}

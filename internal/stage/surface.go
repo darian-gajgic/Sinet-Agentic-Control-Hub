@@ -79,6 +79,13 @@ func mapVerifyErr(err error) error {
 type submitBody struct {
 	Title string `json:"title"`
 	Text  string `json:"text"`
+	// Inputs are requester-supplied input descriptors, ADDITIVE (S15.2
+	// additive-first; P3-B6-7 OQ8). The path and every existing caller are
+	// unchanged: a body without them submits exactly as before. They are
+	// already owner-resolved by the surface that collected them — the assistant
+	// resolves each ref against the requester's OWN exchange manifest — so
+	// nothing here can be handed another person's object.
+	Inputs []intake.Input `json:"inputs,omitempty"`
 }
 
 // Submit implements api.IntakeSurface: Stage-0 triage + task/run birth,
@@ -95,7 +102,7 @@ func (u *Surface) Submit(ctx context.Context, userID string, body json.RawMessag
 	if u.sk.sched == nil {
 		return nil, errors.New("stage: no scheduler bound")
 	}
-	st, err := u.sk.pipe.Start(ctx, intake.Request{UserID: userID, Title: b.Title, Text: b.Text})
+	st, err := u.sk.pipe.Start(ctx, intake.Request{UserID: userID, Title: b.Title, Text: b.Text, Inputs: b.Inputs})
 	if err != nil {
 		return nil, mapIntakeErr(err)
 	}

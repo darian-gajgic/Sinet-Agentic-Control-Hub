@@ -15,6 +15,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -35,6 +36,9 @@ type backend struct {
 	// read it. Nil until a rig composes them.
 	mem     *memory.Store
 	memGate *memory.Gate
+	// chat is the S15.7 assistant store, composed once per fixture world with a
+	// pinned clock + id seam (B6-7) so the committed bodies reproduce.
+	chat *chat.Store
 }
 
 func newBackend(t *testing.T) *backend {

@@ -19,7 +19,12 @@ import (
 
 // fakeSurface records calls and returns scripted results.
 type fakeSurface struct {
-	lastUser    string
+	lastUser string
+	// lastBody + calls are the B6-7 additions: the S15.7 handoff has to be
+	// provable to have called the ONE landed ingress, with the requester's
+	// identity and the requester-supplied inputs actually on the body.
+	lastBody    json.RawMessage
+	calls       int
 	lastAsk     string
 	lastPinOK   bool
 	lastAnswer  json.RawMessage
@@ -30,7 +35,8 @@ type fakeSurface struct {
 }
 
 func (f *fakeSurface) Submit(_ context.Context, userID string, body json.RawMessage) (json.RawMessage, error) {
-	f.lastUser = userID
+	f.lastUser, f.lastBody = userID, body
+	f.calls++
 	if f.submitErr != nil {
 		return nil, f.submitErr
 	}

@@ -39,6 +39,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
@@ -271,6 +272,12 @@ func Run(ctx context.Context, opts Options) error {
 	// HELD on the api Config for the S15 assistant. It has no loop — a query
 	// surface's WHEN is "when a question is asked" — and no route yet (B6).
 	var histSurf *history.Store
+	// The S15.7 conversational assistant's store (B6-7): the per-user session
+	// registry, the immutable transcript, the turn lifecycle and the file
+	// exchange under <state>/exchange. Composed in the production path and held
+	// on the api Config, which ROUTES it (/api/chat). Like the query surface it
+	// has no loop — a conversation's WHEN is "when somebody types".
+	var chatSurf *chat.Store
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -691,6 +698,26 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		defer func() { _ = closeHistoryRO() }()
 
+		// The S15.7 assistant's durable state (B6-7). Its exchange home sits
+		// under the platform state dir beside knowledge/, projects/ and
+		// artifacts/ — control-plane territory, never inside a repo or
+		// workspace lowerdir, because no sandbox may mount it (S11.3).
+		// The titling duty rides ⚙ local.alias's EXISTING `utility` seat through
+		// the same advisory-run metering every other run-less local call uses
+		// (S12.1 R18); with no local stack the seat is absent and the session is
+		// named mechanically, which is the honest degradation.
+		chatSurf, err = chat.New(chat.Config{
+			DB: db, Log: log, Root: filepath.Join(stateDir, "exchange"),
+			Duty:     localSurf.Duty,
+			Advisory: chatAdvisory(advisoryMeter(runs, checkpoints)),
+		})
+		if err != nil {
+			return fmt.Errorf("shell: wire the S15.7 assistant store: %w", err)
+		}
+		logger.Info("chat: S15.7 assistant store wired (B6-7)",
+			"exchange_root", filepath.Join(stateDir, "exchange"),
+			"title_seat_wired", chatSurf.TitleSeatWired())
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,
@@ -779,7 +806,8 @@ func Run(ctx context.Context, opts Options) error {
 		// 503 rather than pretending a knowledge store is open.
 		Memory:     memReads,
 		MemoryGate: memWrites,
-		History:    histSurf,    // S14.10 layers, held for the S15 assistant; not routed
+		History:    histSurf,    // S14.10 layers, consumed by the S15.7 turn verbs
+		Chat:       chatSurf,    // S15.7 sessions/transcript/turns/exchange (B6-7)
 		DB:         db,          // S14.3 snapshot projections (owner-scoped, OQ1)
 		Meter:      meterReader, // S14.3 run-card counters (§4)
 		Logger:     logger,

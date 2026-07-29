@@ -43,6 +43,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
@@ -305,7 +306,104 @@ func fixtureWorld(t *testing.T) *backend {
 	driveFixtureDecisions(t, b)
 	driveFixtureMemoryConflict(t, b)
 	driveFixtureSettings(t, b)
+	driveFixtureChat(t, b)
 	return b
+}
+
+// driveFixtureChat seeds the S15.7 assistant world THROUGH ITS REAL VERBS
+// (B6-7 R18): a real session created, a real upload, real turns opened and
+// settled by the real transport, and one turn left RUNNING so the widget has a
+// committed body for the in-flight state it has to re-attach to.
+//
+// Nothing here inserts a chat row by hand. That is the whole discipline: a
+// fixture hand-written from an imagined payload passes its own test and serves
+// nothing (the B6-5 lesson), so every byte below came out of the same handler
+// production runs.
+//
+// The store's clock AND its id generator are pinned, because a golden fixture
+// cannot carry a wall-clock stamp or a fresh random id and still be reviewable.
+func driveFixtureChat(t *testing.T, b *backend) {
+	t.Helper()
+	ctx := context.Background()
+	n := 0
+	store, err := chat.New(chat.Config{
+		DB: b.db, Log: b.log, Root: filepath.Join(t.TempDir(), "exchange"),
+		Now: func() time.Time { return mustTime(t, fxT2) },
+		NewID: func(prefix string) string {
+			n++
+			return fmt.Sprintf("%s%016d", prefix, n)
+		},
+	})
+	if err != nil {
+		t.Fatalf("chat.New: %v", err)
+	}
+	b.chat = store
+	srv := func(who string) *api.Server { return fixtureChatServer(t, b, who) }
+
+	post := func(who, path, body string) string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		srv(who).Handler().ServeHTTP(rr, httptest.NewRequest("POST", path, strings.NewReader(body)))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("POST %s as %s: %d: %s", path, who, rr.Code, rr.Body.String())
+		}
+		return rr.Body.String()
+	}
+
+	var created struct {
+		Session chat.Session `json:"session"`
+	}
+	if err := json.Unmarshal([]byte(post("alice", "/api/chat/sessions", "")), &created); err != nil {
+		t.Fatalf("decode created session: %v", err)
+	}
+	sid := created.Session.ID
+
+	// A real upload, so the file sidebar has a real manifest row to render.
+	post("alice", "/api/chat/files?name=quarterly-numbers.csv", "run_id,usd\nr-ship,1.42\n")
+
+	// Turn 1 — a Layer-0 view: the deterministic answer, served as the store
+	// made it.
+	post("alice", "/api/chat/sessions/"+sid+"/turns",
+		`{"kind":"view","view":"cost_per_run","text":"what did each run cost?"}`)
+	// Turn 2 — the NL floor with nothing resolvable: the disambiguation card,
+	// which is the honest refusal a neither-verb turn renders.
+	post("alice", "/api/chat/sessions/"+sid+"/turns",
+		`{"kind":"ask","text":"write me a poem about the sea"}`)
+	// Turn 3 — the S06 handoff: the born task with its OPEN intake card, which
+	// is what the feed renders in place (OQ8(i)).
+	post("alice", "/api/chat/sessions/"+sid+"/turns",
+		`{"kind":"task","title":"Draft the release notes","text":"pull the merged PRs and draft release notes"}`)
+
+	// Turn 4 is left RUNNING: the in-flight state has to have a committed body,
+	// because "the turn survives navigation" is a render over served state and a
+	// render with no fixture is a render nobody drove.
+	if _, _, err := store.BeginTurn(ctx, "alice", sid, chat.KindAsk, "and how much did last week cost?"); err != nil {
+		t.Fatalf("seed the in-flight turn: %v", err)
+	}
+
+	// A second session, left empty and unnamed — the honest untitled state the
+	// list has to render without inventing a placeholder.
+	post("alice", "/api/chat/sessions", "")
+}
+
+// fixtureChatServer is the fixture world's chat-serving stack. It is separate
+// from fixtureServer only because the chat store is composed inside
+// driveFixtureChat (it needs the pinned clock and id seam) and the intake seam
+// answers the handoff.
+func fixtureChatServer(t *testing.T, b *backend, who string) *api.Server {
+	t.Helper()
+	st, err := history.New(history.Config{DB: b.db, Log: b.log})
+	if err != nil {
+		t.Fatalf("history.New: %v", err)
+	}
+	return api.New(api.Config{
+		Log: b.log, Sessions: b.store, Auth: fixedIdentity{who},
+		Settings: fixedSettings{d: 20 * 1e9},
+		HealthFn: func() api.Health { return api.Health{Ready: true} },
+		DB:       b.db, Meter: fixtureMeter{}, History: st,
+		Intake: fixtureIntake{t: t}, Chat: b.chat,
+		Now: func() time.Time { return mustTime(t, fxT4) },
+	})
 }
 
 // driveFixtureSettings puts the settings surface into a state worth rendering,
@@ -590,6 +688,35 @@ func fixtureCardJSON(t *testing.T, card intake.Card) string {
 	return string(raw)
 }
 
+// fixtureChatBornCard is the S06.5 batched option card a task born FROM A CHAT
+// TURN opens with (B6-7 OQ8(i)). It is in the fixture set because the chat feed
+// renders it INLINE: the conversation continues in place against the same card
+// the task surface shows, answered through the LANDED ask verbs — same
+// vocabulary, no second answer path — so the render needs a committed body.
+func fixtureChatBornCard(t *testing.T) string {
+	t.Helper()
+	return fixtureCardJSON(t, intake.Card{
+		Kind: intake.CardInterview, TaskID: "t-chatborn", RunID: "t-chatborn.intake",
+		Version: 1, IssuedTS: fxT2, Clearance: 0.48, Tier: intake.TierStandard,
+		Questions: []intake.Question{
+			{
+				ID: "audience", Text: "Who are these release notes for?", Weight: 3,
+				Options: []intake.Option{
+					{Label: "The household", Value: "household"},
+					{Label: "Just me", Value: "self"},
+				},
+			},
+			{
+				ID: "range", Text: "Which changes should it cover?", Weight: 2,
+				Options: []intake.Option{
+					{Label: "Since the last release", Value: "since_last_release"},
+					{Label: "This month", Value: "this_month"},
+				},
+			},
+		},
+	})
+}
+
 // fixtureApprovalCard is the S06.9 Stage-4 card: one phone screen with the
 // assumptions as its centerpiece, the 13.5 help block, the expandable Layer 2,
 // and the card's own Approve · Re-plan · Re-interview vocabulary. It carries a
@@ -868,8 +995,48 @@ func mustTime(t *testing.T, s string) time.Time {
 // Everything else is the honest absence a task before drafting really has.
 type fixtureIntake struct{ t *testing.T }
 
-func (fixtureIntake) Submit(context.Context, string, json.RawMessage) (json.RawMessage, error) {
-	return nil, &api.SurfaceError{Status: http.StatusNotImplemented, Code: "not_implemented", Msg: "fixture"}
+// Submit answers the S15.7 handoff with a faithful born-task view (B6-7). The
+// pipeline rides the IntakeSurface seam and internal/api never speaks its
+// vocabulary, so this is a TEST producing the body the real taskView produces —
+// exactly as fixtureCardJSON produces the stored ask snapshots and the receipt
+// fixture marshals a real metering.Receipt.
+//
+// It carries the born task's OPEN INTAKE CARD, because that is the whole of
+// OQ8(i): the conversation continues IN PLACE against the same card the task
+// surface would show, answered through the LANDED ask verbs. A fixture without
+// the card would leave that render undriven.
+func (f fixtureIntake) Submit(_ context.Context, userID string, body json.RawMessage) (json.RawMessage, error) {
+	var in struct {
+		Title string `json:"title"`
+	}
+	_ = json.Unmarshal(body, &in)
+	view := struct {
+		TaskID    string          `json:"task_id"`
+		Title     string          `json:"title"`
+		Kanban    string          `json:"kanban_status"`
+		Owner     string          `json:"owner"`
+		Phase     string          `json:"phase,omitempty"`
+		Tier      string          `json:"tier,omitempty"`
+		Family    string          `json:"family,omitempty"`
+		OpenAskID string          `json:"open_ask_id,omitempty"`
+		OpenCard  json.RawMessage `json:"open_card,omitempty"`
+		Runs      []struct {
+			RunID string `json:"run_id"`
+			State string `json:"state"`
+			Role  string `json:"role,omitempty"`
+		} `json:"runs"`
+	}{
+		TaskID: "t-chatborn", Title: in.Title, Kanban: "intake", Owner: userID,
+		Phase: "interview", Tier: "medium", Family: "content",
+		OpenAskID: "ask-chatborn-1",
+		OpenCard:  json.RawMessage(fixtureChatBornCard(f.t)),
+	}
+	view.Runs = append(view.Runs, struct {
+		RunID string `json:"run_id"`
+		State string `json:"state"`
+		Role  string `json:"role,omitempty"`
+	}{RunID: "t-chatborn.intake", State: "running", Role: "intake"})
+	return json.Marshal(view)
 }
 
 func (fixtureIntake) Answer(context.Context, string, string, json.RawMessage, bool) (json.RawMessage, error) {
@@ -1005,6 +1172,7 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Registry:   b.reg,
 		Prices:     fixturePrices{},
 		Benchmark:  fixtureBenchmark{},
+		Chat:       b.chat,
 		Now:        func() time.Time { return mustTime(t, fxT4) },
 	})
 }
@@ -1116,6 +1284,16 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// The price table's `editable` is computed per caller too, so the read-only
 	// posture is a served body rather than a second render.
 	{"prices-member", "/api/settings/prices", "alice"},
+	// The S15.7 assistant (B6-7). Chat is OWNER-ONLY, so every one of these is
+	// read as alice: there is no operator body to commit, and that absence is
+	// itself the disposition (the operator does not read a member's
+	// transcripts). The session detail carries the whole render — the
+	// transcript, the settled turns with their answers, the disambiguation
+	// card, the born task's OPEN intake card, and the RUNNING turn the widget
+	// re-attaches to after a navigation.
+	{"chat-sessions", "/api/chat/sessions", "alice"},
+	{"chat-session", "/api/chat/sessions/cs-0000000000000001", "alice"},
+	{"chat-files", "/api/chat/files", "alice"},
 	// The D4(b) unlock: the recorded suite results, through the LANDED audited
 	// query route.
 	{"eval-scores", "/api/events/query/verdicts.eval_scores", ""},

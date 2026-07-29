@@ -69,12 +69,35 @@ const (
 	FamilyGeneric  Family = "generic" // unmatched requests (S06.5 fallback set)
 )
 
+// Input is one requester-supplied input handed in with the request — a file the
+// person gave the assistant and then handed to the task they started by
+// chatting (Spec S15.7: "files handed to a launched task enter as task inputs
+// through intake"; S06.3/S06.6 record what the requester supplied).
+//
+// It is a DESCRIPTOR, not bytes and not a mount. The object itself stays in the
+// requester's control-plane exchange folder; what travels into the pipeline is
+// its identity — which is what keeps S11.3's allowlist-only confinement intact
+// (no sandbox ever mounts the exchange).
+type Input struct {
+	// Ref is the exchange-manifest id. It is resolved against the REQUESTER's
+	// own folder before it ever reaches here, so a ref naming another person's
+	// object never becomes an input (P3-B6-7 OQ8).
+	Ref       string `json:"ref"`
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"size_bytes"`
+	SHA256    string `json:"sha256"`
+}
+
 // Request is one arriving request (feature 1.1: natural-language intake).
 type Request struct {
 	TaskID string `json:"task_id,omitempty"` // generated when empty
 	UserID string `json:"user_id"`           // the requester — the D10 approver
 	Title  string `json:"title"`
 	Text   string `json:"text"`
+	// Inputs are the requester-supplied inputs, additive-first (S15.2). The
+	// State carrying this Request is marshaled whole onto every intake.state
+	// event, so recording them here IS recording them on the intake record.
+	Inputs []Input `json:"inputs,omitempty"`
 }
 
 // Deterministic floor classes (Spec S06.2): any of these forces the high

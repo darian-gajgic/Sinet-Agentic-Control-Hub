@@ -24,6 +24,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
@@ -210,6 +211,16 @@ type Config struct {
 	// call, which "consumes these layers and nothing else". nil leaves those
 	// routes answering 503; Layers 0 and 1 are the floor and say so.
 	History *history.Store
+	// Chat is the S15.7 conversational assistant's durable state behind the
+	// `/api/chat` family (chatapi.go, B6-7): the per-user session registry, the
+	// immutable transcript, the turn lifecycle and the file exchange. Held
+	// directly for the *review.Store / *memory.Store reason (§39/§40-C):
+	// internal/chat is a leaf over storage+eventlog, so the dependency is
+	// narrow and acyclic. It ROUTES nothing — the turn verbs in chatapi.go
+	// dispatch to History and Intake above, which is why the assistant
+	// "consumes these layers and nothing else" (S14.10) is checkable by
+	// reading one file. nil leaves the chat routes answering 503.
+	Chat *chat.Store
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -269,6 +280,8 @@ type Server struct {
 	memGate *memory.Gate
 	// history is the S14.10 query surface, routed under /api/events (B6-1).
 	history *history.Store
+	// chat is the S15.7 assistant's store behind /api/chat (B6-7).
+	chat *chat.Store
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
 	// (the raw tail still serves).
 	proj *projector
@@ -297,6 +310,7 @@ func New(cfg Config) *Server {
 		memory:     cfg.Memory,
 		memGate:    cfg.MemoryGate,
 		history:    cfg.History,
+		chat:       cfg.Chat,
 		effects:    cfg.Effects,
 		cancel:     cfg.Cancel,
 		clock:      cfg.Now,
@@ -471,6 +485,27 @@ func (s *Server) Handler() http.Handler {
 	//
 	// `conflicts` sits one segment deeper than {entry}, so an entry id can never
 	// shadow it and it can never swallow an entry read.
+	// The S15.7 conversational assistant (B6-7: chatapi.go) — the family the
+	// S15.2 table never listed, added additive-first under its own root. Reads
+	// and writes are OWNER-ONLY server-side: the store takes a viewer and has no
+	// role parameter, so the operator does not read another member's transcripts
+	// (a deliberate narrowing of §30's operator-sees-all, which is an
+	// observability rule; a conversation is content — the §40-C line). Messages
+	// are immutable: there is no edit verb and no message delete, and a session
+	// delete is the owner's hard delete of the whole thread. No route here
+	// performs an outward effect — a turn reads the query layers or hands a
+	// request to intake, both control-plane-internal (D7).
+	protected("GET /api/chat/sessions", s.handleChatSessionList)
+	protected("POST /api/chat/sessions", s.handleChatSessionCreate)
+	protected("GET /api/chat/sessions/{session}", s.handleChatSessionDetail)
+	protected("POST /api/chat/sessions/{session}/rename", s.handleChatSessionRename)
+	protected("POST /api/chat/sessions/{session}/delete", s.handleChatSessionDelete)
+	protected("POST /api/chat/sessions/{session}/turns", s.handleChatTurnSubmit)
+	protected("POST /api/chat/turns/{turn}/stop", s.handleChatTurnStop)
+	protected("GET /api/chat/files", s.handleChatFileList)
+	protected("POST /api/chat/files", s.handleChatFileUpload)
+	protected("POST /api/chat/files/{file}/delete", s.handleChatFileDelete)
+
 	protected("GET /api/memory", s.handleMemoryList)
 	protected("POST /api/memory", s.handleMemoryCreate)
 	protected("POST /api/memory/conflicts/{conflict}/resolve", s.handleMemoryConflictResolve)

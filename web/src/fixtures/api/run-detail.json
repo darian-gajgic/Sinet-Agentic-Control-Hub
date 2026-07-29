@@ -28,7 +28,7 @@
     }
   },
   "live_activity": {
-    "cursor": 31,
+    "cursor": 42,
     "topic": "run",
     "run_id": "r-ship",
     "last": {
@@ -54,5 +54,5 @@
       }
     }
   ],
-  "cursor": 31
+  "cursor": 42
 }

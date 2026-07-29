@@ -117,9 +117,11 @@ func TestNoNewMigration(t *testing.T) {
 		// query views) and 0017 by B6-2B (the S10.4 durable budgets + pause
 		// switch and the S15.5 queue-row drag hint) and 0018 by B6-2C (the
 		// BENCH-REG §2 direct-arm capture column) and 0019 by B6-3A (the
-		// S10.3 price table's durable home, `price_rows`); anything beyond
-		// those would be an unexpected preview-side add.
-		if name >= "0020" {
+		// S10.3 price table's durable home, `price_rows`) and 0020 by B6-7
+		// (the S15.7 assistant's sessions, transcript, turns and exchange
+		// manifest); anything beyond those would be an unexpected
+		// preview-side add.
+		if name >= "0021" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
@@ -121,6 +122,19 @@ func producerTypes() []string {
 		// refusal. It is the packet's only new type and the only reason the
 		// registry grows past B5-8A's 94.
 		history.EventQueryAudited,
+		// chat (8): the B6-7 S15.7 conversational assistant. Session
+		// create/rename/delete, the turn lifecycle (start/settle/abandon) and
+		// the file exchange (upload/delete) — every mutation the family has, so
+		// "every mutation lands on the event log" (S15.2 rule 3) is complete
+		// rather than sampled. All eight ADMIT into family 12 under the same
+		// broadened-Platform reading that homes worker./registry./preview./local.
+		// and history.query_audited: a session is an owner-attributed
+		// control-plane asset and a turn is a surface auditing itself. No new
+		// family, so no S00.9 amendment. Payloads are refs-not-blobs — message
+		// bodies live in chat_messages (migration 0020) and never in the log.
+		chat.EventSessionCreated, chat.EventSessionRenamed, chat.EventSessionDeleted,
+		chat.EventTurnStarted, chat.EventTurnSettled, chat.EventTurnAbandoned,
+		chat.EventFileUploaded, chat.EventFileDeleted,
 		// api (1): the B6-2A S15.6 approval-inbox CO-PRODUCER of the already
 		// registered decision.recorded — the effect-card approve/deny, the two
 		// answer acts whose journal transitions leave no run_events row of
@@ -216,13 +230,20 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 // packet"; no new FAMILY, so no S00.9 amendment — it lands in family 12 under
 // the same OQ2-(A) reading as the other platform-operational groups), so the
 // registry moves 90/5/95 → 91 minted + 5 declare-only = 96 registered.
+// B6-7 REGISTERS EIGHT, the chat.* set of the S15.7 conversational assistant —
+// its session, turn and exchange lifecycle, which is every mutation the family
+// has. No new FAMILY: all eight ADMIT into family 12 under the same OQ2-(A)
+// broadened-Platform reading that already homes the worker./registry./preview./
+// local. asset groups and history.query_audited, so no S00.9 amendment is
+// needed. The registry moves 91/5/96 → 99 minted + 5 declare-only = 104
+// registered.
 func TestInventoryTotals(t *testing.T) {
 	distinct := map[string]bool{}
 	for _, typ := range producerTypes() {
 		distinct[typ] = true
 	}
-	if n := len(distinct); n != 91 {
-		t.Errorf("producer inventory = %d distinct types, want 91 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1, +1 price.row_added at B6-3A; B6-2A/B/C co-produce decision.recorded and add none)", n)
+	if n := len(distinct); n != 99 {
+		t.Errorf("producer inventory = %d distinct types, want 99 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1, +1 price.row_added at B6-3A, +8 chat.* at B6-7; B6-2A/B/C co-produce decision.recorded and add none)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -235,8 +256,8 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 91 {
-		t.Errorf("registered minted types = %d, want 91", minted)
+	if minted != 99 {
+		t.Errorf("registered minted types = %d, want 99", minted)
 	}
 	if declareOnly != 5 {
 		t.Errorf("declare-only types = %d, want 5", declareOnly)
@@ -811,6 +832,68 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"price.row_added",
 			`{"row_id":1,"model":"claude-sonnet-4-5","lane":"anthropic","unit_prices":{"input_usd":0.000003,"output_usd":0.000015,"cache_read_usd":0.0000003,"cache_creation_usd":0.00000375,"server_tool_usd":0},"effective_from":"2026-08-01T00:00:00Z","verified_on":"2026-07-28T00:00:00Z","source":"anthropic pricing page","actor":"op","reason":"list price flip announced"}`,
 			[]string{"row_id", "model", "lane", "unit_prices", "effective_from", "verified_on", "source", "actor"},
+		},
+		// The eight chat.* types (B6-7). Their shared contract minimum is
+		// OWNER + SUBJECT: every one names the session, turn or file it is
+		// about, and every one is owner-attributed on the envelope (15.6).
+		// None carries a message body, a title string or an answer — a
+		// transcript is CONTENT and lives in chat_messages / chat_turns
+		// (migration 0020), so these payloads are refs, counts and closed
+		// vocabularies (S02.2 refs-not-blobs).
+		{
+			"chat.session_created",
+			`{"session":"cs-9a1f2b3c4d5e6f70","owner":"alice"}`,
+			[]string{"session", "owner"},
+		},
+		{
+			// The title itself is deliberately absent: what is auditable is
+			// which KIND of thing named the session, not what it is called.
+			"chat.session_renamed",
+			`{"session":"cs-9a1f2b3c4d5e6f70","source":"human"}`,
+			[]string{"session", "source"},
+		},
+		{
+			// A hard delete's record is the audit that the rows went, so it
+			// carries COUNTS of what was removed and none of the content.
+			"chat.session_deleted",
+			`{"session":"cs-9a1f2b3c4d5e6f70","messages":6,"turns":3}`,
+			[]string{"session", "messages", "turns"},
+		},
+		{
+			// `kind` is the client-routed verb from the closed set; `message`
+			// is the REF to the body and `text_len` the only thing said about
+			// what it contained.
+			"chat.turn_started",
+			`{"session":"cs-9a1f2b3c4d5e6f70","turn":"ct-1122334455667788","kind":"ask","message":"cm-aabbccddeeff0011","text_len":42}`,
+			[]string{"session", "turn", "kind", "message", "text_len"},
+		},
+		{
+			// Which verb answered, which ladder layer and named query, the born
+			// task for a handoff, and the count of files the exchange diff
+			// attributed to the turn.
+			"chat.turn_settled",
+			`{"session":"cs-9a1f2b3c4d5e6f70","turn":"ct-1122334455667788","kind":"ask","outcome":"answer","layer":1,"query":"cost_per_run","produced":0}`,
+			[]string{"session", "turn", "kind", "outcome", "produced"},
+		},
+		{
+			"chat.turn_abandoned",
+			`{"session":"cs-9a1f2b3c4d5e6f70","turn":"ct-1122334455667788","kind":"open_sql"}`,
+			[]string{"session", "turn", "kind"},
+		},
+		{
+			// The manifest row's identifying fields — the artifact's identity
+			// rather than its contents (the artifact.produced precedent).
+			"chat.file_uploaded",
+			`{"file":"cf-00ff11ee22dd33cc","owner":"alice","name":"quarterly.csv","size_bytes":8241,"sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08","origin_session":"cs-9a1f2b3c4d5e6f70"}`,
+			[]string{"file", "owner", "name", "size_bytes", "sha256"},
+		},
+		{
+			// A delete whose record does not say WHAT was deleted cannot be
+			// reviewed; the hash identifies the departed object without
+			// retaining it.
+			"chat.file_deleted",
+			`{"file":"cf-00ff11ee22dd33cc","owner":"alice","name":"quarterly.csv","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}`,
+			[]string{"file", "owner", "name", "sha256"},
 		},
 	}
 	for _, c := range cases {

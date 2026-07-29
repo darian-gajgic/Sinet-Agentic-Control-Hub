@@ -505,10 +505,18 @@ func TestSSEStoreRawServeRedacted(t *testing.T) {
 // ask snapshots and effect payloads in the same response are S06/S02 decision
 // CONTENT and stay unwrapped — the line is CONTENT vs PROJECTION, exactly as
 // the task detail draws it (§38 ruling (b)).
+// B6-7 adds the fourth: chatapi.go serves a chat turn's stored OUTCOME, which
+// for a query-layer turn is a history.Answer whose rows are lifted out of
+// run_events — a projection — and redacts it per serialization. The message
+// bodies and session titles in the SAME response are chat's own CONTENT, read
+// from chat's own tables, and go out unwrapped: the line is CONTENT vs
+// PROJECTION, exactly as the task detail and the memory family draw it
+// (§38 ruling (b); §40-C).
 var redactionEdgeFiles = map[string]string{
 	"sse.go":       "the /events frames and snapshot states (B5-2)",
 	"reads.go":     "the payload-bearing REST reads (B6-1 R20)",
 	"approvals.go": "the payload-derived inbox cards on the S15.6 approvals list (B6-2A R3)",
+	"chatapi.go":   "the payload-derived turn outcomes on the S15.7 assistant family (B6-7)",
 }
 
 // TestRedactionObservabilityEdgeOnly proves R16/R18/invariant #2: the redaction

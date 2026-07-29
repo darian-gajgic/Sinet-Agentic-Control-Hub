@@ -390,7 +390,7 @@ var v0Families = []FamilySpec{
 		// below, and in the required-field golden in contract_test.go.
 		RequiredFields: "settings: {actor, key, old, new, reason} (mirrors settings_events [S01.10]); auth: kind/user/device [S01.9]; compaction anomaly: {stage, lane, engine version, window fill at trigger, pinned sections at risk, summary artifact ref} [S05.7]; compaction pass logs itself",
 		Anchor:         "13.4; S2.1",
-		Scope:          "platform-scope operational + asset-lifecycle events: platform lifecycle/settings/auth/compaction/retention, plus the worker.* (S08), registry.* (S13), preview.* (S13.8), backup platform.* (S13.9), local.* (S12) asset-lifecycle events, and history.* (S14.10) query-surface audit events admitted here by the reconciliation reading (OQ2-(A); CONVENTIONS §29)",
+		Scope:          "platform-scope operational + asset-lifecycle events: platform lifecycle/settings/auth/compaction/retention, plus the worker.* (S08), registry.* (S13), preview.* (S13.8), backup platform.* (S13.9), local.* (S12) asset-lifecycle events, history.* (S14.10) query-surface audit events, and chat.* (S15.7) assistant session/turn/exchange lifecycle events admitted here by the reconciliation reading (OQ2-(A); CONVENTIONS §29)",
 	},
 	{
 		Name:           FamilyToolsArtifacts,
@@ -553,6 +553,48 @@ var v0Types = []TypeSpec{
 	minted("history.query_audited", FamilyPlatform, VerdictAdmit,
 		"internal/history/layer2.go (EventQueryAudited); emitted internal/history/layer2.go AskOpenSQL",
 		"S14.10 ¶3's \"every generated query audit-logged\" — the Layer-2 open-SQL escalation surface logging ITSELF, one row per ATTEMPT including every refusal (a guardrail whose refusals are not recorded cannot be reviewed, and the refusals are the interesting rows). Payload {question, outcome (executed|refused|no_sql|unavailable|failed), sql_generated, sql_executed, views, limit_injected, timeout_ms, refusal, row_count, model, alias, as_operator, owner_scoped}. Scope is the ASKER — user_id is the member, or 'platform' for the operator — so a member's audit view never gains another member's questions. Admitted under the broadened Platform scope by the same OQ2-(A) reading that admits the worker./registry./preview./local. groups: it is a platform-operational audit of a surface, not a run event"),
+
+	// The S15.7 conversational assistant (P3-B6-7), eight types. THE FAMILY FIT
+	// IS THE SAME ONE, ARGUED RATHER THAN ASSUMED: a chat session is an
+	// owner-attributed control-plane ASSET whose create/rename/delete is
+	// asset-lifecycle, a turn is that surface auditing what it did, and an
+	// exchange file is an owner-attributed object arriving and leaving. That is
+	// precisely the class the broadened Platform scope already homes — the
+	// worker./registry./preview./local. asset groups and history.query_audited,
+	// a surface logging itself. None of it is a RUN event: a chat turn has no
+	// run, no objective and no receipt (the advisory run its titling duty meters
+	// against is the metering run, not the turn's).
+	//
+	// EVERY ONE IS REFS-NOT-BLOBS. Message BODIES live in chat_messages
+	// (migration 0020) and never in a payload: the transcript is CONTENT, the
+	// same class as an ask snapshot or a knowledge entry, and S02.2's
+	// refs-not-blobs rule is what keeps the event log an index rather than a
+	// second copy of every conversation. A payload carries ids, counts, closed
+	// vocabularies and lengths — never what anybody typed.
+	minted("chat.session_created", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventSessionCreated); emitted internal/chat/chat.go CreateSession",
+		"a person opening an assistant session. Payload {session, owner} — owner-attributed at birth (15.6), which is what makes the fail-closed read scope enforceable at all"),
+	minted("chat.session_renamed", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventSessionRenamed); emitted internal/chat/chat.go RenameSession",
+		"the human override of an auto-derived title. Payload {session, source} carrying the title's PROVENANCE (mechanical|duty|human), not the title text: a label is content, and which KIND of thing named a session is the auditable fact"),
+	minted("chat.session_deleted", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventSessionDeleted); emitted internal/chat/chat.go DeleteSession",
+		"the owner-only hard delete. The rows go; THIS ROW IS THE AUDIT THAT THEY WENT (OQ1) — payload {session, messages, turns} counts what was removed, which is the honest record of a deletion and carries none of the deleted content"),
+	minted("chat.turn_started", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventTurnStarted); emitted internal/chat/turns.go BeginTurn",
+		"one turn opening. Payload {session, turn, kind, message, text_len} — `kind` is the closed client-routed verb (ask|view|query|open_sql|task), and `message` is the REF to the body, with only its length carried so a reader can see a turn happened without the log holding what was said"),
+	minted("chat.turn_settled", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventTurnSettled); emitted internal/chat/turns.go SettleTurn",
+		"one turn producing its outcome. Payload {session, turn, kind, outcome, layer, query, task, produced} — which VERB answered, which ladder layer and named query, the born task's id for a handoff, and the count of files the exchange diff attributed to the turn. It is not a double-mint of anything: a Layer-2 escalation's own audit is history.query_audited (a different fact — what the guardrail did), an intake handoff's task birth is intake.state (the TASK's fact), and Layers 0/1 mint nothing at all"),
+	minted("chat.turn_abandoned", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventTurnAbandoned); emitted internal/chat/turns.go AbandonTurn",
+		"the S15.7 hard-stop, which is an ACT and therefore has a record (OQ6). Payload {session, turn, kind}. The turn row survives as abandoned and a result that completes anyway is still recorded honestly — stopping a turn ends the waiting, it does not unmake what happened. A handed-off TASK is never cancelled by this verb: chat claims no lifecycle authority over a task (4.5's cancel is the task's own verb)"),
+	minted("chat.file_uploaded", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventFileUploaded); emitted internal/chat/exchange.go Upload",
+		"one object entering the S15.7 file exchange. Payload {file, owner, name, size_bytes, sha256, origin_session, origin_turn} — the manifest row's identifying fields, which are the artifact's identity rather than its contents (S02.2 refs-not-blobs; the artifact.produced precedent)"),
+	minted("chat.file_deleted", FamilyPlatform, VerdictAdmit,
+		"internal/chat/chat.go (EventFileDeleted); emitted internal/chat/exchange.go Delete",
+		"one object leaving it. Payload {file, owner, name, sha256} — a delete whose record does not say WHAT was deleted cannot be reviewed, and the hash is what makes the departed object identifiable without retaining it"),
 
 	// ── Family 13: Tools & artifacts (S2.1) ─────────────────────────────
 	minted("tool.completed", FamilyToolsArtifacts, VerdictRename, "internal/adapters/adapters.go:68 (KindToolResult)", "renamed from engine.tool_result; a SECOND emitter is the B5-3 dead-man canary, which injects synthetic tool.completed rows on its platform.deadman.* run to exercise Tier-0 detection end-to-end (internal/watchdog/deadman.go injectLoopTrace) — same type, synthetic provenance"),
