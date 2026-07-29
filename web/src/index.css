@@ -156,6 +156,10 @@ a {
   color: var(--bad);
 }
 
+.notice {
+  color: var(--ok);
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);

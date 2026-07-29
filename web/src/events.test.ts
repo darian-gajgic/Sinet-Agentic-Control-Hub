@@ -1,7 +1,15 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 
 import { Unreachable } from './api'
-import { EventStream, type EventSourceLike, type ResnapshotReason, type Snapshot, type Status, type WireEvent } from './events'
+import {
+  EventStream,
+  type EventSourceLike,
+  type ResnapshotReason,
+  type Snapshot,
+  type Status,
+  type Subscription,
+  type WireEvent,
+} from './events'
 
 /** A scripted EventSource. Nothing here opens a connection to anything: the
  *  harness is offline by construction (no test dials the network, the live
@@ -96,8 +104,8 @@ test('a second subscriber joins the fan-out instead of opening a second connecti
   const a: WireEvent[] = []
   const b: WireEvent[] = []
 
-  stream.subscribe({ types: ['run.state'], onEvent: (e) => a.push(e), onResnapshot: () => {} })
-  stream.subscribe({ types: ['run.state'], onEvent: (e) => b.push(e), onResnapshot: () => {} })
+  stream.subscribe({ types: ['run.state'], onEvent: (e) => a.push(e), onResnapshot: (_r, done) => done() })
+  stream.subscribe({ types: ['run.state'], onEvent: (e) => b.push(e), onResnapshot: (_r, done) => done() })
 
   expect(FakeSource.made).toHaveLength(1)
   expect(stream.opened).toBe(1)
@@ -111,8 +119,8 @@ test('a second subscriber joins the fan-out instead of opening a second connecti
 
 test('a widening filter re-opens the one connection rather than adding a second', () => {
   const { stream } = newStream()
-  stream.subscribe({ topics: ['board'], types: ['run.state'], onResnapshot: () => {} })
-  stream.subscribe({ topics: ['inbox'], types: ['run.state'], onResnapshot: () => {} })
+  stream.subscribe({ topics: ['board'], types: ['run.state'], onResnapshot: (_r, done) => done() })
+  stream.subscribe({ topics: ['inbox'], types: ['run.state'], onResnapshot: (_r, done) => done() })
 
   // Two opens over time, but never two live sources.
   expect(stream.opened).toBe(2)
@@ -126,13 +134,13 @@ test('frames route by the topics field, not by the connection filter', () => {
   const { stream } = newStream()
   const board: WireEvent[] = []
   const inbox: WireEvent[] = []
-  stream.subscribe({ topics: [], types: ['thing.happened'], onEvent: (e) => board.push(e), onResnapshot: () => {} })
+  stream.subscribe({ topics: [], types: ['thing.happened'], onEvent: (e) => board.push(e), onResnapshot: (_r, done) => done() })
   // The second subscriber shares the unfiltered relay and filters in-app.
   stream.subscribe({
     topics: ['inbox'],
     types: ['thing.happened'],
     onEvent: (e) => inbox.push(e),
-    onResnapshot: () => {},
+    onResnapshot: (_r, done) => done(),
   })
   const src = FakeSource.last()
   src.open()
@@ -147,8 +155,8 @@ test('frames route by the topics field, not by the connection filter', () => {
 test('a subscriber receives only the event types it declared', () => {
   const { stream } = newStream()
   const seen: string[] = []
-  stream.subscribe({ types: ['run.state'], onEvent: (e) => seen.push(e.type), onResnapshot: () => {} })
-  stream.subscribe({ types: ['run.created'], onResnapshot: () => {} })
+  stream.subscribe({ types: ['run.state'], onEvent: (e) => seen.push(e.type), onResnapshot: (_r, done) => done() })
+  stream.subscribe({ types: ['run.created'], onResnapshot: (_r, done) => done() })
   const src = FakeSource.last()
   src.open()
 
@@ -162,14 +170,14 @@ test('a subscriber receives only the event types it declared', () => {
 
 test('the first connect is cursorless — it tails from head', () => {
   const { stream } = newStream()
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
 
   expect(FakeSource.last().url).toBe('/events')
 })
 
 test('a transient drop is left to the browser, which carries Last-Event-ID itself', () => {
   const { stream } = newStream()
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
   FakeSource.last().open()
 
   FakeSource.last().fail(false) // readyState CONNECTING: the browser is retrying
@@ -180,7 +188,7 @@ test('a transient drop is left to the browser, which carries Last-Event-ID itsel
 
 test('a manual re-open carries ?after_seq from the last delivered frame', async () => {
   const { stream, timers } = newStream()
-  stream.subscribe({ types: ['run.state'], onResnapshot: () => {} })
+  stream.subscribe({ types: ['run.state'], onResnapshot: (_r, done) => done() })
   const src = FakeSource.last()
   src.open()
   src.send('run.state', event(42, 'run.state', []))
@@ -195,7 +203,7 @@ test('a manual re-open carries ?after_seq from the last delivered frame', async 
 
 test('with no observed cursor a re-open tails from head rather than replaying from zero', async () => {
   const { stream, timers } = newStream()
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
   FakeSource.last().open()
   FakeSource.last().fail(true)
   await vi.waitFor(() => expect(stream.status).toBe('disconnected'))
@@ -206,7 +214,7 @@ test('with no observed cursor a re-open tails from head rather than replaying fr
 
 test('reopen backoff grows and is capped while the control plane stays down', async () => {
   const { stream, timers } = newStream()
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
 
   // Attempt after attempt that never reaches `open`: the host is down.
   for (let i = 0; i < 7; i++) {
@@ -220,7 +228,7 @@ test('reopen backoff grows and is capped while the control plane stays down', as
 
 test('a connection that actually opened resets the backoff', async () => {
   const { stream, timers } = newStream()
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
 
   FakeSource.last().fail(true)
   await vi.waitFor(() => expect(timers).toHaveLength(1))
@@ -250,7 +258,7 @@ test('a snapshot frame replaces state and is never merged into a stale copy', ()
       snapshots.push(s)
       state = s.state // replacement, by contract
     },
-    onResnapshot: () => {},
+    onResnapshot: (_r, done) => done(),
   })
   const src = FakeSource.last()
   src.open()
@@ -265,8 +273,8 @@ test('a snapshot is delivered only to subscribers of that topic', () => {
   const { stream } = newStream()
   const board: Snapshot[] = []
   const inbox: Snapshot[] = []
-  stream.subscribe({ topics: ['board'], types: [], onSnapshot: (s) => board.push(s), onResnapshot: () => {} })
-  stream.subscribe({ topics: ['inbox'], types: [], onSnapshot: (s) => inbox.push(s), onResnapshot: () => {} })
+  stream.subscribe({ topics: ['board'], types: [], onSnapshot: (s) => board.push(s), onResnapshot: (_r, done) => done() })
+  stream.subscribe({ topics: ['inbox'], types: [], onSnapshot: (s) => inbox.push(s), onResnapshot: (_r, done) => done() })
   const src = FakeSource.last()
   src.open()
 
@@ -278,37 +286,93 @@ test('a snapshot is delivered only to subscribers of that topic', () => {
 
 // ── never patch blind ─────────────────────────────────────────────────────
 
+/** A subscriber that owes its snapshot debt until the test pays it, so the
+ *  catching-up → live transition is observable rather than instantaneous. */
+function debtor(extra: Partial<Subscription> = {}) {
+  const reasons: ResnapshotReason[] = []
+  let settle: (() => void) | null = null
+  const sub: Subscription = {
+    ...extra,
+    onResnapshot: (reason, done) => {
+      reasons.push(reason)
+      settle = done
+    },
+  }
+  return {
+    sub,
+    reasons,
+    pay(): void {
+      settle?.()
+    },
+  }
+}
+
 test('every (re)connect tells subscribers to re-snapshot', () => {
   const { stream } = newStream()
-  const reasons: ResnapshotReason[] = []
-  stream.subscribe({ types: [], onResnapshot: (r) => reasons.push(r) })
+  const view = debtor()
+  stream.subscribe(view.sub)
 
   FakeSource.last().open()
-  expect(reasons).toEqual(['connected'])
+  expect(view.reasons).toEqual(['connected'])
   expect(stream.status).toBe('catching-up')
 
-  stream.markApplied()
+  view.pay()
   expect(stream.status).toBe('live')
 
   FakeSource.last().open() // a reconnect
-  expect(reasons).toEqual(['connected', 'connected'])
+  expect(view.reasons).toEqual(['connected', 'connected'])
   expect(stream.status).toBe('catching-up')
+})
+
+// Snapshot debt is PER SUBSCRIBER: one view finishing its REST re-read must
+// never declare another view caught up, or the indicator reads "live" while a
+// surface is still showing what it had before the gap.
+test('the stream is live only once every subscriber has re-snapshotted', () => {
+  const { stream } = newStream()
+  const fast = debtor()
+  const slow = debtor()
+  stream.subscribe(fast.sub)
+  stream.subscribe(slow.sub)
+  FakeSource.last().open()
+
+  expect(stream.status).toBe('catching-up')
+
+  fast.pay()
+  expect(stream.status, 'one subscriber cannot clear another subscriber s debt').toBe('catching-up')
+
+  slow.pay()
+  expect(stream.status).toBe('live')
+})
+
+test('a subscriber that leaves takes its debt with it', () => {
+  const { stream } = newStream()
+  const staying = debtor()
+  const leaving = debtor()
+  stream.subscribe(staying.sub)
+  const stop = stream.subscribe(leaving.sub)
+  FakeSource.last().open()
+  staying.pay()
+  expect(stream.status).toBe('catching-up')
+
+  stop()
+
+  expect(stream.status, 'a departed subscriber left its debt behind').toBe('live')
 })
 
 test('a rewound stream re-snapshots and the frame is DROPPED, never applied', () => {
   const { stream } = newStream()
-  const reasons: ResnapshotReason[] = []
   const applied: number[] = []
-  stream.subscribe({ types: ['run.state'], onEvent: (e) => applied.push(e.seq), onResnapshot: (r) => reasons.push(r) })
+  const view = debtor({ types: ['run.state'], onEvent: (e) => applied.push(e.seq) })
+  stream.subscribe(view.sub)
   const src = FakeSource.last()
   src.open()
-  stream.markApplied()
+  view.pay()
 
   src.send('run.state', event(10, 'run.state', []))
   src.send('run.state', event(7, 'run.state', [])) // behind the cursor
 
   expect(applied).toEqual([10])
-  expect(reasons).toContain('stream-rewound')
+  expect(view.reasons).toContain('stream-rewound')
   expect(stream.status).toBe('catching-up')
 })
 
@@ -317,31 +381,43 @@ test('a rewound stream re-snapshots and the frame is DROPPED, never applied', ()
 // must not fire the signal — otherwise consumers learn to ignore it.
 test('a forward gap in sequence is normal and does not fire the signal', () => {
   const { stream } = newStream()
-  const reasons: ResnapshotReason[] = []
   const applied: number[] = []
-  stream.subscribe({ types: ['run.state'], onEvent: (e) => applied.push(e.seq), onResnapshot: (r) => reasons.push(r) })
+  const view = debtor({ types: ['run.state'], onEvent: (e) => applied.push(e.seq) })
+  stream.subscribe(view.sub)
   const src = FakeSource.last()
   src.open()
-  stream.markApplied()
+  view.pay()
 
   src.send('run.state', event(5, 'run.state', []))
   src.send('run.state', event(91, 'run.state', []))
 
   expect(applied).toEqual([5, 91])
-  expect(reasons).toEqual(['connected'])
+  expect(view.reasons).toEqual(['connected'])
   expect(stream.status).toBe('live')
 })
 
-test('an unparseable frame is dropped rather than becoming state', () => {
+// The one frame the client knowingly skips. Under the sparse-sequence rule the
+// next frame's check cannot notice the hole, so the drop announces itself —
+// otherwise it would be the client's only silent loss of data.
+test('an unreadable delta is dropped AND says so', () => {
   const { stream } = newStream()
   const applied: number[] = []
-  stream.subscribe({ types: ['run.state'], onEvent: (e) => applied.push(e.seq), onResnapshot: () => {} })
+  const view = debtor({ types: ['run.state'], onEvent: (e) => applied.push(e.seq) })
+  stream.subscribe(view.sub)
   const src = FakeSource.last()
   src.open()
+  view.pay()
+  expect(stream.status).toBe('live')
 
   src.sendRaw('run.state', '{not json')
-  src.send('run.state', event(1, 'run.state', []))
 
+  expect(applied).toEqual([])
+  expect(view.reasons).toContain('frame-unreadable')
+  expect(stream.status, 'a dropped frame left the stream claiming to be live').toBe('catching-up')
+
+  // And the stream keeps working: the drop is a re-read demand, not a wedge.
+  view.pay()
+  src.send('run.state', event(1, 'run.state', []))
   expect(applied).toEqual([1])
 })
 
@@ -349,7 +425,7 @@ test('an unparseable frame is dropped rather than becoming state', () => {
 
 test('a fatal close with no session reads as signed out, and does not retry', async () => {
   const { stream, timers } = newStream(() => Promise.resolve({ authenticated: false }))
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
   FakeSource.last().open()
 
   FakeSource.last().fail(true)
@@ -360,7 +436,7 @@ test('a fatal close with no session reads as signed out, and does not retry', as
 
 test('a fatal close with the host unreachable says so rather than blaming the feed', async () => {
   const { stream } = newStream(() => Promise.reject(new Unreachable(new Error('offline'))))
-  stream.subscribe({ types: [], onResnapshot: () => {} })
+  stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
   FakeSource.last().open()
 
   FakeSource.last().fail(true)
@@ -370,7 +446,7 @@ test('a fatal close with the host unreachable says so rather than blaming the fe
 
 test('dropping the last subscriber closes the connection', () => {
   const { stream } = newStream()
-  const stop = stream.subscribe({ types: [], onResnapshot: () => {} })
+  const stop = stream.subscribe({ types: [], onResnapshot: (_r, done) => done() })
   FakeSource.last().open()
 
   stop()

@@ -15,6 +15,7 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
   const [userID, setUserID] = useState('')
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
 
   // The bootstrap-create form's own fields.
@@ -41,20 +42,36 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
     }
   }, [session.hint?.user_id])
 
-  const run = async (fn: () => Promise<unknown>) => {
+  const run = async (fn: () => Promise<void>) => {
     setBusy(true)
     setError('')
     try {
       await fn()
-      setPin('')
-      onSignedIn()
     } catch (err) {
-      setPin('')
       setError(describe(err))
     } finally {
+      // The secret never outlives the request that spent it, on either path.
+      setPin('')
       setBusy(false)
     }
   }
+
+  /**
+   * Creating the first operator does NOT sign anyone in: the server answers
+   * 201 with the new user_id and no session cookie, and the bootstrap window
+   * closes the instant the row exists. So the create lands on the picker with
+   * the new account selected — one honest step, "now sign in" — instead of
+   * re-rendering a form whose window has already shut and whose second submit
+   * would fail with a misleading 401.
+   */
+  const createOperator = () =>
+    run(async () => {
+      const created = await api.createFirstOperator(newID.trim(), newName.trim(), pin)
+      const listed = await api.users()
+      setUsers(listed.users)
+      setUserID(created.user_id)
+      setNotice(`Operator ${created.user_id} created. Sign in with the PIN you just set.`)
+    })
 
   if (users === null) {
     return (
@@ -78,7 +95,7 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            void run(() => api.createFirstOperator(newID.trim(), newName.trim(), pin))
+            void createOperator()
           }}
         >
           <label>
@@ -113,13 +130,17 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
   return (
     <section className="panel">
       <h1>Sign in</h1>
+      {notice !== '' && <p className="notice">{notice}</p>}
       {session.hint?.device_login && (
         <p className="muted">This device is known as {session.hint.device_login}.</p>
       )}
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          void run(() => api.login(userID, pin))
+          void run(async () => {
+            await api.login(userID, pin)
+            onSignedIn()
+          })
         }}
       >
         <label>
@@ -146,7 +167,16 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
           Sign in
         </button>
         {autoLogin && (
-          <button type="button" disabled={busy} onClick={() => void run(() => api.login(userID, ''))}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await api.login(userID, '')
+                onSignedIn()
+              })
+            }
+          >
             Sign in with this device
           </button>
         )}

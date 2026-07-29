@@ -110,8 +110,13 @@ export const api = {
   /** An empty pin is the S01.9 layer-2 grant auto-login attempt. */
   login: (user_id: string, pin: string) => post<{ user_id: string; expires: string }>('/api/auth/login', { user_id, pin }),
   logout: () => post<void>('/api/auth/logout', {}),
-  /** The bootstrap window: while `users` is empty one anonymous create is
-   * allowed and MUST be an operator (D10 needs a holder from the first user). */
+  /**
+   * The bootstrap window: while `users` is empty one anonymous create is
+   * allowed and MUST be an operator (D10 needs a holder from the first user).
+   *
+   * The answer is 201 with the new id and NO session cookie — creating an
+   * account is not signing in, and the caller has to say so.
+   */
   createFirstOperator: (user_id: string, display_name: string, pin: string) =>
-    post<User>('/api/auth/users', { user_id, display_name, role: 'operator', pin }),
+    post<{ user_id: string }>('/api/auth/users', { user_id, display_name, role: 'operator', pin }),
 }

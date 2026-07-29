@@ -10,11 +10,16 @@ import { expect, test } from 'vitest'
  *
  * THE ALLOWLIST IS EMPTY. It widens at B6-8, in B6-8's own commit, with the
  * preview surface it exists for — never quietly, and never here.
+ *
+ * KNOWN BLIND SPOT, defused rather than hidden: `import.meta.glob` does not
+ * include the importing module, so this file is the one file under src/ the
+ * scan cannot see. Every banned token below — in the token list AND in the
+ * planted fixtures — is therefore written SPLIT, so this file contains no
+ * unsplit banned literal at all. The blind spot then costs nothing, and it
+ * stays costing nothing if glob behaviour ever changes and the file starts
+ * scanning itself.
  */
 const allowlist: string[] = []
-
-// Built by concatenation so the scanner's own source is not a hit: the scan
-// covers EVERY file under src/, this one included.
 const banned: { token: string; why: string }[] = [
   { token: 'dangerously' + 'SetInnerHTML', why: "React's escape hatch" },
   { token: 'inner' + 'HTML', why: 'raw HTML assignment' },
@@ -49,6 +54,10 @@ test('the scan actually covers the source tree', () => {
   expect(paths.length).toBeGreaterThan(10)
   expect(paths).toContain('./App.tsx')
   expect(paths).toContain('./events.ts')
+  // The blind spot, asserted so it stays a known fact rather than a belief.
+  expect(paths, 'glob now includes this file — see the split-token note above').not.toContain(
+    './escape-scan.test.ts',
+  )
 })
 
 test('no raw-HTML or code-execution escape hatch exists in web/src', () => {
@@ -59,15 +68,17 @@ test('no raw-HTML or code-execution escape hatch exists in web/src', () => {
 // The planted probe: the scanner must be able to fail. Without this, an
 // assertion that finds nothing proves nothing.
 test('the scan catches a planted violation', () => {
+  // Split, like every other token in this file: the fixtures must plant a
+  // violation in the SCANNER's input without planting one in this SOURCE.
   const planted = {
-    './planted.tsx': 'export const boom = <div dangerouslySetInnerHTML={{ __html: untrusted }} />',
-    './planted2.ts': 'el.innerHTML = untrusted',
-    './planted3.ts': 'const f = new Function("return " + untrusted)',
+    './planted.tsx': 'export const boom = <div dangerously' + 'SetInnerHTML={{ __html: untrusted }} />',
+    './planted2.ts': 'el.inner' + 'HTML = untrusted',
+    './planted3.ts': 'const f = new ' + 'Function("return " + untrusted)',
   }
   const hits = scan(planted)
 
   expect(hits).toHaveLength(3)
-  expect(hits[0]).toContain('dangerouslySetInnerHTML')
-  expect(hits[1]).toContain('innerHTML')
-  expect(hits[2]).toContain('new Function')
+  expect(hits[0]).toContain('dangerously' + 'SetInnerHTML')
+  expect(hits[1]).toContain('inner' + 'HTML')
+  expect(hits[2]).toContain('new ' + 'Function')
 })

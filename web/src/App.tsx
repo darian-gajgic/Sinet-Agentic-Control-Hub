@@ -145,10 +145,11 @@ function useConnection(authed: boolean, injected?: EventStream): Status {
     streamRef.current = stream
     const unwatch = stream.onStatus(setStatus)
     const unsubscribe = stream.subscribe({
-      onResnapshot: () => {
+      onResnapshot: (_reason, done) => {
         // The shell holds no state to re-load, so it is immediately caught up.
-        // A view with state answers this by re-reading its REST snapshot.
-        stream.markApplied()
+        // A view with state answers this by re-reading its REST snapshot and
+        // calling done() when that read lands — clearing its own debt only.
+        done()
       },
     })
     return () => {

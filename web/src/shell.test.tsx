@@ -172,12 +172,17 @@ test('a PIN posts to the login route, is typed as a password, and is not kept', 
   view.unmount()
 })
 
-test('an empty user list opens the bootstrap window and creates an operator', async () => {
-  const calls = routeFetch({
+// The first real-host click-through. Creating the operator answers 201 with no
+// session cookie and CLOSES the bootstrap window, so the flow has to land
+// somewhere that still works — re-rendering the create form would dead-end the
+// operator on a second submit that fails with a misleading 401.
+test('an empty user list opens the bootstrap window and lands on the picker after creating', async () => {
+  const impl: Record<string, Route> = {
     'GET /api/auth/session': anonymous,
     'GET /api/auth/users': { body: { users: [] } },
-    'POST /api/auth/users': { body: { user_id: 'alice', display_name: 'Alice', role: 'operator', pin_set: true } },
-  })
+    'POST /api/auth/users': { status: 201, body: { user_id: 'alice' } },
+  }
+  const calls = routeFetch(impl)
   window.history.replaceState(null, '', '/login')
 
   const view = mount(<App stream={inertStream()} />)
@@ -188,11 +193,59 @@ test('an empty user list opens the bootstrap window and creates an operator', as
   setValue(inputs[0] as HTMLInputElement, 'alice')
   setValue(inputs[1] as HTMLInputElement, 'Alice')
   setValue(inputs[2] as HTMLInputElement, '1234')
+
+  // The account exists from the moment the POST lands: the re-read shows it.
+  impl['GET /api/auth/users'] = {
+    body: { users: [{ user_id: 'alice', display_name: 'Alice', role: 'operator', pin_set: true }] },
+  }
   submit(view.container.querySelector('form')!)
   await flush()
 
   const create = calls.find((c) => c.path === '/api/auth/users' && c.method === 'POST')
   expect(create?.body).toEqual({ user_id: 'alice', display_name: 'Alice', role: 'operator', pin: '1234' })
+
+  // The post-create state, which is the point: the picker, carrying the new
+  // account, with the closed bootstrap form gone and the next step named.
+  const text = view.container.textContent ?? ''
+  expect(text, 'the closed bootstrap window rendered again').not.toContain('First run')
+  expect(text).toContain('Operator alice created')
+  const select = view.container.querySelector('select')!
+  expect([...select.options].map((o) => o.value)).toEqual(['alice'])
+  expect(select.value).toBe('alice')
+  // And the PIN field is empty: creating an account is not signing in.
+  expect((view.container.querySelector('input[type=password]') as HTMLInputElement).value).toBe('')
+  view.unmount()
+})
+
+// The other half of the same fix: with the account in place, the sign-in that
+// follows actually works from the state the create left behind.
+test('the account created in the bootstrap window can sign in from where it lands', async () => {
+  const impl: Record<string, Route> = {
+    'GET /api/auth/session': anonymous,
+    'GET /api/auth/users': { body: { users: [] } },
+    'POST /api/auth/users': { status: 201, body: { user_id: 'alice' } },
+    'POST /api/auth/login': { body: { user_id: 'alice', expires: '2026-08-28T00:00:00Z' } },
+  }
+  const calls = routeFetch(impl)
+  window.history.replaceState(null, '', '/login')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+  const inputs = view.container.querySelectorAll('input')
+  setValue(inputs[0] as HTMLInputElement, 'alice')
+  setValue(inputs[1] as HTMLInputElement, 'Alice')
+  setValue(inputs[2] as HTMLInputElement, '1234')
+  impl['GET /api/auth/users'] = {
+    body: { users: [{ user_id: 'alice', display_name: 'Alice', role: 'operator', pin_set: true }] },
+  }
+  submit(view.container.querySelector('form')!)
+  await flush()
+
+  setValue(view.container.querySelector('input[type=password]') as HTMLInputElement, '1234')
+  submit(view.container.querySelector('form')!)
+  await flush()
+
+  expect(calls.find((c) => c.path === '/api/auth/login')?.body).toEqual({ user_id: 'alice', pin: '1234' })
   view.unmount()
 })
 

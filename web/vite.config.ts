@@ -61,8 +61,15 @@ export default defineConfig(({ command }) => ({
             // The two server surfaces the SPA speaks to (Spec S15.2/S15.3).
             // http-proxy streams responses through unbuffered and Vite adds no
             // compression on a proxied leg, so /events stays a live SSE tail.
-            '/api': { target: devProxyTarget() },
-            '/events': { target: devProxyTarget() },
+            //
+            // A `^` key is a RegExp, and these are anchored on a path BOUNDARY
+            // so dev matches what production enforces: `isAPIPath` in
+            // internal/api/spa.go treats /api and /api/… as the machine
+            // surface and /apifoo as an app route. A bare '/api' key here is a
+            // PREFIX match, which would proxy /apifoo and make the dev server
+            // disagree with the binary it stands in for.
+            '^/api(/|$)': { target: devProxyTarget() },
+            '^/events(/|$)': { target: devProxyTarget() },
           },
         },
       }

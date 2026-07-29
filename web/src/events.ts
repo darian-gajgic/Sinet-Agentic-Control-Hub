@@ -53,6 +53,11 @@ export type ResnapshotReason =
   /** A frame arrived at or below the last sequence we delivered. The stream is
    *  not where we think it is, so the frame is DROPPED rather than applied. */
   | 'stream-rewound'
+  /** A delta frame could not be parsed. It is dropped — and under the sparse-
+   *  sequence rule below, the next frame's check CANNOT notice the hole, so
+   *  the drop has to announce itself or it would be the one silent data loss
+   *  in the client. */
+  | 'frame-unreadable'
 
 export type Subscription = {
   /** Server-side filter. Empty = the unfiltered relay (still owner-scoped). */
@@ -71,8 +76,15 @@ export type Subscription = {
   types?: string[]
   onSnapshot?: (s: Snapshot) => void
   onEvent?: (e: WireEvent) => void
-  /** Obligatory: a subscriber that ignores this renders stale data as live. */
-  onResnapshot: (reason: ResnapshotReason) => void
+  /**
+   * Obligatory: a subscriber that ignores this renders stale data as live.
+   *
+   * `done` clears THIS subscriber's snapshot debt and nothing else — it is the
+   * only way to clear it, so one view cannot declare another one caught up.
+   * Call it once the REST re-read has landed, which may be long after this
+   * callback returns.
+   */
+  onResnapshot: (reason: ResnapshotReason, done: () => void) => void
 }
 
 /** The minimum of EventSource this client uses, so tests can drive it. */
@@ -167,20 +179,19 @@ export class EventStream {
       this.reopen(want)
     } else {
       this.registerTypes(reg)
-      if (this.state === 'live') this.setStatus('catching-up')
-      sub.onResnapshot('connected')
+      this.setStatus('catching-up')
+      reg.onResnapshot('connected', () => this.settle(reg))
     }
     return () => {
       this.subs.delete(reg)
-      if (this.subs.size === 0) this.stop()
+      if (this.subs.size === 0) {
+        this.stop()
+        return
+      }
+      // A departing subscriber must not leave its debt behind: the ones that
+      // remain may all be caught up already.
+      this.settleIfNobodyOwes()
     }
-  }
-
-  /** markApplied is how a subscriber says it has re-loaded its snapshot; the
-   *  stream is 'live' only once nobody owes one. */
-  markApplied(): void {
-    for (const s of this.subs) s.pending = false
-    if (this.source && this.state === 'catching-up') this.setStatus('live')
   }
 
   /** close tears the stream down for good (tab teardown / logout). */
@@ -284,7 +295,23 @@ export class EventStream {
   private requireResnapshot(reason: ResnapshotReason): void {
     for (const s of this.subs) s.pending = true
     this.setStatus('catching-up')
-    for (const s of this.subs) s.onResnapshot(reason)
+    for (const s of this.subs) s.onResnapshot(reason, () => this.settle(s))
+  }
+
+  /** settle clears ONE subscriber's snapshot debt. The stream is live only
+   *  when nobody owes one — otherwise the indicator would read "live" while a
+   *  view is still showing what it had before the gap. */
+  private settle(sub: Registered): void {
+    sub.pending = false
+    this.settleIfNobodyOwes()
+  }
+
+  private settleIfNobodyOwes(): void {
+    if (!this.source || this.state !== 'catching-up') return
+    for (const s of this.subs) {
+      if (s.pending) return
+    }
+    this.setStatus('live')
   }
 
   private onSnapshotFrame(ev: Event): void {
@@ -302,7 +329,15 @@ export class EventStream {
 
   private onDelta(ev: Event): void {
     const frame = parse<WireEvent>(ev)
-    if (!frame) return
+    if (!frame) {
+      // The one place this client knowingly skips a frame. Under the sparse-
+      // sequence rule below, the next frame's check cannot detect the hole —
+      // so the drop is announced rather than swallowed, in the conservative
+      // direction: consumers re-read rather than carry on from a state that
+      // silently missed something.
+      this.requireResnapshot('frame-unreadable')
+      return
+    }
 
     // Sequence discipline. Delivered sequences are legitimately SPARSE — the
     // server drops what the caller may not see and what the filter excludes —
@@ -393,9 +428,10 @@ function parse<T>(ev: Event): T | null {
   try {
     return JSON.parse(data) as T
   } catch {
-    // A frame we cannot parse is logged nowhere and dropped: the transport is
-    // not a place to invent state. The next frame's sequence check will notice
-    // if anything actually moved.
+    // A frame we cannot parse is dropped: the transport is not a place to
+    // invent state. The caller decides what the drop means — a delta announces
+    // it (onDelta), while an unreadable snapshot simply leaves its subscriber
+    // owing one, which already keeps the stream out of 'live'.
     return null
   }
 }
