@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, Unreachable, api, type Session } from './api'
 import { Board } from './Board'
+import { Chat } from './Chat'
 import { ConnectionState } from './ConnectionState'
 import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
@@ -19,9 +20,10 @@ import { hrefFor, routes } from './routes'
  * URLs every deep link and push `navigate` field will target (S15.11), the
  * S01.9 session, and the always-visible connection state (S15.12).
  *
- * The oversight surfaces are built (B6-5); every other surface is still a named
- * stub that says which packet fills it in. A stub renders nothing from the API
- * — honest absence, never a mocked screen that looks real.
+ * The oversight, decision, settings and assistant surfaces are built; the review
+ * surfaces and the workforce map are still named stubs that say which packet
+ * fills them in. A stub renders nothing from the API — honest absence, never a
+ * mocked screen that looks real.
  */
 export default function App({ stream }: { stream?: EventStream } = {}) {
   const { route, params } = useRoute()
@@ -109,6 +111,11 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           <InboxItem id={params.id} stream={stream} />
         ) : route.id === 'settings' ? (
           <Settings stream={stream} />
+        ) : route.id === 'chat' ? (
+          // The open conversation is `/chat?session=…` — a stable, bookmarkable,
+          // push-`navigate`-able URL that fills the route table rather than
+          // adding to it, exactly as the personal filters do on mission control.
+          <Chat stream={stream} search={window.location.search} />
         ) : (
           <Stub route={route} params={params} />
         )}

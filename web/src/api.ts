@@ -1,7 +1,7 @@
 /**
  * The typed client for the S15.2 read surface: readiness, the S01.9 session
- * stack, and the oversight families the B6-5 views render. The inbox, settings,
- * assistant and review families belong to the packets that build those views.
+ * stack, and the oversight, decision, settings and assistant families the built
+ * views render. The review family belongs to the packet that builds that view.
  *
  * Every type below is the shape the Go handler SERVES — pinned by the golden
  * fixtures under src/fixtures/api/, which an internal/api test asserts the real
@@ -835,6 +835,141 @@ export type PriorityHint = {
   detail: string
 }
 
+// ── the S15.7 assistant family (B6-7) ─────────────────────────────────────
+
+/** One conversation's registry row. An EMPTY `title` is the honest untitled
+ *  state, never a placeholder; `title_source` says who or what named it
+ *  (`mechanical` = a truncation of the person's own first message, `duty` = the
+ *  local `utility` seat, `human` = a rename, which the duty never overwrites). */
+export type ChatSession = {
+  session_id: string
+  owner: string
+  title: string
+  title_source: string
+  created_ts: string
+  updated_ts: string
+}
+
+/** One immutable transcript entry. There is no edit verb and no message delete:
+ *  a record of speech that can be rewritten is not a record. */
+export type ChatMessage = {
+  message_id: string
+  session_id: string
+  owner: string
+  role: string
+  body: string
+  turn_id: string
+  created_ts: string
+}
+
+/**
+ * One turn's lifecycle record.
+ *
+ * `outcome` is served VERBATIM as the store recorded it, discriminated by
+ * `outcome_kind`: an `Answer` for the four query verbs, a born task for the S06
+ * handoff, and the platform's own `{error, detail}` envelope for a turn whose
+ * act failed. Nothing on the way to the screen re-derives a confidence or
+ * restyles a lower-confidence flag (G3 D3.5).
+ */
+export type ChatTurn = {
+  turn_id: string
+  session_id: string
+  owner: string
+  /** The verb the person's own gesture chose: ask | view | query | open_sql | task. */
+  kind: string
+  /** running | settled | abandoned. */
+  state: string
+  outcome_kind?: string
+  outcome?: unknown
+  /** The exchange-manifest ids attributed to this turn (the OQ7 window diff plus
+   *  the late-arrival origin-ref union). Honestly sparse at v0. */
+  produced?: string[]
+  started_ts: string
+  settled_ts?: string
+}
+
+/** The born task the S06 handoff returns, with its OPEN intake card — which is
+ *  what the feed renders in place (OQ8(i)). The shape is the pipeline's own
+ *  `taskView`, tied to it by a Go test rather than imagined here. */
+export type ChatBornTask = {
+  task_id: string
+  title: string
+  kanban_status: string
+  owner: string
+  phase: string
+  tier: string
+  family?: string
+  clearance?: number
+  open_ask_id?: string
+  open_card?: ChatIntakeCard
+  runs?: { run_id: string; role: string; state: string; has_receipt: boolean }[]
+}
+
+/** The intake card as the pipeline issued it. Questions carry their own option
+ *  values, and an answer quotes those values back — the vocabulary is the
+ *  card's, never the surface's. */
+export type ChatIntakeCard = {
+  kind: string
+  task_id?: string
+  run_id?: string
+  version?: number
+  issued_ts?: string
+  clearance?: number
+  tier?: string
+  questions?: { id: string; text: string; options?: { label: string; value: string }[]; weight?: number }[]
+}
+
+/**
+ * One session with everything the surface renders without a second round trip.
+ *
+ * `running` is the in-flight turn as SERVER state, which is what makes leaving
+ * the view — or reloading the page entirely — unable to lose it (R14).
+ * `title_seat_wired` lets a mechanically-named session say WHY rather than
+ * leaving a person to wonder.
+ */
+export type ChatSessionView = {
+  session: ChatSession
+  messages: ChatMessage[]
+  turns: ChatTurn[]
+  running?: ChatTurn
+  title_seat_wired: boolean
+}
+
+/** One exchange object's manifest row. The manifest is the record; the
+ *  filesystem is only where the bytes are. */
+export type ChatFile = {
+  file_id: string
+  owner: string
+  name: string
+  size_bytes: number
+  sha256: string
+  origin_session?: string
+  origin_turn?: string
+  uploaded_ts: string
+}
+
+/** The turn submit body: the client's routing decision plus that verb's
+ *  arguments (OQ3(a) — the client routes, the server acts). */
+export type ChatTurnRequest = {
+  kind: string
+  text: string
+  view?: string
+  query?: string
+  slots?: Record<string, string>
+  title?: string
+  /** Exchange-manifest ids handed to a born task, resolved against the CALLER's
+   *  own folder server-side. */
+  inputs?: string[]
+}
+
+export type ChatTurnResult = { turn: ChatTurn; message?: ChatMessage; session: ChatSession }
+/** `applied:false` is the already-resolved state, not a refusal: the turn had
+ *  already ended when the stop arrived (S15.2 retry-safety). */
+export type ChatTurnStopped = { turn: ChatTurn; applied: boolean }
+export type ChatUploaded = { file: ChatFile; applied: boolean }
+export type ChatFileDeleted = { file: ChatFile; applied: boolean }
+export type ChatSessionDeleted = { session_id: string; messages: number; turns: number; applied: boolean }
+
 /** query builds a search string, dropping unset filters rather than sending
  *  empty ones — an empty `?person=` is not the same request as no `?person=`. */
 function query(params: Record<string, string | number | undefined>): string {
@@ -973,4 +1108,41 @@ export const api = {
    *  immutable by trigger, and no edit or delete verb exists to offer. */
   addPriceRow: (row: unknown, reason?: string) =>
     post<PriceRowAdded>('/api/settings/prices', reason ? { row, reason } : { row }),
+
+  // ── the S15.7 assistant family (B6-7) ────────────────────────────────────
+
+  chatSessions: () => request<{ sessions: ChatSession[] }>('/api/chat/sessions'),
+  chatSession: (id: string) => request<ChatSessionView>(`/api/chat/sessions/${encodeURIComponent(id)}`),
+  createChatSession: () => post<{ session: ChatSession }>('/api/chat/sessions', {}),
+  /** The human override of the titling duty. The duty's own write requires the
+   *  source to be unset, so a rename can never be overwritten by it. */
+  renameChatSession: (id: string, title: string) =>
+    post<{ session: ChatSession }>(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),
+  deleteChatSession: (id: string) =>
+    post<ChatSessionDeleted>(`/api/chat/sessions/${encodeURIComponent(id)}/delete`, {}),
+
+  /**
+   * The ONE turn verb, and it is SYNCHRONOUS: the answer arrives whole, because
+   * nothing in the platform streams a chat turn (no engine session runs for one).
+   * "In-flight" is this POST being outstanding over a server-side `running` row,
+   * which is what a re-entered view re-attaches to rather than re-asking.
+   */
+  chatTurn: (session: string, body: ChatTurnRequest) =>
+    post<ChatTurnResult>(`/api/chat/sessions/${encodeURIComponent(session)}/turns`, body),
+  /** The S15.7 hard-stop: an EXPLICIT act with a record, never a navigation side
+   *  effect. It abandons the turn; it does not cancel a task the turn handed off. */
+  stopChatTurn: (turn: string) => post<ChatTurnStopped>(`/api/chat/turns/${encodeURIComponent(turn)}/stop`, {}),
+
+  chatFiles: () => request<{ files: ChatFile[] }>('/api/chat/files'),
+  /**
+   * The ONE upload verb, driven by both gestures (drag-drop and click-browse) so
+   * there is no second write path to keep in step. The body is the raw object and
+   * the name rides the query string: the bytes are never decoded, re-encoded or
+   * wrapped by this client, and the server's own bound refuses an oversized one
+   * with its own reason.
+   */
+  uploadChatFile: (name: string, body: Blob) =>
+    request<ChatUploaded>(`/api/chat/files?name=${encodeURIComponent(name)}`, { method: 'POST', body }),
+  deleteChatFile: (id: string) =>
+    post<ChatFileDeleted>(`/api/chat/files/${encodeURIComponent(id)}/delete`, {}),
 }

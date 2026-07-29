@@ -93,7 +93,7 @@ test('a built surface renders its own heading, not a stub', async () => {
   // is the point: even unreadable, a built surface says what it IS rather than
   // claiming to be unbuilt.
   routeFetch({ 'GET /api/auth/session': signedIn })
-  for (const id of ['mission-control', 'board'] as const) {
+  for (const id of ['mission-control', 'board', 'chat'] as const) {
     const r = routes.find((x) => x.id === id)!
     window.history.replaceState(null, '', r.pattern)
     const view = mount(<App stream={inertStream()} />)

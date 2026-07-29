@@ -40,8 +40,17 @@
       "session_id": "cs-0000000000000001",
       "owner": "alice",
       "role": "user",
-      "body": "and how much did last week cost?",
+      "body": "which runs cost the most last week?",
       "turn_id": "ct-0000000000000010",
+      "created_ts": "2026-07-20T09:02:00Z"
+    },
+    {
+      "message_id": "cm-0000000000000013",
+      "session_id": "cs-0000000000000001",
+      "owner": "alice",
+      "role": "user",
+      "body": "and how much did last week cost?",
+      "turn_id": "ct-0000000000000012",
       "created_ts": "2026-07-20T09:02:00Z"
     }
   ],
@@ -296,13 +305,49 @@
       "turn_id": "ct-0000000000000010",
       "session_id": "cs-0000000000000001",
       "owner": "alice",
+      "kind": "open_sql",
+      "state": "settled",
+      "outcome_kind": "answer",
+      "outcome": {
+        "layer": 2,
+        "query": "open_sql.generated",
+        "confidence": "lower-confidence",
+        "question": "which runs cost the most last week?",
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "truncated": false,
+        "notes": [
+          "history: Layer-2 open SQL is not available: the Layer-2 surface is not wired (read-only handle, local tier or advisory run absent)"
+        ],
+        "audit": {
+          "question": "which runs cost the most last week?",
+          "outcome": "unavailable",
+          "limit_injected": 200,
+          "timeout_ms": 5000,
+          "refusal": "the Layer-2 surface is not wired (read-only handle, local tier or advisory run absent)",
+          "row_count": 0,
+          "truncated": false,
+          "alias": "sql-open",
+          "as_operator": false,
+          "owner_scoped": 0,
+          "raw_output_len": 0
+        }
+      },
+      "started_ts": "2026-07-20T09:02:00Z",
+      "settled_ts": "2026-07-20T09:02:00Z"
+    },
+    {
+      "turn_id": "ct-0000000000000012",
+      "session_id": "cs-0000000000000001",
+      "owner": "alice",
       "kind": "ask",
       "state": "running",
       "started_ts": "2026-07-20T09:02:00Z"
     }
   ],
   "running": {
-    "turn_id": "ct-0000000000000010",
+    "turn_id": "ct-0000000000000012",
     "session_id": "cs-0000000000000001",
     "owner": "alice",
     "kind": "ask",

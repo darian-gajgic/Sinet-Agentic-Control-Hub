@@ -391,9 +391,19 @@ func driveFixtureChat(t *testing.T, b *backend) {
 		`{"kind":"task","title":"Draft the release notes","text":"pull the merged PRs and draft release notes"}`)
 	duringTurn = nil
 
-	// Turn 4 is left RUNNING: the in-flight state has to have a committed body,
-	// because "the turn survives navigation" is a render over served state and a
-	// render with no fixture is a render nobody drove.
+	// Turn 4 — the Layer-2 ESCALATION, reached only because the caller named
+	// `open_sql` (OQ3: reaching open SQL is an act). It is the committed body for
+	// the render G3 D3.5 exists for: a layer-2 answer carrying `lower-confidence`
+	// with its audit block, at 200. This world composes internal/history with no
+	// read-only handle and no duty caller, so the honest outcome is `unavailable`
+	// — a LADDER DEGRADATION, which is exactly one of the two facts part B has to
+	// render as the answer it is rather than as an error banner.
+	post("alice", "/api/chat/sessions/"+sid+"/turns",
+		`{"kind":"open_sql","text":"which runs cost the most last week?"}`)
+
+	// The last turn is left RUNNING: the in-flight state has to have a committed
+	// body, because "the turn survives navigation" is a render over served state
+	// and a render with no fixture is a render nobody drove.
 	if _, _, err := store.BeginTurn(ctx, "alice", sid, chat.KindAsk, "and how much did last week cost?"); err != nil {
 		t.Fatalf("seed the in-flight turn: %v", err)
 	}
@@ -1345,6 +1355,12 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// re-attaches to after a navigation.
 	{"chat-sessions", "/api/chat/sessions", "alice"},
 	{"chat-session", "/api/chat/sessions/cs-0000000000000001", "alice"},
+	// The SECOND session, empty and untitled. It is not a spare: one turn at a
+	// time is a per-session rule, so the rich body above — which deliberately
+	// holds a RUNNING turn — is a conversation the composer correctly refuses to
+	// send a second turn into. The empty body is where a driven send belongs, and
+	// it is also the committed ground for the nothing-said-yet render.
+	{"chat-session-empty", "/api/chat/sessions/cs-0000000000000014", "alice"},
 	{"chat-files", "/api/chat/files", "alice"},
 	// The D4(b) unlock: the recorded suite results, through the LANDED audited
 	// query route.

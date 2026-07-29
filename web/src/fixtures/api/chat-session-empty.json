@@ -1,0 +1,13 @@
+{
+  "session": {
+    "session_id": "cs-0000000000000014",
+    "owner": "alice",
+    "title": "",
+    "title_source": "",
+    "created_ts": "2026-07-20T09:02:00Z",
+    "updated_ts": "2026-07-20T09:02:00Z"
+  },
+  "messages": [],
+  "turns": [],
+  "title_seat_wired": false
+}

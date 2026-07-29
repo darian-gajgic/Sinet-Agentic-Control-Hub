@@ -753,6 +753,206 @@ td {
   white-space: nowrap;
 }
 
+/* ── the assistant (Spec S15.7; S1.10 phone-complete) ────────────────────────
+   Three regions — the conversation rail, the thread, the exchange sidebar — that
+   STACK on a phone and only lay out side by side at the breakpoint. Chat is one
+   of the surfaces S1.10 names as phone-complete, so every act (send, stop, pick
+   a verb, upload, delete, answer an intake card) has to be reachable at 375px. */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 100%;
+}
+
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 100%;
+}
+
+.chat-sessions,
+.chat-exchange,
+.chat-thread {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-sessions-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.chat-sessions ul,
+.chat-files,
+.chat-chips,
+.chat-intake-questions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-sessions li,
+.chat-files li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.chat-sessions li[data-active='true'] {
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 0.5rem;
+}
+
+.chat-session-acts,
+.chat-rename,
+.chat-intake-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* A conversation title and a file name are both content, and content on a phone
+   wraps rather than pushing the page sideways. */
+.chat-session-title,
+.chat-file-name,
+.chip-name {
+  overflow-wrap: anywhere;
+}
+
+/* A sha256 is 64 characters that must not widen the page. */
+.chat-file-sha {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.chat-viewport {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 100%;
+}
+
+.chat-said,
+.chat-turn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem;
+  max-width: 100%;
+  /* Somebody's own words can be one very long token. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-said {
+  background: var(--panel);
+}
+
+.chat-answer,
+.chat-born,
+.chat-intake {
+  max-width: 100%;
+  /* An answer is a table and a table is wider than a phone: it scrolls inside
+     its own box, never the page. */
+  overflow-x: auto;
+}
+
+.chat-born-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.chat-born-facts dt {
+  color: var(--muted);
+}
+
+.chat-born-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.125rem 0.625rem;
+  overflow-wrap: anywhere;
+}
+
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.chat-verbs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat-verbs label,
+.chat-inputs label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chat-arg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.chat-composer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-input {
+  width: 100%;
+  max-width: 100%;
+  min-height: 3rem;
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  resize: vertical;
+}
+
+.chat-escalate {
+  margin-top: 0.5rem;
+}
+
+.chat-exchange[data-drop-target='over'] {
+  border-color: var(--accent);
+}
+
+.chat-browse {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 @media (min-width: 48rem) {
   .conn-detail {
     display: inline;
@@ -794,5 +994,32 @@ td {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: end;
+  }
+
+  /* The three regions lay out side by side only where there is room for them;
+     on a phone they stack, and the thread takes the space that is left. */
+  .chat-body {
+    flex-direction: row;
+    align-items: start;
+  }
+
+  .chat-sessions,
+  .chat-exchange {
+    flex: 0 0 16rem;
+  }
+
+  .chat-thread {
+    flex: 1 1 0;
+  }
+
+  .chat-verbs,
+  .chat-composer-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .chat-input {
+    flex: 1 1 0;
   }
 }

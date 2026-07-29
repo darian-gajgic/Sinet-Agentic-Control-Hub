@@ -51,9 +51,10 @@ function scan(files: Record<string, string>): string[] {
 test('the scan actually covers the source tree', () => {
   const paths = Object.keys(sources)
   // A scanner that silently matched nothing would pass forever. The floor moves
-  // with the tree (10 at B6-4, 30 at B6-5, 35 at B6-6) so "the scan grew over
-  // the new views" is a checked fact rather than an assumption about a glob.
-  expect(paths.length).toBeGreaterThan(35)
+  // with the tree (10 at B6-4, 30 at B6-5, 35 at B6-6, 40 at B6-7) so "the scan
+  // grew over the new views" is a checked fact rather than an assumption about a
+  // glob.
+  expect(paths.length).toBeGreaterThan(40)
   expect(paths).toContain('./App.tsx')
   expect(paths).toContain('./events.ts')
   // The B6-5 oversight surfaces are inside the scan, by name.
@@ -69,6 +70,13 @@ test('the scan actually covers the source tree', () => {
     './Inbox.tsx',
     './Settings.tsx',
     './settingsForm.tsx',
+    // The B6-7 assistant: a transcript is the one surface whose content is
+    // literally what somebody typed, and a chat widget is where a markdown
+    // renderer would be reached for first. The transcript is plain escaped text
+    // at v0 and the allowlist did not move for it.
+    './Chat.tsx',
+    './chatRuntime.ts',
+    './chatFacts.ts',
   ]) {
     expect(paths, `${view} is not covered by the escape scan`).toContain(view)
   }

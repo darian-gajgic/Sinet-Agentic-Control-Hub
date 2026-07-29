@@ -134,6 +134,43 @@ export const inboxEventTypes = [
   'eval.score_recorded',
 ] as const
 
+/**
+ * The types that move the ASSISTANT's session list (Spec S15.7; §42).
+ *
+ * Three, and they are the whole session lifecycle: a create adds a row, a rename
+ * changes the label the list shows, a delete takes the thread away. A turn does
+ * not belong here — it moves the transcript, not the list — except through the
+ * rename the first-message titling duty performs, which mints
+ * `chat.session_renamed` like any other rename.
+ *
+ * These frames DO reach the person who caused them: chat mutations are the
+ * owner's own, and the relay is owner-scoped to the writer. The currency they
+ * buy is a second tab and a phone open on the same conversation.
+ */
+export const chatSessionEventTypes = ['chat.session_created', 'chat.session_renamed', 'chat.session_deleted'] as const
+
+/**
+ * The types that move one CONVERSATION's transcript.
+ *
+ * The turn lifecycle is obvious: a start opens the in-flight state, a settle
+ * records what came back, an abandon records that somebody stopped it. The two
+ * FILE types are here for a reason that is easy to miss — a turn's produced-files
+ * chips are a manifest diff, so an upload landing while a turn is in flight
+ * changes what that turn will list, and a file whose `origin_turn` names a turn
+ * joins its chips at read time even after it settled. A file frame therefore
+ * moves something this view renders.
+ */
+export const chatTurnEventTypes = [
+  'chat.turn_started',
+  'chat.turn_settled',
+  'chat.turn_abandoned',
+  'chat.file_uploaded',
+  'chat.file_deleted',
+] as const
+
+/** The types that move the exchange sidebar: the manifest's own two mutations. */
+export const chatFileEventTypes = ['chat.file_uploaded', 'chat.file_deleted'] as const
+
 export type Live<T> = {
   data: T | null
   /** The failure this view could not read past — rendered, never swallowed. */

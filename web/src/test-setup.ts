@@ -27,4 +27,19 @@ if (!('ResizeObserver' in globalThis)) {
   globalThis.ResizeObserver = NoopResizeObserver
 }
 
+/**
+ * Element.scrollTo as a no-op, for the SAME reason (B6-7).
+ *
+ * jsdom implements scrolling on `window` and not on elements, because there is
+ * nothing to scroll: no layout, no viewport, no overflow. @assistant-ui/react's
+ * thread viewport calls `div.scrollTo` from a requestAnimationFrame to keep the
+ * newest turn in view, so without this a mounted transcript throws from a frame
+ * callback AFTER the assertions have passed — an unhandled error rather than a
+ * failure, which is worse than either. Scroll POSITION is a real-browser concern
+ * and belongs to the B6-9 device drill; nothing here asserts on it.
+ */
+if (typeof Element.prototype.scrollTo !== 'function') {
+  Element.prototype.scrollTo = function scrollTo(): void {}
+}
+
 export {}

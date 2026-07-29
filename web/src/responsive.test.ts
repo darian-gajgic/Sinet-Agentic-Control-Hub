@@ -148,6 +148,27 @@ test('the settings tab reaches all 33 domains at phone width', () => {
   expect(block('.deferred li')).toContain('overflow-wrap: anywhere')
 })
 
+test('the assistant is usable at phone width: three regions that stack, content that wraps', () => {
+  // S1.10 names chat as phone-complete, so its three regions stack on a phone
+  // and lay out side by side only at the breakpoint.
+  expect(block('.chat-body')).toContain('flex-direction: column')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  expect(wide, 'the assistant never lays out its regions side by side on a wide screen').toContain('.chat-body')
+  // Every act stays reachable: the verb picker and the composer row wrap, and
+  // nothing is hidden behind a horizontal scroll of the page.
+  expect(block('.chat-composer-row')).toContain('flex-direction: column')
+  // `.chat-intake-acts` closes the grouped rule that also covers the session
+  // acts and the rename row — the block helper matches the selector before the
+  // brace, so the last one names the whole group.
+  expect(block('.chat-intake-acts')).toContain('flex-wrap: wrap')
+  // Content that is genuinely wider than a phone scrolls INSIDE its own box: an
+  // answer is a table, and a sha256 is 64 characters with no break in it.
+  expect(block('.chat-intake')).toContain('overflow-x: auto')
+  expect(block('.chat-file-sha')).toContain('overflow-wrap: anywhere')
+  expect(block('.chat-turn'), 'a long message would push the page sideways').toContain('overflow-wrap: anywhere')
+  expect(block('.chat-input')).toContain('max-width: 100%')
+})
+
 test('a view that owes a re-snapshot is marked in the stylesheet, not only in the DOM', () => {
   // The stale marker has to be VISIBLE, or "stale never poses as live" is a
   // data attribute nobody can see (S15.12).

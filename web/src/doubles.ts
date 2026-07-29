@@ -5,6 +5,10 @@ import type { EventSourceLike } from './events'
 import approvalsMineRaw from './fixtures/api/approvals-mine.json?raw'
 import approvalsRaw from './fixtures/api/approvals.json?raw'
 import benchmarkVerdictsRaw from './fixtures/api/benchmark-verdicts.json?raw'
+import chatFilesRaw from './fixtures/api/chat-files.json?raw'
+import chatSessionRaw from './fixtures/api/chat-session.json?raw'
+import chatSessionEmptyRaw from './fixtures/api/chat-session-empty.json?raw'
+import chatSessionsRaw from './fixtures/api/chat-sessions.json?raw'
 import evalScoresRaw from './fixtures/api/eval-scores.json?raw'
 import pricesRaw from './fixtures/api/prices.json?raw'
 import pricesMemberRaw from './fixtures/api/prices-member.json?raw'
@@ -107,13 +111,33 @@ export type FetchLog = {
  * that quietly calls something nobody scripted is exactly the drift these
  * tests exist to catch.
  */
+/**
+ * recordBody keeps what was actually sent.
+ *
+ * Almost every verb sends JSON and a parsed object is what a test wants to assert
+ * on. The exchange upload does NOT: its body is the raw object itself, because
+ * the client never decodes or re-encodes a person's file. So a non-JSON body is
+ * recorded AS THE VALUE SENT rather than making the double throw — the assertion
+ * on it is then about the real thing (a Blob and its size), not about a string
+ * somebody serialized to keep a test helper happy.
+ */
+function recordBody(body: BodyInit | null | undefined): unknown {
+  if (body === null || body === undefined) return undefined
+  if (typeof body !== 'string') return body
+  try {
+    return JSON.parse(body)
+  } catch {
+    return body
+  }
+}
+
 export function scriptedFetch(table: Record<string, Scripted>): FetchLog {
   const routes = { ...table }
   const calls: { method: string; path: string; body: unknown }[] = []
   const impl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const path = String(input)
     const method = init?.method ?? 'GET'
-    calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    calls.push({ method, path, body: recordBody(init?.body) })
     const route = routes[`${method} ${path}`]
     if (!route) throw new Error(`unscripted request: ${method} ${path}`)
     const status = route.status ?? 200
@@ -172,6 +196,25 @@ export const fixtures = {
   prices: () => parse<Record<string, unknown>>(pricesRaw),
   pricesMember: () => parse<Record<string, unknown>>(pricesMemberRaw),
   evalScores: () => parse<Record<string, unknown>>(evalScoresRaw),
+  /**
+   * The S15.7 assistant world, read as alice — there IS no operator body to
+   * commit, because the operator does not read another member's transcripts, and
+   * that absence is the disposition rather than an omission.
+   *
+   * `chatSession` deliberately carries every render the widget owes: a Layer-0
+   * deterministic answer, a disambiguation card whose choices are real catalog
+   * queries, the S06 handoff with its OPEN intake card AND a non-empty produced
+   * chip, a Layer-2 escalation carrying `lower-confidence` with its audit, and a
+   * turn left RUNNING for the in-flight re-attach. `chatSessions` holds a second,
+   * empty session in the honest untitled state.
+   */
+  chatSessions: () => parse<Record<string, unknown>>(chatSessionsRaw),
+  chatSession: () => parse<Record<string, unknown>>(chatSessionRaw),
+  /** The empty session. It is where a driven SEND belongs: one turn at a time is
+   *  a per-session rule, so the rich body's own running turn is a conversation the
+   *  composer is right to refuse a second turn into. */
+  chatSessionEmpty: () => parse<Record<string, unknown>>(chatSessionEmptyRaw),
+  chatFiles: () => parse<Record<string, unknown>>(chatFilesRaw),
   taskDetailOps: () => parse<Record<string, unknown>>(taskDetailOpsRaw),
   deliverablesInReview: () => parse<Record<string, unknown>>(deliverablesRaw),
   deliverablesOfTask: () => parse<Record<string, unknown>>(deliverablesOfTaskRaw),
@@ -234,5 +277,21 @@ export function oversightRoutes(): Record<string, Scripted> {
     'GET /api/runs/r-ship': { body: fixtures.runDetail() },
     'GET /api/tasks/t-ops': { body: fixtures.taskDetailOps() },
     'GET /api/deliverables?task=t-ops': { body: { deliverables: [], cursor: 15, truncated: false } },
+  }
+}
+
+/** The reads the S15.7 assistant surface makes, answered from its own golden
+ *  fixtures. Both ids are the fixture world's real ones, because those are the
+ *  ids the committed bodies carry. */
+export const chatSessionID = 'cs-0000000000000001'
+export const chatEmptySessionID = 'cs-0000000000000014'
+
+export function chatRoutes(): Record<string, Scripted> {
+  return {
+    ...oversightRoutes(),
+    'GET /api/chat/sessions': { body: fixtures.chatSessions() },
+    [`GET /api/chat/sessions/${chatSessionID}`]: { body: fixtures.chatSession() },
+    [`GET /api/chat/sessions/${chatEmptySessionID}`]: { body: fixtures.chatSessionEmpty() },
+    'GET /api/chat/files': { body: fixtures.chatFiles() },
   }
 }
