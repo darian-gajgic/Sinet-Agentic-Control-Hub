@@ -2,6 +2,7 @@ package metering
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -156,3 +157,85 @@ func TestParseUnifiedHeadersAbsent(t *testing.T) {
 }
 
 func day(y, m, d int) time.Time { return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC) }
+
+// TestAUIShapedRowPricesEveryUnitItDeclares is the B6-6 drain-r2 assert: the two
+// unit classes the settings form did not originally offer are REAL, they are
+// FED, and a cost folds them unconditionally.
+//
+// The composed table multiplies all five units with no per-unit unpriced trace
+// (Price, above), and normalize feeds CacheCreationTokens and ServerToolCalls
+// from real provider blocks. So a row that declared only three of the five
+// would price genuine cache-creation and server-tool usage at $0 — inside a
+// cost the receipt calls PRICED, with nothing anywhere saying a unit was
+// missing. That is the silent zero the UNPRICED posture exists to bar, arriving
+// through a form instead of through an empty table.
+//
+// This drives the row the settings form now composes — all five units answered
+// — through the real pricing path, and checks the arithmetic unit by unit.
+func TestAUIShapedRowPricesEveryUnitItDeclares(t *testing.T) {
+	pt := NewEffectiveDatedTable("ui-composed-v1")
+	from := day(2026, 7, 1)
+	pt.Add(PriceRow{
+		Model: "claude-opus-5", Lane: "anthropic",
+		// Exactly the shape POST /api/settings/prices now receives: every unit
+		// the operator either priced or explicitly declared not charged.
+		Prices: UnitPrices{
+			InputUSD: 0.000015, OutputUSD: 0.000075, CacheReadUSD: 0.0000015,
+			CacheCreationUSD: 0.00001875, ServerToolUSD: 0.01,
+		},
+		EffectiveFrom: from, VerifiedOn: from, Source: "the provider's published pricing page",
+	})
+
+	// A usage block carrying BOTH previously-missing classes.
+	a := normalize(json.RawMessage(`{
+		"input_tokens": 1000,
+		"output_tokens": 500,
+		"cache_read_input_tokens": 2000,
+		"cache_creation_input_tokens": 400,
+		"server_tool_use": {"web_search_requests": 3, "web_fetch_requests": 1}
+	}`))
+	if a.CacheCreationTokens != 400 || a.ServerToolCalls != 4 {
+		t.Fatalf("the fixture does not actually feed the two classes: cache-creation=%d server-tool=%d",
+			a.CacheCreationTokens, a.ServerToolCalls)
+	}
+
+	pc := pt.Price("claude-opus-5", "anthropic", day(2026, 7, 20), a, CurrencyAPIEquiv)
+	if pc.Unpriced {
+		t.Fatalf("a fully declared row priced UNPRICED: %+v", pc)
+	}
+	want := float64(a.PromptTokensPricedInput())*0.000015 +
+		float64(a.CacheReadTokens)*0.0000015 +
+		float64(a.CacheCreationTokens)*0.00001875 +
+		float64(a.BilledOutputTokens)*0.000075 +
+		float64(a.ServerToolCalls)*0.01
+	if pc.CostUSD != want {
+		t.Fatalf("cost = %v, want %v", pc.CostUSD, want)
+	}
+
+	// THE NON-TAUTOLOGICAL HALF: the same usage against a row that declared only
+	// the three units the first form offered. It still prices — the row exists,
+	// so the lane is "priced" — and the two undeclared classes contribute
+	// NOTHING, with no trace anywhere that they were charged at zero. The gap is
+	// exactly the money those two units were worth.
+	partial := NewEffectiveDatedTable("three-unit-v0")
+	partial.Add(PriceRow{
+		Model: "claude-opus-5", Lane: "anthropic",
+		Prices:        UnitPrices{InputUSD: 0.000015, OutputUSD: 0.000075, CacheReadUSD: 0.0000015},
+		EffectiveFrom: from, VerifiedOn: from, Source: "the provider's published pricing page",
+	})
+	thin := partial.Price("claude-opus-5", "anthropic", day(2026, 7, 20), a, CurrencyAPIEquiv)
+	if thin.Unpriced {
+		t.Fatal("the three-unit row priced UNPRICED — the hazard this test describes would not exist")
+	}
+	missing := float64(a.CacheCreationTokens)*0.00001875 + float64(a.ServerToolCalls)*0.01
+	// Compared with a tolerance, not for equality: the two sums add the same
+	// terms in different orders, and IEEE-754 addition is not associative — the
+	// difference here is one unit in the last place, which is a fact about
+	// float64 rather than about the pricing.
+	if got := want - thin.CostUSD; math.Abs(got-missing) > 1e-12 {
+		t.Fatalf("the undeclared units cost %v, want %v — the silent gap is not what it looks like", got, missing)
+	}
+	if missing <= 0 {
+		t.Fatal("the two units are worth nothing in this fixture, so the assertion is vacuous")
+	}
+}

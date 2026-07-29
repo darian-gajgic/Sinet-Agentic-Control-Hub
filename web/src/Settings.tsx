@@ -367,6 +367,45 @@ function PriceTable({ stream }: { stream?: EventStream }) {
 }
 
 /**
+ * The FIVE unit classes a composed cost multiplies (internal/metering's own
+ * `unit_prices` keys, S10.3).
+ *
+ * All five, not the three that are easy: `PricedCost` folds every unit
+ * UNCONDITIONALLY, and cache-creation tokens and server-tool calls are real fed
+ * classes — so a form that offered three would leave two priced at a traceless
+ * $0 inside a cost the receipt calls priced. A golden-fixture test pins this
+ * list against the served row's own keys, which is what stops it drifting from
+ * the shape the store accepts.
+ */
+type UnitField =
+  | 'input_usd'
+  | 'output_usd'
+  | 'cache_read_usd'
+  | 'cache_creation_usd'
+  | 'server_tool_usd'
+
+const unitFields: [UnitField, string][] = [
+  ['input_usd', 'input, USD per token'],
+  ['output_usd', 'output, USD per token'],
+  ['cache_read_usd', 'cache read, USD per token'],
+  ['cache_creation_usd', 'cache creation, USD per token'],
+  ['server_tool_usd', 'server tool, USD per call'],
+]
+
+const blankUnits = (): Record<UnitField, string> =>
+  Object.fromEntries(unitFields.map(([f]) => [f, ''])) as Record<UnitField, string>
+
+const noneFree = (): Record<UnitField, boolean> =>
+  Object.fromEntries(unitFields.map(([f]) => [f, false])) as Record<UnitField, boolean>
+
+/** positiveNumber is the boundary shape check: `Number('')` is 0 and
+ *  `Number('abc')` is NaN, so neither may pass for a price. */
+function positiveNumber(raw: string): boolean {
+  const n = Number(raw)
+  return raw.trim() !== '' && Number.isFinite(n) && n > 0
+}
+
+/**
  * The add-row form composes the S10.3 row from its known fields (OQ6). It is a
  * structured form rather than raw JSON because raw JSON is operator-hostile,
  * and it is pinned to the OWNER's shape by a golden fixture marshaled from the
@@ -374,35 +413,26 @@ function PriceTable({ stream }: { stream?: EventStream }) {
  * store's validation remains the authority and its refusals render verbatim.
  */
 function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) => void }) {
-  const [row, setRow] = useState({
-    model: '',
-    lane: '',
-    input_usd: '',
-    output_usd: '',
-    cache_read_usd: '',
-    effective_from: '',
-    verified_on: '',
-    source: '',
-  })
+  const [row, setRow] = useState({ model: '', lane: '', effective_from: '', verified_on: '', source: '' })
+  const [prices, setPrices] = useState<Record<UnitField, string>>(blankUnits())
+  const [free, setFree] = useState<Record<UnitField, boolean>>(noneFree())
   const [reason, setReason] = useState('')
-  // A declared unit price must PARSE as a real positive number before the
-  // append is offered. `Number('')` is 0 and `Number('abc')` is NaN, so a blank
-  // or mistyped field would otherwise compose a row priced at nothing — and a
-  // row that exists prices its lane, so every call on it would be charged $0
-  // with no trace, which is exactly the silent zero the UNPRICED posture exists
-  // to bar (S10.1). This is input-shape validation at the boundary; the STORE
-  // is the authority and refuses the same row on its own terms.
-  const priced = (raw: string): boolean => {
-    const n = Number(raw)
-    return raw.trim() !== '' && Number.isFinite(n) && n > 0
-  }
-  const pricesParse = priced(row.input_usd) && priced(row.output_usd) && priced(row.cache_read_usd)
-  // The value is read BEFORE the updater runs: React clears `currentTarget`
-  // once the handler returns, and a lazy setState updater runs after that.
   const set = (field: keyof typeof row) => (e: { currentTarget: { value: string } }) => {
     const value = e.currentTarget.value
     setRow((r) => ({ ...r, [field]: value }))
   }
+
+  // EVERY unit must be answered, one way or the other. A unit left blank and
+  // not declared free is the one state that composes a lie: the row exists, so
+  // the lane is "priced", and the composed table multiplies EVERY unit
+  // unconditionally — so a real cache-creation or server-tool reading would be
+  // charged a traceless $0 inside a cost the receipt calls priced. Saying "this
+  // lane does not charge for that" is a deliberate act the operator takes; the
+  // form never takes it for them.
+  const answered = (f: UnitField) => free[f] || positiveNumber(prices[f])
+  const allAnswered = unitFields.every(([f]) => answered(f))
+  const pricedUnits = unitFields.filter(([f]) => !free[f] && positiveNumber(prices[f])).map(([f]) => f)
+  const freeUnits = unitFields.filter(([f]) => free[f]).map(([f]) => f)
 
   return (
     <div className="add-price-row">
@@ -410,19 +440,10 @@ function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) =
       <p className="muted">
         An append, effective-dated. The store validates it — if it refuses, the refusal appears here in its own words.
       </p>
-      {!pricesParse && (
-        <p className="muted" data-price-guard="unit-prices">
-          Every unit price has to be a positive number before this can be appended. A row priced at nothing would charge
-          $0 for that lane silently — where no row at all honestly prices it UNPRICED.
-        </p>
-      )}
       {(
         [
           ['model', 'model'],
           ['lane', 'lane'],
-          ['input_usd', 'input USD per unit'],
-          ['output_usd', 'output USD per unit'],
-          ['cache_read_usd', 'cache-read USD per unit'],
           ['effective_from', 'effective from'],
           ['verified_on', 'verified on'],
           ['source', 'where you read it'],
@@ -433,6 +454,50 @@ function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) =
           <input type="text" data-price-field={field} value={row[field]} onChange={set(field)} />
         </label>
       ))}
+
+      <fieldset className="unit-prices">
+        <legend>Every unit this lane can charge for</legend>
+        <p className="muted">
+          A cost is composed from all five. Each one needs either a price or your word that this lane does not charge
+          for it — a unit left blank would be charged at nothing, inside a cost the receipt calls priced.
+        </p>
+        {unitFields.map(([field, label]) => (
+          <div key={field} className="unit-row" data-unit-row={field}>
+            <label>
+              <span>{label}</span>
+              <input
+                type="text"
+                data-price-field={field}
+                disabled={free[field]}
+                value={prices[field]}
+                onChange={(e) => {
+                  const value = e.currentTarget.value
+                  setPrices((p) => ({ ...p, [field]: value }))
+                }}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                data-price-free={field}
+                checked={free[field]}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked
+                  setFree((f) => ({ ...f, [field]: checked }))
+                  if (checked) setPrices((p) => ({ ...p, [field]: '' }))
+                }}
+              />
+              not charged on this lane
+            </label>
+            {!answered(field) && (
+              <span className="warn-flag" data-unit-unanswered={field}>
+                needs a positive price, or your word that it is not charged
+              </span>
+            )}
+          </div>
+        ))}
+      </fieldset>
+
       <label>
         <span>why (recorded with the row)</span>
         <input
@@ -444,21 +509,39 @@ function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) =
           }}
         />
       </label>
+
+      {/* Nothing composes silently: the append says which units it prices and
+          which the operator declared this lane does not charge for. */}
+      <p className="muted" data-append-summary={allAnswered ? 'ready' : 'incomplete'}>
+        {allAnswered ? (
+          <>
+            This row will price {pricedUnits.length === 0 ? 'nothing' : pricedUnits.join(', ')}
+            {freeUnits.length > 0 && <> and declare {freeUnits.join(', ')} not charged on this lane</>}.
+          </>
+        ) : (
+          <>Every unit needs an answer before this row can be appended.</>
+        )}
+      </p>
+
       <button
         type="button"
         data-action="add-price-row"
-        disabled={row.model === '' || row.lane === '' || !pricesParse}
+        disabled={row.model === '' || row.lane === '' || !allAnswered}
         onClick={() => {
+          // A declared-free unit is OMITTED from the row rather than sent as a
+          // zero. All five declared free composes an empty unit-price set,
+          // which the STORE refuses on its own all-zero wall — the authority
+          // stays where OQ6 put it, and its sentence is what a person reads.
+          const unit_prices: Record<string, number> = {}
+          for (const [field] of unitFields) {
+            if (!free[field]) unit_prices[field] = Number(prices[field])
+          }
           void api
             .addPriceRow(
               {
                 model: row.model,
                 lane: row.lane,
-                unit_prices: {
-                  input_usd: Number(row.input_usd),
-                  output_usd: Number(row.output_usd),
-                  cache_read_usd: Number(row.cache_read_usd),
-                },
+                unit_prices,
                 effective_from: row.effective_from,
                 verified_on: row.verified_on,
                 source: row.source,

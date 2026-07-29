@@ -458,7 +458,48 @@ test('an EMPTY price table renders its posture prominently — UNPRICED is a sta
   expect(view.container.querySelectorAll('[data-price-row]')).toHaveLength(0)
 })
 
-test('add-row composes the S10.3 row and renders the version and re-validation story', async () => {
+test('the form offers EVERY unit the composed cost multiplies — pinned to the stored shape', async () => {
+  // A cost folds all five units unconditionally, so a form offering three would
+  // leave cache-creation and server-tool usage priced at a traceless $0 inside
+  // a cost the receipt calls priced. The list is pinned to the SERVED row's own
+  // keys, so it cannot drift from the shape the store accepts (OQ6).
+  const { view } = await openSettings()
+  const stored = (fixtures.prices() as unknown as StoredPricesView).rows?.[0]
+  const offered = [...view.container.querySelectorAll('.unit-prices [data-price-field]')].map((n) =>
+    n.getAttribute('data-price-field'),
+  )
+  expect(offered.slice().sort(), 'the form does not offer exactly the stored unit set').toEqual(
+    Object.keys(stored?.unit_prices ?? {}).sort(),
+  )
+  expect(offered).toHaveLength(5)
+})
+
+test('a unit left blank and not declared free cannot be appended', async () => {
+  const { view, log } = await openSettings()
+  const fill = (field: string, value: string) => {
+    typeInto(view.container.querySelector(`.add-price-row [data-price-field="${field}"]`) as HTMLInputElement, value)
+  }
+  const button = () => view.container.querySelector('[data-action="add-price-row"]') as HTMLButtonElement
+
+  fill('model', 'claude-haiku-5')
+  fill('lane', 'anthropic')
+  expect(button().disabled, 'a row with no unit answers could be appended').toBe(true)
+
+  // Answering four still leaves the fifth composing a silent zero.
+  for (const f of ['input_usd', 'output_usd', 'cache_read_usd', 'cache_creation_usd']) fill(f, '0.000001')
+  expect(button().disabled, 'a row with one unanswered unit could be appended').toBe(true)
+  expect(view.container.querySelector('[data-unit-unanswered="server_tool_usd"]')).not.toBeNull()
+  expect(view.container.querySelector('[data-append-summary]')?.getAttribute('data-append-summary')).toBe('incomplete')
+
+  // Zero, negative and mistyped are all still refused as PRICES.
+  for (const bad of ['0', '-1', 'not a number']) {
+    fill('server_tool_usd', bad)
+    expect(button().disabled, `a ${bad} unit price could be appended`).toBe(true)
+  }
+  expect(log.calls.filter((c) => c.method === 'POST'), 'typing appended a row').toHaveLength(0)
+})
+
+test('"not charged on this lane" is an explicit ACT that composes the omission deliberately', async () => {
   const { view, log } = await openSettings({
     'POST /api/settings/prices': {
       body: {
@@ -468,104 +509,82 @@ test('add-row composes the S10.3 row and renders the version and re-validation s
       },
     },
   })
-  const form = view.container.querySelector('.add-price-row')!
-  const fill = (field: string, value: string) => {
-    typeInto(
-      view.container.querySelector(`.add-price-row [data-price-field="${field}"]`) as HTMLInputElement,
-      value,
-    )
-  }
-  expect(form, 'the operator is offered no way to add a row').not.toBeNull()
-  fill('model', 'claude-haiku-5')
-  fill('lane', 'anthropic')
-  fill('input_usd', '0.000001')
-  fill('output_usd', '0.000005')
-  fill('cache_read_usd', '0.0000001')
-  fill('effective_from', '2026-08-01')
-  fill('verified_on', '2026-07-29')
-  fill('source', 'the published pricing page')
-  fill('reason', 'the cheap lane went live')
-  click(view.container.querySelector('[data-action="add-price-row"]'))
-  await flush()
-
-  // The POST specifically: this path is also the GET the panel reads from.
-  const posted = log.calls.find((c) => c.method === 'POST' && c.path === '/api/settings/prices')
-  expect(posted?.body).toEqual({
-    row: {
-      model: 'claude-haiku-5',
-      lane: 'anthropic',
-      unit_prices: { input_usd: 0.000001, output_usd: 0.000005, cache_read_usd: 0.0000001 },
-      effective_from: '2026-08-01',
-      verified_on: '2026-07-29',
-      source: 'the published pricing page',
-    },
-    reason: 'the cheap lane went live',
-  })
-  expect(view.container.querySelector('[data-price-outcome="added"]')?.textContent).toContain('prices/2026-07-29#2')
-})
-
-test('a blank or mistyped unit price cannot be appended — a $0 row is the silent zero UNPRICED bars', async () => {
-  const { view, log } = await openSettings()
   const fill = (field: string, value: string) => {
     typeInto(view.container.querySelector(`.add-price-row [data-price-field="${field}"]`) as HTMLInputElement, value)
   }
-  const button = () => view.container.querySelector('[data-action="add-price-row"]') as HTMLButtonElement
-
   fill('model', 'claude-haiku-5')
   fill('lane', 'anthropic')
-  // Model and lane alone are not enough: `Number('')` is 0, so an append here
-  // would compose a row priced at nothing — and a row that EXISTS prices its
-  // lane, so every call on it would be charged $0 with no trace.
-  expect(button().disabled, 'a row with no unit prices could be appended').toBe(true)
-  expect(view.container.querySelector('[data-price-guard="unit-prices"]')).not.toBeNull()
-
   fill('input_usd', '0.000001')
-  fill('output_usd', 'not a number')
-  fill('cache_read_usd', '0.0000001')
-  expect(button().disabled, 'a mistyped unit price could be appended as NaN').toBe(true)
-
-  fill('output_usd', '0')
-  expect(button().disabled, 'a zero unit price could be appended').toBe(true)
-
-  fill('output_usd', '-0.5')
-  expect(button().disabled, 'a negative unit price could be appended').toBe(true)
-
   fill('output_usd', '0.000005')
-  expect(button().disabled, 'a fully priced row is still refused').toBe(false)
-  expect(log.calls.filter((c) => c.method === 'POST'), 'typing appended a row').toHaveLength(0)
+  fill('cache_read_usd', '0.0000001')
+  fill('cache_creation_usd', '0.00000125')
+  // The fifth is not priced — it is DECLARED not charged, by the operator.
+  click(view.container.querySelector('[data-price-free="server_tool_usd"]'))
+
+  // The summary says exactly what will be composed; nothing is silent.
+  const summary = view.container.querySelector('[data-append-summary]')
+  expect(summary?.getAttribute('data-append-summary')).toBe('ready')
+  expect(summary?.textContent).toContain('cache_creation_usd')
+  expect(summary?.textContent).toContain('declare server_tool_usd not charged on this lane')
+
+  click(view.container.querySelector('[data-action="add-price-row"]'))
+  await flush()
+  const posted = log.calls.find((c) => c.method === 'POST' && c.path === '/api/settings/prices')
+  // The declared-free unit is OMITTED, not sent as a zero — and the two units
+  // the first cut never offered carry real values through.
+  expect(posted?.body).toMatchObject({
+    row: {
+      unit_prices: {
+        input_usd: 0.000001,
+        output_usd: 0.000005,
+        cache_read_usd: 0.0000001,
+        cache_creation_usd: 0.00000125,
+      },
+    },
+  })
+  const sent = (posted?.body as { row: { unit_prices: Record<string, number> } }).row.unit_prices
+  expect(Object.keys(sent), 'a declared-free unit was sent as a zero').not.toContain('server_tool_usd')
+  expect(view.container.querySelector('[data-price-outcome="added"]')?.textContent).toContain('prices/2026-07-29#2')
 })
 
-test("the STORE's own refusal of a $0-priced row renders verbatim", async () => {
-  // The form guards the shape; the STORE is the authority (OQ6), and it refuses
-  // the same row on its own terms. Its sentence is what a person reads.
-  const { view } = await openSettings({
+test('declaring EVERY unit free is refused by the store, in the store&apos;s own words', async () => {
+  // The form permits the act — it is a thing an operator can coherently mean —
+  // and the STORE refuses it, because a row with no unit price at all prices
+  // every call at $0. The authority stays where OQ6 put it.
+  const { view, log } = await openSettings({
     'POST /api/settings/prices': {
       status: 400,
       body: {
         error: 'bad_request',
         detail:
-          'metering: price row is not admissible: the output unit price is 0 — a declared price must be a real positive number, and a row that priced a lane at nothing would silently charge $0 where the empty table would honestly say UNPRICED (S10.1)',
+          'metering: price row is not admissible: a row declares at least one unit price — a row with none prices every call at $0, which is the silent zero the UNPRICED posture exists to bar (S10.1; P-T08-1)',
       },
     },
   })
-  for (const [field, value] of [
-    ['model', 'claude-haiku-5'],
-    ['lane', 'anthropic'],
-    ['input_usd', '0.000001'],
-    ['output_usd', '0.000005'],
-    ['cache_read_usd', '0.0000001'],
-  ] as [string, string][]) {
-    typeInto(view.container.querySelector(`.add-price-row [data-price-field="${field}"]`) as HTMLInputElement, value)
+  typeInto(view.container.querySelector('.add-price-row [data-price-field="model"]') as HTMLInputElement, 'flat-lane')
+  typeInto(view.container.querySelector('.add-price-row [data-price-field="lane"]') as HTMLInputElement, 'coding-plan')
+  for (const [field] of [
+    ['input_usd'],
+    ['output_usd'],
+    ['cache_read_usd'],
+    ['cache_creation_usd'],
+    ['server_tool_usd'],
+  ] as [string][]) {
+    click(view.container.querySelector(`[data-price-free="${field}"]`))
   }
-  click(view.container.querySelector('[data-action="add-price-row"]'))
+  const button = view.container.querySelector('[data-action="add-price-row"]') as HTMLButtonElement
+  expect(button.disabled, 'an all-declared-free row is blocked by the FORM instead of the store').toBe(false)
+  click(button)
   await flush()
+  const posted = log.calls.find((c) => c.method === 'POST' && c.path === '/api/settings/prices')
+  expect((posted?.body as { row: { unit_prices: Record<string, number> } }).row.unit_prices).toEqual({})
   expect(view.container.querySelector('[data-price-outcome="failed"]')?.textContent).toContain(
-    'would silently charge $0',
+    'a row with none prices every call at $0',
   )
 })
 
 test("the store's refusal on a field the FORM does not guard renders in its own words", async () => {
-  // The form guards the unit prices, because a blank there composes a silent
+  // The form guards the unit answers, because a blank there composes a silent
   // $0. It guards nothing else, deliberately: the store owns what a row is, and
   // a second copy of its rules here would be a second definition of the
   // platform's money. A row that parses but is missing its source comes back
@@ -580,24 +599,19 @@ test("the store's refusal on a field the FORM does not guard renders in its own 
       },
     },
   })
-  for (const [field, value] of [
-    ['model', 'claude-haiku-5'],
-    ['lane', 'anthropic'],
-    ['input_usd', '0.000001'],
-    ['output_usd', '0.000005'],
-    ['cache_read_usd', '0.0000001'],
-  ] as [string, string][]) {
+  const fill = (field: string, value: string) => {
     typeInto(view.container.querySelector(`.add-price-row [data-price-field="${field}"]`) as HTMLInputElement, value)
+  }
+  fill('model', 'claude-haiku-5')
+  fill('lane', 'anthropic')
+  for (const [f] of [['input_usd'], ['output_usd'], ['cache_read_usd'], ['cache_creation_usd'], ['server_tool_usd']] as [string][]) {
+    fill(f, '0.000001')
   }
   click(view.container.querySelector('[data-action="add-price-row"]'))
   await flush()
   expect(log.calls.some((c) => c.method === 'POST' && c.path === '/api/settings/prices')).toBe(true)
-  expect(view.container.querySelector('[data-price-outcome="failed"]')?.textContent).toContain(
-    'never an aggregator',
-  )
+  expect(view.container.querySelector('[data-price-outcome="failed"]')?.textContent).toContain('never an aggregator')
 })
-
-// ── R22: the eval-results surface (the D4(b) unlock) ──────────────────────
 
 test('recorded suite results render as served, and a path that registers no floor says so', async () => {
   const { view, log } = await openSettings()
