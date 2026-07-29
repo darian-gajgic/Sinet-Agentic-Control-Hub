@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, Unreachable, api, type Session } from './api'
+import { Board } from './Board'
 import { ConnectionState } from './ConnectionState'
 import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
+import { MissionControl } from './MissionControl'
 import { NotFound, Stub } from './Stub'
 import { Link, navigate, useRoute } from './router'
 import { hrefFor, routes } from './routes'
@@ -13,8 +15,9 @@ import { hrefFor, routes } from './routes'
  * URLs every deep link and push `navigate` field will target (S15.11), the
  * S01.9 session, and the always-visible connection state (S15.12).
  *
- * Every surface beyond this shell is a named stub. Nothing here renders data
- * from the S15.2 families — those views belong to B6-5..8.
+ * The oversight surfaces are built (B6-5); every other surface is still a named
+ * stub that says which packet fills it in. A stub renders nothing from the API
+ * — honest absence, never a mocked screen that looks real.
  */
 export default function App({ stream }: { stream?: EventStream } = {}) {
   const { route, params } = useRoute()
@@ -79,6 +82,13 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           <Login session={session} onSignedIn={reload} />
         ) : route.id === 'not-found' ? (
           <NotFound pathname={window.location.pathname} />
+        ) : route.id === 'mission-control' ? (
+          <MissionControl stream={stream} />
+        ) : route.id === 'board' ? (
+          // The caller's own identity decides what is drag-reorderable, and the
+          // server refuses the rest: the operator is not excepted from "your
+          // own queued work" (S15.5).
+          <Board me={session.user?.user_id ?? ''} stream={stream} />
         ) : (
           <Stub route={route} params={params} />
         )}

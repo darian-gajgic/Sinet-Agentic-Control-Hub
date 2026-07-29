@@ -1,0 +1,547 @@
+{
+  "views": null,
+  "cost_questions": null,
+  "categories": [
+    "status",
+    "failures",
+    "verdicts",
+    "routing quality",
+    "drift history",
+    "cost"
+  ],
+  "axes": [
+    "project",
+    "person",
+    "status",
+    "date_from",
+    "date_to",
+    "worker",
+    "domain",
+    "lane",
+    "run_id",
+    "task_id"
+  ],
+  "queries": [
+    {
+      "name": "cost.budget_remainder",
+      "category": "cost",
+      "description": "the budget remainder — a recorded absence at v0, with its reason",
+      "slots": null
+    },
+    {
+      "name": "cost.burn_rate",
+      "category": "cost",
+      "description": "the burn rate — usd per observed day, with the span it was observed over",
+      "slots": null
+    },
+    {
+      "name": "cost.by_period",
+      "category": "cost",
+      "description": "consumption per day within a date range",
+      "slots": [
+        {
+          "name": "from",
+          "type": "date_from",
+          "description": "inclusive start, YYYY-MM-DD"
+        },
+        {
+          "name": "to",
+          "type": "date_to",
+          "description": "exclusive end, YYYY-MM-DD"
+        }
+      ]
+    },
+    {
+      "name": "cost.done_directly",
+      "category": "cost",
+      "description": "the done-directly line per run, cited from the registered formula",
+      "slots": null
+    },
+    {
+      "name": "cost.for_person",
+      "category": "cost",
+      "description": "what one person's work cost — the person axis",
+      "slots": [
+        {
+          "name": "person",
+          "type": "person",
+          "description": "the person's user id"
+        }
+      ]
+    },
+    {
+      "name": "cost.for_project",
+      "category": "cost",
+      "description": "what one project cost — the project axis, via the intake-resolved linkage",
+      "slots": [
+        {
+          "name": "project",
+          "type": "project",
+          "description": "the project id, or '(no project)' for unassigned work"
+        }
+      ]
+    },
+    {
+      "name": "cost.for_run",
+      "category": "cost",
+      "description": "what one run cost, from the priced receipt",
+      "slots": [
+        {
+          "name": "run_id",
+          "type": "run_id",
+          "description": "the run id"
+        }
+      ]
+    },
+    {
+      "name": "cost.for_task",
+      "category": "cost",
+      "description": "what one task cost across all of its runs",
+      "slots": [
+        {
+          "name": "task_id",
+          "type": "task_id",
+          "description": "the task id"
+        }
+      ]
+    },
+    {
+      "name": "cost.limit_events",
+      "category": "cost",
+      "description": "the provider limit signals hit, with class, signal and reset time",
+      "slots": null
+    },
+    {
+      "name": "cost.limit_events_in_range",
+      "category": "cost",
+      "description": "limit signals hit within a date range",
+      "slots": [
+        {
+          "name": "from",
+          "type": "date_from",
+          "description": "inclusive start, RFC3339 or YYYY-MM-DD"
+        },
+        {
+          "name": "to",
+          "type": "date_to",
+          "description": "exclusive end, RFC3339 or YYYY-MM-DD"
+        }
+      ]
+    },
+    {
+      "name": "drift.by_change_class",
+      "category": "drift history",
+      "description": "drift findings of one change class",
+      "slots": [
+        {
+          "name": "change_class",
+          "type": "change_class",
+          "description": "the change class"
+        }
+      ]
+    },
+    {
+      "name": "drift.by_severity",
+      "category": "drift history",
+      "description": "drift findings at one severity",
+      "slots": [
+        {
+          "name": "severity",
+          "type": "severity",
+          "description": "the severity label"
+        }
+      ]
+    },
+    {
+      "name": "drift.by_source",
+      "category": "drift history",
+      "description": "drift findings from one watched source",
+      "slots": [
+        {
+          "name": "source",
+          "type": "watch_source",
+          "description": "the watch source id"
+        }
+      ]
+    },
+    {
+      "name": "drift.canary_failures",
+      "category": "drift history",
+      "description": "canary probes that did not pass",
+      "slots": null
+    },
+    {
+      "name": "drift.canary_results",
+      "category": "drift history",
+      "description": "canary results — the behavioral and auth probes against the outside world",
+      "slots": null
+    },
+    {
+      "name": "drift.findings_recent",
+      "category": "drift history",
+      "description": "the most recent outside-world drift findings",
+      "slots": null
+    },
+    {
+      "name": "drift.for_lane",
+      "category": "drift history",
+      "description": "drift findings that name one lane among the lanes they affect",
+      "slots": [
+        {
+          "name": "lane",
+          "type": "lane",
+          "description": "the lane name"
+        }
+      ]
+    },
+    {
+      "name": "drift.in_date_range",
+      "category": "drift history",
+      "description": "drift findings within a date range",
+      "slots": [
+        {
+          "name": "from",
+          "type": "date_from",
+          "description": "inclusive start, RFC3339 or YYYY-MM-DD"
+        },
+        {
+          "name": "to",
+          "type": "date_to",
+          "description": "exclusive end, RFC3339 or YYYY-MM-DD"
+        }
+      ]
+    },
+    {
+      "name": "failures.by_lane",
+      "category": "failures",
+      "description": "how many runs failed on each lane, worst first",
+      "slots": null
+    },
+    {
+      "name": "failures.for_run",
+      "category": "failures",
+      "description": "everything that went wrong on one run — flags, wedges and terminal transitions",
+      "slots": [
+        {
+          "name": "run_id",
+          "type": "run_id",
+          "description": "the run id"
+        }
+      ]
+    },
+    {
+      "name": "failures.runs_crashed",
+      "category": "failures",
+      "description": "runs that crashed",
+      "slots": null
+    },
+    {
+      "name": "failures.runs_died_at_gate",
+      "category": "failures",
+      "description": "runs that died at a gate — the ask outlived the engine session",
+      "slots": null
+    },
+    {
+      "name": "failures.runs_wedged",
+      "category": "failures",
+      "description": "runs the recovery layer marked wedged",
+      "slots": null
+    },
+    {
+      "name": "failures.unmetered_defects",
+      "category": "failures",
+      "description": "local duty calls that could not write their mandatory D7 metering row — never silent (S12.1 R18)",
+      "slots": null
+    },
+    {
+      "name": "failures.watchdog_flags",
+      "category": "failures",
+      "description": "recent watchdog flags with their rule, anomaly class and severity",
+      "slots": null
+    },
+    {
+      "name": "failures.watchdog_flags_by_rule",
+      "category": "failures",
+      "description": "watchdog flags raised by one rule",
+      "slots": [
+        {
+          "name": "rule",
+          "type": "watchdog_rule",
+          "description": "the watchdog rule id"
+        }
+      ]
+    },
+    {
+      "name": "routing.by_cause",
+      "category": "routing quality",
+      "description": "routing decisions made for one cause (selector-match, no-fit-generalist, override, pinned, helper-spawn)",
+      "slots": [
+        {
+          "name": "cause",
+          "type": "routing_cause",
+          "description": "the routing cause"
+        }
+      ]
+    },
+    {
+      "name": "routing.by_lane",
+      "category": "routing quality",
+      "description": "routing decisions onto one lane",
+      "slots": [
+        {
+          "name": "lane",
+          "type": "lane",
+          "description": "the lane name"
+        }
+      ]
+    },
+    {
+      "name": "routing.by_worker",
+      "category": "routing quality",
+      "description": "every decision that routed to one worker, with what happened next — the worker axis",
+      "slots": [
+        {
+          "name": "worker",
+          "type": "worker",
+          "description": "the worker template id"
+        }
+      ]
+    },
+    {
+      "name": "routing.decisions_recent",
+      "category": "routing quality",
+      "description": "the most recent routing decisions with their cause and plain-language reason",
+      "slots": null
+    },
+    {
+      "name": "routing.degraded",
+      "category": "routing quality",
+      "description": "decisions marked degraded — the domain lacked full verification maturity",
+      "slots": null
+    },
+    {
+      "name": "routing.for_run",
+      "category": "routing quality",
+      "description": "how one run was routed and how it turned out",
+      "slots": [
+        {
+          "name": "run_id",
+          "type": "run_id",
+          "description": "the run id"
+        }
+      ]
+    },
+    {
+      "name": "routing.rework_by_cause",
+      "category": "routing quality",
+      "description": "the rework rate per routing cause — the S2.6 auditable-over-time figure",
+      "slots": null
+    },
+    {
+      "name": "routing.rework_by_worker",
+      "category": "routing quality",
+      "description": "the rework rate per worker version — the S08.4 version→outcome join",
+      "slots": null
+    },
+    {
+      "name": "status.run_state_history",
+      "category": "status",
+      "description": "the lifecycle transitions of one run, in event order",
+      "slots": [
+        {
+          "name": "run_id",
+          "type": "run_id",
+          "description": "the run id"
+        }
+      ]
+    },
+    {
+      "name": "status.runs_active",
+      "category": "status",
+      "description": "runs that are live right now — anything not yet in a terminal state",
+      "slots": null
+    },
+    {
+      "name": "status.runs_by_lane",
+      "category": "status",
+      "description": "runs on one provider lane",
+      "slots": [
+        {
+          "name": "lane",
+          "type": "lane",
+          "description": "the lane name"
+        }
+      ]
+    },
+    {
+      "name": "status.runs_by_state",
+      "category": "status",
+      "description": "runs currently in a given lifecycle state",
+      "slots": [
+        {
+          "name": "state",
+          "type": "status",
+          "description": "a run lifecycle state (running, parked, completed, crashed, …)"
+        }
+      ]
+    },
+    {
+      "name": "status.runs_for_task",
+      "category": "status",
+      "description": "every run of one task — its intake, compose, execute and verify legs",
+      "slots": [
+        {
+          "name": "task_id",
+          "type": "task_id",
+          "description": "the task id"
+        }
+      ]
+    },
+    {
+      "name": "status.runs_in_date_range",
+      "category": "status",
+      "description": "runs created within a date range",
+      "slots": [
+        {
+          "name": "from",
+          "type": "date_from",
+          "description": "inclusive start, RFC3339 or YYYY-MM-DD"
+        },
+        {
+          "name": "to",
+          "type": "date_to",
+          "description": "exclusive end, RFC3339 or YYYY-MM-DD"
+        }
+      ]
+    },
+    {
+      "name": "status.tasks_by_kanban",
+      "category": "status",
+      "description": "tasks sitting in one kanban column",
+      "slots": [
+        {
+          "name": "kanban_status",
+          "type": "status",
+          "description": "the kanban column"
+        }
+      ]
+    },
+    {
+      "name": "status.waiting_on_human",
+      "category": "status",
+      "description": "runs blocked on an unanswered question — the waiting-on-human queue",
+      "slots": null
+    },
+    {
+      "name": "verdicts.adverse",
+      "category": "verdicts",
+      "description": "verdicts that did not ship — REVISE, ESCALATE or REOPEN-SPEC",
+      "slots": null
+    },
+    {
+      "name": "verdicts.by_domain",
+      "category": "verdicts",
+      "description": "verdicts in one domain — the domain axis, read from the verdict record itself",
+      "slots": [
+        {
+          "name": "domain",
+          "type": "domain",
+          "description": "the domain (software, web-research, …)"
+        }
+      ]
+    },
+    {
+      "name": "verdicts.by_rubric",
+      "category": "verdicts",
+      "description": "verdicts judged against one rubric",
+      "slots": [
+        {
+          "name": "rubric_id",
+          "type": "rubric_id",
+          "description": "the rubric id"
+        }
+      ]
+    },
+    {
+      "name": "verdicts.for_run",
+      "category": "verdicts",
+      "description": "every verdict round on one run, in order",
+      "slots": [
+        {
+          "name": "run_id",
+          "type": "run_id",
+          "description": "the run id"
+        }
+      ]
+    },
+    {
+      "name": "verdicts.recent",
+      "category": "verdicts",
+      "description": "the most recent verification verdicts",
+      "slots": null
+    },
+    {
+      "name": "verdicts.rework_rounds",
+      "category": "verdicts",
+      "description": "how many verification rounds each run needed — rounds beyond the first are the rework",
+      "slots": null
+    },
+    {
+      "name": "verdicts.self_family_judge",
+      "category": "verdicts",
+      "description": "verdicts where the judge was in the same model family as the author — always flagged (G1 Def.1)",
+      "slots": null
+    }
+  ],
+  "query_names": [
+    "cost.budget_remainder",
+    "cost.burn_rate",
+    "cost.by_period",
+    "cost.done_directly",
+    "cost.for_person",
+    "cost.for_project",
+    "cost.for_run",
+    "cost.for_task",
+    "cost.limit_events",
+    "cost.limit_events_in_range",
+    "drift.by_change_class",
+    "drift.by_severity",
+    "drift.by_source",
+    "drift.canary_failures",
+    "drift.canary_results",
+    "drift.findings_recent",
+    "drift.for_lane",
+    "drift.in_date_range",
+    "failures.by_lane",
+    "failures.for_run",
+    "failures.runs_crashed",
+    "failures.runs_died_at_gate",
+    "failures.runs_wedged",
+    "failures.unmetered_defects",
+    "failures.watchdog_flags",
+    "failures.watchdog_flags_by_rule",
+    "routing.by_cause",
+    "routing.by_lane",
+    "routing.by_worker",
+    "routing.decisions_recent",
+    "routing.degraded",
+    "routing.for_run",
+    "routing.rework_by_cause",
+    "routing.rework_by_worker",
+    "status.run_state_history",
+    "status.runs_active",
+    "status.runs_by_lane",
+    "status.runs_by_state",
+    "status.runs_for_task",
+    "status.runs_in_date_range",
+    "status.tasks_by_kanban",
+    "status.waiting_on_human",
+    "verdicts.adverse",
+    "verdicts.by_domain",
+    "verdicts.by_rubric",
+    "verdicts.for_run",
+    "verdicts.recent",
+    "verdicts.rework_rounds",
+    "verdicts.self_family_judge"
+  ]
+}

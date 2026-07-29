@@ -1,0 +1,98 @@
+{
+  "views": [
+    {
+      "Name": "cost_budget_remainder",
+      "Question": "budget remainders",
+      "OwnerColumn": "user_id",
+      "Description": "the budget remainder — the declared automation budget where one exists (in weighted-consumption units, never dollars: a flat-rate lane has no dollar remainder), and a RECORDED ABSENCE with its reason where none is declared. The dollar columns are NULL either way",
+      "Order": "user_id"
+    },
+    {
+      "Name": "cost_burn_rate",
+      "Question": "burn rate",
+      "OwnerColumn": "user_id",
+      "Description": "usd per observed day across the span between a person's first and last receipt; quiet days count against the rate, which is what makes it a rate",
+      "Order": "usd_per_day DESC, user_id"
+    },
+    {
+      "Name": "cost_done_directly",
+      "Question": "done-directly figures",
+      "OwnerColumn": "user_id",
+      "Description": "the done-directly line, CITED from each receipt's own direct_use block (the formula is registered in Spec/benchmark-preregistration-v1.md §13 and is never restated here)",
+      "Order": "receipt_ts DESC, run_id"
+    },
+    {
+      "Name": "cost_per_period",
+      "Question": "per period",
+      "OwnerColumn": "user_id",
+      "Description": "consumption per UTC day, by the moment the cost became known (the receipt's materialization)",
+      "Order": "day DESC, user_id"
+    },
+    {
+      "Name": "cost_per_person",
+      "Question": "per person",
+      "OwnerColumn": "user_id",
+      "Description": "consumption per person — work is billed to the requester (3.4), so the owner column IS the person",
+      "Order": "priced_usd DESC, user_id"
+    },
+    {
+      "Name": "cost_per_project",
+      "Question": "per project",
+      "OwnerColumn": "user_id",
+      "Description": "consumption per registered project, via the intake-resolved artifact_claims linkage; work with no project lands in an explicit '(no project)' bucket",
+      "Order": "priced_usd DESC, project_id"
+    },
+    {
+      "Name": "cost_per_run",
+      "Question": "per run",
+      "OwnerColumn": "user_id",
+      "Description": "what one run consumed, with its pricing status (a run with no materialized receipt reads NO-RECEIPT, never $0)",
+      "Order": "run_created_ts DESC, run_id"
+    },
+    {
+      "Name": "cost_per_task",
+      "Question": "per task",
+      "OwnerColumn": "user_id",
+      "Description": "what a task's runs consumed together — its intake, compose, execute and verify legs",
+      "Order": "priced_usd DESC, task_id"
+    },
+    {
+      "Name": "limit_event_history",
+      "Question": "limit-event history",
+      "OwnerColumn": "user_id",
+      "Description": "the provider limit signals actually hit, with class, signal and reset time; includes the registered legacy type alias so the history does not begin at a rename",
+      "Order": "event_seq DESC"
+    },
+    {
+      "Name": "routing_quality",
+      "Question": "routing quality (S14.10 ¶5)",
+      "OwnerColumn": "user_id",
+      "Description": "every routing decision joined to what happened next — verdicts, rework rounds and the receipt — so routing itself is auditable over time (S2.6)",
+      "Order": "event_seq DESC"
+    },
+    {
+      "Name": "task_project",
+      "Question": "linkage (support view)",
+      "OwnerColumn": "",
+      "Description": "the task→project edge, isolated so its weakness is stated in one place: runs and tasks carry no project column at v0",
+      "Order": "task_id"
+    }
+  ],
+  "cost_questions": [
+    "per run",
+    "per task",
+    "per project",
+    "per person",
+    "per period",
+    "burn rate",
+    "budget remainders",
+    "done-directly figures",
+    "limit-event history",
+    "routing quality (S14.10 ¶5)",
+    "linkage (support view)"
+  ],
+  "categories": null,
+  "axes": null,
+  "queries": null,
+  "query_names": null
+}

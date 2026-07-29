@@ -275,7 +275,17 @@ func TestNoMoneyIsComputedInTheAPI(t *testing.T) {
 	}
 	badIdents := []string{"per_token", "per_million", "price_per", "rate_usd", "priceTable", "PriceTable"}
 	// A `*` in arithmetic position on a line that mentions money is the defect.
-	mult := regexp.MustCompile(`[a-zA-Z_0-9)\]]\s*\*\s*[a-zA-Z_0-9(]`)
+	//
+	// The spacing is load-bearing, and gofmt is what makes it decidable (B6-5).
+	// gofmt writes a binary multiply either fully spaced (`a * b`) or fully
+	// tight (`a*b` where precedence groups it), and it writes a POINTER TYPE as
+	// space-before/none-after (`CostSoFarUSD *float64`). Since `gofmt -l` must
+	// be empty for this tree, that third form cannot be arithmetic — so the
+	// pattern accepts the two arithmetic spacings and rejects the declaration
+	// one. The earlier `\s*` on both sides could not tell them apart and read a
+	// nil-able money field (the honest absence a zero would have faked) as a
+	// multiplication.
+	mult := regexp.MustCompile(`[a-zA-Z_0-9)\]](\*|\s\*\s)[a-zA-Z_0-9(]`)
 
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -319,10 +329,20 @@ func TestNoMoneyIsComputedInTheAPI(t *testing.T) {
 		t.Fatal("the money scan read no files — it would pass vacuously")
 	}
 
-	// Non-tautology probe: the scan detects its own planted defect.
+	// Non-tautology probe: the scan detects its own planted defect, in both
+	// spacings gofmt can produce for a multiply.
 	probe := "\tcostUSD := prompt_tokens * ratePerToken\n"
 	if !strings.Contains(probe, tokenFields[0]) || !mult.MatchString(probe) {
 		t.Fatal("the money-by-generation scan cannot detect its own probe — it would pass vacuously")
+	}
+	if !mult.MatchString("\tcostUSD := tokens*rate + fee\n") {
+		t.Fatal("the money scan misses a gofmt-tight multiply — precedence grouping would hide the defect")
+	}
+	// The other direction, so the tightening above stays deliberate rather than
+	// becoming a hole somebody widens by accident: a POINTER money field is a
+	// declaration, not arithmetic, and the scan must not read it as one.
+	if mult.MatchString("\tCostSoFarUSD *float64 `json:\"cost_so_far_usd\"`\n") {
+		t.Fatal("the money scan reads a nil-able money field as arithmetic — the honest absence would be unimplementable")
 	}
 }
 

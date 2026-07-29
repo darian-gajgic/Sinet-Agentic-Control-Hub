@@ -21,9 +21,18 @@ test('the URL contract is exactly the recorded set', () => {
   ])
 })
 
-test('every surface names the packet that will build it', () => {
+/** The B6-5 oversight surfaces, built. `owner: ''` means "this one is real",
+ *  which is why the assertion below is two-sided rather than relaxed: a route
+ *  is either BUILT or it names the packet that will build it, and a typo in the
+ *  owner field can be neither. */
+const built = ['mission-control', 'board', 'login']
+
+test('every surface is either built or names the packet that will build it', () => {
   for (const r of routes) {
-    if (r.id === 'login') continue // built here
+    if (built.includes(r.id)) {
+      expect(r.owner, `route ${r.id} is built, so it owes no packet`).toBe('')
+      continue
+    }
     expect(r.owner, `route ${r.id} names no owning packet`).toMatch(/^B6-[5-9]$/)
   }
 })

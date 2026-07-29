@@ -1,0 +1,262 @@
+{
+  "lanes": [
+    {
+      "owner": "alice",
+      "lane": "anthropic",
+      "weighted_consumption": 12.5,
+      "cache_read_weight": 0.1,
+      "assumed": true,
+      "pressure_applicable": false,
+      "pressure": null,
+      "budget_declared": false,
+      "budget_remaining": null,
+      "total_runs": 4,
+      "active_runs": 3,
+      "parked_runs": 0,
+      "parked_until": null
+    },
+    {
+      "owner": "alice",
+      "lane": "local",
+      "weighted_consumption": 12.5,
+      "cache_read_weight": 0.1,
+      "assumed": true,
+      "pressure_applicable": false,
+      "pressure": null,
+      "budget_declared": false,
+      "budget_remaining": null,
+      "total_runs": 1,
+      "active_runs": 1,
+      "parked_runs": 0,
+      "parked_until": null
+    },
+    {
+      "owner": "bob",
+      "lane": "zai",
+      "weighted_consumption": 12.5,
+      "cache_read_weight": 0.1,
+      "assumed": true,
+      "pressure_applicable": false,
+      "pressure": null,
+      "budget_declared": false,
+      "budget_remaining": null,
+      "total_runs": 2,
+      "active_runs": 2,
+      "parked_runs": 2,
+      "parked_until": null
+    }
+  ],
+  "burn_rates": {
+    "answer": {
+      "layer": 0,
+      "query": "cost_burn_rate",
+      "confidence": "deterministic",
+      "columns": [
+        "user_id",
+        "active_days",
+        "observed_days",
+        "first_day",
+        "last_day",
+        "priced_usd",
+        "usd_per_day",
+        "pricing_status",
+        "rate_basis"
+      ],
+      "rows": [
+        [
+          "alice",
+          1,
+          1,
+          "2026-07-20",
+          "2026-07-20",
+          null,
+          null,
+          "UNPRICED",
+          "usd per observed day, over the span between the first and last receipt"
+        ]
+      ],
+      "row_count": 1,
+      "truncated": false,
+      "notes": [
+        "usd per observed day across the span between a person's first and last receipt; quiet days count against the rate, which is what makes it a rate"
+      ]
+    }
+  },
+  "budgets": {
+    "answer": {
+      "layer": 0,
+      "query": "cost_budget_remainder",
+      "confidence": "deterministic",
+      "columns": [
+        "user_id",
+        "budget_declared",
+        "budget_usd",
+        "remainder_usd",
+        "remainder_status",
+        "absence_reason",
+        "consumed_priced_usd",
+        "pricing_status",
+        "budget_lanes",
+        "budget_period_tokens_total",
+        "budget_unit",
+        "budget_period_start",
+        "budget_last_declared_ts"
+      ],
+      "rows": [
+        [
+          "alice",
+          0,
+          null,
+          null,
+          "UNAVAILABLE",
+          "no operator budget is declared for this person, so a remainder has no minuend. This is a recorded absence, not a zero (S10.1).",
+          null,
+          "UNPRICED",
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          "bob",
+          0,
+          null,
+          null,
+          "UNAVAILABLE",
+          "no operator budget is declared for this person, so a remainder has no minuend. This is a recorded absence, not a zero (S10.1).",
+          null,
+          "UNPRICED",
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "row_count": 2,
+      "truncated": false,
+      "notes": [
+        "the budget remainder — the declared automation budget where one exists (in weighted-consumption units, never dollars: a flat-rate lane has no dollar remainder), and a RECORDED ABSENCE with its reason where none is declared. The dollar columns are NULL either way"
+      ]
+    }
+  },
+  "limit_events": {
+    "answer": {
+      "layer": 0,
+      "query": "limit_event_history",
+      "confidence": "deterministic",
+      "columns": [
+        "event_seq",
+        "ts",
+        "user_id",
+        "run_id",
+        "type",
+        "limit_class",
+        "provider_signal",
+        "resets_at",
+        "lane"
+      ],
+      "rows": [
+        [
+          4,
+          "2026-07-20T09:02:00Z",
+          "bob",
+          "r-audit",
+          "limit.event",
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "row_count": 1,
+      "truncated": false,
+      "notes": [
+        "the provider limit signals actually hit, with class, signal and reset time; includes the registered legacy type alias so the history does not begin at a rename"
+      ]
+    }
+  },
+  "per_person": {
+    "answer": {
+      "layer": 0,
+      "query": "cost_per_person",
+      "confidence": "deterministic",
+      "columns": [
+        "user_id",
+        "runs",
+        "unpriced_runs",
+        "priced_usd",
+        "pricing_status",
+        "total_calls",
+        "unpriced_calls",
+        "first_run_ts",
+        "last_run_ts"
+      ],
+      "rows": [
+        [
+          "alice",
+          5,
+          4,
+          null,
+          "UNPRICED",
+          0,
+          0,
+          "2026-07-20T09:00:00Z",
+          "2026-07-20T09:04:00Z"
+        ],
+        [
+          "bob",
+          2,
+          2,
+          null,
+          "UNPRICED",
+          0,
+          0,
+          "2026-07-20T09:02:00Z",
+          "2026-07-20T09:04:00Z"
+        ]
+      ],
+      "row_count": 2,
+      "truncated": false,
+      "notes": [
+        "consumption per person — work is billed to the requester (3.4), so the owner column IS the person"
+      ]
+    }
+  },
+  "per_period": {
+    "answer": {
+      "layer": 0,
+      "query": "cost_per_period",
+      "confidence": "deterministic",
+      "columns": [
+        "day",
+        "user_id",
+        "receipts",
+        "receipts_with_unpriced",
+        "priced_usd",
+        "pricing_status",
+        "total_calls",
+        "unpriced_calls"
+      ],
+      "rows": [
+        [
+          "2026-07-20",
+          "alice",
+          1,
+          0,
+          null,
+          "UNPRICED",
+          0,
+          0
+        ]
+      ],
+      "row_count": 1,
+      "truncated": false,
+      "notes": [
+        "consumption per UTC day, by the moment the cost became known (the receipt's materialization)"
+      ]
+    }
+  },
+  "cursor": 5
+}

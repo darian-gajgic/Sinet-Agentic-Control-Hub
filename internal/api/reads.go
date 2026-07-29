@@ -486,13 +486,58 @@ func (p *projector) eventRecords(ctx context.Context, runID string, types []stri
 // TaskListItem is one board card: the task row, its resolved project and its
 // latest run summarized (the BoardSnapshot machinery, reused).
 type TaskListItem struct {
-	TaskID       string    `json:"task_id"`
-	Owner        string    `json:"owner"`
-	Title        string    `json:"title"`
-	KanbanStatus string    `json:"kanban_status"`
-	Project      string    `json:"project"`
-	CreatedTS    time.Time `json:"created_ts"`
-	LatestRun    *BoardRun `json:"latest_run"`
+	TaskID       string       `json:"task_id"`
+	Owner        string       `json:"owner"`
+	Title        string       `json:"title"`
+	KanbanStatus string       `json:"kanban_status"`
+	Project      string       `json:"project"`
+	CreatedTS    time.Time    `json:"created_ts"`
+	LatestRun    *TaskListRun `json:"latest_run"`
+}
+
+// TaskListRun is the task list's latest-run summary at the CARD grain: every
+// BoardRun field (embedded, so the served JSON keeps them at the same level)
+// plus the S1.3 card-face facts no landed list read carried (B6-5 OQ4).
+//
+// Why the face is derived HERE rather than joined by the client: stage,
+// waiting-on-human and parked-until live on the per-run derive, cost-so-far
+// lives behind the S10.4 meter seam and the effort mode lives inside a
+// routing.decided payload — the last two are reachable from no list read at
+// all, so a client assembling the face would need one request per card and
+// still could not answer two of the six elements (S1.3; S15.5).
+//
+// It is a distinct type from BoardRun on purpose: the `board` topic snapshot
+// shares BoardRun and stays byte-for-byte as it was (its consumers are the SSE
+// projections, which this packet does not touch).
+type TaskListRun struct {
+	BoardRun
+	// Stage is the FSM/pipeline stage marker — the control plane's own value,
+	// never a client-invented status.
+	Stage          string  `json:"stage"`
+	WaitingOnHuman bool    `json:"waiting_on_human"`
+	ParkedUntil    *string `json:"parked_until"`
+	// CostSoFarUSD is READ from the S10.4 seam and never computed here (§37,
+	// the money-is-a-read rule). nil is the honest absence — no meter reading
+	// for this run — and is never rendered as a zero.
+	CostSoFarUSD *float64 `json:"cost_so_far_usd"`
+	// EffortMode and DowngradeNote come from the latest routing.decided payload
+	// (3.5 effort modes + disclosed downgrade note). Both are payload-DERIVED
+	// strings and redact at the serving edge with the rest of this response.
+	//
+	// The note is read from an explicit DISCLOSURE key: the landed routing
+	// payload has no downgrade discriminator (S10.6's ladder lands with the
+	// local tier — the receipt's own mode line says so in the same words), so
+	// there is nothing to infer a downgrade FROM. An absent key is an absent
+	// note: the platform disclosed none, and the face says so rather than
+	// dressing the mandatory plain-language routing reason up as one.
+	EffortMode    string `json:"effort_mode"`
+	DowngradeNote string `json:"downgrade_note,omitempty"`
+	// QueueHintRank is the recorded S15.5 drag order of the task's queued runs
+	// (queue.hint_rank, 0 = no hint). Read-only: it exists so a board that
+	// reloads renders the order that was RECORDED rather than falling back to
+	// creation order and silently losing the drag (B6-5 OQ6). nil = the task
+	// has no queued run, so there is no recorded position at all.
+	QueueHintRank *int64 `json:"queue_hint_rank"`
 }
 
 // TaskList is the list response with its S15.3 tail cursor.
@@ -591,11 +636,56 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range out.Tasks {
-		if lr, ok := s.proj.latestRunForTask(r.Context(), out.Tasks[i].TaskID); ok {
+		if lr, ok := s.proj.taskListRun(r.Context(), out.Tasks[i].TaskID); ok {
 			out.Tasks[i].LatestRun = &lr
 		}
 	}
 	s.writeReadRedacted(w, out)
+}
+
+// taskListRun derives one task's latest run at the S1.3 card-face grain.
+//
+// The five facts the board card shares with the run list come from
+// decorateRunRow — the SAME derive /api/runs runs, called rather than copied,
+// so the two surfaces can never disagree about what stage a run is in. The
+// three that are new to this grain (cost, effort, recorded drag order) are each
+// one bounded read of a landed surface.
+func (p *projector) taskListRun(ctx context.Context, taskID string) (TaskListRun, bool) {
+	var it RunListItem
+	if err := p.db.QueryRowContext(ctx,
+		`SELECT run_id, state FROM runs WHERE task_id = ? ORDER BY created_ts DESC, run_id DESC LIMIT 1`, taskID).
+		Scan(&it.RunID, &it.State); err != nil {
+		return TaskListRun{}, false
+	}
+	p.decorateRunRow(ctx, &it)
+	out := TaskListRun{
+		BoardRun:       BoardRun{RunID: it.RunID, State: it.State, Wedged: it.Wedged, LastActivityTS: it.LastActivityTS},
+		Stage:          it.Stage,
+		WaitingOnHuman: it.WaitingOnHuman,
+		ParkedUntil:    it.ParkedUntil,
+	}
+	// Cost so far: READ through the S10.4 seam, the run-card precedent. No
+	// arithmetic happens here and none may (§37).
+	if p.meter != nil {
+		if m, merr := p.meter.RunMeter(ctx, it.RunID); merr == nil {
+			cost := m.APIEquivCostUSD
+			out.CostSoFarUSD = &cost
+		}
+	}
+	if pay, ok := p.latestPayload(ctx, it.RunID, "routing.decided"); ok {
+		out.EffortMode = firstString(pay, "effort", "effort_mode")
+		out.DowngradeNote = firstString(pay, "downgrade_note", "downgrade", "effort_downgrade")
+	}
+	// The recorded drag order. The JOIN is read-only: the scheduler owns every
+	// write to this column and its claim-loop semantics are untouched.
+	var rank int64
+	if err := p.db.QueryRowContext(ctx,
+		`SELECT q.hint_rank FROM queue q JOIN runs r ON r.run_id = q.run_id
+		  WHERE r.task_id = ? AND q.status = 'queued'
+		  ORDER BY q.enqueued_ts, q.queue_id LIMIT 1`, taskID).Scan(&rank); err == nil {
+		out.QueueHintRank = &rank
+	}
+	return out, true
 }
 
 // ── GET /api/tasks/{task} — the enriched task detail ────────────────────────

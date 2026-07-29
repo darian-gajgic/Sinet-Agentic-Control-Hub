@@ -64,12 +64,16 @@ afterEach(() => {
 
 // ── routes and stubs (S15.11) ─────────────────────────────────────────────
 
-test('every B6-5..9 surface has a reachable stub naming its owning packet', async () => {
+test('every unbuilt surface has a reachable stub naming its owning packet', async () => {
   const table: Record<string, Route> = { 'GET /api/auth/session': signedIn }
   routeFetch(table)
 
+  let stubs = 0
   for (const r of routes) {
-    if (r.id === 'login') continue
+    // A BUILT surface renders its data, not a stub. Asserting `toContain('')`
+    // over those would be vacuous — the built ones have their own suites
+    // (mission.test.tsx, board.test.tsx), and are exercised there.
+    if (r.id === 'login' || r.owner === '') continue
     const path = r.pattern.replace(/:(\w+)/g, 'x-1')
     window.history.replaceState(null, '', path)
     const view = mount(<App stream={inertStream()} />)
@@ -78,6 +82,26 @@ test('every B6-5..9 surface has a reachable stub naming its owning packet', asyn
     const text = view.container.textContent ?? ''
     expect(text, `${path} did not render its surface title`).toContain(r.title)
     expect(text, `${path} does not name its owning packet`).toContain(r.owner)
+    stubs++
+    view.unmount()
+  }
+  expect(stubs, 'no stub was checked — the loop would pass vacuously').toBeGreaterThan(0)
+})
+
+test('a built surface renders its own heading, not a stub', async () => {
+  // The scripted plane answers only the session; every data read fails, which
+  // is the point: even unreadable, a built surface says what it IS rather than
+  // claiming to be unbuilt.
+  routeFetch({ 'GET /api/auth/session': signedIn })
+  for (const id of ['mission-control', 'board'] as const) {
+    const r = routes.find((x) => x.id === id)!
+    window.history.replaceState(null, '', r.pattern)
+    const view = mount(<App stream={inertStream()} />)
+    await flush()
+
+    const text = view.container.textContent ?? ''
+    expect(text).toContain(r.title)
+    expect(text, `${r.pattern} still renders the not-built-yet stub`).not.toContain('Not built yet')
     view.unmount()
   }
 })

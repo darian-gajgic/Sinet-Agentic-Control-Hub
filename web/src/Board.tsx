@@ -1,0 +1,284 @@
+import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd'
+import { useState } from 'react'
+
+import { api, type PriorityHint, type TaskListItem } from './api'
+import type { EventStream } from './events'
+import { columnsFor, groupByProject } from './kanban'
+import { boardEventTypes, useLive } from './live'
+import { Absent, Empty, Freshness, Money, Owner, ParkedUntil, Section } from './parts'
+import { Link } from './router'
+import { hrefFor } from './routes'
+
+/**
+ * The live board (Spec S15.5 ¶2; 9.1; S1.3; FC-v1 §1).
+ *
+ * Cards move from the feed: the board loads its REST snapshot, tails the one
+ * connection with the types that change a card, and re-reads on the resnapshot
+ * signal. Movement follows the STORED kanban_status — this view invents no
+ * status, computes no percentage and shows no ETA, because the API serves none
+ * of those and a board is exactly where a made-up "60% done" would look most
+ * plausible.
+ *
+ * THE DRAG'S STRUCTURAL NEGATIVE. Stage is FSM state owned by the control
+ * plane (S02), so a stage column must not be writable by drag. That is enforced
+ * by CONSTRUCTION rather than by a rule somebody has to keep: the stage columns
+ * below are plain lists, and the ONE `<Droppable>` on this screen is the
+ * caller's own queued lane. There is no cross-column drop target to disable,
+ * and `hintPostsFor` refuses any destination that is not that lane, so even a
+ * synthesized drop result calls no verb.
+ */
+
+/** The one droppable id on the board. Reordering own queued work is the whole
+ *  sanctioned v0 drag interaction (S15.5). */
+export const ownQueueDroppableId = 'own-queued'
+
+/**
+ * Rank spacing and bound (B6-5 OQ6(ii)).
+ *
+ * Structural constants with named reasons; no ⚙ key exists and the browser
+ * cannot read the registry before login (§41 precedent).
+ *
+ *  - `rankSpacing` 10, positions 1-based: ranks are 10, 20, 30…, so a later
+ *    single-card move usually has an integer gap to land in, and 0 is never
+ *    assigned — 0 means "no hint" to the scheduler, so a strategy that used it
+ *    for "first" would silently un-rank the card it just promoted.
+ *  - `hintRankBound` 1000 mirrors the verb's own structural bound. NAMED EDGE:
+ *    spaced ranks reach it at position 100, so beyond the hundredth queued task
+ *    the ranks clamp and the tail falls back to the scheduler's default order.
+ *    That is stated rather than worked around — a household queue does not
+ *    reach 100 own-queued tasks, and pretending to order past the bound would
+ *    mean sending ranks the verb rejects.
+ */
+const rankSpacing = 10
+const hintRankBound = 1000
+
+export function spacedRank(position: number): number {
+  return Math.min((position + 1) * rankSpacing, hintRankBound)
+}
+
+/** The rank the server currently holds for a task; 0 is "no hint". */
+function currentRank(t: TaskListItem): number {
+  return t.latest_run?.queue_hint_rank ?? 0
+}
+
+/** ownQueued is the drag-eligible set: the CALLER's own tasks whose latest run
+ *  is still queued. The operator is deliberately not excepted — the verb
+ *  refuses another person's task, and a card that cannot be reordered must not
+ *  look draggable. */
+export function ownQueued(tasks: TaskListItem[], me: string): TaskListItem[] {
+  return tasks
+    .filter((t) => t.owner === me && me !== '' && t.latest_run?.state === 'queued')
+    .sort((a, b) => {
+      // Recorded order first, then the scheduler's own default (enqueue order,
+      // which the list read orders by creation). Rendered order = recorded
+      // order after a reload, which is the point of serving the rank at all.
+      const ra = currentRank(a)
+      const rb = currentRank(b)
+      if (ra !== rb) return (ra === 0 ? Infinity : ra) - (rb === 0 ? Infinity : rb)
+      return a.created_ts.localeCompare(b.created_ts)
+    })
+}
+
+export type HintPost = { task: string; rank: number }
+
+/**
+ * hintPostsFor turns a completed drag into the writes it implies.
+ *
+ * It is a pure function so the negative is checkable without a real drag: a
+ * drop outside the own-queued lane — the shape a stage-column drop would have
+ * if one were ever wired — returns NO posts, and therefore calls no verb.
+ * Only the entries whose EFFECTIVE rank changed are written, so a drag that
+ * put a card back where it came from writes nothing.
+ */
+export function hintPostsFor(queue: TaskListItem[], result: DropResult): HintPost[] {
+  const to = result.destination
+  if (!to) return [] // dropped outside any list
+  if (to.droppableId !== ownQueueDroppableId) return []
+  if (result.source.droppableId !== ownQueueDroppableId) return []
+  if (to.index === result.source.index) return []
+
+  const next = [...queue]
+  const [moved] = next.splice(result.source.index, 1)
+  if (!moved) return []
+  next.splice(to.index, 0, moved)
+
+  const posts: HintPost[] = []
+  next.forEach((t, i) => {
+    const rank = spacedRank(i)
+    if (currentRank(t) !== rank) posts.push({ task: t.task_id, rank })
+  })
+  return posts
+}
+
+/**
+ * applyDrag is the drag's whole write path, kept out of the component so the
+ * contract can be driven directly: what it POSTs, what it refuses to POST, and
+ * that a drop which is not an own-queue reorder reaches the network at all.
+ */
+export async function applyDrag(queue: TaskListItem[], result: DropResult): Promise<PriorityHint[]> {
+  const posts = hintPostsFor(queue, result)
+  if (posts.length === 0) return []
+  return Promise.all(posts.map((p) => api.priorityHint(p.task, p.rank)))
+}
+
+export function Board({ me, stream }: { me: string; stream?: EventStream }) {
+  const { data, error, stale, reload } = useLive({
+    key: '/api/tasks',
+    read: () => api.tasks(),
+    types: boardEventTypes,
+    stream,
+  })
+  const [notes, setNotes] = useState<PriorityHint[]>([])
+
+  const tasks = data?.tasks ?? []
+  const queue = ownQueued(tasks, me)
+
+  const onDragEnd = (result: DropResult) => {
+    void applyDrag(queue, result).then(
+      (answers) => {
+        if (answers.length === 0) return
+        // The stale-board answer is surfaced, not swallowed: `applied:false`
+        // means the work moved on between the render and the drag, and the
+        // verb's own `detail` says what the hint can and cannot do. Then the
+        // board RE-READS — the server's order is the order, and nothing this
+        // drag believed outlives that read.
+        setNotes(answers)
+        reload()
+      },
+      () => {
+        setNotes([])
+        reload()
+      },
+    )
+  }
+
+  return (
+    <section className="surface">
+      <h1>Board</h1>
+      <Freshness stale={stale} error={error} hasData={data !== null} />
+
+      <DragDropContext onDragEnd={onDragEnd}>
+        <Section title="Your queue" stale={stale}>
+          <p className="muted">
+            Drag to re-rank your own queued work. A hint breaks ties among your own same-class queued work — it never
+            outranks the workload class ladder and never reaches another person&apos;s queue.
+          </p>
+          {notes.map((n) => (
+            <p key={n.task_id} className={n.applied ? 'notice' : 'muted'} data-hint-applied={String(n.applied)}>
+              {n.detail}
+            </p>
+          ))}
+          <Droppable droppableId={ownQueueDroppableId}>
+            {(dropProvided) => (
+              <ul className="queue-lane" ref={dropProvided.innerRef} {...dropProvided.droppableProps}>
+                {queue.map((t, index) => (
+                  <Draggable key={t.task_id} draggableId={t.task_id} index={index}>
+                    {(dragProvided) => (
+                      <li
+                        ref={dragProvided.innerRef}
+                        {...dragProvided.draggableProps}
+                        {...dragProvided.dragHandleProps}
+                        className="card"
+                      >
+                        <CardFace task={t} />
+                      </li>
+                    )}
+                  </Draggable>
+                ))}
+                {dropProvided.placeholder}
+                {queue.length === 0 && <Empty what="Nothing of yours is queued." />}
+              </ul>
+            )}
+          </Droppable>
+        </Section>
+      </DragDropContext>
+
+      <div className="columns">
+        {columnsFor(tasks).map((col) => {
+          const inColumn = tasks.filter((t) => t.kanban_status === col.status)
+          return (
+            <section className="column" key={col.status} data-status={col.status} data-known={String(col.known)}>
+              <h2>{col.label}</h2>
+              {!col.known && (
+                <p className="muted">
+                  This column is a stored status the board does not have a name for. The card is shown under its own
+                  value rather than hidden.
+                </p>
+              )}
+              {inColumn.length === 0 ? (
+                <Empty what="Nothing here." />
+              ) : (
+                groupByProject(inColumn).map((group) => (
+                  <div className="project-group" key={group.project} data-project={group.project}>
+                    <h3>{group.project}</h3>
+                    <ul className="cards">
+                      {group.tasks.map((t) => (
+                        <li className="card" key={t.task_id}>
+                          <CardFace task={t} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              )}
+            </section>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The card face is EXACTLY the S1.3 set (S15.5; 3.5; G2 D2.1): what it is,
+ * whose it is, current stage, effort mode with any disclosed downgrade note,
+ * cost so far, and waiting-on-human. Nothing more — the exhaustive trace is the
+ * task detail's job — and nothing less.
+ *
+ * The park horizon rides the waiting line because "waiting on a human" and
+ * "waiting on a clock" are the two ways a card is stopped, and a card that is
+ * stopped without saying which is the one this face must not produce.
+ */
+export function CardFace({ task }: { task: TaskListItem }) {
+  const run = task.latest_run
+  return (
+    <article className="card-face">
+      <h4>
+        <Link to={hrefFor('task', { id: task.task_id })}>{task.title}</Link>
+      </h4>
+      <dl>
+        <dt>Whose</dt>
+        <dd>
+          <Owner id={task.owner} />
+        </dd>
+
+        <dt>Stage</dt>
+        <dd>{run?.stage ? run.stage : <Absent reason="no stage marker yet" />}</dd>
+
+        <dt>Effort</dt>
+        <dd>
+          {run?.effort_mode ? run.effort_mode : <Absent reason="no effort mode recorded" />}
+          {run?.downgrade_note ? (
+            <span className="downgrade-note"> — {run.downgrade_note}</span>
+          ) : null}
+        </dd>
+
+        <dt>Cost so far</dt>
+        <dd>
+          <Money usd={run?.cost_so_far_usd} />
+        </dd>
+
+        <dt>Waiting</dt>
+        <dd>
+          {run?.waiting_on_human ? (
+            <span className="waiting-human">waiting on a person</span>
+          ) : run?.state === 'parked' ? (
+            <ParkedUntil until={run.parked_until} />
+          ) : (
+            'no'
+          )}
+        </dd>
+      </dl>
+    </article>
+  )
+}

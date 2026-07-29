@@ -38,8 +38,8 @@ export type RouteDef = {
 }
 
 export const routes: RouteDef[] = [
-  { id: 'mission-control', pattern: '/', title: 'Mission control', owner: 'B6-5', nav: true },
-  { id: 'board', pattern: '/board', title: 'Board', owner: 'B6-5', nav: true },
+  { id: 'mission-control', pattern: '/', title: 'Mission control', owner: '', nav: true },
+  { id: 'board', pattern: '/board', title: 'Board', owner: '', nav: true },
   { id: 'task', pattern: '/tasks/:id', title: 'Task', owner: 'B6-5', nav: false },
   { id: 'fleet', pattern: '/fleet', title: 'Fleet', owner: 'B6-5', nav: true },
   { id: 'inbox', pattern: '/inbox', title: 'Inbox', owner: 'B6-6', nav: true },

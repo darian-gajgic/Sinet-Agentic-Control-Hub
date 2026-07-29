@@ -1,0 +1,68 @@
+{
+  "layer": 1,
+  "query": "status.runs_active",
+  "confidence": "canned",
+  "columns": [
+    "run_id",
+    "user_id",
+    "task_id",
+    "state",
+    "lane",
+    "updated_ts"
+  ],
+  "rows": [
+    [
+      "r-stall",
+      "bob",
+      "t-stall",
+      "parked",
+      "zai",
+      "2026-07-20T09:04:00Z"
+    ],
+    [
+      "r-claim",
+      "alice",
+      "t-claim",
+      "claimed",
+      "anthropic",
+      "2026-07-20T09:04:00Z"
+    ],
+    [
+      "r-archive",
+      "alice",
+      "t-archive",
+      "queued",
+      "local",
+      "2026-07-20T09:03:00Z"
+    ],
+    [
+      "r-audit",
+      "bob",
+      "t-audit",
+      "parked",
+      "zai",
+      "2026-07-20T09:02:00Z"
+    ],
+    [
+      "r-triage",
+      "alice",
+      "t-triage",
+      "queued",
+      "anthropic",
+      "2026-07-20T09:01:00Z"
+    ],
+    [
+      "r-ship",
+      "alice",
+      "t-ship",
+      "running",
+      "anthropic",
+      "2026-07-20T09:00:00Z"
+    ]
+  ],
+  "row_count": 6,
+  "truncated": false,
+  "notes": [
+    "runs that are live right now — anything not yet in a terminal state"
+  ]
+}

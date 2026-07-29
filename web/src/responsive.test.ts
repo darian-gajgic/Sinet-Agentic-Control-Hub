@@ -26,7 +26,19 @@ test('the stylesheet is really the shell stylesheet', () => {
 })
 
 test('no layout container carries a fixed pixel width', () => {
-  for (const selector of ['.shell', '.shell-head', '.shell-nav', '.shell-main', '.panel']) {
+  for (const selector of [
+    '.shell',
+    '.shell-head',
+    '.shell-nav',
+    '.shell-main',
+    '.panel',
+    // The B6-5 oversight surfaces are held to the same rule.
+    '.block',
+    '.columns',
+    '.column',
+    '.card',
+    '.table-scroll',
+  ]) {
     const rules = block(selector)
     expect(rules, `${selector} pins a pixel width — a phone would scroll sideways`).not.toMatch(
       /(^|[^-])width:\s*\d+px/,
@@ -50,6 +62,33 @@ test('the shell is phone-first and widens at a breakpoint, not the other way rou
 test('the body cannot scroll sideways and oversized content is contained', () => {
   expect(block('body')).toContain('overflow-x: hidden')
   expect(css).toMatch(/max-width:\s*100%/)
+})
+
+test('the board stacks on a phone and only widens into columns at the breakpoint', () => {
+  // Phone-first: the single-column track is the BASE, and the multi-column
+  // track appears inside the min-width query. The other way round would make
+  // the desktop the product and the phone the exception (S1.10).
+  expect(block('.columns'), 'the board does not stack at phone width').toContain('grid-template-columns: 1fr')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  expect(wide, 'the board never widens on a large screen').toContain('grid-template-columns: repeat(auto-fit')
+})
+
+test('content too wide for a phone scrolls inside its own box, not the page', () => {
+  // Meters tables and history answers are genuinely wider than 375px. The one
+  // place a horizontal scrollbar is allowed is inside the thing that is too
+  // wide — the body itself still cannot scroll sideways (asserted above).
+  expect(block('.table-scroll')).toContain('overflow-x: auto')
+  expect(block('.audit pre')).toContain('overflow-x: auto')
+  expect(block('.card-face dd'), 'a long model-written title would widen the page').toContain(
+    'overflow-wrap: anywhere',
+  )
+})
+
+test('a view that owes a re-snapshot is marked in the stylesheet, not only in the DOM', () => {
+  // The stale marker has to be VISIBLE, or "stale never poses as live" is a
+  // data attribute nobody can see (S15.12).
+  const stale = block(".block[data-stale='true']")
+  expect(stale).toContain('border-inline-start')
 })
 
 test('the connection label survives at phone width, only its detail is dropped', () => {
