@@ -1,103 +1,113 @@
-# P3 handoff — last rewritten 2026-07-29, mid-B6 (5/13 packets landed; session ended on the operator stop directive after landing P3-B6-3A)
+# P3 handoff — last rewritten 2026-07-29, mid-B6 (10/13 packets landed; B6-7 part A committed-but-unevaluated; session ended on the operator's context-budget stop directive)
 
-**Read this first, then `P3/STATE.md`.** This file is a *snapshot* meant to get a fresh session oriented in two minutes. It is deliberately short and it goes stale; **`P3/STATE.md` is the single source of truth and outranks anything here.** If the two disagree, STATE wins and this file should be corrected.
+**Read this first, then `P3/STATE.md`.** This file is a *snapshot* meant to get a fresh session oriented in two minutes. It is deliberately short and it goes stale; **`P3/STATE.md` is the single source of truth and outranks anything here.** If the two disagree, STATE wins and this file gets corrected.
 
-Authority order for everything: **`Spec/core-architecture-v1.md` (frozen v1, tag `spec-v1`; drafts in `Spec/drafts/` are canonical text)** → `Spec/benchmark-preregistration-v1.md` (BENCH-REG, signed — its registered numbers change only via its own §17) and `Spec/frontend-components-v1.md` → `P3/CONVENTIONS.md` → `P3/STATE.md` → this file. `Research/` is a **closed archive**; `Docs/` is **read-only**.
+Authority order: **`Spec/core-architecture-v1.md` (frozen v1, tag `spec-v1`; drafts in `Spec/drafts/` are canonical text)** → `Spec/benchmark-preregistration-v1.md` (BENCH-REG, signed — its registered numbers change only via its own §17) and `Spec/frontend-components-v1.md` (FC-v1) → `P3/CONVENTIONS.md` → `P3/STATE.md` → this file. `Research/` is a **closed archive**; `Docs/` is **read-only**.
 
 ---
 
 ## 1. Where the build is
 
-**B0–B5 are ALL CLOSED** (B5 gate record: `P3/gates/B5-report.md` §8 FINAL). **B6 (frontend — S15 + FC-v1) is OPEN, is the LAST phase, and stands at 5/13 packets done + validated.** The queue (in STATE) grew from 9 to 13 via two ratified A/B/C splits (B6-2, B6-3). **LANDED:** B6-1 (read-side APIs: /api/runs, /api/tasks, /api/meters, /api/events query layers; stage events minted), B6-2A (approvals core: ranked 7-kind inbox, hash-pinned retry-safe answers, tiers/step-up/co-approval, cancel mapping + no-auto-kill AST wall, follow-up spawn), B6-2B (budgets/pause + oversight verbs + transitive drag-hint comparator; migration 0017), B6-2C (benchmark driver + single-shot `.direct` leg + verdict backend; NoFork recovery seam + failed-pair card; migration 0018), B6-3A (settings API: UISchema emitter, registry reads/writes/history operator-only, price surface on append-only migration 0019 shipping EMPTY; new event type `price.row_added`). **PENDING, in order: B6-3B (deliverables+accept+preview APIs) → B6-3C (memory API) → B6-4 (SPA scaffold — the frontend tree first appears here) → B6-5..8 (surfaces) → B6-9 (push/PWA + sweep).** Groundings for B6-3B/C are DONE (one brief serves all three parts); their OQ dispositions are ratified in the STATE log ("B6-3 grounding DONE" entry) — the next session launches the B6-3B EXECUTOR directly.
+**B0–B5 CLOSED. B6 (frontend — S15 + FC-v1) is OPEN, is the LAST phase, and stands at 10/13 landed + validated**, with an eleventh packet mid-pipeline.
 
-What the B5 gate settled (do not re-litigate any of it):
+**Landed + validated (all pushed):** B6-1 (read-side APIs) · B6-2A (approvals core) · B6-2B (budgets/oversight/drag-hint, mig 0017) · B6-2C (benchmark driver + `.direct` leg, mig 0018) · B6-3A (settings API + UISchema emitter + price surface, mig 0019) · **B6-3B** (deliverables/accept/preview — 11 routes) · **B6-3C** (memory — 7 gate-routed routes) · **B6-4** (the SPA scaffold: `web/` Vite 8.1.5 + React 19.2.8 + TS 6.0.3, the four FC-v1 picks at their exact pins, the npm rail + lockgate over 240 packages, `go:embed` serving through the front chain, the app shell) · **B6-5** (oversight surfaces: mission control, live board, task detail, fleet, the four personal filters) · **B6-6** (decision surfaces: the nine-kind approval inbox + the full settings tab over JSON Forms).
 
-- **D1** — promptfoo `0.121.19` (MIT), changedetection.io `0.55.8` (Apache-2.0), genai-prices data `v0.0.72` (MIT) all **ratified** (S16.4 #10 closed). DeepEval `4.1.3` stays the pre-registered standby, pin-on-activation.
-- **D2** — **EXECUTED, all green (11 ok / 0 failed):** both organs are **installed on this host at their pins**, user-level, no sudo/apt/system change. promptfoo via npm (`~/.npm-global`); changedetection.io via `uv tool` on managed CPython 3.11, **installed but NOT started** — its real-organ conformance leg stays a sanctioned skip until it runs with `SINET_CDIO_URL`+`SINET_CDIO_API_KEY`. `sinet-watchlist.service` remains **generated, not installed** — deferred to the hardening session.
-- **D3** — **all four canary legs stay DISARMED at v0.** Auth + model-list are honestly un-composable (no per-lane HTTP endpoint or broker credential accessor exists — composing them is named work for whenever arming is wanted). The behavioral leg's **itemization question is TABLED as its arming precondition** (options recorded in the gate file: organ-reported entry / projection-only / broker-path provider). Projection ≈$5.70/yr API-equivalent; stop line = any non-zero real-dollar probe-tagged total.
-- **D4** — the **0.84 eval floor is ratified**; the paid golden sweep ($2.10 projected / $5.00 stop) stays **registered and unexecuted until B6 gives its result a surface**.
-- **D5** — **no S00.9 amendment** for the family-12 `RequiredFields` row (not-wrong-merely-not-restated reading stands). B5-7's **dispatch→render driver** (single-shot direct-arm capture + the B6 verdict form) is named follow-on scope — B6 is where the verdict form lands.
-- **D6** — **35 readings ratified en bloc** (the report's "~30" honestly decomposed; compiled from CONVENTIONS §29–§37 + commit bodies). All are **binding precedent for B6** — including the cross-phase patterns: derive-from-log/no side stores, no tickers (dueness from stored state), structural constants with named reasons interim under the settings-tab directive.
+**MID-PIPELINE — this is the next session's first act.** **P3-B6-7 part A (the assistant backend) is COMMITTED (`56b93c4`) but its EVALUATION NEVER RAN.** The executor finished part A, committed, and stopped without its final report. The coordinator verified the inherited tree afterwards: **gofmt/build clean · `go test ./...` 44 packages, 0 failures · lockgate 29/240 · web typecheck clean + 217/217 vitest + build ok** — green and consistent, nothing half-applied.
 
-**Counters at this handoff (assert these still hold before you change anything):**
+**Pending after that: B6-7 part B (the widget — `/chat` is still a STUB) → B6-8 → B6-9 → the gate.**
+**Groundings and dispositions are DONE for every remaining packet** (B6-7 OQ1–10, B6-8 OQ1–8, B6-9 OQ1–14 — all ratified in the STATE log, all binding). No grounding work remains in B6.
+
+---
+
+## 2. This session's first acts, in order
+
+1. **Session-entry checks:** read `P3/STATE.md`; confirm `git status` shows only the five long-standing operator items (`Research/02-…md` modified; untracked `Presentation/`, `Research/Presentation/`, `Sinet-Logo.jpeg`, `tools/dbpeek/` — **never stage, revert, or "clean" these**); re-run the landing battery so you build on measured ground:
+   `gofmt -l internal/ cmd/ tools/` · `go vet ./...` · `go build ./...` · `go test ./... -count=1` · `go run ./tools/lockgate` · `cd web && npm run typecheck && npm run test && npm run build`
+2. **Launch the B6-7 part-A EVALUATION** (pipeline stage 3, fresh agent, inherit model). Range **`7399c46..56b93c4`**. Rubric = `P3/briefs/P3-B6-7.md` §7 part-A items + the OQ1–10 dispositions in STATE. Tell it to independently verify: the **family-12 admission** for all eight `chat.*` types (§29 same-packet mechanics, 91/5/96 → **99/5/104**, every pin incl. the third registry-size pin in `internal/history`'s test); **migration 0020** + the six-site lockstep sweep; the **owner-only** transcript walls in BOTH directions (the operator must not read another member's chat — the store takes a viewer with no role parameter, which is the structural guarantee; probe it adversarially); the client-routed turn dispatch (no model classifies a turn; nothing falls through to Layer 2 — the audit-count assertions); the `utility`-seat titling (tier-F `FakeServer`, $0, degradation path); the OQ8 additive `inputs` shape; the exchange confinement (resolve-then-deny); fixtures driven through real verbs. Then triage → drain (cap 2 rounds) → land part A.
+3. **Then B6-7 part B** (the widget): fresh executor (opus) — ExternalStoreRuntime + the Sinet adapter, the ladder affordances (explicit-act escalation only), the file-exchange UI, produced-file chips, stop/abandon, the born task's intake card rendered inline. A **running turn is already staged in the `chat-session` fixture** for the re-attach render. assistant-cloud NEVER wired; plain-text transcript (OQ10); zero new npm deps.
+4. **Then B6-8** (review surfaces + try-it + accept UI + workforce map; brief `b384d30`, OQ1–8 ratified — note: the escape allowlist stays EMPTY and gains the `srcdoc` banned token; the TBD-P3 map rendering is RESOLVED as owned).
+5. **Then B6-9** (push + the S15.12 sweep; brief `c1471ef`, OQ1–14 ratified — owned stdlib RFC 8291 crypto, migration **0021**, the push-only service worker ADMITTED, VAPID interim custody with a named hardening item).
+6. **Then the B6 GATE** — `P3/gates/B6-report.md` + the phase decision batch + **the operator's own UI click-through** (their 2026-07-20 directive). §4 below lists what the batch must carry.
+
+---
+
+## 3. Counters (assert these before changing anything)
 
 | Thing | Value |
 |---|---|
-| Event inventory | **91 minted / 5 declare-only = 96 registered** (B6-1 flipped `stage.started/finished`; B6-3A added `price.row_added`) |
-| ⚙ settings | **118 keys / 33 domains** — `internal/settings/index.go` byte-unchanged through ALL of B5+B6 (the UISchema emitter is a separate file) |
-| `components.lock` | **21 entries** (lockgate green; no new dependency in all of B6 so far) |
-| Migrations | **0001–0019** (`user_version` 19: 0017 budgets/pause/hint, 0018 benchmark capture, 0019 price_rows) |
-| Test packages green | **42** (no new package dirs in B6 — new files live in existing packages) |
-| CONVENTIONS | §1–§40 (earlier sections never rewritten; §38 B6-1, §39+B/C B6-2, §40 B6-3A) |
+| Event inventory | **99 minted / 5 declare-only = 104 registered** (B6-7 added eight `chat.*` under family 12) |
+| ⚙ settings | **118 keys / 33 domains** — `internal/settings/index.go` byte-unchanged through ALL of B5+B6 |
+| `components.lock` | **29 entries** (21 Go-side + the 8 frontend/toolchain rows from B6-4; lockgate also covers **240 npm packages**) |
+| Migrations | **0001–0020** (`user_version` 20; 0020 = chat). B6-9 opens **0021** (push subscriptions) |
+| Conformance seed rows | **12** (B6-4 added the frontend dependency-pass row) |
+| Go test packages | **44** green |
+| Web tests | **217 / 17 files** green (vitest, offline) |
+| CONVENTIONS | §1–§44 (+ §40-B/-C, §41-B, §42-B, §43-B and dated drain appendices — earlier sections are never rewritten) |
 | Paid spend, all of B6 | **$0** (every stage fake-engine/hermetic) |
 
-Git: everything through the B5-close commit is pushed to `origin/main`. The working tree carries the known **pre-existing operator items — do not stage, revert, or "clean" them**: `Research/02-provider-watchlist-and-onboarding-criteria.md` (modified, deliberately unstaged), untracked `Presentation/`, `Research/Presentation/`, `Sinet-Logo.jpeg`, `tools/dbpeek/`.
+Git: everything through `7399c46` is pushed; **`56b93c4` (B6-7 part A) is committed locally and NOT pushed** — push it when part A lands after its evaluation.
 
 ---
 
-## 2. This session's first act — open B6
+## 4. What the B6 gate batch must carry (accumulated all phase — do not lose these)
 
-Open with **"continue implementation"** (or `/p3-implementation`). Then, in order:
-
-1. **Session-entry checks:** read `P3/STATE.md`; confirm `git status` is clean apart from the operator items above; re-run the landing battery so you build on measured ground:
-   `gofmt -l internal/ cmd/` · `go vet ./...` · `go build ./...` · `go test ./... -count=1` · `go run ./tools/lockgate`
-2. **Launch the B6-3B EXECUTOR directly** (opus; grounding is DONE — brief `P3/briefs/P3-B6-3.md`, part B = R7–R17 + the F block; the ratified OQ2 (comments = Create+Read only), OQ3 (bounded-revision doors-as-data), OQ4 (merge card return-only) dispositions in the STATE log bind; B6-2's landed surfaces are consumed never rebuilt; **hermetic preview tests NEVER touch the live Caddy admin chain** — standing host hazard). Then eval → triage → drain → land per the pipeline. Then B6-3C (part C, OQ5/OQ6 bind), then B6-4 onward in queue order.
-3. **Carried notes that must not fall between chairs:** the B6-6 grounding absorbs the NINTH derived inbox kind (memory conflicts, B6-3 OQ6) and the D4(b) eval-results-surface unlock; the bring-up ledger carries the BENCH-REG amendment-queue items (tool-less direct arm; crash-vs-consent decline-rate separation) and the storage-down operator-resolution mislabel observation (landed B6-1 machinery, fail-closed, low urgency).
-4. **Run packets through the four-stage pipeline** (§4 below). B6's gate at the end = the phase decision batch **plus the operator's own acceptance: the UI click-through per their 2026-07-20 directive**.
-5. After the B6 gate: bring-up is next (the S19.6 measurement sequence + the accumulated TBD-BRINGUP rows — see the B5 report §3 table; the Layer-2 open-SQL acceptance measurement must count guardrail-conservatism refusals as an expected refusal source, per the ratified landing record).
-
----
-
-## 3. What changed on the host recently
-
-- **The 2026-07-28/29 build sessions changed NOTHING on the host** — pure repo work (Go code, migrations applied only to test DBs, $0 spend, no sudo/apt/unit/secret/canary).
-- From the B5 gate (2026-07-28): **promptfoo 0.121.19** and **changedetection.io 0.55.8** are INSTALLED (user-level; undo: `npm uninstall -g promptfoo` / `uv tool uninstall changedetection.io`). changedetection.io is **not running**, no API key placed; both belong to the hardening session (with the unit install). The key is broker-custody — never via chat or shell history.
+- **S16.4 #10 ratifications** for every frontend adoption: the four FC-v1 picks at their pins (@hello-pangea/dnd 18.0.1, react-diff-view 3.3.3, @assistant-ui/react 0.14.27, JSON Forms 3.8.0), the React/Vite/TS toolchain tree, Vitest + jsdom, `actions/setup-node`.
+- **D4(b) paid golden sweep** — its surface now exists (the settings eval-results panel); the $2.10-projected / $5.00-stop run is registered and unexecuted, awaiting the operator's say-so.
+- **The aggregate done-directly read gap** — no REST route serves the §13.2 measured-label aggregate (`benchmark.DomainReadout` is unreachable); confirmed independently twice.
+- **The Layer-1 catalog is AT its 30–50 band ceiling (50/50)** — the next catalog query breaches the band and forces a decision.
+- **Gate-side authority narrowing** (memory): `Gate.authorize` lacks station-3 project-membership narrowing, and `ResolveConflict` lacks affected-owner narrowing — both v0-contained because the HTTP transport is the sole production write path (enumerated + revert-probed), both fixed properly Gate-side later.
+- **The per-unit unpriced-trace shape** — `PricedCost` cannot distinguish "free" from "unknown" per unit (a float64 + the frozen S10.3 row shape); the UI path is closed, the semantics question is an S00.9-adjacent metering follow-up.
+- **The S10.6 disclosure key** — the downgrade-note render reads an explicit disclosure key no producer emits yet; the future ladder packet must mint the documented key.
+- **VAPID key custody** — held control-plane-side at v0 (StateDirectory 0600); moving it broker-side is a hardening-session item.
+- **Optional cosmetic S00.9 amendments** — add the chat and push family rows to the S15.2 table; align S15.5's "measured, n=…" paraphrase with BENCH-REG §13.2's registered text.
+- **Push retention + timestamp presentation** — exchange-file retention has no sweeper by ratified decision; and whether surfaces show relative/local times beside the verbatim UTC is deliberately left as an **operator-taste question for the click-through**.
+- **Fleet seat/GPU fill**, the hardening session's accumulated list (AppArmor userns, `sinet-watchlist.service` install, changedetection.io start with its broker-custody key, socat/egress/run@/Landlock), and the standing operator housekeeping items (B5 report §7).
 
 ---
 
-## 4. How the machinery works (do not reinvent it)
+## 5. How the machinery works (do not reinvent it)
 
-Every packet runs a **four-stage pipeline**, all stages launched by the coordinator as fresh-context background agents, strictly sequential within a packet:
+Every packet runs a **four-stage pipeline**, all stages launched by the coordinator as fresh-context background agents, strictly sequential within a packet: **grounding** → writes `P3/briefs/P3-<phase>-<n>.md` (handoff artifact *and* evaluation rubric; numbered requirements with spec refs, seams, ⚙ by name, acceptance checklist, open questions) → **executor** (always Opus) → **evaluation** (fresh agent, judge ≠ executor, told to find what is wrong) → **drain** (coordinator triages [F1..Fn], executor fixes, evaluator re-checks; **hard cap two rounds**, then the coordinator implements the remainder inline).
 
-**grounding** → writes `P3/briefs/P3-<phase>-<n>.md` (handoff artifact *and* evaluation rubric; numbered requirements with spec refs, seams, ⚙ by name, acceptance checklist, open questions for coordinator disposition) → **executor** (always Opus) → **evaluation** (fresh agent, judge ≠ executor, told to find what is wrong) → **drain** (coordinator triages findings, executor fixes, evaluator re-checks; **hard cap of two rounds**, then the coordinator implements the remainder inline).
+What repeatedly earned its keep this phase:
 
-What repeatedly earned its keep:
-
-- **Open questions get coordinator dispositions before the executor launches.** Nothing is resolved silently.
-- **Evaluations are adversarial and reproduce their own claims** (planted canaries, reverted fixes, invented attack routes). An untested security property is one refactor from silently gone.
-- **A declared deviation is a referral, never an acceptance.** The coordinator rules; several referrals were real defects, several were sound readings.
-- **Split a packet before an executor rushes it** — grounding's scope verdict is the trigger; a pre-authorized seam stop is a success mode.
+- **Open questions get coordinator dispositions before the executor launches.** Nothing is resolved silently. All remaining B6 packets are already dispositioned.
+- **Evaluations are adversarial and reproduce their own claims** (revert-probes, planted canaries, independent traces). Two findings this phase were *retracted by the evaluator's own experiment* after an executor refused a drain item with evidence — the refusal path works; honor it.
+- **Fixtures must be driven through REAL verbs.** B6-5's worst finding was a fixture world seeded with raw SQL and invented payload keys — tests passing against a world that did not exist. The golden-fixture mechanism (Go compare-only assertor + vitest doubles importing the same files) exists to close exactly that.
+- **A declared deviation is a referral, never an acceptance** — the coordinator rules. Several were sound; several were real defects.
+- **Sanctioned-narrow outside-range fixes** are legitimate when a landed defect blocks the packet's own surface (this phase: the verbs/choices tag, the delta card's missing vocabulary, the store-side zero-price refusal) — ratify explicitly, keep the diff surgical, pin a regression.
 - **Never commit while a stage agent is live in the tree**; use `git commit --only P3/STATE.md` for coordinator bookkeeping meanwhile.
-- **Migration immutability**: binds landed migrations; a migration may be edited during its *own* packet's drain (no production DB exists yet); immutability re-attaches at landing.
+- **Grounding for packet N+1 may overlap execution of packet N** (read-only + `--only` brief commit). Two writers on one path never overlap.
 - Update STATE **before and after every step**. Push after milestone commits.
-
----
-
-## 5. Model routing
-
-Executors and finalizers are **always Opus** (judge independence + classifier immunity mid-run). Grounding and evaluation inherit the session model, with a **lossless Opus fallback** on any safeguard trip. The standing lesson: **sessions that will summarize security-dense work (S10/S11 internals, the §37 guardrail material) should start on Opus** — a documented Fable false-positive on the operator's own authorized infrastructure work; never reword to evade the classifier. *For calibration: the entire B5 gate session ran clean on Fable 5, including the guardrail summaries — the lesson stays recorded but B6's frontend scope (S15/FC-v1) is not security-dense, so inherit is fine.*
 
 ---
 
 ## 6. Invariants that must never be broken
 
-- **The spec wins** — over model memory, reports, and existing code. A conflict, gap, or impossibility is *never* resolved silently: stop the packet, write an S00.9 amendment proposal, present it. Any amendment touching a ⚙ setting re-runs the S18 sweep.
+- **The spec wins** — over model memory, reports, and existing code. A conflict, gap, or impossibility is *never* resolved silently: stop the packet, write an S00.9 amendment proposal, present it.
 - **D1–D10 are fixed.** Never re-derive or relitigate.
-- **Adopt, don't fork.** Pins exact; `components.lock` + CI lock-gate cover every dependency; a new adoption needs its watch row (test-enforced).
+- **Adopt, don't fork.** Exact pins; `components.lock` + lockgate cover every dependency, Go and npm; a new adoption needs its watch row (test-enforced) and gate ratification.
 - **Every ⚙ number ships through the settings registry**; structural constants carry named reasons and are interim under the settings-tab directive.
-- **No load-bearing metered paths**; subscription-coverage rule holds.
-- **Real-world facts are live-verified at time of use** — never answered from memory.
-- **BENCH-REG registered numbers are read-only data**; drift is a platform defect by its own clause.
-- **No auto-kill anywhere** (S14.4 / G1-D1.3). Watchdogs and canaries pause and flag; they never terminate.
+- **No load-bearing metered paths**; the subscription-coverage rule holds; **money is read, never computed** — and never fabricated (the $0-price lesson).
+- **Real-world facts are live-verified at time of use** — never from memory.
+- **No auto-kill anywhere** (S14.4 / G1-D1.3).
+- **Content-vs-telemetry line** (three packets deep now): the operator sees all *machinery* (runs, meters, workers, subscriptions-as-metadata) but **not** other members' personal *content* — memory entries, chat transcripts, and conflict-card metadata addressed to someone else. Deliberate, stated, and test-pinned in both directions.
+- **Escape-by-default**: the web escape-scan allowlist is **EMPTY** and B6-8 keeps it empty (the preview iframe rides `src`, which trips no banned construct); B6-8 adds `srcdoc` to the banned set.
+- **Stale never poses as live**; derive-from-log, no tickers, no client-side side-truths; honest absence over fabrication.
 - Secrets are never committed. Host-level changes are proposed and approved, never applied unilaterally — units are **generated, not installed**.
-- **The 35 ratified B5 readings are binding precedent** (CONVENTIONS §29–§37): derive-from-log, no tickers, cards derive bounded, severity computed never judged, proposals never auto-apply, money read never computed, model output is untrusted input, refusal never repair, every refusal audited.
 
 ---
 
 ## 7. Host and environment state you inherit
 
-- **Local inference tier live-capable, user-level:** llama-swap v241; llama.cpp b10085 CUDA-built sm_120 (user-level CUDA 12.9 + micromamba gcc-14 — **no driver/kernel/system-CUDA change ever, and none may be**). Weights/scratch in `~/.sinet-b45` (~38 GB, outside the repo). Three model seats remain unpulled, none on the v0 default path.
-- **Production front chain LIVE on this machine:** `tailscale serve` → Caddy on 127.0.0.1:8481 → production unit on 8482; `sinet-control` + `sinet-broker` active. **Packet tests stay hermetic and never touch the live Caddy admin API/config** — real hazard, own tripwire.
-- **B5 organs:** promptfoo + changedetection.io **installed** (§3); watchlist unit generated-only; canaries disarmed.
-- Service-context confined runs stay blocked by the AppArmor userns finding until the **hardening session** (needs sudo; its list now also carries: `sinet-watchlist.service` install + starting changedetection.io with its broker-custody API key, plus the carried `socat`/egress/run@/Landlock/`user.slice`-probe items).
-- **Standing operator items, none blocking B6** (full list: B5 report §7): housekeeping `rm`s (`/tmp/llamaswap-test/`, `~/sinet-demo*`, `tools/dbpeek/`, `~/.sinet-b45/baselines/` ~26 GB); the `Research/02` unstaged addendum (operator's call); probe-batch suspend leg (pairs with the battery-drain hour); week-one push drill at first deploy (B6 brings it in reach); optional GitHub Verified badge; Z.AI calibration parked (no lane).
+- **The 2026-07-28/29 sessions changed NOTHING on the host** — pure repo work (Go/TS code, migrations applied only to test DBs, $0 spend, no sudo/apt/unit/secret/canary). `web/node_modules` exists inside the repo (git-ignored); nothing installed globally.
+- **Production front chain LIVE on this machine:** `tailscale serve` → Caddy on 127.0.0.1:8481 → the production unit on 8482; `sinet-control` + `sinet-broker` active. **Packet tests stay hermetic and never touch the live Caddy admin API/config** — real hazard, own tripwire (now self-scanning). The Vite dev proxy **requires** `VITE_SINET_ADDR` and fails fast when unset, precisely because 8482 is production's port here.
+- **Local inference tier live-capable, user-level:** llama-swap v241; llama.cpp b10085 CUDA sm_120; weights in `~/.sinet-b45` (~38 GB, outside the repo). No driver/kernel/system-CUDA change, ever.
+- **B5 organs:** promptfoo 0.121.19 + changedetection.io 0.55.8 installed (user-level); changedetection.io not running; `sinet-watchlist.service` generated-only; all four canaries disarmed.
+- Service-context confined runs stay blocked by the AppArmor userns finding until the **hardening session** (needs sudo).
+
+---
+
+## 8. Model routing
+
+Executors and finalizers are **always Opus**. Grounding and evaluation inherit the session model, with a **lossless Opus fallback** on any safeguard trip. B6's frontend scope is not security-dense; the whole phase ran clean on the inherited model. Coordinator sessions run at max effort.
