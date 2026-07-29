@@ -89,6 +89,51 @@ export const activityEventTypes = [
  *  because it renders the consumption gauges beside the work. */
 export const missionEventTypes = [...boardEventTypes, 'meter.utilization'] as const
 
+/**
+ * The types that open or close an INBOX card (Spec S15.6; §42).
+ *
+ * Chosen family by family against the server's own registry, because the queue
+ * is fed by six different producers and a type not named here is a frame this
+ * view never hears — `EventSource` has no catch-all (§41-B). Each entry is
+ * either what PUTS a card in the queue or what TAKES one out; a type that does
+ * neither is not here, however interesting it is elsewhere.
+ *
+ * The ninth kind is the honest exception, and the view says so on screen rather
+ * than compensating with a timer: an open memory conflict reaches its addressee
+ * through NO frame at all. The Knowledge family routes to no SSE topic, and the
+ * relay frames a conflicting write does produce are owner-scoped to the WRITER —
+ * who, when the question is addressed to somebody else, is not the person
+ * waiting. So that kind's currency comes from the re-reads below and from the
+ * reader's own reload, and the idempotent already-closed answer is what makes a
+ * stale conflict card harmless rather than dangerous.
+ */
+export const inboxEventTypes = [
+  // Gate asks: the durable ask rows behind the ask cards.
+  'engine.gate_ask',
+  // The intake FSM issues and closes the S06 approval, delta and decision cards.
+  'intake.state',
+  'intake.delta_decision',
+  // A decision is what removes a card from the queue — every effect approval,
+  // drift dismissal and conformance acknowledgement mints one.
+  'decision.recorded',
+  // A run that is cancelled or resumed drops the cards that were waiting on it.
+  'run.state_changed',
+  // The watchdog family: a flag opens a card, a suppression closes it, and the
+  // Tier-1 annotation is trigger evidence the open card renders.
+  'watchdog.flagged',
+  'watchdog.annotated',
+  'watchdog.suppressed',
+  // A drift finding opens a drift card (a dismissal rides decision.recorded).
+  'drift.finding',
+  // The benchmark family: a recorded verdict closes a pending pair, and an
+  // alarm raise or clear is itself a card.
+  'benchmark.pair_recorded',
+  'benchmark.alarm',
+  // A conformance result is the ONLY thing that clears a red row — an
+  // acknowledgement never does (S14.5).
+  'eval.score_recorded',
+] as const
+
 export type Live<T> = {
   data: T | null
   /** The failure this view could not read past — rendered, never swallowed. */

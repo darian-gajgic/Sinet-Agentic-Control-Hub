@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -77,7 +78,15 @@ const (
 	approvalKindDrift       = "drift_card"        // open drift incidents (B5-6A)
 	approvalKindVerdict     = "benchmark_verdict" // pending blind-pair verdicts (B5-7)
 	approvalKindAlarm       = "benchmark_alarm"   // standing BENCH-REG §12 alarms (B5-7)
+	// The NINTH kind (B6-6 OQ1): the S09.7 memory-conflict question cards, from
+	// the knowledge_conflicts rows through internal/memory's own browse read.
+	approvalKindMemoryConflict = "memory_conflict"
 )
+
+// memoryActionResolve is the ninth kind's action vocabulary — the landed
+// POST /api/memory/conflicts/{conflict}/resolve verb, named by the card exactly
+// as the oversight kinds name theirs.
+const memoryActionResolve = "resolve"
 
 // The S06.4 risk tiers, as the inbox ranks and gates them (S15.6). The four
 // intake tiers fold onto three inbox tiers: `trivial` is the zero-interaction
@@ -191,6 +200,12 @@ func (s *Server) handleApprovalList(w http.ResponseWriter, r *http.Request) {
 		s.writeSurface(w, nil, err)
 		return
 	}
+	conflicts, err := s.memoryConflictCards(r.Context(), scope)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	items = append(items, conflicts...)
 	// Risk-ranked (S15.6 "cards arrive ranked by risk"), then oldest-first
 	// inside a tier so the queue drains in the order it filled.
 	sort.SliceStable(items, func(i, j int) bool {
@@ -304,6 +319,17 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 		it := oversightItem(approvalKindWatchdog, f.RunID+"\x1f"+f.AnomalyClass, f.Owner, f.RunID,
 			severityTier(f.Severity), f.FlaggedTS, redactWatchdogFlag(f))
 		it.Actions = []string{oversightActionSuppress}
+		// S14.4 makes "resume — I was wrong" first-class ON the card, and
+		// `actions` is the vocabulary a surface renders from — so the door has
+		// to be IN it (B6-6 OQ9(b)). A surface that derived the control from
+		// `run_id` instead would be synthesizing a verb out of a card field,
+		// which is exactly the invention `actions` exists to make unnecessary.
+		// It is added only where the verb can apply: the resume route is
+		// run-scoped, so a run-less platform flag has no run to resume, and its
+		// authority is the same rule this card's `answerable` already carries.
+		if f.RunID != "" {
+			it.Actions = append(it.Actions, oversightActionResume)
+		}
 		setAnswerable(&it, mayAnswerWatchdogFlag(scope, f.Owner),
 			"suppressing a flag is its owner's or the operator's (POST /api/watchdog/flags/suppress, S14.4)")
 		out = append(out, it)
@@ -361,12 +387,83 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 	return out, nil
 }
 
+// memoryConflictCards folds the NINTH kind into the one inbox (B6-6 OQ1): the
+// S09.7 question cards, one per OPEN knowledge conflict addressed to the caller.
+//
+// ── The stated deviation, and why it is the right one ───────────────────────
+//
+// Every other kind here is operator-sees-all. This one is not: a conflict card
+// reaches its ADDRESSEE and nobody else, the operator included. That is not a
+// narrowing invented for the inbox — it is the landed B6-3C visibility line
+// carried onto the surface. `mayAnswerConflict` is the ONE expression of both
+// who sees the edge and who may resolve it, the entry-detail page already hides
+// the edge block from third parties and the non-affected operator, and the
+// resolve verb already refuses everyone but the addressee. An inbox that showed
+// the operator another person's memory question would put a card on screen whose
+// door refuses them, which is the exact D9 failure the `answerable` field exists
+// to prevent — and it would leak the question itself, which is the thing S09
+// scopes. So the browse read is addressee-scoped and the card's `answerable` is
+// still computed through the same predicate: the read cannot hand over a card
+// the rule would refuse, and the card still says the rule out loud.
+//
+// ── The three things this card deliberately does NOT carry ──────────────────
+//
+//   - No payload hash. The resolve verb is path-only and idempotent by design —
+//     a repeat answers 200 with the already-closed detail — so there is no pin
+//     to quote back and inventing one would describe a check nothing performs.
+//     The generic answer verb therefore refuses this kind by its own default,
+//     naming where the verb lives, exactly as it does for the oversight kinds.
+//   - No expiry. `effects.approval_expiry` is the horizon of an approval that
+//     releases something outward; a memory question releases nothing and does
+//     not lapse. A countdown here would be a deadline nothing enforces.
+//   - No staleness. The stored flag's served reason names one-click re-plan
+//     (S06.9), which is meaningless on a conflict — an old question is still
+//     exactly the question.
+//
+// The tier IS run through applyTierRules, unlike the oversight kinds: Medium
+// here is a CLASSIFICATION (answered individually, releases nothing, no
+// step-up), which is what that function's Low/Medium/High semantics express —
+// not a severity ranking, which is why those kinds skip it.
+//
+// A process with no memory store simply has no ninth kind. It is not a 503: the
+// other eight are readable, and failing the whole inbox because one optional
+// subsystem is unwired would be worse than serving what exists.
+func (s *Server) memoryConflictCards(ctx context.Context, scope ownerScope) ([]ApprovalItem, error) {
+	if s.memory == nil {
+		return nil, nil
+	}
+	conflicts, err := s.memory.OpenConflictsFor(ctx, scope.UserID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ApprovalItem, 0, len(conflicts))
+	for _, c := range conflicts {
+		// Unwrapped, like the rest of this response: a conflict row is S09
+		// memory CONTENT — the person's own stored knowledge and the question
+		// put to them about it — and the memory family serves that content
+		// unwrapped everywhere else (§40-C). It is not lifted out of a
+		// run_events payload, so the R3 per-value edge does not apply.
+		it := oversightItem(approvalKindMemoryConflict, strconv.FormatInt(c.ID, 10),
+			c.Affected, "", tierMedium, parseTS(c.DetectedTS), c)
+		it.Actions = []string{memoryActionResolve}
+		setAnswerable(&it, mayAnswerConflict(c, scope.UserID),
+			"a memory conflict is answered by the person it was addressed to (POST /api/memory/conflicts/{conflict}/resolve, S09.7)")
+		applyTierRules(&it)
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 // The oversight card action vocabulary (B6-2B). One verb per kind, named by the
 // card so a surface renders the control the route actually accepts.
 const (
 	oversightActionSuppress    = "suppress"
 	oversightActionDismiss     = "dismiss"
 	oversightActionAcknowledge = "acknowledge"
+	// oversightActionResume is the S14.4 "resume — I was wrong" door, carried on
+	// the run-scoped watchdog card (B6-6 OQ9(b)). Its verb is the landed
+	// POST /api/runs/{run}/resume, named by the card like every other action.
+	oversightActionResume = "resume"
 )
 
 // The two benchmark card kinds' action vocabulary (B6-2C). The verdict card
@@ -506,7 +603,17 @@ type cardShape struct {
 	} `json:"delta"`
 	Decision *struct {
 		Choices []struct {
-			ID string `json:"id"`
+			// The wire key is `value`, and `id` — which this read until B6-6 —
+			// is a key NO producer writes. internal/intake's S06.7 decision
+			// cards marshal []Option{Label, Value} (intake/cards.go), and the
+			// answer validator compares the answer's `choice` against VALUE
+			// (intake/answer.go). Reading `id` derived one empty string per
+			// choice, so every coverage / research / spec-doubt card served an
+			// action list of blanks: a surface rendering from it would have
+			// drawn unlabelled buttons for verbs it could not name. Same
+			// finding as the B6-3B `verbs`/`choices` fix, on the other decision
+			// family — the Go field name was fine, the wire key was not.
+			Value string `json:"value"`
 		} `json:"choices"`
 	} `json:"decision"`
 	// Verify cards (S07.7) declare their answer verbs at the TOP LEVEL under
@@ -588,9 +695,18 @@ func readCardShape(snapshot json.RawMessage) (tier string, actions []string, sta
 		actions = c.Verbs
 	case c.Decision != nil:
 		for _, ch := range c.Decision.Choices {
-			actions = append(actions, ch.ID)
+			actions = append(actions, ch.Value)
 		}
 	}
+	// REPORTED, not papered over: a DELTA card (c.Delta != nil) declares no
+	// action vocabulary at all. Its answer rides `{"action":"approve"|"reject"}`
+	// (intake/delta.go's applyDeltaAnswer), but internal/intake's delta card
+	// carries only {origin, items, help} — no `approval.actions`, no top-level
+	// `choices`, no `decision`. So its served `actions` is empty and a surface
+	// that renders controls from the card's own vocabulary correctly renders
+	// none. Naming the two verbs HERE would put the intake pipeline's answer
+	// vocabulary in the transport, which is the copy this derivation exists to
+	// avoid; the fix belongs in the producer that issues the card.
 	return tier, actions, stale, reasons
 }
 

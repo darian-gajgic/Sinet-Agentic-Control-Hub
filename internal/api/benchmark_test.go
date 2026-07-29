@@ -101,6 +101,20 @@ func (f *fakeBenchmark) SetOptIn(_ context.Context, actor, subject string, enabl
 	return nil
 }
 
+// AnswerVocabulary stands in for the package's registered answer vocabularies.
+// The values are STAND-INS on purpose: internal/api names no registered string
+// and this test must not become the place one appears. What it proves is that
+// the served lists are whatever the seam handed over — the real vocabulary is
+// pinned to the constants on the package's own side of the wall.
+func (f *fakeBenchmark) AnswerVocabulary(context.Context) (api.BenchmarkVocabulary, error) {
+	f.note("vocabulary")
+	return api.BenchmarkVocabulary{
+		Choices:      []string{"stand-in-choice-1", "stand-in-choice-2"},
+		GuessSides:   []string{"stand-in-side"},
+		Dispositions: []string{"stand-in-disposition"},
+	}, nil
+}
+
 // RegisteredValues stands in for the package's S18.4 R9 block. It carries the
 // real marker string because that is the property the settings surface must
 // serve verbatim; the value itself is a stand-in, because internal/api names no
@@ -377,8 +391,8 @@ func TestBenchmarkVerbsMintNoTransportDecisionRow(t *testing.T) {
 			after-before)
 	}
 	// The whole route set was exercised, so the assertion above is not vacuous.
-	if got := len(e.fake.order()); got != 6 {
-		t.Fatalf("the audit walk drove %d practice calls, want 6 (record+reveal, decline, dispose, optin, pending)", got)
+	if got := len(e.fake.order()); got != 7 {
+		t.Fatalf("the audit walk drove %d practice calls, want 7 (record+reveal, decline, dispose, optin, pending+vocabulary)", got)
 	}
 }
 

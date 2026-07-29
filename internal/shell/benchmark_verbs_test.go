@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +257,84 @@ func TestPendingFormCarriesNoArmIdentity(t *testing.T) {
 	for _, required := range []string{pair.PairID, driverArmAnswer, driverPlatformText, "guess_required"} {
 		if !strings.Contains(out, required) {
 			t.Fatalf("the pending form is missing %q — the scan above would pass vacuously", required)
+		}
+	}
+}
+
+// TestTheServedVocabularyIsThePackagesOwn is the B6-6 OQ4 tie, and this is the
+// only place it can be made: internal/api may not import internal/benchmark, so
+// its own battery serves stand-ins, and the WEB fixture the inbox's verdict form
+// is built against is written by that battery. Here — the one place both
+// vocabularies are legitimately visible — the served response and the committed
+// fixture are both held to the package's own constants.
+//
+// Without this, a §17 re-registration could change the frozen verdict set and
+// leave the form quietly offering last year's buttons.
+func TestTheServedVocabularyIsThePackagesOwn(t *testing.T) {
+	e := newDriverEnv(t, &driverEngine{text: driverArmAnswer})
+	e.rendered(t, "bp-vocab", "t-vocab", "alice")
+
+	var served struct {
+		Choices      []string `json:"choices"`
+		GuessSides   []string `json:"guess_sides"`
+		Dispositions []string `json:"dispositions"`
+	}
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", "")), &served); err != nil {
+		t.Fatalf("decode the verdict forms: %v", err)
+	}
+
+	wantChoices := make([]string, 0, len(benchmark.VerdictChoices()))
+	for _, c := range benchmark.VerdictChoices() {
+		wantChoices = append(wantChoices, string(c))
+	}
+	wantSides := make([]string, 0, len(benchmark.GuessSides()))
+	for _, s := range benchmark.GuessSides() {
+		wantSides = append(wantSides, string(s))
+	}
+	for _, c := range []struct {
+		what      string
+		got, want []string
+	}{
+		{"verdict choices", served.Choices, wantChoices},
+		{"guess sides", served.GuessSides, wantSides},
+		{"alarm dispositions", served.Dispositions, benchmark.AlarmDispositions()},
+	} {
+		if strings.Join(c.got, "\x1f") != strings.Join(c.want, "\x1f") {
+			t.Errorf("the served %s are %v; the package registers %v", c.what, c.got, c.want)
+		}
+		if len(c.want) == 0 {
+			t.Errorf("the %s vocabulary is empty — the comparison above would pass vacuously", c.what)
+		}
+	}
+
+	// The same three lists, as the COMMITTED web fixture carries them. The
+	// inbox's verdict form renders its buttons from that file, so a drift
+	// between the registration and the fixture has to fail somewhere, and this
+	// is the only place that can see both.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "fixtures", "api", "benchmark-verdicts.json"))
+	if err != nil {
+		t.Fatalf("read the committed verdict-forms fixture: %v", err)
+	}
+	var committed struct {
+		Choices      []string `json:"choices"`
+		GuessSides   []string `json:"guess_sides"`
+		Dispositions []string `json:"dispositions"`
+	}
+	if err := json.Unmarshal(raw, &committed); err != nil {
+		t.Fatalf("decode the committed fixture: %v", err)
+	}
+	for _, c := range []struct {
+		what      string
+		got, want []string
+	}{
+		{"verdict choices", committed.Choices, wantChoices},
+		{"guess sides", committed.GuessSides, wantSides},
+		{"alarm dispositions", committed.Dispositions, benchmark.AlarmDispositions()},
+	} {
+		if strings.Join(c.got, "\x1f") != strings.Join(c.want, "\x1f") {
+			t.Errorf("the committed web fixture's %s are %v; the package registers %v.\n"+
+				"Regenerate with: SINET_WRITE_API_FIXTURES=1 go test ./internal/api -run TestWebAPIFixtures",
+				c.what, c.got, c.want)
 		}
 	}
 }

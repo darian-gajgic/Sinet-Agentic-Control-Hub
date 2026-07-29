@@ -245,10 +245,14 @@ const (
 	DispositionReregister   = "re-register"
 )
 
+// validDisposition reads the SAME list AlarmDispositions serves to a form, so
+// the set an operator is offered and the set this accepts are one list rather
+// than two that agree today (B6-6 OQ4).
 func validDisposition(d string) bool {
-	switch d {
-	case DispositionInvestigate, DispositionFixAndAccrue, DispositionReregister:
-		return true
+	for _, v := range AlarmDispositions() {
+		if v == d {
+			return true
+		}
 	}
 	return false
 }

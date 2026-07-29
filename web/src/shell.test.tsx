@@ -106,15 +106,22 @@ test('a built surface renders its own heading, not a stub', async () => {
   }
 })
 
-test('a deep link carries its identity into the stub', async () => {
-  routeFetch({ 'GET /api/auth/session': signedIn })
+test('a deep link carries its identity into the surface that owns it', async () => {
+  // /inbox/:id is built now, so the identity reaches the real card surface
+  // rather than a stub that echoed it. A card id that is not in the caller's
+  // own queue renders the honest not-visible state and names the id it looked
+  // for — the same URL contract, answered by the surface instead of a stub.
+  routeFetch({
+    'GET /api/auth/session': signedIn,
+    'GET /api/approvals': { body: { items: [], cursor: 1, truncated: false } },
+  })
   window.history.replaceState(null, '', '/inbox/ask-7')
 
   const view = mount(<App stream={inertStream()} />)
   await flush()
 
   expect(view.container.textContent).toContain('Approval')
-  expect(view.container.textContent).toContain('id=ask-7')
+  expect(view.container.textContent).toContain('ask-7')
   view.unmount()
 })
 

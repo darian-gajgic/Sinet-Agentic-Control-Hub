@@ -78,6 +78,20 @@ type BenchmarkSurface interface {
 	// package refuses any actor but the subject themselves — the operator
 	// included.
 	SetOptIn(ctx context.Context, actor, subject string, enabled bool) error
+	// AnswerVocabulary is the registered ANSWER vocabulary of the two benchmark
+	// card kinds: the §3.3 verdict values, the two guess sides, and the §12
+	// alarm dispositions (B6-6 OQ4). It exists because a form has to render
+	// buttons, and a form that typed these strings would be a THIRD home for
+	// registered text — after the registration document and the package that
+	// encodes it — free to drift from the validator that refuses anything else.
+	// The values come from the package that owns them and not one of them is
+	// named in internal/api; the source scan for restated registered text is
+	// what keeps that true.
+	//
+	// Like RegisteredValues it is a READ with no actor and nothing to fail:
+	// the vocabulary is frozen in code, and the ctx rides the signature so the
+	// seam looks like every other read on it.
+	AnswerVocabulary(ctx context.Context) (BenchmarkVocabulary, error)
 	// RegisteredValues is the S18.4 R9 read: every value the registration
 	// freezes, each carrying its own §-ref and the read-only marker
 	// ("registered — changing this value requires a re-registration commit"),
@@ -100,8 +114,26 @@ type BenchmarkVerdictForms struct {
 	Pairs json.RawMessage `json:"pairs"`
 	// GuessRequired is stated so a form cannot render without it (BENCH-REG
 	// §3.3, frozen). It is a contract fact, not a registered number.
-	GuessRequired bool   `json:"guess_required"`
-	Detail        string `json:"detail"`
+	GuessRequired bool `json:"guess_required"`
+	// The registered answer vocabularies, served flat beside the pairs so the
+	// one read a decision surface already makes to render these cards also
+	// tells it which buttons exist (B6-6 OQ4).
+	BenchmarkVocabulary
+	Detail string `json:"detail"`
+}
+
+// BenchmarkVocabulary is the closed answer vocabulary of the two benchmark card
+// kinds, as the package that owns the registration hands it over.
+//
+// internal/api declares the three FIELD NAMES and not one of the VALUES. Every
+// string these lists carry is frozen registered text (BENCH-REG §3.3/§12) whose
+// only home is internal/benchmark, changeable only through §17 — and
+// TestNoRegisteredNumberIsRestatedInTheAPI is the scan that keeps this file
+// honest about it.
+type BenchmarkVocabulary struct {
+	Choices      []string `json:"choices"`
+	GuessSides   []string `json:"guess_sides"`
+	Dispositions []string `json:"dispositions"`
 }
 
 func (s *Server) handleBenchmarkVerdicts(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +155,11 @@ func (s *Server) handleBenchmarkVerdicts(w http.ResponseWriter, r *http.Request)
 		s.writeSurface(w, nil, err)
 		return
 	}
+	vocab, err := s.benchmark.AnswerVocabulary(r.Context())
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
 	// UNWRAPPED, and the reason is stronger here than anywhere else on the read
 	// surface. The two rendered bodies are the accepted deliverable and the direct
 	// arm's own answer — S13/S06 product CONTENT, structurally exempt from the
@@ -134,7 +171,7 @@ func (s *Server) handleBenchmarkVerdicts(w http.ResponseWriter, r *http.Request)
 	// is a measurement artifact rather than a cosmetic one (BENCH-REG §3.2 — the
 	// template is uniform and the platform never edits an arm).
 	s.writeReadJSON(w, BenchmarkVerdictForms{
-		Pairs: pairs, GuessRequired: true,
+		Pairs: pairs, GuessRequired: true, BenchmarkVocabulary: vocab,
 		Detail: "each pair is two responses through ONE uniform template, keyed by side. Which arm is which is exactly what the vote must not know, and the verdict form takes the blind pick and the arm-guess in the same act (BENCH-REG §3.2/§3.3)",
 	})
 }

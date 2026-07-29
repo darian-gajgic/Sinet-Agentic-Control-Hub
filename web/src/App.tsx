@@ -6,6 +6,7 @@ import { ConnectionState } from './ConnectionState'
 import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
+import { Inbox, InboxItem } from './Inbox'
 import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound, Stub } from './Stub'
@@ -97,6 +98,14 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           <Fleet stream={stream} />
         ) : route.id === 'task' ? (
           <TaskDetail id={params.id} stream={stream} />
+        ) : route.id === 'inbox' ? (
+          <Inbox stream={stream} />
+        ) : route.id === 'inbox-item' ? (
+          // The id arrives DECODED from the route table, which matters: real
+          // card ids carry ':', '#' and a unit separator, so the round trip
+          // through hrefFor/matchRoute is the only thing that keeps a deep
+          // link pointing at the card it names (S15.11).
+          <InboxItem id={params.id} stream={stream} />
         ) : (
           <Stub route={route} params={params} />
         )}

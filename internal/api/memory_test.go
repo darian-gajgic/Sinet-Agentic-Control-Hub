@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -663,6 +664,122 @@ func TestConflictEdgesReachOnlyTheirAddressee(t *testing.T) {
 	for _, who := range []string{"alice", "bob", "carol"} {
 		if got := edges(who, house); len(got) != 0 {
 			t.Errorf("%s must not read the card addressed to the operator: %+v", who, got)
+		}
+	}
+}
+
+// ── the NINTH inbox kind (B6-6 OQ1) ─────────────────────────────────────────
+
+// TestOpenConflictsAreTheNinthInboxKind: an open question card is waiting on a
+// person, so it belongs in the one place "the platform needs you" lives (S15.6).
+//
+// The visibility line is the point and it is a DELIBERATE deviation from the
+// other eight kinds' operator-sees-all: the card reaches its addressee and
+// nobody else, the operator included. It is the landed B6-3C rule carried onto
+// the inbox — one predicate decides both who sees the edge and who may resolve
+// it — and this test drives the card AND the door for all three viewers, so a
+// card can never be listed for somebody the verb would refuse.
+func TestOpenConflictsAreTheNinthInboxKind(t *testing.T) {
+	e := newMemEnv(t)
+	// A project both members read, so every viewer below can see the ENTRIES.
+	// What differs is the card, which is the thing under test.
+	if _, err := e.proj.Register(e.ctx, project.RegisterInput{
+		ProjectID: "p-beta", Owner: "alice", Name: "beta",
+		StorePath: filepath.Join(t.TempDir(), "beta"), Members: []string{"bob", "op"},
+	}); err != nil {
+		t.Fatalf("register p-beta: %v", err)
+	}
+	e.create(t, "alice",
+		`{"scope":"project","scope_ref":"p-beta","kind":"lesson","title":"a","content":"always squash","topic_key":"merge-style"}`)
+	e.create(t, "alice",
+		`{"scope":"project","scope_ref":"p-beta","kind":"lesson","title":"b","content":"never squash","topic_key":"merge-style"}`)
+
+	conflicts, err := e.store.OpenConflictsFor(e.ctx, "alice")
+	if err != nil {
+		t.Fatalf("read open conflicts: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("the two same-topic entries produced %d open conflicts, want 1", len(conflicts))
+	}
+	cardID := "memory_conflict:" + strconv.FormatInt(conflicts[0].ID, 10)
+
+	// The addressee's inbox carries the card, with the verb its own route
+	// accepts and nothing it does not.
+	mine := decodeList(t, e.mustDo(t, "alice", "GET", "/api/approvals", ""))
+	it, ok := itemByID(mine, cardID)
+	if !ok {
+		t.Fatalf("the addressee's inbox is missing her own question card: %+v", mine.Items)
+	}
+	switch {
+	case !it.Answerable:
+		t.Errorf("the addressee cannot answer her own card: %q", it.NotAnswerableReason)
+	case it.Owner != "alice":
+		t.Errorf("the card is attributed to %q, not to the person it was addressed to", it.Owner)
+	case it.Tier != "medium":
+		t.Errorf("tier %q: a question answered individually that releases nothing outward is Medium", it.Tier)
+	case it.Batchable || it.StepUpRequired:
+		t.Error("a Medium card is individual and un-stepped — the tier rules say so in one place")
+	case len(it.Actions) != 1 || it.Actions[0] != "resolve":
+		t.Errorf("actions %v: the card names the one verb its route accepts", it.Actions)
+	case it.PayloadHash != "":
+		t.Error("the resolve verb is path-only and idempotent — a pin here would describe a check nothing performs")
+	case it.ExpiryAt != nil:
+		t.Error("a memory question releases nothing outward and does not lapse — a countdown would be a deadline nothing enforces")
+	case it.Stale:
+		t.Error("an old question is still exactly the question; the staleness flag's own reason names re-plan, which is meaningless here")
+	}
+	// The card IS the row: a surface renders the question, both entry refs and
+	// when it was detected without re-deriving any of them.
+	var card memory.Conflict
+	if err := json.Unmarshal(it.Card, &card); err != nil {
+		t.Fatalf("decode the conflict card: %v: %s", err, it.Card)
+	}
+	if card != conflicts[0] {
+		t.Errorf("the card is not the stored row:\n got %+v\nwant %+v", card, conflicts[0])
+	}
+
+	// Nobody else sees it — a third party OR the operator. Both directions
+	// matter: the question text names another person's entry.
+	for _, who := range []string{"bob", "op", "carol"} {
+		other := decodeList(t, e.mustDo(t, who, "GET", "/api/approvals", ""))
+		if _, found := itemByID(other, cardID); found {
+			t.Errorf("%s sees a memory-conflict card addressed to somebody else — the operator has no limb here, deliberately", who)
+		}
+		for _, item := range other.Items {
+			if item.Kind == "memory_conflict" {
+				t.Errorf("%s's inbox carries memory-conflict card %q that is not theirs", who, item.ID)
+			}
+		}
+	}
+
+	// The card and the door agree: the same predicate that listed it for alice
+	// is the one that refuses everybody else at the verb.
+	path := "/api/memory/conflicts/" + strconv.FormatInt(conflicts[0].ID, 10) + "/resolve"
+	if code, _ := e.do(t, "op", "POST", path, ""); code != http.StatusForbidden {
+		t.Errorf("the operator resolved another person's conflict: %d", code)
+	}
+	e.mustDo(t, "alice", "POST", path, "")
+	// Resolved is closed: the card leaves the inbox because the ROW moved, not
+	// because anything client-side remembered answering it.
+	after := decodeList(t, e.mustDo(t, "alice", "GET", "/api/approvals", ""))
+	if _, found := itemByID(after, cardID); found {
+		t.Error("a resolved conflict is still listed as waiting on its addressee")
+	}
+}
+
+// TestApprovalsServeWithoutAMemoryStore: the ninth kind is an OPTIONAL
+// subsystem's contribution, and a process without it still has an inbox. Eight
+// kinds readable beats a 503 because one seam is unwired.
+func TestApprovalsServeWithoutAMemoryStore(t *testing.T) {
+	e := newDecisionEnv(t)
+	sevenKinds(t, e)
+	list := decodeList(t, e.mustDo(t, "op", "GET", "/api/approvals", ""))
+	if len(list.Items) == 0 {
+		t.Fatal("the inbox is empty in a process with no memory store")
+	}
+	for _, it := range list.Items {
+		if it.Kind == "memory_conflict" {
+			t.Errorf("a memory-conflict card appeared with no memory store wired: %q", it.ID)
 		}
 	}
 }

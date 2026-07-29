@@ -91,9 +91,13 @@ test('a card that is not yours to answer says so, in the server&apos;s own words
   const { view } = await open('/?view=what-needs-me', {
     'GET /api/approvals': { body: fixtures.approvals() },
   })
-  const served = (fixtures.approvals() as { items: { not_answerable_reason?: string }[] }).items[0]
-  expect(served.not_answerable_reason).toBeTruthy()
-  expect(view.container.textContent).toContain(served.not_answerable_reason ?? '')
+  // The operator's body carries cards of both kinds; the one under test is a
+  // card the operator can SEE and cannot ANSWER, which is exactly the D10 line.
+  const served = (fixtures.approvals() as { items: { not_answerable_reason?: string }[] }).items.find(
+    (i) => i.not_answerable_reason !== undefined,
+  )
+  expect(served, 'the served body carries no unanswerable card, so this asserts nothing').toBeTruthy()
+  expect(view.container.textContent).toContain(served?.not_answerable_reason ?? '')
 })
 
 test('a card that IS yours to answer says so — the other direction (drain r2 R4b)', async () => {

@@ -4,6 +4,7 @@ import type { EventSourceLike } from './events'
 
 import approvalsMineRaw from './fixtures/api/approvals-mine.json?raw'
 import approvalsRaw from './fixtures/api/approvals.json?raw'
+import benchmarkVerdictsRaw from './fixtures/api/benchmark-verdicts.json?raw'
 import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
 import deliverablesOfTaskRaw from './fixtures/api/deliverables-of-task.json?raw'
@@ -153,6 +154,9 @@ export const fixtures = {
   /** The same read as its OWNER: `answerable` is per-caller (D10), so the
    *  "yours to answer" branch only exists in a body an owner read. */
   approvalsMine: () => parse<Record<string, unknown>>(approvalsMineRaw),
+  /** The blind-pair form's data, read as the requester: the two renders and the
+   *  registered answer vocabularies the form's buttons come from. */
+  benchmarkVerdicts: () => parse<Record<string, unknown>>(benchmarkVerdictsRaw),
   taskDetailOps: () => parse<Record<string, unknown>>(taskDetailOpsRaw),
   deliverablesInReview: () => parse<Record<string, unknown>>(deliverablesRaw),
   deliverablesOfTask: () => parse<Record<string, unknown>>(deliverablesOfTaskRaw),
@@ -172,6 +176,7 @@ export function oversightRoutes(): Record<string, Scripted> {
     // The signed-in identity in these suites is alice, so the inbox read is
     // the one SHE would get — including the cards she can answer.
     'GET /api/approvals': { body: fixtures.approvalsMine() },
+    'GET /api/benchmark/verdicts': { body: fixtures.benchmarkVerdicts() },
     'GET /api/deliverables?state=in-review': { body: fixtures.deliverablesInReview() },
     'GET /api/deliverables?task=t-ship': { body: fixtures.deliverablesOfTask() },
     'GET /api/deliverables/d-notes': { body: fixtures.deliverableDetail() },

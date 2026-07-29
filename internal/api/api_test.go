@@ -16,6 +16,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
@@ -28,6 +29,12 @@ type backend struct {
 	// reg is the settings registry the DB was opened against. It is exposed so
 	// the drain-D4 Layer-2 rig can build a real local.Registry over it.
 	reg *settings.Registry
+	// mem/memGate are composed ONCE per backend by the rigs that need them, so
+	// every server built over the same backend shares one knowledge root — a
+	// per-server root would put an entry's file where the next server cannot
+	// read it. Nil until a rig composes them.
+	mem     *memory.Store
+	memGate *memory.Gate
 }
 
 func newBackend(t *testing.T) *backend {

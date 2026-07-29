@@ -44,14 +44,28 @@ export type Health = {
   event_head: number
 }
 
-/** ApiError carries the HTTP status so callers can branch on 401 alone. */
+/**
+ * ApiError carries the HTTP status so callers can branch on 401 alone.
+ *
+ * It also carries the machine surface's OWN error envelope: `code` is the
+ * server's `error` field and `body` the whole JSON. Both exist so a caller can
+ * branch on the code the server assigned — `stale_payload`, `pin_required`,
+ * `already_answered` — rather than re-classifying a failure by reading its
+ * message text, which is the server's classification to make and not the
+ * client's (§30/§38). `stale_payload` carries the FRESH card in `body.current`,
+ * and that is the only reason the body is kept at all.
+ */
 export class ApiError extends Error {
   readonly status: number
+  readonly code: string
+  readonly body: unknown
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = '', body?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
+    this.body = body
   }
 }
 
@@ -77,27 +91,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch (cause) {
     throw new Unreachable(cause)
   }
-  if (!res.ok) {
-    throw new ApiError(res.status, await errorMessage(res))
-  }
+  if (!res.ok) throw await apiError(res)
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
-/** errorMessage prefers the machine surface's own {error, detail} shape and
- * degrades to the status text — it never invents a reason. */
-async function errorMessage(res: Response): Promise<string> {
+/** apiError reads the machine surface's own {error, detail} envelope and
+ * degrades to the status text — it never invents a reason, and it never
+ * re-derives a classification the server already made. */
+async function apiError(res: Response): Promise<ApiError> {
   try {
     const body: unknown = await res.json()
     if (body && typeof body === 'object') {
       const { error, detail } = body as { error?: string; detail?: string }
-      if (detail) return detail
-      if (error) return error
+      const message = detail ?? error ?? `${res.status} ${res.statusText}`.trim()
+      return new ApiError(res.status, message, error ?? '', body)
     }
   } catch {
     // Not JSON. The status is what we have, and saying so is honest.
   }
-  return `${res.status} ${res.statusText}`.trim()
+  return new ApiError(res.status, `${res.status} ${res.statusText}`.trim())
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {
@@ -448,23 +461,186 @@ export type RunDetail = {
 
 // ── the what-needs-me feeds (S1.4) ────────────────────────────────────────
 
+/**
+ * The D10 co-approval state of a proposed effect, DERIVED server-side from the
+ * decision.recorded rows and cycle-scoped there. The inbox renders this block
+ * verbatim and infers nothing about who signed from event frames: the served
+ * derivation is the one truth (B6-6 OQ8).
+ */
+export type EffectApprovals = {
+  platform_level: boolean
+  owner_approved: boolean
+  operator_approved: boolean
+  owner_approved_by?: string
+  operator_approved_by?: string
+}
+
+/**
+ * One inbox card, ranked by risk server-side.
+ *
+ * Three fields carry all the AUTHORITY this surface has: `answerable` (with the
+ * reason when it is false), `actions` — the card's OWN verb vocabulary — and the
+ * two tier flags. The UI renders controls from them and invents none: a card
+ * that does not name an action has no button for it, and a card that says it is
+ * not answerable renders its served reason instead of a dead control (D9).
+ *
+ * There is no percent, fraction or ETA field on the wire and none is derived
+ * from one here (§30).
+ */
 export type ApprovalItem = {
+  /** "<kind>:<native id>" — the id the answer verbs and /inbox/:id take. */
   id: string
   kind: string
   owner: string
-  run_id: string
+  run_id?: string
   tier: string
   answerable: boolean
   not_answerable_reason?: string
   batchable: boolean
   step_up_required: boolean
+  /** The pin an answer must quote back (S15.2). Absent on the kinds whose verbs
+   *  take no hash — the oversight cards. */
+  payload_hash?: string
   observed_ts: string
   expiry_at?: string
+  engine_expiry_ts?: string
   stale?: boolean
   stale_reasons?: string[]
+  actions?: string[]
+  approvals?: EffectApprovals
+  /** The card content: the stored ask snapshot (Layer-1 + Layer-2 + the 13.5
+   *  help block), the effect payload, or the projection row of the other kinds.
+   *  Rendered as DATA — every string in it escapes, because a card body is
+   *  model-derived input (§41-B). */
+  card?: unknown
 }
 
 export type ApprovalList = { items: ApprovalItem[]; cursor: number; truncated?: boolean }
+
+/** One answered card. `applied:false` is the honest repeat — the item was
+ *  already resolved and this request changed nothing, which is exactly what
+ *  makes a phone retry safe (S15.2). */
+export type ApprovalAnswerResult = {
+  id: string
+  applied: boolean
+  state: string
+  result?: unknown
+  approvals?: EffectApprovals
+  detail?: string
+}
+
+/** One member of a Low-tier batch. A batch is a transport convenience: each
+ *  item carries ITS OWN pin and its answer in ITS OWN card's vocabulary. */
+export type ApprovalBatchItem = { id: string; payload_hash: string; answer: unknown }
+
+/** One member's own outcome. A refusal of one item leaves the rest applied, so
+ *  each is rendered beside its siblings rather than collapsed into a banner. */
+export type ApprovalBatchOutcome = {
+  id: string
+  status: number
+  code?: string
+  detail?: string
+  result?: ApprovalAnswerResult
+}
+
+export type ApprovalBatchResult = { outcomes: ApprovalBatchOutcome[]; cursor: number }
+
+/** The 409 the answer verb serves when the card moved under the answerer: the
+ *  FRESH card travels with the refusal, so the next act is a re-render rather
+ *  than a guess or a blind retry (S15.2). */
+export type StalePayload = { error: string; detail: string; current: ApprovalItem }
+
+export type FlagSuppressed = { run_id?: string; anomaly_class: string; suppressed: boolean; detail: string }
+
+export type DriftDismissed = {
+  card_id: string
+  fingerprint: string
+  window_start_seq: number
+  dismissed: boolean
+  detail: string
+}
+
+/** `still_red` is always true and is in the shape on purpose: an
+ *  acknowledgement is not a pass, and this surface renders it as exactly that. */
+export type ConformanceAcknowledged = {
+  card_id: string
+  row_id: string
+  last_run_ts: string
+  acknowledged: boolean
+  still_red: boolean
+  detail: string
+}
+
+/**
+ * The blind-pair form's data (BENCH-REG §3.2/§3.3).
+ *
+ * `pairs` is the benchmark package's own pre-record shape, passed through: it
+ * carries no arm, no position and no model, structurally. The three vocabulary
+ * lists are REGISTERED text marshaled by the package that owns the
+ * registration — the form renders the buttons it is served and declares none of
+ * its own (B6-6 OQ4).
+ */
+export type PendingPair = {
+  pair_id: string
+  user_id: string
+  domain: string
+  task_id: string
+  sampled_ts: string
+  render_a: string
+  render_b: string
+  length_a: number
+  length_b: number
+}
+
+export type BenchmarkVerdictForms = {
+  pairs: PendingPair[] | null
+  guess_required: boolean
+  choices: string[] | null
+  guess_sides: string[] | null
+  dispositions: string[] | null
+  detail: string
+}
+
+/** The reveal is a READ of the committed §14 record. Its absence with
+ *  `recorded:true` is the honest late-reveal branch, not a failed vote. */
+export type VerdictRecorded = { pair_id: string; recorded: boolean; reveal?: unknown; detail: string }
+
+export type VerdictDeclined = { pair_id: string; declined: boolean; detail: string }
+
+export type AlarmDispositioned = {
+  card_id: string
+  domain: string
+  disposition: string
+  cleared: boolean
+  detail: string
+}
+
+/** The ninth inbox kind's card: one open memory conflict, folded server-side
+ *  and visible ONLY to its addressee (B6-6 OQ1). */
+export type MemoryConflict = {
+  conflict_id: number
+  affected_owner: string
+  entry_id: string
+  other_entry_id: string
+  topic_key?: string
+  question: string
+  status: string
+  detected_ts: string
+  resolved_by?: string
+  resolved_ts?: string
+}
+
+export type MemoryConflictResolved = { conflict: MemoryConflict; detail: string }
+
+/** staleCard returns the FRESH card a 409 `stale_payload` carried with it. The
+ *  card comes off the refusal itself, so the answerer's next act is a re-render
+ *  of what is actually there — never a guess, never a blind retry (S15.2). */
+export function staleCard(err: unknown): ApprovalItem | null {
+  if (!(err instanceof ApiError) || err.code !== 'stale_payload') return null
+  const body = err.body
+  if (!body || typeof body !== 'object') return null
+  return (body as { current?: ApprovalItem }).current ?? null
+}
 
 export type Deliverable = {
   deliverable_id: string
@@ -589,4 +765,49 @@ export const api = {
 
   priorityHint: (task: string, rank: number, reason?: string) =>
     post<PriorityHint>(`/api/tasks/${encodeURIComponent(task)}/priority-hint`, reason ? { rank, reason } : { rank }),
+
+  // ── the S15.6 decision verbs (B6-6) ─────────────────────────────────────
+  //
+  // Every one of them is the LANDED verb of the card that names it in its own
+  // `actions`. Nothing here invents a door: the inbox renders a control only
+  // where a card served the action, and the server is the authority on whether
+  // the act is allowed.
+
+  /**
+   * The one answer verb. `pin` rides the SAME request as the answer (S01.9
+   * verify-at-act): there is no stored elevation, so a High-tier card's PIN is
+   * collected, sent, and gone. `payload_hash` is the pin the card was shown
+   * for — an answer quoting a stale one fires nothing and comes back with the
+   * fresh card (S15.2).
+   */
+  answerApproval: (id: string, body: { payload_hash: string; answer: unknown; pin?: string }) =>
+    post<ApprovalAnswerResult>(`/api/approvals/${encodeURIComponent(id)}/answer`, body),
+  /** The Low-tier batch. Transport convenience only: each item is validated,
+   *  applied and logged individually, and one refusal leaves the rest alone. */
+  answerApprovalBatch: (items: ApprovalBatchItem[]) => post<ApprovalBatchResult>('/api/approvals/answer-batch', { items }),
+
+  suppressFlag: (body: { run_id?: string; anomaly_class: string; reason?: string }) =>
+    post<FlagSuppressed>('/api/watchdog/flags/suppress', body),
+  /** "Resume — I was wrong" (S14.4). Path-only and owner-scoped; a run parked on
+   *  an OPEN ask refuses with a pointer, which renders verbatim. */
+  resumeRun: (run: string) => post<unknown>(`/api/runs/${encodeURIComponent(run)}/resume`, {}),
+  dismissDrift: (id: string, reason?: string) =>
+    post<DriftDismissed>(`/api/approvals/${encodeURIComponent(id)}/dismiss`, reason ? { reason } : {}),
+  acknowledgeConformance: (id: string, reason?: string) =>
+    post<ConformanceAcknowledged>(`/api/approvals/${encodeURIComponent(id)}/acknowledge`, reason ? { reason } : {}),
+
+  benchmarkVerdicts: () => request<BenchmarkVerdictForms>('/api/benchmark/verdicts'),
+  /** The §3.3 ONE act: the blind pick and the arm-guess together. The backend's
+   *  constructor makes a guess-less verdict inexpressible regardless. */
+  recordVerdict: (id: string, verdict: string, guess: string) =>
+    post<VerdictRecorded>(`/api/approvals/${encodeURIComponent(id)}/verdict`, { verdict, guess }),
+  declineVerdict: (id: string) => post<VerdictDeclined>(`/api/approvals/${encodeURIComponent(id)}/decline`, {}),
+  disposeAlarm: (id: string, disposition: string, reason?: string) =>
+    post<AlarmDispositioned>(`/api/approvals/${encodeURIComponent(id)}/dispose`,
+      reason ? { disposition, reason } : { disposition }),
+
+  /** The ninth kind's verb. The path id is the conflict ROW number, which the
+   *  card carries; a repeat answers 200 with the already-closed detail. */
+  resolveMemoryConflict: (conflict: number) =>
+    post<MemoryConflictResolved>(`/api/memory/conflicts/${encodeURIComponent(String(conflict))}/resolve`, {}),
 }

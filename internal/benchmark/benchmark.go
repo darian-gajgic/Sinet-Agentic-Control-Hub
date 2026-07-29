@@ -119,11 +119,49 @@ const (
 	ChoiceBothBad Choice = "both-bad"
 )
 
-// validChoice reports whether c is one of the four frozen verdict values.
+// ── The registered ANSWER vocabularies (the B6-6 form surface) ───────────────
+//
+// The three lists below are the closed sets a decision form offers: the §3.3
+// verdict values, the two blind presentation sides, and the §12 alarm
+// dispositions. They exist for the same reason RegisteredValues does — a
+// surface that typed these strings would be a SECOND home for registered text,
+// free to drift from the machinery that validates against it, and only a §17
+// re-registration may change any of them. Each list is built from the same
+// constants the validators read, so a form can never offer a value the package
+// would refuse or omit one it would accept (asserted both directions).
+
+// VerdictChoices returns the four frozen §3.3 verdict values.
+func VerdictChoices() []Choice { return []Choice{ChoiceA, ChoiceB, ChoiceTie, ChoiceBothBad} }
+
+// GuessSides returns the two blind presentation positions the mandatory
+// arm-guess picks between (§3.3 — the guess is never optional).
+func GuessSides() []Side { return []Side{SideA, SideB} }
+
+// AlarmDispositions returns the §12 dispositions an operator may take on an
+// alarm card.
+func AlarmDispositions() []string {
+	return []string{DispositionInvestigate, DispositionFixAndAccrue, DispositionReregister}
+}
+
+// validChoice reports whether c is one of the four frozen verdict values. It
+// reads the SAME list VerdictChoices serves to a form, so the set a surface
+// offers and the set this accepts are one list rather than two that agree
+// today (B6-6 OQ4; S01.10(b) applied inside the package).
 func validChoice(c Choice) bool {
-	switch c {
-	case ChoiceA, ChoiceB, ChoiceTie, ChoiceBothBad:
-		return true
+	for _, v := range VerdictChoices() {
+		if v == c {
+			return true
+		}
+	}
+	return false
+}
+
+// validSide is the same one-list rule for the mandatory arm-guess.
+func validSide(s Side) bool {
+	for _, v := range GuessSides() {
+		if v == s {
+			return true
+		}
 	}
 	return false
 }
@@ -155,7 +193,7 @@ func NewAnswer(choice Choice, guess Side) (Answer, error) {
 	if !validChoice(choice) {
 		return Answer{}, errors.New("benchmark: verdict must be A, B, tie or both-bad (BENCH-REG §3.3)")
 	}
-	if guess != SideA && guess != SideB {
+	if !validSide(guess) {
 		return Answer{}, ErrGuessRequired
 	}
 	return Answer{choice: choice, guess: guess, formed: true}, nil

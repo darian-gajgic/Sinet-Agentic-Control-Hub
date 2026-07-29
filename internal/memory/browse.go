@@ -179,6 +179,37 @@ func (s *Store) EntryConflicts(ctx context.Context, entryID string) ([]Conflict,
 	return out, rows.Err()
 }
 
+// OpenConflictsFor returns the OPEN edges addressed to one person, oldest
+// first — the read a decision surface makes to answer "what is waiting on me?"
+// (Spec S15.6; S09.7).
+//
+// It is scoped by the ADDRESSEE and by nothing else, deliberately: `affected` is
+// the owner the question was put to, and mayAnswerConflict — the one expression
+// of both visibility and authority on this edge — is that same equality. So a
+// caller can only ever be handed the conflicts it could also resolve, and a
+// surface built on this read cannot show a card whose door would refuse it.
+// EntryConflicts answers a different question (the edges ON one entry, for the
+// entry's own page) and is not a substitute for either half of this one.
+func (s *Store) OpenConflictsFor(ctx context.Context, affected string) ([]Conflict, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+conflictColumns+` FROM knowledge_conflicts
+		 WHERE status = 'open' AND user_id = ?
+		 ORDER BY conflict_id LIMIT ?`, affected, entryConflictsCap)
+	if err != nil {
+		return nil, fmt.Errorf("memory: read open conflicts for %q: %w", affected, err)
+	}
+	defer rows.Close()
+	var out []Conflict
+	for rows.Next() {
+		c, err := scanConflict(rows)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan conflict: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // Conflict returns one edge by id — the read a surface makes before routing a
 // resolution, so the answer reaches the person the question was addressed to.
 func (s *Store) Conflict(ctx context.Context, conflictID int64) (Conflict, error) {

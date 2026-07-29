@@ -485,6 +485,165 @@ td {
   padding-inline-start: 1.25rem;
 }
 
+
+/* ── the approval inbox (Spec S15.6) ─────────────────────────────────────────
+   Phone-first, like everything else: one card per row, every control reachable
+   at 375px, and the one thing genuinely wider than a phone — a rendered blind-
+   pair response — scrolls inside its own box rather than widening the page. */
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 0.75rem;
+  max-width: 100%;
+}
+
+.card-row[data-tier='high'] {
+  border-inline-start: 3px solid var(--warn);
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.card-id {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.card-body {
+  margin-block-start: 0.5rem;
+}
+
+.restatement,
+.assumptions li,
+.delta-items li,
+.questions li,
+.help-block dd {
+  overflow-wrap: anywhere;
+}
+
+.help-block {
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.help-block dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.help-block dd {
+  margin: 0 0 0.5rem;
+}
+
+.acts {
+  margin-block-start: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.acts .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.acts label,
+.batch-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.acts input[type='text'],
+.acts input[type='password'] {
+  max-width: 100%;
+}
+
+.criteria label,
+.verdict-form label,
+.disposition-form label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.batch-bar {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-block-end: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.batch-candidates,
+.batch-outcomes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.batch-outcomes li {
+  overflow-wrap: anywhere;
+}
+
+.co-approval dt {
+  color: var(--muted);
+}
+
+.co-approval dd[data-signed='false'] {
+  color: var(--warn);
+}
+
+.pair {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pair-side {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem;
+  max-width: 100%;
+}
+
+.render {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.delta-kind {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+}
+
+.layer2 summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
 @media (min-width: 48rem) {
   .conn-detail {
     display: inline;
@@ -509,5 +668,13 @@ td {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: end;
+  }
+
+  .pair {
+    flex-direction: row;
+  }
+
+  .pair-side {
+    flex: 1 1 0;
   }
 }

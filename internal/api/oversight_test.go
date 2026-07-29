@@ -181,6 +181,50 @@ func TestSuppressScopeIsVisibility(t *testing.T) {
 	}
 }
 
+// TestWatchdogCardCarriesTheResumeDoorWhereTheVerbApplies is B6-6 OQ9(b).
+//
+// S14.4 makes "resume — I was wrong" first-class ON the flag card, and `actions`
+// is the vocabulary a surface renders controls from — so the door has to be in
+// it. A surface that instead derived a Resume button from the card's `run_id`
+// would be synthesizing a verb out of a data field, which is precisely what an
+// action list exists to make unnecessary (D9). The resume route is run-scoped,
+// so a run-less platform flag has no run to resume and honestly offers only the
+// suppress it can actually take. Both directions are driven, and the door is
+// driven too — the card and the verb agree or the card is lying.
+func TestWatchdogCardCarriesTheResumeDoorWhereTheVerbApplies(t *testing.T) {
+	e := newVerbEnv(t)
+	seedTask(t, e.b, "t-alice", "alice", "T", "doing")
+	seedRun(t, e.b, "r-alice", "alice", "t-alice", "parked", "lane-a")
+	seedFlag(t, e.b, "alice", "r-alice", "watchdog.loop", "flag-now")
+	seedPlatformFlag(t, e.b, "watchdog.spend:alice")
+
+	var runScoped, runLess api.ApprovalItem
+	for _, it := range inboxKinds(t, e, "op", "watchdog_flag") {
+		if it.RunID == "r-alice" {
+			runScoped = it
+		} else {
+			runLess = it
+		}
+	}
+	if runScoped.ID == "" || runLess.ID == "" {
+		t.Fatalf("the fixture did not produce both flag shapes: %+v", inboxKinds(t, e, "op", "watchdog_flag"))
+	}
+	if !containsAction(runScoped.Actions, "suppress") || !containsAction(runScoped.Actions, "resume") {
+		t.Errorf("the run-scoped flag card offers %v — S14.4 puts BOTH doors on it", runScoped.Actions)
+	}
+	if containsAction(runLess.Actions, "resume") {
+		t.Errorf("a run-less flag card offers resume (%v), and there is no run to resume", runLess.Actions)
+	}
+
+	// The door the card named actually opens for the flag's owner.
+	if code, out := e.do(t, "alice", "POST", "/api/runs/r-alice/resume", ""); code != http.StatusOK {
+		t.Fatalf("the resume the card offers was refused: %d: %s", code, out)
+	}
+	if e.resume.count() != 1 {
+		t.Errorf("the resume verb ran %d times, want 1", e.resume.count())
+	}
+}
+
 // TestSuppressPassesTheFullSuffixedAnomalyClass is the §34 D5 regression: a
 // run-less flag's class carries a suffix, and the derive-from-log supersession
 // matches the FULL class. A transport that trimmed it to the bare rule would

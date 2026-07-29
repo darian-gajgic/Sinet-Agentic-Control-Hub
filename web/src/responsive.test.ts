@@ -40,6 +40,12 @@ test('no layout container carries a fixed pixel width', () => {
     '.table-scroll',
     '.filter-bar',
     '.fleet-filters',
+    // The B6-6 decision surface.
+    '.cards',
+    '.card-row',
+    '.batch-bar',
+    '.pair',
+    '.pair-side',
   ]) {
     const rules = block(selector)
     expect(rules, `${selector} pins a pixel width — a phone would scroll sideways`).not.toMatch(
@@ -102,6 +108,23 @@ test('long task-detail content wraps instead of widening the page', () => {
   for (const selector of ['.decisions li', '.mode-note']) {
     expect(block(selector), `${selector} would push the page sideways on a phone`).toContain('overflow-wrap: anywhere')
   }
+})
+
+test('an inbox card is readable and answerable at phone width', () => {
+  // A card id is an opaque string with no spaces in it (kind:native-id), and a
+  // blind-pair response is genuinely wider than a phone. Neither may widen the
+  // page: the id wraps, and the response scrolls inside its own box.
+  expect(block('.card-id'), 'a long card id would push the page sideways').toContain('overflow-wrap: anywhere')
+  expect(block('.render'), 'a rendered response would push the page sideways').toContain('overflow-x: auto')
+  // The card head and the act buttons wrap rather than overflowing, so every
+  // control stays reachable at 375px.
+  expect(block('.card-head')).toContain('flex-wrap: wrap')
+  expect(block('.acts .buttons')).toContain('flex-wrap: wrap')
+  // The blind pair stacks on a phone and only sits side by side at the
+  // breakpoint — the phone is the base, not the exception (S1.10).
+  expect(block('.pair')).toContain('flex-direction: column')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  expect(wide, 'the blind pair never lays out side by side on a wide screen').toContain('.pair {')
 })
 
 test('a view that owes a re-snapshot is marked in the stylesheet, not only in the DOM', () => {

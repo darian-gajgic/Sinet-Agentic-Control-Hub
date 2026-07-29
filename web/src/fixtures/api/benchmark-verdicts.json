@@ -1,0 +1,32 @@
+{
+  "pairs": [
+    {
+      "pair_id": "bp-notes",
+      "user_id": "alice",
+      "domain": "blind-pairs",
+      "task_id": "t-ship",
+      "sampled_ts": "2026-07-20T09:02:00Z",
+      "render_a": "Release notes, draft one: three entries, one line each.",
+      "render_b": "Release notes: three entries with a short line each.",
+      "length_a": 55,
+      "length_b": 52
+    }
+  ],
+  "guess_required": true,
+  "choices": [
+    "A",
+    "B",
+    "tie",
+    "both-bad"
+  ],
+  "guess_sides": [
+    "A",
+    "B"
+  ],
+  "dispositions": [
+    "investigate",
+    "fix-and-continue-accruing",
+    "re-register"
+  ],
+  "detail": "each pair is two responses through ONE uniform template, keyed by side. Which arm is which is exactly what the vote must not know, and the verdict form takes the blind pick and the arm-guess in the same act (BENCH-REG §3.2/§3.3)"
+}

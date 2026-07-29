@@ -45,6 +45,8 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -96,6 +98,13 @@ func (fixtureMeter) LaneMeter(context.Context, string, string) (api.LaneMeter, e
 func fixtureWorld(t *testing.T) *backend {
 	t.Helper()
 	b := newBackend(t)
+	// The S09 store is composed ONCE, here, so every fixtureServer over this
+	// backend shares one knowledge root (see backend.mem).
+	store, err := memory.NewStore(b.db, b.log, b.reg, filepath.Join(t.TempDir(), "knowledge"))
+	if err != nil {
+		t.Fatalf("memory.NewStore: %v", err)
+	}
+	b.mem, b.memGate = store, memory.NewGate(store)
 
 	// Users are created through the REAL auth store rather than inserted, so
 	// they carry a PIN: a High-tier effect approval re-prompts it (S01.9
@@ -161,11 +170,30 @@ func fixtureWorld(t *testing.T) *backend {
 	// waiting-on-human true (it is derived, never a stored flag).
 	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
 		"ask-audit", "r-audit", "bob", "{}", "gate", fxT2)
-	// An ask ALICE owns, so the inbox has a card she can actually answer: D10
+	// The asks ALICE owns, so the inbox has cards she can actually answer: D10
 	// says the owner answers, so with only bob's ask every card read as
 	// not-yours and the "yours to answer" branch had no fixture (drain r2 R4b).
-	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
-		"ask-ship", "r-ship", "alice", "{}", "question", fxT2)
+	//
+	// Their snapshots are marshaled from the REAL intake.Card types (the
+	// receipt-fixture precedent), so the committed bodies carry the keys the
+	// pipeline actually writes — the S06.9 Layer-1/Layer-2 bodies, the 13.5
+	// help block, and each family's own answer vocabulary. A hand-written
+	// snapshot would only prove the inbox can read keys somebody imagined,
+	// which is the drain-r1 root cause in one sentence.
+	for _, a := range []struct{ id, run, status, snapshot string }{
+		{"ask-ship", "r-ship", "question", fixtureApprovalCard(t)},
+		{"ask-delta", "r-ship", "question", fixtureDeltaCard(t)},
+		{"ask-coverage", "r-triage", "question", fixtureCoverageCard(t)},
+		// Two trivial-band cards, because "one action answers a SELECTED SET"
+		// (S15.6) cannot be driven against a single batchable card.
+		{"ask-notes", "r-notes", "question", fixtureTrivialApprovalCard(t, "t-notes", "r-notes",
+			"Write this week's household note from the calendar and the task board.")},
+		{"ask-claim", "r-claim", "question", fixtureTrivialApprovalCard(t, "t-claim", "r-claim",
+			"Rebuild the search index over the household's notes folder.")},
+	} {
+		exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
+			a.id, a.run, "alice", a.snapshot, a.status, fxT2)
+	}
 
 	// Two queued runs carry RECORDED drag order; spaced ranks, 1-based, as the
 	// board writes them. r-archive is deliberately left at the default 0 — "no
@@ -256,9 +284,141 @@ func fixtureWorld(t *testing.T) *backend {
 			id, fxT2, fxT2, e.ID)
 	}
 
+	seedFixtureOversightCards(t, b)
 	driveFixtureDecisions(t, b)
+	driveFixtureMemoryConflict(t, b)
 	return b
 }
+
+// seedFixtureOversightCards puts ONE card of every remaining inbox kind in the
+// world, so the committed inbox body is the whole ranked queue rather than two
+// of its nine kinds (B6-6 R1). Rows go in with literal stamps, like everything
+// else here.
+//
+// The two watchdog shapes are both present on purpose: a RUN-SCOPED flag, which
+// carries the S14.4 resume door beside suppress (B6-6 OQ9(b)), and a RUN-LESS
+// platform flag, which carries only suppress because there is no run to resume.
+// A fixture with one of them could not show that difference.
+func seedFixtureOversightCards(t *testing.T, b *backend) {
+	t.Helper()
+	event := func(owner, run, typ, payload, ts string) {
+		if run == "" {
+			exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+			            VALUES (NULL, NULL, ?,?,1,?,?)`, owner, typ, payload, ts)
+			return
+		}
+		exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+		            VALUES (?,0,?,?,1,?,?)`, run, owner, typ, payload, ts)
+	}
+
+	event("alice", "r-ship", "watchdog.flagged",
+		`{"rule":"watchdog.loop","anomaly_class":"watchdog.loop","severity":"flag-now",`+
+			`"detail":"the same tool call repeated 12 times with no change in its arguments"}`, fxT3)
+	// The suffixed class of a run-less flag, verbatim — trimming it to the bare
+	// rule is what made such flags un-clearable before the §34 D5 fix.
+	event("platform", "", "watchdog.flagged",
+		`{"rule":"watchdog.spend","anomaly_class":"watchdog.spend:alice","severity":"digest",`+
+			`"detail":"this week's spend is above the usual band for this account"}`, fxT3)
+
+	exec(t, b, `INSERT INTO conformance_registry
+	    (row_id, owning_section, fixtures, trigger_set, schedule, cadence, affect_class, last_run, last_result)
+	    VALUES (?, 'S14.5', 'go test ./internal/api/', 'quarterly', 'quarterly sweep', 'quarterly', 'lane', ?, 'red')`,
+		"api-read-surface", fxT2)
+
+	event("platform", "", "drift.finding",
+		`{"source":"anthropic-changelog","lanes":["anthropic"],"change_class":"breaking","severity":"flag-now",`+
+			`"summary":"the messages endpoint deprecates a parameter this platform sends","fingerprint":"fp-anthropic-1",`+
+			`"row_id":"w-anthropic","classified":true}`, fxT3)
+	event("platform", "", "benchmark.alarm",
+		`{"action":"raise","domain":"blind-pairs","epoch_id":"e1","severity":"flag-now",`+
+			`"summary":"the platform arm is losing its own blind comparison in this domain",`+
+			`"loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`, fxT3)
+
+	// A pair waiting for its blind verdict, and a pair whose direct arm ended
+	// without producing anything — the EIGHTH kind, which rides the same id
+	// space at Low tier with decline as its only act.
+	pair := `INSERT INTO benchmark_pairs
+	    (pair_id, user_id, domain, task_id, deliverable_id, phase, rate_pct, sampled_ts, state,
+	     direct_run_id, render_a, render_b, direct_text, updated_ts)
+	    VALUES (?,?,?,?,?,'pre-gate',100,?,?,?,?,?,?,?)`
+	exec(t, b, pair, "bp-notes", "alice", "blind-pairs", "t-ship", "d-notes", fxT2, "rendered",
+		"", "Release notes, draft one: three entries, one line each.",
+		"Release notes: three entries with a short line each.", "the direct arm's own answer", fxT4)
+	exec(t, b, pair, "bp-archive", "alice", "blind-pairs", "t-archive", "d-notes", fxT3, "dispatched",
+		"r-notes", "", "", nil, fxT4)
+}
+
+// driveFixtureMemoryConflict produces the NINTH kind through the REAL write
+// path (B6-6 OQ1): two entries that share a topic key, posted through
+// POST /api/memory, so the conflict row under the card is one the S09.7
+// detection actually minted rather than a row somebody imagined.
+//
+// The question is addressed to the owner of the entry that was ALREADY THERE,
+// and detection runs over what the new entry's author can SEE — so both entries
+// are alice's own. Two of her lessons about one topic that say opposite things
+// is the case S09.7 exists for, and it is the shape that lands the card on the
+// person who can actually settle it.
+func driveFixtureMemoryConflict(t *testing.T, b *backend) {
+	t.Helper()
+	post := func(who, body string) {
+		rr := httptest.NewRecorder()
+		fixtureServer(t, b, who).Handler().ServeHTTP(rr,
+			httptest.NewRequest("POST", "/api/memory", strings.NewReader(body)))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("seed memory entry as %s: %d: %s", who, rr.Code, rr.Body.String())
+		}
+	}
+	post("alice", `{"scope":"user","kind":"lesson","title":"how I write release notes",`+
+		`"content":"one line per merged change, newest first","topic_key":"release-notes-style"}`)
+	post("alice", `{"scope":"user","kind":"lesson","title":"release notes, second thoughts",`+
+		`"content":"group the notes by project, oldest first","topic_key":"release-notes-style"}`)
+	ctx := context.Background()
+	conflicts, err := b.mem.OpenConflictsFor(ctx, "alice")
+	if err != nil {
+		t.Fatalf("read the seeded conflict: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("the two same-topic entries produced %d open conflicts, want 1 — the ninth kind has no fixture", len(conflicts))
+	}
+
+	// The knowledge store mints a RANDOM entry id per entry (crypto/rand), and
+	// no committed file can carry one — the same concession the effect
+	// journal's UUID forced (drain r1). The ids are SURROGATES pinned after the
+	// real write path ran: the detection, the conflict row and the gate's own
+	// question sentence are all the producer's, and only the two opaque
+	// identifiers inside them are made reproducible. Two surrogate entries go
+	// in first so the conflict's foreign keys stay satisfied at every step; the
+	// real pair STAYS, because a knowledge entry is never deleted (the S09.5
+	// audit trigger refuses it, which is the store protecting its own record).
+	// The extra rows reach no fixture — the conflict card names the surrogates,
+	// and no committed body reads the entry list.
+	c := conflicts[0]
+	for i, id := range []string{fxEntryA, fxEntryB} {
+		real := []string{c.EntryID, c.OtherEntryID}[i]
+		var title, content string
+		if err := b.db.QueryRowContext(ctx,
+			`SELECT title, coalesce(content,'') FROM knowledge_entries WHERE entry_id = ?`, real).
+			Scan(&title, &content); err != nil {
+			t.Fatalf("read seeded entry %s: %v", real, err)
+		}
+		exec(t, b, `INSERT INTO knowledge_entries
+		    (entry_id, user_id, scope, layer, kind, title, content, topic_key, status, version, origin, created_ts, updated_ts)
+		    VALUES (?,?,'user','L2','lesson',?,?,'release-notes-style','active',1,'human_direct',?,?)`,
+			id, "alice", title, content, fxT2, fxT2)
+	}
+	exec(t, b, `UPDATE knowledge_conflicts
+	       SET entry_id = ?, other_entry_id = ?,
+	           question = replace(replace(question, ?, ?), ?, ?),
+	           detected_ts = ?
+	     WHERE conflict_id = ?`,
+		fxEntryA, fxEntryB, c.EntryID, fxEntryA, c.OtherEntryID, fxEntryB, fxT2, c.ID)
+}
+
+// The surrogate knowledge-entry ids the committed conflict card names.
+const (
+	fxEntryA = "k-fixture-release-notes-a"
+	fxEntryB = "k-fixture-release-notes-b"
+)
 
 // driveFixtureDecisions produces the Human-decision rows through the REAL
 // verbs — the OQ2 fidelity promise, and the root cause of drain r1.
@@ -351,6 +511,167 @@ func driveFixtureDecisions(t *testing.T, b *backend) {
 	            VALUES (NULL,NULL,?,?,1,?,?)`, "alice", "decision.recorded",
 		`{"actor":"alice","card_id":"priority_hint:t-elsewhere","card_type":"priority_hint","decision":"reorder",`+
 			`"subject":"t-elsewhere","presented_at":"2026-07-20T09:07:00Z","decided_at":"2026-07-20T09:07:00Z"}`, fxT4)
+}
+
+// ── the stored ask snapshots, from the REAL intake.Card types ───────────────
+//
+// internal/api production code never imports internal/intake — the pipeline
+// rides the IntakeSurface seam, and the whole point of the seam is that the
+// transport does not speak the pipeline's vocabulary. This is a TEST producing
+// faithful stored bodies, exactly as the receipt fixture marshals a real
+// metering.Receipt.
+
+func fixtureCardJSON(t *testing.T, card intake.Card) string {
+	t.Helper()
+	raw, err := json.Marshal(card)
+	if err != nil {
+		t.Fatalf("marshal %s card: %v", card.Kind, err)
+	}
+	return string(raw)
+}
+
+// fixtureApprovalCard is the S06.9 Stage-4 card: one phone screen with the
+// assumptions as its centerpiece, the 13.5 help block, the expandable Layer 2,
+// and the card's own Approve · Re-plan · Re-interview vocabulary. It carries a
+// STORED staleness flag as well, so a surface sees both sources of the flag —
+// the one the card was issued with and the one derived from its age at read.
+func fixtureApprovalCard(t *testing.T) string {
+	t.Helper()
+	return fixtureCardJSON(t, intake.Card{
+		Kind: intake.CardApproval, TaskID: "t-ship", RunID: "r-ship", Version: 2,
+		IssuedTS: fxT2, Clearance: 0.82, Tier: intake.TierStandard,
+		Approval: &intake.ApprovalBody{
+			Layer1: intake.ApprovalLayer1{
+				Restatement: "Write the release notes for this cycle from the merged changes, and publish them where the household reads them.",
+				Deliverable: []string{"a release-notes document with one entry per merged change"},
+				Steps: []string{
+					"Collect every merged change since the last release",
+					"Write one plain-language line per change",
+					"Publish the notes to the household's notes folder",
+				},
+				WillNotDo: []string{"translate the notes", "post anything outside the household"},
+				Assumptions: []intake.Assumption{
+					{Text: "the changelog is the source of truth for what merged", Origin: "slot:source"},
+					{Text: "one line per change is enough detail", Origin: "band"},
+				},
+				Risks:     []string{"the changelog may be incomplete for the last two days"},
+				CostTime:  "about 4 minutes of model time; no outward effect until you approve one",
+				Clearance: 0.82,
+				SizeClass: "small",
+				Help: intake.HelpBlock{
+					What:      "Approving starts the work exactly as planned; nothing runs before you approve.",
+					Wrong:     "If an assumption below is wrong, the result will miss what you actually wanted.",
+					Recommend: "Read the restatement and the assumptions. If they match your intent, approve; if anything is off, contest it via Re-plan.",
+				},
+			},
+			Layer2: intake.ApprovalLayer2{
+				ACs: []intake.AC{
+					{N: 1, Plain: "Every merged change since the last release is listed once."},
+					{N: 2, Plain: "Each entry says what changed in plain language.",
+						Structured: "WHEN a reader opens the notes THEN each entry reads as a sentence", StructuredKind: "gwt"},
+				},
+				Steps: []intake.Step{
+					{ID: "S-1", Title: "Collect the merged changes", DoneWhen: "every merge since the last tag is listed"},
+					{ID: "S-2", Title: "Write one line per change", DoneWhen: "each listed change has a plain sentence"},
+				},
+				Coverage: map[string][]string{"AC-1": {"S-1"}, "AC-2": {"S-2"}},
+				Estimate: intake.Estimate{SizeClass: "small", USD: 0.12, Known: true, Basis: "median of the last five notes runs"},
+			},
+			Actions:      []string{intake.ActionApprove, intake.ActionRePlan, intake.ActionReInterview},
+			StaleFlag:    true,
+			StaleReasons: []string{"the changelog gained three commits since this plan was drafted"},
+		},
+	})
+}
+
+// fixtureTrivialApprovalCard is the zero-interaction band (S06.4 trivial), which
+// folds onto the inbox's LOW tier — the only tier that batches. Two of them make
+// "one action answers a selected set" a thing a fixture can drive.
+func fixtureTrivialApprovalCard(t *testing.T, taskID, runID, restatement string) string {
+	t.Helper()
+	return fixtureCardJSON(t, intake.Card{
+		Kind: intake.CardApproval, TaskID: taskID, RunID: runID, Version: 1,
+		IssuedTS: fxT2, Clearance: 0.97, Tier: intake.TierTrivial,
+		Approval: &intake.ApprovalBody{
+			Layer1: intake.ApprovalLayer1{
+				Restatement: restatement,
+				Deliverable: []string{"one short note in the household folder"},
+				Steps:       []string{"Read the week's finished tasks", "Write the note"},
+				Assumptions: []intake.Assumption{{Text: "the note stays under a page", Origin: "band"}},
+				CostTime:    "under a minute of model time",
+				Clearance:   0.97,
+				Help: intake.HelpBlock{
+					What:      "Approving starts the work exactly as planned; nothing runs before you approve.",
+					Wrong:     "If the week's task list is wrong, the note will describe a week that did not happen.",
+					Recommend: "This is a small, reversible piece of work — approve it if the week looks right.",
+				},
+			},
+			Layer2: intake.ApprovalLayer2{
+				ACs:      []intake.AC{{N: 1, Plain: "The note names every task finished this week."}},
+				Steps:    []intake.Step{{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists in the household folder"}},
+				Coverage: map[string][]string{"AC-1": {"S-1"}},
+				Estimate: intake.Estimate{SizeClass: "tiny", Known: false, Basis: "no comparable run yet"},
+			},
+			Actions: []string{intake.ActionApprove, intake.ActionRePlan},
+		},
+	})
+}
+
+// fixtureDeltaCard is the post-approval delta-only card: exactly what changed
+// against the frozen artifacts, in the ADDED / MODIFIED / REMOVED vocabulary.
+//
+// It is in the fixture set precisely because of what it does NOT carry — see
+// the reported gap on readCardShape: a real delta card declares no action
+// vocabulary, so its served `actions` is empty and a surface that renders
+// controls from the card correctly renders none. The committed body is what
+// makes that a checkable fact rather than an assertion.
+func fixtureDeltaCard(t *testing.T) string {
+	t.Helper()
+	return fixtureCardJSON(t, intake.Card{
+		Kind: intake.CardDelta, TaskID: "t-ship", RunID: "r-ship", Version: 3,
+		IssuedTS: fxT2, Clearance: 0.82, Tier: intake.TierStandard,
+		Delta: &intake.DeltaBody{
+			Origin: "freshness_revalidation",
+			Items: []intake.DeltaItem{
+				{Kind: intake.DeltaAdded, Target: "AC-3", New: "The notes link each entry to its merge."},
+				{Kind: intake.DeltaModified, Target: "S-2",
+					Old: "Write one line per change", New: "Write one line per change, newest first"},
+				{Kind: intake.DeltaRemoved, Target: "assumption:one line per change is enough detail"},
+			},
+			Help: intake.HelpBlock{
+				What:      "The approved plan changed. Only the listed items differ; everything else stays exactly as approved.",
+				Wrong:     "A REMOVED item disappears from the contract; a MODIFIED item changes what gets verified.",
+				Recommend: "Read each line — the card shows the complete change.",
+			},
+		},
+	})
+}
+
+// fixtureCoverageCard is the S06.7(a) decision card, and the reason its answer
+// vocabulary is in the fixture set at all: its choices are []Option{Label,
+// Value}, and the inbox derives the card's actions from VALUE. Until B6-6 it
+// read a key no producer writes, so every card of this family served a list of
+// empty strings — the committed body is what pins the fix.
+func fixtureCoverageCard(t *testing.T) string {
+	t.Helper()
+	return fixtureCardJSON(t, intake.Card{
+		Kind: intake.CardCoverage, TaskID: "t-triage", RunID: "r-triage", Version: 1,
+		IssuedTS: fxT2, Clearance: 0.55, Tier: intake.TierStandard,
+		Decision: &intake.DecisionBody{
+			Summary: "The plan does not cover: AC-2. Auto-fix rounds are exhausted.",
+			Detail:  []string{"AC-2"},
+			Choices: []intake.Option{
+				{Label: "Re-plan once more", Value: intake.ChoiceReplan},
+				{Label: "Drop the criterion (recorded, visible)", Value: intake.ChoiceDropCriterion},
+				{Label: "Proceed with the gap listed on the approval card", Value: intake.ChoiceProceedUncovered},
+			},
+			Help: intake.HelpBlock{
+				What:      "An agreed acceptance criterion has no plan step delivering it.",
+				Wrong:     "Proceeding with the gap means that criterion will not be worked on or verified.",
+				Recommend: "Re-plan once more; drop the criterion only if you no longer want it.",
+			},
+		},
+	})
 }
 
 // fixtureReceipt is a stored S10.10 receipt body.
@@ -547,11 +868,78 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		// is the decision ROW the verb mints, which recordDecision writes
 		// itself. The verb, its D10 authorization and its row are all real; the
 		// queue row below carries the rank the real scheduler would persist.
-		Hints:   newFakeHints("r-ops"),
-		Review:  fixtureReview(t, b),
-		Effects: fixtureJournal(t, b),
-		Now:     func() time.Time { return mustTime(t, fxT4) },
+		Hints:      newFakeHints("r-ops"),
+		Review:     fixtureReview(t, b),
+		Effects:    fixtureJournal(t, b),
+		Memory:     b.mem,
+		MemoryGate: b.memGate,
+		Benchmark:  fixtureBenchmark{},
+		Now:        func() time.Time { return mustTime(t, fxT4) },
 	})
+}
+
+// fixtureBenchmark is the practice seam for the fixture world.
+//
+// It carries NO import of internal/benchmark: the reverse import wall
+// (benchmark/importwall_test.go) scans every .go file under internal/api, tests
+// included, and cards derive from the log rather than from the producer. So the
+// served vocabulary is written out here, and the tie that keeps it honest lives
+// where both vocabularies are legitimately visible — internal/shell's adapter
+// test compares THIS committed fixture against the package's own constants, so
+// a registration change fails the build instead of quietly leaving the form
+// offering last year's buttons.
+//
+// The ACTS are not exercised by a GET fixture and answer as unwired rather than
+// pretending: this is a test producing faithful bodies, not a stand-in for the
+// practice, whose own battery proves the pre-record shape carries no arm.
+type fixtureBenchmark struct{}
+
+// The pending pair, in the package's pre-record shape: keyed by SIDE, with no
+// arm, no position, no run and no model — the fields a blind voter may see, and
+// no field that could leak which arm is which.
+const fixturePendingPairs = `[{"pair_id":"bp-notes","user_id":"alice","domain":"blind-pairs",` +
+	`"task_id":"t-ship","sampled_ts":"2026-07-20T09:02:00Z",` +
+	`"render_a":"Release notes, draft one: three entries, one line each.",` +
+	`"render_b":"Release notes: three entries with a short line each.",` +
+	`"length_a":55,"length_b":52}]`
+
+func (fixtureBenchmark) PendingVerdicts(_ context.Context, requester string) (json.RawMessage, error) {
+	if requester != "" && requester != "alice" {
+		return json.RawMessage(`[]`), nil
+	}
+	return json.RawMessage(fixturePendingPairs), nil
+}
+
+func (fixtureBenchmark) AnswerVocabulary(context.Context) (api.BenchmarkVocabulary, error) {
+	return api.BenchmarkVocabulary{
+		Choices:      []string{"A", "B", "tie", "both-bad"},
+		GuessSides:   []string{"A", "B"},
+		Dispositions: []string{"investigate", "fix-and-continue-accruing", "re-register"},
+	}, nil
+}
+
+func (fixtureBenchmark) RegisteredValues(context.Context) (json.RawMessage, error) {
+	return nil, notWiredInFixture()
+}
+
+func notWiredInFixture() error {
+	return &api.SurfaceError{Status: http.StatusNotImplemented, Code: "not_implemented",
+		Msg: "the fixture world serves the benchmark READS the committed bodies need; its acts are driven by the package's own battery"}
+}
+
+func (fixtureBenchmark) RecordVerdict(context.Context, string, string, string) error {
+	return notWiredInFixture()
+}
+
+func (fixtureBenchmark) Reveal(context.Context, string) (json.RawMessage, error) {
+	return nil, notWiredInFixture()
+}
+func (fixtureBenchmark) Decline(context.Context, string) error { return notWiredInFixture() }
+func (fixtureBenchmark) DisposeAlarm(context.Context, string, string, string, string) error {
+	return notWiredInFixture()
+}
+func (fixtureBenchmark) SetOptIn(context.Context, string, string, bool) error {
+	return notWiredInFixture()
 }
 
 // webAPIFixtures is the covered set: one entry per read a B6-5 view calls.
@@ -578,8 +966,14 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	{"approvals", "/api/approvals", ""},
 	// The same read as the person whose cards they are: `answerable` is
 	// computed PER CALLER (D10), so the "yours to answer" branch only exists in
-	// a body read by an owner.
+	// a body read by an owner. It is also the only body that carries the NINTH
+	// kind, whose card reaches its addressee and nobody else — not even the
+	// operator, deliberately (B6-6 OQ1).
 	{"approvals-mine", "/api/approvals", "alice"},
+	// The blind-pair form's data, read as the requester: the two renders, the
+	// length figures, and the registered answer vocabularies the form's buttons
+	// come from (B6-6 OQ4).
+	{"benchmark-verdicts", "/api/benchmark/verdicts", "alice"},
 }
 
 func TestWebAPIFixtures(t *testing.T) {

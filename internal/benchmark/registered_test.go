@@ -63,6 +63,59 @@ func TestRegisteredValuesAppearInTheirRegisteredSection(t *testing.T) {
 	}
 }
 
+// TestTheServedAnswerVocabulariesAreTheSetsTheMachineryValidates is the B6-6
+// OQ4 pin: a decision form renders buttons from these three lists, so a list
+// that offered a value the package refuses would put a dead control on screen,
+// and one that omitted a value the package accepts would hide a legitimate
+// answer. Both validators now READ these lists, which makes the property
+// structural — this drives it through the exported behaviour anyway, so the
+// structure cannot be quietly undone.
+func TestTheServedAnswerVocabulariesAreTheSetsTheMachineryValidates(t *testing.T) {
+	choices, sides := benchmark.VerdictChoices(), benchmark.GuessSides()
+	if len(choices) == 0 || len(sides) == 0 {
+		t.Fatalf("an empty vocabulary renders a form with no buttons: %v / %v", choices, sides)
+	}
+	for _, c := range choices {
+		for _, s := range sides {
+			a, err := benchmark.NewAnswer(c, s)
+			if err != nil {
+				t.Errorf("the served verdict %q with the served guess %q is refused by the constructor: %v", c, s, err)
+				continue
+			}
+			if a.Choice() != c || a.Guess() != s {
+				t.Errorf("the formed answer is %q/%q, not the values it was built from", a.Choice(), a.Guess())
+			}
+		}
+	}
+	// The other direction: a value the list does not carry is refused, so "the
+	// list is what validates" is not vacuously true of every string.
+	if _, err := benchmark.NewAnswer(benchmark.Choice("maybe"), sides[0]); err == nil {
+		t.Error("a verdict outside the served vocabulary was accepted")
+	}
+	if _, err := benchmark.NewAnswer(choices[0], benchmark.Side("C")); err == nil {
+		t.Error("a guess side outside the served vocabulary was accepted")
+	}
+
+	// The dispositions are the §12 set, and the register that displays frozen
+	// values is where their registration is asserted; here they only have to be
+	// the three the package declares, non-empty and distinct.
+	dispositions := benchmark.AlarmDispositions()
+	seen := map[string]bool{}
+	for _, d := range dispositions {
+		if d == "" || seen[d] {
+			t.Errorf("the disposition set is %v — every entry must be a distinct, non-empty registered value", dispositions)
+		}
+		seen[d] = true
+	}
+	for _, want := range []string{
+		benchmark.DispositionInvestigate, benchmark.DispositionFixAndAccrue, benchmark.DispositionReregister,
+	} {
+		if !seen[want] {
+			t.Errorf("the served disposition set omits %q, which the alarm gate accepts", want)
+		}
+	}
+}
+
 // TestRegisteredValueRegisterIsComplete: every value in the S18.4 R9 display
 // register carries the marker and a BENCH-REG reference, and the register names
 // all four gate limbs, the alarm, the done-directly minimum and both labels —

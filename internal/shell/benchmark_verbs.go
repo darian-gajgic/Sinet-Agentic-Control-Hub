@@ -115,6 +115,25 @@ func (b benchmarkVerbs) SetOptIn(ctx context.Context, actor, subject string, ena
 	return benchmarkStatus(b.bs.Practice.SetOptIn(ctx, actor, subject, enabled))
 }
 
+// AnswerVocabulary hands the transport the package's OWN registered answer
+// vocabularies (B6-6 OQ4). This adapter is the one place allowed to see both
+// vocabularies, so the conversion from the package's typed values to the wire's
+// strings happens here and nowhere else — internal/api never names one.
+func (b benchmarkVerbs) AnswerVocabulary(context.Context) (api.BenchmarkVocabulary, error) {
+	choices := benchmark.VerdictChoices()
+	out := api.BenchmarkVocabulary{
+		Choices:      make([]string, len(choices)),
+		Dispositions: benchmark.AlarmDispositions(),
+	}
+	for i, c := range choices {
+		out.Choices[i] = string(c)
+	}
+	for _, s := range benchmark.GuessSides() {
+		out.GuessSides = append(out.GuessSides, string(s))
+	}
+	return out, nil
+}
+
 // RegisteredValues is the S18.4 R9 block for the B6-3A settings surface: the
 // package's OWN marked values, marshaled and passed straight through. The ctx is
 // unused because there is nothing to read from storage — the values are frozen

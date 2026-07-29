@@ -39,3 +39,39 @@ export async function flush(times = 3): Promise<void> {
     })
   }
 }
+
+/**
+ * typeInto sets a controlled input's value the way a person does.
+ *
+ * The native setter is called explicitly because React tracks the last value it
+ * wrote on the DOM node itself: assigning `el.value` directly updates the node
+ * but leaves React's tracker in step with it, so the `input` event is treated
+ * as a no-op change and `onChange` never fires. Going through the prototype
+ * setter is what makes the tracker see a difference.
+ */
+export function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+  act(() => {
+    setter?.call(el, value)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+/** choose picks a <select> option the same way. */
+export function choose(el: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+  act(() => {
+    setter?.call(el, value)
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
+/** click drives a real click, so a button's disabled state and a checkbox's
+ *  own toggle behave exactly as they would for a person. */
+export function click(el: Element | null | undefined): void {
+  if (!el) throw new Error('click: no such element')
+  act(() => {
+    ;(el as HTMLElement).click()
+  })
+}

@@ -1,6 +1,30 @@
 {
   "items": [
     {
+      "id": "conformance_card:api-read-surface",
+      "kind": "conformance_card",
+      "owner": "platform",
+      "tier": "high",
+      "answerable": true,
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "stale": false,
+      "actions": [
+        "acknowledge"
+      ],
+      "card": {
+        "row_id": "api-read-surface",
+        "owning_section": "S14.5",
+        "schedule": "quarterly sweep",
+        "affect_class": "lane",
+        "flag_now": true,
+        "acknowledged": false,
+        "last_result": "red",
+        "last_run_ts": "2026-07-20T09:02:00Z"
+      }
+    },
+    {
       "id": "effect:e-notify",
       "kind": "effect",
       "owner": "alice",
@@ -32,6 +56,89 @@
       }
     },
     {
+      "id": "benchmark_alarm:blind-pairs#e1",
+      "kind": "benchmark_alarm",
+      "owner": "platform",
+      "tier": "high",
+      "answerable": true,
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:03:00Z",
+      "stale": false,
+      "actions": [
+        "dispose"
+      ],
+      "card": {
+        "seq": 12,
+        "domain": "blind-pairs",
+        "epoch_id": "e1",
+        "severity": "flag-now",
+        "summary": "the platform arm is losing its own blind comparison in this domain",
+        "loss_g": 0.96,
+        "threshold": 0.95,
+        "expansion_freeze": true,
+        "raised_ts": "2026-07-20T09:03:00Z"
+      }
+    },
+    {
+      "id": "drift_card:fp-anthropic-1",
+      "kind": "drift_card",
+      "owner": "platform",
+      "tier": "high",
+      "answerable": true,
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:03:00Z",
+      "stale": false,
+      "actions": [
+        "dismiss"
+      ],
+      "card": {
+        "seq": 11,
+        "latest_seq": 11,
+        "fingerprint": "fp-anthropic-1",
+        "source": "anthropic-changelog",
+        "lanes": [
+          "anthropic"
+        ],
+        "change_class": "breaking",
+        "severity": "flag-now",
+        "summary": "the messages endpoint deprecates a parameter this platform sends",
+        "row_id": "w-anthropic",
+        "hits": 1,
+        "classified": true,
+        "revalidation_triggered": false,
+        "first_ts": "2026-07-20T09:03:00Z",
+        "latest_ts": "2026-07-20T09:03:00Z"
+      }
+    },
+    {
+      "id": "watchdog_flag:r-ship\u001fwatchdog.loop",
+      "kind": "watchdog_flag",
+      "owner": "alice",
+      "run_id": "r-ship",
+      "tier": "high",
+      "answerable": true,
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:03:00Z",
+      "stale": false,
+      "actions": [
+        "suppress",
+        "resume"
+      ],
+      "card": {
+        "seq": 9,
+        "run_id": "r-ship",
+        "owner": "alice",
+        "rule": "watchdog.loop",
+        "anomaly_class": "watchdog.loop",
+        "severity": "flag-now",
+        "detail": "the same tool call repeated 12 times with no change in its arguments",
+        "flagged_ts": "2026-07-20T09:03:00Z"
+      }
+    },
+    {
       "id": "ask:ask-audit",
       "kind": "ask",
       "owner": "bob",
@@ -51,6 +158,115 @@
       "card": {}
     },
     {
+      "id": "ask:ask-coverage",
+      "kind": "ask",
+      "owner": "alice",
+      "run_id": "r-triage",
+      "tier": "medium",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "2513cf48f0b9b5d34a4e4cb65ac12f40eb9579f0285a768c2472fa53de757bd3",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "actions": [
+        "replan",
+        "drop_criterion",
+        "proceed_uncovered"
+      ],
+      "card": {
+        "kind": "decision.coverage",
+        "task_id": "t-triage",
+        "run_id": "r-triage",
+        "version": 1,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.55,
+        "tier": "standard",
+        "decision": {
+          "summary": "The plan does not cover: AC-2. Auto-fix rounds are exhausted.",
+          "detail": [
+            "AC-2"
+          ],
+          "choices": [
+            {
+              "label": "Re-plan once more",
+              "value": "replan"
+            },
+            {
+              "label": "Drop the criterion (recorded, visible)",
+              "value": "drop_criterion"
+            },
+            {
+              "label": "Proceed with the gap listed on the approval card",
+              "value": "proceed_uncovered"
+            }
+          ],
+          "help": {
+            "what": "An agreed acceptance criterion has no plan step delivering it.",
+            "wrong": "Proceeding with the gap means that criterion will not be worked on or verified.",
+            "recommend": "Re-plan once more; drop the criterion only if you no longer want it."
+          }
+        }
+      }
+    },
+    {
+      "id": "ask:ask-delta",
+      "kind": "ask",
+      "owner": "alice",
+      "run_id": "r-ship",
+      "tier": "medium",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "d116b7e4f87d25749c2099925b43dd477b731b188cba6c41733a2affb73bfb25",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "card": {
+        "kind": "approval.delta",
+        "task_id": "t-ship",
+        "run_id": "r-ship",
+        "version": 3,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.82,
+        "tier": "standard",
+        "delta": {
+          "origin": "freshness_revalidation",
+          "items": [
+            {
+              "kind": "ADDED",
+              "target": "AC-3",
+              "new": "The notes link each entry to its merge."
+            },
+            {
+              "kind": "MODIFIED",
+              "target": "S-2",
+              "old": "Write one line per change",
+              "new": "Write one line per change, newest first"
+            },
+            {
+              "kind": "REMOVED",
+              "target": "assumption:one line per change is enough detail"
+            }
+          ],
+          "help": {
+            "what": "The approved plan changed. Only the listed items differ; everything else stays exactly as approved.",
+            "wrong": "A REMOVED item disappears from the contract; a MODIFIED item changes what gets verified.",
+            "recommend": "Read each line — the card shows the complete change."
+          }
+        }
+      }
+    },
+    {
       "id": "ask:ask-ship",
       "kind": "ask",
       "owner": "alice",
@@ -60,16 +276,367 @@
       "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
       "batchable": false,
       "step_up_required": false,
-      "payload_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "payload_hash": "82cad5038c76c4946067b7d0651fd774f26bdd777ca52b4c108a975db4418d36",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "the changelog gained three commits since this plan was drafted",
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "actions": [
+        "approve",
+        "replan",
+        "reinterview"
+      ],
+      "card": {
+        "kind": "approval",
+        "task_id": "t-ship",
+        "run_id": "r-ship",
+        "version": 2,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.82,
+        "tier": "standard",
+        "approval": {
+          "layer1": {
+            "restatement": "Write the release notes for this cycle from the merged changes, and publish them where the household reads them.",
+            "deliverable": [
+              "a release-notes document with one entry per merged change"
+            ],
+            "steps": [
+              "Collect every merged change since the last release",
+              "Write one plain-language line per change",
+              "Publish the notes to the household's notes folder"
+            ],
+            "will_not_do": [
+              "translate the notes",
+              "post anything outside the household"
+            ],
+            "assumptions": [
+              {
+                "text": "the changelog is the source of truth for what merged",
+                "origin": "slot:source"
+              },
+              {
+                "text": "one line per change is enough detail",
+                "origin": "band"
+              }
+            ],
+            "risks": [
+              "the changelog may be incomplete for the last two days"
+            ],
+            "cost_time": "about 4 minutes of model time; no outward effect until you approve one",
+            "clearance": 0.82,
+            "size_class": "small",
+            "help": {
+              "what": "Approving starts the work exactly as planned; nothing runs before you approve.",
+              "wrong": "If an assumption below is wrong, the result will miss what you actually wanted.",
+              "recommend": "Read the restatement and the assumptions. If they match your intent, approve; if anything is off, contest it via Re-plan."
+            }
+          },
+          "layer2": {
+            "acs": [
+              {
+                "n": 1,
+                "plain": "Every merged change since the last release is listed once."
+              },
+              {
+                "n": 2,
+                "plain": "Each entry says what changed in plain language.",
+                "structured": "WHEN a reader opens the notes THEN each entry reads as a sentence",
+                "structured_kind": "gwt"
+              }
+            ],
+            "steps": [
+              {
+                "id": "S-1",
+                "title": "Collect the merged changes",
+                "done_when": "every merge since the last tag is listed",
+                "class": ""
+              },
+              {
+                "id": "S-2",
+                "title": "Write one line per change",
+                "done_when": "each listed change has a plain sentence",
+                "class": ""
+              }
+            ],
+            "coverage": {
+              "AC-1": [
+                "S-1"
+              ],
+              "AC-2": [
+                "S-2"
+              ]
+            },
+            "estimate": {
+              "size_class": "small",
+              "usd": 0.12,
+              "known": true,
+              "basis": "median of the last five notes runs"
+            }
+          },
+          "actions": [
+            "approve",
+            "replan",
+            "reinterview"
+          ],
+          "stale_flag": true,
+          "stale_reasons": [
+            "the changelog gained three commits since this plan was drafted"
+          ]
+        }
+      }
+    },
+    {
+      "id": "benchmark_verdict:bp-notes",
+      "kind": "benchmark_verdict",
+      "owner": "alice",
+      "tier": "medium",
+      "answerable": false,
+      "not_answerable_reason": "a blind-pair verdict is its REQUESTER's own judgement and is not delegable — you can see the card and cannot vote it (POST /api/approvals/{id}/verdict, BENCH-REG §3.3)",
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "stale": false,
+      "actions": [
+        "verdict",
+        "decline"
+      ],
+      "card": {
+        "pair_id": "bp-notes",
+        "owner": "alice",
+        "domain": "blind-pairs",
+        "task_id": "t-ship",
+        "sampled_ts": "2026-07-20T09:02:00Z",
+        "length_a": 55,
+        "length_b": 52,
+        "guess_required": true
+      }
+    },
+    {
+      "id": "watchdog_flag:\u001fwatchdog.spend:alice",
+      "kind": "watchdog_flag",
+      "owner": "platform",
+      "tier": "medium",
+      "answerable": true,
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:03:00Z",
+      "stale": false,
+      "actions": [
+        "suppress"
+      ],
+      "card": {
+        "seq": 10,
+        "run_id": "",
+        "owner": "platform",
+        "rule": "watchdog.spend",
+        "anomaly_class": "watchdog.spend:alice",
+        "severity": "digest",
+        "detail": "this week's spend is above the usual band for this account",
+        "flagged_ts": "2026-07-20T09:03:00Z"
+      }
+    },
+    {
+      "id": "ask:ask-claim",
+      "kind": "ask",
+      "owner": "alice",
+      "run_id": "r-claim",
+      "tier": "low",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "16554b3e065d67d50833ef9e2ee00d7e84a689629228c22fe92ebd865f86aa80",
       "observed_ts": "2026-07-20T09:02:00Z",
       "expiry_at": "2026-07-20T09:02:20Z",
       "stale": true,
       "stale_reasons": [
         "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
       ],
-      "card": {}
+      "actions": [
+        "approve",
+        "replan"
+      ],
+      "card": {
+        "kind": "approval",
+        "task_id": "t-claim",
+        "run_id": "r-claim",
+        "version": 1,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.97,
+        "tier": "trivial",
+        "approval": {
+          "layer1": {
+            "restatement": "Rebuild the search index over the household's notes folder.",
+            "deliverable": [
+              "one short note in the household folder"
+            ],
+            "steps": [
+              "Read the week's finished tasks",
+              "Write the note"
+            ],
+            "will_not_do": null,
+            "assumptions": [
+              {
+                "text": "the note stays under a page",
+                "origin": "band"
+              }
+            ],
+            "cost_time": "under a minute of model time",
+            "clearance": 0.97,
+            "help": {
+              "what": "Approving starts the work exactly as planned; nothing runs before you approve.",
+              "wrong": "If the week's task list is wrong, the note will describe a week that did not happen.",
+              "recommend": "This is a small, reversible piece of work — approve it if the week looks right."
+            }
+          },
+          "layer2": {
+            "acs": [
+              {
+                "n": 1,
+                "plain": "The note names every task finished this week."
+              }
+            ],
+            "steps": [
+              {
+                "id": "S-1",
+                "title": "Write the note",
+                "done_when": "the note exists in the household folder",
+                "class": ""
+              }
+            ],
+            "coverage": {
+              "AC-1": [
+                "S-1"
+              ]
+            },
+            "estimate": {
+              "size_class": "tiny",
+              "known": false,
+              "basis": "no comparable run yet"
+            }
+          },
+          "actions": [
+            "approve",
+            "replan"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ask:ask-notes",
+      "kind": "ask",
+      "owner": "alice",
+      "run_id": "r-notes",
+      "tier": "low",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "9bd040fe6154893bb45cf38669fdc23a1dfa55a63a0671541531875c55bf9a0e",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "actions": [
+        "approve",
+        "replan"
+      ],
+      "card": {
+        "kind": "approval",
+        "task_id": "t-notes",
+        "run_id": "r-notes",
+        "version": 1,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.97,
+        "tier": "trivial",
+        "approval": {
+          "layer1": {
+            "restatement": "Write this week's household note from the calendar and the task board.",
+            "deliverable": [
+              "one short note in the household folder"
+            ],
+            "steps": [
+              "Read the week's finished tasks",
+              "Write the note"
+            ],
+            "will_not_do": null,
+            "assumptions": [
+              {
+                "text": "the note stays under a page",
+                "origin": "band"
+              }
+            ],
+            "cost_time": "under a minute of model time",
+            "clearance": 0.97,
+            "help": {
+              "what": "Approving starts the work exactly as planned; nothing runs before you approve.",
+              "wrong": "If the week's task list is wrong, the note will describe a week that did not happen.",
+              "recommend": "This is a small, reversible piece of work — approve it if the week looks right."
+            }
+          },
+          "layer2": {
+            "acs": [
+              {
+                "n": 1,
+                "plain": "The note names every task finished this week."
+              }
+            ],
+            "steps": [
+              {
+                "id": "S-1",
+                "title": "Write the note",
+                "done_when": "the note exists in the household folder",
+                "class": ""
+              }
+            ],
+            "coverage": {
+              "AC-1": [
+                "S-1"
+              ]
+            },
+            "estimate": {
+              "size_class": "tiny",
+              "known": false,
+              "basis": "no comparable run yet"
+            }
+          },
+          "actions": [
+            "approve",
+            "replan"
+          ]
+        }
+      }
+    },
+    {
+      "id": "benchmark_verdict:bp-archive",
+      "kind": "benchmark_verdict",
+      "owner": "alice",
+      "tier": "low",
+      "answerable": false,
+      "not_answerable_reason": "closing a failed benchmark pair is its REQUESTER's own act (POST /api/approvals/{id}/decline, BENCH-REG §4.2.5)",
+      "batchable": false,
+      "step_up_required": false,
+      "observed_ts": "2026-07-20T09:03:00Z",
+      "stale": false,
+      "actions": [
+        "decline"
+      ],
+      "card": {
+        "pair_id": "bp-archive",
+        "owner": "alice",
+        "domain": "blind-pairs",
+        "task_id": "t-archive",
+        "sampled_ts": "2026-07-20T09:03:00Z",
+        "arm_state": "completed",
+        "reason": "the single-shot direct arm of this benchmark pair ended in state completed without producing an answer, so the pair can never be shown as a blind comparison. Declining closes it with its record — declines are counted and reported, so a pair that could not run is visible rather than silently missing (BENCH-REG §2/§4.2.5)."
+      }
     }
   ],
-  "cursor": 18,
+  "cursor": 25,
   "truncated": false
 }
