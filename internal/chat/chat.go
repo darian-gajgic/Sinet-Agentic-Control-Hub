@@ -197,6 +197,11 @@ type Turn struct {
 	Produced  []string `json:"produced,omitempty"`
 	StartedTS string   `json:"started_ts"`
 	SettledTS string   `json:"settled_ts,omitempty"`
+
+	// exchangeSeq is the manifest watermark read when the turn opened. It is
+	// internal machinery for the produced-files window (exchange.go) and not a
+	// fact about the conversation, so it stays off the wire.
+	exchangeSeq int64
 }
 
 // Store is the whole surface. It is nil-safe in exactly one direction: a nil

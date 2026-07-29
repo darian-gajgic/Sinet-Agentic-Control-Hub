@@ -336,7 +336,18 @@ func (s *Server) handleChatTurnSubmit(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	outcomeKind, outcome := s.runChatTurn(ctx, r, caller, body)
 
-	settled, err := s.chat.SettleTurn(r.Context(), caller, turn.ID, outcomeKind, outcome)
+	// THE RECORD OF THE ENDING OUTLIVES THE REQUEST (the §37-C WithoutCancel
+	// precedent — internal/history/layer2.go's audit append and
+	// internal/stage/stageevents.go's session-end append). Chat is
+	// phone-complete (S1.10), so a connection dropping mid-turn is the ORDINARY
+	// case, not an exotic one — and a settle that rode the request's context
+	// would fail exactly then, leaving the turn `running` forever, minting no
+	// chat.turn_settled, and refusing every later turn in the session with
+	// ErrTurnRunning until someone hard-stopped it by hand. The ACT above still
+	// rides the cancellable context, which is what the hard-stop verb cancels.
+	settleCtx := context.WithoutCancel(r.Context())
+
+	settled, err := s.chat.SettleTurn(settleCtx, caller, turn.ID, outcomeKind, outcome)
 	if err != nil && !errors.Is(err, chat.ErrTurnResolved) {
 		s.writeChatErr(w, err)
 		return
@@ -344,7 +355,7 @@ func (s *Server) handleChatTurnSubmit(w http.ResponseWriter, r *http.Request) {
 	// ErrTurnResolved here means the person hard-stopped while the act ran. The
 	// abandoned record STANDS and `settled` is that record: the result arrived
 	// late and renders with its honest state (OQ6). Nothing is overwritten.
-	sess, err := s.chat.Session(r.Context(), caller, sessionID)
+	sess, err := s.chat.Session(settleCtx, caller, sessionID)
 	if err != nil {
 		s.writeChatErr(w, err)
 		return
@@ -541,6 +552,11 @@ func (s *Server) handleChatFileList(w http.ResponseWriter, r *http.Request) {
 // The body is the raw object; the name rides a query parameter. Both the
 // drag-drop and the click-browse gesture drive this same verb — two gestures,
 // one act, so there is no second write path to keep in step.
+//
+// It is RETRY-SAFE (S15.2): re-sending the same bytes under the same name
+// answers the row that already exists with applied:false, so a phone that
+// retried a request whose answer it never saw does not end up with two copies
+// and two quota slots spent.
 func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.chatReady(w) {
 		return
@@ -556,15 +572,13 @@ func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f, err := s.chat.Upload(r.Context(), chatCaller(r), q.Get("name"), data,
+	res, err := s.chat.Upload(r.Context(), chatCaller(r), q.Get("name"), data,
 		q.Get("session"), q.Get("turn"))
 	if err != nil {
 		s.writeChatErr(w, err)
 		return
 	}
-	s.writeReadJSON(w, struct {
-		File chat.File `json:"file"`
-	}{f})
+	s.writeReadJSON(w, res)
 }
 
 // POST /api/chat/files/{file}/delete — a repeat answers applied:false.

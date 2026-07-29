@@ -129,9 +129,17 @@ CREATE TABLE chat_turns (
                  CHECK (outcome_kind IN ('', 'answer', 'task', 'error')),
     outcome     TEXT NOT NULL DEFAULT '',
     -- produced is the JSON array of exchange-manifest ids that appeared in this
-    -- owner's folder between started_ts and settled_ts (OQ7(a)) — a DIFF over
-    -- stored rows, computed once at settle. No watcher, no ticker (§32).
+    -- owner's folder while the turn ran (OQ7(a)) — a DIFF over stored rows,
+    -- computed once at settle. No watcher, no ticker (§32).
     produced    TEXT NOT NULL DEFAULT '',
+    -- exchange_seq is the manifest WATERMARK read when the turn opened: the
+    -- highest chat_exchange_files.seq that already existed. The window diff is
+    -- `seq > exchange_seq`, which is why a file that was already there can
+    -- never be reported as produced BY this turn. A timestamp cannot carry that
+    -- guarantee: *_ts is second-resolution RFC3339, so an upload landing in the
+    -- same second as a turn's start is indistinguishable from one landing
+    -- during it, and attributing it would fabricate authorship.
+    exchange_seq INTEGER NOT NULL DEFAULT 0,
     started_ts  TEXT NOT NULL,
     settled_ts  TEXT NOT NULL DEFAULT ''
 );
@@ -139,7 +147,14 @@ CREATE TABLE chat_turns (
 CREATE INDEX chat_turns_session_idx ON chat_turns (session_id, started_ts, turn_id);
 
 CREATE TABLE chat_exchange_files (
-    file_id     TEXT PRIMARY KEY,
+    -- seq is the manifest's MONOTONIC row identity, and it is the ordering the
+    -- produced-files window is computed over. AUTOINCREMENT rather than the
+    -- implicit rowid: a plain rowid is reused after the highest row is deleted,
+    -- and this table's rows ARE deleted, so a reused identity could place a new
+    -- object BEFORE a turn that started after it. Ordering by uploaded_ts
+    -- cannot do this job at all — the stamp is second-resolution.
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id     TEXT NOT NULL UNIQUE,
     user_id     TEXT NOT NULL CHECK (user_id <> ''),
     -- name is the ORIGINAL filename, kept as the label only. It is never a path
     -- component: the bytes are stored under the opaque file_id, so a hostile

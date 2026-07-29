@@ -171,57 +171,78 @@ func (s *Store) objectPath(owner, fileID string, create bool) (string, error) {
 	return filepath.Join(dirReal, fileID), nil
 }
 
+// UploadResult reports what an upload did. It is the same already-resolved
+// vocabulary DeleteFileResult speaks: Applied is false when the object was
+// already there.
+type UploadResult struct {
+	File File `json:"file"`
+	// Applied is false on a repeat. An upload carrying the SAME owner, the same
+	// name and the same sha256 is the same object arriving twice — a phone
+	// retrying a request it never saw the answer to — and answering it with the
+	// row that already exists is the S15.2 retry-safety rule. A second row would
+	// consume a second quota slot and mint a second event for one act.
+	Applied bool `json:"applied"`
+}
+
 // Upload stores one object and its manifest row. The bytes land first and the
 // row second, so a failed insert leaves no manifest entry pointing at nothing;
 // the orphaned bytes are then removed. The reverse order would leave a row
 // claiming an object that was never written, which is the worse lie.
-func (s *Store) Upload(ctx context.Context, owner, name string, data []byte, originSession, originTurn string) (File, error) {
+func (s *Store) Upload(ctx context.Context, owner, name string, data []byte, originSession, originTurn string) (UploadResult, error) {
 	if owner == "" {
-		return File{}, fmt.Errorf("%w: an upload needs an owner (15.6)", ErrInvalid)
+		return UploadResult{}, fmt.Errorf("%w: an upload needs an owner (15.6)", ErrInvalid)
 	}
 	safe, err := SafeName(name)
 	if err != nil {
-		return File{}, err
+		return UploadResult{}, err
 	}
 	if len(data) == 0 {
-		return File{}, fmt.Errorf("%w: the uploaded file is empty", ErrInvalid)
+		return UploadResult{}, fmt.Errorf("%w: the uploaded file is empty", ErrInvalid)
 	}
 	if len(data) > MaxFileBytes {
-		return File{}, fmt.Errorf("%w: file is %d bytes, the bound is %d", ErrTooLarge, len(data), MaxFileBytes)
+		return UploadResult{}, fmt.Errorf("%w: file is %d bytes, the bound is %d", ErrTooLarge, len(data), MaxFileBytes)
+	}
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	// Retry-safety BEFORE the quota, deliberately: a repeat is not a new object,
+	// so it must not be refused by a bound it does not consume.
+	if existing, ok, err := s.sameObject(ctx, owner, safe, digest); err != nil {
+		return UploadResult{}, err
+	} else if ok {
+		return UploadResult{File: existing, Applied: false}, nil
 	}
 	var count int64
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT count(*) FROM chat_exchange_files WHERE user_id = ?`, owner).Scan(&count); err != nil {
-		return File{}, fmt.Errorf("chat: count exchange files: %w", err)
+		return UploadResult{}, fmt.Errorf("chat: count exchange files: %w", err)
 	}
 	if count >= MaxFilesPerOwner {
-		return File{}, fmt.Errorf("%w: the exchange folder holds %d files, the bound is %d", ErrTooMany, count, MaxFilesPerOwner)
+		return UploadResult{}, fmt.Errorf("%w: the exchange folder holds %d files, the bound is %d", ErrTooMany, count, MaxFilesPerOwner)
 	}
 	// An origin ref is accepted only if the caller owns what it names —
 	// otherwise the attribution would let one person label their upload as
 	// having come out of someone else's turn.
 	if originSession != "" {
 		if _, err := s.Session(ctx, owner, originSession); err != nil {
-			return File{}, err
+			return UploadResult{}, err
 		}
 	}
 	if originTurn != "" {
 		if _, err := s.Turn(ctx, owner, originTurn); err != nil {
-			return File{}, err
+			return UploadResult{}, err
 		}
 	}
 
-	sum := sha256.Sum256(data)
 	f := File{ID: s.newID("cf-"), Owner: owner, Name: safe, SizeBytes: int64(len(data)),
-		SHA256: hex.EncodeToString(sum[:]), OriginSession: originSession,
+		SHA256: digest, OriginSession: originSession,
 		OriginTurn: originTurn, UploadedTS: s.stamp()}
 
 	path, err := s.objectPath(owner, f.ID, true)
 	if err != nil {
-		return File{}, err
+		return UploadResult{}, err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return File{}, fmt.Errorf("chat: write exchange object: %w", err)
+	if err := writeNewFile(path, data); err != nil {
+		return UploadResult{}, err
 	}
 	payload, err := json.Marshal(struct {
 		File          string `json:"file"`
@@ -234,7 +255,7 @@ func (s *Store) Upload(ctx context.Context, owner, name string, data []byte, ori
 	}{f.ID, owner, f.Name, f.SizeBytes, f.SHA256, f.OriginSession, f.OriginTurn})
 	if err != nil {
 		_ = os.Remove(path)
-		return File{}, fmt.Errorf("chat: encode %s payload: %w", EventFileUploaded, err)
+		return UploadResult{}, fmt.Errorf("chat: encode %s payload: %w", EventFileUploaded, err)
 	}
 	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
@@ -252,9 +273,50 @@ func (s *Store) Upload(ctx context.Context, owner, name string, data []byte, ori
 	})
 	if err != nil {
 		_ = os.Remove(path)
-		return File{}, err
+		return UploadResult{}, err
 	}
-	return f, nil
+	return UploadResult{File: f, Applied: true}, nil
+}
+
+// writeNewFile writes the object bytes through O_EXCL. os.WriteFile FOLLOWS a
+// symlink standing at the destination, so a link planted at the leaf would make
+// the write land outside the exchange root even though objectPath resolved the
+// directory (S11.7 resolve-then-deny, extended to the leaf). O_CREATE|O_EXCL is
+// refused by the kernel on an existing path INCLUDING a dangling symlink, which
+// is the one case a stat-then-write check cannot see.
+func writeNewFile(path string, data []byte) error {
+	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("chat: create exchange object: %w", err)
+	}
+	if _, err := fh.Write(data); err != nil {
+		fh.Close()
+		_ = os.Remove(path)
+		return fmt.Errorf("chat: write exchange object: %w", err)
+	}
+	if err := fh.Close(); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("chat: close exchange object: %w", err)
+	}
+	return nil
+}
+
+// sameObject finds the manifest row a repeated upload is a repeat OF: same
+// owner, same label, same bytes. Newest first, so the answer is the row a later
+// read would serve.
+func (s *Store) sameObject(ctx context.Context, owner, name, digest string) (File, bool, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+fileColumns+` FROM chat_exchange_files
+		  WHERE user_id = ? AND name = ? AND sha256 = ? ORDER BY seq DESC LIMIT 1`,
+		owner, name, digest)
+	f, err := scanFile(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return File{}, false, nil
+	}
+	if err != nil {
+		return File{}, false, fmt.Errorf("chat: read exchange row: %w", err)
+	}
+	return f, true, nil
 }
 
 // ListFiles serves one person's exchange folder, newest first.
@@ -347,22 +409,30 @@ func (s *Store) Delete(ctx context.Context, viewer, id string) (DeleteFileResult
 	return DeleteFileResult{File: f, Applied: true}, nil
 }
 
-// producedBetween is the OQ7 window diff: manifest rows that appeared in this
-// owner's folder between the turn's start and its settle. A row already
-// attributed to a DIFFERENT turn is excluded — it is that turn's product, not
-// this one's — which is the whole of the "origin-attributed" rule on the
-// window side.
+// producedSince is the OQ7 window diff: manifest rows that appeared in this
+// owner's folder AFTER the turn opened. A row already attributed to a DIFFERENT
+// turn is excluded — it is that turn's product, not this one's — which is the
+// whole of the "origin-attributed" rule on the window side.
 //
-// It reads STORED ROWS. There is no filesystem watcher and no ticker anywhere
-// in this family (§32): the diff is a query, run once, at the moment the turn
-// settles.
-func (s *Store) producedBetween(ctx context.Context, owner, turnID, from, to string) ([]string, error) {
+// THE WINDOW IS A SEQUENCE COMPARISON, NOT A TIMESTAMP ONE. sinceSeq is the
+// manifest watermark the turn recorded when it opened, and the predicate is
+// STRICTLY greater, so a file that already existed can never be reported as
+// produced by the turn. Timestamps cannot express that: *_ts is second-
+// resolution RFC3339, so an upload landing in the same second as a turn's start
+// is indistinguishable from one landing during it — and a chip claiming a turn
+// produced a file it merely found is a fabricated attribution, which the
+// honest-absence rule bars outright.
+//
+// The upper bound is the CALL SITE: this runs once, inside SettleTurn, so every
+// row that exists and is past the watermark arrived while the turn ran. There is
+// no filesystem watcher and no ticker anywhere in this family (§32).
+func (s *Store) producedSince(ctx context.Context, owner, turnID string, sinceSeq int64) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT file_id FROM chat_exchange_files
-		  WHERE user_id = ? AND uploaded_ts >= ? AND uploaded_ts <= ?
+		  WHERE user_id = ? AND seq > ?
 		    AND (origin_turn = '' OR origin_turn = ?)
-		  ORDER BY uploaded_ts, file_id LIMIT ?`,
-		owner, from, to, turnID, FileListCap)
+		  ORDER BY seq LIMIT ?`,
+		owner, sinceSeq, turnID, FileListCap)
 	if err != nil {
 		return nil, fmt.Errorf("chat: produced-files diff: %w", err)
 	}

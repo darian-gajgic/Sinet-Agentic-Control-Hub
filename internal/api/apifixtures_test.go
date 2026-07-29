@@ -693,11 +693,17 @@ func fixtureCardJSON(t *testing.T, card intake.Card) string {
 // renders it INLINE: the conversation continues in place against the same card
 // the task surface shows, answered through the LANDED ask verbs — same
 // vocabulary, no second answer path — so the render needs a committed body.
+// fixtureChatBornClearance is the born task's clearance. It is stated ONCE and
+// read by both the card and the task view, because they are two renderings of
+// one number and a fixture where they disagree teaches the widget a world that
+// cannot happen.
+const fixtureChatBornClearance = 0.48
+
 func fixtureChatBornCard(t *testing.T) string {
 	t.Helper()
 	return fixtureCardJSON(t, intake.Card{
 		Kind: intake.CardInterview, TaskID: "t-chatborn", RunID: "t-chatborn.intake",
-		Version: 1, IssuedTS: fxT2, Clearance: 0.48, Tier: intake.TierStandard,
+		Version: 1, IssuedTS: fxT2, Clearance: fixtureChatBornClearance, Tier: intake.TierStandard,
 		Questions: []intake.Question{
 			{
 				ID: "audience", Text: "Who are these release notes for?", Weight: 3,
@@ -1005,37 +1011,57 @@ type fixtureIntake struct{ t *testing.T }
 // OQ8(i): the conversation continues IN PLACE against the same card the task
 // surface would show, answered through the LANDED ask verbs. A fixture without
 // the card would leave that render undriven.
+// fixtureTaskView and fixtureRunSummary MIRROR internal/stage's taskView and
+// runSummary field for field, tag for tag (surface.go). The pipeline rides the
+// IntakeSurface seam and internal/api never speaks its vocabulary, so the shape
+// cannot be reached by import — but a hand-built payload that drifts from the
+// real one is exactly the B6-5 root cause (imagined keys serving a world that
+// does not exist), so TestFixtureHandoffMatchesTheRealTaskView reads the real
+// definition out of its source and pins these against it.
+type fixtureTaskView struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+	Kanban string `json:"kanban_status"`
+	Owner  string `json:"owner"`
+
+	Phase     string  `json:"phase,omitempty"`
+	Tier      string  `json:"tier,omitempty"`
+	Family    string  `json:"family,omitempty"`
+	Clearance float64 `json:"clearance,omitempty"`
+
+	OpenAskID string          `json:"open_ask_id,omitempty"`
+	OpenCard  json.RawMessage `json:"open_card,omitempty"`
+
+	Runs []fixtureRunSummary `json:"runs"`
+}
+
+type fixtureRunSummary struct {
+	RunID string `json:"run_id"`
+	Role  string `json:"role"`
+	State string `json:"state"`
+	// HasReceipt is NOT omitempty in the real runSummary, so production emits it
+	// on every run — including the false that says a run has produced no receipt
+	// yet, which is the whole fact a freshly born task has to render.
+	HasReceipt bool `json:"has_receipt"`
+}
+
 func (f fixtureIntake) Submit(_ context.Context, userID string, body json.RawMessage) (json.RawMessage, error) {
 	var in struct {
 		Title string `json:"title"`
 	}
 	_ = json.Unmarshal(body, &in)
-	view := struct {
-		TaskID    string          `json:"task_id"`
-		Title     string          `json:"title"`
-		Kanban    string          `json:"kanban_status"`
-		Owner     string          `json:"owner"`
-		Phase     string          `json:"phase,omitempty"`
-		Tier      string          `json:"tier,omitempty"`
-		Family    string          `json:"family,omitempty"`
-		OpenAskID string          `json:"open_ask_id,omitempty"`
-		OpenCard  json.RawMessage `json:"open_card,omitempty"`
-		Runs      []struct {
-			RunID string `json:"run_id"`
-			State string `json:"state"`
-			Role  string `json:"role,omitempty"`
-		} `json:"runs"`
-	}{
+	view := fixtureTaskView{
 		TaskID: "t-chatborn", Title: in.Title, Kanban: "intake", Owner: userID,
 		Phase: "interview", Tier: "medium", Family: "content",
+		// The real view carries clearance straight off the intake state, and the
+		// born card this handoff serves declares its own — one task, one number.
+		Clearance: fixtureChatBornClearance,
 		OpenAskID: "ask-chatborn-1",
 		OpenCard:  json.RawMessage(fixtureChatBornCard(f.t)),
+		Runs: []fixtureRunSummary{
+			{RunID: "t-chatborn.intake", Role: "intake", State: "running", HasReceipt: false},
+		},
 	}
-	view.Runs = append(view.Runs, struct {
-		RunID string `json:"run_id"`
-		State string `json:"state"`
-		Role  string `json:"role,omitempty"`
-	}{RunID: "t-chatborn.intake", State: "running", Role: "intake"})
 	return json.Marshal(view)
 }
 

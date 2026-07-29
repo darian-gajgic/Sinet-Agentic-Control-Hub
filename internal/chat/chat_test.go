@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -126,6 +129,69 @@ func TestSessionsAreOwnerOnly(t *testing.T) {
 	}
 	if _, err := e.store.Session(e.ctx, "alice", alice.ID); err != nil {
 		t.Fatalf("alice's session must survive bob's delete: %v", err)
+	}
+}
+
+// TestStoreHasNoOperatorLimbAtAll is the STRUCTURAL half of the owner-only
+// deviation, and it is what makes `"op"` above mean something: in this package
+// the operator is not a refused role, it is a viewer like any other, because
+// there is no role to carry. Every exported method on *Store takes the acting
+// identity as a plain string and nothing else — no role, no scope, no operator
+// bit — so there is no limb anywhere here that a future edit could forget to
+// omit. The HTTP half, where a REAL operator-role user is registered and the
+// refusal is behavioural, lives in internal/api/chatapi_test.go.
+func TestStoreHasNoOperatorLimbAtAll(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	banned := []string{"operator", "role", "scope", "admin"}
+	methods := 0
+	for _, ent := range entries {
+		name := ent.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || !fn.Name.IsExported() {
+				continue
+			}
+			star, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+			if !ok {
+				continue
+			}
+			if id, ok := star.X.(*ast.Ident); !ok || id.Name != "Store" {
+				continue
+			}
+			methods++
+			for _, param := range fn.Type.Params.List {
+				var names []string
+				for _, n := range param.Names {
+					names = append(names, n.Name)
+				}
+				if id, ok := param.Type.(*ast.Ident); ok && id.Name == "bool" {
+					t.Errorf("%s.%s takes a bool %v — a role bit is the only thing this package would want one for, and it must not have one",
+						name, fn.Name.Name, names)
+				}
+				for _, n := range names {
+					for _, b := range banned {
+						if strings.Contains(strings.ToLower(n), b) {
+							t.Errorf("%s.%s takes a parameter named %q — the store takes a VIEWER and knows nothing about roles",
+								name, fn.Name.Name, n)
+						}
+					}
+				}
+			}
+		}
+	}
+	if methods < 15 {
+		t.Fatalf("the scan found %d exported *Store methods — it is not reading the package", methods)
 	}
 }
 

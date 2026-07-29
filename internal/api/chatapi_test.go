@@ -4,17 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
@@ -41,12 +45,29 @@ type chatEnv struct {
 	store *chat.Store
 	hist  *history.Store
 	fake  *fakeSurface
+	// intake is the S06 seam the servers compose. It defaults to fake; the
+	// client-disconnect rig swaps it for one that drops the connection mid-act.
+	intake api.IntakeSurface
 }
 
 func newChatEnv(t *testing.T) *chatEnv {
 	t.Helper()
 	ctx := context.Background()
 	b := newBackend(t)
+	// REAL identities with REAL roles (drain r1 D4). With an empty auth store
+	// isOperatorRead resolves false for everybody, "op" is merely a second
+	// member, and the operator-is-refused-too limb — this packet's headline
+	// stated deviation — would be a duplicate of the bob limb wearing a label.
+	if err := b.store.CreateUser(ctx, "",
+		auth.User{ID: "op", DisplayName: "Op", Role: auth.RoleOperator}, fixturePIN); err != nil {
+		t.Fatalf("create the operator: %v", err)
+	}
+	for _, id := range []string{"alice", "bob"} {
+		if err := b.store.CreateUser(ctx, "op",
+			auth.User{ID: id, DisplayName: id, Role: auth.RoleMember}, fixturePIN); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
 	root := filepath.Join(t.TempDir(), "exchange")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatalf("mkdir exchange: %v", err)
@@ -59,7 +80,8 @@ func newChatEnv(t *testing.T) *chatEnv {
 	if err != nil {
 		t.Fatalf("history.New: %v", err)
 	}
-	return &chatEnv{t: t, b: b, ctx: ctx, store: store, hist: hist, fake: &fakeSurface{}}
+	fake := &fakeSurface{}
+	return &chatEnv{t: t, b: b, ctx: ctx, store: store, hist: hist, fake: fake, intake: fake}
 }
 
 func (e *chatEnv) server(who string) *api.Server {
@@ -74,7 +96,7 @@ func (e *chatEnv) server(who string) *api.Server {
 		Meter:    fakeMeter{},
 		Chat:     e.store,
 		History:  e.hist,
-		Intake:   e.fake,
+		Intake:   e.intake,
 	})
 }
 
@@ -191,6 +213,33 @@ func TestChatIsOwnerOnlyOverHTTP(t *testing.T) {
 	}
 	if _, err := e.store.Session(e.ctx, "alice", sid); err != nil {
 		t.Fatalf("alice's session must survive: %v", err)
+	}
+
+	// ── The limb is not a tautology: "op" really IS the operator here ─────────
+	//
+	// `task_project` is the one Layer-0 view with no owner column, which S01.9
+	// makes operator-only — and the chat transport decides that on the SERVED
+	// scope, so the same surface that just refused op alice's thread answers his
+	// own operator-scoped question and refuses bob's. If isOperatorRead were
+	// resolving false for op (an empty auth store, drain r1 D4), this would
+	// fail and the refusals above would be a second member limb.
+	opSession := e.session(t, "op")
+	opView := e.turn(t, "op", opSession,
+		`{"kind":"view","view":"task_project","text":"the task/project edge"}`)
+	if opView.Turn.OutcomeKind != chat.OutcomeAnswer {
+		t.Fatalf("the operator was refused the operator-only view: %s — his role is not resolving, so every refusal above is vacuous",
+			opView.Turn.Outcome)
+	}
+	bobSession := e.session(t, "bob")
+	bobView := e.turn(t, "bob", bobSession,
+		`{"kind":"view","view":"task_project","text":"the task/project edge"}`)
+	if bobView.Turn.OutcomeKind != chat.OutcomeError || !strings.Contains(string(bobView.Turn.Outcome), "forbidden") {
+		t.Fatalf("a member reached the operator-only view: %q %s", bobView.Turn.OutcomeKind, bobView.Turn.Outcome)
+	}
+	// And the operator's read privilege stops at the chat family's door: he can
+	// answer an operator-only question and still not see alice's conversation.
+	if code, _ := e.do(t, "op", "GET", "/api/chat/sessions/"+sid, ""); code != http.StatusNotFound {
+		t.Errorf("the operator read alice's session detail = %d, want 404", code)
 	}
 }
 
@@ -490,6 +539,76 @@ func TestHardStopIsAnExplicitVerbWithARecord(t *testing.T) {
 	}
 }
 
+// ── The client that goes away mid-turn ──────────────────────────────────────
+
+// droppingIntake is the client-disconnect rig. Its Submit cancels the request
+// driving the turn — which is what a phone losing its connection does to
+// r.Context() — and then answers normally, so the ACT succeeded and only the
+// listener is gone.
+type droppingIntake struct {
+	fakeSurface
+	drop context.CancelFunc
+}
+
+func (d *droppingIntake) Submit(ctx context.Context, userID string, body json.RawMessage) (json.RawMessage, error) {
+	d.drop()
+	return d.fakeSurface.Submit(ctx, userID, body)
+}
+
+// TestClientDisconnectMidTurnStillSettlesTheTurn: chat is phone-complete
+// (S1.10), so a dropped connection is the ORDINARY case, not an exotic one.
+// The turn's RECORD must survive it — the §37-C WithoutCancel precedent, the
+// same reason internal/history's audit append and internal/stage's session-end
+// append outlive their contexts.
+//
+// The failure this pins is not cosmetic: a settle riding the request's context
+// errors on cancellation, the turn stays `running`, no chat.turn_settled is
+// minted, and every LATER turn in that session is refused ErrTurnRunning until
+// somebody hard-stops it by hand. One dropped connection wedges the whole
+// conversation.
+func TestClientDisconnectMidTurnStillSettlesTheTurn(t *testing.T) {
+	e := newChatEnv(t)
+	sid := e.session(t, "alice")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rig := &droppingIntake{drop: cancel}
+	e.intake = rig
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/chat/sessions/"+sid+"/turns",
+		strings.NewReader(`{"kind":"task","title":"Ship the report","text":"pull the numbers"}`)).WithContext(ctx)
+	e.server("alice").Handler().ServeHTTP(rr, req)
+
+	// What the disconnected client received is beside the point; nobody is
+	// listening. The RECORD is the whole of it.
+	if rig.calls != 1 {
+		t.Fatalf("the rig's Submit ran %d times — the disconnect did not happen mid-act", rig.calls)
+	}
+	if n := e.eventCount(t, chat.EventTurnSettled); n != 1 {
+		t.Errorf("chat.turn_settled rows = %d after a disconnect, want 1 — the record of the ending must outlive the request", n)
+	}
+	turns, err := e.store.Turns(e.ctx, "alice", sid)
+	if err != nil {
+		t.Fatalf("read turns: %v", err)
+	}
+	if len(turns) != 1 || turns[0].State != chat.StateSettled {
+		t.Fatalf("the turn after a disconnect = %+v, want one SETTLED turn", turns)
+	}
+	if turns[0].OutcomeKind != chat.OutcomeTask {
+		t.Errorf("the settled outcome = %q, want the task the act actually produced", turns[0].OutcomeKind)
+	}
+	// And the session is not wedged: the next turn opens rather than being
+	// refused behind a turn that never ended.
+	if _, ok, err := e.store.RunningTurn(e.ctx, "alice", sid); err != nil || ok {
+		t.Fatalf("a turn is still running after the disconnect (%v) — the session is wedged", err)
+	}
+	code, out := e.do(t, "alice", "POST", "/api/chat/sessions/"+sid+"/turns",
+		`{"kind":"ask","text":"and what did that cost?"}`)
+	if code != http.StatusOK {
+		t.Fatalf("the next turn after a disconnect = %d: %s", code, out)
+	}
+}
+
 // ── Every mutation lands on the log ─────────────────────────────────────────
 
 // TestEveryMutationMintsItsEvent walks the whole family and counts.
@@ -593,9 +712,24 @@ func TestTurnOutcomeRedactsAtTheEdgeAndContentDoesNot(t *testing.T) {
 	if len(detail.Turns) != 1 {
 		t.Fatalf("turns = %d", len(detail.Turns))
 	}
-	if strings.Contains(string(detail.Turns[0].Outcome), secret) &&
-		strings.Contains(string(got.Turn.Outcome), secret) {
-		t.Errorf("the turn outcome served the planted secret unredacted: %s", detail.Turns[0].Outcome)
+	// EACH EDGE IS ASSERTED ON ITS OWN. A conjunction here would fire only when
+	// BOTH edges leaked, so deleting the redaction from either one of them would
+	// leave the probe green while that edge served the secret verbatim — a guard
+	// that guards nothing. Both are driven separately, and both are revert-probed.
+	if strings.Contains(string(detail.Turns[0].Outcome), secret) {
+		t.Errorf("GET /api/chat/sessions/{id} served the planted secret unredacted in a turn outcome: %s",
+			detail.Turns[0].Outcome)
+	}
+	if strings.Contains(string(got.Turn.Outcome), secret) {
+		t.Errorf("POST .../turns served the planted secret unredacted in its own answer: %s",
+			got.Turn.Outcome)
+	}
+	// The outcome the probe is reading must be the ANSWER — an error outcome
+	// would carry no rows and redact nothing, and the assertions above would
+	// pass on emptiness rather than on redaction.
+	if got.Turn.OutcomeKind != chat.OutcomeAnswer || len(decodeTurnAnswer(t, got.Turn).Rows) == 0 {
+		t.Fatalf("the probe needs a populated answer to redact, got %q: %s",
+			got.Turn.OutcomeKind, got.Turn.Outcome)
 	}
 	// The STORED row is untouched — redaction happens at the edge, not in the DB.
 	var stored string
@@ -605,6 +739,118 @@ func TestTurnOutcomeRedactsAtTheEdgeAndContentDoesNot(t *testing.T) {
 	}
 	if !strings.Contains(stored, secret) {
 		t.Error("the stored payload was modified — store-raw / serve-redacted (§30)")
+	}
+}
+
+// ── The fixture handoff body vs the REAL task view ──────────────────────────
+
+// structJSONShape reads a struct's json field list out of Go SOURCE: every
+// field's tag name, and which of them are non-omitempty (i.e. always emitted).
+func structJSONShape(t *testing.T, file, structName string) (known map[string]bool, always []string) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+	known = map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		ts, ok := n.(*ast.TypeSpec)
+		if !ok || ts.Name.Name != structName {
+			return true
+		}
+		st, ok := ts.Type.(*ast.StructType)
+		if !ok {
+			return true
+		}
+		for _, field := range st.Fields.List {
+			if field.Tag == nil {
+				continue
+			}
+			tag := reflect.StructTag(strings.Trim(field.Tag.Value, "`")).Get("json")
+			parts := strings.Split(tag, ",")
+			if parts[0] == "" || parts[0] == "-" {
+				continue
+			}
+			known[parts[0]] = true
+			if !slices.Contains(parts[1:], "omitempty") {
+				always = append(always, parts[0])
+			}
+		}
+		return false
+	})
+	if len(known) == 0 {
+		t.Fatalf("no json fields found on %s in %s — the shape read is empty", structName, file)
+	}
+	return known, always
+}
+
+// TestFixtureHandoffMatchesTheRealTaskView ties the S06 handoff fixture to the
+// shape production actually serves.
+//
+// The chat feed renders the born task's intake card INLINE from this body
+// (OQ8(i)), so a fixture that drifts from stage.taskView teaches the widget a
+// payload that does not exist — precisely the B6-5 root cause, and nothing was
+// asserting against it. internal/api cannot import the pipeline's view type (the
+// IntakeSurface seam exists so it never speaks that vocabulary), so the shape is
+// read out of internal/stage's SOURCE, where it is written: a rename, a dropped
+// field or a new omitempty there fails here rather than silently.
+func TestFixtureHandoffMatchesTheRealTaskView(t *testing.T) {
+	const realSource = "../stage/surface.go"
+	body, err := fixtureIntake{t: t}.Submit(context.Background(), "alice",
+		json.RawMessage(`{"title":"Draft the release notes"}`))
+	if err != nil {
+		t.Fatalf("fixture Submit: %v", err)
+	}
+	var got map[string]json.RawMessage
+	decodeInto(t, string(body), &got)
+
+	known, always := structJSONShape(t, realSource, "taskView")
+	for key := range got {
+		if !known[key] {
+			t.Errorf("the fixture handoff emits %q, which stage.taskView does not have — an imagined key serves a world that does not exist", key)
+		}
+	}
+	for _, key := range always {
+		if _, ok := got[key]; !ok {
+			t.Errorf("the fixture handoff omits %q, which stage.taskView emits on EVERY task view", key)
+		}
+	}
+
+	var runs []map[string]json.RawMessage
+	decodeInto(t, string(got["runs"]), &runs)
+	if len(runs) == 0 {
+		t.Fatal("the fixture handoff carries no runs — the nested shape below would be checked against nothing")
+	}
+	runKnown, runAlways := structJSONShape(t, realSource, "runSummary")
+	for _, run := range runs {
+		for key := range run {
+			if !runKnown[key] {
+				t.Errorf("a fixture run summary emits %q, which stage.runSummary does not have", key)
+			}
+		}
+		for _, key := range runAlways {
+			if _, ok := run[key]; !ok {
+				t.Errorf("a fixture run summary omits %q, which stage.runSummary emits on EVERY run", key)
+			}
+		}
+	}
+
+	// clearance is omitempty on the real view, so the shape check above cannot
+	// require it — but the real view DOES carry it from intake state, and the
+	// born card this same handoff serves declares its own. One task, one number.
+	raw, ok := got["clearance"]
+	if !ok {
+		t.Fatal("the fixture handoff carries no clearance — stage.taskView reads one off intake state for every task that has one")
+	}
+	var clearance float64
+	decodeInto(t, string(raw), &clearance)
+	var card struct {
+		Clearance float64 `json:"clearance"`
+	}
+	decodeInto(t, string(got["open_card"]), &card)
+	if clearance == 0 || clearance != card.Clearance {
+		t.Errorf("the handoff view's clearance = %v but its own open card declares %v", clearance, card.Clearance)
 	}
 }
 

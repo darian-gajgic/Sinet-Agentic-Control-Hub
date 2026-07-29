@@ -73,13 +73,13 @@ func (s *Store) Drive(ctx context.Context, turnID string) (context.Context, func
 }
 
 const turnColumns = `turn_id, session_id, user_id, kind, state,
-	outcome_kind, outcome, produced, started_ts, settled_ts`
+	outcome_kind, outcome, produced, exchange_seq, started_ts, settled_ts`
 
 func scanTurn(r interface{ Scan(...any) error }) (Turn, error) {
 	var t Turn
 	var outcome, produced string
 	if err := r.Scan(&t.ID, &t.SessionID, &t.Owner, &t.Kind, &t.State,
-		&t.OutcomeKind, &outcome, &produced, &t.StartedTS, &t.SettledTS); err != nil {
+		&t.OutcomeKind, &outcome, &produced, &t.exchangeSeq, &t.StartedTS, &t.SettledTS); err != nil {
 		return Turn{}, err
 	}
 	if outcome != "" {
@@ -141,10 +141,17 @@ func (s *Store) BeginTurn(ctx context.Context, viewer, sessionID, kind, text str
 			m.ID, sessionID, viewer, text, t.ID, now); err != nil {
 			return fmt.Errorf("chat: insert message: %w", err)
 		}
+		// The exchange watermark is read INSIDE the transaction that opens the
+		// turn, so no upload can slip between the reading and the recording and
+		// end up on the wrong side of the window (exchange.go: producedSince).
+		if err := tx.QueryRowContext(ctx,
+			`SELECT IFNULL(MAX(seq), 0) FROM chat_exchange_files`).Scan(&t.exchangeSeq); err != nil {
+			return fmt.Errorf("chat: read exchange watermark: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chat_turns (turn_id, session_id, user_id, kind, state, started_ts)
-			 VALUES (?, ?, ?, ?, 'running', ?)`,
-			t.ID, sessionID, viewer, kind, now); err != nil {
+			`INSERT INTO chat_turns (turn_id, session_id, user_id, kind, state, exchange_seq, started_ts)
+			 VALUES (?, ?, ?, ?, 'running', ?, ?)`,
+			t.ID, sessionID, viewer, kind, t.exchangeSeq, now); err != nil {
 			return fmt.Errorf("chat: insert turn: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -188,7 +195,7 @@ func (s *Store) SettleTurn(ctx context.Context, viewer, turnID, outcomeKind stri
 		return cur, ErrTurnResolved
 	}
 	now := s.stamp()
-	produced, err := s.producedBetween(ctx, viewer, turnID, cur.StartedTS, now)
+	produced, err := s.producedSince(ctx, viewer, turnID, cur.exchangeSeq)
 	if err != nil {
 		return Turn{}, err
 	}
