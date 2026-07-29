@@ -1,6 +1,14 @@
 {
   "files": [
     {
+      "file_id": "cf-0000000000000009",
+      "owner": "alice",
+      "name": "release-notes-draft.md",
+      "size_bytes": 59,
+      "sha256": "b5cd379ccb0d1c8a2df22f5c6aa9e0d97f8d3b67e1ce112ae2ab8e3421829c3a",
+      "uploaded_ts": "2026-07-20T09:02:00Z"
+    },
+    {
       "file_id": "cf-0000000000000002",
       "owner": "alice",
       "name": "quarterly-numbers.csv",

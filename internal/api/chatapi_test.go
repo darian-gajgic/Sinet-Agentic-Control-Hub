@@ -854,6 +854,62 @@ func TestFixtureHandoffMatchesTheRealTaskView(t *testing.T) {
 	}
 }
 
+// TestChatFixtureDrivesBothProducedRenders pins what drain r1b added: the
+// committed session body carries BOTH produced-files states, so neither render
+// is undriven. Exactly one settled turn has a non-empty list — its file arrived
+// through the real upload handler while that turn was in flight, so the window
+// diff attributes it honestly — and the others are empty, which at v0 is the
+// common case (uploads are the only producer, OQ7). Compare-only fixtures catch
+// a CHANGE; this states the property the fixture exists to have.
+func TestChatFixtureDrivesBothProducedRenders(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(fixtureDir, "chat-session.json"))
+	if err != nil {
+		t.Fatalf("read the committed session body: %v", err)
+	}
+	var body struct {
+		Turns []chat.Turn `json:"turns"`
+	}
+	decodeInto(t, string(raw), &body)
+	var withFiles, settledEmpty int
+	for _, turn := range body.Turns {
+		if turn.State != chat.StateSettled {
+			continue
+		}
+		if len(turn.Produced) > 0 {
+			withFiles++
+		} else {
+			settledEmpty++
+		}
+	}
+	if withFiles != 1 {
+		t.Errorf("%d settled turns carry produced files, want exactly 1 — the chip render needs a committed body", withFiles)
+	}
+	if settledEmpty == 0 {
+		t.Error("no settled turn has an empty produced list — the honest-sparse render needs a committed body too")
+	}
+	// The chip must name a file the sidebar actually serves; a chip pointing at
+	// nothing is the fabrication this whole mechanism was fixed to prevent.
+	files, err := os.ReadFile(filepath.Join(fixtureDir, "chat-files.json"))
+	if err != nil {
+		t.Fatalf("read the committed file list: %v", err)
+	}
+	var listed struct {
+		Files []chat.File `json:"files"`
+	}
+	decodeInto(t, string(files), &listed)
+	for _, turn := range body.Turns {
+		for _, id := range turn.Produced {
+			found := false
+			for _, f := range listed.Files {
+				found = found || f.ID == id
+			}
+			if !found {
+				t.Errorf("turn %s claims produced file %s, which the served file list does not carry", turn.ID, id)
+			}
+		}
+	}
+}
+
 // ── Route-table negatives ───────────────────────────────────────────────────
 
 // TestChatRouteTableNegatives: messages are IMMUTABLE, so there is no edit verb

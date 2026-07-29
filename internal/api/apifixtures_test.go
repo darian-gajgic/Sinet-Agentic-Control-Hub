@@ -338,7 +338,14 @@ func driveFixtureChat(t *testing.T, b *backend) {
 		t.Fatalf("chat.New: %v", err)
 	}
 	b.chat = store
-	srv := func(who string) *api.Server { return fixtureChatServer(t, b, who) }
+	// duringTurn models a SECOND REQUEST arriving while a turn is in flight. The
+	// turn verb is synchronous — begin, act, settle in one handler call — so the
+	// only honest way a single-threaded fixture can interleave another request is
+	// from inside the seam the turn is blocked on. What it models is ordinary at
+	// v0: uploads are the only thing that writes the exchange folder (OQ7), and a
+	// person can drop a file into the sidebar while a turn is still running.
+	var duringTurn func()
+	srv := func(who string) *api.Server { return fixtureChatServer(t, b, who, duringTurn) }
 
 	post := func(who, path, body string) string {
 		t.Helper()
@@ -370,9 +377,19 @@ func driveFixtureChat(t *testing.T, b *backend) {
 	post("alice", "/api/chat/sessions/"+sid+"/turns",
 		`{"kind":"ask","text":"write me a poem about the sea"}`)
 	// Turn 3 — the S06 handoff: the born task with its OPEN intake card, which
-	// is what the feed renders in place (OQ8(i)).
+	// is what the feed renders in place (OQ8(i)). It is ALSO the fixture's
+	// non-empty produced-files case: a real upload lands through the real handler
+	// strictly between this turn's BeginTurn and its SettleTurn, so the window
+	// diff (`seq > watermark`) honestly attributes it — the exact mechanism the
+	// chips render. Turns 1 and 2 stay honestly EMPTY: sparse chips are the v0
+	// truth and both renders now have a committed body behind them.
+	duringTurn = func() {
+		post("alice", "/api/chat/files?name=release-notes-draft.md",
+			"# Release notes\n\n- the merged changes, one plain line each\n")
+	}
 	post("alice", "/api/chat/sessions/"+sid+"/turns",
 		`{"kind":"task","title":"Draft the release notes","text":"pull the merged PRs and draft release notes"}`)
+	duringTurn = nil
 
 	// Turn 4 is left RUNNING: the in-flight state has to have a committed body,
 	// because "the turn survives navigation" is a render over served state and a
@@ -389,8 +406,9 @@ func driveFixtureChat(t *testing.T, b *backend) {
 // fixtureChatServer is the fixture world's chat-serving stack. It is separate
 // from fixtureServer only because the chat store is composed inside
 // driveFixtureChat (it needs the pinned clock and id seam) and the intake seam
-// answers the handoff.
-func fixtureChatServer(t *testing.T, b *backend, who string) *api.Server {
+// answers the handoff. `during`, when set, runs inside the handoff act — see
+// duringTurn in driveFixtureChat.
+func fixtureChatServer(t *testing.T, b *backend, who string, during func()) *api.Server {
 	t.Helper()
 	st, err := history.New(history.Config{DB: b.db, Log: b.log})
 	if err != nil {
@@ -401,7 +419,7 @@ func fixtureChatServer(t *testing.T, b *backend, who string) *api.Server {
 		Settings: fixedSettings{d: 20 * 1e9},
 		HealthFn: func() api.Health { return api.Health{Ready: true} },
 		DB:       b.db, Meter: fixtureMeter{}, History: st,
-		Intake: fixtureIntake{t: t}, Chat: b.chat,
+		Intake: fixtureIntake{t: t, during: during}, Chat: b.chat,
 		Now: func() time.Time { return mustTime(t, fxT4) },
 	})
 }
@@ -999,7 +1017,12 @@ func mustTime(t *testing.T, s string) time.Time {
 // directions from SERVED data: the view has to label a draft as a draft, and it
 // cannot be tested on that with only one of the two states on the wire.
 // Everything else is the honest absence a task before drafting really has.
-type fixtureIntake struct{ t *testing.T }
+type fixtureIntake struct {
+	t *testing.T
+	// during runs inside Submit, while the calling turn is still open. It is the
+	// fixture's only way to interleave a second request with an in-flight turn.
+	during func()
+}
 
 // Submit answers the S15.7 handoff with a faithful born-task view (B6-7). The
 // pipeline rides the IntakeSurface seam and internal/api never speaks its
@@ -1046,6 +1069,9 @@ type fixtureRunSummary struct {
 }
 
 func (f fixtureIntake) Submit(_ context.Context, userID string, body json.RawMessage) (json.RawMessage, error) {
+	if f.during != nil {
+		f.during()
+	}
 	var in struct {
 		Title string `json:"title"`
 	}
