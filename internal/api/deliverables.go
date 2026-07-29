@@ -330,7 +330,12 @@ func (s *Server) reviseDoor(ctx context.Context, d review.Deliverable, base stri
 				verbReviseWithGuidance + " answer — the guidance lands as durable requester comments and enters the next attempt through THE drain (S07.7/S13.4)"
 			return door
 		}
-		door.Method, door.Route = http.MethodPost, base+"/follow-up"
+		// No concrete target exists yet, so the door names NO route: the verb it
+		// will use is an answer to a card that has not been issued, and the
+		// follow-up route belongs to the finished door alone. A route naming a
+		// verb that cannot open from this state is the dead-door shape the D3/D9
+		// honesty rule exists to prevent — the reason carries the narrative
+		// instead.
 		door.Reason = "closed for now: the work is in review and no rework card is open. A bounded revision travels as the " +
 			verbReviseWithGuidance + " answer once the platform asks; until then, comments on the revision are what the next round drains (S13.3/S13.4)"
 		return door

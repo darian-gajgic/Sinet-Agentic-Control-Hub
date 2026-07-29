@@ -509,8 +509,14 @@ type cardShape struct {
 			ID string `json:"id"`
 		} `json:"choices"`
 	} `json:"decision"`
-	// Verify cards (S07.7) declare their three verbs under `verbs`.
-	Verbs []string `json:"verbs"`
+	// Verify cards (S07.7) declare their answer verbs at the TOP LEVEL under
+	// `choices` — the field internal/verify's escalation Card marshals into
+	// asks.snapshot (verify/escalate.go) and the same one the landed answer
+	// validator checks a choice against (verify/answer.go). Nothing in the tree
+	// writes `verbs`, which is what this tag read until the B6-3B drain and why
+	// verify-escalation cards derived an EMPTY action list. The Go field keeps
+	// its name; the wire key is what was wrong.
+	Verbs []string `json:"choices"`
 }
 
 // askCards reads the stored snapshot of each listed ask and derives its pin,

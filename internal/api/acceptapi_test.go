@@ -225,6 +225,29 @@ func TestAcceptWithAStalePinFiresNothingAndReturnsTheFreshCard(t *testing.T) {
 	}
 }
 
+// TestAcceptDistinguishesAMissingPinFromAStaleOne pins the TrimSpace parity
+// with the landed checkPin: a whitespace-only quote is a MISSING pin, and the
+// two refusals send the caller to different places — "you did not quote a hash"
+// versus "re-read the card".
+func TestAcceptDistinguishesAMissingPinFromAStaleOne(t *testing.T) {
+	e := newDlvEnv(t)
+	id := acceptFixture(t, e)
+	for _, given := range []string{"", "   ", "\t\n "} {
+		code, out := e.do(t, "alice", "POST", "/api/deliverables/"+id+"/accept", acceptBody(given, dlvPIN))
+		if code != http.StatusBadRequest || !strings.Contains(out, "payload_hash") {
+			t.Errorf("a blank pin %q must be a 400 naming the missing field, got %d: %s", given, code, out)
+		}
+	}
+	// The non-tautological control: a NON-blank wrong hash is the other answer.
+	if code, _ := e.do(t, "alice", "POST", "/api/deliverables/"+id+"/accept",
+		acceptBody("sha256:wrong", dlvPIN)); code != http.StatusConflict {
+		t.Error("a non-blank wrong hash must still be the 409 stale answer")
+	}
+	if len(e.push.reqs) != 0 {
+		t.Error("no refused pin may fire anything")
+	}
+}
+
 func TestCleanAcceptExitsThroughTheJournalAndTheBrokerCASPush(t *testing.T) {
 	e := newDlvEnv(t)
 	id := acceptFixture(t, e)
@@ -293,6 +316,35 @@ func TestCleanAcceptExitsThroughTheJournalAndTheBrokerCASPush(t *testing.T) {
 	msg := e.git("-C", entry.StorePath, "show", "-s", "--format=%B", out.Commit)
 	if !strings.Contains(msg, "Co-Authored-By: claude-cli opus-4-8") {
 		t.Errorf("the commit message must carry the approved trailers, got %q", msg)
+	}
+	// The commit is authored under the accepting PERSON's name, resolved from
+	// their S01.9 user row — not under the platform's handle for them. The
+	// fixture's display name differs from the id on purpose, so this fails if
+	// the raw id is passed through (S13.6 step 2).
+	if got := e.git("-C", entry.StorePath, "show", "-s", "--format=%an", out.Commit); got != "Alice Member" {
+		t.Errorf("commit author name %q — want the accepting user's display name", got)
+	}
+}
+
+// TestAcceptFallsBackToTheUserIDWhenNoDisplayNameExists pins the honest
+// fallback: a person with no display name is named by their id rather than by
+// nothing, because an empty author name would produce a commit nobody is on.
+func TestAcceptFallsBackToTheUserIDWhenNoDisplayNameExists(t *testing.T) {
+	e := newDlvEnv(t)
+	e.exec(`UPDATE users SET display_name = '' WHERE user_id = ?`, "alice")
+	id := acceptFixture(t, e)
+	card := readAcceptCard(t, e, "alice", id)
+	var out api.AcceptOutcome
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST", "/api/deliverables/"+id+"/accept",
+		acceptBody(card.PayloadHash, dlvPIN))), &out); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := e.proj.Get(e.ctx, "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.git("-C", entry.StorePath, "show", "-s", "--format=%an", out.Commit); got != "alice" {
+		t.Errorf("commit author name %q — want the honest id fallback", got)
 	}
 }
 

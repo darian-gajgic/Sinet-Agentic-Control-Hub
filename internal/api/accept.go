@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
@@ -436,7 +437,8 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := s.accept.Accept(r.Context(), acceptInput(d, card, id.UserID, body))
+	out, err := s.accept.Accept(r.Context(),
+		acceptInput(d, card, id.UserID, s.acceptingName(r.Context(), id.UserID), body))
 	if err != nil {
 		s.writeSurface(w, nil, s.reviewErr(err))
 		return
@@ -444,15 +446,34 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	s.writeReadJSON(w, acceptOutcome(d, card, out))
 }
 
+// acceptingName resolves the human-readable name the squash commit is authored
+// under (S13.6 step 2: author = committer = the accepting user, set
+// per-invocation). The name is the person's own display name from the S01.9
+// user row — the id is the platform's handle for them, not what a permanent
+// commit should call them. A user with no display name falls back to their id,
+// which is honest: an empty author name would produce a commit nobody is named
+// on. The committer EMAIL is not this surface's — internal/project derives the
+// ID-based noreply form so attribution survives renames.
+func (s *Server) acceptingName(ctx context.Context, userID string) string {
+	if s.sessions == nil {
+		return userID
+	}
+	u, err := s.sessions.User(ctx, userID)
+	if err != nil || strings.TrimSpace(u.DisplayName) == "" {
+		return userID
+	}
+	return u.DisplayName
+}
+
 // acceptInput assembles the ONE call. Engine, model and vendor address come
 // from the CARD — the same platform facts the reviewer was shown and the same
 // ones the payload hash covers — so the commit's trailers cannot differ from
 // the trailers that were approved.
-func acceptInput(d review.Deliverable, card AcceptCard, user string, body acceptRequest) accept.Input {
+func acceptInput(d review.Deliverable, card AcceptCard, user, name string, body acceptRequest) accept.Input {
 	return accept.Input{
 		DeliverableID:     d.ID,
 		AcceptingUser:     user,
-		AcceptingUserName: user,
+		AcceptingUserName: name,
 		ProjectID:         d.ProjectID,
 		Subject:           body.Subject,
 		Provenance:        body.Provenance,
@@ -541,7 +562,11 @@ func (e *staleAcceptError) Error() string {
 // canonicalization would be a second answer to "is this the same payload?", and
 // the whole retry-safety rule rests on there being one.
 func (s *Server) checkAcceptPin(card AcceptCard, given string) error {
-	if given == "" {
+	// TrimSpace parity with the landed checkPin (approvals.go): a whitespace-only
+	// quote is a MISSING pin, not a stale one, and the two answers send the
+	// caller to different places — 400 "you did not quote a hash" versus 409
+	// "re-read the card".
+	if strings.TrimSpace(given) == "" {
 		return badRequest(`missing "payload_hash": an accept is pinned to the card it was shown for (S15.2)`)
 	}
 	if given != card.PayloadHash {

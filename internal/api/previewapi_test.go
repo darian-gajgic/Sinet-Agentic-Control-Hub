@@ -216,6 +216,10 @@ func TestPreviewComparisonIsHonestAboutHavingNoBefore(t *testing.T) {
 	if cmp.After.State == "" {
 		t.Error("the candidate side must still carry its defined state")
 	}
+	// Non-backed sides start nothing.
+	if got := e.count(preview.EventStarted); got != 0 {
+		t.Errorf("a non-backed comparison emitted %d start events — nothing started", got)
+	}
 
 	// Once a revision is accepted there IS a before, and the pair comes back
 	// with synced navigation enabled.
@@ -240,20 +244,25 @@ func TestPreviewComparisonIsHonestAboutHavingNoBefore(t *testing.T) {
 // tripwire discipline to this package: no test here may carry a string literal
 // naming the live Caddy admin API, the live preview ports, or a host control
 // tool. It inspects STRING LITERALS only, so the host-hazard WARNINGS that live
-// in comments are not flagged; this file names the banned tokens by necessity
-// and is skipped.
+// in comments are not flagged.
+//
+// EVERY *_test.go IS SCANNED, INCLUDING THIS ONE. The banned tokens are
+// assembled from split halves so no literal in this file ever contains a whole
+// one — a tripwire that exempts its own file exempts whatever fixtures later
+// land beside it, which is precisely where a stray live endpoint would hide.
 func TestAPITestsNeverNameTheLiveFrontChain(t *testing.T) {
 	files, err := filepath.Glob("*_test.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	banned := []string{":8481", ":8482", "8481:", "8482:", "tailscale", "systemctl", ":2019"}
+	colon, port1, port2, admin := ":", "84"+"81", "84"+"82", "20"+"19"
+	banned := []string{
+		colon + port1, colon + port2, port1 + colon, port2 + colon,
+		"tail" + "scale", "system" + "ctl", colon + admin,
+	}
 	fset := token.NewFileSet()
 	scanned, probes := 0, 0
 	for _, name := range files {
-		if name == "previewapi_test.go" {
-			continue // this file defines the banned list
-		}
 		parsed, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
@@ -281,9 +290,24 @@ func TestAPITestsNeverNameTheLiveFrontChain(t *testing.T) {
 		t.Fatalf("the tripwire inspected %d files and %d literals — it proves nothing", scanned, probes)
 	}
 	// The probe: the scan must be able to SEE a banned token when one is present.
-	if !strings.Contains("http://127.0.0.1:2019/config/", banned[len(banned)-1]) {
+	// Assembled from halves for the same reason the list is.
+	if !strings.Contains("http://127.0.0.1"+colon+admin+"/config/", banned[len(banned)-1]) {
 		t.Fatal("the tripwire cannot detect its own probe")
 	}
+	// And this file was scanned like every other — the exemption is gone.
+	if !scannedThis(files) {
+		t.Fatal("the tripwire did not scan its own file")
+	}
+}
+
+// scannedThis reports whether the tripwire's own file was in the scanned set.
+func scannedThis(files []string) bool {
+	for _, f := range files {
+		if f == "previewapi"+"_test.go" {
+			return true
+		}
+	}
+	return false
 }
 
 // TestPreviewComposesWithRoutingDisabled is the structural half of R17: this
@@ -358,6 +382,32 @@ func TestEveryPartBMutationLandsItsNamedCanonicalRow(t *testing.T) {
 	e.mustDo(t, "alice", "POST", "/api/deliverables/d-a/accept", acceptBody(card.PayloadHash, dlvPIN))
 	if got := e.count(review.EventAccepted); got != 1 {
 		t.Errorf("want one deliverable.accepted row, got %d", got)
+	}
+
+	// 5. the before-vs-after comparison → preview.started PER BACKED SIDE. The
+	// deliverable is accepted now, so the pair has a real `before`, and each
+	// side is a full instance with its own port and its own start event.
+	startedBefore := e.count(preview.EventStarted)
+	var pair preview.Comparison
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST", "/api/deliverables/d-a/preview/compare", `{}`)), &pair); err != nil {
+		t.Fatal(err)
+	}
+	if pair.SingleInstance || pair.Before == nil {
+		t.Fatalf("the accepted deliverable must give a two-sided pair: %+v", pair)
+	}
+	if pair.Before.State != preview.StateLive || pair.After.State != preview.StateLive {
+		t.Fatalf("both sides must be backed for this walk: before=%q after=%q", pair.Before.State, pair.After.State)
+	}
+	if got := e.count(preview.EventStarted) - startedBefore; got != 2 {
+		t.Errorf("a two-sided backed comparison must emit one preview.started per side, got %d", got)
+	}
+
+	// 6. and the absence limb: a comparison whose sides are NON-backed starts
+	// nothing at all.
+	startedBefore = e.count(preview.EventStarted)
+	e.mustDo(t, "alice", "POST", "/api/deliverables/d-plain/preview/compare", `{}`)
+	if got := e.count(preview.EventStarted) - startedBefore; got != 0 {
+		t.Errorf("a non-backed comparison emitted %d start events — nothing started", got)
 	}
 
 	// The whole walk co-minted nothing.

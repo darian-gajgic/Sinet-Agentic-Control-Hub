@@ -89,8 +89,11 @@ func newDlvEnv(t *testing.T) *dlvEnv {
 	if err := b.store.CreateUser(ctx, "", auth.User{ID: "op", DisplayName: "Op", Role: auth.RoleOperator}, dlvPIN); err != nil {
 		t.Fatalf("create operator: %v", err)
 	}
-	for _, id := range []string{"alice", "bob"} {
-		if err := b.store.CreateUser(ctx, "op", auth.User{ID: id, DisplayName: id, Role: auth.RoleMember}, dlvPIN); err != nil {
+	// The display names are deliberately DIFFERENT from the ids: the accept
+	// authors its squash commit under the person's name, and a fixture where
+	// the two coincide could not tell a resolved name from a raw id.
+	for id, name := range map[string]string{"alice": "Alice Member", "bob": "Bob Member"} {
+		if err := b.store.CreateUser(ctx, "op", auth.User{ID: id, DisplayName: name, Role: auth.RoleMember}, dlvPIN); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
 	}
@@ -498,6 +501,13 @@ func TestDoorsNameTheLiveRoutesForAnInReviewDeliverable(t *testing.T) {
 	if !strings.Contains(revise.Reason, "revise_with_guidance") {
 		t.Errorf("the closed door must still name the landed verb it will use: %q", revise.Reason)
 	}
+	// With no concrete target the door names NO route: the verb it will use
+	// answers a card that has not been issued, and the follow-up route belongs
+	// to the finished door alone. A route that cannot open from this state is
+	// the dead-door shape (D3/D9).
+	if revise.Route != "" || revise.Method != "" {
+		t.Errorf("a door with no concrete target must name no route, got %q %q", revise.Method, revise.Route)
+	}
 	for _, verb := range []string{"follow-up", "preview", "preview-compare"} {
 		if d := doorByVerb(t, body, verb); !d.Available {
 			t.Errorf("the %s door must be live for a minted deliverable: %+v", verb, d)
@@ -531,6 +541,42 @@ func TestReworkCardOpensTheReviseWithGuidanceDoorWithItsPin(t *testing.T) {
 	}
 	if revise.PayloadHash != want {
 		t.Errorf("the door's pin %q is not gates.CanonicalHash of the card %q", revise.PayloadHash, want)
+	}
+}
+
+// TestVerifyEscalationCardListsItsActions is the D6 regression: the inbox
+// derives a verify-escalation card's action vocabulary from the TOP-LEVEL
+// `choices` its producer marshals (internal/verify's escalation Card), which is
+// the same field the landed answer validator checks a choice against. Reading a
+// key nothing writes derived an EMPTY actions list, so the inbox rendered those
+// cards with no controls at all.
+func TestVerifyEscalationCardListsItsActions(t *testing.T) {
+	e := newDlvEnv(t)
+	e.mkRun("t-a", "r-a", "alice")
+	// Producer-shaped: exactly what verify/escalate.go marshals into
+	// asks.snapshot for a CAP-HIT escalation.
+	snapshot := `{"kind":"escalation","category":"CAP-HIT","task_id":"t-a","run_id":"r-a",` +
+		`"issued_ts":"` + dlvNow() + `","summary":"the rework cap was reached",` +
+		`"choices":["accept_best_effort","revise_with_guidance","cancel"],"ask_id":"ask-esc"}`
+	e.exec(`INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?, ?, ?, ?, 'open', ?)`,
+		"ask-esc", "r-a", "alice", snapshot, dlvNow())
+
+	list := decodeList(t, e.mustDo(t, "alice", "GET", "/api/approvals", ""))
+	item, ok := itemByID(list, "ask:ask-esc")
+	if !ok {
+		t.Fatalf("the escalation card is not in the inbox: %+v", list)
+	}
+	if len(item.Actions) == 0 {
+		t.Fatal("the card lists NO actions — an inbox card a person cannot act on is the defect this pins")
+	}
+	got := map[string]bool{}
+	for _, a := range item.Actions {
+		got[a] = true
+	}
+	for _, want := range []string{"accept_best_effort", "revise_with_guidance", "cancel"} {
+		if !got[want] {
+			t.Errorf("the card must list its landed choice %q, got %v", want, item.Actions)
+		}
 	}
 }
 
@@ -674,9 +720,11 @@ func TestCompareRefusesNoTypeAndLabelsTheFallback(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for n, body := range map[int]string{1: "not-a-pdf-old", 2: "not-a-pdf-new"} {
+	// Ordered, not a map range: revisions are 1..N with every hop persisted, so
+	// minting them in a random order is a mint of n=2 onto current=0.
+	for n, body := range []string{"not-a-pdf-old", "not-a-pdf-new"} {
 		if _, err := e.rev.MintRevision(e.ctx, review.MintInput{
-			DeliverableID: "d-pdf", N: n, RunID: "r-a",
+			DeliverableID: "d-pdf", N: n + 1, RunID: "r-a",
 			Objects: map[string][]byte{"doc.pdf": []byte(body)},
 			Types:   map[string]string{"doc.pdf": "application/pdf"},
 		}); err != nil {
