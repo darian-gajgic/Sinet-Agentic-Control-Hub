@@ -68,6 +68,8 @@ export const boardEventTypes = [
 export const activityEventTypes = [
   ...boardEventTypes,
   'tool.completed',
+  // Legacy alias of tool.completed (contract.go rename map) — not a registered
+  // type; kept so a tail resumed across pre-rename stored rows still triggers.
   'engine.tool_result',
   'checkpoint.written',
   'helper.spawned',

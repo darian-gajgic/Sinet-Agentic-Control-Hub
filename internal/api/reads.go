@@ -972,9 +972,10 @@ var stageProgressTypes = []string{"stage.started", "stage.finished", "intake.sta
 // NOT IN THIS FAMILY, and the miss is deliberate: a CANCEL is carried by
 // `run.state_changed` (internal/api/approvals.go — "cancels (carried by
 // run.state_changed) are never double-minted"), which is a run-lifecycle
-// event, not a decision row. It is visible in the stage story instead, which
-// is where a state transition belongs; listing it here would mean this derive
-// reading a lifecycle type as a decision.
+// event, not a decision row. It is visible via runs[].state on this response
+// and the `cancelled` kanban column (never in stage_progress — that derive
+// reads only stage.started/stage.finished/intake.state); listing it here
+// would mean this derive reading a lifecycle type as a decision.
 var (
 	runScopedDecisionTypes  = []string{"intake.delta_decision", "decision.recorded"}
 	platformDecisionTypes   = []string{"decision.recorded", "deliverable.accepted"}
