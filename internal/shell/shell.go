@@ -718,6 +718,18 @@ func Run(ctx context.Context, opts Options) error {
 			"exchange_root", filepath.Join(stateDir, "exchange"),
 			"title_seat_wired", chatSurf.TitleSeatWired())
 
+		// A chat turn is running only while its driving request is in flight in
+		// this process, so any running row surviving a restart was orphaned by a
+		// crash. Its produced-files window would otherwise stay open forever and
+		// disqualify every later upload by that owner — a silent, unrecoverable
+		// degradation. Close them once, here, before the surface serves.
+		if orphans, err := chatSurf.ReconcileOrphanedTurns(ctx); err != nil {
+			return fmt.Errorf("shell: reconcile orphaned chat turns: %w", err)
+		} else if orphans > 0 {
+			logger.Info("chat: closed orphaned turn windows left by a previous process",
+				"turns", orphans)
+		}
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,

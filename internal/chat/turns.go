@@ -305,7 +305,8 @@ func (s *Store) AbandonTurn(ctx context.Context, viewer, turnID string) (Turn, e
 		Session string `json:"session"`
 		Turn    string `json:"turn"`
 		Kind    string `json:"kind"`
-	}{cur.SessionID, cur.ID, cur.Kind})
+		Reason  string `json:"reason"`
+	}{cur.SessionID, cur.ID, cur.Kind, ReasonHardStop})
 	if err != nil {
 		return Turn{}, fmt.Errorf("chat: encode %s payload: %w", EventTurnAbandoned, err)
 	}
@@ -348,6 +349,102 @@ func (s *Store) AbandonTurn(ctx context.Context, viewer, turnID string) (Turn, e
 	}
 	s.flight.cancel(turnID)
 	return s.Turn(ctx, viewer, turnID)
+}
+
+// ReconcileOrphanedTurns closes the windows of turns that no live process owns,
+// and is called ONCE at bootstrap before the surface serves.
+//
+// A turn is `running` only while the request driving it is in flight IN THIS
+// PROCESS: the transport settles or abandons before it returns, and `inflight`
+// — the only thing that can cancel one — is an in-process map emptied when that
+// request returns. So a `running` row observed at startup is orphaned BY
+// DEFINITION: the process that owned it died mid-turn, and nothing will ever
+// settle or abandon it.
+//
+// Left alone, such a row never writes settled_exchange_seq, so its window stays
+// open forever — and an open window is an unconditional disqualifier, so every
+// later upload by that owner would be attributed to no turn, for good. That is a
+// silent degradation with no recovery, and strictly worse than the ambiguity the
+// disqualifier exists to prevent: honest absence is the answer to "which turn
+// produced this", not to "does attribution work at all".
+//
+// The reconciliation is an abandonment, not a settlement: what the turn was
+// doing when the process died is unknown, and a settled record would claim an
+// outcome nobody observed. The record survives with its window closed, which is
+// the §37-C shape — the ending is recorded even though the act did not finish.
+func (s *Store) ReconcileOrphanedTurns(ctx context.Context) (int, error) {
+	var closed int
+	err := s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx,
+			`SELECT turn_id, session_id, user_id, kind FROM chat_turns WHERE state = ?`,
+			StateRunning)
+		if err != nil {
+			return fmt.Errorf("chat: read orphaned turns: %w", err)
+		}
+		type orphan struct{ turnID, sessionID, userID, kind string }
+		var orphans []orphan
+		for rows.Next() {
+			var o orphan
+			if err := rows.Scan(&o.turnID, &o.sessionID, &o.userID, &o.kind); err != nil {
+				rows.Close()
+				return fmt.Errorf("chat: scan orphaned turn: %w", err)
+			}
+			orphans = append(orphans, o)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("chat: read orphaned turns: %w", err)
+		}
+		rows.Close()
+		if len(orphans) == 0 {
+			return nil
+		}
+		// The watermark here is EXACT rather than approximate: uploads run in the
+		// same process, so nothing can have entered the manifest while that
+		// process was dead, and MAX(seq) at bootstrap is MAX(seq) at the crash.
+		//
+		// Honest note: this write records the truth but is not behaviourally
+		// observable, and no test claims otherwise. Every running turn is
+		// reconciled in this one pass, and any turn opened afterwards starts at
+		// this same watermark — so no later window can overlap an orphan's, and
+		// the value it closes at cannot change an attribution. What actually
+		// unblocks the owner is the state flip below.
+		var settleSeq int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT IFNULL(MAX(seq), 0) FROM chat_exchange_files`).Scan(&settleSeq); err != nil {
+			return fmt.Errorf("chat: read exchange watermark: %w", err)
+		}
+		now := s.stamp()
+		for _, o := range orphans {
+			payload, err := json.Marshal(struct {
+				Session string `json:"session"`
+				Turn    string `json:"turn"`
+				Kind    string `json:"kind"`
+				Reason  string `json:"reason"`
+			}{o.sessionID, o.turnID, o.kind, ReasonProcessRestart})
+			if err != nil {
+				return fmt.Errorf("chat: encode %s payload: %w", EventTurnAbandoned, err)
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE chat_turns SET state = ?, settled_exchange_seq = ?, settled_ts = ?
+				  WHERE turn_id = ? AND state = ?`,
+				StateAbandoned, settleSeq, now, o.turnID, StateRunning); err != nil {
+				return fmt.Errorf("chat: reconcile orphaned turn: %w", err)
+			}
+			if _, err := s.log.AppendTx(ctx, tx, eventlog.Append{
+				UserID: o.userID, Type: EventTurnAbandoned,
+				SchemaVersion: chatEventSchemaVersion, Payload: payload,
+			}); err != nil {
+				return err
+			}
+			closed++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return closed, nil
 }
 
 // Turn reads one turn if the viewer owns it, and serves its produced-files list

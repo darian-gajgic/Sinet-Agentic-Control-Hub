@@ -63,6 +63,15 @@ const (
 	EventFileDeleted    = "chat.file_deleted"
 )
 
+// Why a turn was abandoned. A hard-stop and a crash both end a turn without
+// settling it, but they are different facts and the audit must not blur them:
+// one is a person's act, the other is the platform reconciling a window nobody
+// closed. Both ride chat.turn_abandoned with the same payload shape.
+const (
+	ReasonHardStop       = "hard_stop"
+	ReasonProcessRestart = "process_restart"
+)
+
 const chatEventSchemaVersion = 1
 
 // The structural bounds of this family. NONE of them is a ⚙ setting: S15.7 names

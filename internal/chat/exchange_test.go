@@ -591,6 +591,168 @@ func TestOverlappingTurnWindowsAttributeToAtMostOneTurn(t *testing.T) {
 	}
 }
 
+// TestOverlappingTurnWindowsAbstainInEitherSettleOrder is the symmetry half of
+// the rule above, which drives only A-then-B. Whichever turn settles first must
+// not get to claim the ambiguous file merely by being first: the disqualifier
+// looks at the OTHER turn's window whether that window is still open or already
+// closed, so the outcome is identical in both orders.
+func TestOverlappingTurnWindowsAbstainInEitherSettleOrder(t *testing.T) {
+	e := newEnv(t)
+	e.store.Now = func() time.Time { return time.Date(2026, 7, 20, 9, 2, 0, 0, time.UTC) }
+	sa, _ := e.store.CreateSession(e.ctx, "alice")
+	sb, _ := e.store.CreateSession(e.ctx, "alice")
+
+	turnA, _, err := e.store.BeginTurn(e.ctx, "alice", sa.ID, chat.KindAsk, "opened first")
+	if err != nil {
+		t.Fatalf("begin A: %v", err)
+	}
+	turnB, _, err := e.store.BeginTurn(e.ctx, "alice", sb.ID, chat.KindAsk, "opened second")
+	if err != nil {
+		t.Fatalf("begin B: %v", err)
+	}
+	ambiguous := upload(t, e, "alice", "dropped-in.csv", "id,amount\n1,42\n")
+
+	// B settles FIRST this time — the reverse of the committed case.
+	settledB, err := e.store.SettleTurn(e.ctx, "alice", turnB.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle B: %v", err)
+	}
+	settledA, err := e.store.SettleTurn(e.ctx, "alice", turnA.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle A: %v", err)
+	}
+	if contains(settledB.Produced, ambiguous.ID) {
+		t.Errorf("B settled first and claimed %s (produced=%v) — settling first is not evidence of having produced anything",
+			ambiguous.ID, settledB.Produced)
+	}
+	if contains(settledA.Produced, ambiguous.ID) {
+		t.Errorf("A claimed %s (produced=%v) although B's window spanned it too", ambiguous.ID, settledA.Produced)
+	}
+}
+
+// TestAbandonedTurnStillClosesItsWindow guards an invariant that is otherwise
+// unprotected: AbandonTurn writes settled_exchange_seq. An abandoned turn claims
+// nothing itself, so no assertion about ITS produced list can catch the omission
+// — the damage shows up on the OTHER turn, which would then claim an ambiguous
+// file unopposed. This is the ordinary hard-stop path, not an exotic one.
+func TestAbandonedTurnStillClosesItsWindow(t *testing.T) {
+	e := newEnv(t)
+	e.store.Now = func() time.Time { return time.Date(2026, 7, 20, 9, 4, 0, 0, time.UTC) }
+	sa, _ := e.store.CreateSession(e.ctx, "alice")
+	sb, _ := e.store.CreateSession(e.ctx, "alice")
+
+	stopped, _, err := e.store.BeginTurn(e.ctx, "alice", sa.ID, chat.KindAsk, "this one gets stopped")
+	if err != nil {
+		t.Fatalf("begin stopped: %v", err)
+	}
+	survivor, _, err := e.store.BeginTurn(e.ctx, "alice", sb.ID, chat.KindAsk, "this one runs on")
+	if err != nil {
+		t.Fatalf("begin survivor: %v", err)
+	}
+	ambiguous := upload(t, e, "alice", "dropped-in.csv", "id,amount\n1,42\n")
+
+	if _, err := e.store.AbandonTurn(e.ctx, "alice", stopped.ID); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	settled, err := e.store.SettleTurn(e.ctx, "alice", survivor.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle survivor: %v", err)
+	}
+	if contains(settled.Produced, ambiguous.ID) {
+		t.Errorf("the surviving turn claimed %s (produced=%v) — a hard-stopped turn's window was open while that file arrived, so nothing resolves which turn caused it",
+			ambiguous.ID, settled.Produced)
+	}
+}
+
+// TestOrphanedRunningTurnIsReconciledAtBootstrap covers the one path that
+// reaches neither settle nor abandon: the process dies mid-turn. The row stays
+// running, and a running turn is an unconditional disqualifier — so without
+// reconciliation that owner's produced-files attribution is dead permanently,
+// silently, with nothing to recover it. The control at the end is what makes
+// this test non-vacuous: attribution must WORK after reconciling, not merely
+// stop being blocked.
+func TestOrphanedRunningTurnIsReconciledAtBootstrap(t *testing.T) {
+	e := newEnv(t)
+	e.store.Now = func() time.Time { return time.Date(2026, 7, 20, 9, 6, 0, 0, time.UTC) }
+	orphanSession, _ := e.store.CreateSession(e.ctx, "alice")
+	live, _ := e.store.CreateSession(e.ctx, "alice")
+	bobSession, _ := e.store.CreateSession(e.ctx, "bob")
+
+	// The crash: a turn begun and never settled or abandoned.
+	orphan, _, err := e.store.BeginTurn(e.ctx, "alice", orphanSession.ID, chat.KindAsk, "interrupted by a crash")
+	if err != nil {
+		t.Fatalf("begin orphan: %v", err)
+	}
+
+	closed, err := e.store.ReconcileOrphanedTurns(e.ctx)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if closed != 1 {
+		t.Fatalf("reconciled %d turns, want 1", closed)
+	}
+	got, err := e.store.Turn(e.ctx, "alice", orphan.ID)
+	if err != nil {
+		t.Fatalf("read orphan: %v", err)
+	}
+	if got.State != chat.StateAbandoned {
+		t.Errorf("orphaned turn state = %q, want %q — an unfinished turn is abandoned, never settled: nobody observed its outcome",
+			got.State, chat.StateAbandoned)
+	}
+	if n := e.eventCount(t, chat.EventTurnAbandoned); n != 1 {
+		t.Errorf("chat.turn_abandoned rows = %d, want 1 — closing a window is a mutation and has a record", n)
+	}
+	var reason string
+	if err := e.db.QueryRowContext(e.ctx,
+		`SELECT json_extract(payload, '$.reason') FROM run_events WHERE type = ?`,
+		chat.EventTurnAbandoned).Scan(&reason); err != nil {
+		t.Fatalf("read reason: %v", err)
+	}
+	if reason != chat.ReasonProcessRestart {
+		t.Errorf("abandon reason = %q, want %q — a crash and a person's hard-stop are different facts",
+			reason, chat.ReasonProcessRestart)
+	}
+
+	// Reconciling twice is a no-op: nothing is left running.
+	again, err := e.store.ReconcileOrphanedTurns(e.ctx)
+	if err != nil {
+		t.Fatalf("reconcile again: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("second reconcile closed %d turns, want 0", again)
+	}
+
+	// THE CONTROL. Attribution must work again for that owner — the orphan's
+	// window is closed, so a later turn claims what arrives during it. Without
+	// the reconciliation above this is [] forever.
+	next, _, err := e.store.BeginTurn(e.ctx, "alice", live.ID, chat.KindAsk, "life goes on")
+	if err != nil {
+		t.Fatalf("begin next: %v", err)
+	}
+	produced := upload(t, e, "alice", "after-the-crash.csv", "a,b\n5,6\n")
+	settled, err := e.store.SettleTurn(e.ctx, "alice", next.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle next: %v", err)
+	}
+	if !contains(settled.Produced, produced.ID) {
+		t.Fatalf("after reconciliation a later turn produced %v, want %s — a crashed turn must not disable this owner's attribution for good",
+			settled.Produced, produced.ID)
+	}
+	// Bob was never affected: the blast radius of an orphan is its own owner.
+	bobTurn, _, err := e.store.BeginTurn(e.ctx, "bob", bobSession.ID, chat.KindAsk, "unrelated")
+	if err != nil {
+		t.Fatalf("begin bob: %v", err)
+	}
+	bobFile := upload(t, e, "bob", "bobs.csv", "c,d\n7,8\n")
+	bobSettled, err := e.store.SettleTurn(e.ctx, "bob", bobTurn.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle bob: %v", err)
+	}
+	if !contains(bobSettled.Produced, bobFile.ID) {
+		t.Errorf("bob's turn produced %v, want %s", bobSettled.Produced, bobFile.ID)
+	}
+}
+
 func contains(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {
