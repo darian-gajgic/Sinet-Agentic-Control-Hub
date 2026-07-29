@@ -1,5 +1,7 @@
 import { expect, test } from 'vitest'
 
+import { fixtures } from './doubles'
+
 /**
  * The checkable NEGATIVES of the oversight surfaces (P3/CONVENTIONS.md §42;
  * Spec S15.12, §30, §37).
@@ -189,16 +191,57 @@ test('the settings UI declares no ⚙ key of its own', () => {
   const hits: string[] = []
   for (const [path, raw] of Object.entries(appSources())) {
     if (!path.includes('etting')) continue
-    for (const line of raw.split('\n')) {
-      // Route paths and event types are not ⚙ keys; the keys this forbids are
-      // the ones a control would be hand-placed by.
-      // Route paths, event types and CATALOG QUERY names are not ⚙ keys; the
-      // keys this forbids are the ones a control would be hand-placed by.
-      if (line.includes('/api/') || line.includes('settings.changed')) continue
-      if (line.includes('historyQuery') || line.trimStart().startsWith('*')) continue
-      if (line.trimStart().startsWith('//')) continue
+    // A DECLARED EVENT-TYPE list is skipped as a block: those strings are the
+    // registry's own type names, and §42 REQUIRES every view to name the ones
+    // it consumes. They are not ⚙ keys.
+    let inTypes = false
+    // Comments come out first: a file is allowed to EXPLAIN a key in prose, and
+    // only code can hand-place a control. String literals stay, because a
+    // hand-placed key would be one.
+    const code = raw.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1')
+    for (const line of code.split('\n')) {
+      if (/EventTypes\s*=\s*\[/.test(line)) inTypes = true
+      if (inTypes) {
+        if (line.includes('] as const')) inTypes = false
+        continue
+      }
+      // Route paths and CATALOG QUERY names are likewise not ⚙ keys; the keys
+      // this forbids are the ones a control would be hand-placed by.
+      if (line.includes('/api/') || line.includes('historyQuery')) continue
+      if (line.trimStart().startsWith('*') || line.trimStart().startsWith('//')) continue
       if (dotted.test(line)) hits.push(`${path}: ${line.trim()}`)
     }
   }
   expect(hits, 'a settings view names a ⚙ key — the form is generated, not hand-built').toEqual([])
+})
+
+test('no view re-declares a REGISTERED answer vocabulary as its own literal', () => {
+  // The four §3.3 verdict values, the two guess sides and the §12 alarm
+  // dispositions are frozen registered text whose only home is
+  // internal/benchmark — changeable solely through a BENCH-REG §17
+  // re-registration. A view that typed one would be a THIRD home for it (after
+  // the registration document and the package that encodes it) and would keep
+  // offering the old wording the day it changed. They reach the buttons as
+  // DATA, through the served vocabulary block.
+  //
+  // The tokens are SPLIT for the same reason the escape scan splits its own:
+  // this file must not contain the literals it forbids. `A` and `B` are not
+  // scannable strings and are covered instead by the served-vocabulary render
+  // test, which asserts the radio set IS the served list.
+  const registered = ['both-' + 'bad', 'fix-and-continue-' + 'accruing', 're-' + 'register']
+  const hits: string[] = []
+  for (const [path, raw] of Object.entries(appSources())) {
+    for (const literal of registered) {
+      if (raw.includes(literal)) hits.push(`${path}: ${literal}`)
+    }
+  }
+  expect(hits, 'a view file re-typed a registered answer value instead of rendering the served one').toEqual([])
+
+  // Probe: the scan can fail, and the fixture really does carry the strings —
+  // so "no hits" means "rendered from data", not "the value never appears".
+  expect(registered.some((l) => `const v = '${registered[0]}'`.includes(l))).toBe(true)
+  const served = JSON.stringify(fixtures.benchmarkVerdicts())
+  for (const literal of registered) {
+    expect(served, `the served vocabulary does not carry ${literal}`).toContain(literal)
+  }
 })

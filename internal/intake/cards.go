@@ -167,8 +167,19 @@ type DeltaItem struct {
 type DeltaBody struct {
 	Origin string      `json:"origin"` // e.g. "freshness_revalidation" | "sibling_collision" | "contested_card" | "confinement_widening"
 	Items  []DeltaItem `json:"items"`
-	Help   HelpBlock   `json:"help"`
+	// Actions is the card's OWN answer vocabulary — Approve · Reject — for the
+	// same reason ApprovalBody carries one: a surface renders controls from the
+	// card, so a card that declared none was structurally unanswerable from any
+	// surface but the one that hard-coded its verbs. It is built from the same
+	// ChoiceApproveDelta/ChoiceRejectDelta constants applyDeltaAnswer validates
+	// against, so the offered set and the accepted set are one list.
+	Actions []string  `json:"actions"`
+	Help    HelpBlock `json:"help"`
 }
+
+// DeltaActions is the delta card's answer vocabulary, from the constants the
+// answer path itself reads. One list, two readers.
+func DeltaActions() []string { return []string{ChoiceApproveDelta, ChoiceRejectDelta} }
 
 // VerdictRecord is one recorded critique outcome.
 type VerdictRecord struct {

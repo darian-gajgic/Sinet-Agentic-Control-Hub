@@ -1164,6 +1164,19 @@ func TestDeltaReApproval(t *testing.T) {
 	if card.Kind != intake.CardDelta {
 		t.Fatalf("card kind %q", card.Kind)
 	}
+	// The card declares its OWN answer vocabulary (B6-6 drain D4). Until it did,
+	// a delta card carried {origin, items, help} and nothing else — so a surface
+	// that renders controls from the card had nothing to render, while the card
+	// held the task's OpenAskID open. The offered set is built from the same
+	// constants applyDeltaAnswer validates against, so it cannot offer a verb
+	// the answer path would refuse.
+	if got := card.Delta.Actions; len(got) != 2 ||
+		got[0] != intake.ChoiceApproveDelta || got[1] != intake.ChoiceRejectDelta {
+		t.Fatalf("delta card actions = %v, want the approve/reject vocabulary its answer path accepts", got)
+	}
+	// …and the verb it offers is the one the answer path below actually applies,
+	// end to end, so "offered" and "accepted" are the same list in practice.
+
 	kinds := map[intake.DeltaKind]int{}
 	confinement := false
 	for _, it := range card.Delta.Items {

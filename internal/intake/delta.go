@@ -145,8 +145,9 @@ func (p *Pipeline) ProposeDelta(ctx context.Context, taskID, origin string, next
 		Version: st.CardVersion, IssuedTS: p.nowRFC3339(),
 		Clearance: st.Clearance, Tier: st.Tier,
 		Delta: &DeltaBody{
-			Origin: origin,
-			Items:  items,
+			Origin:  origin,
+			Items:   items,
+			Actions: DeltaActions(),
 			Help: HelpBlock{
 				What:      "The approved plan changed. Only the listed items differ; everything else stays exactly as approved.",
 				Wrong:     "A REMOVED item disappears from the contract; a MODIFIED item changes what gets verified.",

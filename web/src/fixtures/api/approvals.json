@@ -224,12 +224,16 @@
       "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
       "batchable": false,
       "step_up_required": false,
-      "payload_hash": "d116b7e4f87d25749c2099925b43dd477b731b188cba6c41733a2affb73bfb25",
+      "payload_hash": "6b6f55a055c7d4e8c6d40d9fa7082209099467b7920d72aad2ee71da28592f22",
       "observed_ts": "2026-07-20T09:02:00Z",
       "expiry_at": "2026-07-20T09:02:20Z",
       "stale": true,
       "stale_reasons": [
         "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "actions": [
+        "approve",
+        "reject"
       ],
       "card": {
         "kind": "approval.delta",
@@ -257,6 +261,10 @@
               "kind": "REMOVED",
               "target": "assumption:one line per change is enough detail"
             }
+          ],
+          "actions": [
+            "approve",
+            "reject"
           ],
           "help": {
             "what": "The approved plan changed. Only the listed items differ; everything else stays exactly as approved.",
@@ -609,6 +617,58 @@
             "approve",
             "replan"
           ]
+        }
+      }
+    },
+    {
+      "id": "ask:ask-sweep",
+      "kind": "ask",
+      "owner": "alice",
+      "run_id": "r-archive",
+      "tier": "low",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "10edad59d48ad04ffe1a73a64e953e6ff21c40149c2e59ad48968800c4448fa1",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "actions": [
+        "replan",
+        "drop_criterion"
+      ],
+      "card": {
+        "kind": "decision.coverage",
+        "task_id": "t-archive",
+        "run_id": "r-archive",
+        "version": 1,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.91,
+        "tier": "trivial",
+        "decision": {
+          "summary": "The archive plan does not cover: AC-1. Auto-fix rounds are exhausted.",
+          "detail": [
+            "AC-1"
+          ],
+          "choices": [
+            {
+              "label": "Re-plan once more",
+              "value": "replan"
+            },
+            {
+              "label": "Drop the criterion (recorded, visible)",
+              "value": "drop_criterion"
+            }
+          ],
+          "help": {
+            "what": "An agreed acceptance criterion has no plan step delivering it.",
+            "wrong": "Proceeding with the gap means that criterion will not be worked on or verified.",
+            "recommend": "Re-plan once more; drop the criterion only if you no longer want it."
+          }
         }
       }
     },

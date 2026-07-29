@@ -283,17 +283,22 @@ export const SinetControl = withJsonFormsControlProps((props: ControlProps) => {
           </button>
           {served.numeric && <BoundsEditor v={served} ctx={ctx} />}
           {served.per_user && <PerUserEditor v={served} ctx={ctx} />}
-          <button
-            type="button"
-            data-action="history"
-            onClick={() => {
-              ctx.openHistory(key)
-            }}
-          >
-            History
-          </button>
         </div>
       )}
+      {/* History is a READ, and the ratified OQ3 gives members the full view —
+          values, bounds, badges, help AND history. The server gates this route
+          at nothing beyond the session, so hiding it behind the write flag
+          would be this surface inventing an authority the platform does not
+          have. It sits outside the editable gate on purpose. */}
+      <button
+        type="button"
+        data-action="history"
+        onClick={() => {
+          ctx.openHistory(key)
+        }}
+      >
+        History
+      </button>
       {outcome && (
         <p className={outcome.failed ? 'error' : 'notice'} data-write-outcome={outcome.failed ? 'failed' : 'applied'}>
           {outcome.detail}

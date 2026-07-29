@@ -550,6 +550,18 @@ export type ApprovalBatchResult = { outcomes: ApprovalBatchOutcome[]; cursor: nu
  *  than a guess or a blind retry (S15.2). */
 export type StalePayload = { error: string; detail: string; current: ApprovalItem }
 
+/** The S02.3 parked→running edge, as internal/stage records it. `generation` is
+ *  the bump that makes a second resume inert, and `detail` is the platform's own
+ *  account of what it did — this client authors none of its own. */
+export type RunResumed = {
+  run_id: string
+  from: string
+  to: string
+  applied: boolean
+  generation: number
+  detail: string
+}
+
 export type FlagSuppressed = { run_id?: string; anomaly_class: string; suppressed: boolean; detail: string }
 
 export type DriftDismissed = {
@@ -601,9 +613,31 @@ export type BenchmarkVerdictForms = {
   detail: string
 }
 
-/** The reveal is a READ of the committed §14 record. Its absence with
+/**
+ * The committed §14 record, read back after the verdict landed — the ONLY place
+ * arm identity is readable (BENCH-REG §3.4).
+ *
+ * These are the fields the post-record promise is ABOUT: which blind side was
+ * the platform's, the two arms' observed model identities, and whether the
+ * mandatory guess was right (the §5 blindness measurement). Typing them is what
+ * lets the form render the answer the voter just earned instead of only saying
+ * that an answer exists.
+ */
+export type VerdictReveal = {
+  pair_id: string
+  platform_side: string
+  platform_model: string
+  direct_model: string
+  verdict: string
+  platform_guess: string
+  guess_correct: boolean
+  epoch_id: string
+  recorded_ts: string
+}
+
+/** The reveal is a READ of the committed record. Its absence with
  *  `recorded:true` is the honest late-reveal branch, not a failed vote. */
-export type VerdictRecorded = { pair_id: string; recorded: boolean; reveal?: unknown; detail: string }
+export type VerdictRecorded = { pair_id: string; recorded: boolean; reveal?: VerdictReveal; detail: string }
 
 export type VerdictDeclined = { pair_id: string; declined: boolean; detail: string }
 
@@ -894,7 +928,7 @@ export const api = {
     post<FlagSuppressed>('/api/watchdog/flags/suppress', body),
   /** "Resume — I was wrong" (S14.4). Path-only and owner-scoped; a run parked on
    *  an OPEN ask refuses with a pointer, which renders verbatim. */
-  resumeRun: (run: string) => post<unknown>(`/api/runs/${encodeURIComponent(run)}/resume`, {}),
+  resumeRun: (run: string) => post<RunResumed>(`/api/runs/${encodeURIComponent(run)}/resume`, {}),
   dismissDrift: (id: string, reason?: string) =>
     post<DriftDismissed>(`/api/approvals/${encodeURIComponent(id)}/dismiss`, reason ? { reason } : {}),
   acknowledgeConformance: (id: string, reason?: string) =>

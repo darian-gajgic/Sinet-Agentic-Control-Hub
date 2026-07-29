@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -310,6 +311,23 @@ func TestAddRowRefusesAnInadmissibleRow(t *testing.T) {
 		{"no source", metering.AddRowRequest{Row: metering.PriceRow{Model: "m", Lane: "l", EffectiveFrom: at, VerifiedOn: at}, Actor: "op"}},
 		{"no effective date", metering.AddRowRequest{Row: metering.PriceRow{Model: "m", Lane: "l", Source: "s", VerifiedOn: at}, Actor: "op"}},
 		{"no verified date", metering.AddRowRequest{Row: metering.PriceRow{Model: "m", Lane: "l", Source: "s", EffectiveFrom: at}, Actor: "op"}},
+		// The B6-6 drain: a row whose DECLARED unit prices are not real positive
+		// numbers. This is the store defending the UNPRICED posture from the
+		// inside — with no row, usage prices UNPRICED and says so; with a row
+		// priced at nothing, the lane is "priced" and every call is charged $0
+		// with no trace that anything was missing (S10.1; P-T08-1). A blank
+		// field in an operator's form is exactly how such a row gets written.
+		{"no unit price at all", metering.AddRowRequest{
+			Row: metering.PriceRow{Model: "m", Lane: "l", Source: "s", EffectiveFrom: at, VerifiedOn: at}, Actor: "op"}},
+		{"a negative unit price", metering.AddRowRequest{
+			Row: metering.PriceRow{Model: "m", Lane: "l", Source: "s", EffectiveFrom: at, VerifiedOn: at,
+				Prices: metering.UnitPrices{InputUSD: 1e-6, OutputUSD: -5e-6}}, Actor: "op"}},
+		{"a NaN unit price", metering.AddRowRequest{
+			Row: metering.PriceRow{Model: "m", Lane: "l", Source: "s", EffectiveFrom: at, VerifiedOn: at,
+				Prices: metering.UnitPrices{InputUSD: 1e-6, OutputUSD: math.NaN()}}, Actor: "op"}},
+		{"an infinite unit price", metering.AddRowRequest{
+			Row: metering.PriceRow{Model: "m", Lane: "l", Source: "s", EffectiveFrom: at, VerifiedOn: at,
+				Prices: metering.UnitPrices{InputUSD: math.Inf(1)}}, Actor: "op"}},
 	} {
 		if _, err := live.AddRow(ctx, c.req); !errors.Is(err, metering.ErrBadPriceRow) {
 			t.Errorf("AddRow with %s: %v, want ErrBadPriceRow", c.what, err)

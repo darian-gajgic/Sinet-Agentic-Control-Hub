@@ -201,6 +201,12 @@ func fixtureWorld(t *testing.T) *backend {
 			"Write this week's household note from the calendar and the task board.")},
 		{"ask-claim", "r-claim", "question", fixtureTrivialApprovalCard(t, "t-claim", "r-claim",
 			"Rebuild the search index over the household's notes folder.")},
+		// A THIRD batchable card whose vocabulary DIFFERS from the other two.
+		// Without it every batchable card shared one action list and the OQ10
+		// constraint — a batch answers only cards that accept the chosen action
+		// — was unobservable: removing the filter changed nothing anybody could
+		// see. The three now overlap on `replan` and diverge everywhere else.
+		{"ask-sweep", "r-archive", "question", fixtureTrivialCoverageCard(t)},
 	} {
 		exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
 			a.id, a.run, "alice", a.snapshot, a.status, fxT2)
@@ -674,18 +680,19 @@ func fixtureTrivialApprovalCard(t *testing.T, taskID, runID, restatement string)
 // fixtureDeltaCard is the post-approval delta-only card: exactly what changed
 // against the frozen artifacts, in the ADDED / MODIFIED / REMOVED vocabulary.
 //
-// It is in the fixture set precisely because of what it does NOT carry — see
-// the reported gap on readCardShape: a real delta card declares no action
-// vocabulary, so its served `actions` is empty and a surface that renders
-// controls from the card correctly renders none. The committed body is what
-// makes that a checkable fact rather than an assertion.
+// It carries the producer's OWN two-verb vocabulary (Approve · Reject), which
+// the drain added at issuance: before it, a real delta card declared none, so a
+// pending delta was unanswerable from any surface that renders controls from
+// the card — while it held the task's OpenAskID open. The committed body is what
+// makes the fix a checkable fact rather than an assertion.
 func fixtureDeltaCard(t *testing.T) string {
 	t.Helper()
 	return fixtureCardJSON(t, intake.Card{
 		Kind: intake.CardDelta, TaskID: "t-ship", RunID: "r-ship", Version: 3,
 		IssuedTS: fxT2, Clearance: 0.82, Tier: intake.TierStandard,
 		Delta: &intake.DeltaBody{
-			Origin: "freshness_revalidation",
+			Origin:  "freshness_revalidation",
+			Actions: intake.DeltaActions(),
 			Items: []intake.DeltaItem{
 				{Kind: intake.DeltaAdded, Target: "AC-3", New: "The notes link each entry to its merge."},
 				{Kind: intake.DeltaModified, Target: "S-2",
@@ -696,6 +703,31 @@ func fixtureDeltaCard(t *testing.T) string {
 				What:      "The approved plan changed. Only the listed items differ; everything else stays exactly as approved.",
 				Wrong:     "A REMOVED item disappears from the contract; a MODIFIED item changes what gets verified.",
 				Recommend: "Read each line — the card shows the complete change.",
+			},
+		},
+	})
+}
+
+// fixtureTrivialCoverageCard is a decision card in the zero-interaction band,
+// so it folds onto the inbox's LOW tier and batches — with the DECISION family's
+// answer vocabulary rather than the approval family's. It is what makes the
+// OQ10 mixed-vocabulary constraint a thing a test can watch work.
+func fixtureTrivialCoverageCard(t *testing.T) string {
+	t.Helper()
+	return fixtureCardJSON(t, intake.Card{
+		Kind: intake.CardCoverage, TaskID: "t-archive", RunID: "r-archive", Version: 1,
+		IssuedTS: fxT2, Clearance: 0.91, Tier: intake.TierTrivial,
+		Decision: &intake.DecisionBody{
+			Summary: "The archive plan does not cover: AC-1. Auto-fix rounds are exhausted.",
+			Detail:  []string{"AC-1"},
+			Choices: []intake.Option{
+				{Label: "Re-plan once more", Value: intake.ChoiceReplan},
+				{Label: "Drop the criterion (recorded, visible)", Value: intake.ChoiceDropCriterion},
+			},
+			Help: intake.HelpBlock{
+				What:      "An agreed acceptance criterion has no plan step delivering it.",
+				Wrong:     "Proceeding with the gap means that criterion will not be worked on or verified.",
+				Recommend: "Re-plan once more; drop the criterion only if you no longer want it.",
 			},
 		},
 	})

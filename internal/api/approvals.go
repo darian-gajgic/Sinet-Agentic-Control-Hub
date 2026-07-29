@@ -599,7 +599,8 @@ type cardShape struct {
 		StaleReasons []string `json:"stale_reasons"`
 	} `json:"approval"`
 	Delta *struct {
-		Origin string `json:"origin"`
+		Origin  string   `json:"origin"`
+		Actions []string `json:"actions"`
 	} `json:"delta"`
 	Decision *struct {
 		Choices []struct {
@@ -697,16 +698,18 @@ func readCardShape(snapshot json.RawMessage) (tier string, actions []string, sta
 		for _, ch := range c.Decision.Choices {
 			actions = append(actions, ch.Value)
 		}
+	case c.Delta != nil:
+		// The delta card's own two verbs. Until the B6-6 drain the producer
+		// declared none, so a pending delta served an EMPTY action list and was
+		// unanswerable from any surface that renders controls from the card —
+		// while it held the task's OpenAskID open. The fix landed in the
+		// producer (internal/intake issues the vocabulary from the same
+		// constants its answer path validates against); this limb reads it,
+		// exactly as the other three read theirs. Naming the verbs HERE instead
+		// would have put the pipeline's answer vocabulary in the transport,
+		// which is the copy this derivation exists to avoid.
+		actions = c.Delta.Actions
 	}
-	// REPORTED, not papered over: a DELTA card (c.Delta != nil) declares no
-	// action vocabulary at all. Its answer rides `{"action":"approve"|"reject"}`
-	// (intake/delta.go's applyDeltaAnswer), but internal/intake's delta card
-	// carries only {origin, items, help} — no `approval.actions`, no top-level
-	// `choices`, no `decision`. So its served `actions` is empty and a surface
-	// that renders controls from the card's own vocabulary correctly renders
-	// none. Naming the two verbs HERE would put the intake pipeline's answer
-	// vocabulary in the transport, which is the copy this derivation exists to
-	// avoid; the fix belongs in the producer that issues the card.
 	return tier, actions, stale, reasons
 }
 

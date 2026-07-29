@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from 'react'
 
 import {
   api,
+  type VerdictReveal,
   staleCard,
   type ApprovalBatchOutcome,
   type ApprovalItem,
@@ -745,9 +746,12 @@ type ActState = {
   note: string
   detail: string
   failed: boolean
+  /** The committed §14 record a verdict answer read back — the arm identities
+   *  the post-record promise is about. Null on every other act. */
+  reveal: VerdictReveal | null
 }
 
-const idle: ActState = { busy: false, note: '', detail: '', failed: false }
+const idle: ActState = { busy: false, note: '', detail: '', failed: false, reveal: null }
 
 /**
  * Acts renders one control per SERVED action and nothing else.
@@ -776,11 +780,17 @@ function Acts({
   const actions = item.actions ?? []
 
   const run = useCallback(
-    async (label: string, fire: () => Promise<{ detail?: string; note?: string }>) => {
-      setState({ busy: true, note: `${label}…`, detail: '', failed: false })
+    async (label: string, fire: () => Promise<ActResult>) => {
+      setState({ busy: true, note: `${label}…`, detail: '', failed: false, reveal: null })
       try {
         const out = await fire()
-        setState({ busy: false, note: out.note ?? label, detail: out.detail ?? '', failed: false })
+        setState({
+          busy: false,
+          note: out.note ?? label,
+          detail: out.detail ?? '',
+          failed: false,
+          reveal: out.reveal ?? null,
+        })
       } catch (err: unknown) {
         const fresh = staleCard(err)
         if (fresh) {
@@ -788,7 +798,7 @@ function Acts({
           onStale(fresh)
           return
         }
-        setState({ busy: false, note: label, detail: describeError(err), failed: true })
+        setState({ busy: false, note: label, detail: describeError(err), failed: true, reveal: null })
       } finally {
         // The PIN exists only for the request it rode in. Clearing it here means
         // it is gone whether the answer applied, was refused, or failed.
@@ -898,6 +908,7 @@ function Acts({
           {state.detail !== '' && <span className="muted"> — {state.detail}</span>}
         </p>
       )}
+      {state.reveal && <Reveal reveal={state.reveal} />}
     </div>
   )
 }
@@ -908,6 +919,60 @@ function Acts({
  *  alarm disposition carries its own beside the disposition it explains. */
 const acceptsReason = ['effect', 'watchdog_flag', 'drift_card', 'conformance_card']
 
+/**
+ * The reveal, rendered.
+ *
+ * This is the one moment BENCH-REG §3.4 has been holding back: the record is
+ * committed, so which blind side was the platform's — and both arms' observed
+ * model identities — are readable at last. Announcing "revealed" and printing
+ * nothing would withhold exactly the thing the announcement is about.
+ *
+ * `guess_correct` is the §5 blindness measurement, scored by the platform. It
+ * renders as the served boolean; nothing here re-scores it.
+ */
+function Reveal({ reveal }: { reveal: VerdictReveal }) {
+  return (
+    <dl className="reveal" data-reveal={reveal.pair_id}>
+      <div>
+        <dt>the platform&apos;s side</dt>
+        <dd data-reveal-side={reveal.platform_side}>{reveal.platform_side}</dd>
+      </div>
+      <div>
+        <dt>your guess</dt>
+        <dd data-guess-correct={reveal.guess_correct ? 'true' : 'false'}>
+          {reveal.platform_guess} — {reveal.guess_correct ? 'right' : 'wrong'}
+        </dd>
+      </div>
+      <div>
+        <dt>the two arms</dt>
+        <dd>
+          platform {reveal.platform_model === '' ? <Absent reason="model not recorded" /> : reveal.platform_model} ·
+          direct {reveal.direct_model === '' ? <Absent reason="model not recorded" /> : reveal.direct_model}
+        </dd>
+      </div>
+      <div>
+        <dt>recorded</dt>
+        <dd>
+          <Stamp ts={reveal.recorded_ts} /> <span className="muted">epoch {reveal.epoch_id}</span>
+        </dd>
+      </div>
+    </dl>
+  )
+}
+
+/** ActResult is what one act reports back: the outcome line, the server's own
+ *  detail, and — for the one act that earns one — the committed record. */
+type ActResult = { note?: string; detail?: string; reveal?: VerdictReveal }
+
+/** conflictID reads the ninth kind's row number off its card, or null when the
+ *  card carries none. Null is the honest answer: a surface that fell back to a
+ *  zero would ask the server to resolve a row that is nobody's. */
+function conflictID(item: ApprovalItem): number | null {
+  const card = item.card as MemoryConflict | undefined
+  const id = card?.conflict_id
+  return typeof id === 'number' && Number.isFinite(id) && id > 0 ? id : null
+}
+
 /** canFire is the ONE structural gate this view applies, and it exists because
  *  BENCH-REG §3.3 is frozen: no verdict without a guess. The backend refuses a
  *  guess-less vote regardless — its constructor cannot express one — so this is
@@ -917,6 +982,9 @@ function canFire(item: ApprovalItem, action: string, form: { verdict: string; gu
     return form.verdict !== '' && form.guess !== ''
   }
   if (item.kind === 'benchmark_alarm' && action === 'dispose') return form.verdict !== ''
+  // A conflict card with no readable row number has nothing to resolve, so the
+  // control does not arm rather than posting a guess at an id.
+  if (item.kind === 'memory_conflict' && action === 'resolve') return conflictID(item) !== null
   return true
 }
 
@@ -957,11 +1025,7 @@ type ActInput = {
  * because pressing a button that silently posts to the wrong route would be
  * worse than a card that says the platform and this surface disagree.
  */
-async function fireAction(
-  item: ApprovalItem,
-  action: string,
-  input: ActInput,
-): Promise<{ detail?: string; note?: string }> {
+async function fireAction(item: ApprovalItem, action: string, input: ActInput): Promise<ActResult> {
   switch (item.kind) {
     case 'ask':
     case 'effect': {
@@ -985,8 +1049,12 @@ async function fireAction(
     }
     case 'watchdog_flag': {
       if (action === 'resume') {
-        await api.resumeRun(item.run_id ?? '')
-        return { note: 'resumed', detail: 'the run is running again — the flag was a false alarm' }
+        // The SERVED outcome, like every other branch here. The first cut
+        // printed a sentence of its own ("the flag was a false alarm") — a
+        // judgement about why the run was released that the platform never
+        // made and this surface has no standing to make.
+        const res = await api.resumeRun(item.run_id ?? '')
+        return { note: `resumed: ${res.from} → ${res.to}`, detail: res.detail }
       }
       const card = item.card as { run_id?: string; anomaly_class?: string } | undefined
       const res = await api.suppressFlag({
@@ -1013,9 +1081,13 @@ async function fireAction(
         return { note: 'declined', detail: res.detail }
       }
       const res = await api.recordVerdict(item.id, input.verdict, input.guess)
+      // The reveal TRAVELS. Saying "revealed" and rendering nothing would make
+      // the surface announce the one thing §3.4 withholds until now and then
+      // withhold it anyway.
       return {
         note: res.reveal ? 'recorded, and revealed' : 'recorded',
         detail: res.detail,
+        reveal: res.reveal,
       }
     }
     case 'benchmark_alarm': {
@@ -1023,8 +1095,18 @@ async function fireAction(
       return { note: `dispositioned: ${res.disposition}`, detail: res.detail }
     }
     case 'memory_conflict': {
-      const card = item.card as MemoryConflict | undefined
-      const res = await api.resolveMemoryConflict(card?.conflict_id ?? 0)
+      const conflict = conflictID(item)
+      if (conflict === null) {
+        // Never post a zero-value guess at an id. A card with no readable
+        // conflict id is a card this surface cannot answer, and saying so is
+        // the honest outcome — posting `0` would ask the server about a row
+        // that is nobody's.
+        return {
+          note: 'not sent',
+          detail: 'this card carries no conflict id, so there is nothing to resolve — re-read the inbox',
+        }
+      }
+      const res = await api.resolveMemoryConflict(conflict)
       return { note: 'resolved', detail: res.detail }
     }
   }
@@ -1049,10 +1131,12 @@ function composeAnswer(item: ApprovalItem, action: string, input: ActInput): unk
     case 'choice':
       return input.criteria.length === 0 ? { choice: action } : { choice: action, criteria: input.criteria }
     case 'answers':
-      // A question card's answer is its slot answers. This surface offers no
-      // slot editor, so it sends the card's own force-proceed shape only when
-      // the person picked the action that means it.
-      return { force_proceed: true }
+      // A question card's answer is its slot answers, and this surface offers
+      // no slot editor — so it composes only the one shape it can honestly
+      // compose, and ONLY for the action that means it. Sending force-proceed
+      // for any served action would answer a question the person did not
+      // answer, under a verb they did press.
+      return action === 'force_proceed' ? { force_proceed: true } : null
     default:
       return null
   }

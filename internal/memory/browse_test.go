@@ -161,3 +161,88 @@ func TestConflictReadsServeTheOpenEdgeToItsAddressee(t *testing.T) {
 		t.Errorf("the closed edge records who answered and when: %+v (%v)", closed, err)
 	}
 }
+
+// TestOpenConflictsForServesOnlyTheAddressee is the ADDRESSEE WALL on the
+// B6-6 browse read that feeds the inbox's ninth card kind.
+//
+// The read exists because a decision surface has to answer "what is waiting on
+// ME?", and the whole reason it is scoped by the addressee — rather than by
+// entry, or by visibility — is that `mayAnswerConflict` is the ONE expression
+// of both who may SEE an open edge and who may RESOLVE it. A read that handed
+// over somebody else's question would put a card on a screen whose verb would
+// refuse it, and would leak the other entry's title and topic while doing so.
+//
+// The direction that matters is the negative one, so it is driven with two
+// people who each have a real conflict of their own: "returns nothing" and "was
+// never scoped" look identical from outside when only one person has any rows.
+func TestOpenConflictsForServesOnlyTheAddressee(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+	f.user("alice", "member")
+	f.user("bob", "member")
+	f.user("op", "operator")
+
+	alice := mustCreate(t, f.gate, "alice", memory.Draft{
+		Scope: memory.ScopeUser, Kind: memory.KindLesson, Title: "a",
+		Content: "always squash", TopicKey: "merge-style"})
+	mustCreate(t, f.gate, "alice", memory.Draft{
+		Scope: memory.ScopeUser, Kind: memory.KindLesson, Title: "b",
+		Content: "never squash", TopicKey: "merge-style"})
+	mustCreate(t, f.gate, "bob", memory.Draft{
+		Scope: memory.ScopeUser, Kind: memory.KindLesson, Title: "c",
+		Content: "rebase first", TopicKey: "rebase-style"})
+	mustCreate(t, f.gate, "bob", memory.Draft{
+		Scope: memory.ScopeUser, Kind: memory.KindLesson, Title: "d",
+		Content: "never rebase", TopicKey: "rebase-style"})
+
+	mine, err := f.store.OpenConflictsFor(ctx, "alice")
+	if err != nil {
+		t.Fatalf("OpenConflictsFor(alice): %v", err)
+	}
+	if len(mine) != 1 {
+		t.Fatalf("alice has %d open conflicts, want her own 1: %+v", len(mine), mine)
+	}
+	if mine[0].Affected != "alice" || mine[0].Status != "open" || mine[0].Question == "" {
+		t.Fatalf("the served edge is not alice's own open question: %+v", mine[0])
+	}
+	if mine[0].EntryID != alice.ID && mine[0].OtherEntryID != alice.ID {
+		t.Errorf("the edge names neither of alice's entries: %+v", mine[0])
+	}
+
+	// Bob has a conflict of his OWN, so his read being disjoint from alice's is
+	// a fact about the scoping rather than about an empty table.
+	his, err := f.store.OpenConflictsFor(ctx, "bob")
+	if err != nil {
+		t.Fatalf("OpenConflictsFor(bob): %v", err)
+	}
+	if len(his) != 1 || his[0].Affected != "bob" {
+		t.Fatalf("bob has %d open conflicts, want his own 1: %+v", len(his), his)
+	}
+	if his[0].ID == mine[0].ID {
+		t.Error("alice and bob were served the SAME edge — the read is not addressee-scoped")
+	}
+
+	// The OPERATOR has no limb here, deliberately: this is the one read on the
+	// platform where the role bit buys nothing, because the question is about
+	// somebody's own stored knowledge and the resolve verb accepts only them.
+	ops, err := f.store.OpenConflictsFor(ctx, "op")
+	if err != nil {
+		t.Fatalf("OpenConflictsFor(op): %v", err)
+	}
+	if len(ops) != 0 {
+		t.Errorf("the operator was served %d conflicts addressed to other people: %+v", len(ops), ops)
+	}
+
+	// RESOLVED leaves the read: "open question" is what the surface means by a
+	// waiting card, and the row moving is what takes the card away.
+	if err := f.gate.ResolveConflict(ctx, "alice", mine[0].ID); err != nil {
+		t.Fatalf("ResolveConflict: %v", err)
+	}
+	if got, err := f.store.OpenConflictsFor(ctx, "alice"); err != nil || len(got) != 0 {
+		t.Errorf("a resolved conflict is still listed as open: %+v (%v)", got, err)
+	}
+	// …and it takes only her own with it.
+	if got, err := f.store.OpenConflictsFor(ctx, "bob"); err != nil || len(got) != 1 {
+		t.Errorf("alice's resolution changed bob's open list: %+v (%v)", got, err)
+	}
+}

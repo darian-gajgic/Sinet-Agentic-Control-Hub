@@ -10,7 +10,7 @@ import {
   type StoredPricesView,
 } from './api'
 import type { EventStream } from './events'
-import { describeError, inboxEventTypes, useLive } from './live'
+import { describeError, useLive } from './live'
 import { Absent, Empty, Freshness, Stamp } from './parts'
 import {
   HistoryRows,
@@ -385,6 +385,18 @@ function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) =
     source: '',
   })
   const [reason, setReason] = useState('')
+  // A declared unit price must PARSE as a real positive number before the
+  // append is offered. `Number('')` is 0 and `Number('abc')` is NaN, so a blank
+  // or mistyped field would otherwise compose a row priced at nothing — and a
+  // row that exists prices its lane, so every call on it would be charged $0
+  // with no trace, which is exactly the silent zero the UNPRICED posture exists
+  // to bar (S10.1). This is input-shape validation at the boundary; the STORE
+  // is the authority and refuses the same row on its own terms.
+  const priced = (raw: string): boolean => {
+    const n = Number(raw)
+    return raw.trim() !== '' && Number.isFinite(n) && n > 0
+  }
+  const pricesParse = priced(row.input_usd) && priced(row.output_usd) && priced(row.cache_read_usd)
   // The value is read BEFORE the updater runs: React clears `currentTarget`
   // once the handler returns, and a lazy setState updater runs after that.
   const set = (field: keyof typeof row) => (e: { currentTarget: { value: string } }) => {
@@ -398,6 +410,12 @@ function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) =
       <p className="muted">
         An append, effective-dated. The store validates it — if it refuses, the refusal appears here in its own words.
       </p>
+      {!pricesParse && (
+        <p className="muted" data-price-guard="unit-prices">
+          Every unit price has to be a positive number before this can be appended. A row priced at nothing would charge
+          $0 for that lane silently — where no row at all honestly prices it UNPRICED.
+        </p>
+      )}
       {(
         [
           ['model', 'model'],
@@ -429,7 +447,7 @@ function AddPriceRow({ onAdded }: { onAdded: (detail: string, failed: boolean) =
       <button
         type="button"
         data-action="add-price-row"
-        disabled={row.model === '' || row.lane === ''}
+        disabled={row.model === '' || row.lane === '' || !pricesParse}
         onClick={() => {
           void api
             .addPriceRow(
@@ -527,6 +545,12 @@ function EvalResults({ stream }: { stream?: EventStream }) {
   )
 }
 
-/** A recorded suite result is what changes this panel — the same type the
- *  inbox watches to know a red conformance row can only be cleared by one. */
-const evalEventTypes = [...inboxEventTypes] as const
+/**
+ * The types that change THIS panel, and only those (§42 per-view declaration).
+ *
+ * It read the whole inbox set at first, which subscribed a table of suite
+ * results to gate asks, drift findings and watchdog flags — frames that cannot
+ * move a single row here. One type does move it, and it is the same one S14.5
+ * says is the only thing that can clear a red: a recorded suite result.
+ */
+const evalEventTypes = ['eval.score_recorded'] as const

@@ -181,20 +181,34 @@ test("a decision card's actions come from the choice VALUES the pipeline accepts
   expect(rendered).toEqual(actions)
 })
 
-test('a delta card renders ADDED / MODIFIED / REMOVED, and offers no verb because it serves none', async () => {
+test('a delta card renders ADDED / MODIFIED / REMOVED and is ANSWERABLE from its own vocabulary', async () => {
   const served = mine()
-  expect(card(served, 'ask:ask-delta').actions, 'the delta card now serves actions — update this test').toBeUndefined()
-  const { view } = await open('/inbox', served)
+  // The drain fixed this at the producer: a delta card issued with no action
+  // vocabulary was unanswerable from any surface that renders controls from the
+  // card, while it held the task's open ask open.
+  expect(card(served, 'ask:ask-delta').actions, 'the delta card serves no vocabulary again').toEqual([
+    'approve',
+    'reject',
+  ])
+  const { view, log } = await open('/inbox', served)
   const node = row(view, 'ask:ask-delta')
   expect([...node.querySelectorAll('[data-delta]')].map((n) => n.getAttribute('data-delta'))).toEqual([
     'ADDED',
     'MODIFIED',
     'REMOVED',
   ])
-  // Render-from-served, taken to its honest conclusion: no vocabulary, no
-  // buttons, and a stated reason instead of an invented pair of them.
-  expect(node.querySelector('[data-acts="none"]')).not.toBeNull()
-  expect(node.querySelectorAll('button[data-action]')).toHaveLength(0)
+  const actions = [...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))
+  expect(actions).toEqual(['approve', 'reject'])
+
+  // …and answering one really posts the delta answer, in the card's own shape.
+  log.set(`POST ${verb('ask:ask-delta', 'answer')}`, {
+    body: { id: 'ask:ask-delta', applied: true, state: 'answered', detail: 'the delta is adopted' },
+  })
+  click(node.querySelector('button[data-action="approve"]'))
+  await flush()
+  const posted = log.calls.find((c) => c.path === verb('ask:ask-delta', 'answer'))
+  expect(posted?.body).toMatchObject({ payload_hash: card(served, 'ask:ask-delta').payload_hash, answer: { action: 'approve' } })
+  expect(row(view, 'ask:ask-delta').textContent).toContain('the delta is adopted')
 })
 
 // ── R5: staleness and expiry, from served fields only ─────────────────────
@@ -256,6 +270,41 @@ test('only batchable cards are selectable, and the action is chosen FIRST', asyn
 
   // A Medium card is never in that list, whatever its vocabulary says.
   expect(offered).not.toContain('ask:ask-ship')
+})
+
+test('the OQ10 constraint BITES: a batchable card that does not accept the action is not offered', async () => {
+  // The whole point of choosing the action first is that a mixed selection is
+  // impossible rather than silently split. That is only observable when the
+  // batchable cards DISAGREE about their vocabulary, so the fixture world
+  // carries three: two approval-band cards and one decision-band card.
+  const served = mine()
+  const batchable = served.items.filter((i) => i.batchable)
+  expect(batchable.length, 'fewer than three batchable cards — the constraint is untestable').toBe(3)
+  const vocabularies = new Set(batchable.map((i) => (i.actions ?? []).join(',')))
+  expect(vocabularies.size, 'every batchable card shares one vocabulary, so the filter cannot be seen to work')
+    .toBeGreaterThan(1)
+
+  const { view } = await open('/inbox', served)
+  const bar = view.container.querySelector('.batch-bar')!
+  const select = bar.querySelector('[data-field="batch-action"]') as HTMLSelectElement
+  const offeredFor = (action: string) => {
+    choose(select, action)
+    return [...view.container.querySelectorAll('[data-batch-pick]')].map((n) => n.getAttribute('data-batch-pick'))
+  }
+
+  // `approve` is the approval band's; the decision card does not accept it and
+  // is therefore NOT offered — this is the assertion that fails the moment the
+  // filter is removed.
+  const approvable = offeredFor('approve')
+  expect(approvable).toEqual(['ask:ask-claim', 'ask:ask-notes'])
+  expect(approvable, 'a card whose vocabulary lacks the chosen action was offered').not.toContain('ask:ask-sweep')
+
+  // `drop_criterion` is the decision band's, and only that card accepts it.
+  expect(offeredFor('drop_criterion')).toEqual(['ask:ask-sweep'])
+
+  // `replan` is the one action all three share, so all three are offered — the
+  // constraint narrows, it never hides a card that genuinely accepts the act.
+  expect(offeredFor('replan')).toEqual(['ask:ask-claim', 'ask:ask-notes', 'ask:ask-sweep'])
 })
 
 test('the batch POSTs one item per selected card, each with ITS OWN pin — and renders each outcome', async () => {
@@ -518,6 +567,30 @@ test('the watchdog card carries the resume door, and its refusal renders verbati
   expect(runless.actions).toEqual(['suppress'])
 })
 
+test('a successful resume renders the SERVED outcome, and authors no story of its own', async () => {
+  const served = mine()
+  const flag = card(served, 'watchdog_flag:r-ship\x1fwatchdog.loop')
+  const { view, log } = await open('/inbox', served)
+  log.set('POST /api/runs/r-ship/resume', {
+    body: {
+      run_id: 'r-ship',
+      from: 'parked',
+      to: 'running',
+      applied: true,
+      generation: 3,
+      detail: 'resumed by a person: the run is running again and its generation bumped to 3',
+    },
+  })
+  click(row(view, flag.id).querySelector('button[data-action="resume"]'))
+  await flush()
+  const text = row(view, flag.id).querySelector('[data-outcome="applied"]')?.textContent ?? ''
+  expect(text).toContain('parked → running')
+  expect(text).toContain('generation bumped to 3')
+  // The first cut printed a judgement the platform never made.
+  expect(text, 'the view authored a story about WHY the run was released').not.toContain('false alarm')
+  expect(log.calls.some((c) => c.method === 'POST' && c.path === '/api/runs/r-ship/resume')).toBe(true)
+})
+
 test('a conformance acknowledgement renders as STILL RED, never as a pass', async () => {
   const served = all()
   const { view, log } = await open('/inbox', served)
@@ -595,7 +668,17 @@ test('the verdict cannot be submitted without BOTH the pick and the arm-guess', 
     body: {
       pair_id: 'bp-notes',
       recorded: true,
-      reveal: { pair_id: 'bp-notes', platform_side: 'A' },
+      reveal: {
+        pair_id: 'bp-notes',
+        platform_side: 'B',
+        platform_model: 'claude-opus-5',
+        direct_model: 'claude-opus-5-direct',
+        verdict: 'A',
+        platform_guess: 'B',
+        guess_correct: true,
+        epoch_id: 'e1',
+        recorded_ts: '2026-07-20T09:05:00Z',
+      },
       detail: 'recorded, then revealed: the §14 record commits with the move to recorded in one transaction',
     },
   })
@@ -605,7 +688,18 @@ test('the verdict cannot be submitted without BOTH the pick and the arm-guess', 
     verdict: 'A',
     guess: 'B',
   })
-  expect(row(view, 'benchmark_verdict:bp-notes').textContent).toContain('recorded, and revealed')
+
+  // THE REVEAL IS RENDERED, not merely announced. §3.4 withholds arm identity
+  // until the record commits; a surface that said "revealed" and printed
+  // nothing would withhold the very thing it was announcing.
+  const reveal = row(view, 'benchmark_verdict:bp-notes').querySelector('[data-reveal="bp-notes"]')
+  expect(reveal, 'the served reveal was dropped').not.toBeNull()
+  expect(reveal?.querySelector('[data-reveal-side]')?.textContent).toBe('B')
+  expect(reveal?.textContent).toContain('claude-opus-5')
+  expect(reveal?.textContent).toContain('claude-opus-5-direct')
+  // The §5 blindness measurement, as the platform scored it — never re-scored.
+  expect(reveal?.querySelector('[data-guess-correct]')?.getAttribute('data-guess-correct')).toBe('true')
+  expect(reveal?.textContent).toContain('right')
 })
 
 test('the form renders the vocabularies it is SERVED and declares none of its own', async () => {
@@ -633,6 +727,8 @@ test('a recorded verdict whose reveal could not be read back renders as late-rev
   const text = row(view, 'benchmark_verdict:bp-notes').querySelector('[data-outcome="applied"]')?.textContent ?? ''
   expect(text).toContain('recorded')
   expect(text).toContain('could not be read back')
+  // No reveal was served, so none is rendered — the honest late-reveal branch.
+  expect(row(view, 'benchmark_verdict:bp-notes').querySelector('[data-reveal]')).toBeNull()
 })
 
 test('decline is first-class beside the verdict, and the failed pair offers ONLY decline', async () => {
@@ -709,6 +805,21 @@ test('the addressee sees their memory-conflict card and can resolve it', async (
   click(node.querySelector('button[data-action="resolve"]'))
   await flush()
   expect(row(view, conflict.id).textContent).toContain('already closed')
+})
+
+test('a conflict card with no readable id does not arm its control, and posts nothing', async () => {
+  const served = mine()
+  const broken: ApprovalList = {
+    ...served,
+    items: served.items.map((i) => (i.kind === 'memory_conflict' ? { ...i, card: { question: 'which is right?' } } : i)),
+  }
+  const { view, log } = await open('/inbox', broken)
+  const button = row(view, 'memory_conflict:1').querySelector('button[data-action="resolve"]') as HTMLButtonElement
+  expect(button.disabled, 'the control armed on a card with no conflict id').toBe(true)
+  click(button)
+  await flush()
+  // A disabled control fires nothing, and in particular never posts id 0.
+  expect(log.calls.filter((c) => c.method === 'POST'), 'a zero-value id was posted').toHaveLength(0)
 })
 
 test('nobody else sees a conflict card — the operator included, deliberately', async () => {

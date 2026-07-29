@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -280,6 +281,41 @@ func validatePriceRow(req AddRowRequest) error {
 		return fmt.Errorf("%w: a row is effective-dated — a table without effective dates is guaranteed wrong on a known future price flip (S10.3; P-T08-3)", ErrBadPriceRow)
 	case req.Row.VerifiedOn.IsZero():
 		return fmt.Errorf("%w: a row records the day it was verified against the provider (S10.3)", ErrBadPriceRow)
+	}
+	// EVERY declared unit price must be a real, positive number.
+	//
+	// This is the store defending the UNPRICED posture (S10.1; P-T08-1). With no
+	// row for a {model, lane} at a date, usage prices UNPRICED and says so on the
+	// receipt — the platform never silently prices to $0. A row that carried a
+	// zero or a NaN would defeat that from the inside: it is a row, so the lane
+	// is "priced", and every call on it would be charged nothing with no trace
+	// that anything was missing. A blank field in an operator's form is exactly
+	// how such a row gets written, so the floor belongs here rather than only at
+	// the boundary that happened to submit it.
+	//
+	// A price the lane genuinely does not charge is expressed by leaving that
+	// unit OUT of the row (the zero value), not by declaring it as zero — which
+	// is why this checks the DECLARED units rather than all five.
+	for _, p := range []struct {
+		name  string
+		value float64
+	}{
+		{"input", req.Row.Prices.InputUSD},
+		{"output", req.Row.Prices.OutputUSD},
+		{"cache-read", req.Row.Prices.CacheReadUSD},
+		{"cache-creation", req.Row.Prices.CacheCreationUSD},
+		{"server-tool", req.Row.Prices.ServerToolUSD},
+	} {
+		if p.value == 0 {
+			continue // undeclared: this lane charges nothing for that unit
+		}
+		if math.IsNaN(p.value) || math.IsInf(p.value, 0) || p.value < 0 {
+			return fmt.Errorf("%w: the %s unit price is %v — a declared price must be a real positive number, and a row that priced a lane at nothing would silently charge $0 where the empty table would honestly say UNPRICED (S10.1)",
+				ErrBadPriceRow, p.name, p.value)
+		}
+	}
+	if req.Row.Prices.allZero() {
+		return fmt.Errorf("%w: a row declares at least one unit price — a row with none prices every call at $0, which is the silent zero the UNPRICED posture exists to bar (S10.1; P-T08-1)", ErrBadPriceRow)
 	}
 	return nil
 }
