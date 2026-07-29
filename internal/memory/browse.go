@@ -41,16 +41,34 @@ type BrowseQuery struct {
 	Limit    int
 }
 
-// ListVisible lists the entries a person may see, newest first: their own rows
-// across every scope they own (S4.1), house-scope rows (house defaults address
-// everyone, S4.5), and project-scope rows of the projects they belong to
-// (S09.6). Tombstones and removed rows are INCLUDED — the stub is an audit
-// surface (S09.5) and the caller narrows with Status when it wants the live
-// set.
+// visiblePredicate builds THE scope predicate of this section — own rows in
+// every scope owned (S4.1), house rows (house defaults address everyone, S4.5),
+// and project rows of the projects the viewer belongs to (S09.6) — as one SQL
+// fragment with its arguments.
 //
-// The operator role bit grants nothing here. House authority (D10) is the right
-// to CURATE the house scope, not a read into another person's personal memory,
-// and this listing is personal content rather than observability.
+// It exists so the set read and the single-entry read cannot disagree. Two
+// hand-maintained copies of one rule are two rules the day one of them is
+// edited, and the copy that drifts is the one that decides whether a person
+// sees another person's memory. The operator role bit is not a parameter: house
+// authority (D10) is the right to CURATE the house scope, not a read into
+// somebody's personal store, so there is no operator limb here to forget.
+func visiblePredicate(viewer string, projects []string) (string, []any) {
+	sql := `(user_id = ? OR scope = 'house'`
+	args := []any{viewer}
+	if len(projects) > 0 {
+		sql += ` OR (scope = 'project' AND scope_ref IN (` +
+			strings.TrimSuffix(strings.Repeat("?,", len(projects)), ",") + `))`
+		for _, p := range projects {
+			args = append(args, p)
+		}
+	}
+	return sql + `)`, args
+}
+
+// ListVisible lists the entries a person may see, newest first, under the one
+// predicate above. Tombstones and removed rows are INCLUDED — the stub is an
+// audit surface (S09.5) and the caller narrows with Status when it wants the
+// live set.
 func (s *Store) ListVisible(ctx context.Context, q BrowseQuery) ([]Entry, error) {
 	if q.Viewer == "" {
 		return nil, fmt.Errorf("%w: a visible-set read needs its viewer (Spec S09.3 server-side scoping)", ErrInvalidEntry)
@@ -58,17 +76,7 @@ func (s *Store) ListVisible(ctx context.Context, q BrowseQuery) ([]Entry, error)
 	if q.Limit <= 0 {
 		return nil, fmt.Errorf("%w: a visible-set read needs a positive bound", ErrInvalidEntry)
 	}
-	visible := `(user_id = ? OR scope = 'house'`
-	args := []any{q.Viewer}
-	if len(q.Projects) > 0 {
-		visible += ` OR (scope = 'project' AND scope_ref IN (` +
-			strings.TrimSuffix(strings.Repeat("?,", len(q.Projects)), ",") + `)`
-		for _, p := range q.Projects {
-			args = append(args, p)
-		}
-		visible += `)`
-	}
-	visible += `)`
+	visible, args := visiblePredicate(q.Viewer, q.Projects)
 
 	query := `SELECT ` + entryColumns + ` FROM knowledge_entries WHERE ` + visible
 	for _, f := range []struct {
@@ -101,6 +109,25 @@ func (s *Store) ListVisible(ctx context.Context, q BrowseQuery) ([]Entry, error)
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// Visible answers the same question for ONE entry, through the same predicate:
+// may this viewer see it? An unknown id is not visible — a caller that needs to
+// tell "gone" from "not yours" reads the entry itself and gets ErrNotFound,
+// which is what keeps 404-before-403 the caller's decision rather than this
+// read's.
+func (s *Store) Visible(ctx context.Context, entryID, viewer string, projects []string) (bool, error) {
+	if viewer == "" {
+		return false, fmt.Errorf("%w: a visibility check needs its viewer (Spec S09.3 server-side scoping)", ErrInvalidEntry)
+	}
+	visible, args := visiblePredicate(viewer, projects)
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM knowledge_entries WHERE entry_id = ? AND `+visible,
+		append([]any{entryID}, args...)...).Scan(&n); err != nil {
+		return false, fmt.Errorf("memory: visibility of %q: %w", entryID, err)
+	}
+	return n > 0, nil
 }
 
 // Conflict is one knowledge_conflicts edge — the durable home of the S09.7

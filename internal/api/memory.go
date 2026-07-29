@@ -261,9 +261,11 @@ func (s *Server) handleMemoryList(w http.ResponseWriter, r *http.Request) {
 
 // ── GET /api/memory/{entry} ─────────────────────────────────────────────────
 
-// MemoryEntryDetail is one entry with the S09.7 edges it is party to. The same
-// shape answers a create and a new version, so the surface that wrote an entry
-// sees the conflicts that write raised without a second read.
+// MemoryEntryDetail is one entry with the S09.7 edges the READER is the
+// addressee of. The same shape answers a create and a new version, so a writer
+// whose entry raised a question they own sees it without a second read — and a
+// writer whose write raised a question addressed to SOMEONE ELSE does not,
+// because that card is that person's to see and to answer (drain D2).
 //
 // The influence list is deliberately NOT here: it is a scan over every run's
 // trace manifest (S09.5), which is the removal verb's answer to "what did this
@@ -284,15 +286,27 @@ func (s *Server) handleMemoryDetail(w http.ResponseWriter, r *http.Request) {
 	s.writeMemoryDetail(w, r, e)
 }
 
-// writeMemoryDetail serves an entry with its open conflict edges.
+// writeMemoryDetail serves an entry with the open conflict edges THIS caller is
+// the addressee of.
+//
+// The filter is the drain-D2 correction: a house or project entry is visible to
+// many people, but an edge against it carries the id, kind, version and question
+// text OF THE OTHER ENTRY, which is frequently somebody's personal one. Serving
+// the edge to every viewer of the shared entry would leak that person's
+// metadata to readers who cannot act on it anyway — the resolve verb is the
+// affected owner's alone. Same predicate, both places (mayAnswerConflict), so
+// the card and the door agree by construction (the §39 D9 shape).
 func (s *Server) writeMemoryDetail(w http.ResponseWriter, r *http.Request, e memory.Entry) {
-	conflicts, err := s.memory.EntryConflicts(r.Context(), e.ID)
+	all, err := s.memory.EntryConflicts(r.Context(), e.ID)
 	if err != nil {
 		s.writeSurface(w, nil, s.memoryErr(err))
 		return
 	}
-	if conflicts == nil {
-		conflicts = []memory.Conflict{}
+	conflicts := []memory.Conflict{}
+	for _, c := range all {
+		if mayAnswerConflict(c, s.callerID(r)) {
+			conflicts = append(conflicts, c)
+		}
 	}
 	cursor, err := s.head(r.Context())
 	if err != nil {
@@ -585,6 +599,13 @@ const conflictStatusOpen = "open"
 
 const conflictAlreadyClosedDetail = "this question was already closed, by the person and at the time the edge records. Nothing was written again."
 
+// mayAnswerConflict is the ONE expression of who a question card belongs to: the
+// affected owner it was addressed to (S09.7). It decides both whether the edge
+// SHOWS on an entry detail and whether the resolve verb accepts it, so a
+// surfaced card and a working door can never diverge — and the operator has no
+// limb, for the same reason they have none on true deletion (OQ5).
+func mayAnswerConflict(c memory.Conflict, caller string) bool { return c.Affected == caller }
+
 // handleMemoryConflictResolve routes Gate.ResolveConflict, scoped to the
 // AFFECTED OWNER: the S09.7 card is a question addressed to one person, and it
 // is theirs to answer. The operator has no limb here for the same reason they
@@ -616,7 +637,7 @@ func (s *Server) handleMemoryConflictResolve(w http.ResponseWriter, r *http.Requ
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusNotFound, Code: "not_found", Msg: "conflict not found"})
 		return
 	}
-	if c.Affected != s.callerID(r) {
+	if !mayAnswerConflict(c, s.callerID(r)) {
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
 			Msg: "this question card is addressed to the affected entry's owner (S09.7); it is theirs to answer"})
 		return
@@ -708,26 +729,17 @@ func (s *Server) memoryScopeRead(w http.ResponseWriter, r *http.Request) (memory
 	return e, true
 }
 
-// memoryVisible answers the OQ5 predicate for ONE entry — the same rule
-// ListVisible applies to the set, so a detail read and a list can never
-// disagree about what a person may see.
+// memoryVisible answers the OQ5 predicate for ONE entry by DELEGATING to the
+// store's single-entry read, which shares its SQL fragment with the set read.
+// The transport therefore holds no copy of the rule: a detail read and a list
+// cannot disagree about what a person may see, structurally rather than by two
+// implementations being written to match (drain D3).
 func (s *Server) memoryVisible(ctx context.Context, e memory.Entry, viewer string) (bool, error) {
-	if e.Owner == viewer || e.Scope == memory.ScopeHouse {
-		return true, nil
-	}
-	if e.Scope != memory.ScopeProject {
-		return false, nil
-	}
 	projects, err := s.visibleProjects(ctx, viewer)
 	if err != nil {
 		return false, err
 	}
-	for _, p := range projects {
-		if p == e.ScopeRef {
-			return true, nil
-		}
-	}
-	return false, nil
+	return s.memory.Visible(ctx, e.ID, viewer, projects)
 }
 
 // visibleProjects reads the S13.7 registry for the projects a person owns or is

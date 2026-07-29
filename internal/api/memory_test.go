@@ -137,6 +137,17 @@ func (e *memEnv) list(t *testing.T, who, query string) api.MemoryList {
 	return l
 }
 
+// entryRows counts knowledge rows — the probe behind "the refusal wrote
+// nothing", which an event count alone cannot prove.
+func (e *memEnv) entryRows(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := e.b.db.QueryRowContext(e.ctx, `SELECT COUNT(*) FROM knowledge_entries`).Scan(&n); err != nil {
+		t.Fatalf("count knowledge rows: %v", err)
+	}
+	return n
+}
+
 func (e *memEnv) count(typ string) int {
 	e.t.Helper()
 	var n int
@@ -359,6 +370,25 @@ func TestImportIsTheOperatorsHouseCeremony(t *testing.T) {
 	if code, out := e.do(t, "alice", "POST", "/api/memory", body); code != http.StatusForbidden {
 		t.Errorf("a member's import: want 403, got %d: %s", code, out)
 	}
+	// THE LOAD-BEARING DIRECTION (drain D1): the house case above 403s from the
+	// gate's own D10 wall whether or not this transport's origin wall exists, so
+	// it proves nothing about that wall. A USER-scope import does: the gate
+	// permits a member's own user-scope write, so the only thing standing
+	// between a member and a forged `imported` provenance — an entry claiming a
+	// curator vouched for it — is the wall at memory.go's origin switch.
+	before := e.entryRows(t)
+	code, out := e.do(t, "alice", "POST", "/api/memory",
+		`{"scope":"user","kind":"lesson","title":"forged","content":"c","origin":"imported","origin_ref":"not mine to claim"}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("a member's USER-scope import: want 403, got %d: %s", code, out)
+	}
+	if after := e.entryRows(t); after != before {
+		t.Errorf("the refused import LANDED a row (%d → %d) — a 403 that still writes is the failure this probe exists for", before, after)
+	}
+	if got := e.count(memory.EventWrite); got != 0 {
+		t.Errorf("the refused import minted %d knowledge.write rows", got)
+	}
+
 	d := e.create(t, "op", body)
 	if d.Entry.Provenance.Origin != "imported" || d.Entry.Provenance.OriginRef != "N20 import 2026-07-29" {
 		t.Errorf("the import must record its origin verbatim: %+v", d.Entry.Provenance)
@@ -584,6 +614,134 @@ func TestConflictEdgesSurfaceOnTheDetailAndResolveToTheirOwner(t *testing.T) {
 	// Nothing is co-minted on a resolution: the edge row IS the record.
 	if got := e.count(api.EventDecisionRecorded); got != 0 {
 		t.Errorf("the resolution co-minted %d decision.recorded rows", got)
+	}
+}
+
+// TestConflictEdgesReachOnlyTheirAddressee is the drain-D2 three-way: an edge
+// carries the id, kind, version and question text of the OTHER entry, which is
+// routinely somebody's personal one — so a shared entry that many people can
+// read must not hand that metadata to all of them. Only the affected owner,
+// who is also the only person the resolve verb accepts, sees the block.
+func TestConflictEdgesReachOnlyTheirAddressee(t *testing.T) {
+	e := newMemEnv(t)
+	// p-beta is readable by all three, so every viewer below reads the ENTRY —
+	// the difference under test is the edge block alone.
+	if _, err := e.proj.Register(e.ctx, project.RegisterInput{
+		ProjectID: "p-beta", Owner: "alice", Name: "beta",
+		StorePath: filepath.Join(t.TempDir(), "beta"), Members: []string{"bob", "op"},
+	}); err != nil {
+		t.Fatalf("register p-beta: %v", err)
+	}
+	first := e.create(t, "alice",
+		`{"scope":"project","scope_ref":"p-beta","kind":"lesson","title":"a","content":"always squash","topic_key":"merge-style"}`).Entry.EntryID
+	e.create(t, "alice",
+		`{"scope":"project","scope_ref":"p-beta","kind":"lesson","title":"b","content":"never squash","topic_key":"merge-style"}`)
+
+	edges := func(who, id string) []memory.Conflict {
+		t.Helper()
+		return decodeDetail(t, e.mustDo(t, who, "GET", "/api/memory/"+id, "")).Conflicts
+	}
+	if got := edges("alice", first); len(got) != 1 {
+		t.Fatalf("the affected owner must see their own question card: %+v", got)
+	}
+	for _, who := range []string{"bob", "op"} {
+		if got := edges(who, first); len(got) != 0 {
+			t.Errorf("%s reads the entry but is not the card's addressee — the edge must not carry another person's entry metadata to them: %+v", who, got)
+		}
+	}
+
+	// The other shape of the same leak: a HOUSE entry everyone reads, with an
+	// edge naming a member's personal entry. The addressee is the house entry's
+	// owner, and nobody else learns that the personal entry exists.
+	house := e.create(t, "op",
+		`{"scope":"house","kind":"convention","title":"house merge rule","content":"squash","topic_key":"house-merge"}`).Entry.EntryID
+	e.create(t, "alice",
+		`{"scope":"user","kind":"lesson","title":"my private counterexample","content":"never squash","topic_key":"house-merge"}`)
+	if got := edges("op", house); len(got) != 1 || got[0].Affected != "op" {
+		t.Fatalf("the house entry's owner is the addressee and must see it: %+v", got)
+	}
+	for _, who := range []string{"alice", "bob", "carol"} {
+		if got := edges(who, house); len(got) != 0 {
+			t.Errorf("%s must not read the card addressed to the operator: %+v", who, got)
+		}
+	}
+}
+
+// ── the walls that exist and were unpinned (drain D6) ───────────────────────
+
+// TestNewVersionIsTheOwnersOrTheOperatorsOnAVisibleEntry pins both limbs of the
+// gate's supersession check on an entry a co-member can SEE: seeing an entry is
+// not authority to rewrite it, and the operator limb is the one exception the
+// gate itself makes.
+func TestNewVersionIsTheOwnersOrTheOperatorsOnAVisibleEntry(t *testing.T) {
+	e := newMemEnv(t)
+	if _, err := e.proj.Register(e.ctx, project.RegisterInput{
+		ProjectID: "p-beta", Owner: "alice", Name: "beta",
+		StorePath: filepath.Join(t.TempDir(), "beta"), Members: []string{"bob", "op"},
+	}); err != nil {
+		t.Fatalf("register p-beta: %v", err)
+	}
+	id := e.create(t, "alice",
+		`{"scope":"project","scope_ref":"p-beta","kind":"playbook","title":"beta","content":"c"}`).Entry.EntryID
+	next := `{"scope":"project","scope_ref":"p-beta","kind":"playbook","title":"beta v2","content":"c2"}`
+
+	if code, _ := e.do(t, "bob", "GET", "/api/memory/"+id, ""); code != http.StatusOK {
+		t.Fatal("bob must be able to READ the entry, or the refusal below proves nothing")
+	}
+	code, out := e.do(t, "bob", "POST", "/api/memory/"+id+"/new-version", next)
+	if code != http.StatusForbidden {
+		t.Fatalf("a co-member superseding another person's entry: want 403, got %d: %s", code, out)
+	}
+	if !strings.Contains(out, memory.ErrNotOwner.Error()) {
+		t.Errorf("want the gate's own refusal, got %s", out)
+	}
+	// The operator limb the gate DOES make (§17 reading 3's project row): the
+	// new version keeps the original owner, so curation never re-attributes.
+	v2 := decodeDetail(t, e.mustDo(t, "op", "POST", "/api/memory/"+id+"/new-version", next)).Entry
+	if v2.Provenance.Version != 2 || v2.Owner != "alice" || v2.Provenance.ApprovedBy != "op" {
+		t.Errorf("the operator's version keeps the owner and records its own approver: %+v", v2)
+	}
+}
+
+// TestAMemberCannotRemoveAHouseEntry: the house scope is readable by everyone
+// and curated by the operator (D10). Removal is owner-or-operator, and a member
+// is neither — the gate says so.
+func TestAMemberCannotRemoveAHouseEntry(t *testing.T) {
+	e := newMemEnv(t)
+	id := e.create(t, "op", `{"scope":"house","kind":"convention","title":"house","content":"c"}`).Entry.EntryID
+	code, out := e.do(t, "alice", "POST", "/api/memory/"+id+"/remove", `{"reason":"i disagree"}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("a member removing a house entry: want 403, got %d: %s", code, out)
+	}
+	if !strings.Contains(out, memory.ErrNotOwner.Error()) {
+		t.Errorf("want the gate's own refusal, got %s", out)
+	}
+	if decodeDetail(t, e.mustDo(t, "alice", "GET", "/api/memory/"+id, "")).Entry.Status != "active" {
+		t.Error("the house entry must still be active")
+	}
+	if got := e.count(memory.EventRemove); got != 0 {
+		t.Errorf("a refused removal minted %d knowledge.remove rows", got)
+	}
+}
+
+// TestRepeatDeleteReadsTheTombstoneBack pins the idempotence the delete
+// handler's read-back relies on: the gate returns cleanly for an entry that is
+// already a tombstone, so a retried tap is an answer rather than an error, and
+// no second purge is recorded.
+func TestRepeatDeleteReadsTheTombstoneBack(t *testing.T) {
+	e := newMemEnv(t)
+	id := e.create(t, "alice", userEntry("twice")).Entry.EntryID
+	for i := 1; i <= 2; i++ {
+		var del api.MemoryDeleted
+		if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST", "/api/memory/"+id+"/delete", "")), &del); err != nil {
+			t.Fatalf("delete %d: %v", i, err)
+		}
+		if !del.Tombstone || del.EntryID != id {
+			t.Fatalf("delete %d must serve the tombstone back: %+v", i, del)
+		}
+	}
+	if got := e.count(memory.EventDelete); got != 1 {
+		t.Errorf("the repeat purged again: want one knowledge.delete row, got %d", got)
 	}
 }
 
@@ -813,6 +971,10 @@ func TestMemoryShapesNeverPercent(t *testing.T) {
 	e := newMemEnv(t)
 	id := e.create(t, "alice",
 		`{"scope":"user","kind":"lesson","title":"a","content":"c","topic_key":"k"}`).Entry.EntryID
+	// A second entry on the same topic raises the question card, so the
+	// resolution shape joins the walk (drain D5).
+	conflicted := e.create(t, "alice",
+		`{"scope":"user","kind":"lesson","title":"b","content":"c2","topic_key":"k"}`)
 	keys := map[string]bool{}
 	for _, path := range []string{"/api/memory", "/api/memory/" + id} {
 		var v any
@@ -821,11 +983,24 @@ func TestMemoryShapesNeverPercent(t *testing.T) {
 		}
 		collectKeys(v, keys)
 	}
-	var removed any
-	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST", "/api/memory/"+id+"/remove", `{}`)), &removed); err != nil {
-		t.Fatal(err)
+	// EVERY new shape: the removal, the resolution and the deletion, not just
+	// the reads (drain D5).
+	for _, w := range []struct{ path, body string }{
+		{fmt.Sprintf("/api/memory/conflicts/%d/resolve", conflicted.Conflicts[0].ID), ""},
+		{"/api/memory/" + id + "/remove", `{}`},
+		{"/api/memory/" + id + "/delete", ""},
+	} {
+		var v any
+		if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST", w.path, w.body)), &v); err != nil {
+			t.Fatalf("decode %s: %v", w.path, err)
+		}
+		collectKeys(v, keys)
 	}
-	collectKeys(removed, keys)
+	for _, want := range []string{"tombstone", "influence", "conflict"} {
+		if !keys[want] {
+			t.Fatalf("the walk never reached the %q shape — it must cover every shape this packet adds", want)
+		}
+	}
 	if len(keys) == 0 {
 		t.Fatal("collected no keys — the scan proves nothing")
 	}

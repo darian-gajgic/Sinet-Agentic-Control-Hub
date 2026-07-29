@@ -69,6 +69,32 @@ func TestListVisibleIsOwnPlusHousePlusTheirProjects(t *testing.T) {
 		}
 	}
 
+	// The single-entry read and the set read share one SQL predicate (drain D3),
+	// and this is where that agreement is checkable: for every viewer and every
+	// entry, Visible answers exactly what ListVisible included.
+	for _, viewer := range []struct {
+		id       string
+		projects []string
+	}{{"alice", []string{"p-alpha"}}, {"bob", []string{"p-alpha"}}, {"bob", nil}, {"op", nil}} {
+		inSet := ids(viewer.id, viewer.projects)
+		for _, e := range []memory.Entry{alice, bob, house, proj} {
+			got, err := f.store.Visible(ctx, e.ID, viewer.id, viewer.projects)
+			if err != nil {
+				t.Fatalf("Visible(%s, %s): %v", e.ID, viewer.id, err)
+			}
+			if got != inSet[e.ID] {
+				t.Errorf("viewer %q (projects %v): Visible(%s) = %v but the list says %v — the two reads must be one rule",
+					viewer.id, viewer.projects, e.ID, got, inSet[e.ID])
+			}
+		}
+	}
+	if _, err := f.store.Visible(ctx, alice.ID, "", nil); !errors.Is(err, memory.ErrInvalidEntry) {
+		t.Errorf("Visible with no viewer: err = %v, want ErrInvalidEntry", err)
+	}
+	if seen, err := f.store.Visible(ctx, "k-doesnotexist", "alice", nil); err != nil || seen {
+		t.Errorf("an unknown id is not visible: %v (%v)", seen, err)
+	}
+
 	// The filters narrow by exact stored value, and the bound is honored.
 	byKind, err := f.store.ListVisible(ctx, memory.BrowseQuery{
 		Viewer: "alice", Projects: []string{"p-alpha"}, Kind: memory.KindPlaybook, Limit: 50})
