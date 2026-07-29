@@ -1061,10 +1061,13 @@ func TestDeliverablesRoutesAreSessionRequiredAndUnversioned(t *testing.T) {
 		}
 	}
 	// The API is unversioned at v0: SPA and API ship in one binary (S15.2).
-	for _, p := range []string{"/v1/api/deliverables", "/api/v1/deliverables", "/v1/api/previews"} {
-		if code, _ := e.do(t, "op", "GET", p, ""); code != http.StatusNotFound {
-			t.Errorf("%s: a version prefix must not exist, got %d", p, code)
-		}
+	if code, _ := e.do(t, "op", "GET", "/api/v1/deliverables", ""); code != http.StatusNotFound {
+		t.Errorf("/api/v1/deliverables: a version prefix must not exist, got %d", code)
+	}
+	// Outside /api the same absence reads as the app shell answering (B6-4).
+	for _, p := range []string{"/v1/api/deliverables", "/v1/api/previews"} {
+		code, body := e.do(t, "op", "GET", p, "")
+		assertServedByTheAppShell(t, p, code, body)
 	}
 }
 

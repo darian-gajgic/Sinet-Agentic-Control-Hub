@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Sinet</title>
+    <!-- PWA scaffold (Spec S15.1 "installed as a PWA"): a hand-written manifest
+         and a placeholder icon, no service worker and no PWA plugin. Declarative
+         Web Push needs no SW (S15.11); final icons, the iOS path and any offline
+         decision are B6-9's. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="theme-color" content="#101418" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

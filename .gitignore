@@ -27,6 +27,17 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# The SPA build output IS the embed source (internal/webui/dist, P3-B6-4).
+# Built assets are generated and stay out of review, but the directory itself
+# has to exist in a fresh clone or `//go:embed all:dist` cannot compile — so
+# its .gitkeep is committed. `dist/` above already excluded the directory, and
+# git cannot re-include a file inside an excluded directory, so the directory
+# is un-excluded first. Vite's publicDir copy restores the .gitkeep after every
+# build (which empties the directory), so `git status` stays clean.
+!/internal/webui/dist/
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+
 # Local scratch — anything here stays off the record
 scratch/
 

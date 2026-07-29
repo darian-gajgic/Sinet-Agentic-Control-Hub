@@ -874,13 +874,14 @@ func TestEveryDecisionRouteLandsOnTheEventLog(t *testing.T) {
 // act — outward effects still exit only through the S02.7 journal (D7).
 func TestTheDecisionPlaneIsUnversionedAndOutwardEffectFree(t *testing.T) {
 	e := newDecisionEnv(t)
-	for _, path := range []string{
-		"/v1/api/approvals", "/api/v1/approvals",
-	} {
-		if code, _ := e.do(t, "alice", "GET", path, ""); code != http.StatusNotFound {
-			t.Errorf("GET %s = %d, want 404: the API is unversioned at v0 (S15.2)", path, code)
-		}
+	if code, _ := e.do(t, "alice", "GET", "/api/v1/approvals", ""); code != http.StatusNotFound {
+		t.Errorf("GET /api/v1/approvals = %d, want 404: the API is unversioned at v0 (S15.2)", code)
 	}
+	// A path outside /api reaches no handler at all: since B6-4 it falls to the
+	// app shell like any unknown URL, which is the same absence stated in the
+	// SPA's terms (spa_test.go).
+	code, body := e.do(t, "alice", "GET", "/v1/api/approvals", "")
+	assertServedByTheAppShell(t, "/v1/api/approvals", code, body)
 	// The one journal verb this plane can reach is Approve/Deny — never
 	// BeginExecute, never a provider call. Proven structurally: an approved
 	// effect has attempts 0 and no idempotency key until the executor runs.

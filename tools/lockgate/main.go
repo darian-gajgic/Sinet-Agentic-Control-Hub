@@ -5,8 +5,10 @@
 //
 // It validates the manifest against the S16.2 field rules, asserts that
 // every Go module dependency is covered by a lock entry, that the go.mod go
-// directive matches the Go-toolchain pin, and that every workflow action is
-// SHA-pinned and covered by a lock entry.
+// directive matches the Go-toolchain pin, that every workflow action is
+// SHA-pinned and covered by a lock entry, and that every npm package installed
+// for the SPA is covered by an entry or toolchain-scoped, with the frontend
+// pins in lockstep across entry, lockfile and package.json.
 package main
 
 import (
@@ -61,9 +63,43 @@ func run(repo string) (problems []string, summary string) {
 		problems = append(problems, lock.CheckWorkflowUses(uses)...)
 	}
 
-	summary = fmt.Sprintf("lockgate: OK — %d entries; %d go.mod dependencies covered; %d workflow action references pinned and covered",
-		len(lock.Components), len(requires), len(uses))
+	npmLock, npmManifest, npmBytes, err := readNPM(repo)
+	if err != nil {
+		problems = append(problems, err.Error())
+	} else {
+		problems = append(problems, lock.CheckNPM(npmLock, npmManifest, npmBytes)...)
+	}
+
+	npmPackages := 0
+	if npmLock != nil {
+		npmPackages = len(npmLock.Packages) - 1 // the project itself is not a dependency
+	}
+	summary = fmt.Sprintf("lockgate: OK — %d entries; %d go.mod dependencies covered; %d workflow action references pinned and covered; %d npm packages covered or toolchain-scoped",
+		len(lock.Components), len(requires), len(uses), npmPackages)
 	return problems, summary
+}
+
+// readNPM loads the SPA tree's manifest and lockfile. Their absence is a
+// failure, not a skip: components.lock entries claim npm packages, so the tree
+// they claim has to exist (S16.2).
+func readNPM(repo string) (*lockfile.NPMLock, *lockfile.NPMManifest, []byte, error) {
+	lockBytes, err := os.ReadFile(filepath.Join(repo, "web", "package-lock.json"))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("web/package-lock.json: %w", err)
+	}
+	npmLock, err := lockfile.ParseNPMLock(lockBytes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(repo, "web", "package.json"))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("web/package.json: %w", err)
+	}
+	manifest, err := lockfile.ParseNPMManifest(manifestBytes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return npmLock, manifest, lockBytes, nil
 }
 
 // readGoMod reads the go directive and require paths via `go mod edit

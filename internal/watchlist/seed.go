@@ -48,6 +48,15 @@ var LockEntryNames = []string{
 	"DeepEval",
 	"changedetection.io",
 	"genai-prices data.json",
+	// The SPA tree and its adoptions (P3-B6-4).
+	"@hello-pangea/dnd",
+	"react-diff-view",
+	"@assistant-ui/react",
+	"JSON Forms",
+	"React 19 + Vite + TypeScript tree",
+	"Vitest",
+	"jsdom",
+	"actions/setup-node",
 }
 
 // LockRowID is the deterministic watch-row id for a components.lock entry. The

@@ -607,12 +607,16 @@ func TestReadRoutesAddNoMutatingVerb(t *testing.T) {
 		}
 	}
 	// And no versioned prefix exists: the API is unversioned at v0 and
-	// evolution is additive-first (§7, S15.2).
+	// evolution is additive-first (§7, S15.2). Under /api that reads as a 404;
+	// outside it, as the app shell answering an unknown URL (B6-4).
 	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/v1/api/runs", nil))
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/v1/runs", nil))
 	if rr.Code != http.StatusNotFound {
-		t.Errorf("GET /v1/api/runs = %d — the API is unversioned at v0", rr.Code)
+		t.Errorf("GET /api/v1/runs = %d — the API is unversioned at v0", rr.Code)
 	}
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/v1/api/runs", nil))
+	assertServedByTheAppShell(t, "/v1/api/runs", rr.Code, rr.Body.String())
 }
 
 // ── drain round 1 ───────────────────────────────────────────────────────────

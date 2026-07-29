@@ -54,6 +54,14 @@ type Component struct {
 	Watch       []string `json:"watch"`
 	LastReview  string   `json:"last_review"`
 	Modules     []string `json:"modules,omitempty"`
+	// NpmPackages is the npm-side equivalent of Modules (P3/CONVENTIONS.md §4
+	// defers its definition to B6, §41 records it): the ROOT package names this
+	// entry claims in web/package-lock.json. Transitive coverage is COMPUTED
+	// from the lockfile's own dependency graph (npm.go), never enumerated here
+	// — the four frontend picks pull in hundreds of names, and a hand-listed
+	// closure would be regenerated review noise that hides the one addition
+	// that matters.
+	NpmPackages []string `json:"npm_packages,omitempty"`
 	Notes       string   `json:"notes,omitempty"`
 }
 
@@ -109,6 +117,7 @@ func (f *File) Validate() []string {
 	}
 	seenNames := make(map[string]bool)
 	seenModules := make(map[string]string)
+	seenNpm := make(map[string]string)
 
 	for i, c := range f.Components {
 		id := c.Name
@@ -167,6 +176,16 @@ func (f *File) Validate() []string {
 				add("%s: module %q already claimed by entry %q", id, m, prev)
 			}
 			seenModules[m] = c.Name
+		}
+		for _, p := range c.NpmPackages {
+			if strings.TrimSpace(p) == "" {
+				add("%s: npm_packages contains an empty name", id)
+				continue
+			}
+			if prev, dup := seenNpm[p]; dup {
+				add("%s: npm package %q already claimed by entry %q", id, p, prev)
+			}
+			seenNpm[p] = c.Name
 		}
 	}
 	return problems

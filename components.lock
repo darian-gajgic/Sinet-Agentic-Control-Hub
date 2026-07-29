@@ -490,6 +490,206 @@
       ],
       "last_review": "2026-07-26",
       "notes": "Vendored at P3-B5-6A per G2 Def.16 + coordinator disposition OQ3(a): the pinned prices/data.json is committed content-hashed at internal/watchlist/pricedata/data.json (345,378 bytes, sha256 42e71b09…4273) with the upstream MIT LICENSE beside it, and a test asserts the file still hashes to the pin so the bytes can never drift from this manifest silently. No `modules` claim (data, not a Go module). Its ONE consumer is the diff baseline — the S10.3 loader, user overlay and persistence remain metering's follow-up and were deliberately NOT pulled into an S14 packet. The refresh ALWAYS lands as a proposal: no code path applies a price change and none auto-flips a billing-regime flag (S10.2/S14.6), proven by test. Health at the pinned ref (2026-07-26): pydantic/genai-prices, not archived, not disabled, pushed_at 2026-07-25, 331 stars, 78 open issues, default branch main; latest release v0.0.72 published 2026-07-22 (S16.3 recorded the v0.0.71 line — it has moved by one). S16.4 #10 operator ratification is QUEUED FOR THE B5 GATE. S16.4 ten-check walk (P3-B5-6A, 2026-07-26). #1 Niche & seam: the vendored diff BASELINE for the S14.6 price-refresh job; it sits behind no runtime seam because it is inert data compiled into the binary. #2 Organ-grade: a data file — no process, no opinions; the S10.3 loader/overlay it could feed is deliberately NOT adopted here. #3 Health from primary sources at the candidate ref: pydantic/genai-prices not archived, not disabled, pushed_at 2026-07-25, 331 stars, 78 open issues, default branch main, release v0.0.72 published 2026-07-22; small-team/community project, and its staleness is itself a watched condition (S16.8). #4 Licence, path-scoped at ref v0.0.72: recursive tree read (193 paths, truncated:false) found root LICENSE (MIT) plus packages/js and packages/python LICENSEs (both MIT), no enterprise/ or ee/ directory and no separate licence under the vendored prices/ path; the upstream LICENSE is kept in-tree beside the file (S16.2). #5 Capability claims verified BEHAVIORALLY: the document shape was read at the ref and is asserted by test — a TOP-LEVEL LIST of providers, per-model `prices` blocks that may be a LIST or carry per-field conditional objects, and per-million-token units converted to per-token on the way to metering.PriceRow. #6 Adopt-unmodified: the file is vendored BYTE-IDENTICAL to upstream; a test asserts its sha256 still equals this pin, so a local edit cannot pass unnoticed. #7 Runner-never-store: it is a baseline to diff against, never a price table — no code path applies a price or flips a billing-regime flag, asserted by test and by source scan. #8 Exact pin + funeral plan: pin carries the tag AND the content hash; replacement (LiteLLM-primary + manual table) and abandonment written above BEFORE first use. #9 Watch registration: the seeded rows named in this entry's watch field, resolved by test. #10 Lock entry + operator approval: entry written and CI green; approval is QUEUED FOR THE B5 GATE."
+    },
+    {
+      "name": "@hello-pangea/dnd",
+      "kind": "frontend",
+      "pin": "18.0.1",
+      "license": {
+        "spdx": "Apache-2.0",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/@hello-pangea/dnd, the exact bytes this tree consumes): single LICENSE at the package root, package.json license field Apache-2.0, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "board drag-drop: list-to-list card movement on the S15.5 kanban board",
+        "section": "S15.5"
+      },
+      "replacement": "pinned @dnd-kit/core 6.3.1 (standby, frozen-but-working) [FC-v1]",
+      "abandonment": "archived or unmaintained → activate the @dnd-kit/core 6.3.1 fallback [FC-v1 'What would change these picks']; default ⚙ adoption.abandonment_months otherwise (S16.7)",
+      "watch": [
+        "S16.8 row: @dnd-kit/react 1.0 — 1.0 with React-19-clean peers → re-evaluate the board pick with a dated note [frontend-components-v1]",
+        "archive/unmaintained watch (FC-v1 §1: the 0.x rewrite family is excluded outright)",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "@hello-pangea/dnd"
+      ],
+      "notes": "S16.3-bound pick, materialized at P3-B6-4 when the SPA tree first installed it. EXECUTION-TIME re-verification (registry.npmjs.org, 2026-07-29): 18.0.1 published 2025-02-09, license Apache-2.0 UNCHANGED, not deprecated, still the latest release — no fallback activates. Runtime closure arrives with it (@babel/runtime, css-box-model, raf-schd, react-redux, redux) and is covered by the computed-closure rule (§41), not enumerated here. S16.4 walk: #1 seam — one view's drag interaction (S15.5), swappable behind the board component. #2 organ-grade: a widget, no orchestration opinions. #3 health at the pinned ref: repo alive (pushed 2026-07-28, archived=false) though 18.0.1 is ~17 months old — the FC-v1 stewardship ground, bounded by the pin. #4 licence: path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY, not by import: a DragDropContext/Droppable/Draggable probe renders under React 19.2.8 in the harness (web/src/*.test.tsx, B6-4 part B). #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 peers `react ^18||^19` admit the pinned 19.2.8. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "react-diff-view",
+      "kind": "frontend",
+      "pin": "3.3.3",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/react-diff-view, the exact bytes this tree consumes): single LICENSE at the package root, package.json license field MIT, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "diff review surface: parses unified git diffs and renders hunks with the gutter/widget hooks the anchored review comments attach to (S15.8)",
+        "section": "S15.8"
+      },
+      "replacement": "monaco diff via @monaco-editor/react 4.7.0 (standby upgrade path) [FC-v1]",
+      "abandonment": "abandoned, or intra-line/large-file needs outgrow it → the monaco diff path [FC-v1]; default ⚙ adoption.abandonment_months otherwise (S16.7)",
+      "watch": [
+        "single-maintainer watch (FC-v1 §2: purpose-fit but slow; bounded by the pin, MIT forkability, and the swap being contained to one view)",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "react-diff-view"
+      ],
+      "notes": "S16.3-bound pick, materialized at P3-B6-4. EXECUTION-TIME re-verification (registry.npmjs.org, 2026-07-29): 3.3.3 published 2026-03-30, license MIT UNCHANGED, not deprecated, still the latest release — no fallback activates. gitdiff-parser 0.3.1 (MIT), which the S16.3 row names alongside it, arrives INSIDE this closure as a runtime dependency and is covered by the computed-closure rule (§41) rather than by a second entry; the rest of the closure is classnames, diff-match-patch, lodash, shallow-equal, warning. The ported N15 review BEHAVIOR governs the surface (FC-v1 §2) — this entry adopts the renderer only. S16.4 walk: #1 seam — one review view (S15.8). #2 organ-grade: a rendering widget. #3 health at the pinned ref: repo alive but quiet (pushed 2026-03-30) — the FC-v1 single-maintainer risk, accepted and bounded by the pin. #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY: a real unified-diff fixture is parsed and its hunks rendered in the harness (B6-4 part B), not merely imported. #6 adopt-unmodified. #7 React 19.2.8 admitted. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "@assistant-ui/react",
+      "kind": "frontend",
+      "pin": "0.14.27",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/@assistant-ui/react, the exact bytes this tree consumes): single LICENSE at the package root, package.json license field MIT, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "chat surface primitives for the S15.7 conversational assistant, driven by LocalRuntime/ExternalStoreRuntime over the platform's own SSE cursor — assistant-cloud is never wired",
+        "section": "S15.7"
+      },
+      "replacement": "owned chat primitives on the same SSE cursor — the ExternalStoreRuntime boundary keeps message state platform-owned, so the swap loses no data [FC-v1]",
+      "abandonment": "0.x churn exceeding the quarterly pass's absorption, or a hostile 1.0 → the owned-primitives fallback [FC-v1]; default ⚙ adoption.abandonment_months otherwise (S16.7)",
+      "watch": [
+        "S16.8 row: assistant-ui 1.0 — stability promise or hostile 1.0, and the 0.x churn rate → re-pin, or the owned-primitives fallback [frontend-components-v1]",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "@assistant-ui/react"
+      ],
+      "notes": "S16.3-bound pick, materialized at P3-B6-4. EXECUTION-TIME re-verification (registry.npmjs.org, 2026-07-29): 0.14.27 published 2026-07-16, license MIT UNCHANGED, not deprecated. Upstream latest has moved to 0.15.1 — THE PIN STANDS AT 0.14.27 (FC-v1: pinned; 0.x churn is absorbed by the lockfile plus the scheduled pass, never by a silent bump). RECORDED READING: assistant-cloud (0.1.37, MIT) is a HARD dependency of this package and therefore sits in the installed tree; 'no assistant-cloud' (S15.4/FC-v1) means never WIRED and never CALLED — a checkable negative, whose first instalment is the no-network mount probe in the harness (B6-4 part B) and whose full form is B6-7's. S16.4 walk: #1 seam — the chat view only (S15.7); the runtime adapter keeps message state platform-owned. #2 organ-grade: primitives, no backend opinions (verified from its own docs at binding, FC-v1 §3). #3 health at the pinned ref: very active (repo pushed 2026-07-28). #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY: a LocalRuntime provider plus thread primitive mounts with no cloud config and zero network calls (fetch spy) in the harness. #6 adopt-unmodified. #7 peers `react ^18||^19` admit 19.2.8. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "JSON Forms",
+      "kind": "frontend",
+      "pin": "3.8.0",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/@jsonforms/core and node_modules/@jsonforms/react, the exact bytes this tree consumes): a LICENSE at each package root, package.json license field MIT, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "generated settings-UI renderer: the S15.9 form is rendered from the registry's JSON Schema plus the emitted UISchema (Group/Categorization + SHOW/HIDE rules), never hand-built",
+        "section": "S15.9"
+      },
+      "replacement": "RJSF v6 (documented runner-up) [FC-v1]",
+      "abandonment": "stall >18 months without a maintenance release, or a registry need its rule/layout vocabulary cannot express → RJSF v6 (the FC-v1 re-entry condition); default ⚙ adoption.abandonment_months otherwise (S16.7)",
+      "watch": [
+        "stall watch (FC-v1 §4: >18 months without a maintenance release is the RJSF re-entry condition)",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "@jsonforms/core",
+        "@jsonforms/react"
+      ],
+      "notes": "S16.3-bound pick, materialized at P3-B6-4. ONE entry covers both packages because they ship as one versioned unit — @jsonforms/react peers @jsonforms/core at the EXACT same version, so they can never move independently. EXECUTION-TIME re-verification (registry.npmjs.org, 2026-07-29): both published 2026-06-16 at 3.8.0, license MIT UNCHANGED, neither deprecated, both still the latest release — no fallback activates. Closure: ajv, ajv-formats, lodash. S16.4 walk: #1 seam — the settings view (S15.9); the Sinet-owned renderer SET is B6-6's work over this core. #2 organ-grade: a renderer driven by data. #3 health at the pinned ref: repo alive (pushed 2026-07-27), Eclipse Foundation backing, ~2 releases/yr since 3.0 — institutional stability was the reason it beat RJSF (FC-v1 §4). #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY: a Categorization+Control fixture — the S15.9 vocabulary shape the B6-3A emitter produces — renders in the harness from a fixture, not from the API. #6 adopt-unmodified. #7 react peer `…||^19.0.0` admits 19.2.8; core/react pinned in lockstep. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "React 19 + Vite + TypeScript tree",
+      "kind": "toolchain",
+      "pin": "8.1.5+sha256:d55b62cc02a7dc4a762e878d7bccad661a5fc35bf32ad49b70ba06b506a486ae",
+      "license": {
+        "spdx": "MIT AND Apache-2.0 AND ISC AND BSD-3-Clause AND BSD-2-Clause AND MPL-2.0 AND BlueOak-1.0.0 AND 0BSD AND MIT-0 AND CC0-1.0",
+        "scope": "the whole installed tree at the pinned lockfile — license fields read from every installed package.json in web/node_modules on 2026-07-29 (240 packages): MIT ×186, Apache-2.0 ×6 (incl. typescript), ISC ×4, BSD-3-Clause ×4, MPL-2.0 ×3 (lightningcss + its two linux-x64 native binaries, reached through Vite 8's rolldown/lightningcss CSS pipeline — the copyleft-file-scope licence in this set, and build-time only: nothing of it reaches the release binary), BSD-2-Clause ×2, MIT-0 ×2, BlueOak-1.0.0 ×1 (lru-cache), 0BSD ×1 (tslib), CC0-1.0 ×1 (mdn-data). No GPL/AGPL anywhere in the tree; no package lacks a licence field (the two hits are vendored benchmark sub-folders inside secure-json-parse and fast-uri, not installed packages)",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "the SPA build toolchain and the React runtime it builds against: resolves TBD-P3(SPA scaffold) — the lockfile IS the tree, and this entry's pin is its identity",
+        "section": "S15.1"
+      },
+      "replacement": "HTMX 2.x re-entry only via its named conditions [G3 D3.3; XREF:S15] — the SPA is ratified, so a toolchain replacement means re-deciding the frontend architecture, not swapping a build tool",
+      "abandonment": "Vite or React abandoned upstream → the G3 D3.3 re-entry conditions are re-opened as an operator decision; default ⚙ adoption.abandonment_months otherwise (S16.7)",
+      "watch": [
+        "Vite majors are adopted on a LAG, never day-one [G3 D3.3 rider]",
+        "peer-range / toolchain health: frontend peers vs the pinned React and Vite (S16.7)",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "react",
+        "react-dom"
+      ],
+      "notes": "Resolves TBD-P3(SPA scaffold) at P3-B6-4. THE PIN IS THE TREE IDENTITY, not a package version: '<vite version>+sha256:<hash of web/package-lock.json>', the content-hash discipline §4 already applies to vendored content, applied to the resolved tree (the genai-prices precedent). tools/lockgate recomputes it, so any dependency movement fails CI until it becomes a deliberate, dated lock edit. Resolved versions: vite 8.1.5, react + react-dom 19.2.8, typescript 6.0.3, @vitejs/plugin-react 6.0.4, @types/react 19.2.17, @types/react-dom 19.2.3, @types/node 22.20.1. SCOPE: this entry claims the two PRODUCTION roots (react, react-dom) explicitly and covers the entire devDependency tree WHOLESALE — every package npm flags dev/devOptional is toolchain-scoped by classification (§41). Vite 8.1.x is the CURRENT major and ~4.5 months old at adoption: first adoption of a settled line, not a day-one major, and the lag rider governs every major FROM here. TypeScript is pinned on the 6.0.x line (6.0.3) — TS 7.0.x, the native-compiler replacement line, was 3 weeks old at adoption and is NOT adopted; it is a candidate for a future scheduled pass, not for a scaffold. Dropped from the create-vite template: oxlint (a linter is a dependency and none is ratified — the §2 no-additional-linters posture applied to npm). Node/npm are HOST tools the platform cannot pin: the maintainer's host runs node v22.22.1 with npm 9.2.0, and CI pins node 22.23.1 (the OS-mechanism-row precedent — record the observed version rather than pretend to own it). One advisory engine warning on the host: jsdom 30.0.0 declares node ^22.22.2 and the host is one patch below it; the harness was verified to run correctly there anyway, and CI's 22.23.1 satisfies the range. NOTHING of this tree exists at runtime — no vite/rolldown/lightningcss code is reachable from the Go binary, which serves only the built assets embedded by internal/webui. S16.4 walk: #1 seam — the build, dev-time only, no runtime service exposure (S16.3 row). #2 organ-grade: replaceable build tooling. #3 health at the pinned ref: vite 8.1.5 current, react 19.2.8 current stable. #4 licence: the whole-tree set above, re-scanned at every pass. #5 capability verified BEHAVIORALLY: typecheck, test and production build all run green, and the built output is served out of the binary by an integration test. #6 adopt-unmodified: no node_modules patching, no patch-package. #7 install posture `npm ci --ignore-scripts`; no package's install script was needed. #8 exact pin (content hash) + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "Vitest",
+      "kind": "toolchain",
+      "pin": "4.1.10",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/vitest, the exact bytes this tree consumes): single LICENSE.md at the package root, package.json license field MIT, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "the frontend test harness: the Vite-native runner every SPA test runs under, including the adoption probes that prove each pinned pick actually works",
+        "section": "S15.1/S01.11"
+      },
+      "replacement": "node:test with a hand-rolled DOM bootstrap — losing the Vite transform pipeline means the tests would compile the app's TSX differently from the build, so the swap is a real cost and is recorded as such",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7); a Vite major the harness cannot follow is the practical trigger",
+      "watch": [
+        "peer range vs the pinned Vite major (vitest 4.1.x peers vite ^6||^7||^8)",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "vitest"
+      ],
+      "notes": "NEW adoption at P3-B6-4 (OQ7): FC-v1 and S15 name NO test harness, so this is a P3 choice through the rail. Live-verified 2026-07-29: 4.1.10 is the current `latest` (5.0.0-beta.7 exists and a beta is never adopted), MIT, not deprecated. devDependency — toolchain-scoped, never in the release binary. S16.4 walk: #1 seam — the harness; test-only, no production import. #2 organ-grade: a runner. #3 health: current stable line, actively released. #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY: it renders a React 19.2.8 tree into jsdom through the same plugin-react transform the build uses (web/src/harness.test.tsx), which is the precondition every pick probe rests on. #6 adopt-unmodified. #7 peers vite ^6||^7||^8 admit the pinned 8.1.5; node ^20||^22||>=24 admits the host and CI. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "jsdom",
+      "kind": "toolchain",
+      "pin": "30.0.0",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/jsdom, the exact bytes this tree consumes): single LICENSE.txt at the package root, package.json license field MIT, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "the DOM environment the harness runs in, so the pick probes render real React trees instead of asserting on markup strings",
+        "section": "S15.1/S01.11"
+      },
+      "replacement": "happy-dom 20.x (the faster, less complete alternative) — the swap is a one-line vitest environment change, and the probes are the acceptance test for it",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "node engine range vs the host and CI node pins",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "npm_packages": [
+        "jsdom"
+      ],
+      "notes": "NEW adoption at P3-B6-4 (OQ7). jsdom was chosen over happy-dom as the DEFAULT because the radix-based assistant-ui probe is the most demanding renderer in the tree and jsdom is the more complete implementation; OQ7 admitted happy-dom only on behavioral evidence that jsdom was materially problematic, and no such evidence appeared — the probes pass on jsdom, so the default stands. Live-verified 2026-07-29: 30.0.0 is `latest`, MIT, not deprecated. ENGINE NOTE: 30.0.0 declares node ^22.22.2 || ^24.15.0 || >=26.0.0 and the maintainer's host runs 22.22.1 — npm prints an advisory EBADENGINE warning there. Verified behaviorally on the host anyway (document construction, React commit, event dispatch); CI pins node 22.23.1, which satisfies the range, so the warning is host-local and does not ride into CI. S16.4 walk: #1 seam — the harness environment, test-only. #2 organ-grade: a DOM implementation. #3 health: current major, actively released. #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY by every harness test. #6 adopt-unmodified. #7 engine note above. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "actions/setup-node",
+      "kind": "toolchain",
+      "pin": "820762786026740c76f36085b0efc47a31fe5020",
+      "license": {
+        "spdx": "MIT",
+        "scope": "repo root (single LICENSE at the pinned ref; no enterprise/ee carve-out directories present)",
+        "checked": "2026-07-29"
+      },
+      "role": {
+        "summary": "CI Node installation step (plus the built-in npm cache keyed on web/package-lock.json) of the S01.11 pipeline",
+        "section": "S01.11"
+      },
+      "replacement": "install the pinned Node release from the official tarball with checksum verification in a run step (same procedure as the host toolchain install)",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-07-29",
+      "notes": "NEW CI-action adoption at P3-B6-4: the SPA tree gives CI a second toolchain to install. sha = tag v7.0.0, verified 2026-07-29 via api.github.com; CI-only — never a running unit or bundled dependency of the release artifact. v7 matches the major already pinned for actions/checkout and actions/setup-go. CACHING (OQ4): the action's OWN `cache` input is used with `cache-dependency-path: web/package-lock.json` — verified present in action.yml at this exact SHA before pinning — so no separate cache action enters the rail. S16.4 walk: #1 seam — one CI step. #2 organ-grade: an installer. #3 health: first-party GitHub action, v7.0.0 published 2026-07-14. #4 licence: MIT at the pinned ref. #5 capability verified: `cache` and `cache-dependency-path` are declared inputs at this SHA (read from action.yml, not from docs). #6 adopt-unmodified. #7 pinned to a full 40-hex commit SHA per §4. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
     }
   ]
 }

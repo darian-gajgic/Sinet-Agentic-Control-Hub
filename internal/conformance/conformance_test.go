@@ -155,8 +155,10 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	find(t, states, "dead-man-canary")
 	// The S14.8 regression-sweep row (B5-5): the S14.8 results' recording home.
 	find(t, states, conformance.RowRegressionSweep)
-	if len(states) != 11 {
-		t.Fatalf("seed produced %d rows, want 11 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery)", len(states))
+	// The S15.1 scheduled SPA dependency pass (B6-4), co-scheduled with S16.7.
+	find(t, states, "frontend-dependency-pass")
+	if len(states) != 12 {
+		t.Fatalf("seed produced %d rows, want 12 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass)", len(states))
 	}
 
 	// The zai lane is OMITTED (R7): no row claims it, and the reason is recorded.
@@ -504,8 +506,8 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 11 {
-		t.Fatalf("never-run: %d rows due, want all 11", len(due))
+	if len(due) != 12 {
+		t.Fatalf("never-run: %d rows due, want all 12", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).
@@ -547,6 +549,27 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	// (⚙ verification.canary_interval_hours default 24h; OQ4(a)).
 	if got := find(t, h.list(t), "forced-escalation-e2e").CanaryEvery; got != 24*time.Hour {
 		t.Errorf("forced-escalation CanaryEvery = %v, want 24h (⚙ verification.canary_interval_hours default)", got)
+	}
+
+	// The B6-4 SPA dependency-pass row reads ⚙ frontend.dependency_pass_interval
+	// (default 90 days) LIVE: 95 days stale is due, and widening the ⚙ value
+	// un-dues the same row with no re-seed and no restart.
+	rp := greenResult("frontend-dependency-pass")
+	rp.RanAt = now.Add(-95 * 24 * time.Hour)
+	if err := h.st.RecordResult(ctx, rp); err != nil {
+		t.Fatal(err)
+	}
+	if !find(t, h.list(t), "frontend-dependency-pass").Due {
+		t.Error("the SPA dependency pass 95 days stale must be due at the default 90-day interval")
+	}
+	if err := h.reg.Set(ctx, settings.SetRequest{
+		Key: "frontend.dependency_pass_interval", Value: json.RawMessage(`180`),
+		Actor: settings.Actor{Kind: settings.ActorOperator, ID: "op"}, Reason: "widen the SPA pass",
+	}); err != nil {
+		t.Fatalf("Set frontend.dependency_pass_interval: %v", err)
+	}
+	if find(t, h.list(t), "frontend-dependency-pass").Due {
+		t.Error("at ⚙ 180 days, a 95-day-old SPA pass is not due — the cadence is not being read live")
 	}
 }
 

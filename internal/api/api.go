@@ -467,7 +467,10 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/memory/{entry}/remove", s.handleMemoryRemove)
 	protected("POST /api/memory/{entry}/delete", s.handleMemoryDelete)
 
-	return s.identity(mux)
+	// The SPA embedded in this binary sits in FRONT of the mux rather than in
+	// it, so the machine surface keeps its own 404s and 405s untouched and no
+	// API path can ever be answered with HTML (spa.go).
+	return s.identity(s.withSPA(mux))
 }
 
 // Nudge signals every open SSE stream to poll the log now. It is a

@@ -1,0 +1,14 @@
+<!-- Placeholder install icon (B6-4/OQ8). Final icon set and the iOS
+     apple-touch-icon path are B6-9's, live-verified then. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sinet">
+  <rect width="64" height="64" rx="12" fill="#101418" />
+  <circle cx="32" cy="32" r="6" fill="#e6edf3" />
+  <circle cx="32" cy="12" r="4" fill="#7d8fa1" />
+  <circle cx="52" cy="42" r="4" fill="#7d8fa1" />
+  <circle cx="12" cy="42" r="4" fill="#7d8fa1" />
+  <g stroke="#7d8fa1" stroke-width="2.5" stroke-linecap="round">
+    <path d="M32 18v8" />
+    <path d="M37 35l11 5" />
+    <path d="M27 35l-11 5" />
+  </g>
+</svg>

@@ -1,0 +1,31 @@
+{
+  "name": "sinet-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "0.14.27",
+    "@hello-pangea/dnd": "18.0.1",
+    "@jsonforms/core": "3.8.0",
+    "@jsonforms/react": "3.8.0",
+    "react": "19.2.8",
+    "react-diff-view": "3.3.3",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "jsdom": "30.0.0",
+    "typescript": "6.0.3",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
+  }
+}

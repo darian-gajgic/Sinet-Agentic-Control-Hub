@@ -957,11 +957,12 @@ func TestMemoryRoutesAreSessionRequiredAndUnversioned(t *testing.T) {
 			t.Errorf("%s %s with no identity: want 401, got %d", r.method, r.path, rr.Code)
 		}
 	}
-	for _, p := range []string{"/v1/api/memory", "/api/v1/memory"} {
-		if code, _ := e.do(t, "op", "GET", p, ""); code != http.StatusNotFound {
-			t.Errorf("%s: a version prefix must not exist, got %d", p, code)
-		}
+	if code, _ := e.do(t, "op", "GET", "/api/v1/memory", ""); code != http.StatusNotFound {
+		t.Errorf("/api/v1/memory: a version prefix must not exist, got %d", code)
 	}
+	// Outside /api the same absence reads as the app shell answering (B6-4).
+	code, body := e.do(t, "op", "GET", "/v1/api/memory", "")
+	assertServedByTheAppShell(t, "/v1/api/memory", code, body)
 }
 
 // TestMemoryShapesNeverPercent extends the §30 never-percent negative over every

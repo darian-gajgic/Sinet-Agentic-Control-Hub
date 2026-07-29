@@ -954,7 +954,6 @@ func TestSettingsRouteTableHasNoUpdateOrDeleteVerbAndNoVersionPrefix(t *testing.
 		{"PATCH", "/api/settings/prices"},
 		{"DELETE", "/api/settings/orchestration.helper_turns"},
 		{"PUT", "/api/settings/orchestration.helper_turns"},
-		{"GET", "/v1/api/settings"},
 		{"GET", "/api/v1/settings"},
 	} {
 		code, _ := e.do(t, "op", c.method, c.path, "")
@@ -962,6 +961,9 @@ func TestSettingsRouteTableHasNoUpdateOrDeleteVerbAndNoVersionPrefix(t *testing.
 			t.Errorf("%s %s answered 200 — no such verb exists (a price change is a new effective-dated row; the API is unversioned)", c.method, c.path)
 		}
 	}
+	// Outside /api the same absence reads as the app shell answering (B6-4).
+	vcode, vbody := e.do(t, "op", "GET", "/v1/api/settings", "")
+	assertServedByTheAppShell(t, "/v1/api/settings", vcode, vbody)
 	// The non-tautological control: the verbs that DO exist answer.
 	e.mustDo(t, "op", "GET", "/api/settings/prices", "")
 	e.mustDo(t, "op", "POST", "/api/settings/orchestration.helper_turns", `{"value":25}`)

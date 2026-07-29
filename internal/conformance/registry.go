@@ -87,6 +87,11 @@ const (
 	// cadence token, read live at evaluation time (B5-5); the other rows keep
 	// their structural quarterly/weekly/daily literals.
 	keyEvalSweepInterval = "eval.sweep_interval"
+	// keyFrontendPassInterval is the S15.1 scheduled SPA dependency pass
+	// (days). Its sibling adoption.dependency_pass_months owns the S16.7
+	// manifest review — S18.4 R9 declares two deliberate keys, and this row
+	// reads only this one (B6-4).
+	keyFrontendPassInterval = "frontend.dependency_pass_interval"
 )
 
 // settingCadence builds a settings-backed cadence token from a dotted key and
@@ -339,6 +344,34 @@ func SeedRows() []Row {
 			Cadence:     CadenceQuarterly,
 			AffectClass: AffectNone,
 			Notes:       "S14.10 ¶3's guardrail stack is the consumer of the ADVERSE B4-7 finding (Arctic-Text2SQL-R1-7B scored 0/30 raw because it emits chain-of-thought before the statement — P3/measurements/2026-07-22-sql-open-arctic.md), so the surface's safety is a property of the GUARDRAIL, never of the seat. That makes the battery model-independent by design and re-runnable on any alias retarget: it asserts that whatever the seat emits dies at the guardrail. Tier F throughout ($0, no seat dialed); the live-seat acceptance run is a bring-up act recorded to P3/measurements, never a Go test (§3).",
+		},
+		{
+			// The scheduled SPA dependency pass [S15.1 rider; S16.7] — B6-4 R21.
+			ID:            "frontend-dependency-pass",
+			OwningSection: "S15.1/S16.7",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/lockfile/ -run TestRepositoryNPMTreeIsCovered (the real web/ tree against components.lock: coverage, pin lockstep across entry↔lockfile↔package.json, and the tree pin's content hash)", Pkg: "internal/lockfile", Run: "TestRepositoryNPMTreeIsCovered"},
+				{Handle: "go test ./internal/lockfile/ -run TestNPMGateFailsOnPinDrift (the gate's falsifiability: a drifted pin is caught, so a green pass means something)", Pkg: "internal/lockfile", Run: "TestNPMGateFailsOnPinDrift"},
+				{Handle: "go run ./tools/lockgate (the same gate as one command, the form the pass is actually run in)", File: "tools/lockgate/main.go"},
+			},
+			TriggerSet:  []string{TriggerQuarterly},
+			Schedule:    "every ⚙ frontend.dependency_pass_interval (90 d), co-scheduled with the S16.7 manifest review",
+			Cadence:     settingCadence(keyFrontendPassInterval, "days"),
+			AffectClass: AffectNone,
+			Notes: "B6-4 R21: the S15.1 scheduled SPA dependency pass, registered so its dueness is visible and passive — " +
+				"dueness reads ⚙ frontend.dependency_pass_interval live (days), never a ticker (§32). S15.1 SHOULDs that it be " +
+				"co-scheduled with the S16.7 manifest review, whose own cadence is the sibling ⚙ adoption.dependency_pass_months " +
+				"(S18.4 R9's two deliberate keys); this row reads only the frontend key and NAMES the sibling rather than " +
+				"reading it, so neither pass silently reschedules the other. Pass CONTENT per S16.7, over every frontend and " +
+				"toolchain lock entry: upstream releases and security advisories vs the pins, path-scoped licence drift at any " +
+				"candidate ref, archive/abandonment against each entry's own criteria, and peer-range/toolchain health (frontend " +
+				"peers vs the pinned React and Vite, with the Vite-major LAG respected). Outputs are PROPOSALS — a bump is a " +
+				"dated lock edit an operator approves, never a silent retarget, and the tree pin's content hash makes that " +
+				"mechanical: any dependency movement fails lockgate until the entry moves with it. The row registers only. " +
+				"There is no runner and no alert wiring: the pass is an operator/coordinator act whose result is recorded " +
+				"through RecordResult when it runs, and a never-run row raises nothing at v0 (§32 OQ3). The fixtures are the " +
+				"instruments the pass leans on, not the pass itself. Neither lane- nor storage-affecting ⇒ an ordinary " +
+				"approval-class card.",
 		},
 	}
 }

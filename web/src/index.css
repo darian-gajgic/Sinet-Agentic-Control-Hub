@@ -1,0 +1,36 @@
+/* Owned CSS. No framework is adopted: a CSS framework is a dependency and none
+   is on the S16.4 rail (P3/CONVENTIONS.md §41). */
+
+:root {
+  color-scheme: dark;
+  --bg: #101418;
+  --fg: #e6edf3;
+  --muted: #9aa7b4;
+  --line: #26303a;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.scaffold {
+  max-width: 40rem;
+  padding: 2rem 1rem;
+  margin: 0 auto;
+}
+
+.muted {
+  color: var(--muted);
+}
