@@ -247,6 +247,14 @@ func Run(ctx context.Context, opts Options) error {
 	// the S15.2 deliverables family reads and comments through it. Declared here
 	// so the api composition below can hold it.
 	var reviewStore *review.Store
+	// The S09 knowledge subsystem, held for the api composition below (B6-3C):
+	// memReads is the read store, memWrites the station-3 human write gate with
+	// the committer and the contradiction screen already wired. They are handed
+	// over as a PAIR because the S15.2 memory family is one family with one
+	// readiness — and separately because the split between them IS the S09.1
+	// capability wall.
+	var memReads *memory.Store
+	var memWrites *memory.Gate
 	var localSurf *localSurface
 	// The S14.4 watchdog suite (B5-3): composed in the production path, driven by
 	// shell-owned goroutines (sweep + Tier-0 tail + dead-man probe) after step 5.
@@ -431,9 +439,11 @@ func Run(ctx context.Context, opts Options) error {
 		// and wired into the runtime knowledge-write gate here — the advisory
 		// local-model duty refines a same-topic_key conflict's question card; the
 		// deterministic detection is never suppressed, and a nil screen
-		// (unconfigured stack) leaves it alone. The gate is held for the B6
-		// knowledge-write surface (the SandboxBroker held-dormant precedent).
+		// (unconfigured stack) leaves it alone. The gate is the ONE write path
+		// the S15.2 memory family routes (B6-3C), which is why the api holds
+		// exactly this construction rather than building its own.
 		localSurf.WriteGate = newWriteGate(memStore, committer, localSurf.Screen)
+		memReads, memWrites = memStore, localSurf.WriteGate
 		// The ⚙-gated GameMode D-Bus subscription (probe-bound; inert unless the
 		// operator session-bus address is configured — R13/R14). The scripts
 		// leg is operator-installed config, not a runtime goroutine.
@@ -764,10 +774,15 @@ func Run(ctx context.Context, opts Options) error {
 		Accept:   acceptAccepter(acceptSurf),
 		FollowUp: acceptFollowUp(acceptSurf),
 		Preview:  previewSurf,
-		History:  histSurf,    // S14.10 layers, held for the S15 assistant; not routed
-		DB:       db,          // S14.3 snapshot projections (owner-scoped, OQ1)
-		Meter:    meterReader, // S14.3 run-card counters (§4)
-		Logger:   logger,
+		// The B6-3C memory family: the S09 read store and the station-3 write
+		// gate. Both nil under injected admission, which leaves those routes at
+		// 503 rather than pretending a knowledge store is open.
+		Memory:     memReads,
+		MemoryGate: memWrites,
+		History:    histSurf,    // S14.10 layers, held for the S15 assistant; not routed
+		DB:         db,          // S14.3 snapshot projections (owner-scoped, OQ1)
+		Meter:      meterReader, // S14.3 run-card counters (§4)
+		Logger:     logger,
 	})
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),

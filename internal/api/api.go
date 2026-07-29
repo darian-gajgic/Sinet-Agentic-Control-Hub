@@ -28,6 +28,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
@@ -155,6 +156,17 @@ type Config struct {
 	// composed at the shell root and ROUTED by B6-3B (previewapi.go); nil leaves
 	// those routes answering 503.
 	Preview *preview.Manager
+	// Memory + MemoryGate are the S09 knowledge subsystem behind the S15.2
+	// memory family (memory.go, B6-3C), and the SPLIT between them is the point:
+	// reads live on the store, and every L2 write verb lives on the gate, whose
+	// calls carry an authenticated human actor (S09.1 capability withholding).
+	// The api is the human-facing surface the §17 import wall exists to admit —
+	// it bars the engine-facing packages, never this one — and both are held
+	// directly for the *review.Store / *settings.Registry reason (§39/§40-B):
+	// internal/memory is a leaf over storage+eventlog, so the dependency is
+	// narrow and acyclic. nil leaves the memory routes answering 503.
+	Memory     *memory.Store
+	MemoryGate *memory.Gate
 	// Effects is the S02.7 two-phase effect journal, ROUTED by the S15.6
 	// approvals family (approvals.go): an effect card's approve/deny answer is
 	// a journal act. Nothing here executes an effect — approval and execution
@@ -243,6 +255,10 @@ type Server struct {
 	benchmark BenchmarkSurface
 	// preview is the S13.8 preview surface behind the preview verbs (B6-3B).
 	preview *preview.Manager
+	// memory + memGate are the S09 read store and the station-3 write gate
+	// behind the memory family (B6-3C).
+	memory  *memory.Store
+	memGate *memory.Gate
 	// history is the S14.10 query surface, routed under /api/events (B6-1).
 	history *history.Store
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
@@ -270,6 +286,8 @@ func New(cfg Config) *Server {
 		accept:     cfg.Accept,
 		followUp:   cfg.FollowUp,
 		preview:    cfg.Preview,
+		memory:     cfg.Memory,
+		memGate:    cfg.MemoryGate,
 		history:    cfg.History,
 		effects:    cfg.Effects,
 		cancel:     cfg.Cancel,
@@ -429,6 +447,25 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/deliverables/{deliverable}/preview/compare", s.handlePreviewCompare)
 	protected("GET /api/previews", s.handlePreviewList)
 	protected("POST /api/previews/{session}/stop", s.handlePreviewStop)
+
+	// The S15.2 memory family (B6-3C: memory.go) — the S09 content family. Reads
+	// are scoped server-side to what the caller may SEE (own entries + house +
+	// their projects, 404 before 403), and every write is a call on the S09.4
+	// station-3 gate: this transport constructs no knowledge SQL and implements
+	// none of the gate's walls a second time. Own-store writes are tier Medium
+	// (S15.2), so there is no PIN step-up and no batch verb; no route here
+	// performs an outward effect — a knowledge write is control-plane-internal
+	// state (D7).
+	//
+	// `conflicts` sits one segment deeper than {entry}, so an entry id can never
+	// shadow it and it can never swallow an entry read.
+	protected("GET /api/memory", s.handleMemoryList)
+	protected("POST /api/memory", s.handleMemoryCreate)
+	protected("POST /api/memory/conflicts/{conflict}/resolve", s.handleMemoryConflictResolve)
+	protected("GET /api/memory/{entry}", s.handleMemoryDetail)
+	protected("POST /api/memory/{entry}/new-version", s.handleMemoryNewVersion)
+	protected("POST /api/memory/{entry}/remove", s.handleMemoryRemove)
+	protected("POST /api/memory/{entry}/delete", s.handleMemoryDelete)
 
 	return s.identity(mux)
 }
