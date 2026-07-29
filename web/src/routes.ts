@@ -44,7 +44,7 @@ export const routes: RouteDef[] = [
   { id: 'fleet', pattern: '/fleet', title: 'Fleet', owner: '', nav: true },
   { id: 'inbox', pattern: '/inbox', title: 'Inbox', owner: '', nav: true },
   { id: 'inbox-item', pattern: '/inbox/:id', title: 'Approval', owner: '', nav: false },
-  { id: 'settings', pattern: '/settings', title: 'Settings', owner: 'B6-6', nav: true },
+  { id: 'settings', pattern: '/settings', title: 'Settings', owner: '', nav: true },
   { id: 'chat', pattern: '/chat', title: 'Assistant', owner: 'B6-7', nav: true },
   { id: 'deliverable', pattern: '/deliverables/:id', title: 'Deliverable', owner: 'B6-8', nav: false },
   { id: 'workforce', pattern: '/workforce', title: 'Workforce', owner: 'B6-8', nav: true },

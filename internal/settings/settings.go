@@ -211,6 +211,24 @@ type Registry struct {
 
 	db  *storage.DB
 	log *eventlog.Log
+
+	// Now is the clock seam every stamp this package writes reads through: the
+	// settings_events audit row, the override cell and the bounds cell. It
+	// exists for the reason the review store's and the effect journal's do —
+	// determinism is a hard constraint of the golden-fixture mechanism, and a
+	// row minted through the REAL write verb cannot be committed if its stamp
+	// is a wall-clock reading. settings_events is append-only by trigger, so
+	// there is no normalizing a stamp afterwards; the clock has to be injectable
+	// at the write. nil is time.Now — production behavior is unchanged.
+	Now func() time.Time
+}
+
+// now is the package's one clock read.
+func (r *Registry) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // New builds the registry from the declaration index. It panics on an

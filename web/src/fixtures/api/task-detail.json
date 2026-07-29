@@ -4,7 +4,7 @@
   "title": "Ship the release notes",
   "kanban_status": "executing",
   "created_ts": "2026-07-20T09:00:00Z",
-  "cursor": 25,
+  "cursor": 31,
   "spec": {
     "task_id": "t-x",
     "owner": "alice",
@@ -168,7 +168,7 @@
   ],
   "decisions": [
     {
-      "seq": 14,
+      "seq": 16,
       "type": "decision.recorded",
       "ts": "2026-07-20T09:04:00Z",
       "actor": "alice",
@@ -180,7 +180,7 @@
       "decided_at": "2026-07-20T09:04:00Z"
     },
     {
-      "seq": 20,
+      "seq": 22,
       "type": "deliverable.accepted",
       "ts": "2026-07-20T09:04:00Z",
       "actor": "alice",
@@ -190,7 +190,7 @@
       "subject": "d-notes"
     },
     {
-      "seq": 21,
+      "seq": 23,
       "type": "intake.delta_decision",
       "ts": "2026-07-20T09:04:00Z",
       "run_id": "r-ship",

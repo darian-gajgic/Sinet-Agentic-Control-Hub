@@ -1,0 +1,48 @@
+{
+  "layer": 1,
+  "query": "verdicts.eval_scores",
+  "confidence": "canned",
+  "columns": [
+    "event_seq",
+    "ts",
+    "suite_id",
+    "suite_version",
+    "asset_id",
+    "asset_version",
+    "result",
+    "floor",
+    "floor_green",
+    "runner"
+  ],
+  "rows": [
+    [
+      14,
+      "2026-07-20T09:03:00Z",
+      "prompt-sweep",
+      "v1",
+      "worker-notes",
+      "2",
+      "red",
+      null,
+      null,
+      "internal/evals"
+    ],
+    [
+      13,
+      "2026-07-20T09:02:00Z",
+      "routing-regression",
+      "v3",
+      "selector-v7",
+      "7",
+      "green",
+      0.82,
+      1,
+      "internal/evals"
+    ]
+  ],
+  "row_count": 2,
+  "truncated": false,
+  "notes": [
+    "recorded regression-eval and conformance suite results — suite, asset, outcome and the registered floor where one applies"
+  ]
+}

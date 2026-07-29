@@ -632,6 +632,110 @@ export type MemoryConflict = {
 
 export type MemoryConflictResolved = { conflict: MemoryConflict; detail: string }
 
+// ── the S15.9 settings family ─────────────────────────────────────────────
+
+/**
+ * One declared setting, as the REGISTRY computes it.
+ *
+ * Everything here is the registry's own answer: what the effective value is,
+ * what the EFFECTIVE clamp bounds are (the operator's override where set, else
+ * the ratified clamp — G1 rider 1), whether an override row exists at all, and
+ * the help text. The UI re-derives none of it. `overridden` is what keeps
+ * "equals the default" and "is explicitly set to the default" distinguishable,
+ * which is the whole reason reset-to-default can be shown as a real act.
+ */
+export type SettingValue = {
+  key: string
+  section: string
+  domain: string
+  title: string
+  help: string
+  type: string
+  unit?: string
+  ratified_by: string
+  dormant?: string
+  default: unknown
+  effective: unknown
+  overridden: boolean
+  /** The per-user overrides in force. A member's read carries only their own —
+   *  the server narrows it, and no client filtering creates that privacy. */
+  user_values?: Record<string, unknown>
+  numeric: boolean
+  floor?: number
+  ceiling?: number
+  min_exclusive?: boolean
+  enum?: string[]
+  auto: boolean
+  per_user: boolean
+  restart_required: boolean
+}
+
+/** The whole settings surface in one read. `schema` and `uischema` are the
+ *  registry's OWN emissions, served verbatim: one artifact set drives
+ *  validation, the UI and the docs, so they cannot drift (S01.10(b)). */
+export type SettingsView = {
+  schema: unknown
+  uischema: unknown
+  values: SettingValue[]
+  domains: string[]
+  registered?: { name: string; value: string; ref: string; marker: string }[]
+  registered_absent?: string
+  /** Whether THIS caller may write here, with the server's own reason when not.
+   *  The write surface renders from this flag and from nothing else. */
+  editable: boolean
+  editable_reason: string
+}
+
+export type SettingsAuditEntry = {
+  id: number
+  actor: string
+  key: string
+  user_id?: string
+  old: unknown
+  new: unknown
+  ts: string
+  reason?: string
+}
+
+export type SettingsHistory = { key: string; entries: SettingsAuditEntry[]; limit: number }
+
+export type SettingsWritten = {
+  key: string
+  reset: boolean
+  value: SettingValue
+  for_user?: string
+  detail: string
+}
+
+/** One stored price row, in the metering package's OWN marshaled shape. The
+ *  transport treats it as opaque and so does this client: S10 owns what a row
+ *  is, and a second declaration of it would be a second definition of the
+ *  platform's money. */
+export type StoredPriceRow = {
+  id: number
+  model: string
+  lane: string
+  unit_prices: Record<string, number>
+  effective_from: string
+  verified_on: string
+  source: string
+  created_by: string
+  created_ts: string
+  reason?: string
+}
+
+export type StoredPricesView = {
+  rows: StoredPriceRow[] | null
+  version: string
+  /** What an EMPTY table means, in the server's own sentence. UNPRICED is the
+   *  shipped stance, not a fault, and the honest answer is prose. */
+  posture?: string
+  deferred: string[]
+  editable: boolean
+}
+
+export type PriceRowAdded = { row: StoredPriceRow; version: string; detail: string }
+
 /** staleCard returns the FRESH card a 409 `stale_payload` carried with it. The
  *  card comes off the refusal itself, so the answerer's next act is a re-render
  *  of what is actually there — never a guess, never a blind retry (S15.2). */
@@ -810,4 +914,29 @@ export const api = {
    *  card carries; a repeat answers 200 with the already-closed detail. */
   resolveMemoryConflict: (conflict: number) =>
     post<MemoryConflictResolved>(`/api/memory/conflicts/${encodeURIComponent(String(conflict))}/resolve`, {}),
+
+  // ── the S15.9 settings family (B6-6 part B) ──────────────────────────────
+
+  settings: () => request<SettingsView>('/api/settings'),
+  settingsHistory: (key: string) => request<SettingsHistory>(`/api/settings/${encodeURIComponent(key)}/history`),
+  /**
+   * The per-key write. A null (or absent) `value` is RESET-TO-DEFAULT — it
+   * deletes the override row — so reset needs no verb of its own and cannot
+   * drift from what the registry means by it. `for_user` targets one person's
+   * override on a per-user key; the registry admits no member actor, so this is
+   * how a member's own override comes to exist.
+   */
+  setSetting: (key: string, body: { value: unknown; for_user?: string; reason?: string }) =>
+    post<SettingsWritten>(`/api/settings/${encodeURIComponent(key)}`, body),
+  /** Bounds are a SEPARATE act from a value, and operator-only: automation
+   *  moves a value inside its bounds, only the operator moves the bounds
+   *  themselves (G1 rider 1). Both null resets to the ratified clamp. */
+  setSettingBounds: (key: string, body: { floor: number | null; ceiling: number | null; reason?: string }) =>
+    post<SettingsWritten>(`/api/settings/${encodeURIComponent(key)}/bounds`, body),
+
+  prices: () => request<StoredPricesView>('/api/settings/prices'),
+  /** The ONLY price mutation there is: an effective-dated APPEND. Past rows are
+   *  immutable by trigger, and no edit or delete verb exists to offer. */
+  addPriceRow: (row: unknown, reason?: string) =>
+    post<PriceRowAdded>('/api/settings/prices', reason ? { row, reason } : { row }),
 }

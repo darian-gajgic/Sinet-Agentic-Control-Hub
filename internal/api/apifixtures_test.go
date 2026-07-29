@@ -105,6 +105,17 @@ func fixtureWorld(t *testing.T) *backend {
 		t.Fatalf("memory.NewStore: %v", err)
 	}
 	b.mem, b.memGate = store, memory.NewGate(store)
+	// The registry is ATTACHED here, exactly as the shell attaches it: a
+	// settings write lands its override cell, its audit row and its
+	// settings.changed event in one transaction, and an unattached registry
+	// refuses the write rather than losing the audit trail (S01.10).
+	// The fixed clock, so a row minted through the REAL write verb is
+	// reproducible: settings_events is append-only by trigger, so there is no
+	// normalizing a stamp after the fact (the review-store / journal precedent).
+	b.reg.Now = func() time.Time { return mustTime(t, fxT4) }
+	if err := b.reg.Attach(context.Background(), b.db, b.log); err != nil {
+		t.Fatalf("attach the settings registry: %v", err)
+	}
 
 	// Users are created through the REAL auth store rather than inserted, so
 	// they carry a PIN: a High-tier effect approval re-prompts it (S01.9
@@ -287,7 +298,37 @@ func fixtureWorld(t *testing.T) *backend {
 	seedFixtureOversightCards(t, b)
 	driveFixtureDecisions(t, b)
 	driveFixtureMemoryConflict(t, b)
+	driveFixtureSettings(t, b)
 	return b
+}
+
+// driveFixtureSettings puts the settings surface into a state worth rendering,
+// through the REAL registry verbs (B6-6 part B): a platform value override, a
+// per-user override, and an operator bounds edit — so the committed bodies
+// carry the `overridden` flag, a populated `user_values`, and EFFECTIVE bounds
+// that differ from the ratified clamp. A registry read of an untouched index
+// would render every one of those as its default and prove none of them.
+func driveFixtureSettings(t *testing.T, b *backend) {
+	t.Helper()
+	post := func(path, body string) {
+		rr := httptest.NewRecorder()
+		fixtureServer(t, b, "op").Handler().ServeHTTP(rr, httptest.NewRequest("POST", path, strings.NewReader(body)))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("drive settings %s: %d: %s", path, rr.Code, rr.Body.String())
+		}
+	}
+	// A platform value, twice, so the key's audit history has more than one row
+	// and a reader can see what changed from what.
+	post("/api/settings/freshness.max_age", `{"value":43200,"reason":"plans go stale faster than a day here"}`)
+	post("/api/settings/freshness.max_age", `{"value":21600,"reason":"faster still while the release is in flight"}`)
+	// The operator's bounds edit — the G1 rider 1 split, which is the only way
+	// an EFFECTIVE bound differs from the ratified clamp.
+	post("/api/settings/freshness.max_age/bounds", `{"floor":7200,"ceiling":172800,"reason":"narrowed for this household"}`)
+	// A per-user override on a PerUser key, set by the operator FOR a member —
+	// the registry admits no member actor, so this is the only way one exists.
+	post("/api/settings/intake.zero_interaction_cost_usd",
+		`{"value":0.25,"for_user":"alice","reason":"alice's trivial band is tighter"}`)
+
 }
 
 // seedFixtureOversightCards puts ONE card of every remaining inbox kind in the
@@ -333,6 +374,19 @@ func seedFixtureOversightCards(t *testing.T, b *backend) {
 		`{"action":"raise","domain":"blind-pairs","epoch_id":"e1","severity":"flag-now",`+
 			`"summary":"the platform arm is losing its own blind comparison in this domain",`+
 			`"loss_g":0.96,"threshold":0.95,"expansion_freeze":true}`, fxT3)
+
+	// Two recorded suite results — the D4(b) surface's own rows. The payload key
+	// set is internal/conformance's scorePayload verbatim, and the two paths
+	// differ honestly: the runbook registers a floor inside `metrics`, the sweep
+	// does not, so a null floor is a fact about the path rather than a zero.
+	event("platform", "", "eval.score_recorded",
+		`{"suite_id":"routing-regression","suite_version":"v3","asset_id":"selector-v7","asset_version":"7",`+
+			`"runner":"internal/evals","runner_version":"v1","result":"green",`+
+			`"metrics":{"floor":0.82,"floor_green":true,"floor_registered":true}}`, fxT2)
+	event("platform", "", "eval.score_recorded",
+		`{"suite_id":"prompt-sweep","suite_version":"v1","asset_id":"worker-notes","asset_version":"2",`+
+			`"runner":"internal/evals","runner_version":"v1","result":"red",`+
+			`"metrics":{"assets_evaluated":4,"assets_red":1}}`, fxT3)
 
 	// A pair waiting for its blind verdict, and a pair whose direct arm ended
 	// without producing anything — the EIGHTH kind, which rides the same id
@@ -674,6 +728,49 @@ func fixtureCoverageCard(t *testing.T) string {
 	})
 }
 
+// fixturePrices is the S18.3 stored-price seam for the fixture world.
+//
+// The row is MARSHALED FROM THE REAL metering.StoredPriceRow (the receipt
+// precedent, and B6-6 OQ6's own requirement): the price editor composes exactly
+// these fields, so pinning the committed body to the owner's struct is what
+// stops the form drifting from the shape the store accepts. The APPEND is not
+// driven here — a GET fixture never calls it, and the store's validation is the
+// authority the UI renders refusals from.
+type fixturePrices struct{}
+
+func (fixturePrices) PriceRows(context.Context) (json.RawMessage, error) {
+	rows := []metering.StoredPriceRow{{
+		ID: 1,
+		PriceRow: metering.PriceRow{
+			Model: "claude-opus-5", Lane: "anthropic",
+			Prices:        metering.UnitPrices{InputUSD: 0.000015, OutputUSD: 0.000075, CacheReadUSD: 0.0000015},
+			EffectiveFrom: fixturePriceDate("2026-07-01"),
+			VerifiedOn:    fixturePriceDate("2026-07-18"),
+			Source:        "the provider's published pricing page, read on the verified-on date",
+		},
+		CreatedBy: "op", CreatedTS: fixturePriceDate("2026-07-20"),
+		Reason: "first row: the household's own lane",
+	}}
+	return json.Marshal(rows)
+}
+
+func (fixturePrices) AddPriceRow(_ context.Context, _, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	return nil, &api.SurfaceError{Status: http.StatusNotImplemented, Code: "not_implemented",
+		Msg: "the fixture world serves the price READ; the append is the store's own battery"}
+}
+
+func (fixturePrices) TableVersion() string { return "prices/2026-07-01#1" }
+
+// fixturePriceDate parses a fixed date. A price row's dates are the operator's
+// own data, so they are literals like every other stamp in this world.
+func fixturePriceDate(day string) time.Time {
+	ts, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		panic("fixture price date: " + err.Error())
+	}
+	return ts
+}
+
 // fixtureReceipt is a stored S10.10 receipt body.
 //
 // It is MARSHALED FROM THE REAL metering.Receipt rather than hand-written, so
@@ -873,6 +970,8 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Effects:    fixtureJournal(t, b),
 		Memory:     b.mem,
 		MemoryGate: b.memGate,
+		Registry:   b.reg,
+		Prices:     fixturePrices{},
 		Benchmark:  fixtureBenchmark{},
 		Now:        func() time.Time { return mustTime(t, fxT4) },
 	})
@@ -974,6 +1073,20 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// length figures, and the registered answer vocabularies the form's buttons
 	// come from (B6-6 OQ4).
 	{"benchmark-verdicts", "/api/benchmark/verdicts", "alice"},
+	// The S15.9 settings surface, read BOTH ways: the operator's body carries
+	// `editable:true` and every per-user override, a member's carries the served
+	// refusal reason and only their own. The whole write surface renders from
+	// that flag, so both bodies have to exist for both renders to be driven.
+	{"settings", "/api/settings", ""},
+	{"settings-member", "/api/settings", "alice"},
+	{"settings-history", "/api/settings/freshness.max_age/history", ""},
+	{"prices", "/api/settings/prices", ""},
+	// The price table's `editable` is computed per caller too, so the read-only
+	// posture is a served body rather than a second render.
+	{"prices-member", "/api/settings/prices", "alice"},
+	// The D4(b) unlock: the recorded suite results, through the LANDED audited
+	// query route.
+	{"eval-scores", "/api/events/query/verdicts.eval_scores", ""},
 }
 
 func TestWebAPIFixtures(t *testing.T) {

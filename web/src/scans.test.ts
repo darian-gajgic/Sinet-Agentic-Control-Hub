@@ -147,3 +147,58 @@ test('every in-app link is built from the route table, never assembled by hand',
   // Probe.
   expect(/`\/(tasks|inbox|deliverables)\//.test('const href = `/tasks/${id}`')).toBe(true)
 })
+
+test('no renderer theme package is imported anywhere in the tree', () => {
+  // FC-v1 §4: the renderer set is SINET-OWNED, over JSON Forms' core,
+  // theme-independent vocabulary. A theme package is a dependency decision with
+  // its own look, its own upgrade cadence and its own opinions about what a
+  // form is; none is on the S16.4 rail, and one arriving quietly is exactly
+  // what this catches.
+  const banned = [
+    '@jsonforms/material-renderers',
+    '@jsonforms/vanilla-renderers',
+    '@jsonforms/vue-vanilla',
+    '@jsonforms/angular-material',
+  ]
+  // Only IMPORT lines are scanned: a package can enter no other way, and a
+  // file is allowed to name in prose the thing it is explaining it never uses
+  // (settingsForm.tsx's own doc comment does exactly that).
+  const hits: string[] = []
+  for (const [path, raw] of Object.entries(appSources())) {
+    for (const line of raw.split('\n')) {
+      if (!/^\s*(import|export)\b|require\(/.test(line)) continue
+      for (const pkg of banned) {
+        if (line.includes(pkg)) hits.push(`${path}: ${pkg}`)
+      }
+    }
+  }
+  expect(hits, 'a JSON Forms theme package entered the tree').toEqual([])
+  // Probe: the scan can fail, and the packages it names are real ones.
+  expect(
+    banned.some((p) => `import x from '${banned[0]}'`.includes(p)),
+    'the probe does not exercise the import matcher',
+  ).toBe(true)
+})
+
+test('the settings UI declares no ⚙ key of its own', () => {
+  // The whole claim of the settings tab is that it hand-builds nothing: the
+  // registry emits the form, and a key list living in a view file would be the
+  // second copy S01.10 exists to prevent. Real dotted keys appear only in the
+  // fixtures the views render FROM.
+  const dotted = /['"`][a-z]+\.[a-z_]+(\.[a-z_]+)?['"`]/
+  const hits: string[] = []
+  for (const [path, raw] of Object.entries(appSources())) {
+    if (!path.includes('etting')) continue
+    for (const line of raw.split('\n')) {
+      // Route paths and event types are not ⚙ keys; the keys this forbids are
+      // the ones a control would be hand-placed by.
+      // Route paths, event types and CATALOG QUERY names are not ⚙ keys; the
+      // keys this forbids are the ones a control would be hand-placed by.
+      if (line.includes('/api/') || line.includes('settings.changed')) continue
+      if (line.includes('historyQuery') || line.trimStart().startsWith('*')) continue
+      if (line.trimStart().startsWith('//')) continue
+      if (dotted.test(line)) hits.push(`${path}: ${line.trim()}`)
+    }
+  }
+  expect(hits, 'a settings view names a ⚙ key — the form is generated, not hand-built').toEqual([])
+})

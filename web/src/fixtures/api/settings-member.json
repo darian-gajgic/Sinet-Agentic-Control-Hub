@@ -1,0 +1,5431 @@
+{
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "description": "Generated from the declare-once settings registry (Spec S01.10); key index Spec S18.",
+    "properties": {
+      "adapter": {
+        "additionalProperties": false,
+        "properties": {
+          "claude": {
+            "additionalProperties": false,
+            "properties": {
+              "cleanup_period_days": {
+                "default": 365,
+                "description": "How long the Claude engine keeps local session data before its own sweep; must exceed the effect-approval expiry so an answerable ask never outlives its session.",
+                "minimum": 30,
+                "title": "Claude session cleanup period",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "adapter.claude.cleanup_period_days",
+                  "ratifiedBy": "P-T02-1 mitigation; SPIKE G1-S2 F5",
+                  "section": "S03",
+                  "type": "int",
+                  "unit": "days"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "engine_ceiling_backstop_mult": {
+            "default": 2,
+            "description": "The engine-internal turn ceiling is set to this multiple of the platform ceiling so the platform gate always fires first.",
+            "minimum": 2,
+            "title": "Engine ceiling backstop multiplier",
+            "type": "number",
+            "x-sinet": {
+              "key": "adapter.engine_ceiling_backstop_mult",
+              "ratifiedBy": "SPIKE G1-S2 F4 (consumer S10)",
+              "section": "S03",
+              "type": "float",
+              "unit": "multiplier"
+            }
+          },
+          "parallel_gate_fallback": {
+            "default": "serialize-by-deny",
+            "description": "How a gated call inside a parallel batch is serialized; serialize-by-deny makes the engine re-issue the gated call alone for a faithful ask record.",
+            "enum": [
+              "serialize-by-deny",
+              "hold-process"
+            ],
+            "title": "Parallel-gate fallback strategy",
+            "type": "string",
+            "x-sinet": {
+              "key": "adapter.parallel_gate_fallback",
+              "ratifiedBy": "SPIKE G1-S2 §Verdict; P2-S4 headline; [coordinator-draft]",
+              "section": "S03",
+              "type": "enum"
+            }
+          }
+        },
+        "title": "adapter (S03)",
+        "type": "object",
+        "x-sinet-owner": "S03"
+      },
+      "adoption": {
+        "additionalProperties": false,
+        "properties": {
+          "abandonment_months": {
+            "default": 6,
+            "description": "Months of upstream inactivity that propose executing an entry's funeral plan; overridable per entry in components.lock.",
+            "maximum": 24,
+            "minimum": 2,
+            "title": "Default abandonment horizon",
+            "type": "integer",
+            "x-sinet": {
+              "key": "adoption.abandonment_months",
+              "ratifiedBy": "R17 §4.8 (⚙ flagged unnumbered); P-T16-1",
+              "section": "S16",
+              "type": "int",
+              "unit": "months"
+            }
+          },
+          "dependency_pass_months": {
+            "default": 3,
+            "description": "Months between quarterly passes over every components.lock entry.",
+            "maximum": 6,
+            "minimum": 1,
+            "title": "Dependency pass cadence",
+            "type": "integer",
+            "x-sinet": {
+              "key": "adoption.dependency_pass_months",
+              "ratifiedBy": "G3 D3.3 rider; R17 §4.8; S18.4 R7",
+              "section": "S16",
+              "type": "int",
+              "unit": "months"
+            }
+          },
+          "price_data_stale_days": {
+            "default": 60,
+            "description": "Days without upstream price-table updates, while providers reprice, before the fallback source is proposed.",
+            "maximum": 180,
+            "minimum": 14,
+            "title": "Price data staleness horizon",
+            "type": "integer",
+            "x-sinet": {
+              "key": "adoption.price_data_stale_days",
+              "ratifiedBy": "R14 §4.2",
+              "section": "S16",
+              "type": "int",
+              "unit": "days"
+            }
+          }
+        },
+        "title": "adoption (S16)",
+        "type": "object",
+        "x-sinet-owner": "S16"
+      },
+      "arbitration": {
+        "additionalProperties": false,
+        "properties": {
+          "background_cpuweight": {
+            "default": "idle",
+            "description": "systemd CPUWeight for the background slice: idle, or an integer weight from 1 to 10000.",
+            "title": "Background CPU weight",
+            "type": "string",
+            "x-sinet": {
+              "key": "arbitration.background_cpuweight",
+              "ratifiedBy": "R09 §4.9 (slice mechanism S01)",
+              "section": "S10",
+              "type": "string"
+            }
+          }
+        },
+        "title": "arbitration (S10)",
+        "type": "object",
+        "x-sinet-owner": "S10"
+      },
+      "backup": {
+        "additionalProperties": false,
+        "properties": {
+          "drill_interval": {
+            "default": 3,
+            "description": "Months between scheduled verified-restore drills (distinct from the escalation drill, S18.4 R6).",
+            "maximum": 12,
+            "minimum": 1,
+            "title": "Restore drill interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "backup.drill_interval",
+              "ratifiedBy": "R13 §4.9 (⚙ flagged unnumbered); S18.4 R6",
+              "section": "S13",
+              "type": "int",
+              "unit": "months"
+            }
+          },
+          "interval": {
+            "default": 86400,
+            "description": "How often the durable-set snapshot pipeline runs.",
+            "maximum": 604800,
+            "minimum": 21600,
+            "title": "Snapshot interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "backup.interval",
+              "ratifiedBy": "G2 D2.5",
+              "section": "S13",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "keep": {
+            "default": 30,
+            "description": "How many snapshots the rotation keeps.",
+            "maximum": 365,
+            "minimum": 7,
+            "title": "Snapshots kept",
+            "type": "integer",
+            "x-sinet": {
+              "key": "backup.keep",
+              "ratifiedBy": "G2 D2.5",
+              "section": "S13",
+              "type": "int",
+              "unit": "snapshots"
+            }
+          },
+          "repo_rotation": {
+            "default": 12,
+            "description": "Months before the snapshot repository is rotated.",
+            "maximum": 24,
+            "minimum": 6,
+            "title": "Snapshot repo rotation",
+            "type": "integer",
+            "x-sinet": {
+              "key": "backup.repo_rotation",
+              "ratifiedBy": "G2 D2.5 (annual)",
+              "section": "S13",
+              "type": "int",
+              "unit": "months"
+            }
+          }
+        },
+        "title": "backup (S13)",
+        "type": "object",
+        "x-sinet-owner": "S13"
+      },
+      "benchmark": {
+        "additionalProperties": false,
+        "properties": {
+          "sampling_rate": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {
+              "maintenance": "25",
+              "pre-gate": "100"
+            },
+            "description": "Percent of eligible tasks sampled into the benchmark per phase; uniformity is frozen and registered values change only via a re-registration commit (BENCH-REG §4.1; S18.4 R9).",
+            "title": "Benchmark sampling rates",
+            "type": "object",
+            "x-sinet": {
+              "key": "benchmark.sampling_rate",
+              "ratifiedBy": "BENCH-REG §4.1 (registered-number rule)",
+              "section": "S14",
+              "type": "map"
+            }
+          }
+        },
+        "title": "benchmark (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "budget": {
+        "additionalProperties": false,
+        "properties": {
+          "background_window_fraction": {
+            "default": 0.5,
+            "description": "Fraction of a subscription window background work may consume; labeled assumed.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Background window fraction",
+            "type": "number",
+            "x-sinet": {
+              "key": "budget.background_window_fraction",
+              "ratifiedBy": "G2 Def.4/5",
+              "section": "S10",
+              "type": "float",
+              "unit": "ratio"
+            }
+          }
+        },
+        "title": "budget (S10)",
+        "type": "object",
+        "x-sinet-owner": "S10"
+      },
+      "canary": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_interval": {
+            "default": 86400,
+            "description": "Cadence of the provider auth-revocation canary (daily by default; between four times daily and weekly).",
+            "maximum": 604800,
+            "minimum": 21600,
+            "title": "Auth canary interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "canary.auth_interval",
+              "ratifiedBy": "G1 Def.3 set; P-T17-1; S18.4 R5",
+              "section": "S14",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "behavioral_interval": {
+            "default": 604800,
+            "description": "Cadence of the behavioral drift canary (weekly by default; between daily and monthly).",
+            "maximum": 2592000,
+            "minimum": 86400,
+            "title": "Behavioral canary interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "canary.behavioral_interval",
+              "ratifiedBy": "R12 §4.5 [coordinator-draft]",
+              "section": "S14",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "canary (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "claims": {
+        "additionalProperties": false,
+        "properties": {
+          "default_write": {
+            "default": "whole-project",
+            "description": "What a plan claims when it cannot bound its write-set: the whole project serializes more but never overwrites; declared-set is the parallel-friendlier alternative.",
+            "enum": [
+              "declared-set",
+              "whole-project"
+            ],
+            "title": "Default write claim",
+            "type": "string",
+            "x-sinet": {
+              "key": "claims.default_write",
+              "ratifiedBy": "G2 Def.3",
+              "section": "S02",
+              "type": "enum"
+            }
+          }
+        },
+        "title": "claims (S02)",
+        "type": "object",
+        "x-sinet-owner": "S02"
+      },
+      "context": {
+        "additionalProperties": false,
+        "properties": {
+          "conventions_max_lines": {
+            "default": 150,
+            "description": "Maximum lines of the injected conventions file before it must be tightened.",
+            "maximum": 400,
+            "minimum": 50,
+            "title": "Conventions file line cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "context.conventions_max_lines",
+              "ratifiedBy": "R07 §4.4",
+              "section": "S05",
+              "type": "int",
+              "unit": "lines"
+            }
+          },
+          "recitation_interval_turns": {
+            "default": 10,
+            "description": "Every this-many turns the run recites its objective to fight drift; 0 turns recitation off, otherwise 5 to 50.",
+            "title": "Objective recitation interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "context.recitation_interval_turns",
+              "ratifiedBy": "[coordinator-draft]",
+              "section": "S05",
+              "type": "int",
+              "unit": "turns"
+            }
+          },
+          "stage_fit_target": {
+            "default": 0.5,
+            "description": "Fraction of the lane's context window a stage is packed toward; recalibrated per model generation, and always below the overflow threshold.",
+            "maximum": 0.7,
+            "minimum": 0.2,
+            "title": "Stage fit target",
+            "type": "number",
+            "x-sinet": {
+              "auto": true,
+              "key": "context.stage_fit_target",
+              "ratifiedBy": "G1 Def.11 (per-generation recalibration, S05.2)",
+              "section": "S05",
+              "type": "float",
+              "unit": "ratio"
+            }
+          },
+          "stage_overflow_threshold": {
+            "default": 0.7,
+            "description": "Fraction of the lane's context window past which a stage overflows and splits; stays at least 0.05 above the fit target.",
+            "maximum": 0.85,
+            "title": "Stage overflow threshold",
+            "type": "number",
+            "x-sinet": {
+              "auto": true,
+              "key": "context.stage_overflow_threshold",
+              "ratifiedBy": "G1 Def.11 (same recalibration)",
+              "section": "S05",
+              "type": "float",
+              "unit": "ratio"
+            }
+          }
+        },
+        "title": "context (S05)",
+        "type": "object",
+        "x-sinet-owner": "S05"
+      },
+      "effects": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_expiry": {
+            "default": 604800,
+            "description": "How long an approved outward effect stays valid before drift or age sends it back for re-approval.",
+            "maximum": 2592000,
+            "minimum": 3600,
+            "title": "Effect approval expiry",
+            "type": "integer",
+            "x-sinet": {
+              "key": "effects.approval_expiry",
+              "ratifiedBy": "G2 Def.2 / R08 §4.5",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "effects (S02)",
+        "type": "object",
+        "x-sinet-owner": "S02"
+      },
+      "eval": {
+        "additionalProperties": false,
+        "properties": {
+          "sweep_interval": {
+            "default": 3,
+            "description": "Months between full regression-eval sweeps.",
+            "maximum": 6,
+            "minimum": 1,
+            "title": "Eval sweep interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "eval.sweep_interval",
+              "ratifiedBy": "R12 §4.7",
+              "section": "S14",
+              "type": "int",
+              "unit": "months"
+            }
+          }
+        },
+        "title": "eval (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "freshness": {
+        "additionalProperties": false,
+        "properties": {
+          "hold_vs_park": {
+            "default": 600,
+            "description": "Pauses shorter than this hold the process for a cheap resume; anything longer parks the run and subjects the resume to the freshness pass.",
+            "maximum": 3600,
+            "minimum": 60,
+            "title": "Hold-versus-park threshold",
+            "type": "integer",
+            "x-sinet": {
+              "key": "freshness.hold_vs_park",
+              "ratifiedBy": "G1 Def.4 (consumer S10)",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "max_age": {
+            "default": 86400,
+            "description": "A parked run or pending approval older than this re-validates its plan against current reality before spending anything significant; also folded alias of intake.approval_stale_hours (S18.4 R2).",
+            "minimum": 3600,
+            "title": "Staleness horizon",
+            "type": "integer",
+            "x-sinet": {
+              "key": "freshness.max_age",
+              "ratifiedBy": "G1 Def.5; feature 4.3 (cross-cutting; consumers S03/S06/S10)",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "freshness (S02)",
+        "type": "object",
+        "x-sinet-owner": "S02"
+      },
+      "frontend": {
+        "additionalProperties": false,
+        "properties": {
+          "dependency_pass_interval": {
+            "default": 90,
+            "description": "Days between SPA dependency passes; co-scheduled with the components.lock review (S18.4 R7).",
+            "maximum": 365,
+            "minimum": 30,
+            "title": "Frontend dependency pass interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "frontend.dependency_pass_interval",
+              "ratifiedBy": "G3 D3.3 rider; R17 §4.3; S18.4 R7",
+              "section": "S15",
+              "type": "int",
+              "unit": "days"
+            }
+          }
+        },
+        "title": "frontend (S15)",
+        "type": "object",
+        "x-sinet-owner": "S15"
+      },
+      "intake": {
+        "additionalProperties": false,
+        "properties": {
+          "clearance_floor": {
+            "additionalProperties": false,
+            "properties": {
+              "high": {
+                "default": 90,
+                "description": "Interviewing continues while the spec's clearance score sits below this floor on high-stakes tasks.",
+                "maximum": 100,
+                "minimum": 0,
+                "title": "Clearance floor — high stakes",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "intake.clearance_floor.high",
+                  "ratifiedBy": "G1 P8 mechanism; default [coordinator-draft]",
+                  "section": "S06",
+                  "type": "int",
+                  "unit": "score"
+                }
+              },
+              "low": {
+                "default": 60,
+                "description": "Interviewing continues while the spec's clearance score sits below this floor on low-stakes tasks.",
+                "maximum": 100,
+                "minimum": 0,
+                "title": "Clearance floor — low stakes",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "intake.clearance_floor.low",
+                  "ratifiedBy": "G1 P8 mechanism; default [coordinator-draft]",
+                  "section": "S06",
+                  "type": "int",
+                  "unit": "score"
+                }
+              },
+              "standard": {
+                "default": 75,
+                "description": "Interviewing continues while the spec's clearance score sits below this floor on standard-stakes tasks.",
+                "maximum": 100,
+                "minimum": 0,
+                "title": "Clearance floor — standard stakes",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "intake.clearance_floor.standard",
+                  "ratifiedBy": "G1 P8 mechanism; default [coordinator-draft]",
+                  "section": "S06",
+                  "type": "int",
+                  "unit": "score"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "coverage_autofix_rounds": {
+            "default": 1,
+            "description": "Bounded planner rounds to fix an uncovered acceptance criterion before a decision card goes to the requester.",
+            "maximum": 2,
+            "minimum": 0,
+            "title": "Coverage auto-fix rounds",
+            "type": "integer",
+            "x-sinet": {
+              "key": "intake.coverage_autofix_rounds",
+              "ratifiedBy": "R03 §4 Stage 2(a) (\"bounded\")",
+              "section": "S06",
+              "type": "int",
+              "unit": "rounds"
+            }
+          },
+          "critique_revise_rounds": {
+            "default": 1,
+            "description": "Bounded revise rounds after the plan self-attack before the result ships as-is with the critique attached.",
+            "maximum": 2,
+            "minimum": 0,
+            "title": "Critique revise rounds",
+            "type": "integer",
+            "x-sinet": {
+              "key": "intake.critique_revise_rounds",
+              "ratifiedBy": "R03 §4 Stage 3 (\"fixes once\")",
+              "section": "S06",
+              "type": "int",
+              "unit": "rounds"
+            }
+          },
+          "size_recheck_factor": {
+            "default": 2,
+            "description": "If the plan-derived estimate exceeds the intake guess by this factor, size and tier are re-decided before expensive work.",
+            "exclusiveMinimum": 1,
+            "title": "Size re-check factor",
+            "type": "number",
+            "x-sinet": {
+              "key": "intake.size_recheck_factor",
+              "ratifiedBy": "feature 2.5; R03 §4 Stage 2(c); default [coordinator-draft]",
+              "section": "S06",
+              "type": "float",
+              "unit": "multiplier"
+            }
+          },
+          "zero_interaction_cost_usd": {
+            "default": 0.5,
+            "description": "Tasks estimated under this API-equivalent cost may run without interview questions; per person.",
+            "minimum": 0,
+            "title": "Zero-interaction cost band",
+            "type": "number",
+            "x-sinet": {
+              "key": "intake.zero_interaction_cost_usd",
+              "perUser": true,
+              "ratifiedBy": "G1 P11 + D1.7 (⚙ per-user at the gate)",
+              "section": "S06",
+              "type": "float",
+              "unit": "USD"
+            }
+          }
+        },
+        "title": "intake (S06)",
+        "type": "object",
+        "x-sinet-owner": "S06"
+      },
+      "limit": {
+        "additionalProperties": false,
+        "properties": {
+          "probe_interval_max": {
+            "default": 1800,
+            "description": "Ceiling on the backoff between probes of a closed provider window.",
+            "maximum": 7200,
+            "minimum": 60,
+            "title": "Limit probe interval cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "limit.probe_interval_max",
+              "ratifiedBy": "G2 D2.1 / R09 §4.3",
+              "section": "S10",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "retry_budget_ratio": {
+            "default": 0.1,
+            "description": "Fraction of a run's budget retries may consume.",
+            "maximum": 0.5,
+            "minimum": 0.01,
+            "title": "Retry budget ratio",
+            "type": "number",
+            "x-sinet": {
+              "key": "limit.retry_budget_ratio",
+              "ratifiedBy": "G2 D2.1 / R09 §4.3",
+              "section": "S10",
+              "type": "float",
+              "unit": "ratio"
+            }
+          },
+          "retry_cap": {
+            "default": 3,
+            "description": "Maximum retries after a provider limit event before the run parks.",
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Limit-event retry cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "limit.retry_cap",
+              "ratifiedBy": "G2 D2.1 / R09 §4.3",
+              "section": "S10",
+              "type": "int"
+            }
+          }
+        },
+        "title": "limit (S10)",
+        "type": "object",
+        "x-sinet-owner": "S10"
+      },
+      "local": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {
+              "contradiction-screen": "DeBERTa-class NLI cross-encoder",
+              "distill-summarize": "workhorse",
+              "embedder": "Qwen3-Embedding-0.6B",
+              "entailment": "Granite Guardian 8B",
+              "intake-triage": "fast",
+              "intent-filling": "fast",
+              "sql-open": "Arctic-Text2SQL-R1-7B",
+              "utility": "workhorse",
+              "watchdog-disambiguator": "fast",
+              "watchlist-triage": "fast"
+            },
+            "description": "Maps each platform duty alias to its serving local model or seat (S12.3/S12.4); changes land only through the S12.10 swap gate.",
+            "title": "Duty-alias map",
+            "type": "object",
+            "x-sinet": {
+              "key": "local.alias",
+              "ratifiedBy": "R16 §4.7; G3 Def.8 (map key ⚙ local.alias.\u003cduty\u003e)",
+              "section": "S12",
+              "type": "map"
+            }
+          },
+          "batch": {
+            "additionalProperties": false,
+            "properties": {
+              "ac_only": {
+                "default": true,
+                "description": "Restrict local batch workloads to when the host is on mains power.",
+                "title": "Batch work on AC only",
+                "type": "boolean",
+                "x-sinet": {
+                  "key": "local.batch.ac_only",
+                  "ratifiedBy": "R16 §4.6",
+                  "section": "S12",
+                  "type": "bool"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "battery": {
+            "additionalProperties": false,
+            "properties": {
+              "gpu_admission": {
+                "default": "urgent-only",
+                "description": "Whether GPU model loads are admitted while the host runs on battery.",
+                "enum": [
+                  "never",
+                  "urgent-only",
+                  "always"
+                ],
+                "title": "GPU admission on battery",
+                "type": "string",
+                "x-sinet": {
+                  "key": "local.battery.gpu_admission",
+                  "ratifiedBy": "R16 §4.6 (name [coordinator-draft])",
+                  "section": "S12",
+                  "type": "enum"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "broker": {
+            "additionalProperties": false,
+            "properties": {
+              "sandbox_logprobs": {
+                "default": false,
+                "description": "Whether sandboxed callers of the local-inference bridge may request logprobs (per-template; off reduces side channels).",
+                "title": "Sandbox logprobs exposure",
+                "type": "boolean",
+                "x-sinet": {
+                  "key": "local.broker.sandbox_logprobs",
+                  "ratifiedBy": "R16 §4.7",
+                  "section": "S12",
+                  "type": "bool"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "gamemode_hook": {
+            "default": true,
+            "description": "Pause local-lane admissions and eager-unload models when GameMode reports a game session.",
+            "title": "GameMode hook",
+            "type": "boolean",
+            "x-sinet": {
+              "key": "local.gamemode_hook",
+              "ratifiedBy": "G2 Def.6",
+              "section": "S12",
+              "type": "bool"
+            }
+          },
+          "reeval": {
+            "additionalProperties": false,
+            "properties": {
+              "cadence_months": {
+                "default": 6,
+                "description": "Months between re-evaluations of the local model set against current releases.",
+                "maximum": 12,
+                "minimum": 1,
+                "title": "Local model re-evaluation cadence",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "local.reeval.cadence_months",
+                  "ratifiedBy": "R16 §4.10",
+                  "section": "S12",
+                  "type": "int",
+                  "unit": "months"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "ttl": {
+            "additionalProperties": false,
+            "properties": {
+              "egpu_s": {
+                "default": 1800,
+                "description": "Idle seconds before an eGPU-pool model is unloaded; dormant until the eGPU pool is enrolled.",
+                "maximum": 86400,
+                "minimum": 0,
+                "title": "eGPU idle TTL",
+                "type": "integer",
+                "x-sinet": {
+                  "dormant": "dormant until pool24 (S18.5)",
+                  "key": "local.ttl.egpu_s",
+                  "ratifiedBy": "R16 §4.1",
+                  "section": "S12",
+                  "type": "int",
+                  "unit": "seconds"
+                }
+              },
+              "fast_s": {
+                "default": 120,
+                "description": "Idle seconds before the fast-tier local model is unloaded and its VRAM returns to zero.",
+                "maximum": 3600,
+                "minimum": 0,
+                "title": "Fast-tier idle TTL",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "local.ttl.fast_s",
+                  "ratifiedBy": "R16 §4.1",
+                  "section": "S12",
+                  "type": "int",
+                  "unit": "seconds"
+                }
+              },
+              "workhorse_s": {
+                "default": 300,
+                "description": "Idle seconds before the workhorse local model is unloaded.",
+                "maximum": 7200,
+                "minimum": 0,
+                "title": "Workhorse idle TTL",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "local.ttl.workhorse_s",
+                  "ratifiedBy": "R16 §4.1",
+                  "section": "S12",
+                  "type": "int",
+                  "unit": "seconds"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "unload": {
+            "additionalProperties": false,
+            "properties": {
+              "term_grace_s": {
+                "default": 5,
+                "description": "Seconds a local-model backend gets to exit cleanly before it is killed on unload.",
+                "maximum": 30,
+                "minimum": 1,
+                "title": "Unload termination grace",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "local.unload.term_grace_s",
+                  "ratifiedBy": "R16 §4.5",
+                  "section": "S12",
+                  "type": "int",
+                  "unit": "seconds"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "vram": {
+            "additionalProperties": false,
+            "properties": {
+              "guard_band_mb": {
+                "default": 512,
+                "description": "VRAM headroom the GPU broker keeps free when admitting a model load.",
+                "minimum": 128,
+                "title": "VRAM guard band",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "local.vram.guard_band_mb",
+                  "ratifiedBy": "R16 §4.4 step 5",
+                  "section": "S12",
+                  "type": "int",
+                  "unit": "MB"
+                }
+              }
+            },
+            "type": "object"
+          }
+        },
+        "title": "local (S12)",
+        "type": "object",
+        "x-sinet-owner": "S12"
+      },
+      "memory": {
+        "additionalProperties": false,
+        "properties": {
+          "digest_interval_days": {
+            "default": 7,
+            "description": "Days between memory digests presented for review.",
+            "maximum": 30,
+            "minimum": 1,
+            "title": "Memory digest interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "memory.digest_interval_days",
+              "ratifiedBy": "G2 Def.7",
+              "section": "S09",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "distill_threshold_lessons": {
+            "default": 3,
+            "description": "How many related lessons accumulate before distillation into a single entry is proposed.",
+            "maximum": 10,
+            "minimum": 2,
+            "title": "Distillation threshold",
+            "type": "integer",
+            "x-sinet": {
+              "key": "memory.distill_threshold_lessons",
+              "ratifiedBy": "G2 Def.7",
+              "section": "S09",
+              "type": "int"
+            }
+          },
+          "injection_budget_tokens": {
+            "additionalProperties": false,
+            "properties": {
+              "house": {
+                "default": 2000,
+                "description": "Token budget for house-scope memory injected into a run's context.",
+                "maximum": 10000,
+                "minimum": 500,
+                "title": "Injection budget — house scope",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "memory.injection_budget_tokens.house",
+                  "ratifiedBy": "G2 Def.7; numbers [coordinator-draft]",
+                  "section": "S09",
+                  "type": "int",
+                  "unit": "tokens"
+                }
+              },
+              "project": {
+                "default": 3000,
+                "description": "Token budget for project-scope memory injected into a run's context.",
+                "maximum": 10000,
+                "minimum": 500,
+                "title": "Injection budget — project scope",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "memory.injection_budget_tokens.project",
+                  "ratifiedBy": "G2 Def.7; numbers [coordinator-draft]",
+                  "section": "S09",
+                  "type": "int",
+                  "unit": "tokens"
+                }
+              },
+              "user": {
+                "default": 1500,
+                "description": "Token budget for user-scope memory injected into a run's context.",
+                "maximum": 10000,
+                "minimum": 500,
+                "title": "Injection budget — user scope",
+                "type": "integer",
+                "x-sinet": {
+                  "key": "memory.injection_budget_tokens.user",
+                  "ratifiedBy": "G2 Def.7; numbers [coordinator-draft]",
+                  "section": "S09",
+                  "type": "int",
+                  "unit": "tokens"
+                }
+              },
+              "worker_overlay": {
+                "default": 1500,
+                "description": "Token budget for worker-overlay memory; the scope activates at v1.",
+                "maximum": 10000,
+                "minimum": 500,
+                "title": "Injection budget — worker overlay",
+                "type": "integer",
+                "x-sinet": {
+                  "dormant": "worker-overlay scope activates v1 (S18.5)",
+                  "key": "memory.injection_budget_tokens.worker_overlay",
+                  "ratifiedBy": "G2 Def.7; numbers [coordinator-draft]",
+                  "section": "S09",
+                  "type": "int",
+                  "unit": "tokens"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "l1_ttl_days": {
+            "default": 90,
+            "description": "Days an L1 observation lives before expiry; the L1 scope activates at v1.",
+            "maximum": 365,
+            "minimum": 7,
+            "title": "L1 memory TTL",
+            "type": "integer",
+            "x-sinet": {
+              "key": "memory.l1_ttl_days",
+              "ratifiedBy": "G2 Def.7 (L1 scope activates v1)",
+              "section": "S09",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "proposals_per_task_max": {
+            "default": 2,
+            "description": "Maximum memory-write proposals one task may raise through the write gate.",
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Memory proposals per task",
+            "type": "integer",
+            "x-sinet": {
+              "key": "memory.proposals_per_task_max",
+              "ratifiedBy": "G2 Def.7",
+              "section": "S09",
+              "type": "int"
+            }
+          },
+          "reverify_house_days": {
+            "default": 180,
+            "description": "Days before a house-scope knowledge entry must be re-verified.",
+            "maximum": 730,
+            "minimum": 90,
+            "title": "House-knowledge re-verify interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "memory.reverify_house_days",
+              "ratifiedBy": "G2 Def.7",
+              "section": "S09",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "reverify_lessons_days": {
+            "default": 90,
+            "description": "Days before a stored lesson must be re-verified against reality.",
+            "maximum": 365,
+            "minimum": 30,
+            "title": "Lesson re-verify interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "memory.reverify_lessons_days",
+              "ratifiedBy": "G2 Def.7",
+              "section": "S09",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "vector_gate": {
+            "additionalProperties": false,
+            "properties": {
+              "corpus_entries": {
+                "default": 5000,
+                "description": "Pre-registered corpus size that, once exceeded, opens the vector-search gate.",
+                "maximum": 50000,
+                "minimum": 1000,
+                "title": "Vector gate — corpus-size trigger",
+                "type": "integer",
+                "x-sinet": {
+                  "dormant": "pre-registered trigger, evaluated post-15.3 (S18.5)",
+                  "key": "memory.vector_gate.corpus_entries",
+                  "ratifiedBy": "G2 Def.8",
+                  "section": "S09",
+                  "type": "int"
+                }
+              },
+              "task_miss_rate": {
+                "default": 0.05,
+                "description": "Pre-registered retrieval miss rate that, once exceeded, opens the vector-search gate; evaluated only after the 15.3 benchmark gate.",
+                "maximum": 0.25,
+                "minimum": 0.01,
+                "title": "Vector gate — miss-rate trigger",
+                "type": "number",
+                "x-sinet": {
+                  "dormant": "pre-registered trigger, evaluated post-15.3 (S18.5)",
+                  "key": "memory.vector_gate.task_miss_rate",
+                  "ratifiedBy": "G2 Def.8",
+                  "section": "S09",
+                  "type": "float",
+                  "unit": "ratio"
+                }
+              }
+            },
+            "type": "object"
+          }
+        },
+        "title": "memory (S09)",
+        "type": "object",
+        "x-sinet-owner": "S09"
+      },
+      "meter": {
+        "additionalProperties": false,
+        "properties": {
+          "value_divergence_alarm": {
+            "default": 20,
+            "description": "Alarm threshold for divergence between the platform's meter and the provider's reported usage.",
+            "maximum": 100,
+            "minimum": 5,
+            "title": "Meter divergence alarm",
+            "type": "number",
+            "x-sinet": {
+              "key": "meter.value_divergence_alarm",
+              "ratifiedBy": "R09 §4.1 / P-T08-1",
+              "section": "S10",
+              "type": "float",
+              "unit": "percent"
+            }
+          }
+        },
+        "title": "meter (S10)",
+        "type": "object",
+        "x-sinet-owner": "S10"
+      },
+      "obs": {
+        "additionalProperties": false,
+        "properties": {
+          "sse_keepalive": {
+            "default": 20,
+            "description": "Comment-frame keepalive cadence on the one SSE endpoint so idle proxies never drop the stream.",
+            "maximum": 30,
+            "minimum": 15,
+            "title": "SSE keepalive interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "obs.sse_keepalive",
+              "ratifiedBy": "R12 §4.3",
+              "section": "S14",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "obs (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "orchestration": {
+        "additionalProperties": false,
+        "properties": {
+          "bulk_offload_tokens": {
+            "default": 20000,
+            "description": "Content larger than this is offloaded to a helper instead of being pulled into the orchestrating context.",
+            "minimum": 1,
+            "title": "Bulk-offload threshold",
+            "type": "integer",
+            "x-sinet": {
+              "key": "orchestration.bulk_offload_tokens",
+              "ratifiedBy": "R06 §4.2; G1 D1.1",
+              "section": "S04",
+              "type": "int",
+              "unit": "tokens"
+            }
+          },
+          "depth_cap": {
+            "default": 2,
+            "description": "Maximum helper nesting depth; raising the ceiling past 2 is a deliberate operator bounds change, never routine.",
+            "maximum": 2,
+            "minimum": 0,
+            "title": "Helper depth cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "orchestration.depth_cap",
+              "ratifiedBy": "D6; G1 Def.8",
+              "section": "S04",
+              "type": "int"
+            }
+          },
+          "helper_retry_limit": {
+            "default": 1,
+            "description": "How many times one failed helper is retried before the failure surfaces.",
+            "minimum": 0,
+            "title": "Helper retries",
+            "type": "integer",
+            "x-sinet": {
+              "key": "orchestration.helper_retry_limit",
+              "ratifiedBy": "R06 §4.4; G1 D1.1",
+              "section": "S04",
+              "type": "int"
+            }
+          },
+          "helper_tokens": {
+            "default": 80000,
+            "description": "Token budget one helper gets; automation may move this within the operator's bounds.",
+            "minimum": 1,
+            "title": "Token budget per helper",
+            "type": "integer",
+            "x-sinet": {
+              "auto": true,
+              "key": "orchestration.helper_tokens",
+              "ratifiedBy": "G1 Def.8 + rider 1",
+              "section": "S04",
+              "type": "int",
+              "unit": "tokens"
+            }
+          },
+          "helper_turns": {
+            "default": 20,
+            "description": "Turn budget one helper gets before it must report; automation may move this within the operator's bounds.",
+            "minimum": 1,
+            "title": "Turns per helper",
+            "type": "integer",
+            "x-sinet": {
+              "auto": true,
+              "key": "orchestration.helper_turns",
+              "ratifiedBy": "G1 Def.8 + rider 1",
+              "section": "S04",
+              "type": "int",
+              "unit": "turns"
+            }
+          },
+          "max_concurrent_helpers": {
+            "default": 4,
+            "description": "How many helpers one task may run at once across all depths; automation may move this within the operator's bounds.",
+            "minimum": 0,
+            "title": "Concurrent helpers per task",
+            "type": "integer",
+            "x-sinet": {
+              "auto": true,
+              "key": "orchestration.max_concurrent_helpers",
+              "ratifiedBy": "G1 Def.8 + rider 1",
+              "section": "S04",
+              "type": "int"
+            }
+          },
+          "report_tokens": {
+            "default": 2000,
+            "description": "Token cap on one helper report, enforced by the report screen.",
+            "minimum": 1,
+            "title": "Helper report size",
+            "type": "integer",
+            "x-sinet": {
+              "key": "orchestration.report_tokens",
+              "ratifiedBy": "G1 Def.8 (screen-enforced, S04.5)",
+              "section": "S04",
+              "type": "int",
+              "unit": "tokens"
+            }
+          },
+          "spawn_budget": {
+            "default": 8,
+            "description": "Total helper spawns one task gets, including sub-helpers and retries; overrunning it takes an operator-visible gate.",
+            "minimum": 0,
+            "title": "Spawn budget per task",
+            "type": "integer",
+            "x-sinet": {
+              "key": "orchestration.spawn_budget",
+              "ratifiedBy": "G1 Def.8; R06 §4.3",
+              "section": "S04",
+              "type": "int"
+            }
+          },
+          "stagger_identical_prefix": {
+            "default": true,
+            "description": "Launch helpers sharing an identical prompt prefix staggered so the provider cache is warm for the followers.",
+            "title": "Stagger identical-prefix helpers",
+            "type": "boolean",
+            "x-sinet": {
+              "key": "orchestration.stagger_identical_prefix",
+              "ratifiedBy": "R06 §4.2; G1 D1.1",
+              "section": "S04",
+              "type": "bool"
+            }
+          }
+        },
+        "title": "orchestration (S04)",
+        "type": "object",
+        "x-sinet-owner": "S04"
+      },
+      "pressure": {
+        "additionalProperties": false,
+        "properties": {
+          "bg_admit_stop": {
+            "default": 0.7,
+            "description": "Consumption-pressure level past which background work stops being admitted.",
+            "maximum": 0.95,
+            "minimum": 0.1,
+            "title": "Background admission stop",
+            "type": "number",
+            "x-sinet": {
+              "key": "pressure.bg_admit_stop",
+              "ratifiedBy": "G2 Def.4",
+              "section": "S10",
+              "type": "float",
+              "unit": "ratio"
+            }
+          },
+          "cache_read_weight": {
+            "default": 0.1,
+            "description": "How strongly cache reads count into consumption pressure; labeled assumed until the provider publishes quota semantics.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Cache-read pressure weight",
+            "type": "number",
+            "x-sinet": {
+              "key": "pressure.cache_read_weight",
+              "ratifiedBy": "G1 Def.10 (consumer S05; dedup S18.4 R3)",
+              "section": "S10",
+              "type": "float",
+              "unit": "ratio"
+            }
+          }
+        },
+        "title": "pressure (S10)",
+        "type": "object",
+        "x-sinet-owner": "S10"
+      },
+      "preview": {
+        "additionalProperties": false,
+        "properties": {
+          "idle_stop": {
+            "default": 900,
+            "description": "Idle time before a running preview is stopped and its port returns to the pool.",
+            "maximum": 86400,
+            "minimum": 60,
+            "title": "Preview idle stop",
+            "type": "integer",
+            "x-sinet": {
+              "key": "preview.idle_stop",
+              "ratifiedBy": "R13 §4.8 (⚙ flagged unnumbered)",
+              "section": "S13",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "max_concurrent": {
+            "default": 3,
+            "description": "Maximum previews running at once.",
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Concurrent previews",
+            "type": "integer",
+            "x-sinet": {
+              "key": "preview.max_concurrent",
+              "ratifiedBy": "feature 3.11 posture [coordinator-draft]",
+              "section": "S13",
+              "type": "int"
+            }
+          }
+        },
+        "title": "preview (S13)",
+        "type": "object",
+        "x-sinet-owner": "S13"
+      },
+      "recovery": {
+        "additionalProperties": false,
+        "properties": {
+          "dead_after": {
+            "default": 300,
+            "description": "How long a run's event cursor may sit still before the recovery pass treats the run as stalled; must stay at least twice the heartbeat.",
+            "title": "Silence-before-dead threshold",
+            "type": "integer",
+            "x-sinet": {
+              "key": "recovery.dead_after",
+              "ratifiedBy": "G2 Def.2 (seeds watchdog.silence_budget.*)",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "heartbeat": {
+            "default": 60,
+            "description": "How often a live run refreshes its lease heartbeat.",
+            "maximum": 300,
+            "minimum": 15,
+            "title": "Run heartbeat interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "recovery.heartbeat",
+              "ratifiedBy": "G2 Def.2",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "max_attempts": {
+            "default": 3,
+            "description": "How many recovery attempts one interruption gets before the run is tombstoned for review.",
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Recovery attempts per interruption",
+            "type": "integer",
+            "x-sinet": {
+              "key": "recovery.max_attempts",
+              "ratifiedBy": "G2 Def.2",
+              "section": "S02",
+              "type": "int"
+            }
+          },
+          "stale_finalize": {
+            "default": 86400,
+            "description": "A run interrupted longer than this is finalized with a card instead of blindly resumed; the freshness pass fires first regardless.",
+            "minimum": 3600,
+            "title": "Stale-run finalize horizon",
+            "type": "integer",
+            "x-sinet": {
+              "key": "recovery.stale_finalize",
+              "ratifiedBy": "G2 Def.2",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "sweep_interval": {
+            "default": 300,
+            "description": "How often the level-triggered reconcile pass re-lists actual run state outside of start and wake.",
+            "maximum": 1800,
+            "minimum": 60,
+            "title": "Recovery sweep interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "recovery.sweep_interval",
+              "ratifiedBy": "R08 §4.4",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "wake_grace": {
+            "default": 120,
+            "description": "Grace applied to every lease deadline right after the host wakes, so a nap never falsely kills a live run.",
+            "maximum": 600,
+            "minimum": 30,
+            "title": "Post-wake lease grace",
+            "type": "integer",
+            "x-sinet": {
+              "key": "recovery.wake_grace",
+              "ratifiedBy": "G2 Def.2",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "recovery (S02)",
+        "type": "object",
+        "x-sinet-owner": "S02"
+      },
+      "retention": {
+        "additionalProperties": false,
+        "properties": {
+          "compaction_horizon": {
+            "default": 6,
+            "description": "Months of full event payloads kept before compaction; per person.",
+            "minimum": 1,
+            "title": "Trace compaction horizon",
+            "type": "integer",
+            "x-sinet": {
+              "key": "retention.compaction_horizon",
+              "perUser": true,
+              "ratifiedBy": "G2 Def.11; feature 13.4",
+              "section": "S14",
+              "type": "int",
+              "unit": "months"
+            }
+          }
+        },
+        "title": "retention (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "review": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_drift_lines": {
+            "default": 2,
+            "description": "How many lines a review comment's anchor may drift before it detaches (the carried N15 behavior).",
+            "maximum": 10,
+            "minimum": 0,
+            "title": "Review anchor drift tolerance",
+            "type": "integer",
+            "x-sinet": {
+              "key": "review.anchor_drift_lines",
+              "ratifiedBy": "FC-v1 §2",
+              "section": "S13",
+              "type": "int",
+              "unit": "lines"
+            }
+          }
+        },
+        "title": "review (S13)",
+        "type": "object",
+        "x-sinet-owner": "S13"
+      },
+      "sandbox": {
+        "additionalProperties": false,
+        "properties": {
+          "block_outbound_doh": {
+            "default": true,
+            "description": "Block DNS-over-HTTPS from sandboxes so egress policy cannot be tunneled around; turning this off requires a recorded reason.",
+            "title": "Block outbound DoH",
+            "type": "boolean",
+            "x-sinet": {
+              "key": "sandbox.block_outbound_doh",
+              "ratifiedBy": "R10 §2.3",
+              "section": "S11",
+              "type": "bool"
+            }
+          },
+          "c2_registry_allowlist": {
+            "default": [],
+            "description": "Curated package-registry and CDN hosts C2-confined runs may fetch from (the Copilot/Codex-preset shape; npm/pypi/crates/apt/go/maven/nuget/rubygems). The concrete curated preset is materialized by the S11 sandbox packet; consumers treat an empty list as preset-not-installed. Data, like the price table.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Package-registry allowlist",
+            "type": "array",
+            "x-sinet": {
+              "key": "sandbox.c2_registry_allowlist",
+              "ratifiedBy": "R10 §3.3",
+              "section": "S11",
+              "type": "list"
+            }
+          },
+          "egress_deny_cidrs": {
+            "default": [
+              "169.254.169.254/32",
+              "169.254.0.0/16",
+              "10.0.0.0/8",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "fc00::/7"
+            ],
+            "description": "CIDRs sandboxed runs may never reach; the cloud-metadata address is a non-removable floor.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Egress deny list",
+            "type": "array",
+            "x-sinet": {
+              "key": "sandbox.egress_deny_cidrs",
+              "ratifiedBy": "R10 §2.3/§3.3",
+              "section": "S11",
+              "type": "list"
+            }
+          },
+          "model_egress_tls_terminate": {
+            "default": true,
+            "description": "Terminate TLS on model egress per lane; off means that lane falls back to pattern-2 scoped egress.",
+            "title": "Model egress TLS termination",
+            "type": "boolean",
+            "x-sinet": {
+              "key": "sandbox.model_egress_tls_terminate",
+              "ratifiedBy": "SPIKE P2-S3 / R10 §3.4",
+              "section": "S11",
+              "type": "bool"
+            }
+          }
+        },
+        "title": "sandbox (S11)",
+        "type": "object",
+        "x-sinet-owner": "S11"
+      },
+      "scheduler": {
+        "additionalProperties": false,
+        "properties": {
+          "missed_slot_default": {
+            "default": "run-once-late",
+            "description": "What a schedule slot missed during suspend does by default; the user-facing schedule surface arrives at v1.",
+            "enum": [
+              "run-once-late",
+              "skip",
+              "notify-only"
+            ],
+            "title": "Missed-slot default",
+            "type": "string",
+            "x-sinet": {
+              "dormant": "ships v0, consumer surface v1 (S18.5)",
+              "key": "scheduler.missed_slot_default",
+              "ratifiedBy": "R09 §4.7",
+              "section": "S10",
+              "type": "enum"
+            }
+          }
+        },
+        "title": "scheduler (S10)",
+        "type": "object",
+        "x-sinet-owner": "S10"
+      },
+      "shell": {
+        "additionalProperties": false,
+        "properties": {
+          "drain_grace": {
+            "default": 900,
+            "description": "How long in-flight runs may keep working after maintenance mode starts before they are parked at their last checkpoint.",
+            "maximum": 86400,
+            "minimum": 60,
+            "title": "Maintenance drain grace",
+            "type": "integer",
+            "x-sinet": {
+              "key": "shell.drain_grace",
+              "ratifiedBy": "G1 Def.7",
+              "section": "S01",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "inhibit_delay_max": {
+            "default": 30,
+            "description": "The logind delay-inhibitor window for the pre-sleep flush, applied as host configuration; the flush itself is sized to fit even the stock 5 seconds.",
+            "maximum": 60,
+            "minimum": 5,
+            "title": "Sleep-inhibitor window",
+            "type": "integer",
+            "x-sinet": {
+              "key": "shell.inhibit_delay_max",
+              "ratifiedBy": "R17 §4.9; SPIKE P2-S2",
+              "restartRequired": true,
+              "section": "S01",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "journal_max_use": {
+            "default": 4294967296,
+            "description": "Total disk space journald may use for the ops logs; the audit record lives in platform.db, never here.",
+            "maximum": 34359738368,
+            "minimum": 536870912,
+            "title": "Journal disk cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "shell.journal_max_use",
+              "ratifiedBy": "R17 §4.8 (⚙ flagged unnumbered)",
+              "restartRequired": true,
+              "section": "S01",
+              "type": "int",
+              "unit": "bytes"
+            }
+          },
+          "watchdog_sec": {
+            "default": 30,
+            "description": "The systemd WatchdogSec= budget for sinet-control's heartbeat; missing it lets systemd restart the control plane.",
+            "maximum": 300,
+            "minimum": 10,
+            "title": "Control-plane watchdog interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "shell.watchdog_sec",
+              "ratifiedBy": "R17 §4.1 (⚙ flagged unnumbered)",
+              "section": "S01",
+              "type": "int",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "shell (S01)",
+        "type": "object",
+        "x-sinet-owner": "S01"
+      },
+      "state": {
+        "additionalProperties": false,
+        "properties": {
+          "busy_timeout": {
+            "default": 5,
+            "description": "How long a write waits for the database lock before failing; honored by the BEGIN IMMEDIATE write discipline.",
+            "minimum": 5,
+            "title": "SQLite busy timeout",
+            "type": "integer",
+            "x-sinet": {
+              "key": "state.busy_timeout",
+              "ratifiedBy": "R08 §4.1",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          },
+          "event_payload_cap": {
+            "default": 65536,
+            "description": "Maximum size of one event-log payload; bulky output lives as files referenced by path and hash, never inline.",
+            "maximum": 1048576,
+            "minimum": 4096,
+            "title": "Event payload cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "state.event_payload_cap",
+              "ratifiedBy": "R08 §4.1 / P-T07-5",
+              "section": "S02",
+              "type": "int",
+              "unit": "bytes"
+            }
+          },
+          "synchronous": {
+            "default": "FULL",
+            "description": "FULL deletes the power-loss window entirely at Sinet's write rate; NORMAL is the documented fallback if measurement ever disagrees.",
+            "enum": [
+              "FULL",
+              "NORMAL"
+            ],
+            "title": "SQLite synchronous mode",
+            "type": "string",
+            "x-sinet": {
+              "key": "state.synchronous",
+              "ratifiedBy": "G2 Def.1",
+              "section": "S02",
+              "type": "enum"
+            }
+          },
+          "wal_truncate_interval": {
+            "default": 3600,
+            "description": "How often the write-ahead log is checkpointed and truncated so it cannot grow without bound.",
+            "maximum": 86400,
+            "minimum": 300,
+            "title": "WAL truncation interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "state.wal_truncate_interval",
+              "ratifiedBy": "R08 §4.1",
+              "section": "S02",
+              "type": "duration",
+              "unit": "seconds"
+            }
+          }
+        },
+        "title": "state (S02)",
+        "type": "object",
+        "x-sinet-owner": "S02"
+      },
+      "verification": {
+        "additionalProperties": false,
+        "properties": {
+          "canary_interval_hours": {
+            "default": 24,
+            "description": "Cadence of the dead-man canary that proves the escalation path can still reach a human; silence is itself the alarm.",
+            "minimum": 1,
+            "title": "Escalation-path canary interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.canary_interval_hours",
+              "ratifiedBy": "G1 Def.3 (superseded set: \"canary daily\"); S18.4 R5",
+              "section": "S07",
+              "type": "int",
+              "unit": "hours"
+            }
+          },
+          "card_push_hours": {
+            "default": 24,
+            "description": "Inbox-wide: how long an unanswered card waits before a push notification goes out.",
+            "minimum": 1,
+            "title": "Card push cadence",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.card_push_hours",
+              "ratifiedBy": "G1 Def.3 (superseded set) — inbox-wide",
+              "section": "S07",
+              "type": "int",
+              "unit": "hours"
+            }
+          },
+          "card_remind_hours": {
+            "default": 4,
+            "description": "Inbox-wide: how long an unanswered card waits before its first reminder.",
+            "minimum": 1,
+            "title": "Card reminder cadence",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.card_remind_hours",
+              "ratifiedBy": "G1 Def.3 (superseded set) — inbox-wide",
+              "section": "S07",
+              "type": "int",
+              "unit": "hours"
+            }
+          },
+          "check_audit_interval_days": {
+            "default": 90,
+            "description": "How often the verification checks themselves are audited against ground truth.",
+            "minimum": 1,
+            "title": "Check-the-checker audit interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.check_audit_interval_days",
+              "ratifiedBy": "P-T06-1; R04 §4; default [coordinator-draft]",
+              "section": "S07",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "convergence_patience_rounds": {
+            "default": 2,
+            "description": "How many rework rounds may pass without the finding count shrinking before rework stops early; never more than the rework rounds themselves.",
+            "minimum": 1,
+            "title": "Convergence patience",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.convergence_patience_rounds",
+              "ratifiedBy": "R04 §2.6/§3-D via G1 D1.1(d)",
+              "section": "S07",
+              "type": "int",
+              "unit": "rounds"
+            }
+          },
+          "drill_interval_days": {
+            "default": 90,
+            "description": "Cadence of the full escalation drill (distinct from the backup restore drill, S18.4 R6).",
+            "minimum": 1,
+            "title": "Escalation drill interval",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.drill_interval_days",
+              "ratifiedBy": "G1 Def.3 (superseded set: \"drill quarterly\"); S18.4 R6",
+              "section": "S07",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "entailment_sample_rate": {
+            "default": 0,
+            "description": "Fraction of non-load-bearing claims sampled into the entailment check; 0 until the bring-up calibration set fixes the ratified value (TBD-BRINGUP).",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Entailment sampling rate",
+            "type": "number",
+            "x-sinet": {
+              "key": "verification.entailment_sample_rate",
+              "ratifiedBy": "G1 Def.2; G3 Def.4/Def.8; default TBD-BRINGUP(entailment calibration set)",
+              "section": "S07",
+              "type": "float",
+              "unit": "ratio"
+            }
+          },
+          "research_rerun_limit": {
+            "default": 1,
+            "description": "How many times a failed research verification may re-run its research node before carding.",
+            "maximum": 2,
+            "minimum": 0,
+            "title": "Research re-run limit",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.research_rerun_limit",
+              "ratifiedBy": "feature 1.9; R03 §4 Stage 2(d) via S06.6",
+              "section": "S07",
+              "type": "int",
+              "unit": "rounds"
+            }
+          },
+          "rework_rounds": {
+            "default": 3,
+            "description": "Maximum fix-and-re-verify rounds a deliverable gets before the remaining findings surface to a human.",
+            "minimum": 0,
+            "title": "Rework rounds",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.rework_rounds",
+              "ratifiedBy": "R04 §4 via G1 D1.1(d); S07 resolution note",
+              "section": "S07",
+              "type": "int",
+              "unit": "rounds"
+            }
+          },
+          "safety_reping_hours": {
+            "default": 1,
+            "description": "Inbox-wide: re-ping interval for safety-relevant cards.",
+            "minimum": 1,
+            "title": "Safety re-ping cadence",
+            "type": "integer",
+            "x-sinet": {
+              "key": "verification.safety_reping_hours",
+              "ratifiedBy": "G1 Def.3 (superseded set) — inbox-wide",
+              "section": "S07",
+              "type": "int",
+              "unit": "hours"
+            }
+          },
+          "sanity_stakes_floor": {
+            "default": "standard",
+            "description": "The lowest stakes tier (S06.4 tiers) at which the independent sanity pass always runs.",
+            "enum": [
+              "trivial",
+              "low",
+              "standard",
+              "high"
+            ],
+            "title": "Sanity-pass stakes floor",
+            "type": "string",
+            "x-sinet": {
+              "key": "verification.sanity_stakes_floor",
+              "ratifiedBy": "G1 D1.2 mechanism; default [coordinator-draft]",
+              "section": "S07",
+              "type": "enum"
+            }
+          }
+        },
+        "title": "verification (S07)",
+        "type": "object",
+        "x-sinet-owner": "S07"
+      },
+      "watchdog": {
+        "additionalProperties": false,
+        "properties": {
+          "error_loop": {
+            "default": 3,
+            "description": "How many identical errors in a row trip the error-loop watchdog.",
+            "maximum": 10,
+            "minimum": 2,
+            "title": "Error-loop trigger",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchdog.error_loop",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "int"
+            }
+          },
+          "flag_now_target": {
+            "default": 2,
+            "description": "Target daily rate of immediate watchdog flags used to judge threshold health.",
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Flag-now target rate",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchdog.flag_now_target",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "int",
+              "unit": "per-day"
+            }
+          },
+          "loop_repeat": {
+            "default": 5,
+            "description": "How many near-identical repeats of the same action trip the loop watchdog.",
+            "maximum": 10,
+            "minimum": 3,
+            "title": "Loop-repeat trigger",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchdog.loop_repeat",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "int"
+            }
+          },
+          "pingpong_cycles": {
+            "default": 6,
+            "description": "How many alternating A/B cycles trip the ping-pong watchdog.",
+            "maximum": 12,
+            "minimum": 3,
+            "title": "Ping-pong trigger",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchdog.pingpong_cycles",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "int"
+            }
+          },
+          "silence_budget": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Per-run-type silence budgets in seconds before the silence watchdog flags; empty entries fall back to the recovery dead-after seed until the bring-up calibration (TBD-BRINGUP) fills them.",
+            "title": "Silence budgets by run type",
+            "type": "object",
+            "x-sinet": {
+              "key": "watchdog.silence_budget",
+              "ratifiedBy": "G2 Def.10 (map key ⚙ watchdog.silence_budget.\u003crun_type\u003e; seed = recovery.dead_after)",
+              "section": "S14",
+              "type": "map"
+            }
+          },
+          "spend_arm_days": {
+            "default": 14,
+            "description": "Days of history required before the spend watchdog arms.",
+            "minimum": 7,
+            "title": "Spend watchdog arming period",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchdog.spend_arm_days",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "int",
+              "unit": "days"
+            }
+          },
+          "spend_median_mult": {
+            "default": 3,
+            "description": "Multiple of the trailing-14-day median spend that trips the spend watchdog.",
+            "minimum": 1.5,
+            "title": "Spend spike trigger",
+            "type": "number",
+            "x-sinet": {
+              "key": "watchdog.spend_median_mult",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "float",
+              "unit": "multiplier"
+            }
+          },
+          "suppress_retune_count": {
+            "default": 2,
+            "description": "How many operator suppressions of the same flag propose a threshold retune; the retune lands as a proposal card, never an auto-move.",
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Suppressions before retune",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchdog.suppress_retune_count",
+              "ratifiedBy": "G2 Def.10",
+              "section": "S14",
+              "type": "int"
+            }
+          }
+        },
+        "title": "watchdog (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "watchlist": {
+        "additionalProperties": false,
+        "properties": {
+          "fetch_fail_streak": {
+            "default": 3,
+            "description": "Consecutive failed fetch cycles before a watchlist source is flagged.",
+            "maximum": 10,
+            "minimum": 2,
+            "title": "Watchlist fetch-fail streak",
+            "type": "integer",
+            "x-sinet": {
+              "key": "watchlist.fetch_fail_streak",
+              "ratifiedBy": "R12 §4.5 / P-T11-3",
+              "section": "S14",
+              "type": "int",
+              "unit": "cycles"
+            }
+          }
+        },
+        "title": "watchlist (S14)",
+        "type": "object",
+        "x-sinet-owner": "S14"
+      },
+      "workers": {
+        "additionalProperties": false,
+        "properties": {
+          "dryrun_cost_cap_usd": {
+            "default": 0.5,
+            "description": "API-equivalent budget one composer dry-run may spend.",
+            "exclusiveMinimum": 0,
+            "title": "Worker dry-run cost cap",
+            "type": "number",
+            "x-sinet": {
+              "key": "workers.dryrun_cost_cap_usd",
+              "ratifiedBy": "R15 §4.3 (⚙ there); anchor G1 D1.7 [coordinator-draft]",
+              "section": "S08",
+              "type": "float",
+              "unit": "USD"
+            }
+          },
+          "first_n": {
+            "default": 3,
+            "description": "A new or changed worker's first N runs are supervised; the count resets when its body or equipment version changes.",
+            "minimum": 1,
+            "title": "Supervised first runs",
+            "type": "integer",
+            "x-sinet": {
+              "key": "workers.first_n",
+              "ratifiedBy": "G3 D3.4",
+              "section": "S08",
+              "type": "int"
+            }
+          },
+          "gap_proposal_count": {
+            "default": 2,
+            "description": "How many times the same capability gap must occur before a worker proposal is raised.",
+            "minimum": 2,
+            "title": "Gap occurrences before proposal",
+            "type": "integer",
+            "x-sinet": {
+              "key": "workers.gap_proposal_count",
+              "ratifiedBy": "G3 D3.4 (\"second occurrence\")",
+              "section": "S08",
+              "type": "int"
+            }
+          },
+          "persona_lines_max": {
+            "default": 2,
+            "description": "Warn threshold of the station-1 lint on persona prose in a worker definition.",
+            "minimum": 0,
+            "title": "Persona line cap",
+            "type": "integer",
+            "x-sinet": {
+              "key": "workers.persona_lines_max",
+              "ratifiedBy": "R15 §4.2 (⚙ there)",
+              "section": "S08",
+              "type": "int",
+              "unit": "lines"
+            }
+          }
+        },
+        "title": "workers (S08)",
+        "type": "object",
+        "x-sinet-owner": "S08"
+      }
+    },
+    "title": "Sinet settings registry",
+    "type": "object"
+  },
+  "uischema": {
+    "type": "Categorization",
+    "elements": [
+      {
+        "type": "Category",
+        "label": "shell (S01)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Maintenance drain grace",
+            "scope": "#/properties/shell/properties/drain_grace",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Control-plane watchdog interval",
+            "scope": "#/properties/shell/properties/watchdog_sec",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Sleep-inhibitor window",
+            "scope": "#/properties/shell/properties/inhibit_delay_max",
+            "options": {
+              "restartRequired": true,
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Journal disk cap",
+            "scope": "#/properties/shell/properties/journal_max_use",
+            "options": {
+              "restartRequired": true,
+              "unit": "bytes"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "state (S02)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "SQLite synchronous mode",
+            "scope": "#/properties/state/properties/synchronous"
+          },
+          {
+            "type": "Control",
+            "label": "SQLite busy timeout",
+            "scope": "#/properties/state/properties/busy_timeout",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "WAL truncation interval",
+            "scope": "#/properties/state/properties/wal_truncate_interval",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Event payload cap",
+            "scope": "#/properties/state/properties/event_payload_cap",
+            "options": {
+              "unit": "bytes"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "recovery (S02)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Run heartbeat interval",
+            "scope": "#/properties/recovery/properties/heartbeat",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Silence-before-dead threshold",
+            "scope": "#/properties/recovery/properties/dead_after",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Post-wake lease grace",
+            "scope": "#/properties/recovery/properties/wake_grace",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Recovery attempts per interruption",
+            "scope": "#/properties/recovery/properties/max_attempts"
+          },
+          {
+            "type": "Control",
+            "label": "Stale-run finalize horizon",
+            "scope": "#/properties/recovery/properties/stale_finalize",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Recovery sweep interval",
+            "scope": "#/properties/recovery/properties/sweep_interval",
+            "options": {
+              "unit": "seconds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "effects (S02)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Effect approval expiry",
+            "scope": "#/properties/effects/properties/approval_expiry",
+            "options": {
+              "unit": "seconds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "claims (S02)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Default write claim",
+            "scope": "#/properties/claims/properties/default_write"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "freshness (S02)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Staleness horizon",
+            "scope": "#/properties/freshness/properties/max_age",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Hold-versus-park threshold",
+            "scope": "#/properties/freshness/properties/hold_vs_park",
+            "options": {
+              "unit": "seconds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "adapter (S03)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Claude session cleanup period",
+            "scope": "#/properties/adapter/properties/claude/properties/cleanup_period_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Engine ceiling backstop multiplier",
+            "scope": "#/properties/adapter/properties/engine_ceiling_backstop_mult",
+            "options": {
+              "unit": "multiplier"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Parallel-gate fallback strategy",
+            "scope": "#/properties/adapter/properties/parallel_gate_fallback"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "orchestration (S04)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Helper depth cap",
+            "scope": "#/properties/orchestration/properties/depth_cap"
+          },
+          {
+            "type": "Control",
+            "label": "Concurrent helpers per task",
+            "scope": "#/properties/orchestration/properties/max_concurrent_helpers",
+            "options": {
+              "auto": true
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Turns per helper",
+            "scope": "#/properties/orchestration/properties/helper_turns",
+            "options": {
+              "auto": true,
+              "unit": "turns"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Token budget per helper",
+            "scope": "#/properties/orchestration/properties/helper_tokens",
+            "options": {
+              "auto": true,
+              "unit": "tokens"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Spawn budget per task",
+            "scope": "#/properties/orchestration/properties/spawn_budget"
+          },
+          {
+            "type": "Control",
+            "label": "Helper report size",
+            "scope": "#/properties/orchestration/properties/report_tokens",
+            "options": {
+              "unit": "tokens"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Bulk-offload threshold",
+            "scope": "#/properties/orchestration/properties/bulk_offload_tokens",
+            "options": {
+              "unit": "tokens"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Helper retries",
+            "scope": "#/properties/orchestration/properties/helper_retry_limit"
+          },
+          {
+            "type": "Control",
+            "label": "Stagger identical-prefix helpers",
+            "scope": "#/properties/orchestration/properties/stagger_identical_prefix"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "context (S05)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Stage fit target",
+            "scope": "#/properties/context/properties/stage_fit_target",
+            "options": {
+              "auto": true,
+              "unit": "ratio"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Stage overflow threshold",
+            "scope": "#/properties/context/properties/stage_overflow_threshold",
+            "options": {
+              "auto": true,
+              "unit": "ratio"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Conventions file line cap",
+            "scope": "#/properties/context/properties/conventions_max_lines",
+            "options": {
+              "unit": "lines"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Objective recitation interval",
+            "scope": "#/properties/context/properties/recitation_interval_turns",
+            "options": {
+              "unit": "turns"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "intake (S06)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Zero-interaction cost band",
+            "scope": "#/properties/intake/properties/zero_interaction_cost_usd",
+            "options": {
+              "perUser": true,
+              "unit": "USD"
+            }
+          },
+          {
+            "type": "Group",
+            "label": "clearance_floor",
+            "elements": [
+              {
+                "type": "Control",
+                "label": "Clearance floor — low stakes",
+                "scope": "#/properties/intake/properties/clearance_floor/properties/low",
+                "options": {
+                  "unit": "score"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Clearance floor — standard stakes",
+                "scope": "#/properties/intake/properties/clearance_floor/properties/standard",
+                "options": {
+                  "unit": "score"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Clearance floor — high stakes",
+                "scope": "#/properties/intake/properties/clearance_floor/properties/high",
+                "options": {
+                  "unit": "score"
+                }
+              }
+            ]
+          },
+          {
+            "type": "Control",
+            "label": "Size re-check factor",
+            "scope": "#/properties/intake/properties/size_recheck_factor",
+            "options": {
+              "unit": "multiplier"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Coverage auto-fix rounds",
+            "scope": "#/properties/intake/properties/coverage_autofix_rounds",
+            "options": {
+              "unit": "rounds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Critique revise rounds",
+            "scope": "#/properties/intake/properties/critique_revise_rounds",
+            "options": {
+              "unit": "rounds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "verification (S07)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Rework rounds",
+            "scope": "#/properties/verification/properties/rework_rounds",
+            "options": {
+              "unit": "rounds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Convergence patience",
+            "scope": "#/properties/verification/properties/convergence_patience_rounds",
+            "options": {
+              "unit": "rounds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Sanity-pass stakes floor",
+            "scope": "#/properties/verification/properties/sanity_stakes_floor"
+          },
+          {
+            "type": "Control",
+            "label": "Entailment sampling rate",
+            "scope": "#/properties/verification/properties/entailment_sample_rate",
+            "options": {
+              "unit": "ratio"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Research re-run limit",
+            "scope": "#/properties/verification/properties/research_rerun_limit",
+            "options": {
+              "unit": "rounds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Check-the-checker audit interval",
+            "scope": "#/properties/verification/properties/check_audit_interval_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Escalation-path canary interval",
+            "scope": "#/properties/verification/properties/canary_interval_hours",
+            "options": {
+              "unit": "hours"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Escalation drill interval",
+            "scope": "#/properties/verification/properties/drill_interval_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Card reminder cadence",
+            "scope": "#/properties/verification/properties/card_remind_hours",
+            "options": {
+              "unit": "hours"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Card push cadence",
+            "scope": "#/properties/verification/properties/card_push_hours",
+            "options": {
+              "unit": "hours"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Safety re-ping cadence",
+            "scope": "#/properties/verification/properties/safety_reping_hours",
+            "options": {
+              "unit": "hours"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "workers (S08)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Supervised first runs",
+            "scope": "#/properties/workers/properties/first_n"
+          },
+          {
+            "type": "Control",
+            "label": "Gap occurrences before proposal",
+            "scope": "#/properties/workers/properties/gap_proposal_count"
+          },
+          {
+            "type": "Control",
+            "label": "Persona line cap",
+            "scope": "#/properties/workers/properties/persona_lines_max",
+            "options": {
+              "unit": "lines"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Worker dry-run cost cap",
+            "scope": "#/properties/workers/properties/dryrun_cost_cap_usd",
+            "options": {
+              "unit": "USD"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "memory (S09)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "L1 memory TTL",
+            "scope": "#/properties/memory/properties/l1_ttl_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Lesson re-verify interval",
+            "scope": "#/properties/memory/properties/reverify_lessons_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "House-knowledge re-verify interval",
+            "scope": "#/properties/memory/properties/reverify_house_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Memory proposals per task",
+            "scope": "#/properties/memory/properties/proposals_per_task_max"
+          },
+          {
+            "type": "Control",
+            "label": "Memory digest interval",
+            "scope": "#/properties/memory/properties/digest_interval_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Distillation threshold",
+            "scope": "#/properties/memory/properties/distill_threshold_lessons"
+          },
+          {
+            "type": "Group",
+            "label": "injection_budget_tokens",
+            "elements": [
+              {
+                "type": "Control",
+                "label": "Injection budget — house scope",
+                "scope": "#/properties/memory/properties/injection_budget_tokens/properties/house",
+                "options": {
+                  "unit": "tokens"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Injection budget — project scope",
+                "scope": "#/properties/memory/properties/injection_budget_tokens/properties/project",
+                "options": {
+                  "unit": "tokens"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Injection budget — user scope",
+                "scope": "#/properties/memory/properties/injection_budget_tokens/properties/user",
+                "options": {
+                  "unit": "tokens"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Injection budget — worker overlay",
+                "scope": "#/properties/memory/properties/injection_budget_tokens/properties/worker_overlay",
+                "options": {
+                  "dormant": "worker-overlay scope activates v1 (S18.5)",
+                  "unit": "tokens"
+                }
+              }
+            ]
+          },
+          {
+            "type": "Group",
+            "label": "vector_gate",
+            "elements": [
+              {
+                "type": "Control",
+                "label": "Vector gate — miss-rate trigger",
+                "scope": "#/properties/memory/properties/vector_gate/properties/task_miss_rate",
+                "options": {
+                  "dormant": "pre-registered trigger, evaluated post-15.3 (S18.5)",
+                  "unit": "ratio"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Vector gate — corpus-size trigger",
+                "scope": "#/properties/memory/properties/vector_gate/properties/corpus_entries",
+                "options": {
+                  "dormant": "pre-registered trigger, evaluated post-15.3 (S18.5)"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "pressure (S10)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Cache-read pressure weight",
+            "scope": "#/properties/pressure/properties/cache_read_weight",
+            "options": {
+              "unit": "ratio"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Background admission stop",
+            "scope": "#/properties/pressure/properties/bg_admit_stop",
+            "options": {
+              "unit": "ratio"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "budget (S10)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Background window fraction",
+            "scope": "#/properties/budget/properties/background_window_fraction",
+            "options": {
+              "unit": "ratio"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "meter (S10)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Meter divergence alarm",
+            "scope": "#/properties/meter/properties/value_divergence_alarm",
+            "options": {
+              "unit": "percent"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "limit (S10)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Limit-event retry cap",
+            "scope": "#/properties/limit/properties/retry_cap"
+          },
+          {
+            "type": "Control",
+            "label": "Retry budget ratio",
+            "scope": "#/properties/limit/properties/retry_budget_ratio",
+            "options": {
+              "unit": "ratio"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Limit probe interval cap",
+            "scope": "#/properties/limit/properties/probe_interval_max",
+            "options": {
+              "unit": "seconds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "scheduler (S10)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Missed-slot default",
+            "scope": "#/properties/scheduler/properties/missed_slot_default",
+            "options": {
+              "dormant": "ships v0, consumer surface v1 (S18.5)"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "arbitration (S10)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Background CPU weight",
+            "scope": "#/properties/arbitration/properties/background_cpuweight"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "sandbox (S11)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Egress deny list",
+            "scope": "#/properties/sandbox/properties/egress_deny_cidrs"
+          },
+          {
+            "type": "Control",
+            "label": "Block outbound DoH",
+            "scope": "#/properties/sandbox/properties/block_outbound_doh"
+          },
+          {
+            "type": "Control",
+            "label": "Package-registry allowlist",
+            "scope": "#/properties/sandbox/properties/c2_registry_allowlist"
+          },
+          {
+            "type": "Control",
+            "label": "Model egress TLS termination",
+            "scope": "#/properties/sandbox/properties/model_egress_tls_terminate"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "local (S12)",
+        "elements": [
+          {
+            "type": "Group",
+            "label": "ttl",
+            "elements": [
+              {
+                "type": "Control",
+                "label": "Fast-tier idle TTL",
+                "scope": "#/properties/local/properties/ttl/properties/fast_s",
+                "options": {
+                  "unit": "seconds"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "Workhorse idle TTL",
+                "scope": "#/properties/local/properties/ttl/properties/workhorse_s",
+                "options": {
+                  "unit": "seconds"
+                }
+              },
+              {
+                "type": "Control",
+                "label": "eGPU idle TTL",
+                "scope": "#/properties/local/properties/ttl/properties/egpu_s",
+                "options": {
+                  "dormant": "dormant until pool24 (S18.5)",
+                  "unit": "seconds"
+                }
+              }
+            ]
+          },
+          {
+            "type": "Control",
+            "label": "VRAM guard band",
+            "scope": "#/properties/local/properties/vram/properties/guard_band_mb",
+            "options": {
+              "unit": "MB"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Unload termination grace",
+            "scope": "#/properties/local/properties/unload/properties/term_grace_s",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "GameMode hook",
+            "scope": "#/properties/local/properties/gamemode_hook"
+          },
+          {
+            "type": "Control",
+            "label": "GPU admission on battery",
+            "scope": "#/properties/local/properties/battery/properties/gpu_admission"
+          },
+          {
+            "type": "Control",
+            "label": "Batch work on AC only",
+            "scope": "#/properties/local/properties/batch/properties/ac_only"
+          },
+          {
+            "type": "Control",
+            "label": "Sandbox logprobs exposure",
+            "scope": "#/properties/local/properties/broker/properties/sandbox_logprobs"
+          },
+          {
+            "type": "Control",
+            "label": "Local model re-evaluation cadence",
+            "scope": "#/properties/local/properties/reeval/properties/cadence_months",
+            "options": {
+              "unit": "months"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Duty-alias map",
+            "scope": "#/properties/local/properties/alias"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "review (S13)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Review anchor drift tolerance",
+            "scope": "#/properties/review/properties/anchor_drift_lines",
+            "options": {
+              "unit": "lines"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "backup (S13)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Snapshot interval",
+            "scope": "#/properties/backup/properties/interval",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Snapshots kept",
+            "scope": "#/properties/backup/properties/keep",
+            "options": {
+              "unit": "snapshots"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Snapshot repo rotation",
+            "scope": "#/properties/backup/properties/repo_rotation",
+            "options": {
+              "unit": "months"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Restore drill interval",
+            "scope": "#/properties/backup/properties/drill_interval",
+            "options": {
+              "unit": "months"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "preview (S13)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Preview idle stop",
+            "scope": "#/properties/preview/properties/idle_stop",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Concurrent previews",
+            "scope": "#/properties/preview/properties/max_concurrent"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "obs (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "SSE keepalive interval",
+            "scope": "#/properties/obs/properties/sse_keepalive",
+            "options": {
+              "unit": "seconds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "watchdog (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Loop-repeat trigger",
+            "scope": "#/properties/watchdog/properties/loop_repeat"
+          },
+          {
+            "type": "Control",
+            "label": "Ping-pong trigger",
+            "scope": "#/properties/watchdog/properties/pingpong_cycles"
+          },
+          {
+            "type": "Control",
+            "label": "Error-loop trigger",
+            "scope": "#/properties/watchdog/properties/error_loop"
+          },
+          {
+            "type": "Control",
+            "label": "Silence budgets by run type",
+            "scope": "#/properties/watchdog/properties/silence_budget"
+          },
+          {
+            "type": "Control",
+            "label": "Spend spike trigger",
+            "scope": "#/properties/watchdog/properties/spend_median_mult",
+            "options": {
+              "unit": "multiplier"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Spend watchdog arming period",
+            "scope": "#/properties/watchdog/properties/spend_arm_days",
+            "options": {
+              "unit": "days"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Flag-now target rate",
+            "scope": "#/properties/watchdog/properties/flag_now_target",
+            "options": {
+              "unit": "per-day"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Suppressions before retune",
+            "scope": "#/properties/watchdog/properties/suppress_retune_count"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "watchlist (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Watchlist fetch-fail streak",
+            "scope": "#/properties/watchlist/properties/fetch_fail_streak",
+            "options": {
+              "unit": "cycles"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "canary (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Auth canary interval",
+            "scope": "#/properties/canary/properties/auth_interval",
+            "options": {
+              "unit": "seconds"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Behavioral canary interval",
+            "scope": "#/properties/canary/properties/behavioral_interval",
+            "options": {
+              "unit": "seconds"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "retention (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Trace compaction horizon",
+            "scope": "#/properties/retention/properties/compaction_horizon",
+            "options": {
+              "perUser": true,
+              "unit": "months"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "eval (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Eval sweep interval",
+            "scope": "#/properties/eval/properties/sweep_interval",
+            "options": {
+              "unit": "months"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "benchmark (S14)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Benchmark sampling rates",
+            "scope": "#/properties/benchmark/properties/sampling_rate"
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "frontend (S15)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Frontend dependency pass interval",
+            "scope": "#/properties/frontend/properties/dependency_pass_interval",
+            "options": {
+              "unit": "days"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Category",
+        "label": "adoption (S16)",
+        "elements": [
+          {
+            "type": "Control",
+            "label": "Dependency pass cadence",
+            "scope": "#/properties/adoption/properties/dependency_pass_months",
+            "options": {
+              "unit": "months"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Default abandonment horizon",
+            "scope": "#/properties/adoption/properties/abandonment_months",
+            "options": {
+              "unit": "months"
+            }
+          },
+          {
+            "type": "Control",
+            "label": "Price data staleness horizon",
+            "scope": "#/properties/adoption/properties/price_data_stale_days",
+            "options": {
+              "unit": "days"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "values": [
+    {
+      "key": "shell.drain_grace",
+      "section": "S01",
+      "domain": "shell",
+      "title": "Maintenance drain grace",
+      "help": "How long in-flight runs may keep working after maintenance mode starts before they are parked at their last checkpoint.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G1 Def.7",
+      "default": 900,
+      "effective": 900,
+      "overridden": false,
+      "numeric": true,
+      "floor": 60,
+      "ceiling": 86400,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "shell.watchdog_sec",
+      "section": "S01",
+      "domain": "shell",
+      "title": "Control-plane watchdog interval",
+      "help": "The systemd WatchdogSec= budget for sinet-control's heartbeat; missing it lets systemd restart the control plane.",
+      "type": "int",
+      "unit": "seconds",
+      "ratified_by": "R17 §4.1 (⚙ flagged unnumbered)",
+      "default": 30,
+      "effective": 30,
+      "overridden": false,
+      "numeric": true,
+      "floor": 10,
+      "ceiling": 300,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "shell.inhibit_delay_max",
+      "section": "S01",
+      "domain": "shell",
+      "title": "Sleep-inhibitor window",
+      "help": "The logind delay-inhibitor window for the pre-sleep flush, applied as host configuration; the flush itself is sized to fit even the stock 5 seconds.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R17 §4.9; SPIKE P2-S2",
+      "default": 30,
+      "effective": 30,
+      "overridden": false,
+      "numeric": true,
+      "floor": 5,
+      "ceiling": 60,
+      "auto": false,
+      "per_user": false,
+      "restart_required": true
+    },
+    {
+      "key": "shell.journal_max_use",
+      "section": "S01",
+      "domain": "shell",
+      "title": "Journal disk cap",
+      "help": "Total disk space journald may use for the ops logs; the audit record lives in platform.db, never here.",
+      "type": "int",
+      "unit": "bytes",
+      "ratified_by": "R17 §4.8 (⚙ flagged unnumbered)",
+      "default": 4294967296,
+      "effective": 4294967296,
+      "overridden": false,
+      "numeric": true,
+      "floor": 536870912,
+      "ceiling": 34359738368,
+      "auto": false,
+      "per_user": false,
+      "restart_required": true
+    },
+    {
+      "key": "state.synchronous",
+      "section": "S02",
+      "domain": "state",
+      "title": "SQLite synchronous mode",
+      "help": "FULL deletes the power-loss window entirely at Sinet's write rate; NORMAL is the documented fallback if measurement ever disagrees.",
+      "type": "enum",
+      "ratified_by": "G2 Def.1",
+      "default": "FULL",
+      "effective": "FULL",
+      "overridden": false,
+      "numeric": false,
+      "enum": [
+        "FULL",
+        "NORMAL"
+      ],
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "state.busy_timeout",
+      "section": "S02",
+      "domain": "state",
+      "title": "SQLite busy timeout",
+      "help": "How long a write waits for the database lock before failing; honored by the BEGIN IMMEDIATE write discipline.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R08 §4.1",
+      "default": 5,
+      "effective": 5,
+      "overridden": false,
+      "numeric": true,
+      "floor": 5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "state.wal_truncate_interval",
+      "section": "S02",
+      "domain": "state",
+      "title": "WAL truncation interval",
+      "help": "How often the write-ahead log is checkpointed and truncated so it cannot grow without bound.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R08 §4.1",
+      "default": 3600,
+      "effective": 3600,
+      "overridden": false,
+      "numeric": true,
+      "floor": 300,
+      "ceiling": 86400,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "state.event_payload_cap",
+      "section": "S02",
+      "domain": "state",
+      "title": "Event payload cap",
+      "help": "Maximum size of one event-log payload; bulky output lives as files referenced by path and hash, never inline.",
+      "type": "int",
+      "unit": "bytes",
+      "ratified_by": "R08 §4.1 / P-T07-5",
+      "default": 65536,
+      "effective": 65536,
+      "overridden": false,
+      "numeric": true,
+      "floor": 4096,
+      "ceiling": 1048576,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "recovery.heartbeat",
+      "section": "S02",
+      "domain": "recovery",
+      "title": "Run heartbeat interval",
+      "help": "How often a live run refreshes its lease heartbeat.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 Def.2",
+      "default": 60,
+      "effective": 60,
+      "overridden": false,
+      "numeric": true,
+      "floor": 15,
+      "ceiling": 300,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "recovery.dead_after",
+      "section": "S02",
+      "domain": "recovery",
+      "title": "Silence-before-dead threshold",
+      "help": "How long a run's event cursor may sit still before the recovery pass treats the run as stalled; must stay at least twice the heartbeat.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 Def.2 (seeds watchdog.silence_budget.*)",
+      "default": 300,
+      "effective": 300,
+      "overridden": false,
+      "numeric": true,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "recovery.wake_grace",
+      "section": "S02",
+      "domain": "recovery",
+      "title": "Post-wake lease grace",
+      "help": "Grace applied to every lease deadline right after the host wakes, so a nap never falsely kills a live run.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 Def.2",
+      "default": 120,
+      "effective": 120,
+      "overridden": false,
+      "numeric": true,
+      "floor": 30,
+      "ceiling": 600,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "recovery.max_attempts",
+      "section": "S02",
+      "domain": "recovery",
+      "title": "Recovery attempts per interruption",
+      "help": "How many recovery attempts one interruption gets before the run is tombstoned for review.",
+      "type": "int",
+      "ratified_by": "G2 Def.2",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "recovery.stale_finalize",
+      "section": "S02",
+      "domain": "recovery",
+      "title": "Stale-run finalize horizon",
+      "help": "A run interrupted longer than this is finalized with a card instead of blindly resumed; the freshness pass fires first regardless.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 Def.2",
+      "default": 86400,
+      "effective": 86400,
+      "overridden": false,
+      "numeric": true,
+      "floor": 3600,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "recovery.sweep_interval",
+      "section": "S02",
+      "domain": "recovery",
+      "title": "Recovery sweep interval",
+      "help": "How often the level-triggered reconcile pass re-lists actual run state outside of start and wake.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R08 §4.4",
+      "default": 300,
+      "effective": 300,
+      "overridden": false,
+      "numeric": true,
+      "floor": 60,
+      "ceiling": 1800,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "effects.approval_expiry",
+      "section": "S02",
+      "domain": "effects",
+      "title": "Effect approval expiry",
+      "help": "How long an approved outward effect stays valid before drift or age sends it back for re-approval.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 Def.2 / R08 §4.5",
+      "default": 604800,
+      "effective": 604800,
+      "overridden": false,
+      "numeric": true,
+      "floor": 3600,
+      "ceiling": 2592000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "claims.default_write",
+      "section": "S02",
+      "domain": "claims",
+      "title": "Default write claim",
+      "help": "What a plan claims when it cannot bound its write-set: the whole project serializes more but never overwrites; declared-set is the parallel-friendlier alternative.",
+      "type": "enum",
+      "ratified_by": "G2 Def.3",
+      "default": "whole-project",
+      "effective": "whole-project",
+      "overridden": false,
+      "numeric": false,
+      "enum": [
+        "declared-set",
+        "whole-project"
+      ],
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "freshness.max_age",
+      "section": "S02",
+      "domain": "freshness",
+      "title": "Staleness horizon",
+      "help": "A parked run or pending approval older than this re-validates its plan against current reality before spending anything significant; also folded alias of intake.approval_stale_hours (S18.4 R2).",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G1 Def.5; feature 4.3 (cross-cutting; consumers S03/S06/S10)",
+      "default": 86400,
+      "effective": 21600,
+      "overridden": true,
+      "numeric": true,
+      "floor": 7200,
+      "ceiling": 172800,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "freshness.hold_vs_park",
+      "section": "S02",
+      "domain": "freshness",
+      "title": "Hold-versus-park threshold",
+      "help": "Pauses shorter than this hold the process for a cheap resume; anything longer parks the run and subjects the resume to the freshness pass.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G1 Def.4 (consumer S10)",
+      "default": 600,
+      "effective": 600,
+      "overridden": false,
+      "numeric": true,
+      "floor": 60,
+      "ceiling": 3600,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "adapter.claude.cleanup_period_days",
+      "section": "S03",
+      "domain": "adapter",
+      "title": "Claude session cleanup period",
+      "help": "How long the Claude engine keeps local session data before its own sweep; must exceed the effect-approval expiry so an answerable ask never outlives its session.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "P-T02-1 mitigation; SPIKE G1-S2 F5",
+      "default": 365,
+      "effective": 365,
+      "overridden": false,
+      "numeric": true,
+      "floor": 30,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "adapter.engine_ceiling_backstop_mult",
+      "section": "S03",
+      "domain": "adapter",
+      "title": "Engine ceiling backstop multiplier",
+      "help": "The engine-internal turn ceiling is set to this multiple of the platform ceiling so the platform gate always fires first.",
+      "type": "float",
+      "unit": "multiplier",
+      "ratified_by": "SPIKE G1-S2 F4 (consumer S10)",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 2,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "adapter.parallel_gate_fallback",
+      "section": "S03",
+      "domain": "adapter",
+      "title": "Parallel-gate fallback strategy",
+      "help": "How a gated call inside a parallel batch is serialized; serialize-by-deny makes the engine re-issue the gated call alone for a faithful ask record.",
+      "type": "enum",
+      "ratified_by": "SPIKE G1-S2 §Verdict; P2-S4 headline; [coordinator-draft]",
+      "default": "serialize-by-deny",
+      "effective": "serialize-by-deny",
+      "overridden": false,
+      "numeric": false,
+      "enum": [
+        "serialize-by-deny",
+        "hold-process"
+      ],
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.depth_cap",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Helper depth cap",
+      "help": "Maximum helper nesting depth; raising the ceiling past 2 is a deliberate operator bounds change, never routine.",
+      "type": "int",
+      "ratified_by": "D6; G1 Def.8",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 2,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.max_concurrent_helpers",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Concurrent helpers per task",
+      "help": "How many helpers one task may run at once across all depths; automation may move this within the operator's bounds.",
+      "type": "int",
+      "ratified_by": "G1 Def.8 + rider 1",
+      "default": 4,
+      "effective": 4,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "auto": true,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.helper_turns",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Turns per helper",
+      "help": "Turn budget one helper gets before it must report; automation may move this within the operator's bounds.",
+      "type": "int",
+      "unit": "turns",
+      "ratified_by": "G1 Def.8 + rider 1",
+      "default": 20,
+      "effective": 20,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": true,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.helper_tokens",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Token budget per helper",
+      "help": "Token budget one helper gets; automation may move this within the operator's bounds.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "G1 Def.8 + rider 1",
+      "default": 80000,
+      "effective": 80000,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": true,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.spawn_budget",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Spawn budget per task",
+      "help": "Total helper spawns one task gets, including sub-helpers and retries; overrunning it takes an operator-visible gate.",
+      "type": "int",
+      "ratified_by": "G1 Def.8; R06 §4.3",
+      "default": 8,
+      "effective": 8,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.report_tokens",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Helper report size",
+      "help": "Token cap on one helper report, enforced by the report screen.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "G1 Def.8 (screen-enforced, S04.5)",
+      "default": 2000,
+      "effective": 2000,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.bulk_offload_tokens",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Bulk-offload threshold",
+      "help": "Content larger than this is offloaded to a helper instead of being pulled into the orchestrating context.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "R06 §4.2; G1 D1.1",
+      "default": 20000,
+      "effective": 20000,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.helper_retry_limit",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Helper retries",
+      "help": "How many times one failed helper is retried before the failure surfaces.",
+      "type": "int",
+      "ratified_by": "R06 §4.4; G1 D1.1",
+      "default": 1,
+      "effective": 1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "orchestration.stagger_identical_prefix",
+      "section": "S04",
+      "domain": "orchestration",
+      "title": "Stagger identical-prefix helpers",
+      "help": "Launch helpers sharing an identical prompt prefix staggered so the provider cache is warm for the followers.",
+      "type": "bool",
+      "ratified_by": "R06 §4.2; G1 D1.1",
+      "default": true,
+      "effective": true,
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "context.stage_fit_target",
+      "section": "S05",
+      "domain": "context",
+      "title": "Stage fit target",
+      "help": "Fraction of the lane's context window a stage is packed toward; recalibrated per model generation, and always below the overflow threshold.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G1 Def.11 (per-generation recalibration, S05.2)",
+      "default": 0.5,
+      "effective": 0.5,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0.2,
+      "ceiling": 0.7,
+      "auto": true,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "context.stage_overflow_threshold",
+      "section": "S05",
+      "domain": "context",
+      "title": "Stage overflow threshold",
+      "help": "Fraction of the lane's context window past which a stage overflows and splits; stays at least 0.05 above the fit target.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G1 Def.11 (same recalibration)",
+      "default": 0.7,
+      "effective": 0.7,
+      "overridden": false,
+      "numeric": true,
+      "ceiling": 0.85,
+      "auto": true,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "context.conventions_max_lines",
+      "section": "S05",
+      "domain": "context",
+      "title": "Conventions file line cap",
+      "help": "Maximum lines of the injected conventions file before it must be tightened.",
+      "type": "int",
+      "unit": "lines",
+      "ratified_by": "R07 §4.4",
+      "default": 150,
+      "effective": 150,
+      "overridden": false,
+      "numeric": true,
+      "floor": 50,
+      "ceiling": 400,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "context.recitation_interval_turns",
+      "section": "S05",
+      "domain": "context",
+      "title": "Objective recitation interval",
+      "help": "Every this-many turns the run recites its objective to fight drift; 0 turns recitation off, otherwise 5 to 50.",
+      "type": "int",
+      "unit": "turns",
+      "ratified_by": "[coordinator-draft]",
+      "default": 10,
+      "effective": 10,
+      "overridden": false,
+      "numeric": true,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "intake.zero_interaction_cost_usd",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Zero-interaction cost band",
+      "help": "Tasks estimated under this API-equivalent cost may run without interview questions; per person.",
+      "type": "float",
+      "unit": "USD",
+      "ratified_by": "G1 P11 + D1.7 (⚙ per-user at the gate)",
+      "default": 0.5,
+      "effective": 0.5,
+      "overridden": false,
+      "user_values": {
+        "alice": 0.25
+      },
+      "numeric": true,
+      "floor": 0,
+      "auto": false,
+      "per_user": true,
+      "restart_required": false
+    },
+    {
+      "key": "intake.clearance_floor.low",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Clearance floor — low stakes",
+      "help": "Interviewing continues while the spec's clearance score sits below this floor on low-stakes tasks.",
+      "type": "int",
+      "unit": "score",
+      "ratified_by": "G1 P8 mechanism; default [coordinator-draft]",
+      "default": 60,
+      "effective": 60,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 100,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "intake.clearance_floor.standard",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Clearance floor — standard stakes",
+      "help": "Interviewing continues while the spec's clearance score sits below this floor on standard-stakes tasks.",
+      "type": "int",
+      "unit": "score",
+      "ratified_by": "G1 P8 mechanism; default [coordinator-draft]",
+      "default": 75,
+      "effective": 75,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 100,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "intake.clearance_floor.high",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Clearance floor — high stakes",
+      "help": "Interviewing continues while the spec's clearance score sits below this floor on high-stakes tasks.",
+      "type": "int",
+      "unit": "score",
+      "ratified_by": "G1 P8 mechanism; default [coordinator-draft]",
+      "default": 90,
+      "effective": 90,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 100,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "intake.size_recheck_factor",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Size re-check factor",
+      "help": "If the plan-derived estimate exceeds the intake guess by this factor, size and tier are re-decided before expensive work.",
+      "type": "float",
+      "unit": "multiplier",
+      "ratified_by": "feature 2.5; R03 §4 Stage 2(c); default [coordinator-draft]",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "min_exclusive": true,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "intake.coverage_autofix_rounds",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Coverage auto-fix rounds",
+      "help": "Bounded planner rounds to fix an uncovered acceptance criterion before a decision card goes to the requester.",
+      "type": "int",
+      "unit": "rounds",
+      "ratified_by": "R03 §4 Stage 2(a) (\"bounded\")",
+      "default": 1,
+      "effective": 1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 2,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "intake.critique_revise_rounds",
+      "section": "S06",
+      "domain": "intake",
+      "title": "Critique revise rounds",
+      "help": "Bounded revise rounds after the plan self-attack before the result ships as-is with the critique attached.",
+      "type": "int",
+      "unit": "rounds",
+      "ratified_by": "R03 §4 Stage 3 (\"fixes once\")",
+      "default": 1,
+      "effective": 1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 2,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.rework_rounds",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Rework rounds",
+      "help": "Maximum fix-and-re-verify rounds a deliverable gets before the remaining findings surface to a human.",
+      "type": "int",
+      "unit": "rounds",
+      "ratified_by": "R04 §4 via G1 D1.1(d); S07 resolution note",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.convergence_patience_rounds",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Convergence patience",
+      "help": "How many rework rounds may pass without the finding count shrinking before rework stops early; never more than the rework rounds themselves.",
+      "type": "int",
+      "unit": "rounds",
+      "ratified_by": "R04 §2.6/§3-D via G1 D1.1(d)",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.sanity_stakes_floor",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Sanity-pass stakes floor",
+      "help": "The lowest stakes tier (S06.4 tiers) at which the independent sanity pass always runs.",
+      "type": "enum",
+      "ratified_by": "G1 D1.2 mechanism; default [coordinator-draft]",
+      "default": "standard",
+      "effective": "standard",
+      "overridden": false,
+      "numeric": false,
+      "enum": [
+        "trivial",
+        "low",
+        "standard",
+        "high"
+      ],
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.entailment_sample_rate",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Entailment sampling rate",
+      "help": "Fraction of non-load-bearing claims sampled into the entailment check; 0 until the bring-up calibration set fixes the ratified value (TBD-BRINGUP).",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G1 Def.2; G3 Def.4/Def.8; default TBD-BRINGUP(entailment calibration set)",
+      "default": 0,
+      "effective": 0,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.research_rerun_limit",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Research re-run limit",
+      "help": "How many times a failed research verification may re-run its research node before carding.",
+      "type": "int",
+      "unit": "rounds",
+      "ratified_by": "feature 1.9; R03 §4 Stage 2(d) via S06.6",
+      "default": 1,
+      "effective": 1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 2,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.check_audit_interval_days",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Check-the-checker audit interval",
+      "help": "How often the verification checks themselves are audited against ground truth.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "P-T06-1; R04 §4; default [coordinator-draft]",
+      "default": 90,
+      "effective": 90,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.canary_interval_hours",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Escalation-path canary interval",
+      "help": "Cadence of the dead-man canary that proves the escalation path can still reach a human; silence is itself the alarm.",
+      "type": "int",
+      "unit": "hours",
+      "ratified_by": "G1 Def.3 (superseded set: \"canary daily\"); S18.4 R5",
+      "default": 24,
+      "effective": 24,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.drill_interval_days",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Escalation drill interval",
+      "help": "Cadence of the full escalation drill (distinct from the backup restore drill, S18.4 R6).",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G1 Def.3 (superseded set: \"drill quarterly\"); S18.4 R6",
+      "default": 90,
+      "effective": 90,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.card_remind_hours",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Card reminder cadence",
+      "help": "Inbox-wide: how long an unanswered card waits before its first reminder.",
+      "type": "int",
+      "unit": "hours",
+      "ratified_by": "G1 Def.3 (superseded set) — inbox-wide",
+      "default": 4,
+      "effective": 4,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.card_push_hours",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Card push cadence",
+      "help": "Inbox-wide: how long an unanswered card waits before a push notification goes out.",
+      "type": "int",
+      "unit": "hours",
+      "ratified_by": "G1 Def.3 (superseded set) — inbox-wide",
+      "default": 24,
+      "effective": 24,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "verification.safety_reping_hours",
+      "section": "S07",
+      "domain": "verification",
+      "title": "Safety re-ping cadence",
+      "help": "Inbox-wide: re-ping interval for safety-relevant cards.",
+      "type": "int",
+      "unit": "hours",
+      "ratified_by": "G1 Def.3 (superseded set) — inbox-wide",
+      "default": 1,
+      "effective": 1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "workers.first_n",
+      "section": "S08",
+      "domain": "workers",
+      "title": "Supervised first runs",
+      "help": "A new or changed worker's first N runs are supervised; the count resets when its body or equipment version changes.",
+      "type": "int",
+      "ratified_by": "G3 D3.4",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "workers.gap_proposal_count",
+      "section": "S08",
+      "domain": "workers",
+      "title": "Gap occurrences before proposal",
+      "help": "How many times the same capability gap must occur before a worker proposal is raised.",
+      "type": "int",
+      "ratified_by": "G3 D3.4 (\"second occurrence\")",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 2,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "workers.persona_lines_max",
+      "section": "S08",
+      "domain": "workers",
+      "title": "Persona line cap",
+      "help": "Warn threshold of the station-1 lint on persona prose in a worker definition.",
+      "type": "int",
+      "unit": "lines",
+      "ratified_by": "R15 §4.2 (⚙ there)",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "workers.dryrun_cost_cap_usd",
+      "section": "S08",
+      "domain": "workers",
+      "title": "Worker dry-run cost cap",
+      "help": "API-equivalent budget one composer dry-run may spend.",
+      "type": "float",
+      "unit": "USD",
+      "ratified_by": "R15 §4.3 (⚙ there); anchor G1 D1.7 [coordinator-draft]",
+      "default": 0.5,
+      "effective": 0.5,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "min_exclusive": true,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.l1_ttl_days",
+      "section": "S09",
+      "domain": "memory",
+      "title": "L1 memory TTL",
+      "help": "Days an L1 observation lives before expiry; the L1 scope activates at v1.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G2 Def.7 (L1 scope activates v1)",
+      "default": 90,
+      "effective": 90,
+      "overridden": false,
+      "numeric": true,
+      "floor": 7,
+      "ceiling": 365,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.reverify_lessons_days",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Lesson re-verify interval",
+      "help": "Days before a stored lesson must be re-verified against reality.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G2 Def.7",
+      "default": 90,
+      "effective": 90,
+      "overridden": false,
+      "numeric": true,
+      "floor": 30,
+      "ceiling": 365,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.reverify_house_days",
+      "section": "S09",
+      "domain": "memory",
+      "title": "House-knowledge re-verify interval",
+      "help": "Days before a house-scope knowledge entry must be re-verified.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G2 Def.7",
+      "default": 180,
+      "effective": 180,
+      "overridden": false,
+      "numeric": true,
+      "floor": 90,
+      "ceiling": 730,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.proposals_per_task_max",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Memory proposals per task",
+      "help": "Maximum memory-write proposals one task may raise through the write gate.",
+      "type": "int",
+      "ratified_by": "G2 Def.7",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.digest_interval_days",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Memory digest interval",
+      "help": "Days between memory digests presented for review.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G2 Def.7",
+      "default": 7,
+      "effective": 7,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 30,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.distill_threshold_lessons",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Distillation threshold",
+      "help": "How many related lessons accumulate before distillation into a single entry is proposed.",
+      "type": "int",
+      "ratified_by": "G2 Def.7",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 2,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.injection_budget_tokens.house",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Injection budget — house scope",
+      "help": "Token budget for house-scope memory injected into a run's context.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "G2 Def.7; numbers [coordinator-draft]",
+      "default": 2000,
+      "effective": 2000,
+      "overridden": false,
+      "numeric": true,
+      "floor": 500,
+      "ceiling": 10000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.injection_budget_tokens.project",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Injection budget — project scope",
+      "help": "Token budget for project-scope memory injected into a run's context.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "G2 Def.7; numbers [coordinator-draft]",
+      "default": 3000,
+      "effective": 3000,
+      "overridden": false,
+      "numeric": true,
+      "floor": 500,
+      "ceiling": 10000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.injection_budget_tokens.user",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Injection budget — user scope",
+      "help": "Token budget for user-scope memory injected into a run's context.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "G2 Def.7; numbers [coordinator-draft]",
+      "default": 1500,
+      "effective": 1500,
+      "overridden": false,
+      "numeric": true,
+      "floor": 500,
+      "ceiling": 10000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.injection_budget_tokens.worker_overlay",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Injection budget — worker overlay",
+      "help": "Token budget for worker-overlay memory; the scope activates at v1.",
+      "type": "int",
+      "unit": "tokens",
+      "ratified_by": "G2 Def.7; numbers [coordinator-draft]",
+      "dormant": "worker-overlay scope activates v1 (S18.5)",
+      "default": 1500,
+      "effective": 1500,
+      "overridden": false,
+      "numeric": true,
+      "floor": 500,
+      "ceiling": 10000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.vector_gate.task_miss_rate",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Vector gate — miss-rate trigger",
+      "help": "Pre-registered retrieval miss rate that, once exceeded, opens the vector-search gate; evaluated only after the 15.3 benchmark gate.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G2 Def.8",
+      "dormant": "pre-registered trigger, evaluated post-15.3 (S18.5)",
+      "default": 0.05,
+      "effective": 0.05,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0.01,
+      "ceiling": 0.25,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "memory.vector_gate.corpus_entries",
+      "section": "S09",
+      "domain": "memory",
+      "title": "Vector gate — corpus-size trigger",
+      "help": "Pre-registered corpus size that, once exceeded, opens the vector-search gate.",
+      "type": "int",
+      "ratified_by": "G2 Def.8",
+      "dormant": "pre-registered trigger, evaluated post-15.3 (S18.5)",
+      "default": 5000,
+      "effective": 5000,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1000,
+      "ceiling": 50000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "pressure.cache_read_weight",
+      "section": "S10",
+      "domain": "pressure",
+      "title": "Cache-read pressure weight",
+      "help": "How strongly cache reads count into consumption pressure; labeled assumed until the provider publishes quota semantics.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G1 Def.10 (consumer S05; dedup S18.4 R3)",
+      "default": 0.1,
+      "effective": 0.1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "pressure.bg_admit_stop",
+      "section": "S10",
+      "domain": "pressure",
+      "title": "Background admission stop",
+      "help": "Consumption-pressure level past which background work stops being admitted.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G2 Def.4",
+      "default": 0.7,
+      "effective": 0.7,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0.1,
+      "ceiling": 0.95,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "budget.background_window_fraction",
+      "section": "S10",
+      "domain": "budget",
+      "title": "Background window fraction",
+      "help": "Fraction of a subscription window background work may consume; labeled assumed.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G2 Def.4/5",
+      "default": 0.5,
+      "effective": 0.5,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 1,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "meter.value_divergence_alarm",
+      "section": "S10",
+      "domain": "meter",
+      "title": "Meter divergence alarm",
+      "help": "Alarm threshold for divergence between the platform's meter and the provider's reported usage.",
+      "type": "float",
+      "unit": "percent",
+      "ratified_by": "R09 §4.1 / P-T08-1",
+      "default": 20,
+      "effective": 20,
+      "overridden": false,
+      "numeric": true,
+      "floor": 5,
+      "ceiling": 100,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "limit.retry_cap",
+      "section": "S10",
+      "domain": "limit",
+      "title": "Limit-event retry cap",
+      "help": "Maximum retries after a provider limit event before the run parks.",
+      "type": "int",
+      "ratified_by": "G2 D2.1 / R09 §4.3",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "limit.retry_budget_ratio",
+      "section": "S10",
+      "domain": "limit",
+      "title": "Retry budget ratio",
+      "help": "Fraction of a run's budget retries may consume.",
+      "type": "float",
+      "unit": "ratio",
+      "ratified_by": "G2 D2.1 / R09 §4.3",
+      "default": 0.1,
+      "effective": 0.1,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0.01,
+      "ceiling": 0.5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "limit.probe_interval_max",
+      "section": "S10",
+      "domain": "limit",
+      "title": "Limit probe interval cap",
+      "help": "Ceiling on the backoff between probes of a closed provider window.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 D2.1 / R09 §4.3",
+      "default": 1800,
+      "effective": 1800,
+      "overridden": false,
+      "numeric": true,
+      "floor": 60,
+      "ceiling": 7200,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "scheduler.missed_slot_default",
+      "section": "S10",
+      "domain": "scheduler",
+      "title": "Missed-slot default",
+      "help": "What a schedule slot missed during suspend does by default; the user-facing schedule surface arrives at v1.",
+      "type": "enum",
+      "ratified_by": "R09 §4.7",
+      "dormant": "ships v0, consumer surface v1 (S18.5)",
+      "default": "run-once-late",
+      "effective": "run-once-late",
+      "overridden": false,
+      "numeric": false,
+      "enum": [
+        "run-once-late",
+        "skip",
+        "notify-only"
+      ],
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "arbitration.background_cpuweight",
+      "section": "S10",
+      "domain": "arbitration",
+      "title": "Background CPU weight",
+      "help": "systemd CPUWeight for the background slice: idle, or an integer weight from 1 to 10000.",
+      "type": "string",
+      "ratified_by": "R09 §4.9 (slice mechanism S01)",
+      "default": "idle",
+      "effective": "idle",
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "sandbox.egress_deny_cidrs",
+      "section": "S11",
+      "domain": "sandbox",
+      "title": "Egress deny list",
+      "help": "CIDRs sandboxed runs may never reach; the cloud-metadata address is a non-removable floor.",
+      "type": "list",
+      "ratified_by": "R10 §2.3/§3.3",
+      "default": [
+        "169.254.169.254/32",
+        "169.254.0.0/16",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "fc00::/7"
+      ],
+      "effective": [
+        "169.254.169.254/32",
+        "169.254.0.0/16",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "fc00::/7"
+      ],
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "sandbox.block_outbound_doh",
+      "section": "S11",
+      "domain": "sandbox",
+      "title": "Block outbound DoH",
+      "help": "Block DNS-over-HTTPS from sandboxes so egress policy cannot be tunneled around; turning this off requires a recorded reason.",
+      "type": "bool",
+      "ratified_by": "R10 §2.3",
+      "default": true,
+      "effective": true,
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "sandbox.c2_registry_allowlist",
+      "section": "S11",
+      "domain": "sandbox",
+      "title": "Package-registry allowlist",
+      "help": "Curated package-registry and CDN hosts C2-confined runs may fetch from (the Copilot/Codex-preset shape; npm/pypi/crates/apt/go/maven/nuget/rubygems). The concrete curated preset is materialized by the S11 sandbox packet; consumers treat an empty list as preset-not-installed. Data, like the price table.",
+      "type": "list",
+      "ratified_by": "R10 §3.3",
+      "default": [],
+      "effective": [],
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "sandbox.model_egress_tls_terminate",
+      "section": "S11",
+      "domain": "sandbox",
+      "title": "Model egress TLS termination",
+      "help": "Terminate TLS on model egress per lane; off means that lane falls back to pattern-2 scoped egress.",
+      "type": "bool",
+      "ratified_by": "SPIKE P2-S3 / R10 §3.4",
+      "default": true,
+      "effective": true,
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.ttl.fast_s",
+      "section": "S12",
+      "domain": "local",
+      "title": "Fast-tier idle TTL",
+      "help": "Idle seconds before the fast-tier local model is unloaded and its VRAM returns to zero.",
+      "type": "int",
+      "unit": "seconds",
+      "ratified_by": "R16 §4.1",
+      "default": 120,
+      "effective": 120,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 3600,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.ttl.workhorse_s",
+      "section": "S12",
+      "domain": "local",
+      "title": "Workhorse idle TTL",
+      "help": "Idle seconds before the workhorse local model is unloaded.",
+      "type": "int",
+      "unit": "seconds",
+      "ratified_by": "R16 §4.1",
+      "default": 300,
+      "effective": 300,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 7200,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.ttl.egpu_s",
+      "section": "S12",
+      "domain": "local",
+      "title": "eGPU idle TTL",
+      "help": "Idle seconds before an eGPU-pool model is unloaded; dormant until the eGPU pool is enrolled.",
+      "type": "int",
+      "unit": "seconds",
+      "ratified_by": "R16 §4.1",
+      "dormant": "dormant until pool24 (S18.5)",
+      "default": 1800,
+      "effective": 1800,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 86400,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.vram.guard_band_mb",
+      "section": "S12",
+      "domain": "local",
+      "title": "VRAM guard band",
+      "help": "VRAM headroom the GPU broker keeps free when admitting a model load.",
+      "type": "int",
+      "unit": "MB",
+      "ratified_by": "R16 §4.4 step 5",
+      "default": 512,
+      "effective": 512,
+      "overridden": false,
+      "numeric": true,
+      "floor": 128,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.unload.term_grace_s",
+      "section": "S12",
+      "domain": "local",
+      "title": "Unload termination grace",
+      "help": "Seconds a local-model backend gets to exit cleanly before it is killed on unload.",
+      "type": "int",
+      "unit": "seconds",
+      "ratified_by": "R16 §4.5",
+      "default": 5,
+      "effective": 5,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 30,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.gamemode_hook",
+      "section": "S12",
+      "domain": "local",
+      "title": "GameMode hook",
+      "help": "Pause local-lane admissions and eager-unload models when GameMode reports a game session.",
+      "type": "bool",
+      "ratified_by": "G2 Def.6",
+      "default": true,
+      "effective": true,
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.battery.gpu_admission",
+      "section": "S12",
+      "domain": "local",
+      "title": "GPU admission on battery",
+      "help": "Whether GPU model loads are admitted while the host runs on battery.",
+      "type": "enum",
+      "ratified_by": "R16 §4.6 (name [coordinator-draft])",
+      "default": "urgent-only",
+      "effective": "urgent-only",
+      "overridden": false,
+      "numeric": false,
+      "enum": [
+        "never",
+        "urgent-only",
+        "always"
+      ],
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.batch.ac_only",
+      "section": "S12",
+      "domain": "local",
+      "title": "Batch work on AC only",
+      "help": "Restrict local batch workloads to when the host is on mains power.",
+      "type": "bool",
+      "ratified_by": "R16 §4.6",
+      "default": true,
+      "effective": true,
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.broker.sandbox_logprobs",
+      "section": "S12",
+      "domain": "local",
+      "title": "Sandbox logprobs exposure",
+      "help": "Whether sandboxed callers of the local-inference bridge may request logprobs (per-template; off reduces side channels).",
+      "type": "bool",
+      "ratified_by": "R16 §4.7",
+      "default": false,
+      "effective": false,
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.reeval.cadence_months",
+      "section": "S12",
+      "domain": "local",
+      "title": "Local model re-evaluation cadence",
+      "help": "Months between re-evaluations of the local model set against current releases.",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "R16 §4.10",
+      "default": 6,
+      "effective": 6,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 12,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "local.alias",
+      "section": "S12",
+      "domain": "local",
+      "title": "Duty-alias map",
+      "help": "Maps each platform duty alias to its serving local model or seat (S12.3/S12.4); changes land only through the S12.10 swap gate.",
+      "type": "map",
+      "ratified_by": "R16 §4.7; G3 Def.8 (map key ⚙ local.alias.\u003cduty\u003e)",
+      "default": {
+        "contradiction-screen": "DeBERTa-class NLI cross-encoder",
+        "distill-summarize": "workhorse",
+        "embedder": "Qwen3-Embedding-0.6B",
+        "entailment": "Granite Guardian 8B",
+        "intake-triage": "fast",
+        "intent-filling": "fast",
+        "sql-open": "Arctic-Text2SQL-R1-7B",
+        "utility": "workhorse",
+        "watchdog-disambiguator": "fast",
+        "watchlist-triage": "fast"
+      },
+      "effective": {
+        "contradiction-screen": "DeBERTa-class NLI cross-encoder",
+        "distill-summarize": "workhorse",
+        "embedder": "Qwen3-Embedding-0.6B",
+        "entailment": "Granite Guardian 8B",
+        "intake-triage": "fast",
+        "intent-filling": "fast",
+        "sql-open": "Arctic-Text2SQL-R1-7B",
+        "utility": "workhorse",
+        "watchdog-disambiguator": "fast",
+        "watchlist-triage": "fast"
+      },
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "review.anchor_drift_lines",
+      "section": "S13",
+      "domain": "review",
+      "title": "Review anchor drift tolerance",
+      "help": "How many lines a review comment's anchor may drift before it detaches (the carried N15 behavior).",
+      "type": "int",
+      "unit": "lines",
+      "ratified_by": "FC-v1 §2",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 0,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "backup.interval",
+      "section": "S13",
+      "domain": "backup",
+      "title": "Snapshot interval",
+      "help": "How often the durable-set snapshot pipeline runs.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G2 D2.5",
+      "default": 86400,
+      "effective": 86400,
+      "overridden": false,
+      "numeric": true,
+      "floor": 21600,
+      "ceiling": 604800,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "backup.keep",
+      "section": "S13",
+      "domain": "backup",
+      "title": "Snapshots kept",
+      "help": "How many snapshots the rotation keeps.",
+      "type": "int",
+      "unit": "snapshots",
+      "ratified_by": "G2 D2.5",
+      "default": 30,
+      "effective": 30,
+      "overridden": false,
+      "numeric": true,
+      "floor": 7,
+      "ceiling": 365,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "backup.repo_rotation",
+      "section": "S13",
+      "domain": "backup",
+      "title": "Snapshot repo rotation",
+      "help": "Months before the snapshot repository is rotated.",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "G2 D2.5 (annual)",
+      "default": 12,
+      "effective": 12,
+      "overridden": false,
+      "numeric": true,
+      "floor": 6,
+      "ceiling": 24,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "backup.drill_interval",
+      "section": "S13",
+      "domain": "backup",
+      "title": "Restore drill interval",
+      "help": "Months between scheduled verified-restore drills (distinct from the escalation drill, S18.4 R6).",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "R13 §4.9 (⚙ flagged unnumbered); S18.4 R6",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 12,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "preview.idle_stop",
+      "section": "S13",
+      "domain": "preview",
+      "title": "Preview idle stop",
+      "help": "Idle time before a running preview is stopped and its port returns to the pool.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R13 §4.8 (⚙ flagged unnumbered)",
+      "default": 900,
+      "effective": 900,
+      "overridden": false,
+      "numeric": true,
+      "floor": 60,
+      "ceiling": 86400,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "preview.max_concurrent",
+      "section": "S13",
+      "domain": "preview",
+      "title": "Concurrent previews",
+      "help": "Maximum previews running at once.",
+      "type": "int",
+      "ratified_by": "feature 3.11 posture [coordinator-draft]",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "obs.sse_keepalive",
+      "section": "S14",
+      "domain": "obs",
+      "title": "SSE keepalive interval",
+      "help": "Comment-frame keepalive cadence on the one SSE endpoint so idle proxies never drop the stream.",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R12 §4.3",
+      "default": 20,
+      "effective": 20,
+      "overridden": false,
+      "numeric": true,
+      "floor": 15,
+      "ceiling": 30,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.loop_repeat",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Loop-repeat trigger",
+      "help": "How many near-identical repeats of the same action trip the loop watchdog.",
+      "type": "int",
+      "ratified_by": "G2 Def.10",
+      "default": 5,
+      "effective": 5,
+      "overridden": false,
+      "numeric": true,
+      "floor": 3,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.pingpong_cycles",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Ping-pong trigger",
+      "help": "How many alternating A/B cycles trip the ping-pong watchdog.",
+      "type": "int",
+      "ratified_by": "G2 Def.10",
+      "default": 6,
+      "effective": 6,
+      "overridden": false,
+      "numeric": true,
+      "floor": 3,
+      "ceiling": 12,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.error_loop",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Error-loop trigger",
+      "help": "How many identical errors in a row trip the error-loop watchdog.",
+      "type": "int",
+      "ratified_by": "G2 Def.10",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 2,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.silence_budget",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Silence budgets by run type",
+      "help": "Per-run-type silence budgets in seconds before the silence watchdog flags; empty entries fall back to the recovery dead-after seed until the bring-up calibration (TBD-BRINGUP) fills them.",
+      "type": "map",
+      "ratified_by": "G2 Def.10 (map key ⚙ watchdog.silence_budget.\u003crun_type\u003e; seed = recovery.dead_after)",
+      "default": {},
+      "effective": {},
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.spend_median_mult",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Spend spike trigger",
+      "help": "Multiple of the trailing-14-day median spend that trips the spend watchdog.",
+      "type": "float",
+      "unit": "multiplier",
+      "ratified_by": "G2 Def.10",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1.5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.spend_arm_days",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Spend watchdog arming period",
+      "help": "Days of history required before the spend watchdog arms.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G2 Def.10",
+      "default": 14,
+      "effective": 14,
+      "overridden": false,
+      "numeric": true,
+      "floor": 7,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.flag_now_target",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Flag-now target rate",
+      "help": "Target daily rate of immediate watchdog flags used to judge threshold health.",
+      "type": "int",
+      "unit": "per-day",
+      "ratified_by": "G2 Def.10",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchdog.suppress_retune_count",
+      "section": "S14",
+      "domain": "watchdog",
+      "title": "Suppressions before retune",
+      "help": "How many operator suppressions of the same flag propose a threshold retune; the retune lands as a proposal card, never an auto-move.",
+      "type": "int",
+      "ratified_by": "G2 Def.10",
+      "default": 2,
+      "effective": 2,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 5,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "watchlist.fetch_fail_streak",
+      "section": "S14",
+      "domain": "watchlist",
+      "title": "Watchlist fetch-fail streak",
+      "help": "Consecutive failed fetch cycles before a watchlist source is flagged.",
+      "type": "int",
+      "unit": "cycles",
+      "ratified_by": "R12 §4.5 / P-T11-3",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 2,
+      "ceiling": 10,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "canary.auth_interval",
+      "section": "S14",
+      "domain": "canary",
+      "title": "Auth canary interval",
+      "help": "Cadence of the provider auth-revocation canary (daily by default; between four times daily and weekly).",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "G1 Def.3 set; P-T17-1; S18.4 R5",
+      "default": 86400,
+      "effective": 86400,
+      "overridden": false,
+      "numeric": true,
+      "floor": 21600,
+      "ceiling": 604800,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "canary.behavioral_interval",
+      "section": "S14",
+      "domain": "canary",
+      "title": "Behavioral canary interval",
+      "help": "Cadence of the behavioral drift canary (weekly by default; between daily and monthly).",
+      "type": "duration",
+      "unit": "seconds",
+      "ratified_by": "R12 §4.5 [coordinator-draft]",
+      "default": 604800,
+      "effective": 604800,
+      "overridden": false,
+      "numeric": true,
+      "floor": 86400,
+      "ceiling": 2592000,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "retention.compaction_horizon",
+      "section": "S14",
+      "domain": "retention",
+      "title": "Trace compaction horizon",
+      "help": "Months of full event payloads kept before compaction; per person.",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "G2 Def.11; feature 13.4",
+      "default": 6,
+      "effective": 6,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "auto": false,
+      "per_user": true,
+      "restart_required": false
+    },
+    {
+      "key": "eval.sweep_interval",
+      "section": "S14",
+      "domain": "eval",
+      "title": "Eval sweep interval",
+      "help": "Months between full regression-eval sweeps.",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "R12 §4.7",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 6,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "benchmark.sampling_rate",
+      "section": "S14",
+      "domain": "benchmark",
+      "title": "Benchmark sampling rates",
+      "help": "Percent of eligible tasks sampled into the benchmark per phase; uniformity is frozen and registered values change only via a re-registration commit (BENCH-REG §4.1; S18.4 R9).",
+      "type": "map",
+      "ratified_by": "BENCH-REG §4.1 (registered-number rule)",
+      "default": {
+        "maintenance": "25",
+        "pre-gate": "100"
+      },
+      "effective": {
+        "maintenance": "25",
+        "pre-gate": "100"
+      },
+      "overridden": false,
+      "numeric": false,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "frontend.dependency_pass_interval",
+      "section": "S15",
+      "domain": "frontend",
+      "title": "Frontend dependency pass interval",
+      "help": "Days between SPA dependency passes; co-scheduled with the components.lock review (S18.4 R7).",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "G3 D3.3 rider; R17 §4.3; S18.4 R7",
+      "default": 90,
+      "effective": 90,
+      "overridden": false,
+      "numeric": true,
+      "floor": 30,
+      "ceiling": 365,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "adoption.dependency_pass_months",
+      "section": "S16",
+      "domain": "adoption",
+      "title": "Dependency pass cadence",
+      "help": "Months between quarterly passes over every components.lock entry.",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "G3 D3.3 rider; R17 §4.8; S18.4 R7",
+      "default": 3,
+      "effective": 3,
+      "overridden": false,
+      "numeric": true,
+      "floor": 1,
+      "ceiling": 6,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "adoption.abandonment_months",
+      "section": "S16",
+      "domain": "adoption",
+      "title": "Default abandonment horizon",
+      "help": "Months of upstream inactivity that propose executing an entry's funeral plan; overridable per entry in components.lock.",
+      "type": "int",
+      "unit": "months",
+      "ratified_by": "R17 §4.8 (⚙ flagged unnumbered); P-T16-1",
+      "default": 6,
+      "effective": 6,
+      "overridden": false,
+      "numeric": true,
+      "floor": 2,
+      "ceiling": 24,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    },
+    {
+      "key": "adoption.price_data_stale_days",
+      "section": "S16",
+      "domain": "adoption",
+      "title": "Price data staleness horizon",
+      "help": "Days without upstream price-table updates, while providers reprice, before the fallback source is proposed.",
+      "type": "int",
+      "unit": "days",
+      "ratified_by": "R14 §4.2",
+      "default": 60,
+      "effective": 60,
+      "overridden": false,
+      "numeric": true,
+      "floor": 14,
+      "ceiling": 180,
+      "auto": false,
+      "per_user": false,
+      "restart_required": false
+    }
+  ],
+  "domains": [
+    "adapter",
+    "adoption",
+    "arbitration",
+    "backup",
+    "benchmark",
+    "budget",
+    "canary",
+    "claims",
+    "context",
+    "effects",
+    "eval",
+    "freshness",
+    "frontend",
+    "intake",
+    "limit",
+    "local",
+    "memory",
+    "meter",
+    "obs",
+    "orchestration",
+    "pressure",
+    "preview",
+    "recovery",
+    "retention",
+    "review",
+    "sandbox",
+    "scheduler",
+    "shell",
+    "state",
+    "verification",
+    "watchdog",
+    "watchlist",
+    "workers"
+  ],
+  "registered_absent": "the registered-value block could not be read: not_implemented: the fixture world serves the benchmark READS the committed bodies need; its acts are driven by the package's own battery",
+  "editable": false,
+  "editable_reason": "settings are operator-edited (S18.1): the registry records an operator or an automation actor and admits no member kind, so a member's own per-user override is set for them by the operator (D10)"
+}

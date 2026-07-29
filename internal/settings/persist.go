@@ -364,7 +364,7 @@ func (r *Registry) persist(ctx context.Context, ch auditChange, apply func(ctx c
 		if err := apply(ctx, tx); err != nil {
 			return err
 		}
-		now := time.Now().UTC().Format(time.RFC3339Nano)
+		now := r.now().UTC().Format(time.RFC3339Nano)
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO settings_events (actor, key, user_id, old, new, ts, reason)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -402,7 +402,7 @@ func scopeName(forUser string) string {
 }
 
 func (r *Registry) upsertValueCell(ctx context.Context, tx *sql.Tx, key, userID, value string, actor Actor) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := r.now().UTC().Format(time.RFC3339Nano)
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO settings (key, user_id, value, floor, ceiling, updated_ts, updated_by)
 		 VALUES (?, ?, ?, NULL, NULL, ?, ?)
@@ -432,7 +432,7 @@ func (r *Registry) deleteValueCell(ctx context.Context, tx *sql.Tx, key, userID 
 }
 
 func (r *Registry) upsertBoundsCells(ctx context.Context, tx *sql.Tx, key string, floor, ceiling *float64, actor Actor) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := r.now().UTC().Format(time.RFC3339Nano)
 	var f, c any
 	if floor != nil {
 		f = *floor

@@ -463,6 +463,12 @@
       ]
     },
     {
+      "name": "verdicts.eval_scores",
+      "category": "verdicts",
+      "description": "recorded regression-eval and conformance suite results — suite, asset, outcome and the registered floor where one applies",
+      "slots": null
+    },
+    {
       "name": "verdicts.for_run",
       "category": "verdicts",
       "description": "every verdict round on one run, in order",
@@ -539,6 +545,7 @@
     "verdicts.adverse",
     "verdicts.by_domain",
     "verdicts.by_rubric",
+    "verdicts.eval_scores",
     "verdicts.for_run",
     "verdicts.recent",
     "verdicts.rework_rounds",

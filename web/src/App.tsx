@@ -7,6 +7,7 @@ import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
 import { Inbox, InboxItem } from './Inbox'
+import { Settings } from './Settings'
 import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound, Stub } from './Stub'
@@ -106,6 +107,8 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           // through hrefFor/matchRoute is the only thing that keeps a deep
           // link pointing at the card it names (S15.11).
           <InboxItem id={params.id} stream={stream} />
+        ) : route.id === 'settings' ? (
+          <Settings stream={stream} />
         ) : (
           <Stub route={route} params={params} />
         )}

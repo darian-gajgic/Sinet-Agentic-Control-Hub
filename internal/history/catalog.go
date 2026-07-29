@@ -305,6 +305,46 @@ var catalog = []Query{
 			` AND json_extract(payload, '$.self_family_judge') = 1` +
 			scoped("user_id") + ` ORDER BY event_seq DESC LIMIT ?`,
 	},
+	{
+		// The S14.8 / S14.5 recorded suite results — the D4(b) serving read.
+		//
+		// Until B6-6 the `eval.score_recorded` rows minted by
+		// internal/conformance.RecordResult (and driven through it by the S14.8
+		// evals) were reachable only through Layer-2 open SQL or a redacted
+		// search: a deterministic question with no deterministic answer. This is
+		// the sanctioned-narrow addition that fixes it, and it stays narrow —
+		// one entry, no new category, no guardrail change.
+		//
+		// NAMING, and it is a deviation worth stating: the disposition called
+		// this `eval.scores`, but `Category` is a CLOSED, spec-named set (S14.10
+		// ¶2) and every catalog name's prefix is its category. Inventing an
+		// `eval` category to match a name would have been a larger change than
+		// naming the query for the category it belongs to. A recorded result IS
+		// a verdict on an asset version against a registered floor.
+		//
+		// COLUMNS are what the producer actually mints. There is no top-level
+		// `score`, `floor` or `pass` key: `result` is the green/red outcome, and
+		// the floor lives inside `metrics` and only on the runbook path — so an
+		// asset evaluated by the sweep reports a null floor, which is the honest
+		// "this path registers none" rather than a zero.
+		//
+		// OWNER SCOPE: the producer attributes these rows to `platform`, so the
+		// operator sees every row and a member sees none. That is the same
+		// answer the drift and canary entries give for the same reason, and it
+		// is the scope predicate doing its job rather than an omission.
+		Name: "verdicts.eval_scores", Category: CatVerdicts,
+		Description: "recorded regression-eval and conformance suite results — suite, asset, outcome and the registered floor where one applies",
+		SQL: `SELECT event_seq, ts, json_extract(payload, '$.suite_id') AS suite_id,` +
+			` json_extract(payload, '$.suite_version') AS suite_version,` +
+			` json_extract(payload, '$.asset_id') AS asset_id,` +
+			` json_extract(payload, '$.asset_version') AS asset_version,` +
+			` json_extract(payload, '$.result') AS result,` +
+			` json_extract(payload, '$.metrics.floor') AS floor,` +
+			` json_extract(payload, '$.metrics.floor_green') AS floor_green,` +
+			` json_extract(payload, '$.runner') AS runner` +
+			` FROM run_events WHERE type = 'eval.score_recorded'` +
+			scoped("user_id") + ` ORDER BY event_seq DESC LIMIT ?`,
+	},
 
 	// ── routing quality ───────────────────────────────────────────────────────
 	{

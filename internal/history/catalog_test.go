@@ -347,3 +347,76 @@ func TestAnswersAreBounded(t *testing.T) {
 		t.Errorf("clamped limit returned %d rows, want 12", len(huge.Rows))
 	}
 }
+
+// TestEvalScoresServesTheRecordedSuiteResults is the D4(b) unlock, driven.
+//
+// Before B6-6 no Layer-0 view and no Layer-1 query read `eval.score_recorded`,
+// so "what did the last suite run score, and against which floor?" — a
+// deterministic question about rows the platform already stores — was reachable
+// only through Layer-2 open SQL or a redacted search. This asserts the query
+// answers it with the columns the PRODUCER actually mints, and that the two
+// paths differ honestly: the runbook path registers a floor, the sweep path
+// does not, and a null floor is that fact rather than a zero.
+func TestEvalScoresServesTheRecordedSuiteResults(t *testing.T) {
+	f := newFixture(t)
+	// The two shapes internal/conformance.RecordResult really writes: one from
+	// the S14.8 runbook (with the registered floor inside `metrics`), one from
+	// the sweep (no floor). Both are platform-attributed, as the producer
+	// appends them.
+	f.event("", "platform", "eval.score_recorded", map[string]any{
+		"suite_id": "routing-regression", "suite_version": "v3", "asset_id": "selector-v7",
+		"asset_version": "7", "runner": "internal/evals", "runner_version": "v1", "result": "green",
+		"metrics": map[string]any{"floor": 0.82, "floor_green": true, "floor_registered": true},
+	})
+	f.event("", "platform", "eval.score_recorded", map[string]any{
+		"suite_id": "prompt-sweep", "suite_version": "v1", "asset_id": "worker-notes",
+		"asset_version": "2", "runner": "internal/evals", "runner_version": "v1", "result": "red",
+		"metrics": map[string]any{"assets_evaluated": 4, "assets_red": 1},
+	})
+
+	a, err := f.st.RunQuery(f.ctx, "verdicts.eval_scores", nil, opScope(), 20)
+	if err != nil {
+		t.Fatalf("run the eval-scores query: %v", err)
+	}
+	if len(a.Rows) != 2 {
+		t.Fatalf("the query returned %d rows, want the 2 recorded results", len(a.Rows))
+	}
+	for _, col := range []string{"suite_id", "asset_id", "result", "floor", "runner"} {
+		if !hasColumn(a, col) {
+			t.Errorf("the answer has no %q column — a reader cannot tell what was scored", col)
+		}
+	}
+	// Newest first, by the append-only sequence rather than by a timestamp.
+	if got := cell(t, a, 0, "suite_id"); got != "prompt-sweep" {
+		t.Errorf("row 0 suite is %v, want the newest result first", got)
+	}
+	// The runbook path carries its registered floor…
+	if got := cell(t, a, 1, "floor"); got != 0.82 {
+		t.Errorf("the registered floor is %v, want 0.82 read from the producer's own metrics block", got)
+	}
+	// …and the sweep path honestly carries none.
+	if got := cell(t, a, 0, "floor"); got != nil {
+		t.Errorf("a sweep result reports floor %v; the path registers none and a number here would be invented", got)
+	}
+
+	// Owner scope: the producer attributes these rows to `platform`, so a member
+	// sees none. Asserted rather than assumed, because "returns nothing" and
+	// "was never scoped" look identical from outside.
+	m, err := f.st.RunQuery(f.ctx, "verdicts.eval_scores", nil, memberScope(member1), 20)
+	if err != nil {
+		t.Fatalf("run the eval-scores query as a member: %v", err)
+	}
+	if len(m.Rows) != 0 {
+		t.Errorf("a member read %d platform-scope eval rows", len(m.Rows))
+	}
+}
+
+// hasColumn reports whether an answer carries a named column.
+func hasColumn(a history.Answer, col string) bool {
+	for _, c := range a.Columns {
+		if c == col {
+			return true
+		}
+	}
+	return false
+}

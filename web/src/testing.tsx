@@ -41,6 +41,20 @@ export async function flush(times = 3): Promise<void> {
 }
 
 /**
+ * settle waits REAL time inside an act scope, for the one thing microtasks
+ * cannot reach: a debounced callback.
+ *
+ * JSON Forms debounces its `onChange` by 10ms (jsonforms-react's
+ * `debouncedEmit`), so a parent that mirrors the form model does not see an
+ * edit until that timer fires. `flush` drains microtasks and never will.
+ */
+export async function settle(ms = 25): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms))
+  })
+}
+
+/**
  * typeInto sets a controlled input's value the way a person does.
  *
  * The native setter is called explicitly because React tracks the last value it

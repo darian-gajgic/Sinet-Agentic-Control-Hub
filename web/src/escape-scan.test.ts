@@ -51,9 +51,9 @@ function scan(files: Record<string, string>): string[] {
 test('the scan actually covers the source tree', () => {
   const paths = Object.keys(sources)
   // A scanner that silently matched nothing would pass forever. The floor moves
-  // with the tree (10 at B6-4, 30 at B6-5, 32 at B6-6) so "the scan grew over
+  // with the tree (10 at B6-4, 30 at B6-5, 35 at B6-6) so "the scan grew over
   // the new views" is a checked fact rather than an assumption about a glob.
-  expect(paths.length).toBeGreaterThan(32)
+  expect(paths.length).toBeGreaterThan(35)
   expect(paths).toContain('./App.tsx')
   expect(paths).toContain('./events.ts')
   // The B6-5 oversight surfaces are inside the scan, by name.
@@ -63,9 +63,12 @@ test('the scan actually covers the source tree', () => {
     './TaskDetail.tsx',
     './Fleet.tsx',
     './Filters.tsx',
-    // The B6-6 decision surface: card bodies are model-derived content, so the
-    // one place raw HTML would be tempting is inside the scan by name.
+    // The B6-6 decision surfaces: card bodies are model-derived content and a
+    // settings help string is registry text, so the two places raw HTML would
+    // be tempting are inside the scan by name.
     './Inbox.tsx',
+    './Settings.tsx',
+    './settingsForm.tsx',
   ]) {
     expect(paths, `${view} is not covered by the escape scan`).toContain(view)
   }

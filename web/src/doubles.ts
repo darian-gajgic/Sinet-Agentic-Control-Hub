@@ -5,6 +5,12 @@ import type { EventSourceLike } from './events'
 import approvalsMineRaw from './fixtures/api/approvals-mine.json?raw'
 import approvalsRaw from './fixtures/api/approvals.json?raw'
 import benchmarkVerdictsRaw from './fixtures/api/benchmark-verdicts.json?raw'
+import evalScoresRaw from './fixtures/api/eval-scores.json?raw'
+import pricesRaw from './fixtures/api/prices.json?raw'
+import pricesMemberRaw from './fixtures/api/prices-member.json?raw'
+import settingsRaw from './fixtures/api/settings.json?raw'
+import settingsHistoryRaw from './fixtures/api/settings-history.json?raw'
+import settingsMemberRaw from './fixtures/api/settings-member.json?raw'
 import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
 import deliverablesOfTaskRaw from './fixtures/api/deliverables-of-task.json?raw'
@@ -157,6 +163,15 @@ export const fixtures = {
   /** The blind-pair form's data, read as the requester: the two renders and the
    *  registered answer vocabularies the form's buttons come from. */
   benchmarkVerdicts: () => parse<Record<string, unknown>>(benchmarkVerdictsRaw),
+  /** The S15.9 settings surface, read BOTH ways: `editable` is computed per
+   *  caller, so the operator's write surface and a member's read-only view are
+   *  two served bodies rather than two renders. */
+  settings: () => parse<Record<string, unknown>>(settingsRaw),
+  settingsMember: () => parse<Record<string, unknown>>(settingsMemberRaw),
+  settingsHistory: () => parse<Record<string, unknown>>(settingsHistoryRaw),
+  prices: () => parse<Record<string, unknown>>(pricesRaw),
+  pricesMember: () => parse<Record<string, unknown>>(pricesMemberRaw),
+  evalScores: () => parse<Record<string, unknown>>(evalScoresRaw),
   taskDetailOps: () => parse<Record<string, unknown>>(taskDetailOpsRaw),
   deliverablesInReview: () => parse<Record<string, unknown>>(deliverablesRaw),
   deliverablesOfTask: () => parse<Record<string, unknown>>(deliverablesOfTaskRaw),
@@ -177,6 +192,10 @@ export function oversightRoutes(): Record<string, Scripted> {
     // the one SHE would get — including the cards she can answer.
     'GET /api/approvals': { body: fixtures.approvalsMine() },
     'GET /api/benchmark/verdicts': { body: fixtures.benchmarkVerdicts() },
+    'GET /api/settings': { body: fixtures.settings() },
+    'GET /api/settings/prices': { body: fixtures.prices() },
+    'GET /api/events/query/verdicts.eval_scores': { body: fixtures.evalScores() },
+    'GET /api/settings/freshness.max_age/history': { body: fixtures.settingsHistory() },
     'GET /api/deliverables?state=in-review': { body: fixtures.deliverablesInReview() },
     'GET /api/deliverables?task=t-ship': { body: fixtures.deliverablesOfTask() },
     'GET /api/deliverables/d-notes': { body: fixtures.deliverableDetail() },

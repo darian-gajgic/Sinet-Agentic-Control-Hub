@@ -644,6 +644,115 @@ td {
   color: var(--muted);
 }
 
+
+/* ── the settings tab (Spec S15.9) ───────────────────────────────────────────
+   118 controls across 33 domain tabs. Phone-first like everything else: the tab
+   strip wraps rather than overflowing, every setting stacks, and the price
+   table — genuinely wider than a phone — scrolls inside its own box. */
+
+.settings-cats {
+  max-width: 100%;
+}
+
+.cat-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-block-end: 1rem;
+}
+
+.cat-tabs button {
+  width: auto;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.cat-tabs button[aria-selected='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 100%;
+}
+
+.setting {
+  border-block-end: 1px solid var(--line);
+  padding-block-end: 0.75rem;
+  max-width: 100%;
+}
+
+.setting-label {
+  font-weight: 600;
+}
+
+.setting-help,
+.setting-key,
+.audit-rows li,
+.deferred li {
+  overflow-wrap: anywhere;
+}
+
+.setting-help {
+  color: var(--muted);
+  margin: 0.25rem 0;
+}
+
+.setting-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.35rem;
+}
+
+.setting-edit input[type='text'],
+.setting-edit input[type='number'],
+.setting-edit select {
+  max-width: 100%;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.setting-acts,
+.bounds-editor,
+.per-user-editor,
+.add-price-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 100%;
+}
+
+.setting-group {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem;
+  max-width: 100%;
+}
+
+.audit-rows,
+.per-user-values,
+.deferred {
+  padding-inline-start: 1.25rem;
+}
+
+.registered dt {
+  color: var(--muted);
+}
+
+.unit-price {
+  white-space: nowrap;
+}
+
 @media (min-width: 48rem) {
   .conn-detail {
     display: inline;
@@ -676,5 +785,14 @@ td {
 
   .pair-side {
     flex: 1 1 0;
+  }
+
+  .setting-acts,
+  .bounds-editor,
+  .per-user-editor,
+  .add-price-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: end;
   }
 }

@@ -46,6 +46,11 @@ test('no layout container carries a fixed pixel width', () => {
     '.batch-bar',
     '.pair',
     '.pair-side',
+    // The B6-6 settings tab.
+    '.settings-cats',
+    '.cat-panel',
+    '.setting',
+    '.setting-group',
   ]) {
     const rules = block(selector)
     expect(rules, `${selector} pins a pixel width — a phone would scroll sideways`).not.toMatch(
@@ -125,6 +130,22 @@ test('an inbox card is readable and answerable at phone width', () => {
   expect(block('.pair')).toContain('flex-direction: column')
   const wide = css.slice(css.indexOf('@media (min-width:'))
   expect(wide, 'the blind pair never lays out side by side on a wide screen').toContain('.pair {')
+})
+
+test('the settings tab reaches all 33 domains at phone width', () => {
+  // The tab strip is the only navigation into 33 domains, so it must wrap
+  // rather than overflow — the same rule the shell nav is held to.
+  expect(block('.cat-tabs')).toContain('flex-wrap: wrap')
+  expect(block('.cat-tabs')).not.toContain('overflow-x: hidden')
+  // A setting's own editors stack on a phone and lay out in a row only at the
+  // breakpoint. `.add-price-row` is the last selector of the grouped rule that
+  // covers them all — the block helper matches the selector before the brace.
+  expect(block('.add-price-row')).toContain('flex-direction: column')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  expect(wide, 'the settings acts never lay out in a row on a wide screen').toContain('.setting-acts')
+  // Long help text, long keys and long audit values wrap instead of widening
+  // the page (`.deferred li` closes that grouped rule).
+  expect(block('.deferred li')).toContain('overflow-wrap: anywhere')
 })
 
 test('a view that owes a re-snapshot is marked in the stylesheet, not only in the DOM', () => {
