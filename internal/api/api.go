@@ -177,6 +177,13 @@ type Config struct {
 	// ONLY path from the HTTP verbs to the ratified cancel mapping. nil leaves
 	// the cancel routes answering 503.
 	Cancel CancelSurface
+	// Now is the decision-row clock (drain r1 D3). It exists for the same
+	// reason review.Store.Now and gates.JournalConfig.Now do: the acts that
+	// mint a Human-decision row are the ones a test has to drive through the
+	// REAL verb to prove a derive reads real producer output, and a wall-clock
+	// stamp inside the mint makes that output non-reproducible. nil is
+	// time.Now, so production behavior is unchanged.
+	Now func() time.Time
 	// The B6-2B seams — the S10.4 meters mutations and the oversight verbs over
 	// LANDED internals. Each is nil-able and nil leaves its route answering 503;
 	// none of them re-implements anything (meters_verbs.go, oversight.go).
@@ -233,6 +240,7 @@ type Server struct {
 	stopping <-chan struct{}
 	poll     time.Duration
 	logger   *slog.Logger
+	clock    func() time.Time
 	nudge    *broadcast
 	intake   IntakeSurface
 	// review is the S13.1–S13.4 store behind the deliverables family (B6-3B).
@@ -291,6 +299,7 @@ func New(cfg Config) *Server {
 		history:    cfg.History,
 		effects:    cfg.Effects,
 		cancel:     cfg.Cancel,
+		clock:      cfg.Now,
 		budgets:    cfg.Budgets,
 		pause:      cfg.Pause,
 		hints:      cfg.Hints,
@@ -299,13 +308,16 @@ func New(cfg Config) *Server {
 		benchmark:  cfg.Benchmark,
 	}
 	if cfg.DB != nil {
-		s.proj = &projector{db: cfg.DB, meter: cfg.Meter}
+		s.proj = &projector{db: cfg.DB, meter: cfg.Meter, now: s.clock}
 	}
 	if s.auth == nil {
 		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}
 	}
 	if s.poll <= 0 {
 		s.poll = 250 * time.Millisecond
+	}
+	if s.clock == nil {
+		s.clock = time.Now
 	}
 	if s.logger == nil {
 		s.logger = slog.Default()

@@ -1324,8 +1324,12 @@ type decisionPayload struct {
 // is generation-fenced against a run this transport does not own the generation
 // of. The run travels in the payload instead (the intake.followup_spawned
 // precedent).
+// now is the server's clock: time.Now in production, injected where a test has
+// to drive a real minting verb and compare its output (drain r1 D3).
+func (s *Server) now() time.Time { return s.clock() }
+
 func (s *Server) recordDecision(ctx context.Context, d decisionPayload, owner string, presentedAt time.Time) error {
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	if presentedAt.IsZero() {
 		presentedAt = now
 	}
@@ -1340,6 +1344,7 @@ func (s *Server) recordDecision(ctx context.Context, d decisionPayload, owner st
 	}
 	if _, err := s.log.Append(ctx, eventlog.Append{
 		UserID: owner, Type: EventDecisionRecorded, SchemaVersion: decisionSchemaVersion, Payload: payload,
+		Time: now,
 	}); err != nil {
 		return fmt.Errorf("append %s: %w", EventDecisionRecorded, err)
 	}

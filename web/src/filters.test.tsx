@@ -75,14 +75,14 @@ test('what-needs-me shows approvals, questions and review-ready work, each linki
   // The approval/question feed.
   expect(text).toContain('ask:ask-audit')
   // The review-ready feed.
-  expect(text).toContain('d-notes')
+  expect(text).toContain('d-changelog')
   expect(text).toContain('Ready to review')
 
   // The honest doors: answering is the inbox's, reviewing is the review
   // surface's — this filter says what is waiting and takes you there.
   const hrefs = [...view.container.querySelectorAll('.rows a')].map((a) => a.getAttribute('href'))
   expect(hrefs).toContain('/inbox/ask%3Aask-audit')
-  expect(hrefs).toContain('/deliverables/d-notes')
+  expect(hrefs).toContain('/deliverables/d-changelog')
 })
 
 test('a card that is not yours to answer says so, in the server&apos;s own words', async () => {

@@ -52,6 +52,25 @@ export const boardEventTypes = [
   'engine.gate_ask',
   'decision.recorded',
   'usage.recorded',
+  // The deliverable lifecycle (drain r1 D6). Without these, a surface that
+  // renders review-ready work or a task's deliverables only updates when an
+  // unrelated frame happens to arrive — "manual refresh is never required for
+  // currency" (S15.12) failing for exactly the transitions the feed exists for.
+  'artifact.produced',
+  'deliverable.accepted',
+  'review.drained',
+] as const
+
+/** The run-scoped types a LIVE ACTIVITY feed consumes: the trace of one run as
+ *  it happens. Broader than the board's set on purpose — the activity line is
+ *  "what is it doing right now", which is every run-scoped frame, not only the
+ *  ones that move a card between columns. */
+export const activityEventTypes = [
+  ...boardEventTypes,
+  'tool.completed',
+  'engine.tool_result',
+  'checkpoint.written',
+  'helper.spawned',
 ] as const
 
 /** Mission control watches everything the board does plus the meter movements,

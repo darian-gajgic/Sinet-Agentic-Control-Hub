@@ -1,8 +1,9 @@
+import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
 import { ReceiptView } from './TaskDetail'
-import type { Receipt, TaskDetail as Detail } from './api'
+import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
 import { EventStream } from './events'
 import { flush, mount } from './testing'
@@ -123,13 +124,17 @@ test('lineage renders both directions, and a multi-project claim renders as the 
 test('every human decision on this task renders with its actor and when — and no other task&apos;s', async () => {
   const { view } = await task('t-ship', detailRoutes())
   const rows = [...view.container.querySelectorAll('.decisions li')]
-  expect(rows.map((r) => r.getAttribute('data-card-type'))).toEqual(['priority_hint', 'effect', 'deliverable'])
+  // The three shapes the REAL producers mint: an effect approval
+  // (`decision.recorded`), a deliverable accept (platform-scoped, reached
+  // through the deliverables join) and an intake delta answer (run-scoped,
+  // naming no actor of its own).
+  expect(rows.map((r) => r.getAttribute('data-card-type'))).toEqual(['effect', 'deliverable', 'intake_delta'])
 
   const text = view.container.textContent ?? ''
-  expect(text).toContain('reorder')
   expect(text).toContain('approve')
   expect(text).toContain('accept')
-  expect(text, 'the operator limb of a co-approval is not distinguished').toContain('as operator')
+  expect(text).toContain('effect:e-publish')
+  expect(text).toContain('deliverable:d-notes')
   // The subject filter really filters: a decision about another task is not
   // this task's, and the served body proves the server excluded it.
   expect(text, "another task's decision reached this page").not.toContain('t-elsewhere')
@@ -199,4 +204,116 @@ test('a run with no receipt renders the served reason', async () => {
   detail.runs = [{ run_id: 'r-new', state: 'queued', created_ts: '2026-07-20T09:10:00Z', receipt_absent: 'no receipt yet' }]
   const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
   expect(view.container.textContent).toContain('no receipt yet')
+})
+
+// ── live activity (R11; drain r1 D4) ──────────────────────────────────────
+
+test('the task detail renders the active run&apos;s live activity, not just stage boundaries', async () => {
+  const { view, log } = await task('t-ship', detailRoutes())
+  expect(log.calls.some((c) => c.path === '/api/runs/r-ship'), 'the run card is never read').toBe(true)
+
+  const panel = view.container.querySelector('.activity')!
+  expect(panel, 'there is no live-activity panel — stage boundaries alone are not S2.2').not.toBeNull()
+  expect(panel.getAttribute('data-run')).toBe('r-ship')
+
+  const served = fixtures.runDetail() as unknown as RunDetail
+  const text = panel.textContent ?? ''
+  // The last-activity line and the monotonic counters, as served.
+  expect(text).toContain(served.card.last_activity?.type ?? '')
+  expect(text).toContain(`${String(served.card.counters.tokens)} tokens`)
+  expect(text).toContain(`${String(served.card.counters.elapsed_s)} s elapsed`)
+  expect(text).toContain('USD 1.42')
+  // Monotonic counters, never a denominator.
+  expect(text.toLowerCase()).not.toContain('%')
+})
+
+test('the live-activity panel re-reads on its own run&apos;s frames and settles the debt', async () => {
+  const routes = detailRoutes()
+  const log = scriptedFetch({ ...oversightRoutes(), ...routes })
+  window.history.replaceState(null, '', '/tasks/t-ship')
+  const stream = new EventStream({
+    createEventSource: (url) => new FakeSource(url),
+    probeSession: () => Promise.resolve({ authenticated: true }),
+    schedule: () => 0,
+    cancel: () => {},
+  })
+  const view = mount(<App stream={stream} />)
+  await flush()
+  act(() => FakeSource.last().open())
+  await flush()
+  expect(stream.status, 'a view still owes a re-snapshot').toBe('live')
+
+  const before = log.calls.filter((c) => c.path === '/api/runs/r-ship').length
+  act(() =>
+    FakeSource.last().send('tool.completed', {
+      seq: 900,
+      run_id: 'r-ship',
+      user_id: 'alice',
+      type: 'tool.completed',
+      schema_version: 1,
+      topics: ['run'],
+      payload: {},
+      ts: '2026-07-20T09:10:00Z',
+    }),
+  )
+  await flush()
+  expect(log.calls.filter((c) => c.path === '/api/runs/r-ship').length, 'a run frame did not re-read the card').toBe(
+    before + 1,
+  )
+
+  // A frame for ANOTHER run is not this panel's business.
+  const held = log.calls.filter((c) => c.path === '/api/runs/r-ship').length
+  act(() =>
+    FakeSource.last().send('tool.completed', {
+      seq: 901,
+      run_id: 'r-elsewhere',
+      user_id: 'alice',
+      type: 'tool.completed',
+      schema_version: 1,
+      topics: ['run'],
+      payload: {},
+      ts: '2026-07-20T09:11:00Z',
+    }),
+  )
+  await flush()
+  expect(log.calls.filter((c) => c.path === '/api/runs/r-ship').length).toBe(held)
+  view.unmount()
+})
+
+test('a task with no run says so rather than rendering an empty activity panel', async () => {
+  const detail = fixtures.taskDetail() as unknown as Detail
+  detail.runs = []
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  expect(view.container.textContent).toContain('nothing running to watch')
+})
+
+// ── deliverables (R13; drain r1 D5) ───────────────────────────────────────
+
+test('the task&apos;s REAL deliverables list with their immutable numbered revisions', async () => {
+  const { view, log } = await task('t-ship', detailRoutes())
+  expect(log.calls.some((c) => c.path === '/api/deliverables?task=t-ship')).toBe(true)
+
+  const blocks = [...view.container.querySelectorAll('[data-deliverable]')].map((n) =>
+    n.getAttribute('data-deliverable'),
+  )
+  expect(blocks, 'the task&apos;s own deliverables are not listed').toEqual(['d-notes', 'd-changelog'])
+
+  // The revisions are the SERVED numbered lineage, not a 1..N count inferred
+  // from current_revision.
+  const notes = view.container.querySelector('[data-deliverable="d-notes"]')!
+  expect([...notes.querySelectorAll('[data-revision]')].map((n) => n.getAttribute('data-revision'))).toEqual(['1', '2'])
+  expect(notes.querySelector('a')?.getAttribute('href')).toBe('/deliverables/d-notes')
+})
+
+test('follow-up lineage renders as lineage, and never as a deliverable revision', async () => {
+  const detail = fixtures.taskDetail() as unknown as Detail
+  detail.lineage.succeeded_by = [
+    { task_id: 't-followup', deliverable_id: 'd-notes', revision_n: 2, created_ts: '2026-07-20T09:09:00Z' },
+  ]
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  // The follow-up TASK is in the lineage block…
+  expect(view.container.querySelector('[data-lineage="succeeded-by"]')?.textContent).toContain('t-followup')
+  // …and not among the deliverables, which are a different fact.
+  const deliverables = view.container.querySelector('[data-deliverable="d-notes"]')!
+  expect(deliverables.textContent, 'a follow-up task was listed as a deliverable revision').not.toContain('t-followup')
 })

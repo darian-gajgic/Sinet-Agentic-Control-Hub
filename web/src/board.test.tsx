@@ -1,3 +1,4 @@
+import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
@@ -193,17 +194,23 @@ test('a simulated cross-column drop calls no verb at all', async () => {
 test('a reorder posts spaced, in-bounds, never-zero ranks for the entries that moved', async () => {
   const routes = oversightRoutes()
   routes['POST /api/tasks/t-archive/priority-hint'] = {
-    body: { task_id: 't-archive', rank: 10, runs: ['r-archive'], applied: true, detail: 'hint recorded' },
-  }
-  routes['POST /api/tasks/t-triage/priority-hint'] = {
-    body: { task_id: 't-triage', rank: 20, runs: ['r-triage'], applied: true, detail: 'hint recorded' },
+    body: { task_id: 't-archive', rank: 20, runs: ['r-archive'], applied: true, detail: 'hint recorded' },
   }
   const { log } = await board(routes)
   const queue = ownQueued(fixtureTasks(), 'alice')
-  expect(queue.map((t) => t.task_id), 'the lane is not in recorded order').toEqual(['t-triage', 't-archive'])
+  // Plain ascending, exactly as internal/scheduler/workload.go sorts: rank 0
+  // is the NEUTRAL MIDDLE, so t-archive (0) sits ahead of t-triage (10).
+  expect(queue.map((t) => t.task_id), 'the lane is not in the comparator&apos;s order').toEqual([
+    't-archive',
+    't-triage',
+  ])
 
+  // Move t-triage to the front. Both cards are then written: t-triage because
+  // it moved, t-archive because it was sitting at 0 — and a 0 left behind
+  // after a drag would claim the neutral middle while rendering wherever the
+  // drop put it.
   await applyDrag(queue, {
-    draggableId: 't-archive',
+    draggableId: 't-triage',
     type: 'DEFAULT',
     source: { droppableId: ownQueueDroppableId, index: 1 },
     destination: { droppableId: ownQueueDroppableId, index: 0 },
@@ -212,11 +219,11 @@ test('a reorder posts spaced, in-bounds, never-zero ranks for the entries that m
     combine: null,
   })
 
+  // t-triage already holds rank 10 and lands at position 0, which IS rank 10 —
+  // so it is not rewritten. t-archive moves from the neutral 0 to 20. Writing
+  // only the difference is what makes a drag idempotent.
   const posts = log.calls.filter((c) => c.method === 'POST')
-  expect(posts.map((p) => [p.path, p.body])).toEqual([
-    ['/api/tasks/t-archive/priority-hint', { rank: 10 }],
-    ['/api/tasks/t-triage/priority-hint', { rank: 20 }],
-  ])
+  expect(posts.map((p) => [p.path, p.body])).toEqual([['/api/tasks/t-archive/priority-hint', { rank: 20 }]])
   for (const p of posts) {
     const rank = (p.body as { rank: number }).rank
     expect(rank, '0 means "no hint" to the scheduler — it is never a position').not.toBe(0)
@@ -261,7 +268,7 @@ test('the stale-board answer is rendered as the honest answer it is, and the boa
   const { log } = await board(routes)
   const queue = ownQueued(fixtureTasks(), 'alice')
   const answers = await applyDrag(queue, {
-    draggableId: 't-archive',
+    draggableId: 't-triage',
     type: 'DEFAULT',
     source: { droppableId: ownQueueDroppableId, index: 1 },
     destination: { droppableId: ownQueueDroppableId, index: 0 },
@@ -271,21 +278,50 @@ test('the stale-board answer is rendered as the honest answer it is, and the boa
   })
   expect(answers.every((a) => !a.applied)).toBe(true)
   expect(answers[0].detail).toBe(detail)
-  expect(log.calls.filter((c) => c.method === 'POST').length).toBe(2)
+  expect(log.calls.filter((c) => c.method === 'POST').length).toBe(1)
 })
 
-test('the lane renders in RECORDED order, so a reload does not lose the drag', () => {
+test('the lane renders in the SCHEDULER&apos;s order — 0 is the neutral middle, not last', () => {
   const tasks = fixtureTasks()
-  // t-archive was created later but carries no hint; t-triage carries rank 10.
-  expect(ownQueued(tasks, 'alice').map((t) => t.task_id)).toEqual(['t-triage', 't-archive'])
+  // t-triage carries rank 10; t-archive carries 0. Plain ascending puts the 0
+  // FIRST, which is what the claim loop will actually do — the earlier reading
+  // ("unranked goes last") would have rendered the opposite of the truth.
+  expect(ownQueued(tasks, 'alice').map((t) => t.task_id)).toEqual(['t-archive', 't-triage'])
 
-  // Flip the recorded ranks and the rendered order follows them, not creation.
-  const flipped = tasks.map((t) =>
-    t.task_id === 't-archive' && t.latest_run
-      ? { ...t, latest_run: { ...t.latest_run, queue_hint_rank: 5 } }
+  // A NEGATIVE rank sorts ahead of the neutral middle, as the comparator says.
+  const promoted = tasks.map((t) =>
+    t.task_id === 't-triage' && t.latest_run
+      ? { ...t, latest_run: { ...t.latest_run, queue_hint_rank: -5 } }
       : t,
   )
-  expect(ownQueued(flipped, 'alice').map((t) => t.task_id)).toEqual(['t-archive', 't-triage'])
+  expect(ownQueued(promoted, 'alice').map((t) => t.task_id)).toEqual(['t-triage', 't-archive'])
+})
+
+test('a drag leaves NO task at rank 0, so nothing silently claims the neutral middle', () => {
+  const queue = ownQueued(fixtureTasks(), 'alice')
+  // The lane really does start with a card at the neutral 0, or the assertion
+  // below would prove nothing.
+  expect(queue.some((t) => (t.latest_run?.queue_hint_rank ?? 0) === 0)).toBe(true)
+
+  const posts = hintPostsFor(queue, {
+    draggableId: 't-triage',
+    type: 'DEFAULT',
+    source: { droppableId: ownQueueDroppableId, index: 1 },
+    destination: { droppableId: ownQueueDroppableId, index: 0 },
+    reason: 'DROP',
+    mode: 'FLUID',
+    combine: null,
+  })
+
+  // Apply the writes and check the PROPERTY rather than a literal list: after
+  // the drag every card in the lane holds a positive rank, so none is left
+  // sitting in the neutral middle claiming an order it does not render.
+  const after = new Map(queue.map((t) => [t.task_id, t.latest_run?.queue_hint_rank ?? 0]))
+  for (const p of posts) after.set(p.task, p.rank)
+  for (const [task, rank] of after) {
+    expect(rank, `${task} was left at the neutral middle after a drag`).toBeGreaterThan(0)
+    expect(Math.abs(rank)).toBeLessThanOrEqual(1000)
+  }
 })
 
 test('a member who owns nothing queued gets an empty lane rather than someone else&apos;s work', async () => {
@@ -296,4 +332,88 @@ test('a member who owns nothing queued gets an empty lane rather than someone el
   const { view } = await board(routes)
   expect(view.container.querySelector('.queue-lane')?.textContent).toContain('Nothing of yours is queued')
   expect(signedIn.body).toBeDefined()
+})
+
+// ── the component path (drain r1 D10/D11) ─────────────────────────────────
+
+/**
+ * drop drives the REAL component through the library's own KEYBOARD drag —
+ * focus the handle, space to lift, arrow to move, space to drop.
+ *
+ * That is the point of this helper: `applyDrag` is unit-tested above, but the
+ * component path (the notes, the `data-hint-applied` marker, the re-read) is
+ * only exercised if @hello-pangea/dnd itself calls `onDragEnd`. Nothing here
+ * synthesizes a DropResult.
+ */
+function key(el: HTMLElement, k: string, code: number) {
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: k, keyCode: code, bubbles: true, cancelable: true }))
+}
+
+async function drop(view: { container: HTMLElement }, from: number, direction: 'up' | 'down') {
+  const handles = [...view.container.querySelectorAll('[data-rfd-drag-handle-draggable-id]')] as HTMLElement[]
+  const handle = handles[from]
+  await act(async () => {
+    handle.focus()
+    key(handle, ' ', 32) // lift
+  })
+  await act(async () => {
+    key(handle, direction === 'up' ? 'ArrowUp' : 'ArrowDown', direction === 'up' ? 38 : 40)
+  })
+  await act(async () => {
+    key(handle, ' ', 32) // drop
+  })
+  await flush(8)
+}
+
+test('a drag through the component renders the verb&apos;s answer and re-reads the board', async () => {
+  const routes = oversightRoutes()
+  routes['POST /api/tasks/t-archive/priority-hint'] = {
+    body: {
+      task_id: 't-archive',
+      rank: 20,
+      runs: ['r-archive'],
+      applied: true,
+      detail: 'hint recorded: it breaks ties among your own same-class queued work',
+    },
+  }
+  const { view, log } = await board(routes)
+  const before = log.calls.filter((c) => c.method === 'GET' && c.path === '/api/tasks').length
+
+  await drop(view, 1, 'up')
+
+  const note = view.container.querySelector('[data-hint-applied]')
+  expect(note, 'the verb&apos;s answer was not rendered').not.toBeNull()
+  expect(note?.getAttribute('data-hint-applied')).toBe('true')
+  expect(note?.textContent).toContain('breaks ties among your own same-class queued work')
+  expect(
+    log.calls.filter((c) => c.method === 'GET' && c.path === '/api/tasks').length,
+    'the board did not re-read after the drag',
+  ).toBeGreaterThan(before)
+})
+
+test('the stale-board answer renders through the component as the honest answer it is', async () => {
+  const routes = oversightRoutes()
+  const detail =
+    'nothing to reorder: this task has no queued run any more (it was claimed, finished or cancelled), so the board you dragged is stale'
+  routes['POST /api/tasks/t-archive/priority-hint'] = {
+    body: { task_id: 't-archive', rank: 20, runs: [], applied: false, detail },
+  }
+  const { view } = await board(routes)
+  await drop(view, 1, 'up')
+
+  const note = view.container.querySelector('[data-hint-applied]')
+  expect(note?.getAttribute('data-hint-applied')).toBe('false')
+  expect(note?.textContent).toBe(detail)
+})
+
+test('a drag whose write FAILS says so instead of silently snapping back', async () => {
+  const routes = oversightRoutes()
+  routes['POST /api/tasks/t-archive/priority-hint'] = { status: 503, body: { error: 'not_wired', detail: 'no scheduler' } }
+  const { view } = await board(routes)
+  await drop(view, 1, 'up')
+
+  const note = view.container.querySelector('[data-hint-applied]')
+  expect(note, 'a failed re-rank left the board silent').not.toBeNull()
+  expect(note?.textContent).toContain('The re-rank did not land')
+  expect(note?.textContent).toContain('503')
 })

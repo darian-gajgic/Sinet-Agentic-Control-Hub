@@ -3,7 +3,9 @@ import { vi } from 'vitest'
 import type { EventSourceLike } from './events'
 
 import approvalsRaw from './fixtures/api/approvals.json?raw'
+import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
+import deliverablesOfTaskRaw from './fixtures/api/deliverables-of-task.json?raw'
 import catalogRaw from './fixtures/api/history-catalog.json?raw'
 import queryAnswerRaw from './fixtures/api/history-query-answer.json?raw'
 import viewAnswerRaw from './fixtures/api/history-view-answer.json?raw'
@@ -11,6 +13,7 @@ import viewsRaw from './fixtures/api/history-views.json?raw'
 import metersRaw from './fixtures/api/meters.json?raw'
 import runsRaw from './fixtures/api/runs.json?raw'
 import receiptRaw from './fixtures/api/receipt.json?raw'
+import runDetailRaw from './fixtures/api/run-detail.json?raw'
 import taskDetailBareRaw from './fixtures/api/task-detail-bare.json?raw'
 import taskDetailDraftRaw from './fixtures/api/task-detail-draft.json?raw'
 import taskDetailRaw from './fixtures/api/task-detail.json?raw'
@@ -146,6 +149,9 @@ export const fixtures = {
   receipt: () => parse<Record<string, unknown>>(receiptRaw),
   approvals: () => parse<Record<string, unknown>>(approvalsRaw),
   deliverablesInReview: () => parse<Record<string, unknown>>(deliverablesRaw),
+  deliverablesOfTask: () => parse<Record<string, unknown>>(deliverablesOfTaskRaw),
+  deliverableDetail: () => parse<Record<string, unknown>>(deliverableDetailRaw),
+  runDetail: () => parse<Record<string, unknown>>(runDetailRaw),
 }
 
 /** The routes the B6-5 oversight surfaces read, answered from the fixtures. */
@@ -159,5 +165,40 @@ export function oversightRoutes(): Record<string, Scripted> {
     'GET /api/events/catalog': { body: fixtures.historyCatalog() },
     'GET /api/approvals': { body: fixtures.approvals() },
     'GET /api/deliverables?state=in-review': { body: fixtures.deliverablesInReview() },
+    'GET /api/deliverables?task=t-ship': { body: fixtures.deliverablesOfTask() },
+    'GET /api/deliverables/d-notes': { body: fixtures.deliverableDetail() },
+    // The task's second deliverable, shaped from the served list row so the
+    // detail chain has both to walk.
+    'GET /api/deliverables/d-changelog': {
+      body: {
+        // The DETAIL shape keys the deliverable as `id` (review.Deliverable),
+        // where the list row keys it `deliverable_id` — served as served.
+        deliverable: {
+          id: 'd-changelog',
+          owner: 'alice',
+          task_id: 't-ship',
+          project_id: 'release-notes',
+          type: 'text',
+          current_revision: 1,
+          state: 'in-review',
+          created_ts: '2026-07-20T09:02:00Z',
+          updated_ts: '2026-07-20T09:04:00Z',
+        },
+        revisions: [
+          {
+            deliverable_id: 'd-changelog',
+            n: 1,
+            owner: 'alice',
+            run_id: 'r-ship',
+            pin_kind: 'content',
+            content_sha256: 'sha-d-changelog-1',
+            platform_ref: 'notes/CHANGELOG.md',
+            created_ts: '2026-07-20T09:02:00Z',
+          },
+        ],
+        cursor: 13,
+      },
+    },
+    'GET /api/runs/r-ship': { body: fixtures.runDetail() },
   }
 }

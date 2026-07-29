@@ -7,6 +7,7 @@ package api_test
 // nothing, and which decisions are this task's.
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -168,7 +169,7 @@ func TestTaskDecisionsAreTaskScoped(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(detail.Decisions) != 3 {
-		t.Fatalf("decisions = %d, want the hint (subject = task), the effect approval (effects join) and the accept (run-scoped): %+v",
+		t.Fatalf("decisions = %d, want the effect approval (subject match), the accept (deliverables join) and the intake delta (run-scoped): %+v",
 			len(detail.Decisions), detail.Decisions)
 	}
 	got := map[string]bool{}
@@ -178,7 +179,7 @@ func TestTaskDecisionsAreTaskScoped(t *testing.T) {
 			t.Errorf("a decision arrived without actor/card/decision: %+v", d)
 		}
 	}
-	for _, want := range []string{"priority_hint:t-ship", "effect:e-publish", "deliverable:d-notes"} {
+	for _, want := range []string{"effect:e-publish", "deliverable:d-notes", "delta:delta-1"} {
 		if !got[want] {
 			t.Errorf("decision for %s is missing", want)
 		}
@@ -187,21 +188,31 @@ func TestTaskDecisionsAreTaskScoped(t *testing.T) {
 		t.Error("a decision about ANOTHER task reached this task's page — the subject match is too loose")
 	}
 
-	// The run-scoped half keeps its run, and the D10 operator limb survives.
-	var sawRun, sawOperator bool
+	// The three producer shapes, each proven to survive its own hazard.
+	var sawRun, sawAccept, sawDeltaActor bool
 	for _, d := range detail.Decisions {
-		if d.Type == "deliverable.accepted" && d.RunID == "r-ship" {
+		// The run-scoped producer keeps its run id.
+		if d.Type == "intake.delta_decision" && d.RunID == "r-ship" {
 			sawRun = true
 		}
-		if d.CardID == "effect:e-publish" && d.ActorIsOperator {
-			sawOperator = true
+		// D1: a REAL accept is platform-scoped and names only a deliverable, so
+		// it reaches this page through the deliverables join or not at all.
+		if d.Type == "deliverable.accepted" && d.RunID == "" && d.Decision == "accept" && d.Actor == "alice" {
+			sawAccept = true
+		}
+		// D2: the delta payload names no actor, so "who" is the row's owner.
+		if d.Type == "intake.delta_decision" && d.Actor == "alice" {
+			sawDeltaActor = true
 		}
 	}
 	if !sawRun {
 		t.Error("a run-scoped family row lost its run id")
 	}
-	if !sawOperator {
-		t.Error("the operator limb of a co-approval reads as a member's — firstBool is not reading the payload boolean")
+	if !sawAccept {
+		t.Error("a real (platform-scoped) deliverable.accepted did not reach its task — the deliverables join is not working")
+	}
+	if !sawDeltaActor {
+		t.Error("intake.delta_decision rendered an empty actor — the payload names none, so the row's owner is the answer")
 	}
 
 	// A task nobody has decided anything about has an empty block, not a
@@ -234,5 +245,51 @@ func TestTaskDecisionsStayWithTheirOwner(t *testing.T) {
 	fixtureServer(t, b, "bob").Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/tasks/t-ship", nil))
 	if rr.Code != http.StatusForbidden && rr.Code != http.StatusNotFound {
 		t.Fatalf("a member read another owner's task detail: %d", rr.Code)
+	}
+}
+
+// TestTaskDecisionsRedactAtTheEdge is drain r1 D8: the redaction call on the
+// decisions block was uncovered — removing it left the suite green.
+//
+// Every string here is lifted out of a run_events PAYLOAD by key, and the task
+// detail goes out UNWRAPPED (§7-C2·2 exempts the spec/plan/receipt content, not
+// this), so the primitive has to run at this serving edge or a secret that
+// reached a reason field reaches the wire. The stored row stays raw (R19).
+func TestTaskDecisionsRedactAtTheEdge(t *testing.T) {
+	b := fixtureWorld(t)
+	// A decision whose REASON carries a secret, minted the way a real one is.
+	secret := "sk-ant-api03-" + strings.Repeat("A", 40)
+	exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+	            VALUES (NULL,NULL,?,?,1,?,?)`, "alice", "decision.recorded",
+		`{"actor":"alice","card_id":"priority_hint:t-ship","card_type":"priority_hint","decision":"reorder",`+
+			`"subject":"t-ship","reason":"pasted `+secret+` by mistake","decided_at":"2026-07-20T09:09:00Z"}`, fxT4)
+
+	body := fixtureGet(t, b, "op", "/api/tasks/t-ship")
+	if strings.Contains(body, secret) {
+		t.Fatal("a payload-derived decision string reached the wire unredacted — redactTaskDecisions is not running")
+	}
+	// Non-tautology: the row really is on this task's page, so the assertion
+	// above is about REDACTION rather than about the row being filtered out.
+	var detail wireTaskDetail
+	if err := json.Unmarshal([]byte(body), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var found bool
+	for _, d := range detail.Decisions {
+		if d.CardID == "priority_hint:t-ship" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the seeded decision is not on this task — the redaction assertion would pass vacuously")
+	}
+	// And the stored row is untouched: store-raw / serve-redacted.
+	var stored string
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT payload FROM run_events WHERE type = 'decision.recorded' AND payload LIKE '%by mistake%'`).Scan(&stored); err != nil {
+		t.Fatalf("read stored row: %v", err)
+	}
+	if !strings.Contains(stored, secret) {
+		t.Error("the STORED payload was rewritten — redaction belongs at the serving edge, not in the log")
 	}
 }

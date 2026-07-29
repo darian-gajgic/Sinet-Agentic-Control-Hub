@@ -411,6 +411,41 @@ export type TaskDetail = {
   decisions: TaskDecision[]
 }
 
+/** The run card: the S14.3 progress figures a live view reads. Counters are
+ *  MONOTONIC — there is no denominator anywhere, so nothing here can become a
+ *  percentage. */
+export type RunCard = {
+  run_id: string
+  owner: string
+  state: string
+  waiting_on_human: boolean
+  parked_until: string | null
+  stage: string
+  tool: { name: string; args_digest: string } | null
+  counters: { tokens: number; api_equiv_cost_usd: number; elapsed_s: number; steps: number }
+  last_activity: { type: string; ts: string; line: string } | null
+  wedged: boolean
+  lane: string
+  generation: number
+}
+
+/** What a client needs to go live on one run: the cursor the snapshot was taken
+ *  at, the topic and run to subscribe with, and the last line already known. */
+export type LiveActivityRefs = {
+  cursor: number
+  topic: string
+  run_id: string
+  last: { type: string; ts: string; line: string } | null
+}
+
+export type RunDetail = {
+  card: RunCard
+  live_activity: LiveActivityRefs
+  spawn_records: { seq: number; type: string; ts: string; payload: unknown }[]
+  routing_records: { seq: number; type: string; ts: string; payload: unknown }[]
+  cursor: number
+}
+
 // ── the what-needs-me feeds (S1.4) ────────────────────────────────────────
 
 export type ApprovalItem = {
@@ -444,6 +479,37 @@ export type Deliverable = {
 }
 
 export type DeliverableList = { deliverables: Deliverable[]; cursor: number; truncated: boolean }
+
+/** One immutable numbered revision (S13.1). The lineage is 1..N and is never
+ *  compressed — each entry is a fact, not a diff of the one before it. */
+export type Revision = {
+  deliverable_id: string
+  n: number
+  owner: string
+  run_id?: string
+  pin_kind: string
+  content_sha256?: string
+  platform_ref: string
+  verdict_ref?: number
+  created_ts: string
+}
+
+export type DeliverableDetail = {
+  deliverable: {
+    id: string
+    owner: string
+    task_id: string
+    project_id?: string
+    subject_ref?: string
+    type: string
+    current_revision: number
+    state: string
+    created_ts: string
+    updated_ts: string
+  }
+  revisions: Revision[]
+  cursor: number
+}
 
 /** The board drag's outcome. `applied:false` is the honest stale-board answer,
  *  not an error: the work moved on between the render and the drag. */
@@ -515,8 +581,10 @@ export const api = {
    * 0 to mean "first" — and it lands only on the caller's OWN queued runs.
    */
   task: (id: string) => request<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`),
+  run: (id: string) => request<RunDetail>(`/api/runs/${encodeURIComponent(id)}`),
+  deliverable: (id: string) => request<DeliverableDetail>(`/api/deliverables/${encodeURIComponent(id)}`),
   approvals: () => request<ApprovalList>('/api/approvals'),
-  deliverables: (f: { state?: string; project?: string; type?: string } = {}) =>
+  deliverables: (f: { state?: string; project?: string; type?: string; task?: string } = {}) =>
     request<DeliverableList>(`/api/deliverables${query(f)}`),
 
   priorityHint: (task: string, rank: number, reason?: string) =>

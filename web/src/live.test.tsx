@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { FakeSource, frame, oversightRoutes, scriptedFetch } from './doubles'
 import { EventStream, type Status } from './events'
-import { boardEventTypes } from './live'
+import { boardEventTypes, missionEventTypes } from './live'
 import { navigate } from './router'
 import { flush, mount } from './testing'
 
@@ -219,5 +219,38 @@ test('a burst of frames coalesces instead of one read per frame', async () => {
   const added = reads(log, '/api/tasks') - settled
   expect(added, 'a frame burst produced a read per frame').toBeLessThan(8)
   expect(added, 'the burst produced no read at all').toBeGreaterThan(0)
+  view.unmount()
+})
+
+test('the deliverable lifecycle is DECLARED, so review-ready work updates from the feed', () => {
+  // Drain r1 D6: without these, a surface that renders review-ready work or a
+  // task's deliverables only updated when an unrelated frame happened to
+  // arrive — "manual refresh is never required for currency" (S15.12) failing
+  // for exactly the transitions the feed exists for. All three are registered
+  // types (internal/eventlog/contract.go), not invented names.
+  for (const type of ['artifact.produced', 'deliverable.accepted', 'review.drained']) {
+    expect(boardEventTypes, `${type} is not declared, so its frame reaches no view`).toContain(type)
+    expect(missionEventTypes, `${type} is not declared on mission control`).toContain(type)
+  }
+})
+
+test('a deliverable-lifecycle frame really does re-read the review-ready feed', async () => {
+  const log = scriptedFetch(oversightRoutes())
+  window.history.replaceState(null, '', '/?view=what-needs-me')
+  const h = harness()
+
+  const view = mount(<App stream={h.stream} />)
+  await flush()
+  act(() => FakeSource.last().open())
+  await flush()
+
+  const path = '/api/deliverables?state=in-review'
+  const before = log.calls.filter((c) => c.path === path).length
+  act(() => FakeSource.last().send('deliverable.accepted', frame(500, 'deliverable.accepted', ['board'])))
+  await flush()
+  expect(
+    log.calls.filter((c) => c.path === path).length,
+    'an accept did not refresh the review-ready feed',
+  ).toBe(before + 1)
   view.unmount()
 })

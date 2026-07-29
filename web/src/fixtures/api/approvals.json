@@ -1,6 +1,37 @@
 {
   "items": [
     {
+      "id": "effect:e-notify",
+      "kind": "effect",
+      "owner": "alice",
+      "run_id": "r-ship",
+      "tier": "high",
+      "answerable": false,
+      "not_answerable_reason": "this effect is its owner's decision; the operator co-approves only a platform-level one (D10)",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "e3d7ce9581186063dff3b29cea1cf6838d5ff426c037e58409422319b2f7e35a",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "actions": [
+        "approve",
+        "deny"
+      ],
+      "approvals": {
+        "platform_level": false,
+        "owner_approved": false,
+        "operator_approved": false
+      },
+      "card": {
+        "kind": "publish",
+        "target": "e-notify"
+      }
+    },
+    {
       "id": "ask:ask-audit",
       "kind": "ask",
       "owner": "bob",
@@ -20,6 +51,6 @@
       "card": {}
     }
   ],
-  "cursor": 9,
+  "cursor": 13,
   "truncated": false
 }

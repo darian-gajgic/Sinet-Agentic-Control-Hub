@@ -769,13 +769,21 @@ type TaskDetail struct {
 	// `decision.recorded` rows whose payload subject or card id names this
 	// task, one of its runs, or an EFFECT of one of its runs.
 	//
-	// WHAT IT MISSES, deliberately and by construction: a decision keyed to
-	// none of those subjects is not a task decision. A person-level automation
-	// pause and a per-person budget edit are the live examples — they are real
-	// decisions, they are recorded, and they belong to the person rather than
-	// to any one task, so they render on the surfaces that are about a person.
-	// Widening this to "everything the owner ever decided" would put another
-	// task's approvals on this task's page.
+	// WHAT IT MISSES, deliberately and by construction:
+	//
+	//   - A decision keyed to none of those subjects is not a task decision. A
+	//     person-level automation pause and a per-person budget edit are the
+	//     live examples — real, recorded, and about the PERSON rather than any
+	//     one task, so they render on the surfaces that are about a person.
+	//     Widening this to "everything the owner ever decided" would put
+	//     another task's approvals on this task's page.
+	//   - A CANCEL (drain r1 D3). Cancelling work is a human decision in the
+	//     ordinary sense, but the landed server carries it as
+	//     `run.state_changed` and deliberately does not double-mint a decision
+	//     row for it. It is therefore visible in `stage_progress`, where a
+	//     lifecycle transition belongs, and not here. Reading a lifecycle type
+	//     as a decision to close the gap would make this derive disagree with
+	//     the family the contract defines.
 	Decisions []TaskDecision `json:"decisions"`
 
 	// Pipeline is the intake pipeline's own task view (phase, tier, the open
@@ -943,11 +951,30 @@ func (p *projector) stageProgress(ctx context.Context, runs []TaskRunView) ([]St
 // engine stage boundaries and the intake pipeline's own phases.
 var stageProgressTypes = []string{"stage.started", "stage.finished", "intake.state"}
 
-// humanDecisionTypes is the S02.2 Human-decision family, as literals for the
-// same reason the spawn and routing record sets are: internal/api imports no
-// producer package, and the derive-from-log discipline keeps the transport
-// naming types rather than importing the code that mints them.
-var humanDecisionTypes = []string{"decision.recorded", "deliverable.accepted", "intake.delta_decision"}
+// The S02.2 Human-decision family, split by HOW ITS PRODUCERS ACTUALLY MINT
+// (drain r1 D1/D2/D3 — the first cut assumed one shape and missed two).
+// Literals for the same reason the spawn and routing record sets are:
+// internal/api imports no producer package.
+//
+//   - runScopedDecisionTypes carry a run_id, so they are found BY RUN.
+//     `intake.delta_decision` is the one real member: internal/intake appends
+//     it on the run whose delta card was answered.
+//   - platformDecisionTypes carry NO run_id and name their subject in the
+//     payload, so each needs its own way back to a task. `decision.recorded`
+//     names it as a subject/card-id; `deliverable.accepted` names a
+//     DELIVERABLE, whose own row carries the task linkage.
+//
+// NOT IN THIS FAMILY, and the miss is deliberate: a CANCEL is carried by
+// `run.state_changed` (internal/api/approvals.go — "cancels (carried by
+// run.state_changed) are never double-minted"), which is a run-lifecycle
+// event, not a decision row. It is visible in the stage story instead, which
+// is where a state transition belongs; listing it here would mean this derive
+// reading a lifecycle type as a decision.
+var (
+	runScopedDecisionTypes  = []string{"intake.delta_decision", "decision.recorded"}
+	platformDecisionTypes   = []string{"decision.recorded", "deliverable.accepted"}
+	deliverableAcceptedType = "deliverable.accepted"
+)
 
 // TaskDecision is one human decision on this task's way: who decided what,
 // about which card, and when (S2.4 — "actor, card id + type, decision,
@@ -983,15 +1010,23 @@ func redactTaskDecisions(rows []TaskDecision) {
 	}
 }
 
-// taskDecisions derives the S2.4 story. Two reads, because the family arrives
-// two ways: run-scoped rows are found by run, and `decision.recorded` — which
-// is platform-scoped and carries its subject in the payload — is found by
-// matching that subject against everything this task IS.
+// taskDecisions derives the S2.4 story.
+//
+// THREE reads, because the family's producers mint three different ways and a
+// single shape misses two of them (drain r1 D1/D2):
+//
+//  1. run-scoped rows, found by run — `intake.delta_decision` is the real one;
+//  2. `decision.recorded`, platform-scoped with its subject in the payload,
+//     matched against everything this task IS (itself, its runs, its effects);
+//  3. `deliverable.accepted`, platform-scoped and naming a DELIVERABLE rather
+//     than a task or a run — so its way back is the deliverables table's own
+//     task linkage. Nothing in its payload names the task, which is why the
+//     first cut of this derive silently returned nothing for every real accept.
 func (p *projector) taskDecisions(ctx context.Context, taskID, owner string, runs []TaskRunView) ([]TaskDecision, error) {
 	out := []TaskDecision{}
 	for _, rv := range runs {
-		q := QueryRunEventsByType(len(humanDecisionTypes))
-		args := append([]any{rv.RunID}, toAny(humanDecisionTypes)...)
+		q := QueryRunEventsByTypeOwned(len(runScopedDecisionTypes))
+		args := append([]any{rv.RunID}, toAny(runScopedDecisionTypes)...)
 		args = append(args, runDetailRecordCap)
 		rows, err := p.db.QueryContext(ctx, q, args...)
 		if err != nil {
@@ -1020,38 +1055,58 @@ func (p *projector) taskDecisions(ctx context.Context, taskID, owner string, run
 	// The card id is "<kind>:<native-id>", so the native half is matched too —
 	// an effect approval names `effect:<effect_id>`, and the effect is what
 	// ties it to this task's run.
-	q := `SELECT event_seq, type, ts, payload FROM run_events
-	       WHERE type = 'decision.recorded' AND user_id = ? AND run_id IS NULL
+	q := `SELECT event_seq, type, ts, payload, user_id FROM run_events
+	       WHERE type = ? AND user_id = ? AND run_id IS NULL
 	         AND (json_extract(payload, '$.subject') IN (` + set + `)
 	           OR json_extract(payload, '$.card_id') IN (` + set + `)
 	           OR substr(json_extract(payload, '$.card_id'),
 	                     instr(json_extract(payload, '$.card_id'), ':') + 1) IN (` + set + `))
 	       ORDER BY event_seq LIMIT ?`
-	args := []any{owner}
+	args := []any{EventDecisionRecorded, owner}
 	for i := 0; i < 3; i++ {
 		args = append(args, toAny(subjects)...)
 	}
 	args = append(args, runDetailRecordCap)
-	rows, err := p.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("projection: task decision subjects %q: %w", taskID, err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		d, serr := scanDecision(rows)
-		if serr != nil {
-			return nil, serr
-		}
-		out = append(out, d)
-	}
-	if err := rows.Err(); err != nil {
+	if err := p.appendDecisions(ctx, &out, q, args, "decision subjects", taskID); err != nil {
 		return nil, err
 	}
+
+	// The accepts. internal/review appends these platform-scoped, with the
+	// deliverable id in the payload and NOTHING naming the task — so the join
+	// back is the deliverable's own row. `accepted_by` is the "who".
+	acceptQ := `SELECT e.event_seq, e.type, e.ts, e.payload, e.user_id
+	              FROM run_events e
+	              JOIN deliverables d
+	                ON d.deliverable_id = json_extract(e.payload, '$.deliverable_id')
+	             WHERE e.type = ? AND e.run_id IS NULL AND d.task_id = ? AND d.user_id = ?
+	             ORDER BY e.event_seq LIMIT ?`
+	if err := p.appendDecisions(ctx, &out,
+		acceptQ, []any{deliverableAcceptedType, taskID, owner, runDetailRecordCap}, "task accepts", taskID); err != nil {
+		return nil, err
+	}
+
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	if len(out) > runDetailRecordCap {
 		out = out[:runDetailRecordCap]
 	}
 	return out, nil
+}
+
+// appendDecisions runs one decision query and folds its rows in.
+func (p *projector) appendDecisions(ctx context.Context, out *[]TaskDecision, q string, args []any, what, taskID string) error {
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("projection: task %s %q: %w", what, taskID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		d, serr := scanDecision(rows)
+		if serr != nil {
+			return serr
+		}
+		*out = append(*out, d)
+	}
+	return rows.Err()
 }
 
 // taskSubjects is everything a decision could name to be ABOUT this task: the
@@ -1085,19 +1140,59 @@ func (p *projector) taskSubjects(ctx context.Context, taskID string, runs []Task
 
 func scanDecision(rows *sql.Rows) (TaskDecision, error) {
 	var (
-		d          TaskDecision
-		ts, payloa string
+		d               TaskDecision
+		ts, payloa, who string
 	)
-	if err := rows.Scan(&d.Seq, &d.Type, &ts, &payloa); err != nil {
+	if err := rows.Scan(&d.Seq, &d.Type, &ts, &payloa, &who); err != nil {
 		return d, fmt.Errorf("projection: task decision scan: %w", err)
 	}
 	d.TS = parseTS(ts)
 	pay := json.RawMessage(payloa)
+	// "Who" comes from the payload where a producer names an actor, and falls
+	// back to the ROW's owner attribution where none does (drain r1 D2):
+	// `intake.delta_decision` carries a measurement hook with no actor key at
+	// all, and rendering an empty "who" on the one real run-scoped producer
+	// would have been the family's whole point going missing.
 	d.Actor = firstString(pay, "actor", "approved_by", "accepted_by")
+	if d.Actor == "" {
+		d.Actor = who
+	}
 	d.CardID = firstString(pay, "card_id")
 	d.CardType = firstString(pay, "card_type")
 	d.Decision = firstString(pay, "decision", "answer", "verdict")
 	d.Subject = firstString(pay, "subject")
+	// Where the payload does not name the act, the TYPE does — and naming it
+	// from the type is reading the log, not inventing (drain r1 D1/D2). A real
+	// `deliverable.accepted` carries {deliverable_id, revision, project_id,
+	// accepted_by, superseded} and no card/decision keys at all, so without
+	// this the family's own terminal act renders as three blanks.
+	switch d.Type {
+	case deliverableAcceptedType:
+		if id := firstString(pay, "deliverable_id"); id != "" {
+			if d.CardID == "" {
+				d.CardID = "deliverable:" + id
+			}
+			if d.Subject == "" {
+				d.Subject = id
+			}
+		}
+		if d.CardType == "" {
+			d.CardType = "deliverable"
+		}
+		if d.Decision == "" {
+			d.Decision = "accept"
+		}
+	case "intake.delta_decision":
+		if id := firstString(pay, "delta_id"); id != "" && d.CardID == "" {
+			d.CardID = "delta:" + id
+		}
+		if d.CardType == "" {
+			d.CardType = "intake_delta"
+		}
+		if d.Subject == "" {
+			d.Subject = firstString(pay, "task_id")
+		}
+	}
 	d.Reason = firstString(pay, "reason")
 	d.DecidedAt = firstString(pay, "decided_at")
 	d.ActorIsOperator = firstBool(pay, "actor_is_operator")
@@ -1211,5 +1306,15 @@ func (s *Server) handleRunReceipt(w http.ResponseWriter, r *http.Request) {
 // and the index test now pins FULL index names so a misattribution fails.
 func QueryRunEventsByType(types int) string {
 	return `SELECT event_seq, type, ts, payload FROM run_events WHERE run_id = ? AND type IN (` +
+		placeholders(types) + `) ORDER BY event_seq LIMIT ?`
+}
+
+// QueryRunEventsByTypeOwned is the same shape carrying the row's OWNER
+// attribution as well — the decision derive needs it because a producer that
+// names no actor in its payload still records whose act it was (drain r1 D2).
+// Same index behavior as above; the extra column is a projection, not a
+// predicate.
+func QueryRunEventsByTypeOwned(types int) string {
+	return `SELECT event_seq, type, ts, payload, user_id FROM run_events WHERE run_id = ? AND type IN (` +
 		placeholders(types) + `) ORDER BY event_seq LIMIT ?`
 }

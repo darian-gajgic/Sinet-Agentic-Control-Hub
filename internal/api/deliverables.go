@@ -154,6 +154,13 @@ func (s *Server) handleDeliverableList(w http.ResponseWriter, r *http.Request) {
 		{` AND project_id = ?`, strings.TrimSpace(r.URL.Query().Get("project"))},
 		{` AND state = ?`, state},
 		{` AND dtype = ?`, strings.TrimSpace(r.URL.Query().Get("type"))},
+		// `?task=` is additive (B6-5 drain r1 D5): the S15.5 task detail lists
+		// "every deliverable revision" for ONE task, and without it the surface
+		// had no way to ask that question — the first cut rendered follow-up
+		// LINEAGE edges under the deliverables heading instead, which is a
+		// different fact wearing the same label. Owner scope is untouched: this
+		// narrows an already-scoped read.
+		{` AND task_id = ?`, strings.TrimSpace(r.URL.Query().Get("task"))},
 	} {
 		if f.val != "" {
 			q += f.clause

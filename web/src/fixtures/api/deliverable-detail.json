@@ -1,0 +1,82 @@
+{
+  "deliverable": {
+    "id": "d-notes",
+    "owner": "alice",
+    "task_id": "t-ship",
+    "project_id": "release-notes",
+    "subject_ref": "notes/RELEASE.md",
+    "type": "text",
+    "current_revision": 2,
+    "state": "accepted",
+    "created_ts": "2026-07-20T09:02:00Z",
+    "updated_ts": "2026-07-20T09:04:00Z"
+  },
+  "revisions": [
+    {
+      "deliverable_id": "d-notes",
+      "n": 1,
+      "owner": "alice",
+      "run_id": "r-ship",
+      "pin_kind": "content",
+      "content_sha256": "sha-d-notes-1",
+      "platform_ref": "notes/RELEASE.md",
+      "created_ts": "2026-07-20T09:02:00Z"
+    },
+    {
+      "deliverable_id": "d-notes",
+      "n": 2,
+      "owner": "alice",
+      "run_id": "r-ship",
+      "pin_kind": "content",
+      "content_sha256": "sha-d-notes-2",
+      "platform_ref": "notes/RELEASE.md",
+      "created_ts": "2026-07-20T09:02:00Z"
+    }
+  ],
+  "lineage": {
+    "project": "release-notes",
+    "project_choices": 1,
+    "succeeds": [],
+    "succeeded_by": []
+  },
+  "doors": [
+    {
+      "verb": "accept",
+      "method": "POST",
+      "route": "/api/deliverables/d-notes/accept",
+      "available": false,
+      "reason": "no accept orchestration is composed in this process",
+      "pin_from": "GET /api/deliverables/d-notes/accept-card"
+    },
+    {
+      "verb": "request-revision",
+      "method": "POST",
+      "route": "/api/deliverables/d-notes/follow-up",
+      "available": true,
+      "reason": "open: this deliverable is finished, so a bounded revision is a successor task under the S13.9 `revision` framing over the one successor link",
+      "preset": "revision"
+    },
+    {
+      "verb": "follow-up",
+      "method": "POST",
+      "route": "/api/deliverables/d-notes/follow-up",
+      "available": true,
+      "reason": "open: A successor task links to a numbered revision of this deliverable (S13.9); the framings are presets over that one link."
+    },
+    {
+      "verb": "preview",
+      "method": "POST",
+      "route": "/api/deliverables/d-notes/preview",
+      "available": false,
+      "reason": "no preview surface is composed in this process"
+    },
+    {
+      "verb": "preview-compare",
+      "method": "POST",
+      "route": "/api/deliverables/d-notes/preview/compare",
+      "available": false,
+      "reason": "no preview surface is composed in this process; with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"
+    }
+  ],
+  "cursor": 13
+}

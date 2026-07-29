@@ -4,7 +4,7 @@
   "title": "Ship the release notes",
   "kanban_status": "executing",
   "created_ts": "2026-07-20T09:00:00Z",
-  "cursor": 9,
+  "cursor": 13,
   "spec": {
     "task_id": "t-x",
     "owner": "alice",
@@ -80,7 +80,7 @@
   "stage_progress": [
     {
       "run_id": "r-ship",
-      "seq": 2,
+      "seq": 5,
       "type": "stage.started",
       "stage": "execute",
       "kind": "execute",
@@ -168,38 +168,37 @@
   ],
   "decisions": [
     {
-      "seq": 6,
+      "seq": 10,
       "type": "decision.recorded",
       "ts": "2026-07-20T09:04:00Z",
       "actor": "alice",
-      "card_id": "priority_hint:t-ship",
-      "card_type": "priority_hint",
-      "decision": "reorder",
-      "subject": "t-ship",
-      "reason": "the release is due",
-      "decided_at": "2026-07-20T09:05:00Z"
-    },
-    {
-      "seq": 7,
-      "type": "decision.recorded",
-      "ts": "2026-07-20T09:04:00Z",
-      "actor": "op",
-      "actor_is_operator": true,
       "card_id": "effect:e-publish",
       "card_type": "effect",
       "decision": "approve",
-      "decided_at": "2026-07-20T09:06:00Z"
+      "subject": "r-ship",
+      "reason": "the release is due",
+      "decided_at": "2026-07-20T09:04:00Z"
     },
     {
-      "seq": 9,
+      "seq": 11,
       "type": "deliverable.accepted",
       "ts": "2026-07-20T09:04:00Z",
-      "run_id": "r-ship",
       "actor": "alice",
       "card_id": "deliverable:d-notes",
       "card_type": "deliverable",
       "decision": "accept",
-      "decided_at": "2026-07-20T09:08:00Z"
+      "subject": "d-notes"
+    },
+    {
+      "seq": 12,
+      "type": "intake.delta_decision",
+      "ts": "2026-07-20T09:04:00Z",
+      "run_id": "r-ship",
+      "actor": "alice",
+      "card_id": "delta:delta-1",
+      "card_type": "intake_delta",
+      "decision": "accept",
+      "subject": "t-ship"
     }
   ]
 }

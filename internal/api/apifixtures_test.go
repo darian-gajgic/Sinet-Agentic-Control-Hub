@@ -30,6 +30,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,9 +43,11 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
 // fixtureDir is where the committed bodies live: inside the web tree, next to
@@ -94,11 +97,20 @@ func fixtureWorld(t *testing.T) *backend {
 	t.Helper()
 	b := newBackend(t)
 
-	for _, u := range []struct{ id, role string }{
-		{"op", auth.RoleOperator}, {"alice", auth.RoleMember}, {"bob", auth.RoleMember},
+	// Users are created through the REAL auth store rather than inserted, so
+	// they carry a PIN: a High-tier effect approval re-prompts it (S01.9
+	// verify-at-act), and driving that verb for real is the point (drain r1).
+	for _, u := range []struct{ id, name, role string }{
+		{"op", "Op", auth.RoleOperator}, {"alice", "Alice", auth.RoleMember}, {"bob", "Bob", auth.RoleMember},
 	} {
-		exec(t, b, `INSERT INTO users (user_id, display_name, role, created_ts) VALUES (?,?,?,?)`,
-			u.id, strings.ToUpper(u.id[:1])+u.id[1:], u.role, fxT0)
+		actor := "op"
+		if u.id == "op" {
+			actor = ""
+		}
+		if err := b.store.CreateUser(context.Background(),
+			actor, auth.User{ID: u.id, DisplayName: u.name, Role: u.role}, fixturePIN); err != nil {
+			t.Fatalf("create %s: %v", u.id, err)
+		}
 	}
 
 	// Four tasks: two kanban columns with cards, one card in the OQ7
@@ -171,48 +183,137 @@ func fixtureWorld(t *testing.T) *backend {
 		            VALUES (?,0,?,?,1,?,?)`, e.run, e.owner, e.typ, e.payload, e.ts)
 	}
 
-	// One proposed effect on the shipping run, so an effect approval has
-	// something to be ABOUT: `decision.recorded` carries no run_id, and the
-	// effects join is what ties `effect:<id>` back to this task (OQ5).
-	exec(t, b, `INSERT INTO effects (effect_id, run_id, user_id, class, payload, payload_hash, state, created_ts, updated_ts)
-	            VALUES (?,?,?,?,?,?,?,?,?)`, "e-publish", "r-ship", "alice", "C", "{}", "h1", "approved", fxT2, fxT3)
-
-	// The human decisions this task's page must show — and one that it must
-	// NOT, because it is about a different task entirely.
-	for _, d := range []struct{ run, payload, ts string }{
-		{"", `{"actor":"alice","card_id":"priority_hint:t-ship","card_type":"priority_hint","decision":"reorder","subject":"t-ship","reason":"the release is due","decided_at":"2026-07-20T09:05:00Z","presented_at":"2026-07-20T09:05:00Z"}`, fxT4},
-		{"", `{"actor":"op","actor_is_operator":true,"card_id":"effect:e-publish","card_type":"effect","decision":"approve","decided_at":"2026-07-20T09:06:00Z","presented_at":"2026-07-20T09:05:00Z"}`, fxT4},
-		{"", `{"actor":"alice","card_id":"priority_hint:t-elsewhere","card_type":"priority_hint","decision":"reorder","subject":"t-elsewhere","decided_at":"2026-07-20T09:07:00Z","presented_at":"2026-07-20T09:07:00Z"}`, fxT4},
-	} {
-		exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
-		            VALUES (NULL,NULL,?,?,1,?,?)`, "alice", "decision.recorded", d.payload, d.ts)
-	}
-	// A run-scoped family row: the accept IS a human decision (S13.6).
-	exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
-	            VALUES (?,0,?,?,1,?,?)`, "r-ship", "alice", "deliverable.accepted",
-		`{"actor":"alice","card_id":"deliverable:d-notes","card_type":"deliverable","decision":"accept","deliverable_id":"d-notes","revision_n":2,"decided_at":"2026-07-20T09:08:00Z"}`, fxT4)
-
 	// A deliverable waiting for a person, with two immutable numbered revisions:
 	// the review-ready half of the what-needs-me filter, and the revision list
 	// the task detail links into.
-	exec(t, b, `INSERT INTO deliverables (deliverable_id, user_id, task_id, project_id, subject_ref, dtype, current_revision, state, created_ts, updated_ts)
-	            VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		"d-notes", "alice", "t-ship", "release-notes", "notes/RELEASE.md", "text", 2, "in-review", fxT2, fxT4)
-	for _, rev := range []struct {
-		n   int
-		sha string
-		ts  string
-	}{{1, "a1", fxT2}, {2, "b2", fxT4}} {
-		exec(t, b, `INSERT INTO deliverable_revisions (deliverable_id, n, user_id, run_id, pin_kind, content_sha256, platform_ref, created_ts)
-		            VALUES (?,?,?,?,?,?,?,?)`,
-			"d-notes", rev.n, "alice", "r-ship", "content", rev.sha, "notes/RELEASE.md", rev.ts)
+	// Two deliverables on the shipping task. `d-notes` is ACCEPTED below
+	// through the real verb (so the task detail lists a finished one with its
+	// numbered revisions); `d-changelog` stays in-review, so the what-needs-me
+	// feed carries genuinely review-ready work. Driving the accept for real is
+	// what emptied the in-review feed the first time round — the fixture now
+	// says both things because the surface renders both.
+	for _, d := range []struct {
+		id, subject, state string
+		revs               int
+	}{
+		{"d-notes", "notes/RELEASE.md", "in-review", 2},
+		{"d-changelog", "notes/CHANGELOG.md", "in-review", 1},
+	} {
+		exec(t, b, `INSERT INTO deliverables (deliverable_id, user_id, task_id, project_id, subject_ref, dtype, current_revision, state, created_ts, updated_ts)
+		            VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			d.id, "alice", "t-ship", "release-notes", d.subject, "text", d.revs, d.state, fxT2, fxT4)
+		for n := 1; n <= d.revs; n++ {
+			exec(t, b, `INSERT INTO deliverable_revisions (deliverable_id, n, user_id, run_id, pin_kind, content_sha256, platform_ref, created_ts)
+			            VALUES (?,?,?,?,?,?,?,?)`,
+				d.id, n, "alice", "r-ship", "content", fmt.Sprintf("sha-%s-%d", d.id, n), d.subject, fxT2)
+		}
 	}
 
 	// One materialized receipt, so the cost views have a row to read and the
 	// task detail has a receipt to render (B6-5 part B consumes it).
 	exec(t, b, `INSERT INTO receipts (run_id, user_id, usage_json, materialized_ts) VALUES (?,?,?,?)`,
 		"r-ship", "alice", fixtureReceiptJSON(t), fxT4)
+
+	// Two effects on the shipping run, PROPOSED through the real journal so
+	// each carries the hash the journal itself computes — a hand-written
+	// payload_hash reads as payload DRIFT the moment the approval verb checks
+	// it, which is the landed S02.7 protection working (drain r1).
+	//
+	// One is approved through the landed verb below; the other stays proposed,
+	// so the what-needs-me feed carries a genuinely PENDING approval-kind card
+	// (drain r1 D9).
+	// The journal mints a UUID per effect, which no committed file can carry —
+	// so the id (a surrogate) is pinned afterwards while the PAYLOAD and its
+	// journal-computed HASH, which are what the approval verb actually checks,
+	// stay the producer's own. Same class of concession as the injected clock.
+	for _, id := range []string{"e-publish", "e-notify"} {
+		e, err := fixtureJournal(t, b).Propose(context.Background(), gates.Proposal{
+			RunID: "r-ship", UserID: "alice", Class: gates.ClassC,
+			Payload: json.RawMessage(`{"kind":"publish","target":"` + id + `"}`),
+		})
+		if err != nil {
+			t.Fatalf("propose %s: %v", id, err)
+		}
+		exec(t, b, `UPDATE effects SET effect_id = ?, created_ts = ?, updated_ts = ? WHERE effect_id = ?`,
+			id, fxT2, fxT2, e.ID)
+	}
+
+	driveFixtureDecisions(t, b)
 	return b
+}
+
+// driveFixtureDecisions produces the Human-decision rows through the REAL
+// verbs — the OQ2 fidelity promise, and the root cause of drain r1.
+//
+// A hand-written payload proves only that the derive can read the keys its
+// author imagined. Driving the producers is what proved that a real
+// `deliverable.accepted` is PLATFORM-scoped (so the run-scoped half could
+// never see it) and that `intake.delta_decision` names no actor at all.
+func driveFixtureDecisions(t *testing.T, b *backend) {
+	t.Helper()
+	// Driven as the card's OWNER: a High-tier effect is the owner's to approve
+	// (D10), and the operator is not excepted — the 403 that this returns for
+	// anyone else is the landed rule, not a fixture inconvenience.
+	srv := fixtureServer(t, b, "alice")
+
+	// 1. A REAL effect approval, read-then-answer exactly as a client does:
+	//    the card carries the pinned payload hash, and answering with anything
+	//    else is a 409 stale_payload. Driving it this way is what makes the
+	//    resulting `decision.recorded` a real producer's row rather than a
+	//    shape somebody imagined.
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/approvals", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read approvals: %d: %s", rr.Code, rr.Body.String())
+	}
+	var inbox struct {
+		Items []struct {
+			ID          string `json:"id"`
+			PayloadHash string `json:"payload_hash"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &inbox); err != nil {
+		t.Fatalf("decode approvals: %v", err)
+	}
+	var hash string
+	for _, it := range inbox.Items {
+		if it.ID == "effect:e-publish" {
+			hash = it.PayloadHash
+		}
+	}
+	if hash == "" {
+		t.Fatalf("the effect card is not in the inbox: %s", rr.Body.String())
+	}
+	body := fmt.Sprintf(`{"payload_hash":%q,"pin":%q,"answer":{"action":"approve","reason":"the release is due"}}`,
+		hash, fixturePIN)
+	ans := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(ans, httptest.NewRequest("POST", "/api/approvals/effect:e-publish/answer", strings.NewReader(body)))
+	if ans.Code != http.StatusOK {
+		t.Fatalf("drive effect answer: %d: %s", ans.Code, ans.Body.String())
+	}
+
+	// 2. A REAL deliverable accept through review.Accept — platform-scoped,
+	//    payload {deliverable_id, revision, project_id, accepted_by, superseded},
+	//    nothing naming the task.
+	if _, err := fixtureReview(t, b).Accept(context.Background(), "d-notes", "alice"); err != nil {
+		t.Fatalf("drive review.Accept: %v", err)
+	}
+
+	// 3. A REAL intake delta decision: internal/intake's own measurement-hook
+	//    payload, byte-for-byte the key set delta.go marshals — no actor key,
+	//    which is precisely why the derive falls back to the row's owner.
+	exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+	            VALUES (?,0,?,?,1,?,?)`, "r-ship", "alice", "intake.delta_decision",
+		`{"delta_id":"delta-1","origin":"verify-findings","presented_items":3,"presented_bytes":812,`+
+			`"time_to_decision_s":94,"decision":"accept","task_id":"t-ship","spec_plan_version":"spec-v2/plan-v2"}`, fxT4)
+
+	// 4. The negative: a decision about ANOTHER task, minted the same way, so
+	//    "it does not appear" is a fact about the derive rather than about the
+	//    fixture being thin.
+	exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+	            VALUES (NULL,NULL,?,?,1,?,?)`, "alice", "decision.recorded",
+		`{"actor":"alice","card_id":"priority_hint:t-elsewhere","card_type":"priority_hint","decision":"reorder",`+
+			`"subject":"t-elsewhere","presented_at":"2026-07-20T09:07:00Z","decided_at":"2026-07-20T09:07:00Z"}`, fxT4)
 }
 
 // fixtureReceipt is a stored S10.10 receipt body.
@@ -313,6 +414,27 @@ func (f fixtureIntake) Receipt(_ context.Context, runID string) (json.RawMessage
 	return nil, &api.SurfaceError{Status: http.StatusNotFound, Code: "not_found", Msg: "no receipt for this run"}
 }
 
+// fixtureReview and fixtureJournal carry the FIXED clock, so a row minted
+// through a real producer is reproducible and can therefore be committed.
+func fixtureReview(t *testing.T, b *backend) *review.Store {
+	t.Helper()
+	return &review.Store{
+		DB: b.db, Log: b.log, Settings: b.reg, Root: t.TempDir(),
+		Now: func() time.Time { return mustTime(t, fxT4) },
+	}
+}
+
+func fixtureJournal(t *testing.T, b *backend) *gates.Journal {
+	t.Helper()
+	j, err := gates.NewJournal(gates.JournalConfig{
+		DB: b.db, Settings: settings.New(), Now: func() time.Time { return mustTime(t, fxT4) },
+	})
+	if err != nil {
+		t.Fatalf("gates.NewJournal: %v", err)
+	}
+	return j
+}
+
 func fixturePair(status string, n int) string {
 	return `{"spec":{"task_id":"t-x","owner":"alice","version":` + strconv.Itoa(n) + `,"status":"` + status + `",` +
 		`"tier":"standard","provenance":"claude/2026-07","restatement":"Publish the release notes for this cycle.",` +
@@ -346,7 +468,9 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Settings: fixedSettings{d: 20 * 1e9},
 		HealthFn: func() api.Health { return api.Health{Ready: true} },
 		DB:       b.db, Meter: fixtureMeter{}, History: st, Intake: fixtureIntake{t: t},
-		Review: &review.Store{DB: b.db, Log: b.log, Settings: b.reg, Root: t.TempDir()},
+		Review:  fixtureReview(t, b),
+		Effects: fixtureJournal(t, b),
+		Now:     func() time.Time { return mustTime(t, fxT4) },
 	})
 }
 
@@ -367,6 +491,9 @@ var webAPIFixtures = []struct{ name, path string }{
 	{"task-detail-bare", "/api/tasks/t-archive"},
 	{"receipt", "/api/runs/r-ship/receipt"},
 	{"deliverables-in-review", "/api/deliverables?state=in-review"},
+	{"deliverables-of-task", "/api/deliverables?task=t-ship"},
+	{"deliverable-detail", "/api/deliverables/d-notes"},
+	{"run-detail", "/api/runs/r-ship"},
 	{"approvals", "/api/approvals"},
 }
 

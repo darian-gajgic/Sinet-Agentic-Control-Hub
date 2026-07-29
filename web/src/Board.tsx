@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { api, type PriorityHint, type TaskListItem } from './api'
 import type { EventStream } from './events'
 import { columnsFor, groupByProject } from './kanban'
-import { boardEventTypes, useLive } from './live'
+import { boardEventTypes, describeError, useLive } from './live'
 import { Absent, Empty, Freshness, Money, Owner, ParkedUntil, Section } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
@@ -61,20 +61,27 @@ function currentRank(t: TaskListItem): number {
   return t.latest_run?.queue_hint_rank ?? 0
 }
 
-/** ownQueued is the drag-eligible set: the CALLER's own tasks whose latest run
- *  is still queued. The operator is deliberately not excepted — the verb
- *  refuses another person's task, and a card that cannot be reordered must not
- *  look draggable. */
+/**
+ * ownQueued is the drag-eligible set: the CALLER's own tasks whose latest run
+ * is still queued. The operator is deliberately not excepted — the verb refuses
+ * another person's task, and a card that cannot be reordered must not look
+ * draggable.
+ *
+ * The order is PLAIN ASCENDING by hint rank, then the scheduler's own default.
+ * That is the landed comparator's rule, verbatim (internal/scheduler/
+ * workload.go: `if x.hintRank != y.hintRank { return x.hintRank < y.hintRank }`,
+ * then the natural key) — 0 is the NEUTRAL MIDDLE, not "unranked, put it last".
+ * Treating 0 as last was the first cut's bug: a task enqueued after a drag sits
+ * at 0, so it would have claimed FIRST from the scheduler while rendering LAST
+ * here, which is the exact "rendered order = recorded order" promise inverted.
+ */
 export function ownQueued(tasks: TaskListItem[], me: string): TaskListItem[] {
   return tasks
     .filter((t) => t.owner === me && me !== '' && t.latest_run?.state === 'queued')
     .sort((a, b) => {
-      // Recorded order first, then the scheduler's own default (enqueue order,
-      // which the list read orders by creation). Rendered order = recorded
-      // order after a reload, which is the point of serving the rank at all.
       const ra = currentRank(a)
       const rb = currentRank(b)
-      if (ra !== rb) return (ra === 0 ? Infinity : ra) - (rb === 0 ? Infinity : rb)
+      if (ra !== rb) return ra - rb
       return a.created_ts.localeCompare(b.created_ts)
     })
 }
@@ -102,6 +109,13 @@ export function hintPostsFor(queue: TaskListItem[], result: DropResult): HintPos
   if (!moved) return []
   next.splice(to.index, 0, moved)
 
+  // Every card in the lane is assigned a POSITIVE spaced rank, not just the
+  // ones that visibly moved. That is what leaves no 0 behind: 0 is the
+  // scheduler's neutral middle, so a card left at 0 after a drag would sit
+  // among the ranked ones rather than where it was dropped. Only the entries
+  // whose effective rank actually changed are written — assigning every
+  // position and writing the difference is idempotent, so a drag that puts a
+  // card back writes nothing.
   const posts: HintPost[] = []
   next.forEach((t, i) => {
     const rank = spacedRank(i)
@@ -145,8 +159,18 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
         setNotes(answers)
         reload()
       },
-      () => {
-        setNotes([])
+      (err: unknown) => {
+        // An honest failure note: the drag did not land, and the board says so
+        // rather than silently snapping back as though nothing was attempted.
+        setNotes([
+          {
+            task_id: 'drag',
+            rank: 0,
+            runs: [],
+            applied: false,
+            detail: `The re-rank did not land. ${describeError(err)}`,
+          },
+        ])
         reload()
       },
     )

@@ -1,6 +1,15 @@
-import { api, type Receipt, type Spec, type TaskDecision, type TaskDetail as Detail, type TaskRunView } from './api'
+import {
+  api,
+  type DeliverableDetail,
+  type Receipt,
+  type RunDetail,
+  type Spec,
+  type TaskDecision,
+  type TaskDetail as Detail,
+  type TaskRunView,
+} from './api'
 import type { EventStream } from './events'
-import { boardEventTypes, useLive } from './live'
+import { activityEventTypes, boardEventTypes, useLive } from './live'
 import { Absent, Empty, Freshness, Money, Owner, Section, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
@@ -51,8 +60,9 @@ export function TaskDetail({ id, stream }: { id: string; stream?: EventStream })
           </p>
           <SpecBlock detail={data} stale={stale} />
           <StageBlock detail={data} stale={stale} />
+          <LiveActivity run={activeRun(data)} stream={stream} />
           <DecisionsBlock decisions={data.decisions} stale={stale} />
-          <DeliverablesBlock detail={data} stale={stale} />
+          <DeliverablesBlock taskID={id} stream={stream} />
           <ReceiptsBlock runs={data.runs} stale={stale} />
         </>
       )}
@@ -159,7 +169,92 @@ function SpecLists({ spec }: { spec: Spec }) {
   )
 }
 
-/** R11: the stage story, plus the live-activity seam. Counters are monotonic
+/**
+ * activeRun is the run the live feed is about: the task's latest run that has
+ * not reached a terminal state, or — when everything has finished — the last
+ * one, so the panel still shows what it was doing when it stopped.
+ */
+const terminalStates = ['completed', 'crashed', 'finalized', 'tombstoned', 'died-at-gate']
+
+export function activeRun(detail: Detail): TaskRunView | null {
+  const live = [...detail.runs].reverse().find((r) => !terminalStates.includes(r.state))
+  return live ?? detail.runs[detail.runs.length - 1] ?? null
+}
+
+/**
+ * R11's other half: the LIVE ACTIVITY FEED (Spec S15.5; S2.2).
+ *
+ * Stage boundaries alone say a stage started and ended — which is exactly the
+ * "started and ended" S2.2 says is not enough to watch work happen. This reads
+ * the run card: the last-activity line, the current stage and tool, and the
+ * monotonic counters, seeded from the REST snapshot and re-read on this run's
+ * own frames.
+ *
+ * The counters are rendered as the monotonic values they are. There is no
+ * denominator on the wire and none is invented here — no percentage, no
+ * fraction, no estimate of what is left.
+ */
+export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?: EventStream }) {
+  const { data, error, stale } = useLive<RunDetail>({
+    key: run ? `/api/runs/${run.run_id}` : '',
+    read: () => (run ? api.run(run.run_id) : Promise.reject(new Error('no run'))),
+    types: activityEventTypes,
+    // Only this run's frames matter here — a sibling run moving is not this
+    // panel's business, and unlike the task resource above, a frame for a run
+    // that does not exist yet cannot change what THIS run is doing.
+    applies: (e) => e.run_id === undefined || e.run_id === run?.run_id,
+    stream,
+  })
+
+  if (!run) {
+    return (
+      <Section title="Live activity">
+        <Absent reason="this task has no run yet, so there is nothing running to watch" />
+      </Section>
+    )
+  }
+  const card = data?.card
+  return (
+    <Section title="Live activity" stale={stale}>
+      <Freshness stale={stale} error={error} hasData={data !== null} />
+      {card && (
+        <div className="activity" data-run={card.run_id}>
+          <p>
+            <span className="run-state">{card.state}</span>{' '}
+            {card.stage !== '' ? <span className="stage-name">{card.stage}</span> : <Absent reason="no stage marker" />}
+            {card.wedged && <span className="warn-flag"> wedged</span>}
+            {card.waiting_on_human && <span className="waiting-human"> waiting on a person</span>}
+          </p>
+          <p className="activity-line">
+            {card.last_activity ? (
+              <>
+                <span className="muted">{card.last_activity.type}</span> {card.last_activity.line}{' '}
+                <Stamp ts={card.last_activity.ts} />
+              </>
+            ) : (
+              <Absent reason="nothing has happened on this run yet" />
+            )}
+          </p>
+          {card.tool && (
+            <p className="muted">
+              tool {card.tool.name} · args {card.tool.args_digest === '' ? 'not digested' : card.tool.args_digest}
+            </p>
+          )}
+          <ul className="counters">
+            <li>{String(card.counters.steps)} steps</li>
+            <li>{String(card.counters.tokens)} tokens</li>
+            <li>{String(card.counters.elapsed_s)} s elapsed</li>
+            <li>
+              <Money usd={card.counters.api_equiv_cost_usd} />
+            </li>
+          </ul>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+/** R11: the stage story. Counters are monotonic
  *  facts; nothing here is turned into "how far along". */
 function StageBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
   return (
@@ -182,9 +277,6 @@ function StageBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
           ))}
         </ol>
       )}
-      <p className="muted">
-        This story is derived from the log and updates from the feed — the runs below carry the live activity.
-      </p>
       <ProjectLineage detail={detail} />
     </Section>
   )
@@ -253,27 +345,56 @@ function DecisionsBlock({ decisions, stale }: { decisions: TaskDecision[]; stale
   )
 }
 
-/** R13: the deliverables link into the review surface. Rendering diffs,
- *  comments and the accept is B6-8's — the link is the honest door. */
-function DeliverablesBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
-  const revisions = detail.lineage.succeeded_by
+/**
+ * R13: the task's REAL deliverables, with their immutable numbered revisions.
+ *
+ * The first cut rendered `lineage.succeeded_by` here — the follow-up TASKS
+ * spawned from a deliverable — which is a different fact wearing the same
+ * label, and left the task's actual deliverables unlisted. Lineage renders as
+ * lineage, in its own block, and nowhere else.
+ *
+ * The revisions come from each deliverable's own detail read rather than being
+ * counted 1..N from `current_revision`: the numbers are records, and inferring
+ * them would be the client asserting a lineage it was never told.
+ */
+function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventStream }) {
+  const { data, error, stale } = useLive<DeliverableDetail[]>({
+    key: `/api/deliverables?task=${taskID}`,
+    read: () =>
+      api
+        .deliverables({ task: taskID })
+        .then((list) => Promise.all(list.deliverables.map((d) => api.deliverable(d.deliverable_id)))),
+    types: boardEventTypes,
+    stream,
+  })
+
   return (
     <Section title="Deliverables" stale={stale}>
-      {revisions.length === 0 ? (
-        <p className="muted">
-          Deliverable revisions are reviewed on their own surface. Any this task produced are reachable from the review
-          list.
-        </p>
+      <Freshness stale={stale} error={error} hasData={data !== null} />
+      {data && data.length === 0 ? (
+        <Empty what="This task has produced no deliverables yet." />
       ) : (
-        <ul>
-          {revisions.map((s) => (
-            <li key={s.deliverable_id}>
-              <Link to={hrefFor('deliverable', { id: s.deliverable_id })}>
-                {s.deliverable_id} — revision {String(s.revision_n)}
-              </Link>
-            </li>
-          ))}
-        </ul>
+        (data ?? []).map((d) => (
+          <div className="deliverable" key={d.deliverable.id} data-deliverable={d.deliverable.id}>
+            <h4>
+              <Link to={hrefFor('deliverable', { id: d.deliverable.id })}>{d.deliverable.id}</Link>{' '}
+              <span className="muted">
+                {d.deliverable.type} · {d.deliverable.state}
+              </span>
+            </h4>
+            <ol className="revisions">
+              {d.revisions.map((r) => (
+                <li key={r.n} data-revision={String(r.n)}>
+                  <Link to={hrefFor('deliverable', { id: d.deliverable.id })}>revision {String(r.n)}</Link>{' '}
+                  <span className="muted">
+                    {r.pin_kind}
+                    {r.content_sha256 ? ` ${r.content_sha256.slice(0, 12)}` : ''} · <Stamp ts={r.created_ts} />
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))
       )}
     </Section>
   )

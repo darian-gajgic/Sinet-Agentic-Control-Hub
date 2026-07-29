@@ -4,14 +4,14 @@
   "title": "Archive last quarter",
   "kanban_status": "moonshot",
   "created_ts": "2026-07-20T09:03:00Z",
-  "cursor": 9,
+  "cursor": 13,
   "spec": null,
   "plan": null,
   "artifacts_absent": "this task has no drafted spec/plan pair yet",
   "stage_progress": [
     {
       "run_id": "r-archive",
-      "seq": 5,
+      "seq": 8,
       "type": "intake.state",
       "stage": "drafting",
       "kind": "intake",

@@ -164,7 +164,7 @@ func (p *projector) runCard(ctx context.Context, runID string) (RunCard, string,
 	}
 
 	// counters — monotonic, no denominator.
-	c.Counters.ElapsedS = elapsedSeconds(createdRaw)
+	c.Counters.ElapsedS = elapsedSeconds(createdRaw, p.clock())
 	if err := p.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM checkpoints WHERE run_id = ?`, runID).Scan(&c.Counters.Steps); err != nil {
 		return RunCard{}, "", false, fmt.Errorf("projection: steps %q: %w", runID, err)
@@ -1415,12 +1415,17 @@ func parseTS(s string) time.Time {
 
 // elapsedSeconds returns now − created_ts in seconds, clamped ≥ 0 (monotonic
 // display counter; never derived from an untrusted single clock for ordering).
-func elapsedSeconds(createdRaw string) int64 {
+// elapsedSeconds reads the projector's clock rather than the wall clock. The
+// seam was already declared on the projector for horizon-bounded projections;
+// this counter belongs to the same class, and reading time.Now() directly made
+// the run card the one read whose output could not be reproduced (drain r1 D4,
+// which needs a committed run-detail fixture).
+func elapsedSeconds(createdRaw string, now time.Time) int64 {
 	t := parseTS(createdRaw)
 	if t.IsZero() {
 		return 0
 	}
-	d := time.Since(t)
+	d := now.Sub(t)
 	if d < 0 {
 		return 0
 	}
