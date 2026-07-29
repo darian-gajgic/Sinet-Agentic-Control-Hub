@@ -110,6 +110,28 @@ test('nothing is kept in web storage', () => {
   expect(hits, 'a client-side side-truth outlives the re-snapshot that should replace it').toEqual([])
 })
 
+test('no view re-declares a registered receipt label as its own literal', () => {
+  // The done-directly labels are REGISTERED text (BENCH-REG §13): the per-run
+  // heuristic line and the aggregate measured form. They reach the screen
+  // through `direct_use.label`, as data. A view that typed one of them would
+  // have made a copy of a registered string that can only be changed through
+  // the registration's own §17 — and would keep rendering the old wording the
+  // day it changed. The tokens are SPLIT here for the same reason the escape
+  // scan splits its own: this file must not contain the literal it forbids.
+  const registered = ['direct-use estimate ' + '(heuristic)', 'measured (benchmark ' + 'n=']
+  const hits: string[] = []
+  for (const [path, raw] of Object.entries(appSources())) {
+    for (const literal of registered) {
+      if (raw.includes(literal)) hits.push(`${path}: ${literal}`)
+    }
+  }
+  expect(hits, 'a view file re-typed a registered label instead of rendering the served one').toEqual([])
+
+  // Probe: the scan can fail, and the fixtures really do carry the strings —
+  // so "no hits" means "rendered from data", not "the label never appears".
+  expect(registered.some((l) => `const label = '${registered[0]}'`.includes(l))).toBe(true)
+})
+
 test('every in-app link is built from the route table, never assembled by hand', () => {
   const hits: string[] = []
   for (const [path, raw] of Object.entries(appSources())) {

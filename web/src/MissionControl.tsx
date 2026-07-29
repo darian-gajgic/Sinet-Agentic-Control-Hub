@@ -1,5 +1,6 @@
 import { api, type MeterView, type Meters, type RunListItem } from './api'
 import type { EventStream } from './events'
+import { FilterBar, FilterView, filterFromSearch } from './Filters'
 import { AnswerView, HistoryPanel } from './History'
 import { missionEventTypes, useLive } from './live'
 import { Absent, Empty, Freshness, Owner, ParkedUntil, Section, Stamp } from './parts'
@@ -73,7 +74,12 @@ export function bucketRuns(runs: RunListItem[], now: number): Bucket[] {
   return buckets
 }
 
-export function MissionControl({ stream }: { stream?: EventStream } = {}) {
+export function MissionControl({
+  stream,
+  me = '',
+  search = '',
+}: { stream?: EventStream; me?: string; search?: string } = {}) {
+  const filter = filterFromSearch(search)
   const work = useLive({
     key: '/api/runs',
     read: () => api.runs(),
@@ -95,6 +101,8 @@ export function MissionControl({ stream }: { stream?: EventStream } = {}) {
   return (
     <section className="surface">
       <h1>Mission control</h1>
+      <FilterBar active={filter} />
+      {filter !== '' && <FilterView id={filter} me={me} stream={stream} />}
       <Freshness stale={work.stale} error={work.error} hasData={work.data !== null} />
 
       {buckets.map((b) => (

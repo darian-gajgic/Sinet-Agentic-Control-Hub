@@ -389,6 +389,84 @@ td {
   margin-block: 0.75rem 0.25rem;
 }
 
+/* ── task detail, fleet, filters (B6-5 part B) ─────────────────────────── */
+
+/* The filters are first-class views, so their bar reads like navigation and
+   wraps at phone width like the shell's own nav does. */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-bar a {
+  text-decoration: none;
+  color: var(--muted);
+}
+
+.filter-bar a[aria-current='page'] {
+  color: var(--fg);
+  border-bottom: 2px solid var(--accent);
+}
+
+.fleet-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.acs,
+.steps,
+.stages,
+.decisions,
+.parks {
+  padding-inline-start: 1.25rem;
+}
+
+.acs li,
+.steps li,
+.stages li,
+.decisions li {
+  margin-block: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.ac-key,
+.step-id {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.decision {
+  color: var(--ok);
+}
+
+.stage-outcome {
+  color: var(--ok);
+}
+
+.receipt {
+  margin-block: 0.5rem;
+}
+
+/* The registered done-directly label and the S10.6 mode note are printed as
+   served; nothing here re-states either string. */
+.direct-use-label {
+  color: var(--fg);
+}
+
+.mode-note {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.lineage {
+  margin-block: 0.75rem;
+}
+
 @media (min-width: 48rem) {
   .conn-detail {
     display: inline;
@@ -408,7 +486,8 @@ td {
   }
 
   .history-choices,
-  .history-slots {
+  .history-slots,
+  .fleet-filters {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: end;

@@ -271,6 +271,180 @@ export type HistoryRegistry = {
   query_names: string[] | null
 }
 
+// ── the task detail (S15.5 ¶3) ────────────────────────────────────────────
+
+/** One numbered acceptance criterion. `structured` is the optional EARS/GWT
+ *  restatement; `plain` is always present. */
+export type AC = { n: number; plain: string; structured?: string; structured_kind?: string }
+
+/** The SPEC as the pipeline stored it. `status` is the §38 ruling-(a) fact the
+ *  view must render honestly: a draft pair is labelled a draft, and is never
+ *  presented as the confirmed specification. */
+export type Spec = {
+  task_id: string
+  owner: string
+  version: number
+  status: string
+  tier?: string
+  provenance?: string
+  restatement: string
+  outcome?: string[]
+  acs: AC[]
+  constraints?: string[]
+  assumptions?: { text: string; basis?: string }[]
+  out_of_scope?: string[]
+  clarifications?: string[]
+}
+
+export type Plan = {
+  task_id: string
+  owner: string
+  version: number
+  spec_version: number
+  status: string
+  steps: { id: string; title: string }[]
+  coverage: Record<string, string[]>
+  risks?: string[]
+}
+
+/** One entry of the per-stage story, derived from the log. No percentage: the
+ *  stages that happened are facts, "how far along" is not one. */
+export type StageStep = {
+  run_id: string
+  seq: number
+  type: string
+  stage: string
+  kind: string
+  outcome?: string
+  ts: string
+}
+
+export type TaskSuccessor = { task_id: string; deliverable_id: string; revision_n: number; created_ts: string }
+
+export type TaskLineage = {
+  project: string
+  /** > 1 means the task claimed more than one project: the ambiguity renders,
+   *  it is never collapsed to a winner. */
+  project_choices: number
+  succeeds: TaskSuccessor[]
+  succeeded_by: TaskSuccessor[]
+}
+
+/** One human decision along the way (S2.4): who decided what, and when. */
+export type TaskDecision = {
+  seq: number
+  type: string
+  ts: string
+  run_id?: string
+  actor: string
+  actor_is_operator?: boolean
+  card_id: string
+  card_type: string
+  decision: string
+  subject?: string
+  reason?: string
+  decided_at?: string
+}
+
+/** The receipt as internal/metering stored it, served verbatim. `items` carries
+ *  Go field names because metering.LineItem has no json tags — consumed as
+ *  served (renaming a landed read's keys is a contract change). */
+export type Receipt = {
+  run_id: string
+  user_id: string
+  items: {
+    Model: string
+    Lane: string
+    Purpose: string
+    Calls: number
+    PromptTokens: number
+    BilledOutputTokens: number
+    PricedUSD: number
+    PricedCalls: number
+    UnpricedCalls: number
+    Currency: string
+  }[]
+  currency: string
+  total_priced_usd: number
+  total_calls: number
+  total_unpriced_calls: number
+  worst_tier: number
+  park_history?: {
+    parked_at: string
+    resumed_at?: string
+    duration_seconds?: number
+    park_reason?: string
+    resume_cause?: string
+    ongoing?: boolean
+  }[]
+  mode: { note: string }
+  /** `label` is the registered done-directly text, served verbatim. The UI
+   *  renders the string it is given and declares none of its own. */
+  direct_use: {
+    label: string
+    formula_ref: string
+    unpriced: boolean
+    reason?: string
+    heuristic_usd?: number
+    currency: string
+    measured_stage_seam?: string
+  }
+  materialized_ts: string
+}
+
+export type TaskRunView = { run_id: string; state: string; created_ts: string; receipt?: Receipt; receipt_absent?: string }
+
+export type TaskDetail = {
+  task_id: string
+  owner: string
+  title: string
+  kanban_status: string
+  created_ts: string
+  cursor: number
+  spec: Spec | null
+  plan: Plan | null
+  /** Why there is no pair — a fact about the task, not an error hiding it. */
+  artifacts_absent?: string
+  stage_progress: StageStep[]
+  lineage: TaskLineage
+  runs: TaskRunView[]
+  decisions: TaskDecision[]
+}
+
+// ── the what-needs-me feeds (S1.4) ────────────────────────────────────────
+
+export type ApprovalItem = {
+  id: string
+  kind: string
+  owner: string
+  run_id: string
+  tier: string
+  answerable: boolean
+  not_answerable_reason?: string
+  batchable: boolean
+  step_up_required: boolean
+  observed_ts: string
+  expiry_at?: string
+  stale?: boolean
+  stale_reasons?: string[]
+}
+
+export type ApprovalList = { items: ApprovalItem[]; cursor: number; truncated?: boolean }
+
+export type Deliverable = {
+  deliverable_id: string
+  owner: string
+  task_id: string
+  project_id: string
+  type: string
+  current_revision: number
+  state: string
+  created_ts: string
+  updated_ts: string
+}
+
+export type DeliverableList = { deliverables: Deliverable[]; cursor: number; truncated: boolean }
+
 /** The board drag's outcome. `applied:false` is the honest stale-board answer,
  *  not an error: the work moved on between the render and the drag. */
 export type PriorityHint = {
@@ -340,6 +514,11 @@ export const api = {
    * within ±1000 where 0 means "no hint" — so a re-rank strategy never assigns
    * 0 to mean "first" — and it lands only on the caller's OWN queued runs.
    */
+  task: (id: string) => request<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`),
+  approvals: () => request<ApprovalList>('/api/approvals'),
+  deliverables: (f: { state?: string; project?: string; type?: string } = {}) =>
+    request<DeliverableList>(`/api/deliverables${query(f)}`),
+
   priorityHint: (task: string, rank: number, reason?: string) =>
     post<PriorityHint>(`/api/tasks/${encodeURIComponent(task)}/priority-hint`, reason ? { rank, reason } : { rank }),
 }

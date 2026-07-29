@@ -1,0 +1,66 @@
+{
+  "run_id": "r-ship",
+  "user_id": "alice",
+  "items": [
+    {
+      "Model": "claude",
+      "Lane": "anthropic",
+      "Purpose": "ceremony",
+      "Tier": 0,
+      "Calls": 3,
+      "PromptTokens": 9800,
+      "BilledOutputTokens": 3000,
+      "CacheReadTokens": 0,
+      "CacheCreationTokens": 0,
+      "ServerToolCalls": 0,
+      "PricedUSD": 0.11,
+      "PricedCalls": 3,
+      "UnpricedCalls": 0,
+      "Currency": "api-equivalent",
+      "TableVersion": ""
+    },
+    {
+      "Model": "claude",
+      "Lane": "anthropic",
+      "Purpose": "execution",
+      "Tier": 0,
+      "Calls": 11,
+      "PromptTokens": 140000,
+      "BilledOutputTokens": 31520,
+      "CacheReadTokens": 0,
+      "CacheCreationTokens": 0,
+      "ServerToolCalls": 0,
+      "PricedUSD": 1.31,
+      "PricedCalls": 10,
+      "UnpricedCalls": 1,
+      "Currency": "api-equivalent",
+      "TableVersion": ""
+    }
+  ],
+  "currency": "api-equivalent",
+  "total_priced_usd": 1.42,
+  "total_calls": 14,
+  "total_unpriced_calls": 1,
+  "worst_tier": 0,
+  "park_history": [
+    {
+      "parked_at": "2026-07-20T09:02:00Z",
+      "resumed_at": "2026-07-20T09:03:00Z",
+      "duration_seconds": 60,
+      "park_reason": "weekly quota reached",
+      "resume_cause": "provider signal"
+    }
+  ],
+  "mode": {
+    "note": "no mode change (S10.6 downgrade ladder lands with routing S08/local tier S12)"
+  },
+  "direct_use": {
+    "label": "direct-use estimate (heuristic)",
+    "formula_ref": "Spec/benchmark-preregistration-v1.md §13",
+    "unpriced": false,
+    "heuristic_usd": 1.42,
+    "currency": "api-equivalent",
+    "measured_stage_seam": ""
+  },
+  "materialized_ts": "2026-07-20T09:04:00Z"
+}

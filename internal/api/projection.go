@@ -1383,6 +1383,24 @@ func firstString(payload json.RawMessage, keys ...string) string {
 	return ""
 }
 
+// firstBool is firstString's sibling for the boolean members of a payload —
+// the D10 co-approval limb marker is one, and reading it as a string would
+// silently make every operator approval look like a member's.
+func firstBool(payload json.RawMessage, keys ...string) bool {
+	var m map[string]any
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return false
+	}
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			if b, ok := v.(bool); ok {
+				return b
+			}
+		}
+	}
+	return false
+}
+
 // parseTS parses a stored timestamp (RFC3339Nano, then RFC3339); zero on
 // failure. Stored ts is never an ordering authority (S02.5) — this is display.
 func parseTS(s string) time.Time {

@@ -38,6 +38,8 @@ test('no layout container carries a fixed pixel width', () => {
     '.column',
     '.card',
     '.table-scroll',
+    '.filter-bar',
+    '.fleet-filters',
   ]) {
     const rules = block(selector)
     expect(rules, `${selector} pins a pixel width — a phone would scroll sideways`).not.toMatch(
@@ -82,6 +84,24 @@ test('content too wide for a phone scrolls inside its own box, not the page', ()
   expect(block('.card-face dd'), 'a long model-written title would widen the page').toContain(
     'overflow-wrap: anywhere',
   )
+})
+
+test('the personal filters and the fleet filters reach everything at phone width', () => {
+  // The filters are first-class views (S1.4) and must be usable on a phone, so
+  // their bar wraps exactly as the shell nav does rather than overflowing.
+  expect(block('.filter-bar')).toContain('flex-wrap: wrap')
+  expect(block('.fleet-filters'), 'the fleet filters do not stack at phone width').toContain('flex-direction: column')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  expect(wide, 'the fleet filters never lay out side by side on a wide screen').toContain('.fleet-filters')
+})
+
+test('long task-detail content wraps instead of widening the page', () => {
+  // `.decisions li` is the last selector of the grouped rule that covers the
+  // ACs, plan steps, stages and decisions — the block helper matches the
+  // selector immediately before the brace.
+  for (const selector of ['.decisions li', '.mode-note']) {
+    expect(block(selector), `${selector} would push the page sideways on a phone`).toContain('overflow-wrap: anywhere')
+  }
 })
 
 test('a view that owes a re-snapshot is marked in the stylesheet, not only in the DOM', () => {

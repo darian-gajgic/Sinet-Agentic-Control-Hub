@@ -116,12 +116,12 @@
       "running",
       "2026-07-20T09:00:00Z",
       "2026-07-20T09:04:00Z",
-      "NO-CALLS",
-      null,
-      0,
-      0,
-      null,
-      null
+      "PARTIAL",
+      1.42,
+      14,
+      1,
+      "api-equivalent",
+      0
     ]
   ],
   "row_count": 7,

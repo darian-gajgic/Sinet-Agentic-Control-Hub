@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "id": "ask:ask-audit",
+      "kind": "ask",
+      "owner": "bob",
+      "run_id": "r-audit",
+      "tier": "medium",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "card": {}
+    }
+  ],
+  "cursor": 9,
+  "truncated": false
+}

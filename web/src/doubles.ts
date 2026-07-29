@@ -2,12 +2,18 @@ import { vi } from 'vitest'
 
 import type { EventSourceLike } from './events'
 
+import approvalsRaw from './fixtures/api/approvals.json?raw'
+import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
 import catalogRaw from './fixtures/api/history-catalog.json?raw'
 import queryAnswerRaw from './fixtures/api/history-query-answer.json?raw'
 import viewAnswerRaw from './fixtures/api/history-view-answer.json?raw'
 import viewsRaw from './fixtures/api/history-views.json?raw'
 import metersRaw from './fixtures/api/meters.json?raw'
 import runsRaw from './fixtures/api/runs.json?raw'
+import receiptRaw from './fixtures/api/receipt.json?raw'
+import taskDetailBareRaw from './fixtures/api/task-detail-bare.json?raw'
+import taskDetailDraftRaw from './fixtures/api/task-detail-draft.json?raw'
+import taskDetailRaw from './fixtures/api/task-detail.json?raw'
 import tasksRaw from './fixtures/api/tasks.json?raw'
 
 /**
@@ -134,6 +140,12 @@ export const fixtures = {
   historyCatalog: () => parse<Record<string, unknown>>(catalogRaw),
   historyViewAnswer: () => parse<Record<string, unknown>>(viewAnswerRaw),
   historyQueryAnswer: () => parse<Record<string, unknown>>(queryAnswerRaw),
+  taskDetail: () => parse<Record<string, unknown>>(taskDetailRaw),
+  taskDetailDraft: () => parse<Record<string, unknown>>(taskDetailDraftRaw),
+  taskDetailBare: () => parse<Record<string, unknown>>(taskDetailBareRaw),
+  receipt: () => parse<Record<string, unknown>>(receiptRaw),
+  approvals: () => parse<Record<string, unknown>>(approvalsRaw),
+  deliverablesInReview: () => parse<Record<string, unknown>>(deliverablesRaw),
 }
 
 /** The routes the B6-5 oversight surfaces read, answered from the fixtures. */
@@ -145,5 +157,7 @@ export function oversightRoutes(): Record<string, Scripted> {
     'GET /api/meters': { body: fixtures.meters() },
     'GET /api/events/views': { body: fixtures.historyViews() },
     'GET /api/events/catalog': { body: fixtures.historyCatalog() },
+    'GET /api/approvals': { body: fixtures.approvals() },
+    'GET /api/deliverables?state=in-review': { body: fixtures.deliverablesInReview() },
   }
 }

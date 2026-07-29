@@ -50,10 +50,16 @@ function scan(files: Record<string, string>): string[] {
 
 test('the scan actually covers the source tree', () => {
   const paths = Object.keys(sources)
-  // A scanner that silently matched nothing would pass forever.
-  expect(paths.length).toBeGreaterThan(10)
+  // A scanner that silently matched nothing would pass forever. The floor moves
+  // with the tree (10 at B6-4, 30 at B6-5) so "the scan grew over the new
+  // views" is a checked fact rather than an assumption about a glob.
+  expect(paths.length).toBeGreaterThan(30)
   expect(paths).toContain('./App.tsx')
   expect(paths).toContain('./events.ts')
+  // The B6-5 oversight surfaces are inside the scan, by name.
+  for (const view of ['./MissionControl.tsx', './Board.tsx', './TaskDetail.tsx', './Fleet.tsx', './Filters.tsx']) {
+    expect(paths, `${view} is not covered by the escape scan`).toContain(view)
+  }
   // The blind spot, asserted so it stays a known fact rather than a belief.
   expect(paths, 'glob now includes this file — see the split-token note above').not.toContain(
     './escape-scan.test.ts',

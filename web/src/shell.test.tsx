@@ -124,7 +124,9 @@ test('the nav reaches every navigable surface, and only real paths', async () =>
   const view = mount(<App stream={inertStream()} />)
   await flush()
 
-  const hrefs = [...view.container.querySelectorAll('nav a')].map((a) => a.getAttribute('href'))
+  // Scoped to the SHELL nav: mission control now carries a second <nav> for
+  // the personal filters, and this assertion is about the primary one.
+  const hrefs = [...view.container.querySelectorAll('.shell-nav a')].map((a) => a.getAttribute('href'))
   expect(hrefs).toEqual(routes.filter((r) => r.nav).map((r) => r.pattern))
   view.unmount()
 })

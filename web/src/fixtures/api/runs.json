@@ -103,9 +103,9 @@
       "generation": 0,
       "created_ts": "2026-07-20T09:00:00Z",
       "updated_ts": "2026-07-20T09:00:00Z",
-      "last_activity_ts": "2026-07-20T09:01:00Z"
+      "last_activity_ts": "2026-07-20T09:04:00Z"
     }
   ],
-  "cursor": 5,
+  "cursor": 9,
   "truncated": false
 }

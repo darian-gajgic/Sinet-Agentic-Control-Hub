@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -757,6 +758,26 @@ type TaskDetail struct {
 	Lineage       TaskLineage   `json:"lineage"`
 	Runs          []TaskRunView `json:"runs"`
 
+	// Decisions is every human decision along this task's way (S2.4), derived
+	// server-side because no landed read served the Human-decision family and
+	// `decision.recorded` carries NO run_id — its subject travels in the
+	// payload, so "which task was this about" is a question only a join can
+	// answer (B6-5 OQ5).
+	//
+	// WHAT IT COVERS: the Human-decision-family rows scoped to this task's runs
+	// (an accepted deliverable, an intake delta answered), plus the
+	// `decision.recorded` rows whose payload subject or card id names this
+	// task, one of its runs, or an EFFECT of one of its runs.
+	//
+	// WHAT IT MISSES, deliberately and by construction: a decision keyed to
+	// none of those subjects is not a task decision. A person-level automation
+	// pause and a per-person budget edit are the live examples — they are real
+	// decisions, they are recorded, and they belong to the person rather than
+	// to any one task, so they render on the surfaces that are about a person.
+	// Widening this to "everything the owner ever decided" would put another
+	// task's approvals on this task's page.
+	Decisions []TaskDecision `json:"decisions"`
+
 	// Pipeline is the intake pipeline's own task view (phase, tier, the open
 	// card), passed through from the surface that owns it. Absent when no
 	// pipeline surface is wired in this process.
@@ -805,6 +826,10 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		s.writeSurface(w, nil, err)
 		return
 	}
+	if detail.Decisions, err = s.proj.taskDecisions(r.Context(), taskID, detail.Owner, detail.Runs); err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
 	s.fillTaskArtifacts(r.Context(), taskID, &detail)
 
 	// The task detail is NOT wrapped as a whole: SPEC/PLAN artifacts, receipts,
@@ -817,6 +842,7 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	// the same property as "cannot carry a secret" (drain D10). They redact at
 	// this serving edge, per R20, before the unwrapped body goes out.
 	redactStageProgress(detail.StageProgress)
+	redactTaskDecisions(detail.Decisions)
 	s.writeReadJSON(w, detail)
 }
 
@@ -916,6 +942,167 @@ func (p *projector) stageProgress(ctx context.Context, runs []TaskRunView) ([]St
 // stageProgressTypes are the family-1 markers the per-stage story reads: the
 // engine stage boundaries and the intake pipeline's own phases.
 var stageProgressTypes = []string{"stage.started", "stage.finished", "intake.state"}
+
+// humanDecisionTypes is the S02.2 Human-decision family, as literals for the
+// same reason the spawn and routing record sets are: internal/api imports no
+// producer package, and the derive-from-log discipline keeps the transport
+// naming types rather than importing the code that mints them.
+var humanDecisionTypes = []string{"decision.recorded", "deliverable.accepted", "intake.delta_decision"}
+
+// TaskDecision is one human decision on this task's way: who decided what,
+// about which card, and when (S2.4 — "actor, card id + type, decision,
+// presented-at → decided-at"). Every string is lifted out of a payload by key
+// and REDACTS at the serving edge, exactly as the stage story does.
+type TaskDecision struct {
+	Seq             int64     `json:"seq"`
+	Type            string    `json:"type"`
+	TS              time.Time `json:"ts"`
+	RunID           string    `json:"run_id,omitempty"`
+	Actor           string    `json:"actor"`
+	ActorIsOperator bool      `json:"actor_is_operator,omitempty"`
+	CardID          string    `json:"card_id"`
+	CardType        string    `json:"card_type"`
+	Decision        string    `json:"decision"`
+	Subject         string    `json:"subject,omitempty"`
+	Reason          string    `json:"reason,omitempty"`
+	DecidedAt       string    `json:"decided_at,omitempty"`
+}
+
+// redactTaskDecisions applies the codor-C2 primitive per lifted VALUE, the
+// redactStageProgress precedent: these fields are run_events payload content on
+// a response that goes out unwrapped, and "enumerated by key" is not the same
+// property as "cannot carry a secret" (§38 D10).
+func redactTaskDecisions(rows []TaskDecision) {
+	for i := range rows {
+		rows[i].Actor = redact.Redact(rows[i].Actor)
+		rows[i].CardID = redact.Redact(rows[i].CardID)
+		rows[i].CardType = redact.Redact(rows[i].CardType)
+		rows[i].Decision = redact.Redact(rows[i].Decision)
+		rows[i].Subject = redact.Redact(rows[i].Subject)
+		rows[i].Reason = redact.Redact(rows[i].Reason)
+	}
+}
+
+// taskDecisions derives the S2.4 story. Two reads, because the family arrives
+// two ways: run-scoped rows are found by run, and `decision.recorded` — which
+// is platform-scoped and carries its subject in the payload — is found by
+// matching that subject against everything this task IS.
+func (p *projector) taskDecisions(ctx context.Context, taskID, owner string, runs []TaskRunView) ([]TaskDecision, error) {
+	out := []TaskDecision{}
+	for _, rv := range runs {
+		q := QueryRunEventsByType(len(humanDecisionTypes))
+		args := append([]any{rv.RunID}, toAny(humanDecisionTypes)...)
+		args = append(args, runDetailRecordCap)
+		rows, err := p.db.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("projection: task decisions %q: %w", rv.RunID, err)
+		}
+		for rows.Next() {
+			d, serr := scanDecision(rows)
+			if serr != nil {
+				rows.Close()
+				return nil, serr
+			}
+			d.RunID = rv.RunID
+			out = append(out, d)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	subjects, err := p.taskSubjects(ctx, taskID, runs)
+	if err != nil {
+		return nil, err
+	}
+	set := placeholders(len(subjects))
+	// The card id is "<kind>:<native-id>", so the native half is matched too —
+	// an effect approval names `effect:<effect_id>`, and the effect is what
+	// ties it to this task's run.
+	q := `SELECT event_seq, type, ts, payload FROM run_events
+	       WHERE type = 'decision.recorded' AND user_id = ? AND run_id IS NULL
+	         AND (json_extract(payload, '$.subject') IN (` + set + `)
+	           OR json_extract(payload, '$.card_id') IN (` + set + `)
+	           OR substr(json_extract(payload, '$.card_id'),
+	                     instr(json_extract(payload, '$.card_id'), ':') + 1) IN (` + set + `))
+	       ORDER BY event_seq LIMIT ?`
+	args := []any{owner}
+	for i := 0; i < 3; i++ {
+		args = append(args, toAny(subjects)...)
+	}
+	args = append(args, runDetailRecordCap)
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: task decision subjects %q: %w", taskID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		d, serr := scanDecision(rows)
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	if len(out) > runDetailRecordCap {
+		out = out[:runDetailRecordCap]
+	}
+	return out, nil
+}
+
+// taskSubjects is everything a decision could name to be ABOUT this task: the
+// task, its runs, and the effects those runs proposed.
+func (p *projector) taskSubjects(ctx context.Context, taskID string, runs []TaskRunView) ([]string, error) {
+	subjects := []string{taskID}
+	if len(runs) == 0 {
+		return subjects, nil
+	}
+	ids := make([]string, 0, len(runs))
+	for _, rv := range runs {
+		subjects = append(subjects, rv.RunID)
+		ids = append(ids, rv.RunID)
+	}
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT effect_id FROM effects WHERE run_id IN (`+placeholders(len(ids))+`) ORDER BY effect_id LIMIT ?`,
+		append(toAny(ids), runDetailRecordCap)...)
+	if err != nil {
+		return nil, fmt.Errorf("projection: task effects %q: %w", taskID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("projection: task effect scan: %w", err)
+		}
+		subjects = append(subjects, id)
+	}
+	return subjects, rows.Err()
+}
+
+func scanDecision(rows *sql.Rows) (TaskDecision, error) {
+	var (
+		d          TaskDecision
+		ts, payloa string
+	)
+	if err := rows.Scan(&d.Seq, &d.Type, &ts, &payloa); err != nil {
+		return d, fmt.Errorf("projection: task decision scan: %w", err)
+	}
+	d.TS = parseTS(ts)
+	pay := json.RawMessage(payloa)
+	d.Actor = firstString(pay, "actor", "approved_by", "accepted_by")
+	d.CardID = firstString(pay, "card_id")
+	d.CardType = firstString(pay, "card_type")
+	d.Decision = firstString(pay, "decision", "answer", "verdict")
+	d.Subject = firstString(pay, "subject")
+	d.Reason = firstString(pay, "reason")
+	d.DecidedAt = firstString(pay, "decided_at")
+	d.ActorIsOperator = firstBool(pay, "actor_is_operator")
+	return d, nil
+}
 
 // taskLineage reads the project linkage and both directions of the S13.9
 // follow-up edges.

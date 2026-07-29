@@ -5,7 +5,9 @@ import { Board } from './Board'
 import { ConnectionState } from './ConnectionState'
 import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
+import { Fleet } from './Fleet'
 import { MissionControl } from './MissionControl'
+import { TaskDetail } from './TaskDetail'
 import { NotFound, Stub } from './Stub'
 import { Link, navigate, useRoute } from './router'
 import { hrefFor, routes } from './routes'
@@ -83,12 +85,18 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
         ) : route.id === 'not-found' ? (
           <NotFound pathname={window.location.pathname} />
         ) : route.id === 'mission-control' ? (
-          <MissionControl stream={stream} />
+          // The personal filters are `/?view=…` on this surface: stable,
+          // bookmarkable URLs that fill the route table rather than renaming it.
+          <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
         ) : route.id === 'board' ? (
           // The caller's own identity decides what is drag-reorderable, and the
           // server refuses the rest: the operator is not excepted from "your
           // own queued work" (S15.5).
           <Board me={session.user?.user_id ?? ''} stream={stream} />
+        ) : route.id === 'fleet' ? (
+          <Fleet stream={stream} />
+        ) : route.id === 'task' ? (
+          <TaskDetail id={params.id} stream={stream} />
         ) : (
           <Stub route={route} params={params} />
         )}
