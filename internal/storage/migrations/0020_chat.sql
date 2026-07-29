@@ -132,14 +132,24 @@ CREATE TABLE chat_turns (
     -- owner's folder while the turn ran (OQ7(a)) — a DIFF over stored rows,
     -- computed once at settle. No watcher, no ticker (§32).
     produced    TEXT NOT NULL DEFAULT '',
-    -- exchange_seq is the manifest WATERMARK read when the turn opened: the
-    -- highest chat_exchange_files.seq that already existed. The window diff is
-    -- `seq > exchange_seq`, which is why a file that was already there can
+    -- exchange_seq and settled_exchange_seq are the OPEN and CLOSE of the turn's
+    -- manifest window: the highest chat_exchange_files.seq that existed when the
+    -- turn opened, and the highest that existed when it resolved. The window diff
+    -- is `seq > exchange_seq`, which is why a file that was already there can
     -- never be reported as produced BY this turn. A timestamp cannot carry that
     -- guarantee: *_ts is second-resolution RFC3339, so an upload landing in the
     -- same second as a turn's start is indistinguishable from one landing
     -- during it, and attributing it would fabricate authorship.
+    --
+    -- The CLOSE exists because one owner may hold running turns in two different
+    -- sessions at once (the one-turn rule is per session, deliberately — a
+    -- person with two conversations open can use both). A file whose seq falls
+    -- inside more than one turn's window is AMBIGUOUS, and OQ7 already answers
+    -- it: the origin ref decides, and where none resolves it the file attributes
+    -- to no turn. Answering that needs each turn's closed window on the row,
+    -- including the windows of turns that claimed nothing.
     exchange_seq INTEGER NOT NULL DEFAULT 0,
+    settled_exchange_seq INTEGER NOT NULL DEFAULT 0,
     started_ts  TEXT NOT NULL,
     settled_ts  TEXT NOT NULL DEFAULT ''
 );

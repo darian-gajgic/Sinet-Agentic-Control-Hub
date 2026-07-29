@@ -508,6 +508,89 @@ func TestProducedFilesDiffIsAWindowAndAnOriginRef(t *testing.T) {
 	}
 }
 
+// TestOverlappingTurnWindowsAttributeToAtMostOneTurn is the cross-session tail
+// of the same fabricated-authorship defect the window fix closed.
+//
+// The one-turn rule is enforced per SESSION on purpose — a person with two
+// conversations open should be able to run a turn in each, and part B renders
+// sessions as switchable — so one owner's turn windows CAN overlap. A file that
+// lands in the overlap belongs to no turn in particular, and OQ7 says so
+// already: the origin ref decides, and where none resolves it the file
+// attributes to no turn. Two turns both printing the same chip under different
+// authorship is a fabrication, not a duplicate.
+func TestOverlappingTurnWindowsAttributeToAtMostOneTurn(t *testing.T) {
+	e := newEnv(t)
+	e.store.Now = func() time.Time { return time.Date(2026, 7, 20, 9, 2, 0, 0, time.UTC) }
+	sa, _ := e.store.CreateSession(e.ctx, "alice")
+	sb, _ := e.store.CreateSession(e.ctx, "alice")
+
+	turnA, _, err := e.store.BeginTurn(e.ctx, "alice", sa.ID, chat.KindAsk, "in the first conversation")
+	if err != nil {
+		t.Fatalf("begin A: %v", err)
+	}
+	turnB, _, err := e.store.BeginTurn(e.ctx, "alice", sb.ID, chat.KindAsk, "in the second conversation")
+	if err != nil {
+		t.Fatalf("begin B — a second session must still be able to open a turn: %v", err)
+	}
+
+	// One upload, inside BOTH open windows and naming neither.
+	ambiguous := upload(t, e, "alice", "dropped-in.csv", "id,amount\n1,42\n")
+	// One upload that DOES name a turn: the origin ref is what resolves an
+	// otherwise identical ambiguity.
+	named, err := e.store.Upload(e.ctx, "alice", "for-b.csv", []byte("x,y\n1,2\n"), sb.ID, turnB.ID)
+	if err != nil {
+		t.Fatalf("named upload: %v", err)
+	}
+
+	settledA, err := e.store.SettleTurn(e.ctx, "alice", turnA.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle A: %v", err)
+	}
+	settledB, err := e.store.SettleTurn(e.ctx, "alice", turnB.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle B: %v", err)
+	}
+
+	claims := 0
+	for _, turn := range []chat.Turn{settledA, settledB} {
+		if contains(turn.Produced, ambiguous.ID) {
+			claims++
+		}
+	}
+	if claims > 1 {
+		t.Errorf("%s is claimed by %d turns (A=%v, B=%v) — a file cannot have been produced by two different turns",
+			ambiguous.ID, claims, settledA.Produced, settledB.Produced)
+	}
+	if claims != 0 {
+		t.Errorf("%s was claimed by a turn although nothing resolves which one caused it — OQ7 attributes it to NO turn",
+			ambiguous.ID)
+	}
+	// The origin-ref half still resolves its own ambiguity: the named file lands
+	// on B and only B, even though A's window spans it just as widely.
+	if !contains(settledB.Produced, named.File.ID) {
+		t.Errorf("B's produced = %v, missing %s — an origin ref is what decides an overlap",
+			settledB.Produced, named.File.ID)
+	}
+	if contains(settledA.Produced, named.File.ID) {
+		t.Errorf("A claimed %s, which names B as its origin", named.File.ID)
+	}
+	// The non-tautological control: with no overlap, the window still attributes.
+	// A third turn, opened after both closed, claims what arrives during it.
+	turnC, _, err := e.store.BeginTurn(e.ctx, "alice", sa.ID, chat.KindAsk, "on its own now")
+	if err != nil {
+		t.Fatalf("begin C: %v", err)
+	}
+	alone := upload(t, e, "alice", "solo.csv", "a,b\n3,4\n")
+	settledC, err := e.store.SettleTurn(e.ctx, "alice", turnC.ID, chat.OutcomeAnswer, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("settle C: %v", err)
+	}
+	if len(settledC.Produced) != 1 || settledC.Produced[0] != alone.ID {
+		t.Fatalf("an unambiguous turn produced %v, want [%s] — the rule above would pass by attributing nothing, ever",
+			settledC.Produced, alone.ID)
+	}
+}
+
 func contains(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {

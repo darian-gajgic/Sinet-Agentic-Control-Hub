@@ -409,6 +409,13 @@ func (s *Store) Delete(ctx context.Context, viewer, id string) (DeleteFileResult
 	return DeleteFileResult{File: f, Applied: true}, nil
 }
 
+// rowQuerier is whatever the produced-files diff reads through — the store's
+// pool for a plain read, or the settle transaction itself so the window closes
+// and is measured atomically.
+type rowQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // producedSince is the OQ7 window diff: manifest rows that appeared in this
 // owner's folder AFTER the turn opened. A row already attributed to a DIFFERENT
 // turn is excluded — it is that turn's product, not this one's — which is the
@@ -423,16 +430,33 @@ func (s *Store) Delete(ctx context.Context, viewer, id string) (DeleteFileResult
 // produced a file it merely found is a fabricated attribution, which the
 // honest-absence rule bars outright.
 //
-// The upper bound is the CALL SITE: this runs once, inside SettleTurn, so every
-// row that exists and is past the watermark arrived while the turn ran. There is
-// no filesystem watcher and no ticker anywhere in this family (§32).
-func (s *Store) producedSince(ctx context.Context, owner, turnID string, sinceSeq int64) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT file_id FROM chat_exchange_files
-		  WHERE user_id = ? AND seq > ?
-		    AND (origin_turn = '' OR origin_turn = ?)
-		  ORDER BY seq LIMIT ?`,
-		owner, sinceSeq, turnID, FileListCap)
+// AND WINDOWS CAN OVERLAP, SO AMBIGUITY ATTRIBUTES TO NOBODY. The one-turn rule
+// is per SESSION, deliberately — a person with two conversations open can run a
+// turn in each — so one owner's windows may overlap, and an upload during the
+// overlap belongs to no turn in particular. OQ7 answers exactly this: the origin
+// ref decides, and where none resolves it the file attributes to no turn. The
+// NOT EXISTS below is that rule: a file with no origin ref is claimed only when
+// no OTHER turn of this owner had a window containing it — a turn still running,
+// or one whose closed window (exchange_seq, settled_exchange_seq] spans the row.
+// Both overlapping turns therefore abstain, rather than both claiming the same
+// file and printing the same chip twice under different authorship.
+//
+// The upper bound is the CALL SITE: this runs once, inside SettleTurn's own
+// transaction, so every row that exists and is past the watermark arrived while
+// the turn ran. There is no filesystem watcher and no ticker anywhere in this
+// family (§32).
+func (s *Store) producedSince(ctx context.Context, q rowQuerier, owner, turnID string, sinceSeq int64) ([]string, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT f.file_id FROM chat_exchange_files f
+		  WHERE f.user_id = ? AND f.seq > ?
+		    AND (f.origin_turn = ?
+		         OR (f.origin_turn = '' AND NOT EXISTS (
+		               SELECT 1 FROM chat_turns x
+		                WHERE x.user_id = f.user_id AND x.turn_id <> ?
+		                  AND x.exchange_seq < f.seq
+		                  AND (x.state = 'running' OR f.seq <= x.settled_exchange_seq))))
+		  ORDER BY f.seq LIMIT ?`,
+		owner, sinceSeq, turnID, turnID, FileListCap)
 	if err != nil {
 		return nil, fmt.Errorf("chat: produced-files diff: %w", err)
 	}

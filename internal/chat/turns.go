@@ -195,23 +195,34 @@ func (s *Store) SettleTurn(ctx context.Context, viewer, turnID, outcomeKind stri
 		return cur, ErrTurnResolved
 	}
 	now := s.stamp()
-	produced, err := s.producedSince(ctx, viewer, turnID, cur.exchangeSeq)
-	if err != nil {
-		return Turn{}, err
-	}
-	producedJSON, err := json.Marshal(produced)
-	if err != nil {
-		return Turn{}, fmt.Errorf("chat: encode produced list: %w", err)
-	}
-	payload, err := json.Marshal(turnSettledPayload(cur, outcomeKind, outcome, len(produced)))
-	if err != nil {
-		return Turn{}, fmt.Errorf("chat: encode %s payload: %w", EventTurnSettled, err)
-	}
 	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		// The window CLOSES here, and the diff is computed inside the same
+		// transaction that closes it — so no upload can land between the two and
+		// end up inside a window nobody recorded. It reads through the tx rather
+		// than the store: the control plane's pool is ONE connection (S02.1), and
+		// a second reader opened underneath an open write transaction deadlocks.
+		var settleSeq int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT IFNULL(MAX(seq), 0) FROM chat_exchange_files`).Scan(&settleSeq); err != nil {
+			return fmt.Errorf("chat: read exchange watermark: %w", err)
+		}
+		produced, err := s.producedSince(ctx, tx, viewer, turnID, cur.exchangeSeq)
+		if err != nil {
+			return err
+		}
+		producedJSON, err := json.Marshal(produced)
+		if err != nil {
+			return fmt.Errorf("chat: encode produced list: %w", err)
+		}
+		payload, err := json.Marshal(turnSettledPayload(cur, outcomeKind, outcome, len(produced)))
+		if err != nil {
+			return fmt.Errorf("chat: encode %s payload: %w", EventTurnSettled, err)
+		}
 		res, err := tx.ExecContext(ctx,
-			`UPDATE chat_turns SET state = ?, outcome_kind = ?, outcome = ?, produced = ?, settled_ts = ?
+			`UPDATE chat_turns SET state = ?, outcome_kind = ?, outcome = ?, produced = ?,
+			        settled_exchange_seq = ?, settled_ts = ?
 			  WHERE turn_id = ? AND user_id = ? AND state = ?`,
-			StateSettled, outcomeKind, string(outcome), string(producedJSON), now,
+			StateSettled, outcomeKind, string(outcome), string(producedJSON), settleSeq, now,
 			turnID, viewer, StateRunning)
 		if err != nil {
 			return fmt.Errorf("chat: settle turn: %w", err)
@@ -300,10 +311,19 @@ func (s *Store) AbandonTurn(ctx context.Context, viewer, turnID string) (Turn, e
 	}
 	now := s.stamp()
 	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		// An abandoned turn claims nothing, but its window still CLOSES: it was
+		// open while files arrived, and another turn that overlapped it must not
+		// then claim them unambiguously (OQ7 — the origin ref decides, else no
+		// turn). A window left open forever would silently disqualify everything.
+		var settleSeq int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT IFNULL(MAX(seq), 0) FROM chat_exchange_files`).Scan(&settleSeq); err != nil {
+			return fmt.Errorf("chat: read exchange watermark: %w", err)
+		}
 		res, err := tx.ExecContext(ctx,
-			`UPDATE chat_turns SET state = ?, settled_ts = ?
+			`UPDATE chat_turns SET state = ?, settled_exchange_seq = ?, settled_ts = ?
 			  WHERE turn_id = ? AND user_id = ? AND state = ?`,
-			StateAbandoned, now, turnID, viewer, StateRunning)
+			StateAbandoned, settleSeq, now, turnID, viewer, StateRunning)
 		if err != nil {
 			return fmt.Errorf("chat: abandon turn: %w", err)
 		}
