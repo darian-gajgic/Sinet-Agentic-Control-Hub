@@ -21,11 +21,25 @@ test('the URL contract is exactly the recorded set', () => {
   ])
 })
 
-/** The B6-5 oversight surfaces, built. `owner: ''` means "this one is real",
- *  which is why the assertion below is two-sided rather than relaxed: a route
- *  is either BUILT or it names the packet that will build it, and a typo in the
- *  owner field can be neither. */
-const built = ['mission-control', 'board', 'task', 'fleet', 'login', 'inbox', 'inbox-item', 'settings', 'chat', 'deliverable']
+/** Every surface, built. `owner: ''` means "this one is real", which is why the
+ *  assertion below is two-sided rather than relaxed: a route is either BUILT or
+ *  it names the packet that will build it, and a typo in the owner field can be
+ *  neither. The workforce map was the last stub, so this list is now the whole
+ *  table minus `not-found` — and the assertion still has both arms, because a
+ *  later packet adds its route to the contract before it builds the surface. */
+const built = [
+  'mission-control',
+  'board',
+  'task',
+  'fleet',
+  'login',
+  'inbox',
+  'inbox-item',
+  'settings',
+  'chat',
+  'deliverable',
+  'workforce',
+]
 
 test('every surface is either built or names the packet that will build it', () => {
   for (const r of routes) {
@@ -35,6 +49,15 @@ test('every surface is either built or names the packet that will build it', () 
     }
     expect(r.owner, `route ${r.id} names no owning packet`).toMatch(/^B6-[5-9]$/)
   }
+})
+
+test('nothing in the URL contract is unbuilt any more', () => {
+  // The two-sided assertion above stays honest whichever way the table moves;
+  // this records the state B6-8 part B leaves it in. Every route the SPA
+  // publishes now answers with a real surface, so no deep link and no push
+  // `navigate` target can land on a not-built-yet page.
+  expect(routes.filter((r) => r.owner !== '').map((r) => r.id)).toEqual([])
+  expect(built).toHaveLength(routes.length)
 })
 
 test('paths resolve to their route and capture their identity', () => {

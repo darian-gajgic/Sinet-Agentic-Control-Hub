@@ -70,6 +70,14 @@ type Config struct {
 	Overlays OverlaySource
 	// Now defaults to time.Now; tests inject a clock.
 	Now func() time.Time
+	// NewID is the identity seam, and it exists for the same reason Now does
+	// (the internal/chat precedent, B6-7): template and version ids are MINTED
+	// rather than caller-supplied, so a golden fixture produced through the real
+	// CreateDraft/Approve verbs would otherwise carry a fresh random string on
+	// every run — and a fixture that churns is a fixture nobody reviews. nil =
+	// the crypto/rand generator, so production behavior is unchanged and no
+	// caller can choose an id.
+	NewID func(prefix string) string
 }
 
 // Store is the worker store.
@@ -80,6 +88,7 @@ type Store struct {
 	root     string
 	overlays OverlaySource
 	now      func() time.Time
+	ids      func(prefix string) string
 }
 
 // NewStore opens the store and materializes the file root.
@@ -99,9 +108,12 @@ func NewStore(cfg Config) (*Store, error) {
 		}
 	}
 	s := &Store{db: cfg.DB, log: cfg.Log, settings: cfg.Settings, root: cfg.Root,
-		overlays: cfg.Overlays, now: cfg.Now}
+		overlays: cfg.Overlays, now: cfg.Now, ids: cfg.NewID}
 	if s.now == nil {
 		s.now = time.Now
+	}
+	if s.ids == nil {
+		s.ids = newID
 	}
 	return s, nil
 }

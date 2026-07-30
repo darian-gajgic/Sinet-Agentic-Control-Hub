@@ -223,6 +223,54 @@ export const deliverableEventTypes = [
   'run.state_changed',
 ] as const
 
+/**
+ * The types that move the WORKFORCE MAP (Spec S15.10; §42).
+ *
+ * Chosen against the registry the same way the other sets were, and each one is
+ * either what puts something on this page or what takes it off:
+ *
+ *  - `worker.template_created` adds a worker to the roster, and
+ *    `worker.version_created` adds a version row beside one;
+ *  - `worker.validated` is what writes a validation record and what a dated
+ *    revalidation stamp rides on (a green stamp also releases a flagged
+ *    version), and `worker.approved` is the ONLY thing that writes the granted
+ *    guardrails block, repoints the active version and seeds the first-N
+ *    counter — three of the things every card renders;
+ *  - `worker.promoted` moves a worker from personal to household, which changes
+ *    WHO is served this row at all;
+ *  - `worker.repointed` moves the active version (rollback is a repoint), so it
+ *    moves which definition and which equipment the card shows;
+ *  - `worker.flagged` and `worker.retired` move the status, and with it the
+ *    S08.7 delivery policy; `worker.graduated` stamps graduation and ends the
+ *    supervised first-N line;
+ *  - `worker.domain_maturity` is the operator flipping a domain full↔degraded,
+ *    which re-marks every worker in that domain at once;
+ *  - `routing.decided` is the version→outcome join's own row — a run routed to a
+ *    version is what a per-version reading is made of — `verdict.recorded` is
+ *    that run's verdict, and `usage.recorded` is what moves its meter reading.
+ *
+ * `worker.gap`, `worker.review` and `worker.automation_run` are deliberately
+ * NOT here: a gap record, a review note and an automation execution are all
+ * real facts and none of them changes anything this page renders. `EventSource`
+ * has no catch-all, so a type not named here is a frame this view never hears
+ * (§41-B).
+ */
+export const workforceEventTypes = [
+  'worker.template_created',
+  'worker.version_created',
+  'worker.validated',
+  'worker.approved',
+  'worker.promoted',
+  'worker.repointed',
+  'worker.flagged',
+  'worker.retired',
+  'worker.graduated',
+  'worker.domain_maturity',
+  'routing.decided',
+  'verdict.recorded',
+  'usage.recorded',
+] as const
+
 export type Live<T> = {
   data: T | null
   /** The failure this view could not read past — rendered, never swallowed. */

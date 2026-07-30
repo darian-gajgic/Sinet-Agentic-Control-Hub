@@ -1,0 +1,278 @@
+{
+  "workers": [
+    {
+      "template_id": "wt-audit",
+      "name": "spend-auditor",
+      "owner": "alice",
+      "scope": "personal",
+      "kind": "agentic",
+      "status": "draft",
+      "active_version": "",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z",
+      "domain": {
+        "name": "software",
+        "maturity": "full",
+        "rubric_ref": "seed-verify-rubric-software"
+      },
+      "delivery": {
+        "deliverable": false,
+        "requires_review": false,
+        "reasons": [
+          "status draft — not deliverable"
+        ]
+      },
+      "definition": null,
+      "definition_absent": "no active version — status draft, so nothing is equipped yet (S08.6)",
+      "versions": [
+        {
+          "version_id": "wtv-audit-1",
+          "version": 1,
+          "active": false,
+          "file_path": "templates/wt-audit/v1.md",
+          "file_sha256": "da6f01b4df59caba6b23c3a39ffa6bb33bca5af062f24aaff8a0743c62d89df3",
+          "author_kind": "composer",
+          "composer": "claude/2026-07",
+          "playbook_version": "composer-playbook/1",
+          "evidence_ref": "gap:spend-audit/2026-07",
+          "origin": "composed",
+          "created_by": "alice",
+          "created_ts": "2026-07-20T09:04:00Z",
+          "requested_grants": {
+            "tools": [
+              "Read",
+              "Grep"
+            ],
+            "class": "C1",
+            "egress": "none"
+          },
+          "granted": null,
+          "granted_absent": "never approved — approval is the only writer of enforcement state (S08.2)",
+          "validation": null,
+          "validation_absent": "the S08.6 battery has not run for this version",
+          "revalidation": null,
+          "revalidation_absent": "never revalidated — no S08.10 trigger has fired for this version",
+          "outcomes": {
+            "runs": [],
+            "truncated": false,
+            "absent": "no routed run in this reading"
+          }
+        }
+      ],
+      "versions_truncated": false
+    },
+    {
+      "template_id": "wt-notes",
+      "name": "release-notes-writer",
+      "owner": "alice",
+      "scope": "household",
+      "kind": "agentic",
+      "status": "active",
+      "active_version": "wtv-notes-2",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z",
+      "domain": {
+        "name": "software",
+        "maturity": "full",
+        "rubric_ref": "seed-verify-rubric-software"
+      },
+      "delivery": {
+        "deliverable": true,
+        "requires_review": true,
+        "reasons": [
+          "supervised first-N: 3 reviews remaining (S08.6)"
+        ]
+      },
+      "definition": {
+        "description": "Writes and revises the household release notes from the merged changelog",
+        "selectors": {
+          "family": "read-analyze",
+          "task_classes": [
+            "review",
+            "summarize"
+          ],
+          "triggers": [
+            "write the release notes",
+            "summarize the changelog"
+          ]
+        },
+        "profile": {
+          "duty": "execution",
+          "effort_floor": "standard"
+        },
+        "requested_equipment": {
+          "tools": [
+            "Read",
+            "Grep",
+            "Glob"
+          ],
+          "skills": [
+            "release-notes-house-style"
+          ],
+          "knowledge": [
+            "release-notes/conventions"
+          ]
+        },
+        "eval": {
+          "golden_set_ref": "golden/release-notes",
+          "planted_defect_ref": "planted/release-notes"
+        },
+        "persona": [
+          "Terse and concrete."
+        ]
+      },
+      "versions": [
+        {
+          "version_id": "wtv-notes-2",
+          "version": 2,
+          "supersedes": "wtv-notes-1",
+          "active": true,
+          "file_path": "templates/wt-notes/v2.md",
+          "file_sha256": "2adf9912b6dd9b021089ae09cf2205d76c3ad80c8968920c2a31f214884b4308",
+          "author_kind": "human",
+          "evidence_ref": "review:release-notes/round-2",
+          "origin": "human-written",
+          "created_by": "alice",
+          "created_ts": "2026-07-20T09:04:00Z",
+          "approved_by": "alice",
+          "approved_ts": "2026-07-20T09:04:00Z",
+          "requested_grants": {
+            "tools": [
+              "Read",
+              "Grep",
+              "Glob"
+            ],
+            "class": "C1",
+            "egress": "none"
+          },
+          "granted": {
+            "granted_tools": [
+              "Read",
+              "Grep",
+              "Glob"
+            ],
+            "confinement_class": "C1",
+            "egress": "none",
+            "budget_usd": 0,
+            "budget_steps": 0,
+            "gate_policy": "{}",
+            "first_n_remaining": 3,
+            "schedule_attachable": false,
+            "updated_ts": "2026-07-20T09:04:00Z"
+          },
+          "validation": {
+            "model": "claude-haiku-4-5",
+            "engine_pin": "claude-cli@2.1.215",
+            "green": true,
+            "approver": "alice",
+            "approved_ts": "2026-07-20T09:04:00Z",
+            "created_ts": "2026-07-20T09:04:00Z"
+          },
+          "revalidation": null,
+          "revalidation_absent": "never revalidated — no S08.10 trigger has fired for this version",
+          "outcomes": {
+            "runs": [
+              {
+                "run_id": "r-claim",
+                "owner": "alice",
+                "cause": "selector-match",
+                "model": "claude",
+                "lane": "anthropic",
+                "effort": "quick",
+                "plain_reason": "the release-notes writer matched the index rebuild's summarize class",
+                "routed_ts": "2026-07-20T09:04:00Z",
+                "verdicts": [],
+                "verdicts_absent": "no verdict recorded for this run yet",
+                "tokens": null,
+                "api_equiv_cost_usd": null,
+                "meter_absent": "no usage recorded for this run yet"
+              },
+              {
+                "run_id": "r-notes",
+                "owner": "alice",
+                "cause": "selector-match",
+                "model": "claude",
+                "lane": "anthropic",
+                "effort": "standard",
+                "plain_reason": "the release-notes writer matched on both signals",
+                "routed_ts": "2026-07-20T09:04:00Z",
+                "verdicts": [
+                  {
+                    "round": 1,
+                    "verdict": "SHIP",
+                    "revision": 2,
+                    "domain": "software",
+                    "ts": "2026-07-20T09:04:00Z"
+                  }
+                ],
+                "tokens": null,
+                "api_equiv_cost_usd": null,
+                "meter_absent": "no meter reading for this run"
+              }
+            ],
+            "truncated": false
+          }
+        },
+        {
+          "version_id": "wtv-notes-1",
+          "version": 1,
+          "active": false,
+          "file_path": "templates/wt-notes/v1.md",
+          "file_sha256": "38513dff7f2813f128fec3b7c95a13af2814a1e9c62f3a4d90d53f3a7844b92d",
+          "author_kind": "human",
+          "evidence_ref": "gap:release-notes/2026-07",
+          "origin": "human-written",
+          "created_by": "alice",
+          "created_ts": "2026-07-20T09:04:00Z",
+          "approved_by": "alice",
+          "approved_ts": "2026-07-20T09:04:00Z",
+          "requested_grants": {
+            "tools": [
+              "Read",
+              "Grep",
+              "Glob"
+            ],
+            "class": "C1",
+            "egress": "none"
+          },
+          "granted": {
+            "granted_tools": [
+              "Read",
+              "Grep",
+              "Glob"
+            ],
+            "confinement_class": "C1",
+            "egress": "none",
+            "budget_usd": 0,
+            "budget_steps": 0,
+            "gate_policy": "{}",
+            "first_n_remaining": 3,
+            "schedule_attachable": false,
+            "updated_ts": "2026-07-20T09:04:00Z"
+          },
+          "validation": {
+            "model": "claude-haiku-4-5",
+            "engine_pin": "claude-cli@2.1.215",
+            "green": true,
+            "approver": "alice",
+            "approved_ts": "2026-07-20T09:04:00Z",
+            "created_ts": "2026-07-20T09:04:00Z"
+          },
+          "revalidation": null,
+          "revalidation_absent": "never revalidated — no S08.10 trigger has fired for this version",
+          "outcomes": {
+            "runs": [],
+            "truncated": false,
+            "absent": "no routed run in this reading"
+          }
+        }
+      ],
+      "versions_truncated": false
+    }
+  ],
+  "roster_scope": "your own personal workers plus the household roster (S15.10)",
+  "outcome_scope": "your own runs only — a shared worker's other runs belong to whoever launched them (D2)",
+  "truncated": false,
+  "outcomes_truncated": false,
+  "cursor": 84
+}

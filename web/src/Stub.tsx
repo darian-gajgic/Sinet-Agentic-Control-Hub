@@ -4,6 +4,11 @@ import type { RouteDef } from './routes'
  * A surface that does not exist yet says so, names the packet that will build
  * it, and renders nothing from the API. Honest absence over a blank page or a
  * mocked-up screen that looks real.
+ *
+ * No route is in that state today — the workforce map was the last one and it
+ * landed with B6-8 part B. This stays because the URL contract moves BEFORE the
+ * surface does: a route is published so deep links and push payloads can be
+ * written against it, and between those two moments this is what answers it.
  */
 export function Stub({ route, params }: { route: RouteDef; params: Record<string, string> }) {
   const keys = Object.keys(params)

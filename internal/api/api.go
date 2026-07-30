@@ -34,6 +34,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // Settings is the api-facing view of the settings registry (Spec S01.10):
@@ -211,6 +212,15 @@ type Config struct {
 	// call, which "consumes these layers and nothing else". nil leaves those
 	// routes answering 503; Layers 0 and 1 are the floor and say so.
 	History *history.Store
+	// Workforce is the S08 worker registry behind the S15.10 workforce map
+	// (workforce.go, B6-8 part B): the roster, each worker's equipment and
+	// permissions, and the multi-stage chains. It is READ-ONLY here — the map
+	// has no mutation affordance and this transport calls no worker verb (S15.10
+	// parks editing to 15.5). Held directly for the *review.Store / *chat.Store
+	// reason (§39/§40-C/§44): internal/worker is a leaf over storage+eventlog,
+	// so the dependency is narrow and acyclic. nil leaves the route answering
+	// 503.
+	Workforce *worker.Store
 	// Chat is the S15.7 conversational assistant's durable state behind the
 	// `/api/chat` family (chatapi.go, B6-7): the per-user session registry, the
 	// immutable transcript, the turn lifecycle and the file exchange. Held
@@ -282,6 +292,9 @@ type Server struct {
 	history *history.Store
 	// chat is the S15.7 assistant's store behind /api/chat (B6-7).
 	chat *chat.Store
+	// workforce is the S08 registry behind /api/workforce (B6-8 part B), read
+	// only — no verb in that file touches it.
+	workforce *worker.Store
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
 	// (the raw tail still serves).
 	proj *projector
@@ -311,6 +324,7 @@ func New(cfg Config) *Server {
 		memGate:    cfg.MemoryGate,
 		history:    cfg.History,
 		chat:       cfg.Chat,
+		workforce:  cfg.Workforce,
 		effects:    cfg.Effects,
 		cancel:     cfg.Cancel,
 		clock:      cfg.Now,
@@ -510,6 +524,16 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/chat/files", s.handleChatFileList)
 	protected("POST /api/chat/files", s.handleChatFileUpload)
 	protected("POST /api/chat/files/{file}/delete", s.handleChatFileDelete)
+
+	// The S15.10 workforce map (B6-8 part B: workforce.go) — ONE read and
+	// nothing else. The roster is scoped server-side to what the caller may see
+	// (own personal workers plus the household roster; the operator reads the
+	// whole registry, because a worker is audited machinery gated by D10 acts and
+	// not personal content), and the per-version outcome figures are scoped by
+	// the RUN's owner besides. There is no mutation verb here at any shape:
+	// editing through the map is parked to 15.5, so the surface performs no act
+	// and has no audit row to name.
+	protected("GET /api/workforce", s.handleWorkforceRead)
 
 	protected("GET /api/memory", s.handleMemoryList)
 	protected("POST /api/memory", s.handleMemoryCreate)

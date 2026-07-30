@@ -74,10 +74,10 @@ function scan(files: Record<string, string>): string[] {
 test('the scan actually covers the source tree', () => {
   const paths = Object.keys(sources)
   // A scanner that silently matched nothing would pass forever. The floor moves
-  // with the tree (10 at B6-4, 30 at B6-5, 35 at B6-6, 40 at B6-7, 42 at B6-8) so
-  // "the scan grew over the new views" is a checked fact rather than an assumption
-  // about a glob.
-  expect(paths.length).toBeGreaterThan(42)
+  // with the tree (10 at B6-4, 30 at B6-5, 35 at B6-6, 40 at B6-7, 42 at B6-8
+  // part A, 44 at part B) so "the scan grew over the new views" is a checked fact
+  // rather than an assumption about a glob.
+  expect(paths.length).toBeGreaterThan(44)
   expect(paths).toContain('./App.tsx')
   expect(paths).toContain('./events.ts')
   // The B6-5 oversight surfaces are inside the scan, by name.
@@ -105,6 +105,11 @@ test('the scan actually covers the source tree', () => {
     // ONE file in the tree that mounts an iframe. If any file needed an escape
     // hatch it would be this one, and it is inside the scan by name.
     './Deliverable.tsx',
+    // The B6-8 part-B workforce map: it renders worker DEFINITIONS — a
+    // description, a prompt-body-adjacent selector set, tool and connector names
+    // and a routing reason, all of which can be composer-written, which is model
+    // output. It is inside the scan by name for that reason.
+    './Workforce.tsx',
   ]) {
     expect(paths, `${view} is not covered by the escape scan`).toContain(view)
   }

@@ -153,9 +153,11 @@ test('the built/unbuilt table moved by exactly one row, and the pattern did not 
   expect(chat.nav).toBe(true)
   // Every OTHER unbuilt surface still names its packet: this packet fills one
   // surface and touches no other row.
-  // B6-8 part A filled the deliverable row after this packet landed, so the one
-  // remaining unbuilt surface is the workforce map.
-  expect(routes.filter((r) => r.owner !== '').map((r) => `${r.id} ${r.owner}`)).toEqual(['workforce B6-8'])
+  // B6-8 filled the deliverable row (part A) and then the workforce row (part
+  // B) after this packet landed, so NO row is unbuilt any more — which is a
+  // stronger statement than the one-remaining-row form it replaces, and the
+  // route contract itself is pinned by the assertions above.
+  expect(routes.filter((r) => r.owner !== '').map((r) => `${r.id} ${r.owner}`)).toEqual([])
 })
 
 test('the open conversation is a URL fact that round-trips through the route table', async () => {

@@ -1294,6 +1294,190 @@ export type ChatUploaded = { file: ChatFile; applied: boolean }
 export type ChatFileDeleted = { file: ChatFile; applied: boolean }
 export type ChatSessionDeleted = { session_id: string; messages: number; turns: number; applied: boolean }
 
+// ── the S15.10 workforce map (B6-8 part B) ────────────────────────────────
+//
+// ONE read serves the whole map, and every absence on it arrives with a reason:
+// a worker with no active version, a version nobody approved, a version nothing
+// was ever routed to. At v0 the roster is EMPTY on a fresh host
+// (compose-when-earned, S08.6) and most versions carry no outcomes at all —
+// that empty IS the truthful answer, so the shapes below make it renderable
+// rather than guessable.
+
+/** The S08.9 multi-stage chain: the dialect, the ONE named service, and the
+ *  ordered steps with their explicit approval nodes marked. Step args are not
+ *  served — the map renders how stages connect, not the values between them. */
+export type WorkflowStep = { id: string; verb: string; approval: boolean }
+export type WorkerWorkflow = { dialect: string; service: string; steps: WorkflowStep[] }
+
+/** What the definition FILE requests (S08.1). What was granted is the version's
+ *  own `granted` block — the S08.2 split, kept as two fields on the wire. */
+export type RequestedEquipment = {
+  tools?: string[]
+  skills?: string[]
+  knowledge?: string[]
+  connectors?: string[]
+}
+
+export type WorkerDefinition = {
+  description?: string
+  selectors: { family?: string; task_classes?: string[]; triggers?: string[] }
+  profile: { duty?: string; effort_floor?: string; model_pin?: string; model_pin_reason?: string }
+  requested_equipment: RequestedEquipment
+  eval: { golden_set_ref?: string; planted_defect_ref?: string }
+  persona?: string[]
+  workflow?: WorkerWorkflow
+  workflow_absent?: string
+}
+
+/** The worker_guardrails row — the S08.2 enforcement state, exclusively. */
+export type WorkerGrants = {
+  granted_tools: string[]
+  gated_tools?: string[]
+  permission_mode?: string
+  confinement_class: string
+  egress: string
+  egress_hosts?: string[]
+  budget_usd: number
+  budget_steps: number
+  gate_policy?: string
+  first_n_remaining: number
+  schedule_attachable: boolean
+  updated_ts: string
+}
+
+export type WorkerValidation = {
+  model?: string
+  engine_pin: string
+  green: boolean
+  approver?: string
+  approved_ts?: string
+  created_ts: string
+}
+
+/** A dated revalidation stamp (S14.8 ¶3). A RED stamp is on the record too, and
+ *  the version stays flagged — which is why `green` is rendered either way. */
+export type WorkerRevalidation = {
+  trigger_kind: string
+  trigger_subject?: string
+  suites: string
+  baseline: string
+  green: boolean
+  actor: string
+  stamped_ts: string
+}
+
+export type WorkerVerdict = { round: number; verdict: string; revision?: number; domain?: string; ts: string }
+
+/** One run routed to a version: the routing decision as recorded, that run's
+ *  verdicts, and its meter reading. `tokens`/`api_equiv_cost_usd` are READ from
+ *  the metering seam and are null when there is no reading — never a zero. */
+export type RoutedRun = {
+  run_id: string
+  owner: string
+  cause: string
+  model?: string
+  lane?: string
+  effort?: string
+  plain_reason?: string
+  degraded?: boolean
+  generalist?: boolean
+  routed_ts: string
+  verdicts: WorkerVerdict[]
+  verdicts_absent?: string
+  verdicts_truncated?: boolean
+  tokens: number | null
+  api_equiv_cost_usd: number | null
+  unpriced?: boolean
+  meter_absent?: string
+}
+
+/** The S08.4 version→outcome join. There is deliberately no total: a cross-run
+ *  figure would be arithmetic nobody performed. `truncated` reports the
+ *  per-version bound cutting the list, so a reading of the newest runs is never
+ *  read as the whole history. */
+export type WorkerOutcomes = { runs: RoutedRun[]; truncated: boolean; absent?: string }
+
+export type WorkerVersion = {
+  version_id: string
+  version: number
+  supersedes?: string
+  active: boolean
+  file_path: string
+  file_sha256: string
+  file_commit?: string
+  author_kind: string
+  composer?: string
+  playbook_version?: string
+  evidence_ref?: string
+  origin: string
+  origin_ref?: string
+  created_by: string
+  created_ts: string
+  approved_by?: string
+  approved_ts?: string
+  graduated_ts?: string
+  requested_grants: {
+    tools?: string[]
+    class: string
+    egress: string
+    egress_hosts?: string[]
+    gated_tools?: string[]
+    permission_mode?: string
+    budget_usd?: number
+    budget_steps?: number
+    schedule_attachable?: boolean
+  }
+  granted: WorkerGrants | null
+  granted_absent?: string
+  validation: WorkerValidation | null
+  validation_absent?: string
+  revalidation: WorkerRevalidation | null
+  revalidation_absent?: string
+  outcomes: WorkerOutcomes
+}
+
+/** The S08.7 policy, served from the registry's own read: what this worker may
+ *  deliver without a person looking, and why not. Degraded mode is structural,
+ *  not advisory, so its consequence arrives as data.
+ *
+ *  It is always present. There is no "unread" state to render because the server
+ *  fails the whole read rather than serving one — the zero policy would say
+ *  `requires_review: false`, and a reader must never be told a worker needs no
+ *  human review by an accident of decoding. */
+export type DeliveryPolicy = { deliverable: boolean; requires_review: boolean; reasons?: string[] }
+
+export type WorkerRow = {
+  template_id: string
+  name: string
+  owner: string
+  scope: string
+  kind: string
+  status: string
+  active_version: string
+  created_ts: string
+  updated_ts: string
+  /** `maturity` is the RAW stored value, so one this build has not heard of
+   *  still reaches the screen rather than vanishing (§42 forward tolerance). */
+  domain: { name: string; maturity: string; rubric_ref?: string }
+  delivery: DeliveryPolicy
+  definition: WorkerDefinition | null
+  definition_absent?: string
+  versions: WorkerVersion[]
+  versions_truncated: boolean
+}
+
+/** `roster_scope` and `outcome_scope` are SERVED sentences, not derived: a
+ *  member's answer and the operator's are different readings of the registry and
+ *  neither may pose as the other. */
+export type Workforce = {
+  workers: WorkerRow[]
+  roster_scope: string
+  outcome_scope: string
+  truncated: boolean
+  outcomes_truncated: boolean
+  cursor: number
+}
+
 /**
  * apiPath reports whether a SERVED route is a machine-surface path on this origin.
  *
@@ -1566,6 +1750,12 @@ export const api = {
    *  caller is told it did not complete rather than told it did. */
   stopPreview: (session: string) =>
     post<PreviewStopped>(`/api/previews/${encodeURIComponent(session)}/stop`, {}),
+
+  // ── the S15.10 workforce map (B6-8 part B) ───────────────────────────────
+  //
+  // ONE read, and no verb: the v0 map has no mutation affordance at all
+  // (S15.10 parks editing to 15.5), so there is nothing else here to call.
+  workforce: () => request<Workforce>('/api/workforce'),
 
   chatFiles: () => request<{ files: ChatFile[] }>('/api/chat/files'),
   /**

@@ -56,6 +56,8 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker/automation"
 )
 
 // fixtureDir is where the committed bodies live: inside the web tree, next to
@@ -76,10 +78,20 @@ const (
 	fxT4 = "2026-07-20T09:04:00Z"
 )
 
-// fixtureMeter is the metering seam for the fixture world. It answers a
-// per-run figure so the card face carries a real cost, and REFUSES for one run
-// so the committed body also carries the honest nil — the absence the views
-// have to render without turning it into a zero (§37).
+// fixtureMeter is the metering seam for the fixture world. It answers a per-run
+// figure so the card face carries a real cost, and it produces BOTH honest nils
+// the views have to render without turning either into a zero (§37):
+//
+//   - it REFUSES for an unknown run;
+//   - and for `r-claim` it answers a ZERO-VALUED reading with NO error, which is
+//     the shape the production ledger actually returns for a run that exists and
+//     has recorded no usage yet. `Ledger.RunConsumption` folds a run's
+//     checkpoint rows, and a run between its routing decision and its first
+//     checkpoint folds to zero tokens, zero cost and zero unpriced calls
+//     successfully. Without this arm in the fixture, every consumer that treats
+//     `err == nil` as "there is a reading" prints USD 0 in production and passes
+//     every test — which is what this arm exists to make impossible. `r-claim`
+//     is the right run for it: its state is `claimed`, so nothing has run.
 type fixtureMeter struct{}
 
 func (fixtureMeter) RunMeter(_ context.Context, runID string) (api.RunMeter, error) {
@@ -90,6 +102,8 @@ func (fixtureMeter) RunMeter(_ context.Context, runID string) (api.RunMeter, err
 		return api.RunMeter{Tokens: 9_100, APIEquivCostUSD: 0.07}, nil
 	case "r-audit":
 		return api.RunMeter{Tokens: 41_500, APIEquivCostUSD: 0.63}, nil
+	case "r-claim":
+		return api.RunMeter{}, nil
 	}
 	return api.RunMeter{}, os.ErrNotExist
 }
@@ -322,6 +336,12 @@ func fixtureWorld(t *testing.T) *backend {
 	driveFixtureSettings(t, b)
 	driveFixtureChat(t, b)
 	seedFixtureChatBornTask(t, b)
+	// LAST, deliberately: the S08 verbs append their own worker.* rows, and
+	// seeding them here rather than earlier keeps every event_seq the other
+	// committed bodies carry exactly where it was. The head cursor still moves —
+	// producer-driven workers mean real appended events, which is the whole point
+	// of driving them — and it moves in lockstep across every body.
+	seedFixtureWorkforce(t, b)
 	return b
 }
 
@@ -1660,6 +1680,7 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Prices:     fixturePrices{},
 		Benchmark:  fixtureBenchmark{},
 		Chat:       b.chat,
+		Workforce:  fixtureWorkforce(t, b),
 		Now:        func() time.Time { return mustTime(t, fxT4) },
 	})
 }
@@ -1829,6 +1850,20 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// The owner's live preview sessions. Empty is the truthful answer in a world
 	// that launches nothing, and "no session is running" is a render of its own.
 	{"previews", "/api/previews", "alice"},
+	// The S15.10 workforce map (B6-8 part B), read BOTH ways — and unlike the
+	// review surface, the two bodies are genuinely different ANSWERS rather than
+	// two renders of one:
+	//
+	//   - the operator's carries the whole registry, including another member's
+	//     PERSONAL automation, and the outcome figures of every owner's runs;
+	//   - alice's carries her own personal workers plus the HOUSEHOLD roster, and
+	//     the outcome figures of her own runs only — bob's personal automation is
+	//     absent from it entirely, which is the limb that leaks if it is wrong.
+	//
+	// Both have to be committed, because "the member sees less" is a claim about
+	// a served body and not about a render.
+	{"workforce", "/api/workforce", ""},
+	{"workforce-member", "/api/workforce", "alice"},
 }
 
 func TestWebAPIFixtures(t *testing.T) {
@@ -2042,4 +2077,358 @@ func canonicalJSON(t *testing.T, raw []byte) []byte {
 		t.Fatalf("indent: %v", err)
 	}
 	return []byte(buf.String())
+}
+
+// ── the S15.10 workforce map (B6-8 part B) ──────────────────────────────────
+
+// The template documents the map renders. They are real files that go in
+// through CreateDraft → RunBattery → Approve, because the roster's equipment
+// block is PARSED from the hash-verified file on every read (S08.3): a
+// hand-written row would point at a file nothing wrote and the tamper check
+// would refuse it, so a hand-written roster fixture cannot exist at all.
+//
+// The v2 body differs from v1 in the PROMPT BODY only, which is what makes v1 a
+// superseded version with its own history rather than a duplicate.
+const (
+	fxWorkerAgenticV1 = `---
+name: release-notes-writer
+description: Writes and revises the household release notes from the merged changelog
+kind: agentic
+domain: software
+selectors:
+  family: read-analyze
+  task_classes: [review, summarize]
+  triggers: [write the release notes, summarize the changelog]
+profile:
+  duty: execution
+  effort_floor: standard
+equipment:
+  tools: [Read, Grep, Glob]
+  skills: [release-notes-house-style]
+  knowledge: [release-notes/conventions]
+eval:
+  golden_set_ref: golden/release-notes
+  planted_defect_ref: planted/release-notes
+persona: [Terse and concrete.]
+---
+Read the changelog since the last release. Write one line per merged change,
+in plain language, and cite the change it came from. Escalate when a change
+has no description to read.
+`
+	fxWorkerAgenticV2 = `---
+name: release-notes-writer
+description: Writes and revises the household release notes from the merged changelog
+kind: agentic
+domain: software
+selectors:
+  family: read-analyze
+  task_classes: [review, summarize]
+  triggers: [write the release notes, summarize the changelog]
+profile:
+  duty: execution
+  effort_floor: standard
+equipment:
+  tools: [Read, Grep, Glob]
+  skills: [release-notes-house-style]
+  knowledge: [release-notes/conventions]
+eval:
+  golden_set_ref: golden/release-notes
+  planted_defect_ref: planted/release-notes
+persona: [Terse and concrete.]
+---
+Read the changelog since the last release. Write one line per merged change,
+in plain language, and cite the change it came from. Group the lines by the
+area of the system they touch. Escalate when a change has no description to
+read.
+`
+	// The automation body is a dialect document (S08.9): a read step feeding an
+	// OUTWARD step that carries its explicit approval node. The marked node is
+	// what R13 renders as the D7 fact it is, so the chain has to contain a real
+	// one — and an outward step's approval marking is only honest when the verb
+	// really is outward.
+	fxWorkerAutomation = `---
+name: calendar-digest
+description: Posts a daily digest of the household calendar to the notes channel
+kind: automation
+domain: chore
+selectors:
+  family: connector-automation
+equipment:
+  connectors: [calendar]
+---
+{"dialect":"sinet-automation/1","service":"calendar","steps":[
+  {"id":"fetch","verb":"calendar.list","args":{"day":{"$from":"payload.day"}}},
+  {"id":"post","verb":"calendar.post","args":{"digest":{"$from":"steps.fetch.summary"}},"approval":true}
+]}
+`
+	// The DRAFT: a real template document whose battery has never run, so it has
+	// no active version, no granted enforcement state and no validation record.
+	// That is the honest state of a composed-but-unapproved worker, and it is a
+	// render the map owes (an empty roster is not the only truthful absence).
+	fxWorkerDraft = `---
+name: spend-auditor
+description: Reads the weekly receipts and reports where the household spend moved
+kind: agentic
+domain: software
+selectors:
+  family: read-analyze
+  task_classes: [review]
+  triggers: [audit the spend]
+profile:
+  duty: execution
+  effort_floor: quick
+equipment:
+  tools: [Read, Grep]
+---
+Read the receipts for the period. Report which lanes moved and by how much,
+citing the receipt each figure came from.
+`
+)
+
+// The workforce fixture's stable ids. Template and version ids are MINTED by
+// the store, so the world pins them through the NewID seam rather than
+// rewriting six tables and a file path afterwards — the same concession the
+// journal clock and review clock already make, and for the same reason.
+const (
+	fxWorkerNotes     = "wt-notes"
+	fxWorkerDigest    = "wt-digest"
+	fxWorkerAudit     = "wt-audit"
+	fxWorkerNotesV1   = "wtv-notes-1"
+	fxWorkerNotesV2   = "wtv-notes-2"
+	fxWorkerDigestV1  = "wtv-digest-1"
+	fxWorkerAuditV1   = "wtv-audit-1"
+	fxWorkerDigestEff = "e-digest"
+)
+
+// fixtureWorkforce composes the S08 store ONCE per world. Like the review
+// store it has to be shared: its Root is where the template FILES live, and a
+// per-server root would put a version's definition where the next server
+// cannot hash-verify it.
+func fixtureWorkforce(t *testing.T, b *backend) *worker.Store {
+	t.Helper()
+	if b.work == nil {
+		ids := fixtureIDs(t, fxWorkerNotes, fxWorkerNotesV1, fxWorkerNotesV2,
+			fxWorkerDigest, fxWorkerDigestV1, fxWorkerAudit, fxWorkerAuditV1)
+		st, err := worker.NewStore(worker.Config{
+			DB: b.db, Log: b.log, Settings: b.reg, Root: filepath.Join(t.TempDir(), "workers"),
+			Now: func() time.Time { return mustTime(t, fxT4) }, NewID: ids,
+		})
+		if err != nil {
+			t.Fatalf("worker.NewStore: %v", err)
+		}
+		b.work = st
+	}
+	return b.work
+}
+
+// fixtureIDs hands out the pinned ids in mint order. It FAILS rather than
+// falling back to a random id when the world mints more than it was given: a
+// silent fallback would make one added version quietly un-commitable, which is
+// the failure this seam exists to prevent.
+func fixtureIDs(t *testing.T, want ...string) func(string) string {
+	t.Helper()
+	next := 0
+	return func(prefix string) string {
+		if next >= len(want) {
+			t.Fatalf("the workforce fixture minted more ids than it pinned (prefix %q, %d pinned)", prefix, len(want))
+			return ""
+		}
+		id := want[next]
+		next++
+		if !strings.HasPrefix(id, prefix+"-") {
+			t.Fatalf("pinned id %q does not carry the %q prefix the store asked for", id, prefix)
+		}
+		return id
+	}
+}
+
+// fxCalendarVerbs is the connector verb registry the automation's station 3
+// runs against: one read verb that executes, one OUTWARD verb that journals a
+// gated proposal and never calls anything (S08.9; D7 makes this free).
+func fxCalendarVerbs() automation.VerbMap {
+	return automation.VerbMap{
+		"calendar.list": {Fn: func(_ context.Context, args map[string]json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"summary":"3 events on ` + strings.Trim(string(args["day"]), `"`) + `"}`), nil
+		}},
+		"calendar.post": {Outward: true, Class: gates.ClassC},
+	}
+}
+
+// seedFixtureWorkforce builds the roster the S15.10 map renders, entirely
+// through S08's own verbs.
+//
+//	wt-notes   agentic, software (FULL), promoted to HOUSEHOLD by the operator,
+//	           two versions: v1 superseded, v2 active. Alice's, and therefore
+//	           the one a member reads through the household limb.
+//	wt-digest  automation, chore (DEGRADED — a new domain is born degraded),
+//	           BOB's and PERSONAL. It renders the multi-stage chain with its
+//	           marked approval node, the degraded-domain marking, and — because
+//	           it is another member's personal worker — it is what must NOT
+//	           appear in Alice's roster.
+//	wt-audit   agentic, alice's, PERSONAL, DRAFT: the battery never ran, so it
+//	           has no active version, no granted guardrails and no validation.
+//
+// Then the version→outcome join gets something real to join over: four routing
+// decisions naming a worker VERSION, across two owners and two versions, plus
+// one recorded verdict. That is what makes both arms of the join driven — a
+// version WITH outcomes beside a version with none — and what makes the
+// member/operator outcome scopes differ observably rather than by assertion.
+func seedFixtureWorkforce(t *testing.T, b *backend) {
+	t.Helper()
+	ctx := context.Background()
+	st := fixtureWorkforce(t, b)
+
+	// The skill the agentic definition REFERENCES. Station 1 resolves skill refs
+	// against the store's own skill root, so an unresolved ref is a lint error
+	// and the battery would be red: installing it for real is what makes the
+	// equipment block resolvable rather than aspirational.
+	if _, err := st.InstallSkill(ctx, "alice", "release-notes-house-style", map[string][]byte{
+		"SKILL.md": []byte("---\nname: release-notes-house-style\n" +
+			"description: How this household writes release notes\n---\n" +
+			"One line per change. Plain language. Cite the change.\n"),
+	}); err != nil {
+		t.Fatalf("InstallSkill: %v", err)
+	}
+
+	// `chore` does not exist in the 0005 day-one rows, and CreateDomain makes it
+	// DEGRADED by construction (S08.7 maturity honesty) — which is exactly the
+	// structural fact the automation's card has to render.
+	if err := st.CreateDomain(ctx, "op", "chore"); err != nil {
+		t.Fatalf("CreateDomain(chore): %v", err)
+	}
+
+	// wt-notes v1 → validated → approved → active.
+	if _, _, err := st.CreateDraft(ctx, "alice", fxWorkerAgenticV1,
+		worker.RequestedGrants{Tools: []string{"Read", "Grep", "Glob"}, Class: "C1", Egress: worker.EgressNone},
+		worker.Provenance{AuthorKind: "human", Origin: worker.OriginHumanWritten,
+			EvidenceRef: "gap:release-notes/2026-07"}); err != nil {
+		t.Fatalf("CreateDraft(notes): %v", err)
+	}
+	fxApproveWorker(t, st, "alice", fxWorkerNotesV1)
+
+	// v2: every edit is a new immutable version row (S08.4). The body moved, so
+	// first-N resets — the supervised counter the map renders is the real one.
+	if _, err := st.NewVersion(ctx, "alice", fxWorkerNotes, fxWorkerAgenticV2,
+		worker.RequestedGrants{Tools: []string{"Read", "Grep", "Glob"}, Class: "C1", Egress: worker.EgressNone},
+		worker.Provenance{AuthorKind: "human", Origin: worker.OriginHumanWritten,
+			EvidenceRef: "review:release-notes/round-2"}); err != nil {
+		t.Fatalf("NewVersion(notes v2): %v", err)
+	}
+	fxApproveWorker(t, st, "alice", fxWorkerNotesV2)
+
+	// Promotion to household-shared is an OPERATOR approval (D10, S08.4), and it
+	// is what puts this worker in a member's roster through the shared limb
+	// rather than through ownership.
+	if err := st.Promote(ctx, "op", fxWorkerNotes); err != nil {
+		t.Fatalf("Promote(notes): %v", err)
+	}
+
+	// wt-digest: bob's personal automation. Station 3 is a sample-payload
+	// execution whose outward step journals a gated proposal — the world's own
+	// consequence of validating an automation, so the proposal is left standing
+	// and its id pinned (the e-publish precedent: the journal mints a UUID no
+	// committed file can carry, while the payload and its journal-computed hash
+	// stay the producer's own).
+	if _, _, err := st.CreateDraft(ctx, "bob", fxWorkerAutomation,
+		worker.RequestedGrants{Tools: []string{"calendar.list", "calendar.post"}, Class: "C0",
+			Egress: worker.EgressSingleHost, EgressHosts: []string{"calendar.example.com"}},
+		worker.Provenance{AuthorKind: "human", Origin: worker.OriginHumanWritten}); err != nil {
+		t.Fatalf("CreateDraft(digest): %v", err)
+	}
+	res, err := st.RunBattery(ctx, fxWorkerDigestV1, worker.BatteryInput{
+		Actor: "bob", SampleTask: `{"day":"2026-07-20"}`,
+		Verbs: fxCalendarVerbs(), Journal: fixtureJournal(t, b),
+	})
+	if err != nil {
+		t.Fatalf("RunBattery(digest): %v", err)
+	}
+	if !res.Green {
+		t.Fatalf("digest battery red: lint=%+v audit=%+v", res.Lint, res.Audit)
+	}
+	fxPinDryRunProposal(t, b, fxWorkerDigestEff)
+	if _, err := st.Approve(ctx, "bob", fxWorkerDigestV1, worker.ApproveOpts{}); err != nil {
+		t.Fatalf("Approve(digest): %v", err)
+	}
+
+	// wt-audit: the draft nobody validated.
+	if _, _, err := st.CreateDraft(ctx, "alice", fxWorkerDraft,
+		worker.RequestedGrants{Tools: []string{"Read", "Grep"}, Class: "C1", Egress: worker.EgressNone},
+		worker.Provenance{AuthorKind: "composer", Composer: "claude/2026-07",
+			PlaybookVer: "composer-playbook/1", Origin: worker.OriginComposed,
+			EvidenceRef: "gap:spend-audit/2026-07"}); err != nil {
+		t.Fatalf("CreateDraft(audit): %v", err)
+	}
+
+	// The S08.4 version→outcome join's own ground. Every row names a worker AND
+	// a version, which is what makes it joinable at all; the runs are ones the
+	// world already has, so no task or run row is added.
+	for _, e := range []struct{ run, owner, version, cause, effort, reason, ts string }{
+		{"r-notes", "alice", fxWorkerNotesV2, "selector-match", "standard",
+			"the release-notes writer matched on both signals", fxT4},
+		{"r-claim", "alice", fxWorkerNotesV2, "selector-match", "quick",
+			"the release-notes writer matched the index rebuild's summarize class", fxT4},
+		{"r-stall", "bob", fxWorkerNotesV2, "override", "standard",
+			"bob re-routed the re-index to the release-notes writer", fxT4},
+		{"r-audit", "bob", fxWorkerNotesV1, "selector-match", "standard",
+			"the release-notes writer v1 matched the price-table audit", fxT2},
+	} {
+		exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+		            VALUES (?,0,?,?,1,?,?)`, e.run, e.owner, "routing.decided",
+			`{"cause":"`+e.cause+`","score":0.88,"worker":"`+fxWorkerNotes+`","worker_name":"release-notes-writer",`+
+				`"version":"`+e.version+`","model":"claude","lane":"anthropic","effort":"`+e.effort+`",`+
+				`"plain_reason":"`+e.reason+`","window_tokens":200000}`, e.ts)
+	}
+	// ONE recorded verdict, so a routed run WITH a verdict renders beside routed
+	// runs without one. Both arms have to be in the committed body: "no verdict
+	// yet" and "SHIP" are different facts and neither may be inferred.
+	exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+	            VALUES (?,0,?,?,1,?,?)`, "r-notes", "alice", "verdict.recorded",
+		`{"round":1,"verdict":"SHIP","ac_ids":["AC-1","AC-2"],"passed":["AC-1","AC-2"],`+
+			`"domain":"software","revision":2,"content_sha256":"sha-d-notes-2","retention":"keep-forever",`+
+			`"golden_set":{}}`, fxT4)
+}
+
+// fxApproveWorker drives one version through station 3 and station 4 for real:
+// a green battery is what Approve requires, and Approve is the ONLY writer of
+// the guardrails row the map renders as the permissions block (S08.2).
+func fxApproveWorker(t *testing.T, st *worker.Store, actor, versionID string) {
+	t.Helper()
+	res, err := st.RunBattery(context.Background(), versionID, worker.BatteryInput{
+		Actor: actor, SampleTask: "write the release notes for the current cycle",
+		Engine: fxDryEngine{}, Model: "claude-haiku-4-5", EnginePin: "claude-cli@2.1.215",
+	})
+	if err != nil {
+		t.Fatalf("RunBattery(%s): %v", versionID, err)
+	}
+	if !res.Green {
+		t.Fatalf("battery red for %s: lint=%+v audit=%+v dry=%+v", versionID, res.Lint, res.Audit, res.DryRun)
+	}
+	if _, err := st.Approve(context.Background(), actor, versionID, worker.ApproveOpts{}); err != nil {
+		t.Fatalf("Approve(%s): %v", versionID, err)
+	}
+}
+
+// fxDryEngine is station 3's sandboxed dry run. NO engine is spawned and no
+// paid call is made — the established fake-engine posture.
+type fxDryEngine struct{}
+
+func (fxDryEngine) DryRun(context.Context, worker.DryRunRequest) (worker.DryRunResult, error) {
+	return worker.DryRunResult{Completed: true, TranscriptRef: "fixture://dry-run/release-notes",
+		Output: "one line per merged change, grouped by area", CostUSD: 0.01}, nil
+}
+
+// fxPinDryRunProposal pins the id of the effect the automation's station 3
+// journaled. The journal mints a UUID, which no committed body can carry; the
+// PAYLOAD and its journal-computed hash — the things the approval verb checks —
+// stay the producer's own.
+func fxPinDryRunProposal(t *testing.T, b *backend, id string) {
+	t.Helper()
+	var minted string
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT effect_id FROM effects WHERE json_extract(payload, '$.kind') = ? ORDER BY rowid DESC LIMIT 1`,
+		"automation-step").Scan(&minted); err != nil {
+		t.Fatalf("read the automation dry-run proposal: %v", err)
+	}
+	exec(t, b, `UPDATE effects SET effect_id = ?, created_ts = ?, updated_ts = ? WHERE effect_id = ?`,
+		id, fxT4, fxT4, minted)
 }

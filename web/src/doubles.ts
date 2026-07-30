@@ -42,6 +42,8 @@ import taskDetailDraftRaw from './fixtures/api/task-detail-draft.json?raw'
 import taskDetailOpsRaw from './fixtures/api/task-detail-ops.json?raw'
 import taskDetailRaw from './fixtures/api/task-detail.json?raw'
 import tasksRaw from './fixtures/api/tasks.json?raw'
+import workforceRaw from './fixtures/api/workforce.json?raw'
+import workforceMemberRaw from './fixtures/api/workforce-member.json?raw'
 
 /**
  * The offline harness every view test drives (P3/CONVENTIONS.md §42).
@@ -262,6 +264,23 @@ export const fixtures = {
   placedComments: () => parse<Record<string, unknown>>(placedCommentsRaw),
   acceptCard: () => parse<Record<string, unknown>>(acceptCardRaw),
   previews: () => parse<Record<string, unknown>>(previewsRaw),
+  /**
+   * The S15.10 workforce map (B6-8 part B), read BOTH ways — and unlike the
+   * settings and price bodies, these two are different ANSWERS rather than one
+   * body computed per caller:
+   *
+   *   `workforce` is the OPERATOR's: the whole registry, including another
+   *   member's personal automation, with the outcome figures of every owner's
+   *   runs. It carries a household worker with two versions (one routed to,
+   *   one superseded and routed to once), a degraded-domain automation with its
+   *   marked approval node, and a draft with no active version at all.
+   *
+   *   `workforceMember` is ALICE's: her own draft plus the household worker, the
+   *   outcome figures of her own runs only, and — the limb that leaks if it is
+   *   wrong — bob's personal automation absent entirely.
+   */
+  workforce: () => parse<Record<string, unknown>>(workforceRaw),
+  workforceMember: () => parse<Record<string, unknown>>(workforceMemberRaw),
 }
 
 /** The routes the B6-5 oversight surfaces read, answered from the fixtures. */
@@ -412,6 +431,15 @@ function objectDetail(id: string, type: string, subject: string): Record<string,
  *  ids the committed bodies carry. */
 export const chatSessionID = 'cs-0000000000000001'
 export const chatEmptySessionID = 'cs-0000000000000014'
+
+/** The one read the S15.10 map makes. The map offers no act, so there is
+ *  nothing else to script — which is itself part of what the suite asserts. */
+export function workforceRoutes(body = fixtures.workforce()): Record<string, Scripted> {
+  return {
+    ...oversightRoutes(),
+    'GET /api/workforce': { body },
+  }
+}
 
 export function chatRoutes(): Record<string, Scripted> {
   return {

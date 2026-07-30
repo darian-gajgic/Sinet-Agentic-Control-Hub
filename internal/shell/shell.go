@@ -256,6 +256,12 @@ func Run(ctx context.Context, opts Options) error {
 	// capability wall.
 	var memReads *memory.Store
 	var memWrites *memory.Gate
+	// workRoster is the S08 worker registry, held for the api composition below
+	// (B6-8 part B): the S15.10 workforce map reads the roster, each worker's
+	// equipment and permissions, and the multi-stage chains through it. Held
+	// read-only — the map has no mutation affordance and the transport calls no
+	// worker verb.
+	var workRoster *worker.Store
 	var localSurf *localSurface
 	// The S14.4 watchdog suite (B5-3): composed in the production path, driven by
 	// shell-owned goroutines (sweep + Tier-0 tail + dead-man probe) after step 5.
@@ -404,6 +410,7 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 		logger.Info("worker: store open (Spec S08.1)", "root", workStore.Root())
+		workRoster = workStore
 
 		// The S14.8 regression-eval surface (B5-5): the per-version floor
 		// registry, the revalidation runbook (flag → run → compare → dated
@@ -818,11 +825,15 @@ func Run(ctx context.Context, opts Options) error {
 		// 503 rather than pretending a knowledge store is open.
 		Memory:     memReads,
 		MemoryGate: memWrites,
-		History:    histSurf,    // S14.10 layers, consumed by the S15.7 turn verbs
-		Chat:       chatSurf,    // S15.7 sessions/transcript/turns/exchange (B6-7)
-		DB:         db,          // S14.3 snapshot projections (owner-scoped, OQ1)
-		Meter:      meterReader, // S14.3 run-card counters (§4)
-		Logger:     logger,
+		History:    histSurf, // S14.10 layers, consumed by the S15.7 turn verbs
+		Chat:       chatSurf, // S15.7 sessions/transcript/turns/exchange (B6-7)
+		// The B6-8 part-B workforce map: the S08 registry, read only. nil under
+		// injected admission, which leaves the route at 503 rather than
+		// pretending an empty registry is the roster.
+		Workforce: workRoster,
+		DB:        db,          // S14.3 snapshot projections (owner-scoped, OQ1)
+		Meter:     meterReader, // S14.3 run-card counters (§4)
+		Logger:    logger,
 	})
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),

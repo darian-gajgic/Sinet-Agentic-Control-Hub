@@ -84,7 +84,7 @@ func (s *Store) CreateDraft(ctx context.Context, actor string, src string, req R
 
 	now := rfc3339(s.now())
 	t := Template{
-		ID: newID("wt"), Owner: actor, Name: def.Name, Scope: ScopePersonal,
+		ID: s.ids("wt"), Owner: actor, Name: def.Name, Scope: ScopePersonal,
 		Kind: def.Kind, Domain: def.Domain, Status: StatusDraft,
 		CreatedTS: now, UpdatedTS: now,
 	}
@@ -161,7 +161,7 @@ func (s *Store) insertVersion(ctx context.Context, t Template, num int64, supers
 		return Version{}, err
 	}
 	v := Version{
-		ID: newID("wtv"), TemplateID: t.ID, Version: num, Supersedes: supersedes,
+		ID: s.ids("wtv"), TemplateID: t.ID, Version: num, Supersedes: supersedes,
 		FilePath: relPath, FileSHA256: sha, Requested: req,
 		AuthorKind: prov.AuthorKind, Composer: prov.Composer, PlaybookVer: prov.PlaybookVer,
 		EvidenceRef: prov.EvidenceRef, Origin: prov.Origin, OriginRef: prov.OriginRef,

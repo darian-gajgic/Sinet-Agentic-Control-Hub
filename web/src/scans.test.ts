@@ -246,6 +246,38 @@ test('no view re-declares a REGISTERED answer vocabulary as its own literal', ()
   }
 })
 
+test('the workforce map performs no act — a SOURCE scan beside the DOM walk', () => {
+  // S15.10: "the v0 surface has no mutation affordances" (editing is parked to
+  // 15.5). The map's own suite walks the rendered DOM for forms, inputs and
+  // buttons; that catches what a render produces and cannot see a handler that
+  // never fired, so this reads the source. The two together are the check.
+  const src = strip(sources['./Workforce.tsx'])
+  expect(src, 'Workforce.tsx is not in the scan — the whole check would pass vacuously').toBeTruthy()
+
+  const acts = [
+    /\bpost\s*\(/,
+    /method:\s*['"](?:POST|PUT|PATCH|DELETE)/,
+    /\bonSubmit\b/,
+    /\bonClick\b/,
+    /<form\b/,
+    /\bPUT\b|\bPATCH\b|\bDELETE\b/,
+  ]
+  const hits = acts.filter((p) => p.test(src)).map(String)
+  expect(hits, 'the workforce map carries a mutation shape').toEqual([])
+
+  // The one API call it makes, by name: a second read would be a shape to keep
+  // in step with a body nothing else serves, and any other `api.` member is a
+  // verb the map has no business reaching.
+  const called = [...src.matchAll(/\bapi\.([A-Za-z0-9_]+)/g)].map((m) => m[1])
+  expect([...new Set(called)], 'the map calls something other than its one read').toEqual(['workforce'])
+
+  // Probes, one per class: the scan is shown able to fail rather than trusted.
+  expect(acts.some((p) => p.test('await api.approveWorker(id)\n<button onClick={go}>Edit</button>'))).toBe(true)
+  expect(acts.some((p) => p.test('<form onSubmit={save}>'))).toBe(true)
+  expect(acts.some((p) => p.test("fetch(url, { method: 'DELETE' })"))).toBe(true)
+  expect([...'const x = api.accept(id)'.matchAll(/\bapi\.([A-Za-z0-9_]+)/g)].map((m) => m[1])).toEqual(['accept'])
+})
+
 test('every golden double is consumed by something — a fixture nothing reads is a guard nobody has', () => {
   // §42 ties the web views to the served bodies by having the vitest doubles
   // import the SAME files the Go assertor writes. A double nothing calls breaks

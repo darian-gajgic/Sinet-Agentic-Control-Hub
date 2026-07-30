@@ -139,6 +139,37 @@
       }
     },
     {
+      "id": "effect:e-digest",
+      "kind": "effect",
+      "owner": "bob",
+      "tier": "high",
+      "answerable": true,
+      "batchable": false,
+      "step_up_required": true,
+      "payload_hash": "f38c4c29b023c28070da1959f01ad04d7d5081a3bf5b505fd5dacff15c52595f",
+      "observed_ts": "2026-07-20T09:04:00Z",
+      "expiry_at": "2026-07-20T09:04:20Z",
+      "stale": false,
+      "actions": [
+        "approve",
+        "deny"
+      ],
+      "approvals": {
+        "platform_level": true,
+        "owner_approved": false,
+        "operator_approved": false
+      },
+      "card": {
+        "args": {
+          "digest": "3 events on 2026-07-20"
+        },
+        "kind": "automation-step",
+        "service": "calendar",
+        "step": "post",
+        "verb": "calendar.post"
+      }
+    },
+    {
       "id": "ask:ask-audit",
       "kind": "ask",
       "owner": "bob",
@@ -800,6 +831,6 @@
       }
     }
   ],
-  "cursor": 64,
+  "cursor": 84,
   "truncated": false
 }

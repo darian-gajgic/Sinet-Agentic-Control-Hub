@@ -15,16 +15,20 @@ import { TaskDetail } from './TaskDetail'
 import { NotFound, Stub } from './Stub'
 import { Link, navigate, useRoute } from './router'
 import { hrefFor, routes } from './routes'
+import { Workforce } from './Workforce'
 
 /**
  * The app shell: one responsive workspace (Spec S1.10 via S15.12), the stable
  * URLs every deep link and push `navigate` field will target (S15.11), the
  * S01.9 session, and the always-visible connection state (S15.12).
  *
- * The oversight, decision, settings, assistant and review surfaces are built;
- * the workforce map is still a named stub that says which packet fills it in. A
- * stub renders nothing from the API — honest absence, never a mocked screen that
- * looks real.
+ * EVERY ROUTE IN THE TABLE IS BUILT. The workforce map was the last stub and it
+ * landed with B6-8 part B, so no URL this SPA publishes answers with a
+ * not-built-yet page. `Stub` stays as the terminal arm below because a later
+ * packet publishes its route BEFORE it builds the surface — the URL contract is
+ * what deep links and push payloads are written against, so it moves first — and
+ * a route in that state has to say so rather than render blank. A stub reads
+ * nothing from the API: honest absence, never a mocked screen that looks real.
  */
 export default function App({ stream }: { stream?: EventStream } = {}) {
   const { route, params } = useRoute()
@@ -124,6 +128,12 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           // on it. That is presentation over a served body — the server refuses
           // the verb regardless (S15.2).
           <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
+        ) : route.id === 'workforce' ? (
+          // View-only by construction (S15.10 parks editing to 15.5): the map
+          // takes no identity prop because it offers no act. What each caller
+          // may SEE is decided server-side and the read says out loud which
+          // reading it returned.
+          <Workforce stream={stream} />
         ) : (
           <Stub route={route} params={params} />
         )}

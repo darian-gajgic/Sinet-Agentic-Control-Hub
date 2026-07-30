@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { ConnectionState } from './ConnectionState'
 import { EventStream, type EventSourceLike, type Status } from './events'
-import { routes } from './routes'
+import { routes, type RouteDef } from './routes'
+import { Stub } from './Stub'
 import { flush, mount } from './testing'
 
 /** A stream that never opens anything — the shell's connection machinery is
@@ -64,28 +65,41 @@ afterEach(() => {
 
 // ── routes and stubs (S15.11) ─────────────────────────────────────────────
 
-test('every unbuilt surface has a reachable stub naming its owning packet', async () => {
-  const table: Record<string, Route> = { 'GET /api/auth/session': signedIn }
-  routeFetch(table)
-
-  let stubs = 0
-  for (const r of routes) {
-    // A BUILT surface renders its data, not a stub. Asserting `toContain('')`
-    // over those would be vacuous — the built ones have their own suites
-    // (mission.test.tsx, board.test.tsx), and are exercised there.
-    if (r.id === 'login' || r.owner === '') continue
-    const path = r.pattern.replace(/:(\w+)/g, 'x-1')
-    window.history.replaceState(null, '', path)
-    const view = mount(<App stream={inertStream()} />)
-    await flush()
-
-    const text = view.container.textContent ?? ''
-    expect(text, `${path} did not render its surface title`).toContain(r.title)
-    expect(text, `${path} does not name its owning packet`).toContain(r.owner)
-    stubs++
-    view.unmount()
+test('a route published ahead of its surface falls to a stub that names its packet and reads nothing', () => {
+  // This used to loop over the UNBUILT rows of the route table. B6-8 part B
+  // filled the last one, so that loop now quantifies over an empty set — its
+  // own floor said so, which is why it is replaced rather than deleted. What it
+  // was really checking is a property of `Stub`, and that property still
+  // matters: the URL contract moves BEFORE the surface does (a route is
+  // published so deep links and push `navigate` payloads can be written against
+  // it), and between those two moments this is what answers.
+  const calls = routeFetch({ 'GET /api/auth/session': signedIn })
+  const pending: RouteDef = {
+    // The id is not what Stub renders — it renders the title, the owning packet
+    // and the captured params — so any RouteID stands in for a row that does
+    // not exist yet.
+    id: 'not-found',
+    pattern: '/example/:id',
+    title: 'Example surface',
+    owner: 'B7-1',
+    nav: false,
   }
-  expect(stubs, 'no stub was checked — the loop would pass vacuously').toBeGreaterThan(0)
+  const view = mount(<Stub route={pending} params={{ id: 'x-1' }} />)
+  const text = view.container.textContent ?? ''
+  expect(text, 'the stub does not render its surface title').toContain(pending.title)
+  expect(text, 'the stub does not name its owning packet').toContain(pending.owner)
+  expect(text, 'the stub does not show the identity the URL already carries').toContain('id=x-1')
+  // "renders nothing from the API" is the other half of the promise, and it is
+  // checked rather than read: no request left this component.
+  expect(calls, 'a stub reached the control plane').toEqual([])
+  view.unmount()
+})
+
+test('every route in the contract is built, so no URL answers with a stub', () => {
+  // The state B6-8 part B leaves the table in. Two-sided: the assertion in
+  // routes.test.ts still admits an unbuilt row that names its packet, and this
+  // records that none exists today.
+  expect(routes.filter((r) => r.owner !== '').map((r) => `${r.id} → ${r.owner}`)).toEqual([])
 })
 
 test('a built surface renders its own heading, not a stub', async () => {

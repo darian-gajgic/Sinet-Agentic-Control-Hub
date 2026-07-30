@@ -23,6 +23,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // backend is a real migrated platform.db with its event log and auth store.
@@ -50,6 +51,12 @@ type backend struct {
 	rev  *review.Store
 	acc  *accept.Accepter
 	prev *preview.Manager
+	// work is the S08 worker registry, composed ONCE per world (B6-8 part B)
+	// with a pinned clock and id seam. It has to be shared for the review
+	// store's reason: its Root is where template FILES live, and a per-server
+	// root would put a version's definition where the next server cannot
+	// hash-verify it. Nil until a rig composes it.
+	work *worker.Store
 }
 
 func newBackend(t *testing.T) *backend {
