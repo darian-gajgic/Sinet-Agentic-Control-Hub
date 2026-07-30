@@ -391,13 +391,16 @@ func TestDeliverablesTaskFilterIsOwnerScoped(t *testing.T) {
 		return out
 	}
 
-	// operator: both of the task's deliverables.
-	if got := ids("op", "/api/deliverables?task=t-ship"); len(got) != 2 {
-		t.Errorf("operator sees %v, want both of the task's deliverables", got)
+	// The operator sees the task's deliverables, and the OWNER sees exactly the
+	// same set — which is the scope claim, stated without a count so growing the
+	// fixture world cannot make an owner-scope test fail for the wrong reason.
+	asOperator := ids("op", "/api/deliverables?task=t-ship")
+	asOwner := ids("alice", "/api/deliverables?task=t-ship")
+	if len(asOwner) == 0 {
+		t.Error("the owner sees none of their own deliverables — the read would pass vacuously")
 	}
-	// owner: their own, present.
-	if got := ids("alice", "/api/deliverables?task=t-ship"); len(got) != 2 {
-		t.Errorf("the owner sees %v, want their own deliverables", got)
+	if strings.Join(asOperator, ",") != strings.Join(asOwner, ",") {
+		t.Errorf("operator sees %v and the owner sees %v — one read, one answer", asOperator, asOwner)
 	}
 	// another member: none — the filter narrows, it does not widen.
 	if got := ids("bob", "/api/deliverables?task=t-ship"); len(got) != 0 {

@@ -1,0 +1,28 @@
+{
+  "deliverable_id": "d-site",
+  "revision_n": 2,
+  "pin_kind": "content",
+  "content_pin": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
+  "project_id": "release-notes",
+  "protected_ref": "refs/heads/main",
+  "trailers": "Co-Authored-By: claude-cli claude \u003canthropic@vendor.noreply.sinet.invalid\u003e\nAssisted-by: claude-cli (claude) via Sinet",
+  "provenance": {
+    "minting_run_id": "r-ship",
+    "engine": "claude-cli",
+    "model": "claude",
+    "lane": "anthropic",
+    "vendor_noreply": "anthropic@vendor.noreply.sinet.invalid"
+  },
+  "signing": {
+    "structural": true,
+    "per_call_flag": false,
+    "key_leaves_broker": false,
+    "statement": "signing is your structural posture, not an option on this card: it is all-or-nothing per user (S13.6 step 5), the broker holds the git-ssh-key and does the signing, and no key material or per-call flag crosses this surface. Whether YOUR commits are signed is a broker fact this transport does not probe — asking would mean reaching past the accept orchestration that owns it."
+  },
+  "tier": "high",
+  "tier_statement": "High tier: this pushes a commit to a shared branch, so it is never batched and your PIN is re-prompted in the same request. No elevation is inherited from an idle session (S15.6; S01.9).",
+  "payload_hash": "4f738c8df1b4cf6250d0031ddb4e354e33a38e59dfcc83a503d316913ab627b1",
+  "acceptable": true,
+  "reason": "open: accept with this payload_hash and your PIN in the same request",
+  "route": "POST /api/deliverables/d-site/accept"
+}

@@ -1,0 +1,101 @@
+{
+  "deliverable": {
+    "id": "d-brief",
+    "owner": "alice",
+    "task_id": "t-brief",
+    "project_id": "release-notes",
+    "subject_ref": "docs/brief.pdf",
+    "type": "pdf",
+    "current_revision": 2,
+    "state": "in-review",
+    "created_ts": "2026-07-20T09:04:00Z",
+    "updated_ts": "2026-07-20T09:04:00Z"
+  },
+  "revisions": [
+    {
+      "deliverable_id": "d-brief",
+      "n": 1,
+      "owner": "alice",
+      "run_id": "r-brief",
+      "attempt_ref": "r-brief#round-1",
+      "pin_kind": "objects",
+      "platform_ref": "refs/sinet/deliverable/d-brief/rev-1",
+      "objects": [
+        {
+          "name": "docs/brief.pdf",
+          "size": 13,
+          "sha256": "86b1b60c61c4672bbf2aa432fd15e119aac5106bcc2eae59fe881cf1c7884648",
+          "type": "application/pdf"
+        }
+      ],
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "deliverable_id": "d-brief",
+      "n": 2,
+      "owner": "alice",
+      "run_id": "r-brief",
+      "attempt_ref": "r-brief#round-2",
+      "pin_kind": "objects",
+      "platform_ref": "refs/sinet/deliverable/d-brief/rev-2",
+      "objects": [
+        {
+          "name": "docs/brief.pdf",
+          "size": 13,
+          "sha256": "45927fa56bdda8671ee6f03546a9e63788b6ca1d987d6dfcc092d57c328c667b",
+          "type": "application/pdf"
+        }
+      ],
+      "created_ts": "2026-07-20T09:04:00Z"
+    }
+  ],
+  "lineage": {
+    "project": "(no project)",
+    "project_choices": 1,
+    "succeeds": [],
+    "succeeded_by": []
+  },
+  "doors": [
+    {
+      "verb": "accept",
+      "method": "POST",
+      "route": "/api/deliverables/d-brief/accept",
+      "available": false,
+      "reason": "revision 2 is not repo-backed: it pins content but no snapshot commit, and an accept pushes a commit (S13.1/S13.6)",
+      "pin_from": "GET /api/deliverables/d-brief/accept-card"
+    },
+    {
+      "verb": "request-revision",
+      "method": "POST",
+      "route": "/api/approvals/ask:ask-brief/answer",
+      "available": true,
+      "reason": "open: this deliverable is parked on a rework-family card, so a bounded revision is that card's revise_with_guidance answer — the guidance lands as durable requester comments and enters the next attempt through THE drain (S07.7/S13.4)",
+      "pin_from": "GET /api/approvals",
+      "answer": "revise_with_guidance",
+      "ask_id": "ask-brief",
+      "payload_hash": "94d537de0a4b62cd382c44e06d38cbe9d165527ba8692eb425dfd3eef7ba17ee"
+    },
+    {
+      "verb": "follow-up",
+      "method": "POST",
+      "route": "/api/deliverables/d-brief/follow-up",
+      "available": true,
+      "reason": "open: A successor task links to a numbered revision of this deliverable (S13.9); the framings are presets over that one link."
+    },
+    {
+      "verb": "preview",
+      "method": "POST",
+      "route": "/api/deliverables/d-brief/preview",
+      "available": true,
+      "reason": "a preview launches from a minted revision and answers a defined state for every type — no-preview and requires-container-tier are answers, not failures (S13.8)"
+    },
+    {
+      "verb": "preview-compare",
+      "method": "POST",
+      "route": "/api/deliverables/d-brief/preview/compare",
+      "available": true,
+      "reason": "a preview launches from a minted revision and answers a defined state for every type — no-preview and requires-container-tier are answers, not failures (S13.8); with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"
+    }
+  ],
+  "cursor": 64
+}

@@ -184,6 +184,45 @@ export const chatFileEventTypes = ['chat.file_uploaded', 'chat.file_deleted'] as
  */
 export const chatIntakeEventTypes = ['intake.state', 'decision.recorded'] as const
 
+/**
+ * The types that move a DELIVERABLE REVIEW surface (Spec S15.8; §42).
+ *
+ * Chosen against the registry the same way the other sets were — each one either
+ * changes what the page renders or takes something off it:
+ *
+ *  - `artifact.produced` is a new REVISION, which moves the lineage, the default
+ *    round-over-round pair and every placement on screen;
+ *  - `review.comment` is the comment loop's own row, minted by the store on both
+ *    ingresses (a human comment and a verification finding);
+ *  - `review.drained` is what STAMPS the finding numbers and marks a batch
+ *    consumed, so it is the frame that flips a comment from open to consumed;
+ *  - `deliverable.accepted` is the terminal act: the state moves, the doors close
+ *    and the accept card stops being acceptable;
+ *  - `verdict.recorded` moves a revision's verdict ref, which the lineage shows;
+ *  - `preview.started` / `preview.stopped` move the live-session list this page
+ *    offers a stop on;
+ *  - `engine.gate_ask` and `decision.recorded` are what OPEN and CLOSE the rework
+ *    card the request-revision door hangs on — without them a door that just went
+ *    live (or dead) would keep rendering its old state;
+ *  - `run.state_changed` covers the minting run reaching a state that changes
+ *    whether a revision is still being worked on.
+ *
+ * `EventSource` has no catch-all, so a type not named here is a frame this view
+ * never hears (§41-B).
+ */
+export const deliverableEventTypes = [
+  'artifact.produced',
+  'review.comment',
+  'review.drained',
+  'deliverable.accepted',
+  'verdict.recorded',
+  'preview.started',
+  'preview.stopped',
+  'engine.gate_ask',
+  'decision.recorded',
+  'run.state_changed',
+] as const
+
 export type Live<T> = {
   data: T | null
   /** The failure this view could not read past — rendered, never swallowed. */

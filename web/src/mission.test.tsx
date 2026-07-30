@@ -65,9 +65,14 @@ test('every bucket is filled from served rows, and no run falls off the screen',
   // client never re-ranks. `waiting_on_human` is a SERVED flag (parked AND an
   // open ask), so this is what fills the bucket: `r-ship` is running with two
   // open asks of its own and is correctly not here.
-  expect(by('blocked'), 'the human bucket is not the served waiting-on-human set, in served order')
-    .toEqual(['t-chatborn.intake', 'r-audit'])
-  expect(by('parked'), 'blocked-on-a-human must not also appear as merely parked').toEqual(['r-stall'])
+  expect(by('blocked'), 'the human bucket is not the served waiting-on-human set, in served order').toEqual(
+    runs.filter((r) => r.waiting_on_human).map((r) => r.run_id),
+  )
+  expect(by('blocked').length, 'the waiting-on-human bucket is empty, so the assertion above proves nothing')
+    .toBeGreaterThan(1)
+  expect(by('parked'), 'blocked-on-a-human must not also appear as merely parked').toEqual(
+    runs.filter((r) => r.state === 'parked' && !r.waiting_on_human).map((r) => r.run_id),
+  )
   expect(by('finished')).toEqual(['r-notes'])
   // `claimed` is named by none of the five buckets — and is still on screen.
   expect(by('other')).toEqual(['r-claim'])

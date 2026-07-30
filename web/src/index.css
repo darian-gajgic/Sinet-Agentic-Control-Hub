@@ -953,6 +953,154 @@ td {
   gap: 0.25rem;
 }
 
+/* ── the S15.8 review surface (B6-8) ───────────────────────────────────────
+   Owned CSS only. react-diff-view's own stylesheet styles the widget's own DOM
+   (adopt-don't-fork: re-implementing its presentation would be forking it); what
+   is below is the Sinet frame around it — the image trio, the metadata cards, the
+   synthetic strip, the doors, the frames and the accept card. Phone-first, like
+   the rest of the sheet: everything stacks by default and widens at the one
+   breakpoint. */
+
+.deliverable .rev-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.deliverable .rev-n,
+.deliverable .object-name,
+.deliverable .attempt-ref,
+.deliverable .finding-number {
+  font-weight: 600;
+}
+
+.deliverable .quote code,
+.deliverable .object-sha {
+  overflow-wrap: anywhere;
+}
+
+.diff-controls,
+.image-modes,
+.port-picker,
+.merge-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.diff-file {
+  margin: 0.5rem 0;
+  overflow-x: auto;
+}
+
+.diff-file-head {
+  margin: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-widget {
+  padding: 0.35rem 0.5rem;
+  border-left: 3px solid currentColor;
+}
+
+.comment {
+  padding: 0.35rem 0;
+}
+
+.comment-body,
+.door-reason,
+.placement,
+.signing {
+  overflow-wrap: anywhere;
+}
+
+.suggested,
+.trailers,
+.merge-card pre {
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.comment-list,
+.synthetic-strip ul,
+.doors,
+.live-previews ul,
+.object-side ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.synthetic-strip {
+  margin: 0.5rem 0;
+  padding: 0.35rem 0.5rem;
+  border-left: 3px solid currentColor;
+}
+
+.comment-composer,
+.request-revision,
+.accept-form,
+.frame-path {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.comment-composer textarea,
+.request-revision textarea {
+  min-width: 0;
+  min-height: 4rem;
+}
+
+.two-up,
+.frames {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.image-side {
+  margin: 0;
+}
+
+.deliverable img,
+.image-side img {
+  max-width: 100%;
+  height: auto;
+}
+
+.swipe-stack,
+.onion-stack {
+  position: relative;
+}
+
+.swipe-top,
+.onion-top {
+  position: absolute;
+  inset: 0 auto 0 0;
+  overflow: hidden;
+}
+
+.onion-top {
+  inset: 0;
+}
+
+.frame iframe {
+  width: 100%;
+  min-height: 20rem;
+  border: 1px solid currentColor;
+}
+
+.frame-absent {
+  padding: 0.5rem;
+  border: 1px dashed currentColor;
+}
+
+.accept-card dd,
+.accept-outcome dd {
+  overflow-wrap: anywhere;
+}
+
 @media (min-width: 48rem) {
   .conn-detail {
     display: inline;
@@ -1021,5 +1169,26 @@ td {
 
   .chat-input {
     flex: 1 1 0;
+  }
+
+  .deliverable .rev-picker,
+  .diff-controls,
+  .image-modes,
+  .port-picker,
+  .frame-path {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .two-up,
+  .frames {
+    flex-direction: row;
+  }
+
+  .two-up > *,
+  .frames > * {
+    flex: 1 1 0;
+    min-width: 0;
   }
 }

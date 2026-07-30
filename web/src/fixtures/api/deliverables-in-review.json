@@ -1,6 +1,61 @@
 {
   "deliverables": [
     {
+      "deliverable_id": "d-site",
+      "owner": "alice",
+      "task_id": "t-ship",
+      "project_id": "release-notes",
+      "type": "code",
+      "current_revision": 2,
+      "state": "in-review",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "deliverable_id": "d-notebook",
+      "owner": "alice",
+      "task_id": "t-ship",
+      "project_id": "release-notes",
+      "type": "notebook",
+      "current_revision": 2,
+      "state": "in-review",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "deliverable_id": "d-hero",
+      "owner": "alice",
+      "task_id": "t-ship",
+      "project_id": "release-notes",
+      "type": "image",
+      "current_revision": 2,
+      "state": "in-review",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "deliverable_id": "d-bundle",
+      "owner": "alice",
+      "task_id": "t-ship",
+      "project_id": "release-notes",
+      "type": "binary",
+      "current_revision": 2,
+      "state": "in-review",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "deliverable_id": "d-brief",
+      "owner": "alice",
+      "task_id": "t-brief",
+      "project_id": "release-notes",
+      "type": "pdf",
+      "current_revision": 2,
+      "state": "in-review",
+      "created_ts": "2026-07-20T09:04:00Z",
+      "updated_ts": "2026-07-20T09:04:00Z"
+    },
+    {
       "deliverable_id": "d-changelog",
       "owner": "alice",
       "task_id": "t-ship",
@@ -12,6 +67,6 @@
       "updated_ts": "2026-07-20T09:04:00Z"
     }
   ],
-  "cursor": 46,
+  "cursor": 64,
   "truncated": false
 }

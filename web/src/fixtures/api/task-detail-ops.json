@@ -4,7 +4,7 @@
   "title": "Rotate the household keys",
   "kanban_status": "intake",
   "created_ts": "2026-07-20T09:04:00Z",
-  "cursor": 46,
+  "cursor": 64,
   "spec": null,
   "plan": null,
   "artifacts_absent": "this task has no drafted spec/plan pair yet",
@@ -25,7 +25,7 @@
   ],
   "decisions": [
     {
-      "seq": 21,
+      "seq": 39,
       "type": "decision.recorded",
       "ts": "2026-07-20T09:04:00Z",
       "actor": "op",

@@ -1,0 +1,24 @@
+{
+  "deliverable_id": "d-hero",
+  "type": "image",
+  "old_n": 1,
+  "new_n": 2,
+  "surface": "image-pair",
+  "old_objects": [
+    {
+      "name": "site/hero.png",
+      "size": 11,
+      "sha256": "38ac1c48047475eb275103a3b18febf98abff8a3d7413b72edf4b3ffb84be439",
+      "type": "image/png"
+    }
+  ],
+  "new_objects": [
+    {
+      "name": "site/hero.png",
+      "size": 11,
+      "sha256": "b280cac44341c23d8beac495162c6d8b99ba777ae45c6408610ba05ca9cb50ba",
+      "type": "image/png"
+    }
+  ],
+  "changed": true
+}

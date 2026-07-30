@@ -1,0 +1,24 @@
+{
+  "deliverable_id": "d-bundle",
+  "type": "binary",
+  "old_n": 1,
+  "new_n": 2,
+  "surface": "binary-cards",
+  "old_objects": [
+    {
+      "name": "dist/site.tar",
+      "size": 15,
+      "sha256": "b67370360dc57414ac26bbd6d6b57ec1bbf404c4f376afa3e1b0cdb6284defac",
+      "type": "application/x-tar"
+    }
+  ],
+  "new_objects": [
+    {
+      "name": "dist/site.tar",
+      "size": 15,
+      "sha256": "8ef5e2f4e804cee443cc53ee648e785d7c997d210495d3bcc454389e5dffe5e8",
+      "type": "application/x-tar"
+    }
+  ],
+  "changed": true
+}

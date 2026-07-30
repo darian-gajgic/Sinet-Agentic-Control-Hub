@@ -1,0 +1,220 @@
+{
+  "deliverable_id": "d-site",
+  "revision_n": 2,
+  "comments": [
+    {
+      "id": 1,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 1,
+      "kind": "human",
+      "severity": "blocker",
+      "body": "The page mounts before the theme is applied, so the first paint is unstyled.",
+      "suggested_change": "  theme.apply()\n  return mount(notes)",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 14,
+        "line_text": "  return mount(notes)"
+      },
+      "anchor_status": "exact",
+      "status": "consumed",
+      "finding_number": 1,
+      "consumed_at": "2026-07-20T09:04:00Z",
+      "consumed_by": "r-ship#round-2",
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "id": 2,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 1,
+      "kind": "human",
+      "severity": "note",
+      "body": "loadNotes() can return an empty list — is that a render or an error?",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 9,
+        "line_text": "export function loadNotes() {"
+      },
+      "anchor_status": "exact",
+      "status": "open",
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "id": 3,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 1,
+      "kind": "human",
+      "severity": "blocker",
+      "body": "This component has no error boundary above it.",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "old",
+        "line_no": 3,
+        "line_text": "export function ReleasePage() {"
+      },
+      "anchor_status": "exact",
+      "status": "open",
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "id": 4,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 1,
+      "kind": "human",
+      "severity": "note",
+      "body": "Worth checking nothing still imports this before it goes.",
+      "anchor": {
+        "file_path": "site/legacy.tsx",
+        "side": "new",
+        "line_no": 2,
+        "line_text": "export const legacy = true"
+      },
+      "anchor_status": "exact",
+      "status": "open",
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "id": 5,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 2,
+      "kind": "human",
+      "severity": "note",
+      "body": "The README should say where the notes come from.",
+      "anchor": {
+        "file_path": "site/README.md",
+        "side": "",
+        "line_no": 0,
+        "line_text": ""
+      },
+      "anchor_status": "file",
+      "status": "open",
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "id": 6,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 2,
+      "kind": "human",
+      "severity": "note",
+      "body": "Applying the theme here is the right place.",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 15,
+        "line_text": "  theme.apply()"
+      },
+      "anchor_status": "exact",
+      "status": "open",
+      "created_ts": "2026-07-20T09:04:00Z"
+    },
+    {
+      "id": 7,
+      "owner": "alice",
+      "deliverable_id": "d-site",
+      "revision_n": 2,
+      "run_id": "r-ship",
+      "kind": "finding",
+      "severity": "note",
+      "category": "accessibility",
+      "criterion": "AC-2",
+      "body": "The page sets no document title, so a screen reader announces the URL.",
+      "anchor": {
+        "file_path": "",
+        "side": "",
+        "line_no": 0,
+        "line_text": ""
+      },
+      "origin_anchor": "section:accessibility",
+      "anchor_status": "file",
+      "status": "open",
+      "created_ts": "2026-07-20T09:04:00Z"
+    }
+  ],
+  "placements": [
+    {
+      "comment_id": 1,
+      "revision_n": 2,
+      "status": "drifted",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 16,
+        "line_text": "  return mount(notes)"
+      }
+    },
+    {
+      "comment_id": 2,
+      "revision_n": 2,
+      "status": "mapped",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 10,
+        "line_text": "export function loadNotes() {"
+      }
+    },
+    {
+      "comment_id": 3,
+      "revision_n": 2,
+      "status": "drifted",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 4,
+        "line_text": "export function ReleasePage() {"
+      }
+    },
+    {
+      "comment_id": 4,
+      "revision_n": 2,
+      "status": "orphan",
+      "anchor": {
+        "file_path": "",
+        "side": "",
+        "line_no": 0,
+        "line_text": ""
+      }
+    },
+    {
+      "comment_id": 5,
+      "revision_n": 2,
+      "status": "file",
+      "anchor": {
+        "file_path": "site/README.md",
+        "side": "",
+        "line_no": 0,
+        "line_text": ""
+      }
+    },
+    {
+      "comment_id": 6,
+      "revision_n": 2,
+      "status": "exact",
+      "anchor": {
+        "file_path": "site/release.tsx",
+        "side": "new",
+        "line_no": 15,
+        "line_text": "  theme.apply()"
+      }
+    },
+    {
+      "comment_id": 7,
+      "revision_n": 2,
+      "status": "file",
+      "anchor": {
+        "file_path": "",
+        "side": "",
+        "line_no": 0,
+        "line_text": ""
+      }
+    }
+  ],
+  "cursor": 64
+}

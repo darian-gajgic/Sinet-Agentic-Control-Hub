@@ -21,7 +21,16 @@ import (
 // gitDiff runs `git diff --no-index` over two contents and returns the
 // unified diff body ("" when identical). Exit status 1 means "differs" and
 // is not an error.
-func gitDiff(oldContent, newContent string) (string, error) {
+//
+// `name` is the LOGICAL path the two contents belong to, and it is what the
+// returned diff's file headers name. Without it the headers named the
+// throwaway temp files git was handed — a random directory per call — which
+// made the served text carry a host path AND differ on every read of the
+// same immutable revision pair. A unified diff's headers are the file
+// identity every consumer reads (the S15.8 widget parses them, and the
+// anchor model keys on file paths), so naming the temp file was naming the
+// wrong thing. An empty name leaves the output as git wrote it.
+func gitDiff(name, oldContent, newContent string) (string, error) {
 	dir, err := os.MkdirTemp("", "sinet-review-diff-*")
 	if err != nil {
 		return "", fmt.Errorf("review: diff tmp: %w", err)
@@ -50,7 +59,29 @@ func gitDiff(oldContent, newContent string) (string, error) {
 		}
 		// Exit 1 = the files differ: the expected outcome, not an error.
 	}
-	return out.String(), nil
+	return relabel(out.String(), oldPath, newPath, name), nil
+}
+
+// relabel rewrites the temp paths in a unified diff's file headers to the
+// logical path the contents came from. Only the paths git was handed are
+// replaced — by exact string, not by pattern — so no diff BODY line can be
+// touched: a temp path cannot appear in content that was written to that temp
+// path moments earlier.
+func relabel(unified, oldPath, newPath, name string) string {
+	if unified == "" || name == "" {
+		return unified
+	}
+	// git prints the paths under the a/ b/ prefixes with the leading separator
+	// stripped; the bare absolute forms are replaced too, because which one a
+	// git version emits for --no-index outside a repository is not something to
+	// depend on.
+	rel := func(p string) string { return strings.TrimPrefix(filepath.ToSlash(p), "/") }
+	return strings.NewReplacer(
+		"a/"+rel(oldPath), "a/"+name,
+		"b/"+rel(newPath), "b/"+name,
+		filepath.ToSlash(oldPath), name,
+		filepath.ToSlash(newPath), name,
+	).Replace(unified)
 }
 
 // hunk is one parsed @@ block.

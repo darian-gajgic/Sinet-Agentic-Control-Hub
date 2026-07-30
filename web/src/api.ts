@@ -808,21 +808,345 @@ export type Revision = {
   created_ts: string
 }
 
+/** One content-addressed object pin: the metadata card's fields plus the hash the
+ *  bytes are read back by. `type` is the label the MINT recorded, not a wire
+ *  header — the bytes route decides from a closed allowlist what may render
+ *  inline, and everything else is an attachment. */
+export type ObjectRef = { name: string; size: number; sha256: string; type?: string }
+
+export type DeliverableRow = {
+  id: string
+  owner: string
+  task_id: string
+  project_id?: string
+  subject_ref?: string
+  type: string
+  current_revision: number
+  state: string
+  created_ts: string
+  updated_ts: string
+}
+
+/**
+ * One live verb on a deliverable, with the preconditions that decide whether it
+ * is open right now — doors-as-data (B6-3 OQ3).
+ *
+ * The surface renders a CONTROL only where `available`, and renders `reason`
+ * verbatim where it is not. It never invents a door and never hides one: a closed
+ * door still ships, carrying why, so the state can be explained instead of
+ * silently omitted (the D3/D9 honesty rule).
+ */
+export type Door = {
+  verb: string
+  method: string
+  route: string
+  available: boolean
+  reason: string
+  /** The read a caller makes FIRST to obtain the `payload_hash` its body quotes. */
+  pin_from?: string
+  /** The answer verb the body carries when this door answers a card. */
+  answer?: string
+  ask_id?: string
+  payload_hash?: string
+  /** The S13.9 framing a follow-up spawns under. */
+  preset?: string
+}
+
 export type DeliverableDetail = {
-  deliverable: {
-    id: string
-    owner: string
-    task_id: string
-    project_id?: string
-    subject_ref?: string
-    type: string
-    current_revision: number
-    state: string
-    created_ts: string
-    updated_ts: string
-  }
+  deliverable: DeliverableRow
   revisions: Revision[]
+  lineage: TaskLineage
+  doors: Door[]
   cursor: number
+}
+
+/** The server-side pixel-diff aid. Nil at v0 — the seam exists, the surface
+ *  renders it when a producer fills it and says nothing when none does. */
+export type PixelDiff = { diff_object_sha?: string; changed_ratio?: number }
+
+/**
+ * The host-side comparison of two revisions (S13.2), served verbatim.
+ *
+ * `surface` is the type's DEFINED answer — no type is refused. `label` carries
+ * the visible labeling text a fallback or degrade must show, which is the whole
+ * 2.1 honesty posture: a fallback never poses as a rich surface. `unified` is the
+ * host's own git diff text and nothing else — no HTML, no tokens, no
+ * server-rendered highlight, because react-diff-view parses unified diffs and
+ * highlights client-side and no server-side highlighter exists (FC-v1 §2).
+ */
+export type Comparison = {
+  deliverable_id: string
+  type: string
+  /** 0 is the PRE-TASK BASE, not a revision (S13.1). */
+  old_n: number
+  new_n: number
+  surface: string
+  fallback?: boolean
+  label?: string
+  unified?: string
+  old_objects?: ObjectRef[]
+  new_objects?: ObjectRef[]
+  /** The by-hash verdict for the object surfaces. */
+  changed?: boolean
+  pixel_diff?: PixelDiff
+}
+
+/** The five recorded anchor states (S13.3). Consumed as served: an unknown value
+ *  renders under its own name rather than being coerced into one of these. */
+export const anchorStatuses = ['exact', 'mapped', 'drifted', 'file', 'orphan'] as const
+
+/** The FC-v1 §2 anchor record: `line_text` is the quote selector, (side, line_no)
+ *  the position selector. */
+export type AnchorRecord = { file_path: string; side: string; line_no: number; line_text: string }
+
+/** Where a comment anchors in ONE revision, recomputed server-side on every
+ *  render. A client's positions are never placement authority. */
+export type Placement = {
+  comment_id: number
+  revision_n: number
+  status: string
+  /** The live position for exact/mapped/drifted; the file for `file` (line_no 0);
+   *  zero-valued for `orphan`, whose quote lives on the comment row. */
+  anchor?: AnchorRecord
+}
+
+/**
+ * One review comment — the ONE schema shared by human comments and verification
+ * findings (S13.1/S13.3).
+ *
+ * There is no update verb and no delete verb at any shape, so this surface offers
+ * neither: immutability renders as the property it is, and somebody who wants to
+ * change what they said adds another comment. `finding_number` is stamped by THE
+ * drain at consumption and is 0 while open.
+ */
+export type Comment = {
+  id: number
+  owner: string
+  deliverable_id: string
+  /** The ORIGINAL-revision link: which revision this was said about. */
+  revision_n: number
+  run_id?: string
+  kind: string
+  severity: string
+  category?: string
+  criterion?: string
+  body: string
+  suggested_change?: string
+  /** The original AS-CLAIMED anchor, kept beside the live placement. */
+  anchor?: AnchorRecord
+  /** A non-positional as-supplied anchor, kept verbatim (findings). */
+  origin_anchor?: string
+  /** The server-validated status at birth. */
+  anchor_status: string
+  status: string
+  finding_number?: number
+  consumed_at?: string
+  consumed_by?: string
+  created_ts: string
+}
+
+export type PlacedComments = {
+  deliverable_id: string
+  revision_n: number
+  comments: Comment[]
+  placements: Placement[]
+  cursor: number
+}
+
+/** The create body. `revision` 0 is the current one; the anchor is CLAIMED and is
+ *  validated server-side, so what comes back may not be the position asserted. */
+export type CommentCreate = {
+  revision: number
+  body: string
+  severity: string
+  anchor?: AnchorRecord
+  file_level?: string
+  suggested_change?: string
+}
+
+/** The S13.6 step-5 signing posture, stated as data and secret-free. Signing is
+ *  not a choice on the form: it is structural per user, and the broker holds the
+ *  key. */
+export type AcceptSigning = {
+  structural: boolean
+  per_call_flag: boolean
+  key_leaves_broker: boolean
+  statement: string
+}
+
+/** Where each trailer input came from. Every one is a platform fact read off the
+ *  minting run — no string a model produced can name a co-author. `absent` states
+ *  why the trailers could not be rendered, when they could not. */
+export type AcceptProvenance = {
+  minting_run_id?: string
+  engine?: string
+  model?: string
+  lane?: string
+  vendor_noreply?: string
+  absent?: string
+}
+
+/**
+ * The accept decision data, shown BEFORE the act (S13.6 step 3).
+ *
+ * The trailers are byte-for-byte what the commit will carry: the mis-attribution
+ * lesson is that they are SHOWN, not discovered in the commit afterwards. The card
+ * answers for any state — an accepted or non-repo-backed deliverable gets
+ * `acceptable:false` with the reason rather than a refusal that hides the facts.
+ */
+export type AcceptCard = {
+  deliverable_id: string
+  revision_n: number
+  pin_kind: string
+  content_pin: string
+  project_id: string
+  protected_ref?: string
+  trailers: string
+  provenance: AcceptProvenance
+  signing: AcceptSigning
+  tier: string
+  tier_statement: string
+  payload_hash: string
+  acceptable: boolean
+  reason: string
+  route: string
+}
+
+/** The collision card, verbatim from internal/accept. A collision is an ANSWER,
+ *  never a refusal and never a silent overwrite (S13.6 step 1). */
+export type MergeCard = {
+  deliverable_id: string
+  project_id: string
+  onto: string
+  candidate: string
+  reason: string
+  conflicts?: string
+  options: string[]
+}
+
+/** One collision option with its honest answerability. All three are
+ *  `answerable:false` at v0; the third names a LANDED door reaching the same
+ *  outcome, which is where the person goes rather than an executor. */
+export type MergeCardOption = {
+  option: string
+  answerable: boolean
+  reason: string
+  route?: string
+  preset?: string
+}
+
+export type MergeCardView = { card: MergeCard | null; options: MergeCardOption[]; durability: string }
+
+/**
+ * The accept's answer.
+ *
+ * `applied:false` covers two honest cases and neither is an error: a read-back of
+ * an already-accepted deliverable (which is what makes a phone retry safe), and a
+ * collision, where nothing was pushed and the merge card says so.
+ */
+export type AcceptOutcome = {
+  deliverable_id: string
+  applied: boolean
+  state: string
+  revision_n: number
+  commit?: string
+  effect_id?: string
+  /** Deliverables this accept moved to superseded, and the project's active runs
+   *  the S02.8 sibling-accept freshness trigger sent for re-validation. */
+  superseded: string[]
+  routed_runs: string[]
+  merge_card?: MergeCardView
+  detail: string
+}
+
+/** One probed listening port — the multi-port picker's data, populated when a dev
+ *  server exposes more than one. */
+export type PreviewPort = { number: number; label?: string }
+
+/**
+ * One preview instance (S13.8).
+ *
+ * `state` is a DEFINED answer for every type: `live` is backed, and
+ * `self-preview`, `requires-container-tier`, `no-preview`, `unavailable` and
+ * `at-capacity` are states carrying their reason. None of them is an error, and
+ * none of them gets an iframe — a broken frame is the failure S13.8 names.
+ */
+export type PreviewSession = {
+  id: string
+  deliverable: string
+  revision: number
+  role: string
+  lane: string
+  state: string
+  reason?: string
+  /** The tailnet front-chain subdomain when routed, the loopback backend in dev. */
+  url?: string
+  backend_addr?: string
+  pool_port?: number
+  route_id?: string
+  routed: boolean
+  ports?: PreviewPort[]
+  runner?: { tool: string; argv?: string[]; source: string }
+  user: string
+  host_injections?: { mechanism: string; key: string; value: string }[]
+  created_ts: string
+}
+
+/** The lean per-side data the dual-iframe shell consumes. */
+export type SessionView = {
+  role: string
+  deliverable: string
+  revision: number
+  url: string
+  state: string
+  reason?: string
+}
+
+/** How navigation mirrors across the two frames. `path` = mirror the URL
+ *  path+query across both sides; `enabled` is false when there is no before. */
+export type SyncSemantics = { mode: string; enabled: boolean }
+
+/** The before-vs-after contract. `before` is absent when the deliverable has no
+ *  accepted revision: revision 1 has no before, and inventing one would be a
+ *  preview fake of a story the S13.1 diff already tells truthfully. */
+export type PreviewComparison = {
+  deliverable: string
+  before?: SessionView
+  after: SessionView
+  single_instance: boolean
+  sync: SyncSemantics
+}
+
+export type PreviewSessions = { sessions: PreviewSession[]; cursor: number }
+export type PreviewStopped = { session: string; stopped: boolean; detail: string }
+
+/**
+ * staleAcceptCard returns the FRESH AcceptCard a 409 `stale_payload` carried.
+ *
+ * `staleCard` above cannot be reused: the accept verb's 409 carries an
+ * ACCEPT CARD in `current`, not an ApprovalItem, and reading one as the other
+ * would silently produce a card with no pin. Same refusal shape, two different
+ * families — so two readers, each typed to what its verb actually sends.
+ */
+/**
+ * objectHref is the URL of one pinned object's BYTES.
+ *
+ * It is a URL rather than a fetch because the two consumers are an `<img src>` and
+ * a download `<a href>` — the browser reads these, not this client. The path is
+ * composed from the deliverable id and the sha the SERVED ObjectRef carries, so
+ * nothing here names an object the platform did not pin; the server resolves the
+ * sha against that deliverable's own revisions and 404s otherwise, which is what
+ * keeps the route from being a hash oracle.
+ */
+export function objectHref(deliverable: string, sha: string): string {
+  return `/api/deliverables/${encodeURIComponent(deliverable)}/objects/${encodeURIComponent(sha)}`
+}
+
+export function staleAcceptCard(err: unknown): AcceptCard | null {
+  if (!(err instanceof ApiError) || err.code !== 'stale_payload') return null
+  const body = err.body
+  if (!body || typeof body !== 'object') return null
+  return (body as { current?: AcceptCard }).current ?? null
 }
 
 /** The board drag's outcome. `applied:false` is the honest stale-board answer,
@@ -1058,6 +1382,27 @@ export const api = {
   /** The Low-tier batch. Transport convenience only: each item is validated,
    *  applied and logged individually, and one refusal leaves the rest alone. */
   answerApprovalBatch: (items: ApprovalBatchItem[]) => post<ApprovalBatchResult>('/api/approvals/answer-batch', { items }),
+  /**
+   * The same answer verb, reached at the route a DOOR named.
+   *
+   * A door serves the whole path, card id included — and the card id is a
+   * `<kind>:<native-id>` composite whose halves the door serves SEPARATELY
+   * (`ask_id` is the native half alone). Assembling the composite here would be
+   * this client re-deriving a transport identity it was already handed, which is
+   * the mistake §43 recorded on the other decision family. So the door's route is
+   * used as given.
+   *
+   * The one check is a boundary check, because a served string is becoming a
+   * request target: the route must be an `/api/` path on this origin. A door that
+   * named anything else would be a bug in the platform, and following it would be
+   * this client's.
+   */
+  answerAtDoor: (route: string, body: { payload_hash: string; answer: unknown; pin?: string }) => {
+    if (!route.startsWith('/api/')) {
+      return Promise.reject(new ApiError(0, `a door named a route this client will not follow: ${route}`, 'bad_door'))
+    }
+    return post<ApprovalAnswerResult>(route, body)
+  },
 
   suppressFlag: (body: { run_id?: string; anomaly_class: string; reason?: string }) =>
     post<FlagSuppressed>('/api/watchdog/flags/suppress', body),
@@ -1132,6 +1477,62 @@ export const api = {
   /** The S15.7 hard-stop: an EXPLICIT act with a record, never a navigation side
    *  effect. It abandons the turn; it does not cancel a task the turn handed off. */
   stopChatTurn: (turn: string) => post<ChatTurnStopped>(`/api/chat/turns/${encodeURIComponent(turn)}/stop`, {}),
+
+  // ── the S15.8 review family (B6-8) ───────────────────────────────────────
+  //
+  // Every read below is owner-scoped server-side and every verb is one the
+  // deliverable's own DOORS name. The surface renders a control where a door is
+  // available and the door's reason where it is not; nothing here reaches an act
+  // the served detail did not offer.
+
+  /**
+   * The comparison of two revisions. Sending NO bounds is the point: the server's
+   * own default is round-over-round (new = current, old = new−1), so the default
+   * view asks for exactly that rather than composing a pair the client inferred.
+   * `old: 0` is the pre-task base — a real navigation target that is not a revision.
+   */
+  compare: (id: string, bounds: { old?: number; new?: number } = {}) =>
+    request<Comparison>(`/api/deliverables/${encodeURIComponent(id)}/compare${query(bounds)}`),
+
+  /** Every comment of the deliverable, with where each one anchors in `revision`
+   *  (absent = the current one). Placements come from the server on every render;
+   *  this client never computes one. */
+  comments: (id: string, revision?: number) =>
+    request<PlacedComments>(`/api/deliverables/${encodeURIComponent(id)}/comments${query({ revision })}`),
+
+  /**
+   * Create ONE comment. There is deliberately no update and no delete verb here,
+   * because none exists at any shape: a comment is immutable and is consumed only
+   * by THE drain (S13.3/S13.4). The anchor sent is CLAIMED — the response carries
+   * the status the server's own ladder gave it, which is what the surface renders.
+   */
+  addComment: (id: string, body: CommentCreate) =>
+    post<Comment>(`/api/deliverables/${encodeURIComponent(id)}/comments`, body),
+
+  /** The pin-bearing read the accept door names in `pin_from`. */
+  acceptCard: (id: string) => request<AcceptCard>(`/api/deliverables/${encodeURIComponent(id)}/accept-card`),
+
+  /**
+   * The ONE outward act on this API, as one request: the pin the card was shown
+   * with, and the PIN verified at the act (S01.9 verify-at-act — no elevation is
+   * inherited, so the PIN is collected, sent, and gone). A stale `payload_hash`
+   * fires nothing and comes back 409 with the FRESH card in `current`.
+   */
+  accept: (id: string, body: { payload_hash: string; pin: string; subject?: string; provenance?: string }) =>
+    post<AcceptOutcome>(`/api/deliverables/${encodeURIComponent(id)}/accept`, body),
+
+  /** Try it out. Low tier throughout (S13.8): no journal, no proposal, no PIN on
+   *  any preview route — launching one is reversible and touches nothing outside
+   *  the host. `revision` 0 is the current one. */
+  launchPreview: (id: string, revision = 0) =>
+    post<PreviewSession>(`/api/deliverables/${encodeURIComponent(id)}/preview`, { revision }),
+  previewComparison: (id: string, revision = 0) =>
+    post<PreviewComparison>(`/api/deliverables/${encodeURIComponent(id)}/preview/compare`, { revision }),
+  previews: () => request<PreviewSessions>('/api/previews'),
+  /** A partial teardown keeps the session, so the stop stays retryable and the
+   *  caller is told it did not complete rather than told it did. */
+  stopPreview: (session: string) =>
+    post<PreviewStopped>(`/api/previews/${encodeURIComponent(session)}/stop`, {}),
 
   chatFiles: () => request<{ files: ChatFile[] }>('/api/chat/files'),
   /**

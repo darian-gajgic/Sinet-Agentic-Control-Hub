@@ -25,7 +25,7 @@ test('the URL contract is exactly the recorded set', () => {
  *  which is why the assertion below is two-sided rather than relaxed: a route
  *  is either BUILT or it names the packet that will build it, and a typo in the
  *  owner field can be neither. */
-const built = ['mission-control', 'board', 'task', 'fleet', 'login', 'inbox', 'inbox-item', 'settings', 'chat']
+const built = ['mission-control', 'board', 'task', 'fleet', 'login', 'inbox', 'inbox-item', 'settings', 'chat', 'deliverable']
 
 test('every surface is either built or names the packet that will build it', () => {
   for (const r of routes) {

@@ -10,9 +10,9 @@
       "pressure": null,
       "budget_declared": false,
       "budget_remaining": null,
-      "total_runs": 5,
-      "active_runs": 4,
-      "parked_runs": 1,
+      "total_runs": 6,
+      "active_runs": 5,
+      "parked_runs": 2,
       "parked_until": null
     },
     {
@@ -226,8 +226,8 @@
       "rows": [
         [
           "alice",
+          7,
           6,
-          5,
           1.42,
           "PARTIAL-OR-PRICED",
           14,
@@ -299,5 +299,5 @@
       ]
     }
   },
-  "cursor": 46
+  "cursor": 64
 }

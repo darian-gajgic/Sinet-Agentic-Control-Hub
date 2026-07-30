@@ -139,7 +139,7 @@ func (s *Store) Compare(ctx context.Context, deliverableID string, oldN, newN in
 			out.Changed = objectsChanged(oldRev.Objects, newRev.Objects)
 			return out, nil
 		}
-		out.Unified, err = gitDiff(oldText, newText)
+		out.Unified, err = gitDiff(pdfDiffName(d), oldText, newText)
 		return out, err
 
 	case isImageType(d.Type):
@@ -213,19 +213,35 @@ func (s *Store) contentDiff(ctx context.Context, deliverableID string, oldN, new
 	sort.Strings(ordered)
 	var sb strings.Builder
 	for _, name := range ordered {
-		u, err := gitDiff(oldFiles[name], newFiles[name])
+		u, err := gitDiff(name, oldFiles[name], newFiles[name])
 		if err != nil {
 			return "", err
 		}
 		if u == "" {
 			continue
 		}
-		if len(ordered) > 1 {
-			fmt.Fprintf(&sb, "=== %s ===\n", name)
-		}
+		// The per-file diffs are concatenated and nothing else — no separator line.
+		// One used to be written here because the git headers named a throwaway temp
+		// file and a multi-file diff had no other way to say which file each part
+		// belonged to. Now that the headers carry the logical path, the separator is
+		// a duplicate of the header AND makes the result a non-standard unified diff:
+		// a line between two file diffs that is neither a header nor a hunk is
+		// exactly what a conformant parser has no rule for.
 		sb.WriteString(u)
 	}
 	return sb.String(), nil
+}
+
+// pdfDiffName is the logical path an extracted-text diff carries in its file
+// headers. A PDF's reading text belongs to the DOCUMENT, so the deliverable's
+// own subject ref names it; a deliverable with no subject falls back to its id
+// rather than to the empty label, which would leave the headers naming a temp
+// file again.
+func pdfDiffName(d Deliverable) string {
+	if d.SubjectRef != "" {
+		return d.SubjectRef
+	}
+	return d.ID
 }
 
 func (s *Store) revisionPDFText(n int, rev Revision) (string, error) {

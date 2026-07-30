@@ -13,11 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
 )
@@ -39,6 +42,14 @@ type backend struct {
 	// chat is the S15.7 assistant store, composed once per fixture world with a
 	// pinned clock + id seam (B6-7) so the committed bodies reproduce.
 	chat *chat.Store
+	// rev/acc/prev are the S13 family, composed ONCE per fixture world (B6-8).
+	// The review store in particular has to be shared: its Root is where minted
+	// revision BYTES live, and a per-server root would put a revision's content
+	// where the next server cannot read it — which is exactly why the review
+	// fixtures could not be producer-driven before. Nil until a rig composes them.
+	rev  *review.Store
+	acc  *accept.Accepter
+	prev *preview.Manager
 }
 
 func newBackend(t *testing.T) *backend {

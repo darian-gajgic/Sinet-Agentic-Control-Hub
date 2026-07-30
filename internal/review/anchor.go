@@ -76,7 +76,7 @@ func portAnchor(srcFiles, dstFiles map[string]string, a AnchorRecord, drift int)
 	mapped := a.LineNo
 	if srcFiles != nil {
 		if srcContent, ok := srcFiles[a.FilePath]; ok {
-			unified, err := gitDiff(srcContent, dstContent)
+			unified, err := gitDiff(a.FilePath, srcContent, dstContent)
 			if err == nil {
 				if hs, herr := parseHunks(unified); herr == nil {
 					mapped, _ = lineMap(hs, a.LineNo)

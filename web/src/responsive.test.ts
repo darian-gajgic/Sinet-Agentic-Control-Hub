@@ -187,3 +187,40 @@ test('the connection label survives at phone width, only its detail is dropped',
   expect(block('.conn-detail')).toContain('display: none')
   expect(css).not.toMatch(/\.conn-label\s*\{[^}]*display:\s*none/)
 })
+
+test('the review surface reads at phone width and nothing widens the page', () => {
+  // A diff is genuinely wider than a phone, so it scrolls INSIDE its own box
+  // rather than pushing the page sideways — the same answer the receipt table and
+  // the audit block already give.
+  expect(block('.diff-file'), 'a diff would push the page sideways').toContain('overflow-x: auto')
+  // The three long opaque strings on this surface — a content hash, a quoted diff
+  // line, and a commit trailer block — each have their own answer: hashes wrap,
+  // and the pre-formatted blocks scroll.
+  // `.deliverable .object-sha` and `.frames` are the LAST selectors of their
+  // grouped rules, which is what the block helper matches.
+  expect(block('.deliverable .object-sha'), 'a content hash would push the page sideways').toContain(
+    'overflow-wrap: anywhere',
+  )
+  expect(block('.merge-card pre'), 'a conflict list would push the page sideways').toContain('overflow-x: auto')
+  // A comment body is somebody's own prose and a door reason is the server's: both
+  // wrap rather than overflow, in the same grouped rule.
+  expect(block('.signing'), 'a comment body, a door reason and the signing statement all wrap').toContain(
+    'overflow-wrap: anywhere',
+  )
+
+  // Every control cluster stacks at phone width and only lays out in a row at the
+  // breakpoint — the phone is the base, not the exception (S1.10).
+  for (const selector of ['.merge-options', '.frame-path', '.frames']) {
+    expect(block(selector), `${selector} does not stack at phone width`).toContain('flex-direction: column')
+  }
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  for (const selector of ['.two-up', '.frame-path', '.image-modes']) {
+    expect(wide, `${selector} never widens on a large screen`).toContain(selector)
+  }
+
+  // An image and a preview frame both fit the viewport they are in: an image is a
+  // deliverable's own content and could be any size, and a frame is somebody
+  // else's whole application.
+  expect(block('.image-side img'), 'a full-size image would widen the page').toContain('max-width: 100%')
+  expect(block('.frame iframe')).toContain('width: 100%')
+})

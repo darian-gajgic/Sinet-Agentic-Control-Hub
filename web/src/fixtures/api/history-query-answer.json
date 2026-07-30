@@ -44,6 +44,14 @@
       "2026-07-20T09:03:00Z"
     ],
     [
+      "r-brief",
+      "alice",
+      "t-brief",
+      "parked",
+      "anthropic",
+      "2026-07-20T09:03:00Z"
+    ],
+    [
       "r-audit",
       "bob",
       "t-audit",
@@ -76,7 +84,7 @@
       "2026-07-20T09:00:00Z"
     ]
   ],
-  "row_count": 8,
+  "row_count": 9,
   "truncated": false,
   "notes": [
     "runs that are live right now — anything not yet in a terminal state"

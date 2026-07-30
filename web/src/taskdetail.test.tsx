@@ -297,7 +297,14 @@ test('the task&apos;s REAL deliverables list with their immutable numbered revis
   const blocks = [...view.container.querySelectorAll('[data-deliverable]')].map((n) =>
     n.getAttribute('data-deliverable'),
   )
-  expect(blocks, 'the task&apos;s own deliverables are not listed').toEqual(['d-notes', 'd-changelog'])
+  // Every deliverable the SERVED list carries renders, in served order — stated
+  // against the body rather than against a hand-copied set, so growing the fixture
+  // world cannot make this pass while a row silently stops rendering.
+  const served = fixtures.deliverablesOfTask() as { deliverables: { deliverable_id: string }[] }
+  expect(served.deliverables.length, 'the served list is empty, so the check below proves nothing').toBeGreaterThan(1)
+  expect(blocks, 'the task&apos;s own deliverables are not listed').toEqual(
+    served.deliverables.map((d) => d.deliverable_id),
+  )
 
   // The revisions are the SERVED numbered lineage, not a 1..N count inferred
   // from current_revision.

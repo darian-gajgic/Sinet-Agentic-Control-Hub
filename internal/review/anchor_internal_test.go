@@ -134,7 +134,7 @@ func TestParseFindingAnchorShapes(t *testing.T) {
 func TestLineMapThroughRealDiff(t *testing.T) {
 	oldC := longFile(20, nil)
 	newC := longFile(20, map[int]string{10: "changed"}, "top-insert")
-	unified, err := gitDiff(oldC, newC)
+	unified, err := gitDiff("src/app.ts", oldC, newC)
 	if err != nil {
 		t.Fatalf("gitDiff: %v", err)
 	}
@@ -157,8 +157,54 @@ func TestLineMapThroughRealDiff(t *testing.T) {
 }
 
 func TestGitDiffIdentical(t *testing.T) {
-	u, err := gitDiff("same\n", "same\n")
+	u, err := gitDiff("src/app.ts", "same\n", "same\n")
 	if err != nil || u != "" {
 		t.Fatalf("identical contents: %q err %v", u, err)
+	}
+}
+
+// TestGitDiffHeadersNameTheLogicalPathAndNothingElse pins the B6-8 correction.
+//
+// The headers used to name the throwaway temp files, which made the served diff
+// carry a host path and differ on EVERY read of the same immutable revision
+// pair. Both halves are asserted, because either alone would pass over the bug:
+// the real path is present, AND no temp-directory name survives anywhere in the
+// output.
+func TestGitDiffHeadersNameTheLogicalPathAndNothingElse(t *testing.T) {
+	u, err := gitDiff("site/release.tsx", "one\ntwo\n", "one\ntwo\nthree\n")
+	if err != nil {
+		t.Fatalf("gitDiff: %v", err)
+	}
+	for _, want := range []string{
+		"diff --git a/site/release.tsx b/site/release.tsx",
+		"--- a/site/release.tsx",
+		"+++ b/site/release.tsx",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("the diff headers must name the logical path — missing %q in:\n%s", want, u)
+		}
+	}
+	if strings.Contains(u, "sinet-review-diff") {
+		t.Errorf("a temp directory name reached the served diff:\n%s", u)
+	}
+
+	// Byte-stability across two runs is the property the golden fixtures rest on:
+	// an immutable revision pair has ONE diff, not one per call.
+	again, err := gitDiff("site/release.tsx", "one\ntwo\n", "one\ntwo\nthree\n")
+	if err != nil {
+		t.Fatalf("gitDiff again: %v", err)
+	}
+	if again != u {
+		t.Errorf("the same contents diffed differently twice:\n%s\n%s", u, again)
+	}
+
+	// An empty name leaves git's own output alone — the honest no-label path,
+	// asserted so the rewrite is known to be conditional rather than assumed.
+	unlabeled, err := gitDiff("", "one\n", "two\n")
+	if err != nil {
+		t.Fatalf("gitDiff unlabeled: %v", err)
+	}
+	if !strings.Contains(unlabeled, "sinet-review-diff") {
+		t.Errorf("with no name the output is git's own, temp paths included:\n%s", unlabeled)
 	}
 }

@@ -976,6 +976,7 @@ var deliverablesRoutes = []struct{ method, path, body string }{
 	{"GET", "/api/deliverables/d-x/compare", ""},
 	{"GET", "/api/deliverables/d-x/comments", ""},
 	{"POST", "/api/deliverables/d-x/comments", `{"body":"x"}`},
+	{"GET", "/api/deliverables/d-x/objects/" + strings.Repeat("ab", 32), ""},
 	{"GET", "/api/deliverables/d-x/accept-card", ""},
 	{"POST", "/api/deliverables/d-x/accept", `{"payload_hash":"x","pin":"` + dlvPIN + `"}`},
 	{"POST", "/api/deliverables/d-x/preview", `{}`},

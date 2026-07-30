@@ -1,0 +1,26 @@
+{
+  "deliverable_id": "d-brief",
+  "type": "pdf",
+  "old_n": 1,
+  "new_n": 2,
+  "surface": "binary-cards",
+  "fallback": true,
+  "label": "PDF text extraction unavailable (extract docs/brief.pdf: review: open pdf: not a PDF file: invalid header): metadata cards",
+  "old_objects": [
+    {
+      "name": "docs/brief.pdf",
+      "size": 13,
+      "sha256": "86b1b60c61c4672bbf2aa432fd15e119aac5106bcc2eae59fe881cf1c7884648",
+      "type": "application/pdf"
+    }
+  ],
+  "new_objects": [
+    {
+      "name": "docs/brief.pdf",
+      "size": 13,
+      "sha256": "45927fa56bdda8671ee6f03546a9e63788b6ca1d987d6dfcc092d57c328c667b",
+      "type": "application/pdf"
+    }
+  ],
+  "changed": true
+}

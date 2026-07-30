@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
@@ -49,8 +50,12 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // fixtureDir is where the committed bodies live: inside the web tree, next to
@@ -245,6 +250,9 @@ func fixtureWorld(t *testing.T) *backend {
 		            VALUES (?,0,?,?,1,?,?)`, e.run, e.owner, e.typ, e.payload, e.ts)
 	}
 
+	// The S13 orchestrations, composed before anything reads a door.
+	fixtureAcceptAndPreview(t, b)
+
 	// A deliverable waiting for a person, with two immutable numbered revisions:
 	// the review-ready half of the what-needs-me filter, and the revision list
 	// the task detail links into.
@@ -270,6 +278,8 @@ func fixtureWorld(t *testing.T) *backend {
 				d.id, n, "alice", "r-ship", "content", fmt.Sprintf("sha-%s-%d", d.id, n), d.subject, fxT2)
 		}
 	}
+
+	seedFixtureReviewSurface(t, b)
 
 	// One materialized receipt, so the cost views have a row to read and the
 	// task detail has a receipt to render (B6-5 part B consumes it).
@@ -313,6 +323,296 @@ func fixtureWorld(t *testing.T) *backend {
 	driveFixtureChat(t, b)
 	seedFixtureChatBornTask(t, b)
 	return b
+}
+
+// ── the S15.8 review surface (B6-8) ─────────────────────────────────────────
+
+// The revision content the line-diff surface is built from. It is written out as
+// literal text rather than assembled, because the committed unified diff is what
+// react-diff-view parses and a generated body would make the fixture unreadable
+// at review time.
+//
+// Rev 2 makes TWO edits, far enough apart to land in two separate hunks under
+// --unified=3, which is what gives the placement ladder something real to do: an
+// anchor inside a changed hunk cannot be mapped by line number and falls to the
+// text search, while an anchor in the untouched middle maps exactly by the diff's
+// own line delta. Both statuses have to exist in the committed body, so the
+// distance between the two edits is load-bearing rather than incidental.
+const (
+	fxSiteRev1 = "import { mount } from './mount'\n" +
+		"\n" +
+		"export function ReleasePage() {\n" +
+		"  const notes = loadNotes()\n" +
+		"  if (!notes) throw new Error('no notes to render')\n" +
+		"  return render(notes)\n" +
+		"}\n" +
+		"\n" +
+		"export function loadNotes() {\n" +
+		"  return fetchChangelog()\n" +
+		"}\n" +
+		"\n" +
+		"export function render(notes) {\n" +
+		"  return mount(notes)\n" +
+		"}\n" +
+		"\n" +
+		"export const version = 1\n"
+	fxSiteRev2 = "import { mount } from './mount'\n" +
+		"import { theme } from './theme'\n" +
+		"\n" +
+		"export function ReleasePage() {\n" +
+		"  const notes = loadNotes()\n" +
+		"  if (!notes) throw new Error('no notes to render')\n" +
+		"  return render(notes)\n" +
+		"}\n" +
+		"\n" +
+		"export function loadNotes() {\n" +
+		"  return fetchChangelog()\n" +
+		"}\n" +
+		"\n" +
+		"export function render(notes) {\n" +
+		"  theme.apply()\n" +
+		"  return mount(notes)\n" +
+		"}\n" +
+		"\n" +
+		// A MODIFIED line, not just insertions: markEdits pairs a delete with an
+		// insert to mark the changed words inside a line, so a diff with no
+		// modification anywhere gives its tokenizer nothing to do and the committed
+		// body could not exercise the client-side highlighting at all.
+		"export const version = 2\n"
+	fxSiteReadme = "# Release page\n\nRendered from the changelog.\n"
+	fxSiteLegacy = "// superseded by release.tsx\nexport const legacy = true\n"
+)
+
+// The S13.5 snapshot-commit pins. They are LITERALS, not real commits: what makes
+// a revision repo-backed — and therefore acceptable — is the column being filled,
+// and a real `git` sha would carry the wall clock into the committed bodies
+// through the commit's own timestamps. The accept orchestration is composed but
+// never called by a fixture read, so nothing resolves these against a repo.
+const (
+	fxSiteSnap1 = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+	fxSiteSnap2 = "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c"
+)
+
+// seedFixtureReviewSurface builds the world the S15.8 review surface renders,
+// entirely through S13's own verbs (§42's producer-fidelity rule: a fixture is
+// only worth what the ROW under it is worth).
+//
+//	d-site    code    two content revisions with real files → the line-diff
+//	                  surface, a REAL unified diff, and the five placement
+//	                  statuses across the revision hop
+//	d-hero    image   two object revisions with recorded image/png types → the
+//	                  image-pair surface the S13.2 trio renders
+//	d-bundle  binary  two object revisions → the metadata cards + hash verdict
+//	d-brief   pdf     bytes that are not a PDF → the extraction-failure DEGRADE,
+//	                  labeled, which is a defined answer and never a refusal
+//
+// Everything hangs off the shipping task and its run, so no task or run row is
+// added: the deliverables belong to work that already exists, and the accept
+// card's trailers derive from the routing decision and engine session that run
+// already recorded.
+func seedFixtureReviewSurface(t *testing.T, b *backend) {
+	t.Helper()
+	ctx := context.Background()
+	rev := fixtureReview(t, b)
+
+	// The OPEN REWORK CARD behind the request-revision door's live limb. The door
+	// is doors-as-data: with no rework card open it names NO route and carries the
+	// narrative instead, which `d-site` shows — so without a real card in the world
+	// the open limb had no ground at all, and the surface's only driven direction
+	// would have been the closed one.
+	//
+	// The snapshot is a real `verify.Card` for the reason every other ask snapshot
+	// here is: the door reads the card's own `choices` (§40-B), and a hand-written
+	// snapshot would only prove the door can read keys somebody imagined. The
+	// category is the one whose landed vocabulary carries `revise_with_guidance`.
+	card, err := json.Marshal(verify.Card{
+		Kind: verify.SinkDecisionCard, Category: verify.CatACBlocker,
+		TaskID: "t-brief", RunID: "r-brief", IssuedTS: fxT3,
+		Summary: "AC-2 is unmet after two rounds: the brief still has no plain-language summary.",
+		Detail:  []string{"round 2 verdict: red on AC-2", "the requester decides whether another round is worth it"},
+		Choices: []string{"accept_best_effort", "revise_with_guidance", "cancel"},
+		AskID:   "ask-brief",
+	})
+	if err != nil {
+		t.Fatalf("marshal verify.Card: %v", err)
+	}
+	exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
+		"t-brief", "alice", "Rewrite the onboarding brief", "attention", fxT3)
+	exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,0,?,?)`, "r-brief", "alice", "t-brief", "parked", "anthropic", fxT3, fxT3)
+	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
+		"ask-brief", "r-brief", "alice", string(card), "question", fxT3)
+
+	// The two provenance facts the accept card renders trailers from. The routing
+	// decision is already in the world; the engine session's substrate is added so
+	// the card takes the PRIMARY path (substrate recorded) rather than the lane
+	// fallback — production records both, and a fixture that only exercised the
+	// fallback would teach the surface the wrong shape.
+	exec(t, b, `INSERT INTO engine_sessions (run_id, user_id, substrate, engine_session_id, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,?)`, "r-ship", "alice", "claude-cli", "r-ship-sess", fxT0, fxT1)
+	// The S13.7 registry row behind `protected_ref`: an accept pushes to a branch,
+	// and the card names which one BEFORE the act.
+	exec(t, b, `INSERT INTO repo_registry (project_id, user_id, name, store_path, default_branch, state, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,?,?,?)`,
+		"release-notes", "alice", "release-notes", "projects/release-notes.git", "main", "active", fxT0, fxT0)
+
+	ensure := func(id, task, dtype, subject string) {
+		t.Helper()
+		if _, err := rev.EnsureDeliverable(ctx, review.EnsureInput{
+			ID: id, Owner: "alice", TaskID: task, ProjectID: "release-notes", Type: dtype, SubjectRef: subject,
+		}); err != nil {
+			t.Fatalf("EnsureDeliverable %s: %v", id, err)
+		}
+	}
+	mint := func(runID string, in review.MintInput) {
+		t.Helper()
+		in.RunID = runID
+		in.AttemptRef = fmt.Sprintf("%s#round-%d", runID, in.N)
+		if _, err := rev.MintRevision(ctx, in); err != nil {
+			t.Fatalf("MintRevision %s/%d: %v", in.DeliverableID, in.N, err)
+		}
+	}
+	comment := func(in review.CommentInput) {
+		t.Helper()
+		in.DeliverableID, in.Author = "d-site", "alice"
+		if _, err := rev.AddComment(ctx, in); err != nil {
+			t.Fatalf("AddComment %q: %v", in.Body, err)
+		}
+	}
+
+	// ── d-site: the line-diff surface and the comment loop ──────────────────
+	ensure("d-site", "t-ship", "code", "site/release.tsx")
+	mint("r-ship", review.MintInput{DeliverableID: "d-site", N: 1, SnapshotSHA: fxSiteSnap1, Files: map[string]string{
+		"site/release.tsx": fxSiteRev1, "site/README.md": fxSiteReadme, "site/legacy.tsx": fxSiteLegacy,
+	}})
+
+	// ONE comment before the rework, so the drain has something to consume and the
+	// committed body carries both halves of the S13.3 lifecycle. It is drained
+	// BEFORE revision 2 is minted, which is the real order of events: the rework
+	// receives the numbered points and then produces the next revision.
+	comment(review.CommentInput{
+		RevisionN: 1, Severity: review.SeverityBlocker,
+		Body:      "The page mounts before the theme is applied, so the first paint is unstyled.",
+		Anchor:    &review.AnchorRecord{FilePath: "site/release.tsx", Side: review.SideNew, LineNo: 14, LineText: "  return mount(notes)"},
+		Suggested: "  theme.apply()\n  return mount(notes)",
+	})
+	drained, err := rev.Drain(ctx, review.DrainRequest{
+		DeliverableID: "d-site", AttemptRef: "r-ship#round-2", RunID: "r-ship",
+	})
+	if err != nil {
+		t.Fatalf("drive review.Drain: %v", err)
+	}
+	if len(drained) != 1 || drained[0].Number != 1 {
+		t.Fatalf("the drain must number the one open blocker [F1], got %+v", drained)
+	}
+
+	mint("r-ship", review.MintInput{DeliverableID: "d-site", N: 2, SnapshotSHA: fxSiteSnap2, Files: map[string]string{
+		"site/release.tsx": fxSiteRev2, "site/README.md": fxSiteReadme,
+	}})
+
+	// The five placement statuses, each produced by the ladder rather than
+	// asserted: the surface has to render every one of them, and a body missing a
+	// status is a render nobody checked.
+	//
+	//  mapped  — anchored in rev 1 in the UNTOUCHED middle of the file, so the
+	//            diff's own line delta moves it and the quote confirms there.
+	//  drifted — an OLD-side anchor of revision 1, whose old side is the pre-task
+	//            base the S13.5 topology has not materialized, so the ladder skips
+	//            the map and finds the quote near the claimed position instead.
+	//  orphan  — anchored in a file revision 2 deleted: no live location anywhere.
+	//  file    — a file-level comment, first-class and positionless by choice.
+	//  exact   — made on revision 2 itself, at the line it names.
+	comment(review.CommentInput{
+		RevisionN: 1,
+		Body:      "loadNotes() can return an empty list — is that a render or an error?",
+		Anchor:    &review.AnchorRecord{FilePath: "site/release.tsx", Side: review.SideNew, LineNo: 9, LineText: "export function loadNotes() {"},
+	})
+	comment(review.CommentInput{
+		RevisionN: 1, Severity: review.SeverityBlocker,
+		Body:   "This component has no error boundary above it.",
+		Anchor: &review.AnchorRecord{FilePath: "site/release.tsx", Side: review.SideOld, LineNo: 3, LineText: "export function ReleasePage() {"},
+	})
+	comment(review.CommentInput{
+		RevisionN: 1,
+		Body:      "Worth checking nothing still imports this before it goes.",
+		Anchor:    &review.AnchorRecord{FilePath: "site/legacy.tsx", Side: review.SideNew, LineNo: 2, LineText: "export const legacy = true"},
+	})
+	comment(review.CommentInput{
+		RevisionN: 2, FileLevel: "site/README.md",
+		Body: "The README should say where the notes come from.",
+	})
+	comment(review.CommentInput{
+		RevisionN: 2,
+		Body:      "Applying the theme here is the right place.",
+		Anchor:    &review.AnchorRecord{FilePath: "site/release.tsx", Side: review.SideNew, LineNo: 15, LineText: "  theme.apply()"},
+	})
+
+	// One VERIFICATION FINDING, through the other ingress of the same schema
+	// (S13.1/S13.3: one comment schema, two ingresses). Its anchor is a section
+	// reference rather than a position, so it records file-level with the original
+	// string kept verbatim in origin_anchor — the field the surface renders as the
+	// finding's own claim of where it applies.
+	if _, err := rev.AddFindings(ctx, "d-site", 2, []review.FindingInput{{
+		Author: "alice", RunID: "r-ship", Kind: review.KindFinding, Severity: review.SeverityNote,
+		Category: "accessibility", Criterion: "AC-2",
+		Body:      "The page sets no document title, so a screen reader announces the URL.",
+		RawAnchor: "section:accessibility",
+	}}); err != nil {
+		t.Fatalf("drive review.AddFindings: %v", err)
+	}
+
+	// All five statuses are the POINT of this world, so their presence is
+	// ASSERTED here rather than hoped for. A content edit that quietly collapsed
+	// two of them would leave a render nobody checks while the committed body
+	// still looked plausible — an absence failing silently, which is worse than
+	// the ambiguity the five statuses exist to remove.
+	_, placements, err := rev.PlacedComments(ctx, "d-site", 2)
+	if err != nil {
+		t.Fatalf("read placements: %v", err)
+	}
+	seen := map[review.AnchorStatus]bool{}
+	for _, p := range placements {
+		seen[p.Status] = true
+	}
+	for _, want := range []review.AnchorStatus{
+		review.AnchorExact, review.AnchorMapped, review.AnchorDrifted, review.AnchorFile, review.AnchorOrphan,
+	} {
+		if !seen[want] {
+			t.Fatalf("the review fixture world produces no %q placement — the surface would have no ground for it (placements: %+v)",
+				want, placements)
+		}
+	}
+
+	// ── the object surfaces ─────────────────────────────────────────────────
+	// A content-pinned deliverable of a type with NO rich comparison: the honest
+	// extracted-text FALLBACK, labeled. Without it the surface's fallback-diff lane
+	// had no committed ground at all — the PDF lane degrades past it to the cards,
+	// so the two are different renders rather than one.
+	ensure("d-notebook", "t-ship", "notebook", "analysis/report.ipynb")
+	for n, body := range []string{"cells: 3\nsummary: draft\n", "cells: 4\nsummary: reviewed\n"} {
+		mint("r-ship", review.MintInput{DeliverableID: "d-notebook", N: n + 1,
+			Files: map[string]string{"analysis/report.ipynb": body}})
+	}
+
+	ensure("d-hero", "t-ship", "image", "site/hero.png")
+	ensure("d-bundle", "t-ship", "binary", "dist/site.tar")
+	// The PDF hangs off the task whose rework card is open, so the deliverable
+	// whose request-revision door is LIVE is a real one rather than a construction.
+	ensure("d-brief", "t-brief", "pdf", "docs/brief.pdf")
+	for n, side := range []string{"OLD", "NEW"} {
+		mint("r-ship", review.MintInput{DeliverableID: "d-hero", N: n + 1,
+			Objects: map[string][]byte{"site/hero.png": []byte("\x89PNG\r\n\x1a\n" + side)},
+			Types:   map[string]string{"site/hero.png": "image/png"}})
+		mint("r-ship", review.MintInput{DeliverableID: "d-bundle", N: n + 1,
+			Objects: map[string][]byte{"dist/site.tar": []byte("site-bundle-" + side)},
+			Types:   map[string]string{"dist/site.tar": "application/x-tar"}})
+		// Bytes that are NOT a PDF, which is the degrade path a corrupt or
+		// unsupported document takes: the surface falls back to the metadata cards
+		// with the reason on the label, never a refusal (S13.2).
+		mint("r-brief", review.MintInput{DeliverableID: "d-brief", N: n + 1,
+			Objects: map[string][]byte{"docs/brief.pdf": []byte("not-a-pdf-" + side)},
+			Types:   map[string]string{"docs/brief.pdf": "application/pdf"}})
+	}
 }
 
 // seedFixtureChatBornTask puts the task the S15.7 handoff gives birth to into
@@ -1234,12 +1534,70 @@ func answerEffect(t *testing.T, b *backend, who, effectID string) {
 	}
 }
 
+// fixtureReview returns the world's ONE review store.
+//
+// Sharing it is load-bearing rather than tidy (B6-8): `Root` is where minted
+// revision bytes live, and the store used to be constructed per server over a
+// fresh t.TempDir — so a revision minted through the real verb was invisible to
+// the next request, and the review reads could only be fixtured off hand-written
+// SQL rows with invented content hashes. One store per world is what lets
+// `MintRevision`, `AddComment` and `Drain` be the producers of the committed
+// bodies. A caller with no composed world still gets a throwaway root.
 func fixtureReview(t *testing.T, b *backend) *review.Store {
 	t.Helper()
-	return &review.Store{
-		DB: b.db, Log: b.log, Settings: b.reg, Root: t.TempDir(),
-		Now: func() time.Time { return mustTime(t, fxT4) },
+	if b.rev == nil {
+		b.rev = &review.Store{
+			DB: b.db, Log: b.log, Settings: b.reg, Root: t.TempDir(),
+			Now: func() time.Time { return mustTime(t, fxT4) },
+		}
 	}
+	return b.rev
+}
+
+// fixtureAcceptAndPreview composes the two S13 orchestrations the review surface
+// renders doors for. Neither is CALLED by any committed read: the accept card is
+// a read that only needs the Accepter to exist (`acceptable()` asks whether the
+// orchestration is composed, not what it would do), and no fixture launches a
+// preview. Composing them is what makes the served doors say what a real process
+// says instead of "not composed in this process" — the doors are data the surface
+// renders controls from, so a fixture where every door is closed would exercise
+// exactly one of the two directions.
+//
+// The host-hazard posture is internal/preview's own: NewCaddyClient("", "") is
+// routing-disabled, the port range is this package's 47900-47919 (disjoint from
+// internal/preview's and internal/shell's), and nothing binds a port because
+// nothing launches.
+func fixtureAcceptAndPreview(t *testing.T, b *backend) {
+	t.Helper()
+	rev := fixtureReview(t, b)
+	proj, err := project.New(project.Config{DB: b.db, Log: b.log, Root: filepath.Join(t.TempDir(), "projects")})
+	if err != nil {
+		t.Fatalf("project.New: %v", err)
+	}
+	acc, err := accept.New(accept.Config{
+		Project: proj, Journal: fixtureJournal(t, b), Push: &fakePusher{}, Review: rev,
+		Freshness: b.reg, Now: func() time.Time { return mustTime(t, fxT4) },
+	})
+	if err != nil {
+		t.Fatalf("accept.New: %v", err)
+	}
+	ports, err := portpool.New(portpool.Config{
+		Dir: filepath.Join(t.TempDir(), "portpool"), Lo: 47900, Hi: 47919,
+		Now: func() time.Time { return mustTime(t, fxT4) },
+	})
+	if err != nil {
+		t.Fatalf("portpool.New: %v", err)
+	}
+	prev, err := preview.New(preview.Config{
+		Reviews: rev, Projects: proj, Ports: ports,
+		Caddy: preview.NewCaddyClient("", ""), Events: b.log,
+		Settings: dlvPreviewSettings{cap: 2}, Scratch: filepath.Join(t.TempDir(), "preview-clones"),
+		Now: func() time.Time { return mustTime(t, fxT4) },
+	})
+	if err != nil {
+		t.Fatalf("preview.New: %v", err)
+	}
+	b.acc, b.prev = acc, prev
 }
 
 func fixtureJournal(t *testing.T, b *backend) *gates.Journal {
@@ -1293,6 +1651,8 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		// queue row below carries the rank the real scheduler would persist.
 		Hints:      newFakeHints("r-ops"),
 		Review:     fixtureReview(t, b),
+		Accept:     b.acc,
+		Preview:    b.prev,
 		Effects:    fixtureJournal(t, b),
 		Memory:     b.mem,
 		MemoryGate: b.memGate,
@@ -1430,6 +1790,45 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// The D4(b) unlock: the recorded suite results, through the LANDED audited
 	// query route.
 	{"eval-scores", "/api/events/query/verdicts.eval_scores", ""},
+	// The S15.8 review surface (B6-8), read as the OWNER — which is who reviews.
+	// A non-owner's render is presentation over the same body (the accept form is
+	// the owner's; the card is readable by the operator and acceptable by nobody
+	// else), so it needs no second body: the two renders come from two SESSIONS
+	// over one served detail.
+	{"deliverable-review", "/api/deliverables/d-site", "alice"},
+	// The default compare read takes NO parameters: round-over-round IS the
+	// server's default (new = current, old = new−1), and the committed body is
+	// what proves the surface is not sending a pair it made up.
+	{"compare-line-diff", "/api/deliverables/d-site/compare", "alice"},
+	// old=0 is the PRE-TASK BASE (S13.1) — the one navigation target that is not a
+	// revision, and the reason the revision picker offers a zero at all.
+	{"compare-base", "/api/deliverables/d-site/compare?old=0&new=2", "alice"},
+	// The three non-diff surfaces, each a defined answer for its type: per-side
+	// object refs and the by-hash verdict for images and binaries, and the PDF's
+	// extraction-failure DEGRADE with its reason on the label.
+	{"compare-image-pair", "/api/deliverables/d-hero/compare", "alice"},
+	{"compare-binary-cards", "/api/deliverables/d-bundle/compare", "alice"},
+	{"compare-pdf-degrade", "/api/deliverables/d-brief/compare", "alice"},
+	// The honest FALLBACK diff: a real unified diff under a label that says it is
+	// not a rich surface for this type.
+	{"compare-extracted-text", "/api/deliverables/d-notebook/compare", "alice"},
+	// The SECOND deliverable detail, and it exists for one door: this one's task is
+	// parked on a rework card, so `request-revision` is LIVE and carries the ask,
+	// the answer verb and the card's own pin. The body above shows the closed limb;
+	// no single deliverable can serve both, because the door's state IS the
+	// deliverable's state.
+	{"deliverable-rework", "/api/deliverables/d-brief", "alice"},
+	// Every comment of the deliverable with where each one anchors in the CURRENT
+	// revision — all five placement statuses, an open set beside a consumed one,
+	// and a verification finding under the same schema as the human comments.
+	{"placed-comments", "/api/deliverables/d-site/comments", "alice"},
+	// The High-tier decision data, shown BEFORE the act (S13.6 step 3): the pin,
+	// the protected ref, the trailers byte-for-byte with their provenance sources,
+	// the secret-free signing posture and the tier statement.
+	{"accept-card", "/api/deliverables/d-site/accept-card", "alice"},
+	// The owner's live preview sessions. Empty is the truthful answer in a world
+	// that launches nothing, and "no session is running" is a render of its own.
+	{"previews", "/api/previews", "alice"},
 }
 
 func TestWebAPIFixtures(t *testing.T) {

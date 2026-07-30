@@ -15,6 +15,17 @@ import pricesMemberRaw from './fixtures/api/prices-member.json?raw'
 import settingsRaw from './fixtures/api/settings.json?raw'
 import settingsHistoryRaw from './fixtures/api/settings-history.json?raw'
 import settingsMemberRaw from './fixtures/api/settings-member.json?raw'
+import acceptCardRaw from './fixtures/api/accept-card.json?raw'
+import compareBaseRaw from './fixtures/api/compare-base.json?raw'
+import compareBinaryRaw from './fixtures/api/compare-binary-cards.json?raw'
+import compareImageRaw from './fixtures/api/compare-image-pair.json?raw'
+import compareLineDiffRaw from './fixtures/api/compare-line-diff.json?raw'
+import compareExtractedRaw from './fixtures/api/compare-extracted-text.json?raw'
+import comparePdfRaw from './fixtures/api/compare-pdf-degrade.json?raw'
+import deliverableReviewRaw from './fixtures/api/deliverable-review.json?raw'
+import deliverableReworkRaw from './fixtures/api/deliverable-rework.json?raw'
+import placedCommentsRaw from './fixtures/api/placed-comments.json?raw'
+import previewsRaw from './fixtures/api/previews.json?raw'
 import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
 import deliverablesOfTaskRaw from './fixtures/api/deliverables-of-task.json?raw'
@@ -220,6 +231,37 @@ export const fixtures = {
   deliverablesOfTask: () => parse<Record<string, unknown>>(deliverablesOfTaskRaw),
   deliverableDetail: () => parse<Record<string, unknown>>(deliverableDetailRaw),
   runDetail: () => parse<Record<string, unknown>>(runDetailRaw),
+  /**
+   * The S15.8 review world (B6-8), every body produced by S13's own verbs.
+   *
+   * `deliverableReview` is the in-review code deliverable: two real revisions, the
+   * accept and both preview doors OPEN, and the request-revision door CLOSED with
+   * its narrative reason. `deliverableRework` is the other limb — a deliverable
+   * whose task is parked on a rework card, so that door is live and carries the
+   * ask, the answer verb and the card's own pin. No single deliverable can serve
+   * both, because the door's state IS the deliverable's state.
+   */
+  deliverableReview: () => parse<Record<string, unknown>>(deliverableReviewRaw),
+  deliverableRework: () => parse<Record<string, unknown>>(deliverableReworkRaw),
+  /** The round-over-round default read, with a REAL host-side unified diff whose
+   *  headers name the deliverable's own paths. */
+  compareLineDiff: () => parse<Record<string, unknown>>(compareLineDiffRaw),
+  /** `old=0` — the pre-task base, which is a navigation target and not a revision. */
+  compareBase: () => parse<Record<string, unknown>>(compareBaseRaw),
+  compareImagePair: () => parse<Record<string, unknown>>(compareImageRaw),
+  compareBinaryCards: () => parse<Record<string, unknown>>(compareBinaryRaw),
+  /** The PDF degrade: extraction could not run, so the surface falls back to the
+   *  metadata cards with the reason ON THE LABEL — an answer, never a refusal. */
+  comparePdfDegrade: () => parse<Record<string, unknown>>(comparePdfRaw),
+  /** The honest FALLBACK diff: a real unified diff under a label saying this type
+   *  has no rich comparison at v0. A different render from the PDF degrade, which
+   *  falls past it to the metadata cards. */
+  compareExtractedText: () => parse<Record<string, unknown>>(compareExtractedRaw),
+  /** All five placement statuses over one revision hop, an open set beside a
+   *  consumed one, and a verification finding under the same schema. */
+  placedComments: () => parse<Record<string, unknown>>(placedCommentsRaw),
+  acceptCard: () => parse<Record<string, unknown>>(acceptCardRaw),
+  previews: () => parse<Record<string, unknown>>(previewsRaw),
 }
 
 /** The routes the B6-5 oversight surfaces read, answered from the fixtures. */
@@ -274,10 +316,88 @@ export function oversightRoutes(): Record<string, Scripted> {
         cursor: 13,
       },
     },
+    // The three review deliverables the B6-8 fixture world minted on the same
+    // task. The task detail reads EVERY deliverable's own detail (the revisions
+    // are records, not a count), so a body missing here is an unscripted request
+    // and the block renders nothing.
+    [`GET /api/deliverables/${reviewDeliverableID}`]: { body: fixtures.deliverableReview() },
+    [`GET /api/deliverables/${imageDeliverableID}`]: { body: imageDetail() },
+    [`GET /api/deliverables/${binaryDeliverableID}`]: { body: binaryDetail() },
+    [`GET /api/deliverables/${notebookDeliverableID}`]: { body: notebookDetail() },
     'GET /api/runs/r-ship': { body: fixtures.runDetail() },
     'GET /api/tasks/t-ops': { body: fixtures.taskDetailOps() },
     'GET /api/deliverables?task=t-ops': { body: { deliverables: [], cursor: 15, truncated: false } },
   }
+}
+
+/** The review surface's ids, the fixture world's own. */
+export const reviewDeliverableID = 'd-site'
+export const reworkDeliverableID = 'd-brief'
+export const imageDeliverableID = 'd-hero'
+export const binaryDeliverableID = 'd-bundle'
+export const notebookDeliverableID = 'd-notebook'
+
+/** The reads the S15.8 review surface makes, answered from its own golden bodies.
+ *  The compare keys carry NO query string for the default read, because the
+ *  server's own round-over-round default is what "no parameters" means. */
+export function reviewRoutes(): Record<string, Scripted> {
+  return {
+    ...oversightRoutes(),
+    [`GET /api/deliverables/${reviewDeliverableID}`]: { body: fixtures.deliverableReview() },
+    [`GET /api/deliverables/${reviewDeliverableID}/compare`]: { body: fixtures.compareLineDiff() },
+    [`GET /api/deliverables/${reviewDeliverableID}/compare?old=0&new=2`]: { body: fixtures.compareBase() },
+    [`GET /api/deliverables/${reviewDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },
+    [`GET /api/deliverables/${reviewDeliverableID}/accept-card`]: { body: fixtures.acceptCard() },
+    [`GET /api/deliverables/${reworkDeliverableID}`]: { body: fixtures.deliverableRework() },
+    [`GET /api/deliverables/${reworkDeliverableID}/compare`]: { body: fixtures.comparePdfDegrade() },
+    [`GET /api/deliverables/${reworkDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },
+    [`GET /api/deliverables/${reworkDeliverableID}/accept-card`]: { body: fixtures.acceptCard() },
+    [`GET /api/deliverables/${imageDeliverableID}`]: { body: imageDetail() },
+    [`GET /api/deliverables/${imageDeliverableID}/compare`]: { body: fixtures.compareImagePair() },
+    [`GET /api/deliverables/${binaryDeliverableID}`]: { body: binaryDetail() },
+    [`GET /api/deliverables/${binaryDeliverableID}/compare`]: { body: fixtures.compareBinaryCards() },
+    [`GET /api/deliverables/${notebookDeliverableID}`]: { body: notebookDetail() },
+    [`GET /api/deliverables/${notebookDeliverableID}/compare`]: { body: fixtures.compareExtractedText() },
+    [`GET /api/deliverables/${notebookDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },
+    'GET /api/previews': { body: fixtures.previews() },
+  }
+}
+
+/**
+ * The two object-surface deliverables' DETAILS, derived from the review detail by
+ * swapping the identity fields the served comparison already pins.
+ *
+ * DECLARED DOWNGRADE (OQ8): these two bodies are derived rather than golden. The
+ * COMPARISONS they are read alongside are real committed bodies produced by real
+ * mints — which is where the surface's whole render comes from — and a third and
+ * fourth committed detail would add two more fixture-world seedings to prove
+ * nothing the first detail does not already prove about the detail shape.
+ */
+function imageDetail(): Record<string, unknown> {
+  return objectDetail(imageDeliverableID, 'image', 'site/hero.png')
+}
+
+function binaryDetail(): Record<string, unknown> {
+  return objectDetail(binaryDeliverableID, 'binary', 'dist/site.tar')
+}
+
+function notebookDetail(): Record<string, unknown> {
+  return objectDetail(notebookDeliverableID, 'notebook', 'analysis/report.ipynb')
+}
+
+function objectDetail(id: string, type: string, subject: string): Record<string, unknown> {
+  const detail = fixtures.deliverableReview() as {
+    deliverable: Record<string, unknown>
+    revisions: Record<string, unknown>[]
+    doors: Record<string, unknown>[]
+  }
+  detail.deliverable = { ...detail.deliverable, id, type, subject_ref: subject }
+  detail.revisions = detail.revisions.map((r) => ({ ...r, deliverable_id: id }))
+  detail.doors = detail.doors.map((d) => ({
+    ...d,
+    route: String(d.route ?? '').replace(reviewDeliverableID, id),
+  }))
+  return detail as unknown as Record<string, unknown>
 }
 
 /** The reads the S15.7 assistant surface makes, answered from its own golden

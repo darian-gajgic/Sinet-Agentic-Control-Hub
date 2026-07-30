@@ -1,0 +1,10 @@
+{
+  "deliverable_id": "d-notebook",
+  "type": "notebook",
+  "old_n": 1,
+  "new_n": 2,
+  "surface": "extracted-text-diff",
+  "fallback": true,
+  "label": "fallback surface: plain text diff (no rich comparison for type \"notebook\" at v0)",
+  "unified": "diff --git a/analysis/report.ipynb b/analysis/report.ipynb\nindex f3e6b72..87a402a 100644\n--- a/analysis/report.ipynb\n+++ b/analysis/report.ipynb\n@@ -1,2 +1,2 @@\n-cells: 3\n-summary: draft\n+cells: 4\n+summary: reviewed\n"
+}

@@ -1,0 +1,8 @@
+{
+  "deliverable_id": "d-site",
+  "type": "code",
+  "old_n": 1,
+  "new_n": 2,
+  "surface": "line-diff",
+  "unified": "diff --git a/site/legacy.tsx b/site/legacy.tsx\nindex 6bbffa9..e69de29 100644\n--- a/site/legacy.tsx\n+++ b/site/legacy.tsx\n@@ -1,2 +0,0 @@\n-// superseded by release.tsx\n-export const legacy = true\ndiff --git a/site/release.tsx b/site/release.tsx\nindex 947bc73..a144823 100644\n--- a/site/release.tsx\n+++ b/site/release.tsx\n@@ -1,4 +1,5 @@\n import { mount } from './mount'\n+import { theme } from './theme'\n \n export function ReleasePage() {\n   const notes = loadNotes()\n@@ -11,7 +12,8 @@ export function loadNotes() {\n }\n \n export function render(notes) {\n+  theme.apply()\n   return mount(notes)\n }\n \n-export const version = 1\n+export const version = 2\n"
+}

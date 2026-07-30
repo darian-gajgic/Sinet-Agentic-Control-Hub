@@ -4,6 +4,7 @@ import { ApiError, Unreachable, api, type Session } from './api'
 import { Board } from './Board'
 import { Chat } from './Chat'
 import { ConnectionState } from './ConnectionState'
+import { Deliverable } from './Deliverable'
 import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
@@ -20,10 +21,10 @@ import { hrefFor, routes } from './routes'
  * URLs every deep link and push `navigate` field will target (S15.11), the
  * S01.9 session, and the always-visible connection state (S15.12).
  *
- * The oversight, decision, settings and assistant surfaces are built; the review
- * surfaces and the workforce map are still named stubs that say which packet
- * fills them in. A stub renders nothing from the API — honest absence, never a
- * mocked screen that looks real.
+ * The oversight, decision, settings, assistant and review surfaces are built;
+ * the workforce map is still a named stub that says which packet fills it in. A
+ * stub renders nothing from the API — honest absence, never a mocked screen that
+ * looks real.
  */
 export default function App({ stream }: { stream?: EventStream } = {}) {
   const { route, params } = useRoute()
@@ -116,6 +117,13 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           // push-`navigate`-able URL that fills the route table rather than
           // adding to it, exactly as the personal filters do on mission control.
           <Chat stream={stream} search={window.location.search} />
+        ) : route.id === 'deliverable' ? (
+          // The caller's own identity decides whether the ACCEPT FORM renders:
+          // an accept is the owner's own outward act under their own credentials,
+          // so a non-owner (the operator included) reads the card and cannot act
+          // on it. That is presentation over a served body — the server refuses
+          // the verb regardless (S15.2).
+          <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
         ) : (
           <Stub route={route} params={params} />
         )}

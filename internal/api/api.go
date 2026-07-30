@@ -467,6 +467,11 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/deliverables/{deliverable}/compare", s.handleDeliverableCompare)
 	protected("GET /api/deliverables/{deliverable}/comments", s.handleCommentList)
 	protected("POST /api/deliverables/{deliverable}/comments", s.handleCommentCreate)
+	// The object BYTES behind an ObjectRef (B6-8 OQ2b): the S13.2 image trio and
+	// the binary card's download-to-inspect need content, and metadata plus a
+	// hash is not content. The sha resolves only against THIS deliverable's own
+	// revisions, so the route is not a sha oracle (objects.go).
+	protected("GET /api/deliverables/{deliverable}/objects/{sha}", s.handleDeliverableObject)
 	protected("GET /api/deliverables/{deliverable}/accept-card", s.handleAcceptCard)
 	protected("POST /api/deliverables/{deliverable}/accept", s.handleAccept)
 	protected("POST /api/deliverables/{deliverable}/preview", s.handlePreviewLaunch)
