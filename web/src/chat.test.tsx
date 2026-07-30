@@ -5,6 +5,7 @@ import App from './App'
 import { ApiError, Unreachable } from './api'
 import type {
   Answer,
+  ApprovalItem,
   ChatBornTask,
   ChatFile,
   ChatMessage,
@@ -94,6 +95,16 @@ function messageOf(view: ChatSessionView, turn: string): ChatMessage {
  */
 function turnPost(view: ChatSessionView, turn: ChatTurn) {
   return { body: { turn, message: messageOf(view, turn.turn_id), session: view.session } }
+}
+
+/** The served inbox as ALICE reads it — the same body the inbox suite drives,
+ *  carrying the chat-born card as the real projector emitted it. */
+const chatbornItem = () => (fixtures.approvalsMine() as unknown as { items: ApprovalItem[] }).items
+
+function card(items: ApprovalItem[], nativeAsk: string): ApprovalItem {
+  const found = items.find((i) => i.id.endsWith(`:${nativeAsk}`))
+  if (!found) throw new Error(`the served queue carries no card for ask ${nativeAsk} — the test would assert nothing`)
+  return found
 }
 
 const node = (view: { container: HTMLElement }, sel: string) => view.container.querySelector(sel)
@@ -233,15 +244,31 @@ test('assistant-cloud is never wired: no import, no cloud runtime, no cloud conf
   // The cloud SEAMS are re-exported by the pinned package under its own names, so
   // naming one would wire the cloud without ever naming the package.
   const seams = ['Assistant' + 'Cloud', 'useCloudThreadList' + 'Runtime', 'useCloudThreadList' + 'Adapter', 'CloudFileAttachment' + 'Adapter']
-  const seamHits: string[] = []
-  for (const [path, raw] of Object.entries(appSources())) {
-    for (const seam of seams) if (raw.includes(seam)) seamHits.push(`${path}: ${seam}`)
+  const seamHits = (files: Record<string, string>) => {
+    const hits: string[] = []
+    for (const [path, raw] of Object.entries(files)) {
+      for (const seam of seams) if (raw.includes(seam)) hits.push(`${path}: ${seam}`)
+    }
+    return hits
   }
-  expect(seamHits, 'a cloud runtime or adapter is referenced in app code').toEqual([])
+  expect(seamHits(appSources()), 'a cloud runtime or adapter is referenced in app code').toEqual([])
 
-  // Probe: the scan can fail.
-  const planted = { './p.ts': `import { ${seams[0]} } from '@assistant-ui/react'` }
-  expect(Object.values(planted).some((raw) => seams.some((s) => raw.includes(s)))).toBe(true)
+  // BOTH scans get a probe that RUNS THE SCAN, not a re-statement of its predicate
+  // on a literal — a "probe" that re-evaluates `raw.includes(x)` proves only that
+  // `includes` works (drain r1 D9).
+  expect(seamHits({ './planted.tsx': `const r = ${seams[0]}.create({ apiKey: k })` })).toHaveLength(1)
+  const plantedImport = { './planted.ts': `import { AssistantCloud } from '${pkg}'\n` }
+  const plantedHits: string[] = []
+  for (const [path, raw] of Object.entries(plantedImport)) {
+    for (const line of raw.split('\n')) {
+      if (!/^\s*(import|export)\b|require\(/.test(line)) continue
+      if (line.includes(pkg)) plantedHits.push(`${path}: ${line.trim()}`)
+    }
+  }
+  expect(plantedHits, 'the import-line scan cannot catch a planted import').toHaveLength(1)
+  // …and the line matcher really does ignore a NON-import mention, which is what
+  // makes the scan usable over a tree whose prose explains what it forbids.
+  expect(/^\s*(import|export)\b|require\(/.test(` * this file never touches ${pkg}`)).toBe(false)
 })
 
 test('the adapter is pure at its edges: the feed and the converter are the served rows', () => {
@@ -508,31 +535,52 @@ test('the choice surfaces are the SERVED registries, not a list typed into this 
 
 // ── R14: survives navigation, and the stop act ────────────────────────────
 
-test('the survives-navigation inventory is an explicit table, and everything in it has a reason', () => {
-  const must = [
-    'the in-flight turn',
-    "the in-flight turn's progress",
-    'the produced-files accumulation',
-    'the transcript',
-    'which conversation is open',
-    "the tab's one EventSource",
-  ]
-  for (const thing of must) {
-    const row = survivesNavigation.find((r) => r.thing === thing)
-    expect(row, `the inventory does not name ${thing}`).toBeDefined()
-    expect(row!.survives, `${thing} MUST survive a view switch (S15.7)`).toBe(true)
-  }
-  // The shed rows are deliberate, and both directions are stated.
-  expect(survivesNavigation.filter((r) => !r.survives).length).toBeGreaterThan(0)
+/**
+ * The must-survive half, named once and used twice: this list is what the
+ * partition test pins AND what the behavioral test walks, so a row cannot be
+ * declared to survive without something driving it.
+ */
+const mustSurvive = [
+  'the in-flight turn',
+  "the in-flight turn's progress",
+  'the produced-files accumulation',
+  'the transcript',
+  'which conversation is open',
+  "the tab's one EventSource",
+]
+
+test('the inventory is a PINNED PARTITION: flipping any row fails this test', () => {
+  // The whole table, verdict by verdict and in order. A subset check plus a
+  // "something is shed" count is not falsifiable — a shed row flipped to
+  // `survives: true` (with any reason at all) passes it, which is the one thing
+  // R14 asked this artifact not to be. The prose reasons are deliberately NOT
+  // machine-checked: no honest scan can tell a real reason from a plausible
+  // sentence. What carries is this partition plus the behavioral drives below.
+  expect(survivesNavigation.map((r) => `${r.survives ? 'survives' : 'shed'}: ${r.thing}`)).toEqual([
+    'survives: the in-flight turn',
+    "survives: the in-flight turn's progress",
+    'survives: the produced-files accumulation',
+    'survives: the transcript',
+    'survives: which conversation is open',
+    "survives: the tab's one EventSource",
+    'shed: the composer draft',
+    "shed: the composer's verb pick",
+    'shed: the uploaded-file list',
+    'shed: a request-level notice (sending, or a failure)',
+  ])
+  // Every must-survive row is DRIVEN, and the two lists are held to each other so
+  // a new claim cannot be added to the table without a drive to back it.
+  expect(survivesNavigation.filter((r) => r.survives).map((r) => r.thing)).toEqual(mustSurvive)
   for (const row of survivesNavigation) {
-    expect(row.because.length, `${row.thing} has no reason`).toBeGreaterThan(20)
+    expect(row.because.length, `${row.thing} states no reason at all`).toBeGreaterThan(20)
   }
 })
 
-test('leaving mid-turn and coming back keeps the in-flight turn, its chips, and ONE EventSource', async () => {
-  // The turn is genuinely mid-flight, and NOT because this tab remembers it: the
-  // committed body serves it as `running`, which is the server-side row the turn
-  // verb opened. That is what survival means here — a re-read, not a memory.
+test('a view-switch round trip keeps ALL SIX must-survive things, and sheds the draft', async () => {
+  // Every row the inventory claims survives is driven HERE, in one round trip, so
+  // the claim and the evidence cannot come apart. The turn is genuinely mid-flight
+  // and NOT because this tab remembers it: the committed body serves it as
+  // `running`, which is the server-side row the turn verb opened.
   const body = served()
   const inflight = body.running!
   const withChips = body.turns.find((t) => (t.produced ?? []).length > 0)!
@@ -541,6 +589,11 @@ test('leaving mid-turn and coming back keeps the in-flight turn, its chips, and 
   expect(turnNode(view, inflight.turn_id).getAttribute('data-turn-fact')).toBe('running')
   const openedBefore = stream.opened
   const callsBefore = log.calls.length
+
+  // A draft nobody sent — the shed half, so the partition is driven in BOTH
+  // directions rather than only where survival is convenient.
+  typeInto(node(view, '.chat-input') as HTMLTextAreaElement, 'a half-typed question')
+  expect((node(view, '.chat-input') as HTMLTextAreaElement).value).toBe('a half-typed question')
 
   click(nodes(view, '.shell-nav a').find((a) => a.textContent === 'Board')!)
   await flush(6)
@@ -553,18 +606,40 @@ test('leaving mid-turn and coming back keeps the in-flight turn, its chips, and 
   act(() => navigate(chatHref))
   await flush(8)
 
-  // The turn is still there — because it was never in this tab.
+  // (1) the in-flight turn — still there, because it was never in this tab.
   const back = turnNode(view, inflight.turn_id)
   expect(back, 'the in-flight turn was lost across a view switch').not.toBeNull()
+  // (2) its progress — the RECORDED state, not merely the row's existence, and
+  // with the act that can end it still offered.
+  expect(back.getAttribute('data-turn-state'), "the turn's progress did not survive").toBe('running')
   expect(back.getAttribute('data-turn-fact')).toBe('running')
   expect(buttonNamed(view, 'Stop this turn'), 'the stop act is not on the running turn').toBeDefined()
-  // And so is the produced-files accumulation.
-  expect(turnNode(view, withChips.turn_id).querySelectorAll('[data-chip]')).toHaveLength(withChips.produced!.length)
-
-  // ONE EventSource for the tab, across the whole round trip.
+  // (3) the produced-files accumulation.
+  expect(
+    turnNode(view, withChips.turn_id).querySelectorAll('[data-chip]'),
+    'the produced-files accumulation did not survive',
+  ).toHaveLength(withChips.produced!.length)
+  // (4) the transcript — every word of it.
+  for (const said of body.messages) {
+    expect(view.container.textContent, 'the transcript did not survive the round trip').toContain(said.body)
+  }
+  expect(nodes(view, '[data-turn]')).toHaveLength(body.turns.length)
+  // (5) which conversation is open — in the URL and marked in the rail.
+  expect(window.location.pathname + window.location.search).toBe(chatHref)
+  expect(
+    view.container
+      .querySelector(`[data-session-id="${CSS.escape(chatSessionID)}"]`)
+      ?.getAttribute('data-active'),
+    'the rail lost track of which conversation is open',
+  ).toBe('true')
+  // (6) ONE EventSource for the tab, across the whole round trip.
   expect(stream.opened, 'a view switch re-opened the tab connection').toBe(openedBefore)
   expect(stream.opened).toBe(1)
   expect(FakeSource.made).toHaveLength(1)
+
+  // SHED, as the inventory says: unsent text is not platform state, and carrying
+  // it across would be a side-truth no re-snapshot could correct.
+  expect((node(view, '.chat-input') as HTMLTextAreaElement).value, 'the composer draft outlived the view').toBe('')
 
   // NAVIGATION CALLS NOTHING (OQ6): no stop, no cancel, no unload handler.
   const during = log.calls.slice(callsBefore)
@@ -592,10 +667,15 @@ test('a sent turn is asked for straight away, and this tab says what IT is doing
   view.unmount()
 })
 
-test('an outstanding POST is itself the in-flight state, and the composer will not race it', async () => {
+test('an outstanding POST holds the next turn back, and offers NO stop it cannot perform', async () => {
   // The other half of "in-flight": the request is still out and no `running` row
   // has come back yet. The widget's own running state is what holds the second
   // turn back, which is the same rule the server enforces per session.
+  //
+  // AND NOTHING OFFERS TO STOP IT. In this window no turn id exists, so a stop
+  // control would be a door onto nothing — and OQ6 rejected client-only forget,
+  // so there is no honest local abort to put behind it either. The notice says so
+  // in words instead (§43: never a dead button).
   const { view } = await open(emptyHref, { [`POST ${emptyPath}/turns`]: { body: new Promise(() => {}) } })
 
   typeInto(node(view, '.chat-input') as HTMLTextAreaElement, 'what is running?')
@@ -603,7 +683,26 @@ test('an outstanding POST is itself the in-flight state, and the composer will n
   await flush(6)
 
   expect((node(view, '.chat-send') as HTMLButtonElement).disabled, 'a second turn could be raced in').toBe(true)
-  expect(node(view, '.chat-cancel'), 'the widget offers no stop while a turn is outstanding').not.toBeNull()
+  expect(node(view, '.chat-cancel'), 'a stop control renders while nothing is stoppable').toBeNull()
+  expect(buttonNamed(view, 'Stop'), 'a stop affordance renders while nothing is stoppable').toBeUndefined()
+  expect(node(view, '[data-sending]')?.textContent).toContain('nothing to stop yet')
+  view.unmount()
+})
+
+test('the widget cancel appears once a turn IS stoppable, and calls the abandon verb', async () => {
+  // The same affordance, in the window where it can act: a served `running` turn
+  // has an id, so the widget's cancel and the in-feed stop control are two
+  // affordances on ONE verb.
+  const inflight = served().running!
+  const { view, log } = await open(chatHref, {
+    [`POST /api/chat/turns/${inflight.turn_id}/stop`]: { body: { turn: inflight, applied: true } },
+  })
+
+  const cancel = node(view, '.chat-cancel')
+  expect(cancel, "the widget's own cancel does not render for a stoppable turn").not.toBeNull()
+  click(cancel)
+  await flush(8)
+  expect(log.calls.filter((c) => c.path === `/api/chat/turns/${inflight.turn_id}/stop`)).toHaveLength(1)
   view.unmount()
 })
 
@@ -683,7 +782,13 @@ test('the failure table keys on class, status and code — never on message text
   }
 })
 
-test('a busy platform is humanized in-feed with the served detail kept', async () => {
+test('the FORWARD-TOLERANT overload arm is humanized with the served detail kept', async () => {
+  // R15 mandates 429/overload humanization, so the arm exists — but no chat route
+  // reaches it today and the test says so rather than implying otherwise (drain r1
+  // D5): the only 429 in internal/api is the login PIN lockout, which chat never
+  // calls, and every 503 a chat route produces carries `not_wired`, which the table
+  // gives its own class on purpose. This drives the arm against the status it is
+  // written for, so the day a lane refusal surfaces here it is already humane.
   const { view } = await open(emptyHref, {
     [`POST ${emptyPath}/turns`]: {
       status: 429,
@@ -941,37 +1046,26 @@ test('answering the intake card in place uses the LANDED verb with the card own 
   const born = turnByKind(body, 'task')
   const task = born.outcome as ChatBornTask
   const question = task.open_card!.questions![0]
-  // The queue row is LOCALLY CONSTRUCTED, and the reason is structural: the
-  // fixture world answers the handoff through the IntakeSurface seam, and
-  // internal/api's reverse import wall bars its tests from importing
-  // internal/stage — so no real intake ask can ever exist in that world, and no
-  // committed approvals body can carry this card. The shape is the landed
-  // ApprovalItem's own (api.ts), and the id/pin used below are read back OFF it
-  // rather than composed here.
-  const queued = {
-    id: `ask:${task.open_ask_id}`,
-    kind: 'ask',
-    owner: 'alice',
-    tier: 'standard',
-    answerable: true,
-    batchable: false,
-    step_up_required: false,
-    payload_hash: 'sha256:the-card-own-pin',
-    observed_ts: '2026-07-20T09:02:00Z',
-    actions: ['proceed'],
-    card: task.open_card,
-  }
+  // THE QUEUE ROW IS THE REAL PROJECTOR'S (drain r1 D2). The fixture world seeds
+  // the born card as a real `asks` row — the same `intake.Card` value the handoff
+  // view carries — so `GET /api/approvals` serves it through the same projection
+  // production uses: a bare 64-hex `gates.CanonicalHash` for the pin, whatever
+  // action vocabulary an interview card actually derives (none), and the tier,
+  // expiry and staleness the platform computes. A hand-built row got all three of
+  // those wrong, which is the B6-5 root cause in miniature.
+  const queued = card(chatbornItem(), task.open_ask_id!)
+  expect(queued.payload_hash, 'the served pin is not a canonical hash').toMatch(/^[0-9a-f]{64}$/)
+  expect(queued.answerable, 'the platform is not offering this card for an answer').toBe(true)
   const { view, log } = await open(chatHref, {
-    'GET /api/approvals': { body: { items: [queued], cursor: 46 } },
     [`POST /api/approvals/${encodeURIComponent(queued.id)}/answer`]: {
       body: { id: queued.id, state: 'answered', applied: true, cursor: 47 },
     },
   })
-  const card = turnNode(view, born.turn_id).querySelector('[data-intake-ask]') as HTMLElement
+  const inline = turnNode(view, born.turn_id).querySelector('[data-intake-ask]') as HTMLElement
 
   // Nothing is sent until the person has answered something.
   expect((buttonNamed(view, 'Answer here') as HTMLButtonElement).disabled).toBe(true)
-  choose(card.querySelector(`[data-question="${CSS.escape(question.id)}"] select`) as HTMLSelectElement,
+  choose(inline.querySelector(`[data-question="${CSS.escape(question.id)}"] select`) as HTMLSelectElement,
     question.options![0].value)
   await flush(2)
   click(buttonNamed(view, 'Answer here'))
@@ -990,14 +1084,43 @@ test('answering the intake card in place uses the LANDED verb with the card own 
   view.unmount()
 })
 
+test('a card that demands a PIN is sent to the surface that has one, never answered here', async () => {
+  // The served card is the authority. This surface has no PIN field and must never
+  // grow one — a High-tier step-up exists so approval identity is not inherited
+  // from an idle session — so a card declaring step-up is handed to the inbox with
+  // the reason, and no answer is posted. At v0 no intake interview card declares
+  // it, which is exactly why the assumption needs driving rather than assuming.
+  const body = served()
+  const born = turnByKind(body, 'task')
+  const task = born.outcome as ChatBornTask
+  const question = task.open_card!.questions![0]
+  const real = card(chatbornItem(), task.open_ask_id!)
+  const { view, log } = await open(chatHref, {
+    'GET /api/approvals': { body: { items: [{ ...real, step_up_required: true }], cursor: 46 } },
+  })
+  const inline = turnNode(view, born.turn_id).querySelector('[data-intake-ask]') as HTMLElement
+
+  choose(inline.querySelector(`[data-question="${CSS.escape(question.id)}"] select`) as HTMLSelectElement,
+    question.options![0].value)
+  await flush(2)
+  click(buttonNamed(view, 'Answer here'))
+  await flush(8)
+
+  expect(view.container.textContent).toContain('needs your PIN')
+  expect(log.calls.filter((c) => c.path.includes('/answer')), 'a step-up card was answered without a PIN').toEqual([])
+  // And the way out is offered: the card's own served id, as a link.
+  expect(nodes(view, 'a').map((a) => a.getAttribute('href'))).toContain(hrefFor('inbox-item', { id: real.id }))
+  view.unmount()
+})
+
 test('a card the queue no longer carries says so plainly instead of guessing a pin', async () => {
   const body = served()
   const born = turnByKind(body, 'task')
   const question = (born.outcome as ChatBornTask).open_card!.questions![0]
   const { view, log } = await open(chatHref, { 'GET /api/approvals': { body: { items: [], cursor: 46 } } })
-  const card = turnNode(view, born.turn_id).querySelector('[data-intake-ask]') as HTMLElement
+  const inline = turnNode(view, born.turn_id).querySelector('[data-intake-ask]') as HTMLElement
 
-  choose(card.querySelector(`[data-question="${CSS.escape(question.id)}"] select`) as HTMLSelectElement,
+  choose(inline.querySelector(`[data-question="${CSS.escape(question.id)}"] select`) as HTMLSelectElement,
     question.options![0].value)
   await flush(2)
   click(buttonNamed(view, 'Answer here'))

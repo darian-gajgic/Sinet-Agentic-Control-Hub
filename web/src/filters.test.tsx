@@ -139,8 +139,12 @@ test('"running" asks for the stored state, and renders what comes back', async (
   const { view, log } = await open('/?view=running', { 'GET /api/runs?status=running': { body: running } })
   expect(log.calls.some((c) => c.path === '/api/runs?status=running')).toBe(true)
   const rows = [...view.container.querySelectorAll('[data-filter="running"] .row')]
-  expect(rows.length).toBe(1)
-  expect(rows[0].textContent).toContain('t-ship')
+  // Both running runs render: the release run and the intake run of the
+  // chat-born task (B6-7 D2). The filter shows what the SERVER returned, so a
+  // row appearing here is the world growing, not the client sieving.
+  expect(rows.map((r) => r.textContent?.includes('t-ship'))).toContain(true)
+  expect(rows).toHaveLength(2)
+  expect(rows.map((r) => r.textContent?.includes('t-chatborn'))).toContain(true)
 })
 
 test('"finished today" sends local midnight as a UTC instant, in a non-UTC zone', async () => {

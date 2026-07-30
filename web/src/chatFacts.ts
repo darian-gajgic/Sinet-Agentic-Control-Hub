@@ -36,6 +36,15 @@ export type SurvivalRow = {
  *
  * Read the `false` rows as deliberate: a thing that is not platform state must
  * not be made to look like it is.
+ *
+ * HARD-STOP IS AN ACT, NOT A SIDE EFFECT (OQ6), and that is why nothing in this
+ * table is conditional on leaving. Navigation calls no verb: there is no unload
+ * handler and no cleanup that posts anything. A person who walks away has not
+ * stopped their turn — it is still running on the server and is there when they
+ * come back — and a person who stopped one pressed something that says so. The
+ * guarantee is DRIVEN (a round trip that posts nothing, plus a tree scan for
+ * unload-family handlers); it is deliberately not restated here as a boolean
+ * constant, because a constant nothing reads pins nothing.
  */
 export const survivesNavigation: readonly SurvivalRow[] = [
   {
@@ -96,15 +105,6 @@ export const survivesNavigation: readonly SurvivalRow[] = [
       "it describes THIS tab's own outstanding or finished request, not the conversation; the turn's recorded state is what survives, and that is served",
   },
 ]
-
-/**
- * HARD-STOP IS AN ACT, NOT A SIDE EFFECT (OQ6). Navigation calls no verb: there
- * is no unload handler, no pagehide handler and no cleanup that posts anything.
- * A person who walks away has not stopped their turn — the turn is still running
- * on the server and is there when they come back — and a person who stops one
- * pressed something that says so.
- */
-export const navigationCallsNoVerb = true
 
 // ── R15: the error-humanization table ─────────────────────────────────────
 

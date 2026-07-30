@@ -152,8 +152,13 @@ test('the assistant is usable at phone width: three regions that stack, content 
   // S1.10 names chat as phone-complete, so its three regions stack on a phone
   // and lay out side by side only at the breakpoint.
   expect(block('.chat-body')).toContain('flex-direction: column')
+  // The wide rule must actually SET something: asserting only that the selector
+  // appears after the breakpoint would pass over an empty block (drain r1 D10).
   const wide = css.slice(css.indexOf('@media (min-width:'))
-  expect(wide, 'the assistant never lays out its regions side by side on a wide screen').toContain('.chat-body')
+  const wideBody = wide.slice(wide.indexOf('.chat-body {'), wide.indexOf('}', wide.indexOf('.chat-body {')))
+  expect(wideBody, 'the assistant does not lay its regions out side by side on a wide screen').toContain(
+    'flex-direction: row',
+  )
   // Every act stays reachable: the verb picker and the composer row wrap, and
   // nothing is hidden behind a horizontal scroll of the page.
   expect(block('.chat-composer-row')).toContain('flex-direction: column')

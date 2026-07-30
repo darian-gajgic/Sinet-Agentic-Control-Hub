@@ -420,12 +420,13 @@ function Conversation({
                 the survives-navigation inventory says out loud. */}
             {sending && running === null && (
               <p className="muted" data-sending="true">
-                Sending — the platform is recording your message.
+                Sending — the platform is recording your message. There is nothing to stop yet: a turn can only be
+                stopped once the platform has opened it and told us its id.
               </p>
             )}
           </ThreadPrimitive.Viewport>
 
-          <Composer pick={pick} setPick={setPick} registries={registries} files={files} />
+          <Composer pick={pick} setPick={setPick} registries={registries} files={files} stoppable={running} />
         </ThreadPrimitive.Root>
       </AssistantRuntimeProvider>
     </div>
@@ -683,6 +684,20 @@ function IntakeCardInPlace({
         return
       }
       setFound(item)
+      // A CARD THAT DEMANDS A PIN IS ANSWERED WHERE THE PIN LIVES (§43's
+      // card-is-the-authority rule). This surface has no PIN field and must never
+      // grow one: a High-tier step-up exists so approval identity is never
+      // inherited from an idle session (G3 Def.1), and the inbox already has the
+      // prompt. At v0 an intake interview card declares standard/medium and never
+      // asks for one, so this branch is the assumption made explicit rather than a
+      // hole being closed — the day a card arrives with it, the person is sent to
+      // the surface that can do it instead of being handed a refusal.
+      if (item.step_up_required) {
+        setNotice(
+          'This card needs your PIN re-entered, which happens in the decision queue — open it there and the platform will ask.',
+        )
+        return
+      }
       if (item.payload_hash === undefined || item.payload_hash === '' || !item.answerable) {
         setNotice(
           item.not_answerable_reason ??
@@ -773,11 +788,16 @@ function Composer({
   setPick,
   registries,
   files,
+  stoppable,
 }: {
   pick: ComposerPick
   setPick: (p: ComposerPick) => void
   registries: Registries
   files: ChatFile[]
+  /** The turn the widget's own cancel affordance would end, or null when there is
+   *  nothing stoppable — which is every moment before the platform has opened the
+   *  turn and named it. */
+  stoppable: ChatTurn | null
 }) {
   const selected = (registries.catalog?.queries ?? []).find((q) => q.name === pick.query)
   return (
@@ -883,9 +903,14 @@ function Composer({
           aria-label="Message"
         />
         <ComposerPrimitive.Send className="chat-send">Send</ComposerPrimitive.Send>
-        <ThreadPrimitive.If running>
-          <ComposerPrimitive.Cancel className="chat-cancel">Stop</ComposerPrimitive.Cancel>
-        </ThreadPrimitive.If>
+        {/* The widget's cancel affordance renders only when there is a turn to
+            cancel. `ThreadPrimitive.If running` was the wrong gate: the thread is
+            also "running" while the POST is merely outstanding, and in THAT window
+            no turn id exists yet — so the button was a door onto nothing. OQ6
+            rejected client-only forget, so there is no honest local abort to put
+            behind it; a control that cannot act must not be drawn (§43). The
+            sending notice says so in words instead. */}
+        {stoppable !== null && <ComposerPrimitive.Cancel className="chat-cancel">Stop</ComposerPrimitive.Cancel>}
       </div>
     </ComposerPrimitive.Root>
   )

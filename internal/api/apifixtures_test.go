@@ -150,6 +150,12 @@ func fixtureWorld(t *testing.T) *backend {
 		// one act that mints a TASK-SCOPED decision carrying the D10 operator
 		// limb, so it is what the task page can render "(as operator)" from.
 		{"t-ops", "op", "Rotate the household keys", "intake", fxT4},
+		// The task the S15.7 handoff gives birth to. Its ask row is what lets the
+		// chat feed answer the born card in place through the real approvals verb
+		// (drain r1 D2), and `asks.run_id` is a FOREIGN KEY — so the run and the
+		// task it belongs to have to be real rows too. That is the honest
+		// direction: the chat fixture already claims this task exists.
+		{"t-chatborn", "alice", "Draft the release notes", "intake", fxT2},
 	} {
 		exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
 			tk.id, tk.owner, tk.title, tk.kanban, tk.created)
@@ -173,6 +179,9 @@ func fixtureWorld(t *testing.T) *backend {
 		{"r-stall", "bob", "t-stall", "parked", "zai", fxT4},
 		{"r-claim", "alice", "t-claim", "claimed", "anthropic", fxT4},
 		{"r-ops", "op", "t-ops", "queued", "anthropic", fxT4},
+		// The born task's intake run, in the state its own served summary
+		// declares (`running`), so the two agree.
+		{"t-chatborn.intake", "alice", "t-chatborn", "running", "anthropic", fxT2},
 	} {
 		exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
 		            VALUES (?,?,?,?,?,0,?,?)`, r.id, r.owner, r.task, r.state, r.lane, r.created, r.created)
@@ -208,6 +217,14 @@ func fixtureWorld(t *testing.T) *backend {
 		// — was unobservable: removing the filter changed nothing anybody could
 		// see. The three now overlap on `replan` and diverge everywhere else.
 		{"ask-sweep", "r-archive", "question", fixtureTrivialCoverageCard(t)},
+		// The chat-born task's OPEN INTAKE CARD, as a REAL ask row (B6-7 part-B
+		// drain r1, D2). The chat feed renders this card in place and answers it
+		// through the LANDED approvals verb, which pins an answer to the card's
+		// own payload hash — so the widget needs a body where that hash, the
+		// derived action vocabulary and `answerable` are the REAL projector's.
+		// The snapshot is the SAME fixtureChatBornCard the handoff view carries:
+		// one card value, two renderings, so the queue and the feed cannot drift.
+		{"ask-chatborn-1", "t-chatborn.intake", "question", fixtureChatBornCard(t)},
 	} {
 		exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
 			a.id, a.run, "alice", a.snapshot, a.status, fxT2)

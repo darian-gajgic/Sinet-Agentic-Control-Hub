@@ -56,7 +56,10 @@ test('every bucket is filled from served rows, and no run falls off the screen',
   const buckets = bucketRuns(runs, fixtureNow)
   const by = (id: string) => buckets.find((b) => b.id === id)!.runs.map((r) => r.run_id)
 
-  expect(by('running')).toEqual(['r-ship'])
+  // Two running runs: the release run and the intake run of the task the S15.7
+  // handoff gave birth to (B6-7 D2 made that task and its run real rows, because
+  // `asks.run_id` is a foreign key and its born card had to be a real ask).
+  expect(by('running').sort()).toEqual(['r-ship', 't-chatborn.intake'])
   // Three queued runs: two of alice's and the operator's own.
   expect(by('queued').sort()).toEqual(['r-archive', 'r-ops', 'r-triage'])
   expect(by('blocked'), 'the run with an open ask is not under the human bucket').toEqual(['r-audit'])

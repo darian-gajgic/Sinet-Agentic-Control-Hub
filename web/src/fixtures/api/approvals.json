@@ -158,6 +158,65 @@
       "card": {}
     },
     {
+      "id": "ask:ask-chatborn-1",
+      "kind": "ask",
+      "owner": "alice",
+      "run_id": "t-chatborn.intake",
+      "tier": "medium",
+      "answerable": false,
+      "not_answerable_reason": "the card's owner answers it (D10); you can read it but not decide it",
+      "batchable": false,
+      "step_up_required": false,
+      "payload_hash": "d09305217b5f184b2f9294b9924ffffffe726f30f0bc2ba605e2884d4fe20a5f",
+      "observed_ts": "2026-07-20T09:02:00Z",
+      "expiry_at": "2026-07-20T09:02:20Z",
+      "stale": true,
+      "stale_reasons": [
+        "pending longer than ⚙ freshness.max_age — assumptions may be stale; re-plan is one click (S06.9)"
+      ],
+      "card": {
+        "kind": "interview",
+        "task_id": "t-chatborn",
+        "run_id": "t-chatborn.intake",
+        "version": 1,
+        "issued_ts": "2026-07-20T09:02:00Z",
+        "clearance": 0.48,
+        "tier": "standard",
+        "questions": [
+          {
+            "id": "audience",
+            "text": "Who are these release notes for?",
+            "options": [
+              {
+                "label": "The household",
+                "value": "household"
+              },
+              {
+                "label": "Just me",
+                "value": "self"
+              }
+            ],
+            "weight": 3
+          },
+          {
+            "id": "range",
+            "text": "Which changes should it cover?",
+            "options": [
+              {
+                "label": "Since the last release",
+                "value": "since_last_release"
+              },
+              {
+                "label": "This month",
+                "value": "this_month"
+              }
+            ],
+            "weight": 2
+          }
+        ]
+      }
+    },
+    {
       "id": "ask:ask-coverage",
       "kind": "ask",
       "owner": "alice",
