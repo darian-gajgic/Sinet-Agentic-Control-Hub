@@ -209,7 +209,22 @@ type WorkforceGrants struct {
 	GatePolicy         string   `json:"gate_policy,omitempty"`
 	FirstNRemaining    int64    `json:"first_n_remaining"`
 	ScheduleAttachable bool     `json:"schedule_attachable"`
-	UpdatedTS          string   `json:"updated_ts"`
+	// ScheduleBarred is S08.7's third consequence AS A SERVED FACT: a degraded
+	// domain closes auto-accepting schedules to its workers, so a version
+	// granted attachability is still barred while its domain is degraded
+	// (`Approve` copies the request unclamped, so the grant and the bar are two
+	// different facts and the row carries both).
+	//
+	// It is decided HERE rather than by the client re-reading `maturity ==
+	// "degraded"`, and that is the point: the maturity vocabulary is the
+	// server's, so a maturity this build has never heard of that also bars
+	// schedules is one server change away from being marked everywhere, while a
+	// client-side derivation would leave it silently unmarked on the screen
+	// (§42 forward tolerance). It also travels with the grants block, so every
+	// render of a granted row carries its own bar — including a SUPERSEDED
+	// version's, which a caller-passed flag had already been forgotten on.
+	ScheduleBarred bool   `json:"schedule_barred,omitempty"`
+	UpdatedTS      string `json:"updated_ts"`
 }
 
 // WorkforceValidation is the newest validation_records row, keyed (version ×
@@ -253,20 +268,38 @@ type WorkforceRevalidation struct {
 
 // WorkforceOutcomes is the S08.4 version→outcome join for one version.
 type WorkforceOutcomes struct {
-	// Runs are the runs routed to this version, newest routing decision first.
+	// Runs is ONE ROW PER ROUTING DECISION, newest first — so a run re-routed to
+	// this version appears once per decision, each with its own cause and stamp,
+	// which is what a routing-accountability surface is for (S08.8). `RunsRouted`
+	// below counts RUNS and is the different number it sounds like.
 	Runs []WorkforceRoutedRun `json:"runs"`
 	// Truncated reports the per-version bound cutting the list short, so a
 	// reading of the newest runs is never read as the whole history.
 	Truncated bool `json:"truncated"`
-	// RunsRouted is how many runs this reading found routed to this version —
-	// the count BEFORE the per-version bound, so it stays true when the list
-	// above is cut. A count of rows is a reading somebody can take; it is not
-	// money, and nothing here sums a figure.
+	// RunsRouted is how many DISTINCT RUNS this reading found routed to this
+	// version — the count BEFORE the per-version bound, so it stays true when
+	// the list above is cut. A count of rows is a reading somebody can take; it
+	// is not money, and nothing here sums a figure.
+	//
+	// DISTINCT is the whole of it. A run can be routed to one version more than
+	// once — an `override` re-route is an ordinary cause — so counting routing
+	// DECISIONS under a field named `runs_routed` reports more runs than exist,
+	// which is the same false-figure family as a price nobody set. A routing
+	// decision naming no run counts as no run for the same reason; the row
+	// itself still renders below, with both its absences stated.
 	RunsRouted int `json:"runs_routed"`
 	// VerdictTally is the S08.4 "verdict outcomes" half: how many recorded
 	// rounds carried each verdict, across the runs above. Rows counted, sorted
-	// by verdict so two identical requests answer identically.
+	// by verdict so two identical requests answer identically. Each run
+	// contributes ONCE however many times it was routed here.
 	VerdictTally []WorkforceVerdictCount `json:"verdict_tally"`
+	// VerdictTallyTruncated says the tally was counted from a BOUNDED set, so
+	// its numbers are a floor rather than the whole record: either a run's own
+	// rounds were cut by the per-run bound or a run was cut by the per-version
+	// bound before it could contribute. A bound that truncates has to be visible
+	// where the number is rendered — a silently smaller count is a false figure
+	// with nothing on screen to warn a reader off it.
+	VerdictTallyTruncated bool `json:"verdict_tally_truncated,omitempty"`
 	// Absent says why there is nothing, so an empty list is never read as a
 	// measurement somebody took (S10.1; §42 honest absence). At v0 this is what
 	// most versions will carry, and it is the truthful render.
@@ -410,12 +443,12 @@ func workforceWorker(e worker.RosterEntry, outcomes versionOutcomeSet) Workforce
 		}
 	}
 	for _, rv := range e.Versions {
-		out.Versions = append(out.Versions, workforceVersion(rv, outcomes))
+		out.Versions = append(out.Versions, workforceVersion(rv, e.Domain, outcomes))
 	}
 	return out
 }
 
-func workforceVersion(rv worker.RosterVersion, outcomes versionOutcomeSet) WorkforceVersion {
+func workforceVersion(rv worker.RosterVersion, dom worker.Domain, outcomes versionOutcomeSet) WorkforceVersion {
 	v := rv.Version
 	out := WorkforceVersion{
 		VersionID: v.ID, Version: v.Version, Supersedes: v.Supersedes, Active: rv.Active,
@@ -433,7 +466,8 @@ func workforceVersion(rv worker.RosterVersion, outcomes versionOutcomeSet) Workf
 			ConfinementClass: g.Class, Egress: string(g.Egress), EgressHosts: g.EgressHosts,
 			GatePolicy:      g.GatePolicy,
 			FirstNRemaining: g.FirstNRemaining, ScheduleAttachable: g.ScheduleAttachable,
-			UpdatedTS: g.UpdatedTS,
+			ScheduleBarred: g.ScheduleAttachable && dom.Maturity == worker.MaturityDegraded,
+			UpdatedTS:      g.UpdatedTS,
 		}
 		if g.BudgetUSD != 0 {
 			usd := g.BudgetUSD
@@ -467,6 +501,9 @@ func workforceVersion(rv worker.RosterVersion, outcomes versionOutcomeSet) Workf
 	if out.Outcomes.VerdictTally == nil {
 		out.Outcomes.VerdictTally = []WorkforceVerdictCount{}
 	}
+	// Both bounds make the tally a floor: rounds cut off one run, or a whole run
+	// cut off the version before it could contribute.
+	out.Outcomes.VerdictTallyTruncated = outcomes.tallyCut[v.ID] || outcomes.cutAt[v.ID]
 	if runs := outcomes.runs[v.ID]; len(runs) > 0 {
 		out.Outcomes.Runs = runs
 		out.Outcomes.Truncated = outcomes.cutAt[v.ID]
@@ -499,6 +536,9 @@ type versionOutcomeSet struct {
 	cutAt  map[string]bool
 	counts map[string]int
 	tally  map[string][]WorkforceVerdictCount
+	// tallyCut says a contributing run's own rounds were cut by the per-run
+	// bound, which makes that version's tally a floor.
+	tallyCut map[string]bool
 	// scoped says the caller's reading covers only their OWN runs, which is what
 	// makes the two empty-outcome answers different sentences (D6).
 	scoped    bool
@@ -605,9 +645,21 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 	kept := make([]routed, 0, len(scanned))
 	perVersion := map[string]int{}
 	counts := map[string]int{}
+	countedRuns := map[string]map[string]bool{}
 	cut := map[string]bool{}
 	for _, r := range scanned {
-		counts[r.ver]++ // the true count in this reading, before the bound
+		// The true count in this reading, before the bound — of RUNS, which is
+		// what the field is named after. A run re-routed to the same version
+		// appears here twice and is one run either way.
+		if id := r.out.RunID; id != "" {
+			if countedRuns[r.ver] == nil {
+				countedRuns[r.ver] = map[string]bool{}
+			}
+			if !countedRuns[r.ver][id] {
+				countedRuns[r.ver][id] = true
+				counts[r.ver]++
+			}
+		}
 		if perVersion[r.ver] >= workforceRunsPerVersion {
 			cut[r.ver] = true
 			continue
@@ -631,6 +683,8 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 
 	metered := map[string]WorkforceRoutedRun{}
 	tally := map[string]map[string]int{}
+	tallied := map[string]map[string]bool{}
+	tallyCut := map[string]bool{}
 	out := map[string][]WorkforceRoutedRun{}
 	for _, r := range kept {
 		row := r.out
@@ -645,11 +699,25 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 		}
 		if vs := verdicts[row.RunID]; len(vs) > 0 {
 			row.Verdicts, row.VerdictsTruncated = vs, cutRuns[row.RunID]
-			if tally[r.ver] == nil {
-				tally[r.ver] = map[string]int{}
+			// ONE CONTRIBUTION PER RUN. `kept` can carry the same run twice for
+			// one version, and adding its rounds twice would report more recorded
+			// rounds than were ever recorded. The tally is also a floor whenever
+			// this run's own rounds were cut by the per-run bound, and it says so
+			// rather than serving a quietly smaller number.
+			if tallied[r.ver] == nil {
+				tallied[r.ver] = map[string]bool{}
 			}
-			for _, v := range vs {
-				tally[r.ver][v.Verdict]++
+			if !tallied[r.ver][row.RunID] {
+				tallied[r.ver][row.RunID] = true
+				if tally[r.ver] == nil {
+					tally[r.ver] = map[string]int{}
+				}
+				for _, v := range vs {
+					tally[r.ver][v.Verdict]++
+				}
+				if row.VerdictsTruncated {
+					tallyCut[r.ver] = true
+				}
 			}
 		} else {
 			row.VerdictsAbsent = "no verdict recorded for this run yet"
@@ -666,7 +734,7 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 		out[r.ver] = append(out[r.ver], row)
 	}
 	return versionOutcomeSet{
-		runs: out, cutAt: cut, counts: counts, tally: tallyRows(tally),
+		runs: out, cutAt: cut, counts: counts, tally: tallyRows(tally), tallyCut: tallyCut,
 		scoped: scoped, truncated: truncated,
 	}, nil
 }

@@ -106,7 +106,9 @@ type serverOpts struct {
 	health   func() api.Health
 	stopping chan struct{}
 	poll     time.Duration
-	meter    api.MeterReader // nil = counters best-effort (zero)
+	// nil = no metering seam: tokens stay 0 and the COST is served as an
+	// absence, not a zero (meterReading — a money zero is a price nobody set).
+	meter api.MeterReader
 }
 
 func newTestServer(t *testing.T, o serverOpts) (*api.Server, *httptest.Server) {

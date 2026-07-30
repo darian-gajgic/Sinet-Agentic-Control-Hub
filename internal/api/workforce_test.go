@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker/automation"
 )
@@ -758,15 +760,26 @@ func TestWorkforceMeterEmptyReadingIsAnAbsenceNotAZero(t *testing.T) {
 		t.Error("a refusal and an empty reading serve the same reason — they are different facts")
 	}
 
-	// The non-tautological control: the seam really does answer this shape
-	// without an error, so the arm is a real production state and not a
-	// fixture-only curiosity.
-	m, err := fixtureMeter{}.RunMeter(t.Context(), "r-claim")
+	// THE CONTROL, AND IT IS ASKED OF THE REAL LEDGER. The claim arm 3 rests on
+	// is a claim about PRODUCTION — that `Ledger.RunConsumption` answers a run
+	// with no checkpoints successfully, with everything folded to zero — and
+	// asking `fixtureMeter{}` about it would only re-read the stub that was
+	// written to match the claim. `r-claim` is a real run row in this world with
+	// no checkpoints, so the real ledger answers it.
+	rc, err := metering.NewLedger(b.db, nil, metering.MeteredExceptions{}, nil).
+		RunConsumption(t.Context(), "r-claim")
 	if err != nil {
-		t.Fatalf("the fixture meter refuses r-claim, so arm 3 is testing the refusal path: %v", err)
+		t.Fatalf("the REAL ledger refuses a run with no checkpoints, so arm 3 is not a production state: %v", err)
 	}
-	if m.Tokens != 0 || m.APIEquivCostUSD != 0 || m.Unpriced {
-		t.Fatalf("the fixture meter does not answer the empty shape: %+v", m)
+	if rc.TotalPricedUSD != 0 || rc.TotalUnpricedCalls != 0 || len(rc.Items) != 0 {
+		t.Fatalf("the real ledger does not fold an unmeasured run to zero: %+v", rc)
+	}
+	// And the discriminator that tells this apart from a measured zero. It is
+	// what `api.RunMeter.Calls` carries, and it is zero here precisely because
+	// nothing has been metered — a run whose only work priced a true local $0
+	// would fold to the same figures with a NON-zero count.
+	if rc.TotalCalls != 0 {
+		t.Fatalf("an unmeasured run folded %d calls — the empty reading is not empty", rc.TotalCalls)
 	}
 }
 
@@ -862,6 +875,68 @@ func TestWorkforceStepReferencesKeepEdgesAndDropLiterals(t *testing.T) {
 	}
 }
 
+// TestWorkforceStepEdgesUseTheDialectsOwnPredicate is the rest of D3, and it is
+// the half the first fix got wrong in BOTH directions at once.
+//
+// The map's one job here is to say how the stages connect, so "is this argument
+// an edge" must be the same question the EXECUTOR asks. It was not: the reader
+// ran a stricter decoder of its own. An argument carrying a sibling key beside
+// `$from` parses (Step.Args is raw JSON, so the document loader's strictness
+// never reaches inside an argument value) and RESOLVES — a genuine step-to-step
+// dependency — and the reader showed it as no connection at all. And
+// `{"$from":""}`, which the executor passes through as the literal it is,
+// showed up as an edge pointing nowhere. Both are false statements about how
+// the procedure connects, which is worse than the missing-edges defect D3 fixed.
+//
+// Driven through the real dialect end to end: the document parses, the executor
+// resolves the annotated reference to the earlier step's output, and the
+// reader's answer is asserted against that.
+func TestWorkforceStepEdgesUseTheDialectsOwnPredicate(t *testing.T) {
+	wf, err := automation.Parse(`{"dialect":"` + automation.DialectVersion + `","service":"calendar","steps":[
+	  {"id":"fetch","verb":"calendar.list","args":{"day":{"$from":"payload.day"}}},
+	  {"id":"note","verb":"calendar.note","args":{
+	     "digest":{"$from":"steps.fetch.summary","note":"annotated"},
+	     "blank":{"$from":""}}}
+	]}`)
+	if err != nil {
+		t.Fatalf("the dialect refuses a reference carrying a sibling key, so there is nothing to disagree about: %v", err)
+	}
+
+	// The executor's own answer, taken from the executor. `note` returns the arg
+	// it was handed, so the report says what `digest` resolved to.
+	verbs := automation.VerbMap{
+		"calendar.list": {Fn: func(context.Context, map[string]json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"summary":"THE DAY"}`), nil
+		}},
+		"calendar.note": {Fn: func(_ context.Context, args map[string]json.RawMessage) (json.RawMessage, error) {
+			return args["digest"], nil
+		}},
+	}
+	rep, err := automation.Execute(t.Context(), automation.ExecInput{
+		Workflow: wf, Payload: json.RawMessage(`{"day":"monday"}`), Verbs: verbs, UserID: "alice",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var resolved string
+	for _, st := range rep.Steps {
+		if st.ID == "note" {
+			resolved = string(st.Output)
+		}
+	}
+	if resolved != `"THE DAY"` {
+		t.Fatalf("the executor did not resolve the annotated reference (got %s), so this test is not about a real edge", resolved)
+	}
+
+	refs := worker.StepReferences(wf.Steps[1])
+	if refs["digest"] != "steps.fetch.summary" {
+		t.Errorf("the reader shows no connection for an argument the executor resolves from step `fetch`: %v", refs)
+	}
+	if _, ok := refs["blank"]; ok {
+		t.Errorf("`{\"$from\":\"\"}` is a LITERAL to the executor and rendered as an edge to nowhere: %v", refs)
+	}
+}
+
 func sameRefs(got, want map[string]string) bool {
 	if len(got) != len(want) {
 		return false
@@ -933,6 +1008,141 @@ func TestMeterReadingIsOneExpressionAcrossEverySurface(t *testing.T) {
 	if *ship.Card.Counters.APIEquivCostUSD == 0 {
 		t.Error("a real reading rendered as zero")
 	}
+}
+
+// TestRunCardCarriesTheUnpricedMarkingWithTheFigure is the fabricated-zero class
+// one surface over from where this packet kept finding it.
+//
+// A subscription lane prices UNPRICED, so the seam's cost is 0 and the run card
+// printed a bare `USD 0` — a figure that says the run was free when what is true
+// is that nobody priced it. The workforce map's routed rows already carried the
+// marking; `RunCounters` did not, so the ONE-expression claim `meterReading`
+// makes across three surfaces was not true of this one. Additive: the same
+// field, the same meaning, beside the same figure.
+func TestRunCardCarriesTheUnpricedMarkingWithTheFigure(t *testing.T) {
+	read := func(m api.MeterReader) api.RunCounters {
+		t.Helper()
+		b := newBackend(t)
+		seedRun(t, b, "r1", "u1", "", "running", "anthropic")
+		_, ts := newTestServer(t, serverOpts{b: b, meter: m})
+		resp, err := ts.Client().Get(ts.URL + "/api/runs/r1")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /api/runs/r1 = %d", resp.StatusCode)
+		}
+		var detail api.RunDetail
+		if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return detail.Card.Counters
+	}
+
+	// cost 0 with tokens: fakeMeter marks that unpriced, which is the real
+	// subscription-lane shape.
+	unpriced := read(fakeMeter{tokens: 1234, cost: 0})
+	if unpriced.APIEquivCostUSD == nil {
+		t.Fatal("an unpriced reading IS a reading and its figure was withheld — the wrong half went missing")
+	}
+	if *unpriced.APIEquivCostUSD != 0 {
+		t.Fatalf("the unpriced figure is %v, not the 0 the seam served", *unpriced.APIEquivCostUSD)
+	}
+	if !unpriced.Unpriced {
+		t.Error("the card serves USD 0 with nothing saying the lane is unpriced — that reads as free (§37)")
+	}
+
+	// The other direction, so the field is a consequence rather than a constant.
+	priced := read(fakeMeter{tokens: 900, cost: 0.42})
+	if priced.Unpriced {
+		t.Error("a priced reading is marked unpriced")
+	}
+}
+
+// TestMeteredZeroIsAReadingAndUnmeteredIsNot is the sign-flipped half of the
+// packet's headline defect, and it is the one that withholds a TRUE figure.
+//
+// `meterReading` keyed on folded MAGNITUDES, and the ledger deliberately prices
+// a local duty call a true $0 on the permanent free tier (the zero-allowance
+// row, S12.1). So a run whose recorded work was local folds to zero tokens,
+// zero cost and zero unpriced calls — a real measurement, indistinguishable at
+// the seam from a run nobody has touched, and served as "no reading". The
+// discriminator is how many rows the ledger FOLDED, which the seam now carries.
+//
+// Both halves are driven, and the first is asked of the REAL ledger because the
+// claim being relied on is a claim about production.
+func TestMeteredZeroIsAReadingAndUnmeteredIsNot(t *testing.T) {
+	b := newBackend(t)
+	seedRun(t, b, "r-local", "u1", "", "running", "anthropic")
+	seedRun(t, b, "r-untouched", "u1", "", "running", "anthropic")
+	seq := appendRun(t, b, "u1", "r-local", "run.state_changed", `{"to":"running"}`)
+	// A local duty call's checkpoint: the wire contract internal/local writes,
+	// with no tokens on it. This is the row that folds to a true $0.
+	exec(t, b, `INSERT INTO checkpoints (run_id, user_id, event_seq, usage_json, session_substrate, session_id, model_id, created_ts)
+	            VALUES (?,?,?,?,'claude-cli',?,?,?)`,
+		"r-local", "u1", seq,
+		`{"input_tokens":0,"output_tokens":0,"local":{"lane":"local","duty":"summarize","model":"qwen","model_sha256":"sha","engine_build":"b"}}`,
+		"sid-local", "qwen", nowTS())
+
+	ledger := metering.NewLedger(b.db, nil, metering.MeteredExceptions{}, nil)
+	local, err := ledger.RunConsumption(t.Context(), "r-local")
+	if err != nil {
+		t.Fatalf("real ledger, local run: %v", err)
+	}
+	// The shape that defeats a magnitude test: measured, and it came to zero.
+	if local.TotalCalls != 1 {
+		t.Fatalf("the local row was not folded (%d calls) — this test is not about a measured run", local.TotalCalls)
+	}
+	if local.TotalPricedUSD != 0 || local.TotalUnpricedCalls != 0 {
+		t.Fatalf("the local row did not price a true $0: %+v", local)
+	}
+	untouched, err := ledger.RunConsumption(t.Context(), "r-untouched")
+	if err != nil {
+		t.Fatalf("real ledger, untouched run: %v", err)
+	}
+	if untouched.TotalCalls != 0 {
+		t.Fatalf("a run with no checkpoints folded %d calls", untouched.TotalCalls)
+	}
+
+	// And the seam's answer for each, through the card. `callsMeter` reports
+	// exactly what the shell's projMeter reports off the numbers above.
+	card := func(runID string, m api.MeterReader) api.RunCounters {
+		t.Helper()
+		_, ts := newTestServer(t, serverOpts{b: b, meter: m})
+		resp, err := ts.Client().Get(ts.URL + "/api/runs/" + runID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer resp.Body.Close()
+		var detail api.RunDetail
+		if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return detail.Card.Counters
+	}
+	measured := card("r-local", callsMeter{calls: local.TotalCalls})
+	if measured.APIEquivCostUSD == nil {
+		t.Error("a MEASURED zero was served as an absence — the run's local work really did cost nothing and the card will not say so")
+	} else if *measured.APIEquivCostUSD != 0 {
+		t.Errorf("the measured zero came back as %v", *measured.APIEquivCostUSD)
+	}
+	// The other direction, unchanged: nothing folded, so there is no reading.
+	if none := card("r-untouched", callsMeter{calls: untouched.TotalCalls}); none.APIEquivCostUSD != nil {
+		t.Errorf("an unmeasured run serves a figure again: %v — that is the fabricated zero back", *none.APIEquivCostUSD)
+	}
+}
+
+// callsMeter answers with a fold's CALL COUNT and nothing else — the shape
+// projMeter produces for a run whose every row priced a true $0.
+type callsMeter struct{ calls int64 }
+
+func (m callsMeter) RunMeter(context.Context, string) (api.RunMeter, error) {
+	return api.RunMeter{Calls: m.calls}, nil
+}
+
+func (callsMeter) LaneMeter(context.Context, string, string) (api.LaneMeter, error) {
+	return api.LaneMeter{}, nil
 }
 
 func mustDecode(t *testing.T, raw []byte, v any) {
@@ -1062,6 +1272,124 @@ func TestWorkforceServesRunsRoutedAndVerdictOutcomes(t *testing.T) {
 	}
 }
 
+// TestWorkforceRunsRoutedCountsRunsAndTheTallyIsExactOrSaysItIsBounded is the
+// rest of D11, and both halves are the packet's own headline class in a
+// different currency: a number whose NAME does not describe what it counts.
+//
+// `runs_routed` counted routing DECISIONS. A run can be routed to one version
+// more than once — an `override` re-route is a cause this world already uses —
+// so the field reported more runs than exist, and the render beside it ("N
+// routed in this reading") said runs too. The verdict tally had the same defect
+// squared: the duplicated row re-counted that run's rounds, so ONE recorded SHIP
+// tallied as two. And the tally was SILENTLY bounded — rounds past the per-run
+// bound simply never reached it, with nothing on screen to warn a reader that
+// the number is a floor.
+func TestWorkforceRunsRoutedCountsRunsAndTheTallyIsExactOrSaysItIsBounded(t *testing.T) {
+	b := fixtureWorld(t)
+	// The same run, routed to the same version a second time. Nothing exotic:
+	// it is the fixture world's own `override` cause on a run it already has.
+	exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+	            VALUES (?,0,?,?,1,?,?)`, "r-notes", "alice", "routing.decided",
+		`{"cause":"override","score":0.88,"worker":"`+fxWorkerNotes+`","worker_name":"release-notes-writer",`+
+			`"version":"`+fxWorkerNotesV2+`","model":"claude","lane":"anthropic","effort":"deep",`+
+			`"plain_reason":"alice re-routed the same run to the same version","window_tokens":200000}`, fxT4)
+
+	v2 := workforceVersion(t, workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerNotes), fxWorkerNotesV2)
+	if v2.Outcomes.RunsRouted != 3 {
+		t.Errorf("runs_routed = %d for 3 distinct runs — a field named after runs counted decisions",
+			v2.Outcomes.RunsRouted)
+	}
+	// The decisions are all still served, which is the point of keeping them
+	// separate numbers rather than deduplicating the rows.
+	if len(v2.Outcomes.Runs) != 4 {
+		t.Errorf("the re-route's own decision row was dropped: %d rows", len(v2.Outcomes.Runs))
+	}
+	ship := 0
+	for _, tally := range v2.Outcomes.VerdictTally {
+		if tally.Verdict == "SHIP" {
+			ship = tally.Rounds
+		}
+	}
+	if ship != 1 {
+		t.Errorf("the tally reports SHIP: %d for ONE recorded SHIP round — the duplicated row re-counted it", ship)
+	}
+	if v2.Outcomes.VerdictTallyTruncated {
+		t.Error("an exact tally claims to be bounded, so the marker means nothing")
+	}
+
+	// The other half: past the per-run bound the tally is a floor, and it says
+	// so where the number is. 25 rounds, all newer than the SHIP, so the bound
+	// keeps 20 REWORKs and the SHIP falls out.
+	for i := 1; i <= 25; i++ {
+		exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+		            VALUES (?,0,?,?,1,?,?)`, "r-notes", "alice", "verdict.recorded",
+			fmt.Sprintf(`{"round":%d,"verdict":"REWORK","domain":"software","retention":"keep-forever","golden_set":{}}`, i),
+			fxT4)
+	}
+	bounded := workforceVersion(t, workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerNotes), fxWorkerNotesV2)
+	rework := 0
+	for _, tally := range bounded.Outcomes.VerdictTally {
+		if tally.Verdict == "REWORK" {
+			rework = tally.Rounds
+		}
+	}
+	if rework != 20 {
+		t.Fatalf("REWORK tallied %d rounds, want the 20 the per-run bound serves — the bound is not under test", rework)
+	}
+	if !bounded.Outcomes.VerdictTallyTruncated {
+		t.Error("25 recorded rounds tally as 20 with nothing saying the number is a floor — a silently bounded count")
+	}
+}
+
+// TestWorkforceScheduleBarIsAServedFactOnEveryGrantedBlock is D5's server half,
+// which until now was pinned only by golden drift, plus the forward-tolerance
+// half the first fix left client-side.
+//
+// S08.7's third consequence — a degraded domain closes auto-accepting schedules
+// — is a POLICY consequence, so it is decided where the maturity vocabulary is
+// defined and served as a fact. Deriving it in the browser from
+// `maturity === "degraded"` leaves any future maturity that also bars schedules
+// silently unmarked, and a flag passed in by a caller gets forgotten: the
+// superseded-version block rendered "granted" with no bar at all.
+func TestWorkforceScheduleBarIsAServedFactOnEveryGrantedBlock(t *testing.T) {
+	b := fixtureWorld(t)
+	view := workforceRead(t, b, "op")
+
+	// The degraded domain's automation REQUESTED attachability, so the grant and
+	// the bar are two different facts on one row.
+	digest := workforceVersion(t, workforceWorkerByID(t, view, fxWorkerDigest), fxWorkerDigestV1)
+	if digest.Granted == nil {
+		t.Fatal("the automation has no granted block, so there is no row to bar")
+	}
+	if !digest.Granted.ScheduleAttachable {
+		t.Fatal("the automation was not granted schedule attachability, so the bar has nothing to contradict")
+	}
+	if !digest.Granted.ScheduleBarred {
+		t.Error("a worker in a degraded domain is granted a schedule with no bar served (S08.7)")
+	}
+
+	// The control: a FULL domain grants no bar, so the field is a consequence
+	// rather than a constant — and EVERY version carries its own, including the
+	// superseded one, which is where a caller-passed flag had been dropped.
+	notes := workforceWorkerByID(t, view, fxWorkerNotes)
+	if notes.Domain.Maturity != "full" {
+		t.Fatalf("the control worker's domain is %q, not full", notes.Domain.Maturity)
+	}
+	seen := 0
+	for _, v := range notes.Versions {
+		if v.Granted == nil {
+			continue
+		}
+		seen++
+		if v.Granted.ScheduleBarred {
+			t.Errorf("version %s in a FULL domain carries a schedule bar", v.VersionID)
+		}
+	}
+	if seen < 2 {
+		t.Fatalf("only %d granted blocks under test — the superseded version is not covered", seen)
+	}
+}
+
 // TestWorkforceMeterBudgetIsSpentNewestFirstAndDeterministically is D7. Past
 // `workforceMeterCap` distinct runs, WHICH rows carry a figure and which say
 // "not read in this reading" has to be the same answer every time — a served
@@ -1092,9 +1420,20 @@ func TestWorkforceMeterBudgetIsSpentNewestFirstAndDeterministically(t *testing.T
 		return workforceVersion(t, notes, fxWorkerNotesV1).Outcomes.Runs
 	}
 	first, second := read(), read()
-	if len(first) != api.WorkforceRunsPerVersion {
-		t.Fatalf("the per-version bound served %d rows, want %d — the budget is not under test",
-			len(first), api.WorkforceRunsPerVersion)
+	// A LITERAL, not `api.WorkforceRunsPerVersion`: comparing the served length
+	// against the constant that produced it changes both sides together, so the
+	// check cannot fail and pins nothing. 20 is the bound's declared value and
+	// moving it is a deliberate act that should have to move this line too.
+	if len(first) != 20 {
+		t.Fatalf("the per-version bound served %d rows, want 20 — the budget is not under test", len(first))
+	}
+	// The last assertion in this test reasons "20 rows is far inside the 100-run
+	// meter cap". That is a RELATION between two independent bounds, and if it
+	// ever stopped holding the assertion would start failing for a reason that
+	// has nothing to do with what it checks. Said out loud so it is checked.
+	if api.WorkforceRunsPerVersion >= api.WorkforceMeterCap {
+		t.Fatalf("the per-version bound (%d) no longer sits inside the meter cap (%d) — the budget check below is testing the cap, not the order",
+			api.WorkforceRunsPerVersion, api.WorkforceMeterCap)
 	}
 	// Byte-identical across two identical requests. Under map iteration this is
 	// what varies.

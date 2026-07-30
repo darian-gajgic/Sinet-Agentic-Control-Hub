@@ -1396,6 +1396,10 @@ func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, er
 		Tokens:          tokens,
 		APIEquivCostUSD: rc.TotalPricedUSD,
 		Unpriced:        rc.TotalUnpricedCalls > 0,
+		// The rows the ledger actually folded. Zero of them is the only honest
+		// way to say "nothing has been measured for this run yet"; the folded
+		// magnitudes cannot, because a local zero-allowance row prices a true $0.
+		Calls: rc.TotalCalls,
 	}, nil
 }
 

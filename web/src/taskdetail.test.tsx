@@ -228,6 +228,54 @@ test('the task detail renders the active run&apos;s live activity, not just stag
   expect(text.toLowerCase()).not.toContain('%')
 })
 
+test('a subscription-lane run card says the figure is API-equivalent instead of printing a bare USD 0', async () => {
+  // The unpriced lane prices UNPRICED, so the served cost is 0 — and this card
+  // rendered it as a bare "USD 0", which asserts the run was free when what is
+  // true is that nobody priced it. That is the same fabrication class the
+  // workforce map's routed rows were already labelling; `meterReading` is one
+  // expression across three surfaces and this was the surface that could not
+  // say the word.
+  const served = fixtures.runDetail() as unknown as RunDetail
+  const unpriced = {
+    ...served,
+    card: { ...served.card, counters: { ...served.card.counters, api_equiv_cost_usd: 0, unpriced: true } },
+  }
+  const { view } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': { body: unpriced },
+  })
+  const panel = view.container.querySelector('.activity')!
+  expect(panel.textContent, 'a served unpriced figure renders with no marking at all').toContain(
+    'subscription lane, so this is the API-equivalent figure',
+  )
+  view.unmount()
+})
+
+test('NO money span on the run card prints a bare zero, whatever the seam serves', async () => {
+  // Quantified over every money span this surface produces, the way the
+  // workforce map's guard now is — a guard scoped to one cell is a guard
+  // pointed away from wherever the next zero lands.
+  const served = fixtures.runDetail() as unknown as RunDetail
+  const zeroed = {
+    ...served,
+    card: { ...served.card, counters: { ...served.card.counters, api_equiv_cost_usd: 0, unpriced: true } },
+  }
+  for (const body of [served, zeroed]) {
+    const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/runs/r-ship': { body } })
+    const spans = [...view.container.querySelectorAll('.money')]
+    expect(spans.length, 'the surface renders no money at all, so this asserts nothing').toBeGreaterThan(0)
+    for (const el of spans) {
+      const line = el.parentElement?.textContent ?? el.textContent ?? ''
+      expect(line, 'a money figure reads as USD 0 with nothing saying why').not.toMatch(
+        /^USD\s*0(\.0*)?\s*$/,
+      )
+    }
+    view.unmount()
+  }
+  // Probe: the matcher really does catch the shape that shipped.
+  expect('USD 0').toMatch(/^USD\s*0(\.0*)?\s*$/)
+})
+
 test('the live-activity panel re-reads on its own run&apos;s frames and settles the debt', async () => {
   const routes = detailRoutes()
   const log = scriptedFetch({ ...oversightRoutes(), ...routes })

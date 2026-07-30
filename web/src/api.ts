@@ -437,8 +437,19 @@ export type RunCard = {
   tool: { name: string; args_digest: string } | null
   /** `api_equiv_cost_usd` is null when the run has no cost reading. Tokens stay
    *  a plain counter beside it: a monotonic count at zero is a true reading of a
-   *  run that has consumed nothing, while a money zero is a price nobody set. */
-  counters: { tokens: number; api_equiv_cost_usd: number | null; elapsed_s: number; steps: number }
+   *  run that has consumed nothing, while a money zero is a price nobody set.
+   *
+   *  `unpriced` is the seam's subscription-lane marking, and the figure is
+   *  meaningless without it: an unpriced run serves `0`, which reads as "this
+   *  was free" when the cost is genuinely unknown. Same field, same meaning, as
+   *  a routed run's on the workforce map. */
+  counters: {
+    tokens: number
+    api_equiv_cost_usd: number | null
+    unpriced?: boolean
+    elapsed_s: number
+    steps: number
+  }
   last_activity: { type: string; ts: string; line: string } | null
   wedged: boolean
   lane: string
@@ -1358,6 +1369,12 @@ export type WorkerGrants = {
   gate_policy?: string
   first_n_remaining: number
   schedule_attachable: boolean
+  /** S08.7's third consequence, DECIDED BY THE SERVER: a degraded domain closes
+   *  auto-accepting schedules, so a version granted attachability is still
+   *  barred. Read, never re-derived from `domain.maturity` here — the vocabulary
+   *  is the server's, and a future maturity that also bars would go silently
+   *  unmarked on a client that only knows today's words. */
+  schedule_barred?: boolean
   updated_ts: string
 }
 
@@ -1414,12 +1431,18 @@ export type RoutedRun = {
 export type WorkerOutcomes = {
   runs: RoutedRun[]
   truncated: boolean
-  /** How many runs this reading found routed to the version, BEFORE the
-   *  per-version bound — so it stays true when the list is cut. A count of rows
-   *  is a reading; money is never summed. */
+  /** How many DISTINCT RUNS this reading found routed to the version, BEFORE
+   *  the per-version bound — so it stays true when the list is cut. `runs` is
+   *  one row per routing DECISION and a run can be routed here twice, which is
+   *  why these are two numbers. A count of rows is a reading; money is never
+   *  summed. */
   runs_routed: number
-  /** How many recorded rounds carried each verdict, across those runs. */
+  /** How many recorded rounds carried each verdict, across those runs — each
+   *  run counted once however often it was routed here. */
   verdict_tally: { verdict: string; rounds: number }[]
+  /** The tally was counted from a bounded set, so its numbers are a floor. It
+   *  renders beside the numbers: a bound nobody can see is a silent cap. */
+  verdict_tally_truncated?: boolean
   absent?: string
 }
 

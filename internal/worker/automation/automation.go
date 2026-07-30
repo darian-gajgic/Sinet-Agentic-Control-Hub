@@ -245,6 +245,35 @@ func proposalPayload(service string, st Step, args map[string]json.RawMessage) (
 	return raw, nil
 }
 
+// Reference reports the {"$from": "<path>"} reference an argument value
+// carries, and whether it carries one at all.
+//
+// This is THE dialect's own edge predicate and it is exported so there is ONE
+// expression of it. An argument that is a reference is a DEFINITION-TIME edge —
+// the only place a step's dependency on another step is written down — so a
+// surface that reads a definition (the S15.10 workforce map) and the executor
+// that runs it must agree about which arguments are edges. Two predicates
+// hand-written to the same intent drift, and this pair had: a stricter reader
+// dropped a legal edge the executor resolves, and served a `{"$from":""}`
+// literal as an edge the executor never follows.
+//
+// The rule, deliberately permissive in the same way the executor is: the value
+// is a JSON object carrying a non-empty string `$from`. Sibling keys do NOT
+// disqualify it — Step.Args is map[string]json.RawMessage, so the document
+// loader's DisallowUnknownFields never reaches inside an argument value and a
+// document carrying one parses.
+func Reference(raw json.RawMessage) (string, bool) {
+	var ref struct {
+		From string `json:"$from"`
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '{' &&
+		json.Unmarshal(trimmed, &ref) == nil && ref.From != "" {
+		return ref.From, true
+	}
+	return "", false
+}
+
 // resolveArgs resolves {"$from": ...} references; every other value passes
 // through verbatim.
 func resolveArgs(args map[string]json.RawMessage, payload json.RawMessage, outputs map[string]json.RawMessage) (map[string]json.RawMessage, error) {
@@ -253,13 +282,8 @@ func resolveArgs(args map[string]json.RawMessage, payload json.RawMessage, outpu
 	}
 	out := make(map[string]json.RawMessage, len(args))
 	for k, raw := range args {
-		var ref struct {
-			From string `json:"$from"`
-		}
-		trimmed := bytes.TrimSpace(raw)
-		if len(trimmed) > 0 && trimmed[0] == '{' &&
-			json.Unmarshal(trimmed, &ref) == nil && ref.From != "" {
-			v, err := lookupPath(ref.From, payload, outputs)
+		if from, ok := Reference(raw); ok {
+			v, err := lookupPath(from, payload, outputs)
 			if err != nil {
 				return nil, err
 			}

@@ -264,7 +264,7 @@ function Equipment({ worker: w, granted }: { worker: WorkerRow; granted: WorkerV
         {granted === null ? (
           <Absent reason="no active version, so nothing is granted" />
         ) : (
-          <Grants version={granted} barred={w.domain.maturity === 'degraded'} />
+          <Grants version={granted} />
         )}
       </div>
 
@@ -278,8 +278,9 @@ function Equipment({ worker: w, granted }: { worker: WorkerRow; granted: WorkerV
 }
 
 /** The granted guardrails block, or the reason there is none. */
-function Grants({ version, barred = false }: { version: WorkerVersion; barred?: boolean }) {
+function Grants({ version }: { version: WorkerVersion }) {
   const g = version.granted
+  const barred = g !== null && g.schedule_barred === true
   if (g === null) {
     return (
       <span className="absent" data-granted-absent>
@@ -371,10 +372,18 @@ function Grants({ version, barred = false }: { version: WorkerVersion; barred?: 
         {/* The guardrail is copied from the version's REQUEST unclamped, so it
             can say yes while the worker's domain bars it (S08.7). Rendering the
             grant alone would contradict the marking two blocks up; the bar is
-            the operative fact and rides with it. */}
+            the operative fact and rides with it.
+
+            THE BAR IS READ, NOT DERIVED. It used to be computed here from
+            `maturity === 'degraded'` — a policy consequence decided in the
+            browser, which is a side-truth the standing readings bar, and which
+            leaves any future maturity that also bars schedules silently
+            unmarked. It also had to be handed in by the caller, and the
+            superseded-version block forgot to; served on the grants row, every
+            render of a granted block carries its own. */}
         <dd data-schedule-attachable={String(g.schedule_attachable)} data-schedule-barred={String(barred)}>
           {g.schedule_attachable ? 'granted' : 'no'}
-          {g.schedule_attachable && barred && (
+          {barred && (
             <> — but barred while this worker’s domain is degraded: a schedule that auto-accepts is closed to it (S08.7)</>
           )}
         </dd>
@@ -608,10 +617,18 @@ function Outcomes({ version: v }: { version: WorkerVersion }) {
           <Absent reason="no verdict recorded against this version" />
         ) : (
           v.outcomes.verdict_tally.map((t) => (
-            <span key={t.verdict} className="tally" data-tally={t.verdict}>
+            <span key={t.verdict} className="tally" data-tally={t.verdict} data-rounds={String(t.rounds)}>
               {t.verdict}: {String(t.rounds)}{' '}
             </span>
           ))
+        )}
+        {/* A bound that truncates has to be visible where the number is. The
+            tally is counted from the rounds this reading carries, so once
+            either bound cuts, every figure above is a floor. */}
+        {v.outcomes.verdict_tally_truncated === true && v.outcomes.verdict_tally.length > 0 && (
+          <span className="muted" data-tally-truncated>
+            — counted from the rounds in this reading, so these are at least that many
+          </span>
         )}
       </p>
       {runs.length === 0 ? (

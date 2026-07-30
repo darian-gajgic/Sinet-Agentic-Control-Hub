@@ -51,6 +51,15 @@ type RunMeter struct {
 	Tokens          int64
 	APIEquivCostUSD float64
 	Unpriced        bool
+	// Calls is how many usage rows the seam folded to produce the figures above
+	// — the DISCRIMINATOR between "measured, and it came to zero" and "nothing
+	// has been measured yet", which the folded magnitudes alone cannot tell
+	// apart. It exists because the local tier deliberately prices a TRUE $0
+	// (a zero-allowance row), so a run whose only work was local folds to zero
+	// tokens, zero cost and zero unpriced calls exactly like a run nobody has
+	// touched. A seam that does not report it leaves it 0 and the magnitudes
+	// decide, which is the pre-existing reading (see meterReading).
+	Calls int64
 }
 
 // LaneMeter is the S14.3 fleet per-lane meter snapshot (§3): the S10.4
@@ -77,7 +86,9 @@ type LaneMeter struct {
 // run-card counters and the fleet per-lane meter. Both reads are owner-keyed
 // (RunMeter folds one run's checkpoints; LaneMeter reads one (owner, lane)
 // consumption). The shell adapts metering.Ledger + PressureGauge to it; nil
-// leaves the counters at zero (the snapshot still projects, best-effort).
+// leaves the token counter at zero and the COST an honest absence — never a
+// zero, which would be a price nobody set (see meterReading). The snapshot
+// still projects; only the figures the seam would have carried go missing.
 type MeterReader interface {
 	RunMeter(ctx context.Context, runID string) (RunMeter, error)
 	LaneMeter(ctx context.Context, userID, lane string) (LaneMeter, error)
@@ -240,8 +251,8 @@ type Config struct {
 	// disables snapshot-then-tail — the raw owner-scoped tail still serves
 	// (back-compat with the B0-3 endpoint).
 	DB *storage.DB
-	// Meter is the run-card metering seam (RunMeter); nil leaves the token/cost
-	// counters at zero.
+	// Meter is the run-card metering seam (RunMeter); nil leaves the token
+	// counter at zero and serves the cost as an absence rather than a zero.
 	Meter  MeterReader
 	Logger *slog.Logger // nil = slog.Default
 }

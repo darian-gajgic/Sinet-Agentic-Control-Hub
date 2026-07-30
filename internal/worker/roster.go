@@ -1,9 +1,7 @@
 package worker
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -280,25 +278,27 @@ func (s *Store) rosterDefinition(ctx context.Context, t Template) (*RosterDefini
 
 // StepReferences extracts one step's `$from` edges, dropping every literal.
 //
-// The shape is the dialect's own (automation.resolveArgs): an argument is a
-// reference when it is an object whose ONLY key is `$from` with a string value.
-// Anything else — a number, a string, an object of literals — is a value, and a
-// value is not this surface's to show.
+// The predicate is the DIALECT'S OWN — automation.Reference, the same function
+// resolveArgs calls — so the edges this surface draws are exactly the edges the
+// executor follows. It is a call rather than a copy because the copy had
+// already drifted in both directions: a stricter local decoder dropped a legal
+// edge whose argument carried a sibling key (Step.Args is raw JSON, so the
+// document loader's strictness never reaches inside an argument value, and such
+// a document parses AND resolves), and it served `{"$from":""}` — a literal the
+// executor passes through untouched — as an edge to nowhere. Either error is a
+// false statement about how the stages connect, which is the one thing S15.10
+// asks this surface for.
 func StepReferences(st automation.Step) map[string]string {
 	var out map[string]string
 	for name, raw := range st.Args {
-		var ref struct {
-			From *string `json:"$from"`
-		}
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&ref); err != nil || ref.From == nil {
+		from, ok := automation.Reference(raw)
+		if !ok {
 			continue
 		}
 		if out == nil {
 			out = map[string]string{}
 		}
-		out[name] = *ref.From
+		out[name] = from
 	}
 	return out
 }

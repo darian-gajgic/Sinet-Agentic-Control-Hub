@@ -78,8 +78,16 @@ type RunCounters struct {
 	// zero is a true reading of a run that has consumed nothing, while a MONEY
 	// zero is a figure nobody priced (S10.1; §37).
 	APIEquivCostUSD *float64 `json:"api_equiv_cost_usd"`
-	ElapsedS        int64    `json:"elapsed_s"`
-	Steps           int64    `json:"steps"`
+	// Unpriced carries the seam's own subscription-lane marking, exactly as the
+	// workforce map's routed rows do. Without it this card printed a bare
+	// `USD 0` for a subscription-lane run — a figure that reads as "this was
+	// free" when the cost is genuinely unknown, which is the fabrication the
+	// nil-able field above exists to prevent in the other direction. The label
+	// belongs wherever the figure is rendered, and this is one of the three
+	// surfaces `meterReading` serves.
+	Unpriced bool  `json:"unpriced,omitempty"`
+	ElapsedS int64 `json:"elapsed_s"`
+	Steps    int64 `json:"steps"`
 }
 
 // Activity is the last-activity line (§4): the latest run_events row summarized.
@@ -179,6 +187,7 @@ func (p *projector) runCard(ctx context.Context, runID string) (RunCard, string,
 	if priced {
 		cost := m.APIEquivCostUSD
 		c.Counters.APIEquivCostUSD = &cost
+		c.Counters.Unpriced = m.Unpriced
 	}
 
 	// last-activity line: the latest run_events row for the run.
@@ -1269,6 +1278,16 @@ func (p *projector) lastActivity(ctx context.Context, runID string) (Activity, b
 // TOKENS ARE A DIFFERENT FACT and callers keep them: a monotonic counter at zero
 // is a true reading of a run that has consumed nothing. Only the MONEY is
 // withheld, because only the money is a price nobody set.
+//
+// `Calls` IS THE DISCRIMINATOR and the folded magnitudes are the fallback. The
+// magnitudes alone have a narrow false negative in the other direction: the
+// ledger deliberately prices a local row a TRUE $0 (the zero-allowance tier), so
+// a run whose every checkpoint was local folds to zero tokens, zero cost and
+// zero unpriced calls — a real measurement that reads exactly like no
+// measurement at all. `Calls` is what the seam folded, so a non-zero count is a
+// reading regardless of what it came to. The magnitude arms stay because a seam
+// that does not report a call count reports 0, and withdrawing a figure it did
+// serve would be the worse error of the two.
 func (p *projector) meterReading(ctx context.Context, runID string) (RunMeter, bool) {
 	if p.meter == nil {
 		return RunMeter{}, false
@@ -1277,7 +1296,7 @@ func (p *projector) meterReading(ctx context.Context, runID string) (RunMeter, b
 	if err != nil {
 		return RunMeter{}, false
 	}
-	return m, m.Tokens != 0 || m.APIEquivCostUSD != 0 || m.Unpriced
+	return m, m.Calls > 0 || m.Tokens != 0 || m.APIEquivCostUSD != 0 || m.Unpriced
 }
 
 // latestPayload returns the payload of the newest run_events row for the run

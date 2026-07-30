@@ -244,8 +244,15 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
             <li>{String(card.counters.steps)} steps</li>
             <li>{String(card.counters.tokens)} tokens</li>
             <li>{String(card.counters.elapsed_s)} s elapsed</li>
-            <li>
+            <li className="run-cost">
               <Money usd={card.counters.api_equiv_cost_usd} />
+              {/* The subscription lane prices UNPRICED, so the figure beside it
+                  is 0 — and a bare "USD 0" says the run was free when what is
+                  true is that nobody priced it. The served marking is what makes
+                  the number readable, exactly as on the workforce map. */}
+              {card.counters.unpriced === true && (
+                <> · subscription lane, so this is the API-equivalent figure</>
+              )}
             </li>
           </ul>
         </div>

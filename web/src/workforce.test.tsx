@@ -162,7 +162,10 @@ test('a draft with no active version renders its absences with reasons, never a 
   view.unmount()
 })
 
-test('an empty roster renders the no-standing-army state, which is what a fresh host serves', async () => {
+test('a body with no workers renders the no-standing-army state rather than a blank page', async () => {
+  // A RENDER test over a hand-built empty body: what a fresh host serves is the
+  // server's property and is driven Go-side. What this pins is that an empty
+  // roster reaches the screen as the S08.6 statement it is.
   const { view } = await open({
     workers: [],
     roster_scope: 'your own personal workers plus the household roster (S15.10)',
@@ -435,7 +438,10 @@ test('a step chain renders its $from edges — the connections, not just the seq
   view.unmount()
 })
 
-test('a worker whose definition failed its integrity check still shows what it is allowed to do', async () => {
+test('a body carrying a definition-absent reason still renders what the worker is allowed to do', async () => {
+  // A RENDER test: the body below is hand-built, so it pins how the two halves
+  // render and NOT that the store refuses a tampered file — that is S08.3's own
+  // check, and it lives in internal/worker.
   // The audit case that matters most: the file cannot be trusted, and the
   // powers are recompiled from the guardrails TABLE on every run regardless
   // (S08.2). A reader who learns only the first half learns the less useful
@@ -495,6 +501,42 @@ test('a degraded domain names all three S08.7 consequences, and the schedule gra
   view.unmount()
 })
 
+test('the schedule bar is read from the served row, so EVERY granted block carries it — superseded included', async () => {
+  // Two defects in one shape. The bar used to be derived in the browser from
+  // `maturity === "degraded"` — a policy consequence decided client-side, which
+  // leaves a maturity this build has never heard of unmarked even when the
+  // server knows it bars — and it had to be handed to `Grants` by its caller,
+  // which the SUPERSEDED-version block did not do. So a superseded version in a
+  // degraded domain rendered "granted" with no bar at all.
+  const body = served()
+  const digest = worker(body, DIGEST)
+  const active = digest.versions.find((v) => v.active)!
+  const twoVersions = {
+    ...digest,
+    // A maturity string no client vocabulary knows, with the server's bar on
+    // BOTH versions' rows. A client deriving from the word renders neither.
+    domain: { ...digest.domain, maturity: 'quarantined' },
+    versions: [
+      active,
+      {
+        ...active,
+        version_id: 'wtv-digest-0',
+        version: 0,
+        active: false,
+        granted: { ...active.granted!, schedule_attachable: true, schedule_barred: true },
+      },
+    ],
+  }
+  const { view } = await open({ ...body, workers: [twoVersions] } as unknown as Record<string, unknown>)
+  const rows = [...view.container.querySelectorAll(`[data-worker="${DIGEST}"] [data-schedule-attachable]`)]
+  expect(rows.length, 'only one granted block rendered, so "every block" is untested').toBe(2)
+  for (const row of rows) {
+    expect(row.getAttribute('data-schedule-barred'), 'a served bar did not reach a granted block').toBe('true')
+    expect(row.textContent).toContain('barred')
+  }
+  view.unmount()
+})
+
 test('each version says how many runs were routed to it and how its rounds came out', async () => {
   const { view } = await open()
   const notes = worker(served(), NOTES)
@@ -515,6 +557,46 @@ test('each version says how many runs were routed to it and how its rounds came 
   expect(notes.versions.some((v) => v.outcomes.verdict_tally.length > 0)).toBe(true)
   expect(notes.versions.some((v) => v.outcomes.verdict_tally.length === 0)).toBe(true)
   view.unmount()
+})
+
+test('the tally RENDERS the served round counts, and says so when they are a floor', async () => {
+  // Every tally in the committed body carries exactly 1 round, so `{verdict}: 1`
+  // as a hard-coded constant passed the check above — the numbers were pinned
+  // Go-side and unpinned here, and a render bug printing the wrong count would
+  // have shipped. Driven with counts that are neither 1 nor each other.
+  const body = served()
+  const notes = worker(body, NOTES)
+  const active = notes.versions.find((v) => v.active)!
+  const tally = [
+    { verdict: 'SHIP', rounds: 7 },
+    { verdict: 'REWORK', rounds: 2 },
+  ]
+  const withTally = {
+    ...notes,
+    versions: [{ ...active, outcomes: { ...active.outcomes, verdict_tally: tally, verdict_tally_truncated: true } }],
+  }
+  const { view } = await open({ ...body, workers: [withTally] } as unknown as Record<string, unknown>)
+  const block = view.container.querySelector(`[data-outcomes="${active.version_id}"]`)!
+  for (const t of tally) {
+    const el = block.querySelector(`[data-tally="${t.verdict}"]`)!
+    expect(el.getAttribute('data-rounds')).toBe(String(t.rounds))
+    expect(el.textContent, `the ${t.verdict} tally does not render its served count`).toContain(
+      `${t.verdict}: ${String(t.rounds)}`,
+    )
+  }
+  // And a bounded tally says so WHERE THE NUMBER IS. Without this a truncated
+  // count reads as the whole record — a silent cap, which is barred outright.
+  const note = block.querySelector('[data-tally-truncated]')
+  expect(note, 'a tally counted from a bounded set rendered as the whole record').not.toBeNull()
+  expect(note!.textContent).toContain('at least')
+  view.unmount()
+
+  // The other direction: the committed body's tally is exact, so the note does
+  // not render — without this the assertion above would pass on a surface that
+  // always shows it.
+  const exact = await open()
+  expect(exact.view.container.querySelector('[data-tally-truncated]')).toBeNull()
+  exact.view.unmount()
 })
 
 test('the two empty-outcome answers are different sentences, because they are different facts', async () => {
@@ -666,7 +748,9 @@ test('an unknown domain, kind, status and maturity all render honestly rather th
   view.unmount()
 })
 
-test('an unknown workflow verb and an unparsable automation body both render honestly', async () => {
+test('a served unknown workflow verb and a served parser refusal both render honestly', async () => {
+  // Both bodies are hand-built: what is under test is the RENDER's forward
+  // tolerance, not what the dialect's parser accepts.
   const body = served()
   const digest = worker(body, DIGEST)
   const odd = {
@@ -717,7 +801,9 @@ test('the map is the only consumer of the workforce read, and it renders under t
   mission.unmount()
 })
 
-test('a per-version run list that was cut says so, so a reading is never read as a history', async () => {
+test('a served truncated run list renders as a reading, never as a history', async () => {
+  // The truncation is set on a hand-built body — the bound that produces it is
+  // driven Go-side; this pins that the flag reaches the screen.
   const body = served()
   const notes = worker(body, NOTES)
   const active = notes.versions.find((v) => v.active)!
@@ -739,7 +825,8 @@ test('a per-version run list that was cut says so, so a reading is never read as
   whole.view.unmount()
 })
 
-test("a run whose verdict rounds were cut says so, and one that was not does not", async () => {
+test("a served verdicts_truncated renders, and a row served without it does not", async () => {
+  // Hand-built both ways: the per-run bound itself is driven Go-side.
   const body = served()
   const notes = worker(body, NOTES)
   const active = notes.versions.find((v) => v.active)!
