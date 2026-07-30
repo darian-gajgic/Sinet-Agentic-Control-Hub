@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -335,6 +336,40 @@ type Server struct {
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
 	// (the raw tail still serves).
 	proj *projector
+	// routes records every pattern Handler registered, in registration order.
+	//
+	// It exists so the S15.12 "the SPA consumes every API" check (B6-9 R17) can
+	// be a comparison between two INDEPENDENTLY PRODUCED lists rather than a
+	// list compared to itself: this one is written by the registration calls
+	// themselves, so a route added without a client is visible by construction
+	// and a hand-maintained inventory — the tautology that hid a live defect at
+	// B6-8 — cannot exist here.
+	routes []Route
+}
+
+// Route is one registered pattern: the method, the path, and whether it sits
+// behind the S01.9 identity requirement.
+type Route struct {
+	Method  string `json:"method"`
+	Path    string `json:"path"`
+	Session bool   `json:"session_required"`
+}
+
+// Routes returns the registered surface. Handler must have been called; it is
+// what does the registering.
+func (s *Server) Routes() []Route {
+	out := make([]Route, len(s.routes))
+	copy(out, s.routes)
+	return out
+}
+
+// record splits a "METHOD /path" pattern into a Route.
+func (s *Server) record(pattern string, session bool) {
+	method, path, found := strings.Cut(pattern, " ")
+	if !found {
+		method, path = "", pattern
+	}
+	s.routes = append(s.routes, Route{Method: method, Path: path, Session: session})
 }
 
 // New assembles the Server.
@@ -406,16 +441,22 @@ func New(cfg Config) *Server {
 // requires an authenticated identity, enforced fail-closed.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.routes = nil
 
 	// Pre-session surface.
-	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.HandleFunc("GET /api/auth/session", s.handleAuthSession)
-	mux.HandleFunc("GET /api/auth/users", s.handleAuthUsers)
-	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
-	mux.HandleFunc("POST /api/auth/users", s.handleAuthUserCreate)
+	open := func(pattern string, h http.HandlerFunc) {
+		s.record(pattern, false)
+		mux.HandleFunc(pattern, h)
+	}
+	open("GET /api/health", s.handleHealth)
+	open("GET /api/auth/session", s.handleAuthSession)
+	open("GET /api/auth/users", s.handleAuthUsers)
+	open("POST /api/auth/login", s.handleAuthLogin)
+	open("POST /api/auth/users", s.handleAuthUserCreate)
 
 	// Session-required surface.
 	protected := func(pattern string, h http.HandlerFunc) {
+		s.record(pattern, true)
 		mux.Handle(pattern, s.requireIdentity(h))
 	}
 	protected("GET /events", s.handleEvents)

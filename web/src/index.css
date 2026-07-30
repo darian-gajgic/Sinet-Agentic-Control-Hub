@@ -1376,3 +1376,34 @@ td {
   margin: 0;
   color: var(--muted);
 }
+
+/* The S15.11 "This device" panel (B6-9). Phone-first like every other block:
+   no fixed width anywhere, so a 375px screen enrols a device without scrolling
+   sideways — which is the surface a person actually reaches this on. */
+.push-device {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.push-device label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  max-width: 24rem;
+}
+
+.push-device input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.push-devices {
+  margin-top: 0.75rem;
+}
+
+.push-devices .items li {
+  overflow-wrap: anywhere;
+}

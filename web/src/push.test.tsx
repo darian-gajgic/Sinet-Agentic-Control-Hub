@@ -15,7 +15,7 @@ import {
   type PushManagerLike,
   type PushSubscriptionLike,
 } from './push'
-import { flush, mount } from './testing'
+import { flush, mount, settle } from './testing'
 
 import navigateFixture from './fixtures/api/push-navigate.json?raw'
 import pushSubscriptionsRaw from './fixtures/api/push-subscriptions.json?raw'
@@ -355,6 +355,22 @@ describe('the “This device” panel', () => {
     ui.unmount()
   })
 
+  /**
+   * settleDevice waits for the panel's own device READ to land.
+   *
+   * It is a bounded wait rather than a fixed number of `flush()` calls because
+   * the read hashes the browser's endpoint through `crypto.subtle.digest`, whose
+   * promise is settled by the platform rather than by the microtask queue —
+   * draining microtasks a fixed number of times is a race, and it flaked. This
+   * asserts the same thing; it just stops asserting it before the answer exists.
+   */
+  const settleDevice = async (ui: { container: HTMLElement }, state: string) => {
+    for (let i = 0; i < 20; i++) {
+      if (ui.container.querySelector(`[data-push-state="${state}"]`)) return
+      await settle(1)
+    }
+  }
+
   test('a subscription the platform does not list is stated, not glossed', async () => {
     // The browser holds one; the served list carries a DIFFERENT hash. Saying
     // "enrolled" would be false and saying "not enrolled" would be worse.
@@ -366,8 +382,7 @@ describe('the “This device” panel', () => {
       />,
     )
     await flush()
-    await flush()
-    await flush()
+    await settleDevice(ui, 'unknown-subscription')
     expect(ui.container.querySelector('[data-push-state="unknown-subscription"]')).not.toBeNull()
     // The control: the SAME world with the endpoint the served list DOES carry
     // renders enrolled, so this is about the mismatch and not about a branch

@@ -55,10 +55,27 @@ const banned: { token: string; why: string }[] = [
 
 /** Every source file under src/, as text. import.meta.glob is Vite's own
  *  mechanism, so the scan needs no Node types and no extra dependency. */
-const sources = import.meta.glob('./**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<
+const src = import.meta.glob('./**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<
   string,
   string
 >
+
+/**
+ * The SHIPPED SCRIPTS UNDER web/public, added at B6-9.
+ *
+ * `sw.js` is owned source that ships verbatim and renders a notification from a
+ * payload a vendor relay delivered — model- and web-derived content by any
+ * reading — and it is outside the typed `src` tree, which is exactly the kind of
+ * file a scan bounded to `src/` would never see. It is inside the scan now, by
+ * name.
+ */
+const publicScripts = import.meta.glob('../public/*.js', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+const sources: Record<string, string> = { ...src, ...publicScripts }
 
 function scan(files: Record<string, string>): string[] {
   const hits: string[] = []
@@ -75,9 +92,9 @@ test('the scan actually covers the source tree', () => {
   const paths = Object.keys(sources)
   // A scanner that silently matched nothing would pass forever. The floor moves
   // with the tree (10 at B6-4, 30 at B6-5, 35 at B6-6, 40 at B6-7, 42 at B6-8
-  // part A, 44 at part B) so "the scan grew over the new views" is a checked fact
-  // rather than an assumption about a glob.
-  expect(paths.length).toBeGreaterThan(44)
+  // part A, 44 at part B, 50 at B6-9) so "the scan grew over the new views" is a
+  // checked fact rather than an assumption about a glob.
+  expect(paths.length).toBeGreaterThan(50)
   expect(paths).toContain('./App.tsx')
   expect(paths).toContain('./events.ts')
   // The B6-5 oversight surfaces are inside the scan, by name.
@@ -110,6 +127,14 @@ test('the scan actually covers the source tree', () => {
     // and a routing reason, all of which can be composer-written, which is model
     // output. It is inside the scan by name for that reason.
     './Workforce.tsx',
+    // The B6-9 push surfaces. The enrolment panel renders a SERVED sentence
+    // about what leaves this machine and a person's own device label; push.ts
+    // handles subscription material; and the service worker renders a
+    // notification composed from a payload that arrived through a vendor relay,
+    // which is untrusted input by construction.
+    './PushDevices.tsx',
+    './push.ts',
+    '../public/sw.js',
   ]) {
     expect(paths, `${view} is not covered by the escape scan`).toContain(view)
   }
@@ -158,4 +183,51 @@ test('the scan catches a planted violation', () => {
       `no planted probe exercises the ${token} ban`,
     ).toBe(true)
   }
+})
+
+/**
+ * THE ONE SANCTIONED RAW-HTML CHANNEL, asserted rather than asserted-in-prose
+ * (S15.12 escape-by-default; B6-9 R15).
+ *
+ * "The only sanctioned raw-HTML channel is S15.8's preview surface" is a
+ * statement about the FINAL tree, so it is checked over the final tree: exactly
+ * one file mounts an iframe, it composes its `src` from a served preview URL and
+ * the shell's own path, and no content — a comparison, a comment, a card, a
+ * notification — reaches it.
+ */
+test('exactly one surface embeds a browsing context, and it is the preview', () => {
+  const withIframes = Object.entries(sources)
+    .filter(([p]) => !p.includes('.test.'))
+    .filter(([, text]) => text.includes('<iframe'))
+    .map(([p]) => p)
+    .sort()
+  expect(
+    withIframes,
+    'a second surface embeds a browsing context; S15.12 sanctions exactly one and it is the S15.8 preview',
+  ).toEqual(['./Deliverable.tsx'])
+
+  // And it is sandboxed with top navigation withheld — the property S13.3 and
+  // review.EscapeFirst() both name (§45 D1).
+  //
+  // The assertion reads the GRANT LIST itself rather than the file text: that
+  // file's own doc comment enumerates the withheld tokens by name, and a text
+  // scan would read the documentation of an absence as the absence's opposite.
+  const preview = sources['./Deliverable.tsx']
+  const grant = /previewSandbox\s*=\s*'([^']*)'/.exec(preview)
+  expect(grant, 'the preview sandbox grant list is gone or was renamed').not.toBeNull()
+  const tokens = (grant?.[1] ?? '').split(/\s+/).filter((t) => t !== '')
+  expect(tokens.length, 'the sandbox attribute is empty').toBeGreaterThan(0)
+  for (const withheld of [
+    'allow-top-navigation',
+    'allow-top-navigation-by-user-activation',
+    'allow-top-navigation-to-custom-protocols',
+    'allow-popups-to-escape-sandbox',
+    'allow-modals',
+    'allow-downloads',
+  ]) {
+    expect(tokens, `the preview frame is granted ${withheld}`).not.toContain(withheld)
+  }
+  // The control: the grant list is real and non-empty, so "does not contain"
+  // is a statement about what was granted rather than about an empty string.
+  expect(tokens).toContain('allow-scripts')
 })
