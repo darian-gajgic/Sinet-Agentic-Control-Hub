@@ -259,7 +259,9 @@ test('an automation renders its step chain in order with the approval node marke
   expect(wf.steps.length, 'the automation fixture has no steps, so this asserts nothing').toBe(2)
 
   const card = view.container.querySelector(`[data-worker="${DIGEST}"]`)!
-  const steps = [...card.querySelectorAll('.chain li')]
+  // Direct children only: the nested `.step-needs` list holds the edges, and
+  // sweeping them into the step list would compare a chain against its own edges.
+  const steps = [...card.querySelectorAll('.chain > li')]
   expect(steps.map((s) => s.getAttribute('data-step'))).toEqual(wf.steps.map((s) => s.id))
   expect(steps.map((s) => s.getAttribute('data-approval'))).toEqual(wf.steps.map((s) => String(s.approval)))
   // Both arms exist in the fixture, so "marked" means something.
@@ -372,6 +374,164 @@ test('money renders as served and never as a zero, and no total exists anywhere'
   for (const banned of ['total', 'average', 'sum of', 'combined']) {
     expect(text, `the map rendered a ${banned} figure`).not.toContain(banned)
   }
+  view.unmount()
+})
+
+test('NO money span anywhere on the map prints a zero — every one, not just the run cells', async () => {
+  // The earlier guard was scoped to `.routed-cost`, which is where the meter's
+  // zero would have landed — and the zero that actually shipped was in the
+  // GRANTED block three lines away, rendering an undeclared ceiling as USD 0.
+  // A guard pointed away from where the defect lands is not a guard, so this
+  // one quantifies over every money span the surface produces.
+  const { view } = await open()
+  const spans = [...view.container.querySelectorAll('.workforce .money')]
+  expect(spans.length, 'the surface renders no money at all, so this asserts nothing').toBeGreaterThan(0)
+  for (const el of spans) {
+    expect(el.textContent, 'a money span printed a zero — that is a figure nobody set (§37)').not.toMatch(
+      /^USD\s*0(\.0*)?$/,
+    )
+  }
+  // Probe: the matcher really does catch the shape that shipped.
+  expect('USD 0').toMatch(/^USD\s*0(\.0*)?$/)
+  view.unmount()
+})
+
+test('an undeclared ceiling renders its reason, and a declared one renders the figure', async () => {
+  // BOTH arms come from the committed bodies, not from a synthesized one: v2 of
+  // the release-notes writer REQUESTED ceilings and the automation requested
+  // none, and `Approve` copies requested → granted verbatim (S08.2). So the
+  // stored 0 that must not print as USD 0 is a real produced row.
+  const { view } = await open()
+  const body = served()
+
+  const declared = worker(body, NOTES).versions.find((v) => v.active)!
+  expect(declared.granted!.budget_usd, 'the fixture declares no ceiling, so the figure arm is undriven').toBe(12.5)
+  const shown = view.container.querySelector(`[data-worker="${NOTES}"] [data-budget]`)!
+  expect(shown.getAttribute('data-budget')).toBe('declared')
+  expect(shown.textContent).toContain('USD 12.5')
+  expect(shown.textContent).toContain('400 steps')
+
+  const none = worker(body, DIGEST).versions.find((v) => v.active)!
+  expect(none.granted!.budget_usd, 'the fixture has no undeclared ceiling, so the absence arm is undriven').toBeNull()
+  const cell = view.container.querySelector(`[data-worker="${DIGEST}"] [data-budget]`)!
+  expect(cell.getAttribute('data-budget')).toBe('absent')
+  expect(cell.textContent).toContain('no ceiling declared')
+  expect(cell.textContent, 'an undeclared ceiling rendered as a figure').not.toContain('USD')
+  view.unmount()
+})
+
+test('a step chain renders its $from edges — the connections, not just the sequence', async () => {
+  const { view } = await open()
+  const wf = worker(served(), DIGEST).definition!.workflow!
+  const withRef = wf.steps.find((s) => Object.keys(s.needs ?? {}).length > 0)
+  expect(withRef, 'no step in the fixture carries a $from edge, so this asserts nothing').toBeTruthy()
+
+  // The edge that makes this a chain rather than a list: `post` consumes
+  // `fetch`'s output, and that dependency exists ONLY in the args.
+  const post = view.container.querySelector('[data-step="post"]')!
+  expect(post.querySelector('[data-needs="steps.fetch.summary"]'), 'the step-to-step edge is not rendered').not.toBeNull()
+  const fetch = view.container.querySelector('[data-step="fetch"]')!
+  expect(fetch.querySelector('[data-needs="payload.day"]'), 'the payload edge is not rendered').not.toBeNull()
+  view.unmount()
+})
+
+test('a worker whose definition failed its integrity check still shows what it is allowed to do', async () => {
+  // The audit case that matters most: the file cannot be trusted, and the
+  // powers are recompiled from the guardrails TABLE on every run regardless
+  // (S08.2). A reader who learns only the first half learns the less useful
+  // half. Driven with a SINGLE-version worker and grants that appear nowhere
+  // else in the body, so nothing can be satisfied by a sibling.
+  const body = served()
+  const active = worker(body, NOTES).versions.find((v) => v.active)!
+  const tampered = {
+    ...worker(body, NOTES),
+    template_id: 'wt-tampered',
+    definition: null,
+    definition_absent: 'worker: template file hash mismatch (S08.3)',
+    versions: [
+      {
+        ...active,
+        granted: {
+          ...active.granted!,
+          granted_tools: ['Bash', 'WebFetch'],
+          confinement_class: 'C3',
+          egress: 'unrestricted',
+        },
+      },
+    ],
+  }
+  const { view } = await open({ ...body, workers: [tampered] } as unknown as Record<string, unknown>)
+  const card = view.container.querySelector('[data-worker="wt-tampered"]')!
+  expect(card.querySelector('[data-definition-absent]')!.textContent).toContain('hash mismatch')
+  const grants = card.querySelector('[data-equipment="granted"]')!
+  for (const power of ['Bash', 'WebFetch', 'C3', 'unrestricted']) {
+    expect(grants.textContent, `a tampered worker hides its granted ${power}`).toContain(power)
+  }
+  // The REQUESTED half is the half that legitimately goes with the file.
+  expect(card.querySelector('[data-equipment="requested"]')!.textContent).toContain('could not be read')
+  view.unmount()
+})
+
+test('a degraded domain names all three S08.7 consequences, and the schedule grant does not contradict it', async () => {
+  const { view } = await open()
+  const digest = worker(served(), DIGEST)
+  const active = digest.versions.find((v) => v.active)!
+  expect(active.granted!.schedule_attachable, 'the fixture grants no attachability, so the bar is undriven').toBe(true)
+
+  const marking = view.container.querySelector('[data-maturity="degraded"]')!
+  expect(marking.querySelector('[data-degraded-schedule]'), 'the schedule bar is missing from the marking').not.toBeNull()
+  expect(marking.textContent).toContain('auto-accept')
+
+  const cell = view.container.querySelector(`[data-worker="${DIGEST}"] [data-schedule-attachable]`)!
+  expect(cell.getAttribute('data-schedule-attachable')).toBe('true')
+  expect(cell.getAttribute('data-schedule-barred')).toBe('true')
+  expect(cell.textContent, 'the card says a degraded worker may attach to a schedule').toContain('barred')
+
+  // The other direction: the FULL-domain worker's row carries no bar, so the
+  // wording is a consequence of the domain and not a constant.
+  const ok = view.container.querySelector(`[data-worker="${NOTES}"] [data-schedule-attachable]`)!
+  expect(ok.getAttribute('data-schedule-barred')).toBe('false')
+  expect(ok.textContent).not.toContain('barred')
+  view.unmount()
+})
+
+test('each version says how many runs were routed to it and how its rounds came out', async () => {
+  const { view } = await open()
+  const notes = worker(served(), NOTES)
+  for (const v of notes.versions) {
+    const block = view.container.querySelector(`[data-outcomes="${v.version_id}"]`)!
+    expect(block.querySelector('[data-runs-routed]')!.getAttribute('data-runs-routed')).toBe(String(v.outcomes.runs_routed))
+    if (v.outcomes.verdict_tally.length === 0) {
+      expect(block.textContent).toContain('no verdict recorded against this version')
+      continue
+    }
+    for (const t of v.outcomes.verdict_tally) {
+      const el = block.querySelector(`[data-tally="${t.verdict}"]`)
+      expect(el, `the ${t.verdict} tally does not render`).not.toBeNull()
+      expect(el!.textContent).toContain(String(t.rounds))
+    }
+  }
+  // Both arms exist in the body, so neither branch is dead.
+  expect(notes.versions.some((v) => v.outcomes.verdict_tally.length > 0)).toBe(true)
+  expect(notes.versions.some((v) => v.outcomes.verdict_tally.length === 0)).toBe(true)
+  view.unmount()
+})
+
+test('the two empty-outcome answers are different sentences, because they are different facts', async () => {
+  const opBody = served()
+  const meBody = servedMember()
+  const opEmpty = opBody.workers.flatMap((w) => w.versions).find((v) => v.outcomes.absent !== undefined)!
+  const meEmpty = meBody.workers.flatMap((w) => w.versions).find((v) => v.outcomes.absent !== undefined)!
+  expect(opEmpty.outcomes.absent).toBe('no run has been routed to this version')
+  expect(meEmpty.outcomes.absent).toBe('no run of yours has been routed to this version')
+  expect(opEmpty.outcomes.absent, 'the two readings serve the same sentence').not.toBe(meEmpty.outcomes.absent)
+
+  // And the member's wording discloses nothing: it says what SHE ran, never
+  // that somebody else's run exists here.
+  expect(meEmpty.outcomes.absent).not.toMatch(/another|other|cannot see|hidden/)
+
+  const { view } = await open(fixtures.workforceMember())
+  expect(view.container.textContent).toContain('no run of yours has been routed')
   view.unmount()
 })
 

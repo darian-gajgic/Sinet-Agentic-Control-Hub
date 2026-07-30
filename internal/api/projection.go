@@ -71,10 +71,15 @@ type ToolInfo struct {
 // RunCounters are the monotonic, unbounded progress counters (§4). NEVER a
 // percent, fraction, ratio or ETA (R10): a denominator is never implied.
 type RunCounters struct {
-	Tokens          int64   `json:"tokens"`
-	APIEquivCostUSD float64 `json:"api_equiv_cost_usd"`
-	ElapsedS        int64   `json:"elapsed_s"`
-	Steps           int64   `json:"steps"`
+	Tokens int64 `json:"tokens"`
+	// APIEquivCostUSD is nil when the run has no cost reading — see
+	// meterReading, which is the one expression of what "has a reading" means.
+	// Tokens stay a plain counter beside it on purpose: a monotonic count at
+	// zero is a true reading of a run that has consumed nothing, while a MONEY
+	// zero is a figure nobody priced (S10.1; §37).
+	APIEquivCostUSD *float64 `json:"api_equiv_cost_usd"`
+	ElapsedS        int64    `json:"elapsed_s"`
+	Steps           int64    `json:"steps"`
 }
 
 // Activity is the last-activity line (§4): the latest run_events row summarized.
@@ -169,11 +174,11 @@ func (p *projector) runCard(ctx context.Context, runID string) (RunCard, string,
 		`SELECT COUNT(*) FROM checkpoints WHERE run_id = ?`, runID).Scan(&c.Counters.Steps); err != nil {
 		return RunCard{}, "", false, fmt.Errorf("projection: steps %q: %w", runID, err)
 	}
-	if p.meter != nil {
-		if m, merr := p.meter.RunMeter(ctx, runID); merr == nil {
-			c.Counters.Tokens = m.Tokens
-			c.Counters.APIEquivCostUSD = m.APIEquivCostUSD
-		}
+	m, priced := p.meterReading(ctx, runID)
+	c.Counters.Tokens = m.Tokens
+	if priced {
+		cost := m.APIEquivCostUSD
+		c.Counters.APIEquivCostUSD = &cost
 	}
 
 	// last-activity line: the latest run_events row for the run.
@@ -1247,6 +1252,32 @@ func (p *projector) lastActivity(ctx context.Context, runID string) (Activity, b
 	a.TS = parseTS(tsRaw)
 	a.Line = firstString(json.RawMessage(payload), "line", "summary", "message", "reason", "detail")
 	return a, true
+}
+
+// meterReading is THE expression of "does this run have a cost reading?", and
+// every surface that serves one goes through it.
+//
+// It exists because `err == nil` is NOT that question, which is the defect this
+// helper was extracted to end. `Ledger.RunConsumption` FOLDS a run's checkpoint
+// rows: a run that exists and has recorded no usage yet — every run between its
+// first state row and its first checkpoint, which is the state the newest runs
+// are in — folds to zero tokens, zero cost and zero unpriced calls
+// SUCCESSFULLY. A caller reading that as a reading serves `USD 0` for work
+// nobody has priced, which is exactly the fabricated figure S10.1 and §37
+// forbid, and it is indistinguishable from a real zero at the call site.
+//
+// TOKENS ARE A DIFFERENT FACT and callers keep them: a monotonic counter at zero
+// is a true reading of a run that has consumed nothing. Only the MONEY is
+// withheld, because only the money is a price nobody set.
+func (p *projector) meterReading(ctx context.Context, runID string) (RunMeter, bool) {
+	if p.meter == nil {
+		return RunMeter{}, false
+	}
+	m, err := p.meter.RunMeter(ctx, runID)
+	if err != nil {
+		return RunMeter{}, false
+	}
+	return m, m.Tokens != 0 || m.APIEquivCostUSD != 0 || m.Unpriced
 }
 
 // latestPayload returns the payload of the newest run_events row for the run

@@ -189,14 +189,23 @@ type WorkforceVersion struct {
 // WorkforceGrants is the worker_guardrails row — the S08.2 enforcement state,
 // exclusively: what this version may actually do.
 type WorkforceGrants struct {
-	GrantedTools       []string `json:"granted_tools"`
-	GatedTools         []string `json:"gated_tools,omitempty"`
-	PermissionMode     string   `json:"permission_mode,omitempty"`
-	ConfinementClass   string   `json:"confinement_class"`
-	Egress             string   `json:"egress"`
-	EgressHosts        []string `json:"egress_hosts,omitempty"`
-	BudgetUSD          float64  `json:"budget_usd"`
-	BudgetSteps        int64    `json:"budget_steps"`
+	GrantedTools     []string `json:"granted_tools"`
+	GatedTools       []string `json:"gated_tools,omitempty"`
+	PermissionMode   string   `json:"permission_mode,omitempty"`
+	ConfinementClass string   `json:"confinement_class"`
+	Egress           string   `json:"egress"`
+	EgressHosts      []string `json:"egress_hosts,omitempty"`
+	// The ceilings are NIL-ABLE, and 0 is what makes them so. `worker_guardrails`
+	// stores both NOT NULL with a >= 0 check and `Approve` copies the version's
+	// REQUEST verbatim, so a version that asked for no ceiling is granted 0 —
+	// and the registry's own request type says as much, carrying `omitempty` on
+	// both fields (worker.go RequestedGrants). Serving that 0 put `USD 0` on
+	// screen for a ceiling nobody set, which is the same fabricated figure the
+	// meters surface already refuses to print (api.go LaneMeter: "no operator
+	// budget is persisted anywhere … the ABSENCE is what the meters surface
+	// serves — never a zero", S10.1).
+	BudgetUSD          *float64 `json:"budget_usd"`
+	BudgetSteps        *int64   `json:"budget_steps"`
 	GatePolicy         string   `json:"gate_policy,omitempty"`
 	FirstNRemaining    int64    `json:"first_n_remaining"`
 	ScheduleAttachable bool     `json:"schedule_attachable"`
@@ -249,6 +258,15 @@ type WorkforceOutcomes struct {
 	// Truncated reports the per-version bound cutting the list short, so a
 	// reading of the newest runs is never read as the whole history.
 	Truncated bool `json:"truncated"`
+	// RunsRouted is how many runs this reading found routed to this version —
+	// the count BEFORE the per-version bound, so it stays true when the list
+	// above is cut. A count of rows is a reading somebody can take; it is not
+	// money, and nothing here sums a figure.
+	RunsRouted int `json:"runs_routed"`
+	// VerdictTally is the S08.4 "verdict outcomes" half: how many recorded
+	// rounds carried each verdict, across the runs above. Rows counted, sorted
+	// by verdict so two identical requests answer identically.
+	VerdictTally []WorkforceVerdictCount `json:"verdict_tally"`
 	// Absent says why there is nothing, so an empty list is never read as a
 	// measurement somebody took (S10.1; §42 honest absence). At v0 this is what
 	// most versions will carry, and it is the truthful render.
@@ -292,6 +310,12 @@ type WorkforceRoutedRun struct {
 	Unpriced bool `json:"unpriced,omitempty"`
 	// MeterAbsent is why there is no reading for this run.
 	MeterAbsent string `json:"meter_absent,omitempty"`
+}
+
+// WorkforceVerdictCount is one verdict value and how many rounds carried it.
+type WorkforceVerdictCount struct {
+	Verdict string `json:"verdict"`
+	Rounds  int    `json:"rounds"`
 }
 
 // WorkforceVerdict is one verdict.recorded row of a routed run.
@@ -407,9 +431,17 @@ func workforceVersion(rv worker.RosterVersion, outcomes versionOutcomeSet) Workf
 		out.Granted = &WorkforceGrants{
 			GrantedTools: g.GrantedTools, GatedTools: g.GatedTools, PermissionMode: g.PermissionMode,
 			ConfinementClass: g.Class, Egress: string(g.Egress), EgressHosts: g.EgressHosts,
-			BudgetUSD: g.BudgetUSD, BudgetSteps: g.BudgetSteps, GatePolicy: g.GatePolicy,
+			GatePolicy:      g.GatePolicy,
 			FirstNRemaining: g.FirstNRemaining, ScheduleAttachable: g.ScheduleAttachable,
 			UpdatedTS: g.UpdatedTS,
+		}
+		if g.BudgetUSD != 0 {
+			usd := g.BudgetUSD
+			out.Granted.BudgetUSD = &usd
+		}
+		if g.BudgetSteps != 0 {
+			steps := g.BudgetSteps
+			out.Granted.BudgetSteps = &steps
 		}
 	} else {
 		out.GrantedAbsent = "never approved — approval is the only writer of enforcement state (S08.2)"
@@ -430,14 +462,29 @@ func workforceVersion(rv worker.RosterVersion, outcomes versionOutcomeSet) Workf
 	} else {
 		out.RevalidationAbsent = "never revalidated — no S08.10 trigger has fired for this version"
 	}
+	out.Outcomes.RunsRouted = outcomes.counts[v.ID]
+	out.Outcomes.VerdictTally = outcomes.tally[v.ID]
+	if out.Outcomes.VerdictTally == nil {
+		out.Outcomes.VerdictTally = []WorkforceVerdictCount{}
+	}
 	if runs := outcomes.runs[v.ID]; len(runs) > 0 {
 		out.Outcomes.Runs = runs
 		out.Outcomes.Truncated = outcomes.cutAt[v.ID]
 		return out
 	}
-	out.Outcomes.Absent = "no routed run in this reading"
-	if outcomes.truncated {
+	// The two readings are different facts and get different sentences. The
+	// operator's covers every owner, so its empty answer is about the version
+	// itself; a member's covers their own runs, so its empty answer is about
+	// what THEY ran — which is also the most it can honestly say, because
+	// "there is a run here you cannot see" would disclose the existence of
+	// another owner's run to somebody the scope exists to keep it from.
+	switch {
+	case outcomes.truncated:
 		out.Outcomes.Absent = "no routed run within the bounded routing scan — the exhaustive trace is /api/events"
+	case outcomes.scoped:
+		out.Outcomes.Absent = "no run of yours has been routed to this version"
+	default:
+		out.Outcomes.Absent = "no run has been routed to this version"
 	}
 	return out
 }
@@ -448,19 +495,31 @@ func workforceVersion(rv worker.RosterVersion, outcomes versionOutcomeSet) Workf
 // separate — one says "this version has more", the other says "this reading saw
 // less of everything".
 type versionOutcomeSet struct {
-	runs      map[string][]WorkforceRoutedRun
-	cutAt     map[string]bool
+	runs   map[string][]WorkforceRoutedRun
+	cutAt  map[string]bool
+	counts map[string]int
+	tally  map[string][]WorkforceVerdictCount
+	// scoped says the caller's reading covers only their OWN runs, which is what
+	// makes the two empty-outcome answers different sentences (D6).
+	scoped    bool
 	truncated bool
 }
 
 // versionOutcomes is the S08.4 join, keyed by version id.
 //
 // THE ROUTING AND VERDICT ROWS ARE TWO QUERIES FOR THE WHOLE READ, not two per
-// version: they are scanned once and grouped in memory, which is what keeps a
-// roster of N workers from becoming 2N queries on the one writer connection.
-// The METER is the exception and cannot be batched — the seam is per run, and
-// each call opens a write transaction on that same connection — so it is bounded
-// by workforceMeterCap and memoized per run id.
+// version: they are scanned once and grouped in memory. That is a property of
+// THIS JOIN and of nothing else — the roster path above it is frankly an N+1
+// (per template: a domain read, a delivery policy that re-reads the template,
+// and a versions query; per version: guardrails, latest validation, latest
+// revalidation), which at the declared caps is a large number of small indexed
+// SELECTs. It is left that way deliberately: the roster is household-scale and
+// empty at v0, and the alternative is hand-written joins duplicating reads the
+// registry already owns. The real bound is the caps, not the query count.
+//
+// The METER is the one part that cannot be batched — the seam is per run, and
+// each call opens a WRITE transaction on the single writer connection — so it is
+// bounded by workforceMeterCap, memoized per run id, and spent newest-first.
 func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (versionOutcomeSet, error) {
 	q := `SELECT event_seq, run_id, user_id, ts, payload FROM run_events
 	       WHERE type = ?
@@ -477,6 +536,7 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 	}
 	q += ` ORDER BY event_seq DESC LIMIT ?`
 	args = append(args, workforceRoutingCap+1)
+	scoped := !scope.Operator
 
 	rows, err := p.db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -536,26 +596,32 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 		scanned = scanned[:workforceRoutingCap]
 	}
 
-	// Group first, THEN bound per version, so the meter and verdict work below
-	// is done only for rows that will actually be served.
-	grouped := map[string][]WorkforceRoutedRun{}
+	// Bound per version, KEEPING THE SCAN'S OWN ORDER. `scanned` is globally
+	// newest-first, so walking it once and dropping the rows past a version's
+	// bound leaves every surviving row in newest-first order — which is what the
+	// meter budget below is then spent in. Grouping into a map first and
+	// iterating THAT would have spent the budget in Go's randomized map order,
+	// so two identical requests could disagree about which rows carry a figure.
+	kept := make([]routed, 0, len(scanned))
+	perVersion := map[string]int{}
+	counts := map[string]int{}
 	cut := map[string]bool{}
 	for _, r := range scanned {
-		if len(grouped[r.ver]) >= workforceRunsPerVersion {
+		counts[r.ver]++ // the true count in this reading, before the bound
+		if perVersion[r.ver] >= workforceRunsPerVersion {
 			cut[r.ver] = true
 			continue
 		}
-		grouped[r.ver] = append(grouped[r.ver], r.out)
+		perVersion[r.ver]++
+		kept = append(kept, r)
 	}
 
-	runIDs := make([]string, 0, len(scanned))
+	runIDs := make([]string, 0, len(kept))
 	seen := map[string]bool{}
-	for _, rows := range grouped {
-		for _, row := range rows {
-			if row.RunID != "" && !seen[row.RunID] {
-				seen[row.RunID] = true
-				runIDs = append(runIDs, row.RunID)
-			}
+	for _, r := range kept {
+		if r.out.RunID != "" && !seen[r.out.RunID] {
+			seen[r.out.RunID] = true
+			runIDs = append(runIDs, r.out.RunID)
 		}
 	}
 	verdicts, cutRuns, err := p.verdictsByRun(ctx, runIDs)
@@ -564,35 +630,60 @@ func (p *projector) versionOutcomes(ctx context.Context, scope ownerScope) (vers
 	}
 
 	metered := map[string]WorkforceRoutedRun{}
+	tally := map[string]map[string]int{}
 	out := map[string][]WorkforceRoutedRun{}
-	for ver, rows := range grouped {
-		for _, row := range rows {
-			if row.RunID == "" {
-				// A routing decision attributed to no run cannot be joined to a
-				// verdict or a meter reading; it is still a routing fact about
-				// this version, so it renders with both absences stated.
-				row.VerdictsAbsent = "this routing decision names no run, so nothing verifies it"
-				row.MeterAbsent = "this routing decision names no run, so no meter reading exists"
-				out[ver] = append(out[ver], row)
-				continue
-			}
-			if vs := verdicts[row.RunID]; len(vs) > 0 {
-				row.Verdicts, row.VerdictsTruncated = vs, cutRuns[row.RunID]
-			} else {
-				row.VerdictsAbsent = "no verdict recorded for this run yet"
-			}
-			// One reading per run, however many versions it was routed to.
-			if prior, ok := metered[row.RunID]; ok {
-				row.Tokens, row.APIEquivCostUSD, row.Unpriced, row.MeterAbsent =
-					prior.Tokens, prior.APIEquivCostUSD, prior.Unpriced, prior.MeterAbsent
-			} else {
-				p.readMeter(ctx, &row, len(metered) >= workforceMeterCap)
-				metered[row.RunID] = row
-			}
-			out[ver] = append(out[ver], row)
+	for _, r := range kept {
+		row := r.out
+		if row.RunID == "" {
+			// A routing decision attributed to no run cannot be joined to a
+			// verdict or a meter reading; it is still a routing fact about this
+			// version, so it renders with both absences stated.
+			row.VerdictsAbsent = "this routing decision names no run, so nothing verifies it"
+			row.MeterAbsent = "this routing decision names no run, so no meter reading exists"
+			out[r.ver] = append(out[r.ver], row)
+			continue
 		}
+		if vs := verdicts[row.RunID]; len(vs) > 0 {
+			row.Verdicts, row.VerdictsTruncated = vs, cutRuns[row.RunID]
+			if tally[r.ver] == nil {
+				tally[r.ver] = map[string]int{}
+			}
+			for _, v := range vs {
+				tally[r.ver][v.Verdict]++
+			}
+		} else {
+			row.VerdictsAbsent = "no verdict recorded for this run yet"
+		}
+		// One reading per run, however many versions it was routed to — and the
+		// budget is spent newest-first, because `kept` is in scan order.
+		if prior, ok := metered[row.RunID]; ok {
+			row.Tokens, row.APIEquivCostUSD, row.Unpriced, row.MeterAbsent =
+				prior.Tokens, prior.APIEquivCostUSD, prior.Unpriced, prior.MeterAbsent
+		} else {
+			p.readMeter(ctx, &row, len(metered) >= workforceMeterCap)
+			metered[row.RunID] = row
+		}
+		out[r.ver] = append(out[r.ver], row)
 	}
-	return versionOutcomeSet{runs: out, cutAt: cut, truncated: truncated}, nil
+	return versionOutcomeSet{
+		runs: out, cutAt: cut, counts: counts, tally: tallyRows(tally),
+		scoped: scoped, truncated: truncated,
+	}, nil
+}
+
+// tallyRows turns the per-version verdict counts into sorted rows, so two
+// identical requests serve identical bytes.
+func tallyRows(tally map[string]map[string]int) map[string][]WorkforceVerdictCount {
+	out := map[string][]WorkforceVerdictCount{}
+	for ver, counts := range tally {
+		rows := make([]WorkforceVerdictCount, 0, len(counts))
+		for verdict, n := range counts {
+			rows = append(rows, WorkforceVerdictCount{Verdict: verdict, Rounds: n})
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].Verdict < rows[j].Verdict })
+		out[ver] = rows
+	}
+	return out
 }
 
 // readMeter fills one row's figures from the metering seam, or states why it
@@ -615,12 +706,17 @@ func (p *projector) readMeter(ctx context.Context, row *WorkforceRoutedRun, over
 		row.MeterAbsent = "not read in this reading — this run's own receipt carries its figure"
 		return
 	}
-	m, err := p.meter.RunMeter(ctx, row.RunID)
-	if err != nil {
-		row.MeterAbsent = "no meter reading for this run"
-		return
-	}
-	if m.Tokens == 0 && m.APIEquivCostUSD == 0 && !m.Unpriced {
+	m, priced := p.meterReading(ctx, row.RunID)
+	if !priced {
+		// The seam refused and the seam answering with nothing recorded are
+		// different facts, so they get different sentences. meterReading folds
+		// both into one bool, so the refusal is re-asked here rather than
+		// inferred — which keeps ONE expression of "is there a reading" while
+		// still saying WHICH absence this is.
+		if _, err := p.meter.RunMeter(ctx, row.RunID); err != nil {
+			row.MeterAbsent = "no meter reading for this run"
+			return
+		}
 		row.MeterAbsent = "no usage recorded for this run yet"
 		return
 	}

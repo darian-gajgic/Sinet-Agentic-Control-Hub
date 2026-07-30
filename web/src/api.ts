@@ -435,7 +435,10 @@ export type RunCard = {
   parked_until: string | null
   stage: string
   tool: { name: string; args_digest: string } | null
-  counters: { tokens: number; api_equiv_cost_usd: number; elapsed_s: number; steps: number }
+  /** `api_equiv_cost_usd` is null when the run has no cost reading. Tokens stay
+   *  a plain counter beside it: a monotonic count at zero is a true reading of a
+   *  run that has consumed nothing, while a money zero is a price nobody set. */
+  counters: { tokens: number; api_equiv_cost_usd: number | null; elapsed_s: number; steps: number }
   last_activity: { type: string; ts: string; line: string } | null
   wedged: boolean
   lane: string
@@ -1306,7 +1309,16 @@ export type ChatSessionDeleted = { session_id: string; messages: number; turns: 
 /** The S08.9 multi-stage chain: the dialect, the ONE named service, and the
  *  ordered steps with their explicit approval nodes marked. Step args are not
  *  served — the map renders how stages connect, not the values between them. */
-export type WorkflowStep = { id: string; verb: string; approval: boolean }
+export type WorkflowStep = {
+  id: string
+  verb: string
+  approval: boolean
+  /** This step's `$from` edges: argument name → the reference it reads
+   *  (`payload.day`, `steps.fetch.summary`). A reference is a definition-time
+   *  connection, which is what makes the chain a chain; a LITERAL arg is a value
+   *  and is deliberately not served. Absent when the step reads neither. */
+  needs?: Record<string, string>
+}
 export type WorkerWorkflow = { dialect: string; service: string; steps: WorkflowStep[] }
 
 /** What the definition FILE requests (S08.1). What was granted is the version's
@@ -1337,8 +1349,12 @@ export type WorkerGrants = {
   confinement_class: string
   egress: string
   egress_hosts?: string[]
-  budget_usd: number
-  budget_steps: number
+  /** Nil when no ceiling was declared. `worker_guardrails` stores 0 for "none
+   *  requested" and approval grants only what was requested, so a 0 here would
+   *  be a ceiling nobody set — the same fabricated figure the meters surface
+   *  refuses to print (S10.1). */
+  budget_usd: number | null
+  budget_steps: number | null
   gate_policy?: string
   first_n_remaining: number
   schedule_attachable: boolean
@@ -1395,7 +1411,17 @@ export type RoutedRun = {
  *  figure would be arithmetic nobody performed. `truncated` reports the
  *  per-version bound cutting the list, so a reading of the newest runs is never
  *  read as the whole history. */
-export type WorkerOutcomes = { runs: RoutedRun[]; truncated: boolean; absent?: string }
+export type WorkerOutcomes = {
+  runs: RoutedRun[]
+  truncated: boolean
+  /** How many runs this reading found routed to the version, BEFORE the
+   *  per-version bound — so it stays true when the list is cut. A count of rows
+   *  is a reading; money is never summed. */
+  runs_routed: number
+  /** How many recorded rounds carried each verdict, across those runs. */
+  verdict_tally: { verdict: string; rounds: number }[]
+  absent?: string
+}
 
 export type WorkerVersion = {
   version_id: string

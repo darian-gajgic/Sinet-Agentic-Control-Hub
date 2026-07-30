@@ -75,7 +75,7 @@
         "stage": "",
         "waiting_on_human": false,
         "parked_until": null,
-        "cost_so_far_usd": 0,
+        "cost_so_far_usd": null,
         "effort_mode": "quick",
         "queue_hint_rank": null
       }

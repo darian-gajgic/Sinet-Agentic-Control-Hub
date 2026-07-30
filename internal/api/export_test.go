@@ -8,3 +8,10 @@ package api
 // run.IsTerminal — the one definition of record — without this package importing
 // internal/run for a predicate it only needs inside SQL-shaped code.
 func TerminalRunStatesForTest() []string { return terminalRunStates }
+
+// The workforce read's structural bounds, exposed so the external test package
+// can assert against the real numbers rather than restating them (B6-8 part B).
+const (
+	WorkforceRunsPerVersion = workforceRunsPerVersion
+	WorkforceMeterCap       = workforceMeterCap
+)

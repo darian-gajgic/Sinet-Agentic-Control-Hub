@@ -114,7 +114,8 @@ function DomainMarking({ workers }: { workers: WorkerRow[] }) {
         <>
           {' '}
           — no purpose-built quality check exists for this domain yet, so nothing here delivers without a person
-          reviewing it, and nothing here can graduate to unsupervised work.
+          reviewing it, <strong data-degraded-schedule>nothing here may attach to a schedule whose results
+          auto-accept</strong>, and nothing here can graduate to unsupervised work.
         </>
       )}
       {d.rubric_ref !== undefined && d.rubric_ref !== '' && <> Rubric: {d.rubric_ref}.</>}
@@ -137,6 +138,13 @@ function WorkerCard({ worker: w }: { worker: WorkerRow }) {
 
       <Delivery worker={w} />
 
+      {/* THE DEFINITION AND THE PERMISSIONS ARE SEPARATE RENDERS, and that is
+          the audit case that matters most. A worker whose file failed its S08.3
+          hash check has no readable definition — but it still HAS granted
+          powers, recompiled into every invocation from the guardrails table
+          (S08.2), and those are exactly what a person needs to see about a
+          worker they have just been told they cannot trust. Gating the
+          permissions block on the definition hid that half. */}
       {w.definition === null ? (
         <p className="absent" data-definition-absent>
           {w.definition_absent === undefined || w.definition_absent === '' ? (
@@ -146,14 +154,11 @@ function WorkerCard({ worker: w }: { worker: WorkerRow }) {
           )}
         </p>
       ) : (
-        <>
-          {w.definition.description !== undefined && w.definition.description !== '' && (
-            <p className="worker-description">{w.definition.description}</p>
-          )}
-          <Equipment worker={w} granted={active} />
-          <Connections worker={w} />
-        </>
+        w.definition.description !== undefined &&
+        w.definition.description !== '' && <p className="worker-description">{w.definition.description}</p>
       )}
+      <Equipment worker={w} granted={active} />
+      {w.definition !== null && <Connections worker={w} />}
 
       <div className="worker-versions">
         <h4>Versions</h4>
@@ -236,14 +241,22 @@ function Equipment({ worker: w, granted }: { worker: WorkerRow; granted: WorkerV
       <h4>Equipment</h4>
       <div className="equipment-requested" data-equipment="requested">
         <h5>Requested by the definition</h5>
-        <dl>
-          {lists.map(([label, items]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{(items ?? []).length === 0 ? <Absent reason="none requested" /> : <Chips items={items ?? []} />}</dd>
-            </div>
-          ))}
-        </dl>
+        {w.definition === null ? (
+          // The requested half lives in the FILE, so it is the half that goes
+          // with an unreadable definition. The granted half below does not.
+          <Absent reason="the definition could not be read, so what it requested is unknown" />
+        ) : (
+          <dl>
+            {lists.map(([label, items]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>
+                  {(items ?? []).length === 0 ? <Absent reason="none requested" /> : <Chips items={items ?? []} />}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </div>
 
       <div className="equipment-granted" data-equipment="granted">
@@ -251,7 +264,7 @@ function Equipment({ worker: w, granted }: { worker: WorkerRow; granted: WorkerV
         {granted === null ? (
           <Absent reason="no active version, so nothing is granted" />
         ) : (
-          <Grants version={granted} />
+          <Grants version={granted} barred={w.domain.maturity === 'degraded'} />
         )}
       </div>
 
@@ -265,7 +278,7 @@ function Equipment({ worker: w, granted }: { worker: WorkerRow; granted: WorkerV
 }
 
 /** The granted guardrails block, or the reason there is none. */
-function Grants({ version }: { version: WorkerVersion }) {
+function Grants({ version, barred = false }: { version: WorkerVersion; barred?: boolean }) {
   const g = version.granted
   if (g === null) {
     return (
@@ -309,9 +322,28 @@ function Grants({ version }: { version: WorkerVersion }) {
         </dd>
       </div>
       <div>
-        <dt>Budget</dt>
-        <dd>
-          <Money usd={g.budget_usd} /> · {String(g.budget_steps)} steps
+        <dt>Ceilings</dt>
+        <dd data-budget={g.budget_usd === null ? 'absent' : 'declared'}>
+          {g.budget_usd === null && g.budget_steps === null ? (
+            // 0 is what the guardrails row stores for "none requested", and
+            // approval grants only what was requested (S08.2) — so printing it
+            // would be a ceiling nobody set (S10.1, the meters precedent).
+            <Absent reason="no ceiling declared — this version requested none, and approval grants only what was requested" />
+          ) : (
+            <>
+              {g.budget_usd === null ? (
+                <Absent reason="no dollar ceiling declared" />
+              ) : (
+                <Money usd={g.budget_usd} />
+              )}
+              {' · '}
+              {g.budget_steps === null ? (
+                <Absent reason="no step ceiling declared" />
+              ) : (
+                <>{String(g.budget_steps)} steps</>
+              )}
+            </>
+          )}
         </dd>
       </div>
       {g.permission_mode !== undefined && g.permission_mode !== '' && (
@@ -336,7 +368,16 @@ function Grants({ version }: { version: WorkerVersion }) {
       </div>
       <div>
         <dt>Attachable to a schedule</dt>
-        <dd>{g.schedule_attachable ? 'yes' : 'no'}</dd>
+        {/* The guardrail is copied from the version's REQUEST unclamped, so it
+            can say yes while the worker's domain bars it (S08.7). Rendering the
+            grant alone would contradict the marking two blocks up; the bar is
+            the operative fact and rides with it. */}
+        <dd data-schedule-attachable={String(g.schedule_attachable)} data-schedule-barred={String(barred)}>
+          {g.schedule_attachable ? 'granted' : 'no'}
+          {g.schedule_attachable && barred && (
+            <> — but barred while this worker’s domain is degraded: a schedule that auto-accepts is closed to it (S08.7)</>
+          )}
+        </dd>
       </div>
     </dl>
   )
@@ -367,6 +408,15 @@ function Connections({ worker: w }: { worker: WorkerRow }) {
             <li key={s.id} data-step={s.id} data-approval={String(s.approval)}>
               <span className="step-id">{s.id}</span> <code>{s.verb}</code>
               {s.approval && <span className="step-approval"> — approval node: this step becomes a card, never a call</span>}
+              {Object.keys(s.needs ?? {}).length > 0 && (
+                <ul className="step-needs">
+                  {Object.entries(s.needs ?? {}).map(([arg, ref]) => (
+                    <li key={arg} data-needs={ref}>
+                      <code>{arg}</code> ← <code>{ref}</code>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ol>
@@ -549,6 +599,21 @@ function Outcomes({ version: v }: { version: WorkerVersion }) {
   return (
     <div className="version-outcomes" data-outcomes={v.version_id}>
       <h5>Runs routed to this version</h5>
+      <p className="outcome-tally">
+        <span data-runs-routed={String(v.outcomes.runs_routed)}>
+          {String(v.outcomes.runs_routed)} routed in this reading
+        </span>
+        {' · '}
+        {v.outcomes.verdict_tally.length === 0 ? (
+          <Absent reason="no verdict recorded against this version" />
+        ) : (
+          v.outcomes.verdict_tally.map((t) => (
+            <span key={t.verdict} className="tally" data-tally={t.verdict}>
+              {t.verdict}: {String(t.rounds)}{' '}
+            </span>
+          ))
+        )}
+      </p>
       {runs.length === 0 ? (
         <Empty what={v.outcomes.absent ?? 'no outcomes recorded'} />
       ) : (

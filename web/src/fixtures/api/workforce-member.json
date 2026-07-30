@@ -55,7 +55,9 @@
           "outcomes": {
             "runs": [],
             "truncated": false,
-            "absent": "no routed run in this reading"
+            "runs_routed": 0,
+            "verdict_tally": [],
+            "absent": "no run of yours has been routed to this version"
           }
         }
       ],
@@ -143,7 +145,9 @@
               "Glob"
             ],
             "class": "C1",
-            "egress": "none"
+            "egress": "none",
+            "budget_usd": 12.5,
+            "budget_steps": 400
           },
           "granted": {
             "granted_tools": [
@@ -153,8 +157,8 @@
             ],
             "confinement_class": "C1",
             "egress": "none",
-            "budget_usd": 0,
-            "budget_steps": 0,
+            "budget_usd": 12.5,
+            "budget_steps": 400,
             "gate_policy": "{}",
             "first_n_remaining": 3,
             "schedule_attachable": false,
@@ -210,7 +214,14 @@
                 "meter_absent": "no meter reading for this run"
               }
             ],
-            "truncated": false
+            "truncated": false,
+            "runs_routed": 2,
+            "verdict_tally": [
+              {
+                "verdict": "SHIP",
+                "rounds": 1
+              }
+            ]
           }
         },
         {
@@ -243,8 +254,8 @@
             ],
             "confinement_class": "C1",
             "egress": "none",
-            "budget_usd": 0,
-            "budget_steps": 0,
+            "budget_usd": null,
+            "budget_steps": null,
             "gate_policy": "{}",
             "first_n_remaining": 3,
             "schedule_attachable": false,
@@ -263,7 +274,9 @@
           "outcomes": {
             "runs": [],
             "truncated": false,
-            "absent": "no routed run in this reading"
+            "runs_routed": 0,
+            "verdict_tally": [],
+            "absent": "no run of yours has been routed to this version"
           }
         }
       ],

@@ -1364,3 +1364,15 @@ td {
     min-width: 0;
   }
 }
+
+.step-needs {
+  list-style: none;
+  margin: 0.125rem 0 0;
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.outcome-tally {
+  margin: 0;
+  color: var(--muted);
+}

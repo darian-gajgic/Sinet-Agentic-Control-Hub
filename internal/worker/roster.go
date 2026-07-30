@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -89,12 +91,8 @@ type RosterDefinition struct {
 }
 
 // RosterWorkflow is the S08.9 multi-stage chain as an audit surface reads it:
-// the dialect, the ONE named service, and the ordered steps with their
-// explicit approval nodes marked.
-//
-// Step ARGS are deliberately absent. The map renders how the stages connect,
-// and an arg is a value flowing between them, not a connection; leaving them
-// out keeps a view-only surface from becoming a window onto payload content.
+// the dialect, the ONE named service, the ordered steps with their explicit
+// approval nodes marked, and the REFERENCES that wire the steps to each other.
 type RosterWorkflow struct {
 	Dialect string       `json:"dialect"`
 	Service string       `json:"service"`
@@ -103,10 +101,24 @@ type RosterWorkflow struct {
 
 // RosterStep is one step of the chain. Approval marks the explicit approval
 // node every outward step carries (Spec S08.9; D7).
+//
+// REFERENCES ARE SERVED, LITERAL ARGS ARE NOT, and the split is the whole point.
+// A `{"$from":"steps.fetch.summary"}` arg is not a value flowing at run time —
+// it is a DEFINITION-TIME edge saying this step consumes that one's output, and
+// it is the only place the chain's shape is written down (S08.9's resolver:
+// `{"$from":"payload.<path>"}` / `{"$from":"steps.<id>.<path>"}`, resolved by
+// pure lookup). Dropping it leaves a sequence with approval flags and no
+// connections at all, which under-delivers the one thing S15.10 asks for — "how
+// multi-stage procedures connect". A LITERAL arg is genuinely a value, carries
+// producer content, and stays off a view-only surface.
 type RosterStep struct {
 	ID       string `json:"id"`
 	Verb     string `json:"verb"`
 	Approval bool   `json:"approval"`
+	// Needs maps this step's argument name to the reference it reads, verbatim
+	// (`payload.day`, `steps.fetch.summary`). Empty when the step takes only
+	// literals or no arguments.
+	Needs map[string]string `json:"needs,omitempty"`
 }
 
 // RosterVersion is one immutable version row with its enforcement state and
@@ -258,10 +270,37 @@ func (s *Store) rosterDefinition(ctx context.Context, t Template) (*RosterDefini
 	}
 	steps := make([]RosterStep, 0, len(wf.Steps))
 	for _, st := range wf.Steps {
-		steps = append(steps, RosterStep{ID: st.ID, Verb: st.Verb, Approval: st.Approval})
+		steps = append(steps, RosterStep{
+			ID: st.ID, Verb: st.Verb, Approval: st.Approval, Needs: StepReferences(st),
+		})
 	}
 	rd.Workflow = &RosterWorkflow{Dialect: wf.Dialect, Service: wf.Service, Steps: steps}
 	return rd, nil
+}
+
+// StepReferences extracts one step's `$from` edges, dropping every literal.
+//
+// The shape is the dialect's own (automation.resolveArgs): an argument is a
+// reference when it is an object whose ONLY key is `$from` with a string value.
+// Anything else — a number, a string, an object of literals — is a value, and a
+// value is not this surface's to show.
+func StepReferences(st automation.Step) map[string]string {
+	var out map[string]string
+	for name, raw := range st.Args {
+		var ref struct {
+			From *string `json:"$from"`
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&ref); err != nil || ref.From == nil {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[name] = *ref.From
+	}
+	return out
 }
 
 // rosterVersions reads the immutable version history newest first, each with

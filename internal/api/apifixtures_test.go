@@ -2308,8 +2308,13 @@ func seedFixtureWorkforce(t *testing.T, b *backend) {
 
 	// v2: every edit is a new immutable version row (S08.4). The body moved, so
 	// first-N resets — the supervised counter the map renders is the real one.
+	// v2 REQUESTS ceilings and v1 does not, so both arms of the budget render are
+	// in the committed bodies and neither is a synthesized body: `Approve` copies
+	// requested → granted verbatim (S08.2), so a version that asked for nothing
+	// is granted 0 — which is the absence, not a ceiling of zero.
 	if _, err := st.NewVersion(ctx, "alice", fxWorkerNotes, fxWorkerAgenticV2,
-		worker.RequestedGrants{Tools: []string{"Read", "Grep", "Glob"}, Class: "C1", Egress: worker.EgressNone},
+		worker.RequestedGrants{Tools: []string{"Read", "Grep", "Glob"}, Class: "C1", Egress: worker.EgressNone,
+			BudgetUSD: 12.5, BudgetSteps: 400},
 		worker.Provenance{AuthorKind: "human", Origin: worker.OriginHumanWritten,
 			EvidenceRef: "review:release-notes/round-2"}); err != nil {
 		t.Fatalf("NewVersion(notes v2): %v", err)
@@ -2329,9 +2334,18 @@ func seedFixtureWorkforce(t *testing.T, b *backend) {
 	// and its id pinned (the e-publish precedent: the journal mints a UUID no
 	// committed file can carry, while the payload and its journal-computed hash
 	// stay the producer's own).
+	// ScheduleAttachable is REQUESTED here, and Approve copies requested →
+	// granted unclamped (lifecycle.go), so the guardrails row says `true` while
+	// the worker's domain is degraded — and S08.7's second consequence is that a
+	// degraded-domain worker "cannot attach to any schedule whose results
+	// auto-accept". The fixture reaches that contradiction on purpose: a card
+	// that renders "attachable: yes" without stating the bar is the render this
+	// surface must not produce, and with all three workers at `false` it was
+	// undriveable.
 	if _, _, err := st.CreateDraft(ctx, "bob", fxWorkerAutomation,
 		worker.RequestedGrants{Tools: []string{"calendar.list", "calendar.post"}, Class: "C0",
-			Egress: worker.EgressSingleHost, EgressHosts: []string{"calendar.example.com"}},
+			Egress: worker.EgressSingleHost, EgressHosts: []string{"calendar.example.com"},
+			ScheduleAttachable: true},
 		worker.Provenance{AuthorKind: "human", Origin: worker.OriginHumanWritten}); err != nil {
 		t.Fatalf("CreateDraft(digest): %v", err)
 	}
@@ -2421,13 +2435,23 @@ func (fxDryEngine) DryRun(context.Context, worker.DryRunRequest) (worker.DryRunR
 // journaled. The journal mints a UUID, which no committed body can carry; the
 // PAYLOAD and its journal-computed hash — the things the approval verb checks —
 // stay the producer's own.
+//
+// It selects by the proposal's own IDENTITY (service + step + verb, which the
+// dialect makes unique within a workflow) rather than by insertion order, so it
+// pins the row it means the same way `e-publish` does. `ORDER BY rowid DESC`
+// would fail safely today and silently pin the wrong effect the moment a second
+// automation joins this world.
 func fxPinDryRunProposal(t *testing.T, b *backend, id string) {
 	t.Helper()
 	var minted string
 	if err := b.db.QueryRowContext(context.Background(),
-		`SELECT effect_id FROM effects WHERE json_extract(payload, '$.kind') = ? ORDER BY rowid DESC LIMIT 1`,
-		"automation-step").Scan(&minted); err != nil {
-		t.Fatalf("read the automation dry-run proposal: %v", err)
+		`SELECT effect_id FROM effects
+		  WHERE json_extract(payload, '$.kind') = ?
+		    AND json_extract(payload, '$.service') = ?
+		    AND json_extract(payload, '$.step') = ?
+		    AND json_extract(payload, '$.verb') = ?`,
+		"automation-step", "calendar", "post", "calendar.post").Scan(&minted); err != nil {
+		t.Fatalf("read the automation dry-run proposal by identity: %v", err)
 	}
 	exec(t, b, `UPDATE effects SET effect_id = ?, created_ts = ?, updated_ts = ? WHERE effect_id = ?`,
 		id, fxT4, fxT4, minted)

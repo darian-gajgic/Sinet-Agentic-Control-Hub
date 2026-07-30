@@ -97,6 +97,14 @@ test('every served kind renders once, in the order the control plane ranked them
   ]) {
     expect([...kinds], `the operator's inbox is missing kind ${kind}`).toContain(kind)
   }
+  // WITNESSED BY ID, not just by kind. `effect` used to be uniquely witnessed by
+  // e-notify; B6-8 part B added a second effect card (an automation's station-3
+  // proposal), which satisfies the kind check on its own and would have let
+  // e-notify disappear unnoticed. A card each kind is witnessed BY is a check;
+  // a kind that any card can satisfy is a weaker one.
+  for (const id of ['effect:e-notify', 'effect:e-digest']) {
+    expect(rowIDs(view), `the inbox is missing the card ${id} that witnesses its kind`).toContain(id)
+  }
   const failed = card(served, 'benchmark_verdict:bp-archive')
   expect(failed.tier, 'the failed-pair card is not the Low-tier eighth kind').toBe('low')
   expect(failed.actions).toEqual(['decline'])
@@ -924,4 +932,42 @@ test('a declared frame re-reads the queue, and the re-snapshot debt settles on t
 test('an empty queue says so rather than rendering nothing', async () => {
   const { view } = await open('/inbox', { items: [], cursor: 4, truncated: false })
   expect(view.container.textContent).toContain('Nothing is waiting on you.')
+})
+
+// ── the automation-step proposal (B6-8 part B's arrival in this queue) ───────
+
+test("an automation's station-3 proposal renders through the generic card, and what that looks like is pinned", async () => {
+  // This card arrived with the workforce map's fixture world: validating a
+  // kind=automation worker journals its outward step as a gated proposal
+  // (S08.9; D7 makes it free), so the queue genuinely gains one. `Inbox.tsx`
+  // has no arm for `card.kind: "automation-step"` — it falls to the generic
+  // RowCard — and NOTHING asserted on it, which is how a card can render
+  // badly beside a live PIN field and armed buttons without anyone noticing.
+  //
+  // Growing B6-6's card vocabulary is a gate question and is NOT done here.
+  // What is done here is making the current render a checked fact rather than
+  // an unlooked-at one, so the gate decides against evidence.
+  const served = all()
+  const { view } = await open('/inbox', served)
+  const item = card(served, 'effect:e-digest')
+
+  const row = view.container.querySelector('[data-card-id="effect:e-digest"]')
+  expect(row, 'the automation-step proposal does not render at all').not.toBeNull()
+  expect(row!.getAttribute('data-kind')).toBe('effect')
+
+  // What the card IS, from the served body: a High-tier outward step on one
+  // named service, owned by the person whose worker it is.
+  expect(item.tier).toBe('high')
+  expect(item.owner).toBe('bob')
+  expect(item.step_up_required).toBe(true)
+  expect(item.actions).toEqual(['approve', 'deny'])
+
+  // What renders: the generic fallback shows the payload's own fields. The
+  // verb and the step are the two facts that say what would happen, and both
+  // reach the screen — so the fallback is legible enough to decide against,
+  // even though it is not a purpose-built arm.
+  const text = row!.textContent ?? ''
+  for (const fact of ['calendar.post', 'post', 'calendar']) {
+    expect(text, `the card does not show ${fact}, so a person cannot tell what they are approving`).toContain(fact)
+  }
 })

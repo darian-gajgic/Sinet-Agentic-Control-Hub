@@ -666,12 +666,13 @@ func (p *projector) taskListRun(ctx context.Context, taskID string) (TaskListRun
 		ParkedUntil:    it.ParkedUntil,
 	}
 	// Cost so far: READ through the S10.4 seam, the run-card precedent. No
-	// arithmetic happens here and none may (§37).
-	if p.meter != nil {
-		if m, merr := p.meter.RunMeter(ctx, it.RunID); merr == nil {
-			cost := m.APIEquivCostUSD
-			out.CostSoFarUSD = &cost
-		}
+	// arithmetic happens here and none may (§37). The nil-able field is what
+	// makes the absence expressible, and `meterReading` is what decides there is
+	// one — a run the ledger folds to zero has no price, and serving that as 0
+	// put a fabricated `USD 0` on this very card.
+	if m, priced := p.meterReading(ctx, it.RunID); priced {
+		cost := m.APIEquivCostUSD
+		out.CostSoFarUSD = &cost
 	}
 	if pay, ok := p.latestPayload(ctx, it.RunID, "routing.decided"); ok {
 		out.EffortMode = firstString(pay, "effort", "effort_mode")

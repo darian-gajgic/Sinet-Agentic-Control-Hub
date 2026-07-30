@@ -12,6 +12,7 @@ import (
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker/automation"
 )
 
 // workforce_test.go — GET /api/workforce (B6-8 part B, R11–R14 + R19).
@@ -293,10 +294,21 @@ func TestWorkforceAutomationServesItsStepChain(t *testing.T) {
 	if !wf.Steps[1].Approval {
 		t.Error("the OUTWARD step's approval node is not marked (S08.9; D7)")
 	}
-	// Step ARGS are deliberately not on the wire: the map renders how stages
-	// connect, and an arg is a value flowing between them.
+	// The step-to-step EDGE, which is the one thing S15.10 actually asks the
+	// chain for. `post` depends on `fetch` and that dependency is written down in
+	// exactly one place — the `$from` reference in its args — so a chain served
+	// without it is a sequence with approval flags and no connections at all.
+	if got := wf.Steps[1].Needs["digest"]; got != "steps.fetch.summary" {
+		t.Errorf("the outward step's edge to %q is missing: needs = %v", "fetch", wf.Steps[1].Needs)
+	}
+	if got := wf.Steps[0].Needs["day"]; got != "payload.day" {
+		t.Errorf("the read step's payload edge is missing: needs = %v", wf.Steps[0].Needs)
+	}
+	// LITERAL args are still off the wire — a reference is a connection, a
+	// literal is a value, and only the first is this surface's to show. The raw
+	// body carries no `args` key, which is what the `needs` projection replaced.
 	if strings.Contains(workforceRawBody(t, b, "op"), `"args"`) {
-		t.Error("the workflow serves step args — a view-only map must not surface payload values")
+		t.Error("the workflow serves raw step args — only $from REFERENCES belong on a view-only map")
 	}
 
 	// The agentic worker's own multi-stage facts: what selects it and how it runs.
@@ -811,5 +823,300 @@ func TestWorkforceVerdictScanIsBoundedPerRunNotPerRequest(t *testing.T) {
 	// A run at or under the bound is NOT marked cut, so the flag means something.
 	if quiet.VerdictsTruncated {
 		t.Error("a run with one round is marked truncated")
+	}
+}
+
+// TestWorkforceStepReferencesKeepEdgesAndDropLiterals is the other half of D3:
+// the selection rule is "a reference is a connection, a literal is a value", so
+// both directions have to be driven. A definition carrying one of each proves
+// the projection selects rather than simply copying or simply dropping.
+func TestWorkforceStepReferencesKeepEdgesAndDropLiterals(t *testing.T) {
+	wf, err := automation.Parse(`{"dialect":"` + automation.DialectVersion + `","service":"calendar","steps":[
+	  {"id":"fetch","verb":"calendar.list","args":{"day":{"$from":"payload.day"},"limit":25,"label":"daily"}},
+	  {"id":"post","verb":"calendar.post","args":{"digest":{"$from":"steps.fetch.summary"},"channel":"notes"},"approval":true}
+	]}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := map[string]map[string]string{}
+	for _, st := range wf.Steps {
+		got[st.ID] = worker.StepReferences(st)
+	}
+	if want := map[string]string{"day": "payload.day"}; !sameRefs(got["fetch"], want) {
+		t.Errorf("fetch: got %v, want only the reference %v", got["fetch"], want)
+	}
+	if want := map[string]string{"digest": "steps.fetch.summary"}; !sameRefs(got["post"], want) {
+		t.Errorf("post: got %v, want only the reference %v", got["post"], want)
+	}
+	// The literals are the control: a projection that copied everything would
+	// carry them, and one that dropped everything would carry nothing.
+	for _, literal := range []string{"limit", "label", "channel"} {
+		for id, refs := range got {
+			if _, ok := refs[literal]; ok {
+				t.Errorf("step %s serves the LITERAL arg %q — a value is not a connection", id, literal)
+			}
+		}
+	}
+	if len(got["fetch"]) == 0 || len(got["post"]) == 0 {
+		t.Fatal("no references survived at all, so the literal check above proves nothing")
+	}
+}
+
+func sameRefs(got, want map[string]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for k, v := range want {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// TestMeterReadingIsOneExpressionAcrossEverySurface is D2's regression, and it
+// is deliberately about the SEAM rather than about one view.
+//
+// `Ledger.RunConsumption` answers a run that has recorded no usage with zeros
+// and NO error. Three landed surfaces read that seam — the task list's
+// `cost_so_far_usd`, the run card's counters, and the workforce map's routed
+// runs — and before this drain each decided independently what `err == nil`
+// meant. Two of them got it wrong. The check is that all three now answer the
+// same way for the same run.
+func TestMeterReadingIsOneExpressionAcrossEverySurface(t *testing.T) {
+	b := fixtureWorld(t)
+
+	// r-claim: the seam answers, with nothing recorded. Every surface must
+	// render the ABSENCE, and none may print a zero.
+	var tasks api.TaskList
+	mustDecode(t, fixtureBody(t, b, "op", "/api/tasks"), &tasks)
+	var claim *api.TaskListRun
+	for _, it := range tasks.Tasks {
+		if it.LatestRun != nil && it.LatestRun.RunID == "r-claim" {
+			claim = it.LatestRun
+		}
+	}
+	if claim == nil {
+		t.Fatal("r-claim is not on the task list, so this asserts nothing")
+	}
+	if claim.CostSoFarUSD != nil {
+		t.Errorf("the task card serves a cost for a run the ledger folds to nothing: %v — that is a fabricated USD %v",
+			*claim.CostSoFarUSD, *claim.CostSoFarUSD)
+	}
+
+	var detail api.RunDetail
+	mustDecode(t, fixtureBody(t, b, "op", "/api/runs/r-claim"), &detail)
+	if detail.Card.Counters.APIEquivCostUSD != nil {
+		t.Errorf("the run card serves a cost for the same run: %v", *detail.Card.Counters.APIEquivCostUSD)
+	}
+	// Tokens stay a plain counter beside it: zero consumed IS a true reading.
+	if detail.Card.Counters.Tokens != 0 {
+		t.Errorf("tokens should read 0 for a run that consumed nothing, got %d", detail.Card.Counters.Tokens)
+	}
+
+	notes := workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerNotes)
+	for _, v := range notes.Versions {
+		for _, r := range v.Outcomes.Runs {
+			if r.RunID == "r-claim" && r.APIEquivCostUSD != nil {
+				t.Errorf("the map serves a cost for the same run: %v", *r.APIEquivCostUSD)
+			}
+		}
+	}
+
+	// The other direction, so this is not just "everything is nil": r-ship has a
+	// real reading and every surface that shows one shows it.
+	var ship api.RunDetail
+	mustDecode(t, fixtureBody(t, b, "op", "/api/runs/r-ship"), &ship)
+	if ship.Card.Counters.APIEquivCostUSD == nil {
+		t.Fatal("r-ship has a real meter reading and the run card dropped it — the fix over-applied")
+	}
+	if *ship.Card.Counters.APIEquivCostUSD == 0 {
+		t.Error("a real reading rendered as zero")
+	}
+}
+
+func mustDecode(t *testing.T, raw []byte, v any) {
+	t.Helper()
+	if err := json.Unmarshal(raw, v); err != nil {
+		t.Fatalf("decode: %v (%s)", err, raw)
+	}
+}
+
+// TestWorkforceUndeclaredCeilingIsAnAbsenceNotAZero is D1 at the seam rather
+// than at the render. `worker_guardrails` stores both ceilings NOT NULL with a
+// >= 0 check and `Approve` copies the version's REQUEST verbatim, so a version
+// that asked for no ceiling is granted 0 — and the registry's own request type
+// says so, carrying `omitempty` on both fields. Serving that 0 put `USD 0` on
+// screen for a ceiling nobody set (S10.1, the meters precedent).
+func TestWorkforceUndeclaredCeilingIsAnAbsenceNotAZero(t *testing.T) {
+	b := fixtureWorld(t)
+	notes := workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerNotes)
+
+	// v2 asked for ceilings, so they are served as the figures they are.
+	v2 := workforceVersion(t, notes, fxWorkerNotesV2)
+	if v2.Granted == nil || v2.Granted.BudgetUSD == nil || v2.Granted.BudgetSteps == nil {
+		t.Fatalf("a version that REQUESTED ceilings serves none: %+v", v2.Granted)
+	}
+	if *v2.Granted.BudgetUSD != 12.5 || *v2.Granted.BudgetSteps != 400 {
+		t.Errorf("the granted ceilings are not the requested ones: %v / %v",
+			*v2.Granted.BudgetUSD, *v2.Granted.BudgetSteps)
+	}
+
+	// v1 asked for none, so there is nothing to serve — and a 0 would be a
+	// ceiling nobody set.
+	v1 := workforceVersion(t, notes, fxWorkerNotesV1)
+	if v1.Granted == nil {
+		t.Fatal("v1 has no guardrails row, so this asserts nothing")
+	}
+	if v1.Granted.BudgetUSD != nil {
+		t.Errorf("an undeclared dollar ceiling was served as %v — a figure nobody set (S10.1)", *v1.Granted.BudgetUSD)
+	}
+	if v1.Granted.BudgetSteps != nil {
+		t.Errorf("an undeclared step ceiling was served as %v", *v1.Granted.BudgetSteps)
+	}
+	// And it is genuinely 0 in the row, so the nil above is a DECISION about a
+	// stored zero rather than a column that happened to be empty.
+	g, err := fixtureWorkforce(t, b).Guardrails(t.Context(), fxWorkerNotesV1)
+	if err != nil {
+		t.Fatalf("read the guardrails row: %v", err)
+	}
+	if g.BudgetUSD != 0 || g.BudgetSteps != 0 {
+		t.Fatalf("v1's stored ceilings are not zero (%v/%v), so the absence above is not the case under test",
+			g.BudgetUSD, g.BudgetSteps)
+	}
+}
+
+// TestWorkforceEmptyOutcomeSentencesDifferByReading is D6 at the seam. The
+// operator's reading covers every owner, so its empty answer is about the
+// VERSION; a member's covers their own runs, so its empty answer is about what
+// THEY ran — which is also the most it may honestly say, because naming another
+// owner's run would disclose exactly what the scope exists to withhold.
+func TestWorkforceEmptyOutcomeSentencesDifferByReading(t *testing.T) {
+	b := fixtureWorld(t)
+
+	// The version whose only run belongs to bob: alice can see the VERSION
+	// (the worker is household) and none of its runs.
+	mine := workforceVersion(t, workforceWorkerByID(t, workforceRead(t, b, "alice"), fxWorkerNotes), fxWorkerNotesV1)
+	if len(mine.Outcomes.Runs) != 0 {
+		t.Fatalf("alice sees runs on v1, so the empty sentence is not under test: %+v", mine.Outcomes.Runs)
+	}
+	// A version nobody has ever routed to, read as the operator.
+	never := workforceVersion(t, workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerAudit), fxWorkerAuditV1)
+	if len(never.Outcomes.Runs) != 0 {
+		t.Fatal("the draft's version has routed runs, so the empty sentence is not under test")
+	}
+
+	if mine.Outcomes.Absent == never.Outcomes.Absent {
+		t.Errorf("two different facts serve one sentence: %q", mine.Outcomes.Absent)
+	}
+	if !strings.Contains(mine.Outcomes.Absent, "of yours") {
+		t.Errorf("a member's empty answer does not say whose reading it is: %q", mine.Outcomes.Absent)
+	}
+	// The non-disclosure limb: the member's wording must not reveal that
+	// somebody else's run exists here.
+	for _, leak := range []string{"another", "other owner", "cannot see", "hidden", "bob"} {
+		if strings.Contains(strings.ToLower(mine.Outcomes.Absent), leak) {
+			t.Errorf("the member's absence discloses another owner's run (%q): %q", leak, mine.Outcomes.Absent)
+		}
+	}
+}
+
+// TestWorkforceServesRunsRoutedAndVerdictOutcomes is D11: R14 names three
+// per-version readings and two of them were missing. A count of rows is a
+// reading somebody can take; money is still never summed, and the check below
+// asserts that too.
+func TestWorkforceServesRunsRoutedAndVerdictOutcomes(t *testing.T) {
+	b := fixtureWorld(t)
+	notes := workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerNotes)
+
+	v2 := workforceVersion(t, notes, fxWorkerNotesV2)
+	if v2.Outcomes.RunsRouted != len(v2.Outcomes.Runs) {
+		t.Errorf("runs_routed (%d) disagrees with the rows served (%d)", v2.Outcomes.RunsRouted, len(v2.Outcomes.Runs))
+	}
+	if v2.Outcomes.RunsRouted != 3 {
+		t.Errorf("runs_routed = %d, want the 3 the world routed to this version", v2.Outcomes.RunsRouted)
+	}
+	if len(v2.Outcomes.VerdictTally) != 1 || v2.Outcomes.VerdictTally[0].Verdict != "SHIP" ||
+		v2.Outcomes.VerdictTally[0].Rounds != 1 {
+		t.Errorf("the verdict tally is not the recorded rounds: %+v", v2.Outcomes.VerdictTally)
+	}
+
+	// A version with routed runs but NO verdicts tallies nothing rather than
+	// carrying a zero row for a verdict nobody recorded.
+	v1 := workforceVersion(t, notes, fxWorkerNotesV1)
+	if v1.Outcomes.RunsRouted != 1 {
+		t.Errorf("v1 runs_routed = %d, want 1", v1.Outcomes.RunsRouted)
+	}
+	if len(v1.Outcomes.VerdictTally) != 0 {
+		t.Errorf("v1 tallies verdicts it has none of: %+v", v1.Outcomes.VerdictTally)
+	}
+
+	// The member's reading counts HER runs, so the count follows the scope
+	// rather than reporting a total she may not read.
+	mine := workforceVersion(t, workforceWorkerByID(t, workforceRead(t, b, "alice"), fxWorkerNotes), fxWorkerNotesV2)
+	if mine.Outcomes.RunsRouted != 2 {
+		t.Errorf("the member's runs_routed = %d, want the 2 runs she owns", mine.Outcomes.RunsRouted)
+	}
+	if mine.Outcomes.RunsRouted >= v2.Outcomes.RunsRouted {
+		t.Error("the member's count is not narrower than the operator's — the count escaped the scope")
+	}
+}
+
+// TestWorkforceMeterBudgetIsSpentNewestFirstAndDeterministically is D7. Past
+// `workforceMeterCap` distinct runs, WHICH rows carry a figure and which say
+// "not read in this reading" has to be the same answer every time — a served
+// body that differs between two identical requests is the determinism family —
+// and it has to be the NEWEST rows, like the surface's three other bounds.
+//
+// It needs more routed runs than the cap to be observable at all, so the world
+// grows its own here rather than in the committed fixture.
+func TestWorkforceMeterBudgetIsSpentNewestFirstAndDeterministically(t *testing.T) {
+	b := fixtureWorld(t)
+	// 140 runs routed to the SUPERSEDED version, all newer than anything the
+	// fixture seeded, and all owned by alice so the operator and she both see
+	// them. The meter refuses every one of them (they are not in fixtureMeter's
+	// table), which is fine: what is under test is WHICH rows the budget reached,
+	// and "not read in this reading" is distinguishable from every other absence.
+	for i := 0; i < 140; i++ {
+		run := fmt.Sprintf("r-bulk-%03d", i)
+		exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
+		            VALUES (?,?,?,?,?,0,?,?)`, run, "alice", "t-ship", "completed", "anthropic", fxT4, fxT4)
+		exec(t, b, `INSERT INTO run_events (run_id, generation, user_id, type, schema_version, payload, ts)
+		            VALUES (?,0,?,?,1,?,?)`, run, "alice", "routing.decided",
+			`{"cause":"selector-match","worker":"`+fxWorkerNotes+`","version":"`+fxWorkerNotesV1+`",`+
+				`"model":"claude","lane":"anthropic","plain_reason":"bulk","window_tokens":200000}`, fxT4)
+	}
+
+	read := func() []api.WorkforceRoutedRun {
+		notes := workforceWorkerByID(t, workforceRead(t, b, "op"), fxWorkerNotes)
+		return workforceVersion(t, notes, fxWorkerNotesV1).Outcomes.Runs
+	}
+	first, second := read(), read()
+	if len(first) != api.WorkforceRunsPerVersion {
+		t.Fatalf("the per-version bound served %d rows, want %d — the budget is not under test",
+			len(first), api.WorkforceRunsPerVersion)
+	}
+	// Byte-identical across two identical requests. Under map iteration this is
+	// what varies.
+	a, _ := json.Marshal(first)
+	c, _ := json.Marshal(second)
+	if string(a) != string(c) {
+		t.Errorf("two identical requests served different bodies:\n%s\n%s", a, c)
+	}
+
+	// Newest-first: the rows served are the highest event_seq ones, which are
+	// the bulk runs rather than the fixture's original r-audit.
+	for _, r := range first {
+		if !strings.HasPrefix(r.RunID, "r-bulk-") {
+			t.Errorf("the per-version bound kept an older row (%s) over a newer one", r.RunID)
+		}
+	}
+	// And every served row was reached by the meter budget, because 20 rows is
+	// far inside the 100-run cap — so nothing here says "not read", which is
+	// what proves the budget follows the same order rather than a random one.
+	for _, r := range first {
+		if strings.Contains(r.MeterAbsent, "not read in this reading") {
+			t.Errorf("run %s fell outside the meter budget while inside the per-version bound", r.RunID)
+		}
 	}
 }
