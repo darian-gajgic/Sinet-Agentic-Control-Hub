@@ -542,7 +542,14 @@ test('each version says how many runs were routed to it and how its rounds came 
   const notes = worker(served(), NOTES)
   for (const v of notes.versions) {
     const block = view.container.querySelector(`[data-outcomes="${v.version_id}"]`)!
-    expect(block.querySelector('[data-runs-routed]')!.getAttribute('data-runs-routed')).toBe(String(v.outcomes.runs_routed))
+    const routed = block.querySelector('[data-runs-routed]')!
+    expect(routed.getAttribute('data-runs-routed')).toBe(String(v.outcomes.runs_routed))
+    // The attribute alone left the RENDERED number free: a constant in its place
+    // passed the whole suite, so a render bug showing a figure the attribute
+    // contradicts would have shipped. The tally learned this one bullet down.
+    expect(routed.textContent, 'the routed count does not render its served value').toContain(
+      `${String(v.outcomes.runs_routed)} routed`,
+    )
     if (v.outcomes.verdict_tally.length === 0) {
       expect(block.textContent).toContain('no verdict recorded against this version')
       continue
