@@ -85,6 +85,22 @@ test('waiting-on-a-human and parked-until are distinguished on the face', async 
   // person in the way — proven on mission control's own parked line.
   expect((oversightRoutes()['GET /api/tasks'].body as { tasks: TaskListItem[] }).tasks
     .find((t) => t.task_id === 't-audit')?.latest_run?.parked_until).toBe('2026-07-20T12:00:00Z')
+
+  // The chat-born task is the second card in this state, and the one whose served
+  // run state this suite had no assertion on at all: its own copy of it lived only
+  // in the Go byte-compare. A task holding an open interview card is parked and
+  // waiting on a person — the pipeline parks the run in the transaction that
+  // issues the card — so the face must say so here, where a person reads it.
+  const born = (oversightRoutes()['GET /api/tasks'].body as { tasks: TaskListItem[] }).tasks
+    .find((t) => t.task_id === 't-chatborn')
+  expect(born, 'the served board no longer carries the chat-born task').toBeDefined()
+  expect(born!.latest_run?.state, 'a run holding an open interview card cannot read running').toBe('parked')
+  expect(born!.latest_run?.waiting_on_human, 'an open interview card IS a person in the way').toBe(true)
+  const bornFace = [...view.container.querySelectorAll('.card-face')].find((c) =>
+    c.textContent?.includes('Draft the release notes'),
+  )!
+  expect(bornFace, 'the chat-born card is not on the board').toBeDefined()
+  expect(bornFace.querySelector('.waiting-human'), 'the born card hides that it waits on a person').not.toBeNull()
 })
 
 test('no view renders a percentage, a completion fraction or an ETA', async () => {

@@ -35,7 +35,14 @@ import {
 import { describeChatFailure, turnFact, type ChatFailure, type TurnError } from './chatFacts'
 import { AnswerView } from './History'
 import { type EventStream } from './events'
-import { chatFileEventTypes, chatSessionEventTypes, chatTurnEventTypes, describeError, useLive } from './live'
+import {
+  chatFileEventTypes,
+  chatIntakeEventTypes,
+  chatSessionEventTypes,
+  chatTurnEventTypes,
+  describeError,
+  useLive,
+} from './live'
 import { Absent, Empty, Freshness, Stamp } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
@@ -297,6 +304,17 @@ function Conversation({
     types: chatTurnEventTypes,
     stream,
   })
+  // The person's own decision queue, read here because a handoff turn renders the
+  // born task's open intake card and THAT card is never in the turn's outcome (see
+  // `openIntakeCard`). It is the same bounded read the inbox does, and it is what
+  // makes the card appear when the pipeline issues it and disappear when it is
+  // answered — from here or from the inbox.
+  const queue = useLive<{ items: ApprovalItem[] }>({
+    key: 'chat-intake-queue',
+    read: () => api.approvals(),
+    types: chatIntakeEventTypes,
+    stream,
+  })
   const registries = useRegistries()
 
   const [pick, setPick] = useState<ComposerPick>(emptyPick)
@@ -314,6 +332,15 @@ function Conversation({
   pickRef.current = pick
 
   const reload = detail.reload
+  const reloadQueue = queue.reload
+  // Answering the born task's card moves BOTH the conversation (the pipeline
+  // advances) and the queue (the card is resolved). The `decision.recorded` frame
+  // says so too, but the person who just pressed the button should not have to
+  // wait for a round trip through the relay to see their own act.
+  const answered = useCallback(() => {
+    reload()
+    reloadQueue()
+  }, [reload, reloadQueue])
   const submit = useCallback(
     async (req: ChatTurnRequest) => {
       setFailure(null)
@@ -405,10 +432,11 @@ function Conversation({
                     turn={item.turn}
                     question={item.question}
                     files={files}
+                    queue={queue.data?.items ?? []}
                     onStop={() => void stop(item.turn.turn_id)}
                     onEscalate={(question) => void submit({ kind: 'open_sql', text: question })}
                     onChoose={(query, question) => void submit({ kind: 'query', text: question, query })}
-                    onAnswered={reload}
+                    onAnswered={answered}
                   />
                 )
               }}
@@ -469,6 +497,7 @@ function TurnBubble({
   turn,
   question,
   files,
+  queue,
   onStop,
   onEscalate,
   onChoose,
@@ -477,6 +506,7 @@ function TurnBubble({
   turn: ChatTurn
   question: string
   files: ChatFile[]
+  queue: ApprovalItem[]
   onStop: () => void
   onEscalate: (question: string) => void
   onChoose: (query: string, question: string) => void
@@ -517,7 +547,7 @@ function TurnBubble({
         />
       )}
       {(fact.kind === 'task' || (fact.kind === 'abandoned' && turn.outcome_kind === 'task')) && (
-        <BornTaskView task={turn.outcome as ChatBornTask} onAnswered={onAnswered} />
+        <BornTaskView task={turn.outcome as ChatBornTask} queue={queue} onAnswered={onAnswered} />
       )}
 
       <ProducedChips produced={turn.produced ?? []} files={files} />
@@ -609,16 +639,55 @@ function ProducedChips({ produced, files }: { produced: string[]; files: ChatFil
 // ── the S06 handoff, continued in place (OQ8(i)) ──────────────────────────
 
 /**
+ * The open intake card for a born task, taken from the person's OWN DECISION
+ * QUEUE rather than from the turn that started the task.
+ *
+ * This is the correction of a real defect, and the reason is worth stating: a
+ * settled turn's outcome is written exactly once and is never re-enriched on
+ * read, while the pipeline issues the interview card only AFTER the handoff verb
+ * has answered — `Start` births the task with no ask at all, and the ask and the
+ * intake run's park land together in a later transaction of their own. So a turn
+ * outcome that carries a card is a fixture's shape, not production's: reading the
+ * card off the outcome meant OQ8-(i)'s in-place card could never appear on a real
+ * platform, and no re-read could ever add it.
+ *
+ * The queue is also the only surface serving the PIN an answer must quote, so
+ * card and pin now come from one place, and the card leaves the feed the moment
+ * it is resolved — including when it is answered in the inbox instead. Matching
+ * is on the card's own `task_id`; nothing here composes an id.
+ */
+function openIntakeCard(queue: ApprovalItem[], taskID: string): { item: ApprovalItem; card: IntakeCard } | null {
+  for (const item of queue) {
+    const card = item.card as IntakeCard | undefined
+    if (card !== undefined && card !== null && card.task_id === taskID) return { item, card }
+  }
+  return null
+}
+
+/** The intake card shapes this surface can be handed. `questions` is the
+ *  interview shape it renders; a card without them is a real kind it does not
+ *  render (a delta decision), which is said plainly rather than shown empty. */
+type IntakeCard = NonNullable<ChatBornTask['open_card']> & { task_id?: string }
+
+/**
  * The born task, with its OPEN intake card rendered inline.
  *
- * The card is the pipeline's own snapshot, riding the turn's outcome — the same
- * card the inbox would show. Answering it here goes through the LANDED approvals
- * answer verb with the card's OWN payload hash, read off the queue at the moment
- * of answering: there is no second answer path, and this surface never composes a
- * card id or invents a pin. If the queue no longer carries the card, that is said
- * plainly and the deep links are there.
+ * Answering it here goes through the LANDED approvals answer verb with the card's
+ * OWN payload hash, re-read at the moment of answering: there is no second answer
+ * path, and this surface never composes a card id or invents a pin. When nothing
+ * of the person's is open on the task, that is said plainly and the deep links are
+ * there.
  */
-function BornTaskView({ task, onAnswered }: { task: ChatBornTask; onAnswered: () => void }) {
+function BornTaskView({
+  task,
+  queue,
+  onAnswered,
+}: {
+  task: ChatBornTask
+  queue: ApprovalItem[]
+  onAnswered: () => void
+}) {
+  const open = openIntakeCard(queue, task.task_id)
   return (
     <div className="chat-born" data-task={task.task_id}>
       <p>
@@ -640,8 +709,13 @@ function BornTaskView({ task, onAnswered }: { task: ChatBornTask; onAnswered: ()
           </>
         )}
       </dl>
-      {task.open_card && task.open_ask_id !== undefined && task.open_ask_id !== '' ? (
-        <IntakeCardInPlace askID={task.open_ask_id} card={task.open_card} onAnswered={onAnswered} />
+      {open !== null && (open.card.questions ?? []).length > 0 ? (
+        <IntakeCardInPlace askID={nativeID(open.item.id)} card={open.card} onAnswered={onAnswered} />
+      ) : open !== null ? (
+        <p className="muted">
+          This task is waiting on you, but not with a question this surface answers — it is in your{' '}
+          <Link to={hrefFor('inbox-item', { id: open.item.id })}>decision queue</Link>.
+        </p>
       ) : (
         <p className="muted">
           Nothing is waiting on you for this task right now — its progress is on the task page.

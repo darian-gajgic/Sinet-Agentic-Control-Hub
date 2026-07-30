@@ -259,11 +259,19 @@ test('every golden double is consumed by something — a fixture nothing reads i
   const keys = [...block![1].matchAll(/^ {2}([A-Za-z0-9_]+):/gm)].map((m) => m[1])
   expect(keys.length, 'no fixture keys were found, so the check below would pass over nothing').toBeGreaterThan(20)
 
+  // What this enforces, exactly: every golden body is REACHED from somewhere in
+  // web/src — a test, or one of the route tables in `doubles.ts` that the tests
+  // mount their world from. It is deliberately not "read by a test directly":
+  // five of these bodies are served only through those tables, which is a real
+  // way to be exercised. So this scan catches a body nothing can reach at all,
+  // and it CANNOT tell whether what reaches one asserts anything about it — that
+  // is what the per-body assertions are for (drain r2 R6; post-cap RES-5/RES-6
+  // added the two the world had grown without).
   const dead = (names: string[]) => {
     const everywhere = Object.values(sources).join('\n')
     return names.filter((k) => !new RegExp(`fixtures\\.${k}\\b`).test(everywhere))
   }
-  expect(dead(keys), 'a golden body is imported and exported but never read by any test').toEqual([])
+  expect(dead(keys), 'a golden body is imported and exported but reached from nowhere in web/src').toEqual([])
   // Probe: the scan can fail. A name no test could be calling is reported.
   expect(dead(['aDoubleNothingCalls'])).toEqual(['aDoubleNothingCalls'])
 })

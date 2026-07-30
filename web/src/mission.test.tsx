@@ -224,6 +224,20 @@ test('choosing a view asks for it and renders the answer with its layer and conf
   expect(answer.textContent).toContain('r-ship')
   // The view's own plain-language note rides the answer.
   expect(answer.textContent).toContain('NO-RECEIPT')
+  // The SAME guard the Layer-1 sibling carries, for the same reason: this body's
+  // rows grow with the shared world, and asserting only the layer and one run id
+  // let the born run's state be anything at all. A run holding an open interview
+  // card cannot read `running` — the pipeline parks it in the transaction that
+  // issues the card — so that is pinned here where it is rendered, not only in
+  // the Go byte-compare.
+  const served = fixtures.historyViewAnswer() as unknown as Answer
+  expect(answer.querySelectorAll('tbody tr')).toHaveLength(served.rows.length)
+  const born = served.rows.find((r) => r[0] === 't-chatborn.intake')
+  expect(born, 'the served body no longer carries the chat-born run').toBeDefined()
+  expect(born![served.columns.indexOf('state')], 'a run holding an open interview card cannot read running')
+    .toBe('parked')
+  const bornRow = [...answer.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('t-chatborn.intake'))
+  expect(bornRow?.textContent, 'the served state did not reach the screen').toContain('parked')
   view.unmount()
 })
 

@@ -17,7 +17,7 @@ import { survivesNavigation, describeChatFailure, turnFact } from './chatFacts'
 import { argumentReady, chatFeed, composerVerbs, convertChatItem, emptyPick, turnRequestFor } from './chatRuntime'
 import { chatEmptySessionID, chatRoutes, chatSessionID, FakeSource, fixtures, scriptedFetch, type Scripted } from './doubles'
 import { EventStream } from './events'
-import { chatSessionEventTypes, chatTurnEventTypes } from './live'
+import { chatIntakeEventTypes, chatSessionEventTypes, chatTurnEventTypes } from './live'
 import { navigate } from './router'
 import { hrefFor, matchRoute, routes } from './routes'
 import { click, choose, flush, mount, typeInto } from './testing'
@@ -1117,8 +1117,15 @@ test('a card the queue no longer carries says so plainly instead of guessing a p
   const body = served()
   const born = turnByKind(body, 'task')
   const question = (born.outcome as ChatBornTask).open_card!.questions![0]
-  const { view, log } = await open(chatHref, { 'GET /api/approvals': { body: { items: [], cursor: 46 } } })
+  const { view, log } = await open(chatHref)
   const inline = turnNode(view, born.turn_id).querySelector('[data-intake-ask]') as HTMLElement
+
+  // The card was open when this was rendered and is gone by the time the person
+  // presses Answer — somebody resolved it in the inbox meanwhile. That race is
+  // why the pin is re-read at the moment of answering instead of being held from
+  // the render, and it is the only way this branch can be reached now that the
+  // render itself comes from the queue.
+  log.set('GET /api/approvals', { body: { items: [], cursor: 46 } })
 
   choose(inline.querySelector(`[data-question="${CSS.escape(question.id)}"] select`) as HTMLSelectElement,
     question.options![0].value)
@@ -1164,6 +1171,92 @@ test('the subscription declares event TYPES and no topic, and a frame triggers a
   view.unmount()
 })
 
+/** A born task whose turn outcome carries NO card and NO ask id: what the real
+ *  `Submit` returns, because `Start` births the task with no ask and the pipeline
+ *  issues the interview card in a later transaction of its own. */
+function cardlessBorn() {
+  const body = served()
+  const born = turnByKind(body, 'task')
+  const task = born.outcome as ChatBornTask
+  const askID = task.open_ask_id!
+  born.outcome = { ...task, open_ask_id: undefined, open_card: undefined }
+  return { body, born, askID }
+}
+
+test('the born card renders from the QUEUE, so it appears on the outcome production actually returns', async () => {
+  const { body, born, askID } = cardlessBorn()
+  const queued = card(chatbornItem(), askID)
+  const { view } = await open(chatHref, { [`GET /api/chat/sessions/${chatSessionID}`]: { body } })
+  const cell = turnNode(view, born.turn_id)
+
+  // Nothing in the served outcome names a card — the pipeline had not issued one
+  // when the handoff answered — and the card is on screen anyway, because the
+  // person's own decision queue is what it is read from.
+  expect((born.outcome as ChatBornTask).open_card, 'the probe stopped being the production shape').toBeUndefined()
+  const inline = cell.querySelector('[data-intake-ask]') as HTMLElement | null
+  expect(inline, 'a born task with a queued card rendered none').not.toBeNull()
+  expect(inline!.getAttribute('data-intake-ask')).toBe(askID)
+  for (const q of (queued.card as { questions: { id: string }[] }).questions) {
+    expect(inline!.querySelector(`[data-question="${CSS.escape(q.id)}"]`), `${q.id} is not rendered`).not.toBeNull()
+  }
+  view.unmount()
+})
+
+test('a born task with nothing of yours open says so, and asks the queue for no pin', async () => {
+  const { body, born } = cardlessBorn()
+  const { view, log } = await open(chatHref, {
+    [`GET /api/chat/sessions/${chatSessionID}`]: { body },
+    'GET /api/approvals': { body: { items: [], cursor: 46 } },
+  })
+  const cell = turnNode(view, born.turn_id)
+
+  expect(cell.querySelector('[data-intake-ask]'), 'a card was rendered with nothing to render it from').toBeNull()
+  expect(cell.textContent).toContain('Nothing is waiting on you for this task right now')
+  expect(cell.textContent, 'the born task itself vanished with its card').toContain('t-chatborn')
+  expect(log.calls.filter((c) => c.path.includes('/answer')), 'an answer was posted for a card nobody has').toEqual([])
+  view.unmount()
+})
+
+test('a card resolved elsewhere leaves the feed — the turn outcome never poses as the live card', async () => {
+  // The served outcome DOES carry a card here (the fixture's own shape), and the
+  // queue does not. Stale never poses as live: what is rendered is what is open.
+  const body = served()
+  const born = turnByKind(body, 'task')
+  expect((born.outcome as ChatBornTask).open_card, 'this probe needs an outcome-borne card').toBeDefined()
+  const { view } = await open(chatHref, { 'GET /api/approvals': { body: { items: [], cursor: 46 } } })
+
+  const cell = turnNode(view, born.turn_id)
+  expect(cell.querySelector('[data-intake-ask]'), 'an answered card is still being offered').toBeNull()
+  expect(cell.textContent).toContain('Nothing is waiting on you for this task right now')
+  view.unmount()
+})
+
+test('the intake frame that issues the card is declared, so the feed hears it', async () => {
+  const { body } = cardlessBorn()
+  const { view, log } = await open(chatHref, { [`GET /api/chat/sessions/${chatSessionID}`]: { body } })
+  const src = FakeSource.last()
+  src.open()
+  await flush(6)
+  const before = log.calls.filter((c) => c.path === '/api/approvals').length
+
+  src.send('intake.state', {
+    seq: 47,
+    user_id: 'alice',
+    type: 'intake.state',
+    schema_version: 1,
+    topics: [],
+    payload: { task_id: 't-chatborn' },
+    ts: 'x',
+  })
+  await flush(6)
+
+  expect(
+    log.calls.filter((c) => c.path === '/api/approvals').length,
+    'the frame that announces the card triggered no re-read',
+  ).toBeGreaterThan(before)
+  view.unmount()
+})
+
 test('the declared types are the chat family, each of them able to move what is rendered', () => {
   expect([...chatSessionEventTypes]).toEqual(['chat.session_created', 'chat.session_renamed', 'chat.session_deleted'])
   expect([...chatTurnEventTypes]).toEqual([
@@ -1173,6 +1266,10 @@ test('the declared types are the chat family, each of them able to move what is 
     'chat.file_uploaded',
     'chat.file_deleted',
   ])
+  // The card a handoff renders is issued by the PIPELINE, after the turn that
+  // started the task has already settled — so the two types that move it are
+  // intake's and the decision's, not chat's own.
+  expect([...chatIntakeEventTypes]).toEqual(['intake.state', 'decision.recorded'])
   // No view declares a topic: the tab rides the unfiltered relay and selects by
   // type (§42 OQ1(b)).
   for (const [path, raw] of Object.entries(appSources())) {

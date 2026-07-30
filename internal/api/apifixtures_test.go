@@ -1146,13 +1146,19 @@ func (f fixtureIntake) Submit(_ context.Context, userID string, body json.RawMes
 		// (intake's issueCard: "gates wait", S06.1) — so the view and the seeded
 		// world state agree, and neither is a state the pipeline cannot reach.
 		//
-		// The one fidelity gap left standing, stated rather than papered over:
-		// the REAL Submit returns BEFORE any card is issued (Start births the
-		// task and run; the card comes later), so production's first handoff
-		// response carries no open card at all and the feed would meet it on a
-		// re-read. Rendering the card in place is OQ8(i) as dispositioned, and
-		// closing the gap is a producer/coordinator question — recorded on the
-		// B6 gate list in §44-B, not decided inside a widget drain.
+		// A FIDELITY GAP, and the correction of what this comment used to claim
+		// about it: the REAL Submit returns BEFORE any card is issued (Start
+		// births the task and run with no ask; the card and the run's park land
+		// in a later transaction), so production's first handoff response carries
+		// no open card at all. It said "the feed would meet it on a re-read" —
+		// which was FALSE, and demonstrably: a settled turn's outcome has exactly
+		// one writer and is served verbatim apart from redaction, so no re-read
+		// can ever add a card to it. The widget therefore no longer reads the
+		// card from the outcome at all — it reads the person's own decision
+		// queue, which is where the card actually appears and where its pin
+		// already lived (post-cap RES-1, §44-B). This body keeps its card because
+		// this seam's double returns one, and the render is driven BOTH ways: with
+		// it and, in the production shape, without it.
 		Runs: []fixtureRunSummary{
 			{RunID: "t-chatborn.intake", Role: "intake", State: "parked", HasReceipt: false},
 		},
@@ -1492,7 +1498,9 @@ func TestWebAPIFixturesAreStable(t *testing.T) {
 //
 // The B6-5 root cause was a fixture world that cannot exist, and the shape it
 // takes here is a run state. `issueCard` inserts the ask row and parks the run
-// in ONE transaction, so a task whose intake card is open and whose run reads
+// in ONE transaction (what the check below can actually see is that ONE FUNCTION
+// does both — the transaction boundary is read by a person, the coupling is read
+// by the test), so a task whose intake card is open and whose run reads
 // `running` is a world production can never reach — and it is not a harmless
 // wrongness: `waiting_on_human` is derived as parked AND an open ask
 // (projection.go), so the impossible row would sit in mission control's running

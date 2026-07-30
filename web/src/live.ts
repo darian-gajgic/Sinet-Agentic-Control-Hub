@@ -171,6 +171,19 @@ export const chatTurnEventTypes = [
 /** The types that move the exchange sidebar: the manifest's own two mutations. */
 export const chatFileEventTypes = ['chat.file_uploaded', 'chat.file_deleted'] as const
 
+/**
+ * The types that move the OPEN INTAKE CARD a handoff turn renders in place.
+ *
+ * Neither of these is a chat type, and that is the point. The pipeline issues an
+ * interview card AFTER the handoff verb has already answered — the ask and the
+ * intake run's park land in one transaction of their own — so `intake.state` is
+ * the only frame that announces the card this surface is waiting to show. And
+ * `decision.recorded` is what takes it away again, including when the person
+ * answers it from the inbox instead: the card leaves the queue, so it must leave
+ * the feed. Both move something this view renders, which is the whole test (§42).
+ */
+export const chatIntakeEventTypes = ['intake.state', 'decision.recorded'] as const
+
 export type Live<T> = {
   data: T | null
   /** The failure this view could not read past — rendered, never swallowed. */
