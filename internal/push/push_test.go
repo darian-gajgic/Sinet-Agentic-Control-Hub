@@ -300,8 +300,11 @@ func TestRemoveIsIdempotentAndOwnerScoped(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("push.unsubscribed rows = %d, want exactly 1 (the repeat mints nothing)", len(rows))
 	}
-	if rows[0]["reason"] != "operator" {
-		t.Errorf("reason = %v, want the person's own act", rows[0]["reason"])
+	if rows[0]["reason"] != push.ReasonOwnerUnenrolled {
+		t.Errorf("reason = %v, want the person's own act — and NOT the D10 role word, which is what a member unenrolling their own phone used to record", rows[0]["reason"])
+	}
+	if push.ReasonOwnerUnenrolled == "operator" {
+		t.Error("the self-service reason is the role word again")
 	}
 }
 

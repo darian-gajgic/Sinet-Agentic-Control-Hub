@@ -172,7 +172,7 @@ test('a body with no workers renders the no-standing-army state rather than a bl
     outcome_scope: 'your own runs only',
     truncated: false,
     outcomes_truncated: false,
-    cursor: 84,
+    cursor: 86,
   })
   const text = view.container.textContent ?? ''
   expect(text).toContain('Nothing has been composed yet')

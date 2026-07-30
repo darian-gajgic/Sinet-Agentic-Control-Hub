@@ -273,6 +273,107 @@ func TestDeadEndpointIsRemovedWithItsEvent(t *testing.T) {
 	}
 }
 
+// TestATransportFailureNeverWRITESTheCapabilityItFAILEDToReach is D1.
+//
+// A transport failure is the ORDINARY shape of a failed send — a sleeping host,
+// a dropped tailnet — and `*url.Error` from http.Client.Do always embeds the
+// full URL it was handed. That URL is the subscription's capability: anyone
+// holding it can push to that device, which is exactly why OQ2 ruled
+// hashes-never-raw and why migration 0021, contract.go and this package's own
+// doc comment all say the endpoint never reaches a payload. So the commonest
+// failure path is the one that has to be checked, and this checks the ROW.
+func TestATransportFailureNeverWritesTheCapabilityItFailedToReach(t *testing.T) {
+	e := newEnv(t)
+	svc := newFakeService(t)
+	sub, _, err := e.store.Enrol(e.ctx, "alice", svc.enrolment())
+	if err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	client := svc.Client()
+	svc.Close() // the ordinary case: the service is not answering
+
+	res := push.NewSender(e.store, client).Send(e.ctx, sub, msg("ask:a1"))
+	if res.Outcome != push.OutcomeUnreachable {
+		t.Fatalf("outcome = %s, want unreachable", res.Outcome)
+	}
+	rows := e.events(push.EventSent)
+	if len(rows) != 1 {
+		t.Fatalf("push.sent rows = %d, want 1", len(rows))
+	}
+	detail, _ := rows[0]["detail"].(string)
+	if detail == "" {
+		t.Fatal("the transport failure recorded no detail at all, so this test cannot see what it would have written")
+	}
+	// The whole row, not just the field: a capability must not reach the record
+	// by any route.
+	raw, _ := json.Marshal(rows[0])
+	for _, secret := range []string{sub.Endpoint, "/push/alice-phone", "https://", "http://"} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("the audit row carries %q — the endpoint is a capability and never leaves: %s", secret, raw)
+		}
+	}
+	// The RETURNED result is scrubbed too, so a caller that logs it cannot
+	// re-introduce what the row refused.
+	if strings.Contains(res.Detail, "://") {
+		t.Errorf("Send returned a detail carrying a URL: %q", res.Detail)
+	}
+	// The control, without which "no hits" could mean "the detail was emptied":
+	// the classification a drill needs survives.
+	if !strings.Contains(detail, "<endpoint withheld>") {
+		t.Errorf("the scrub did not mark where the URL was; detail = %q", detail)
+	}
+	if len(detail) < 20 {
+		t.Errorf("the detail was gutted rather than scrubbed: %q", detail)
+	}
+}
+
+// TestScrubDetailRemovesEveryURLShapeAndKeepsTheRest drives the boundary
+// directly, including the case a push service's own error BODY echoes the
+// request URL back at us — the second way a capability could reach a row.
+func TestScrubDetailRemovesEveryURLShapeAndKeepsTheRest(t *testing.T) {
+	cases := []struct{ name, in, wantOut, wantKept string }{
+		{"a url.Error from the transport",
+			`Post "https://web.push.apple.com/QDzVu-secret-token": dial tcp 17.0.0.1:443: connect: connection refused`,
+			"", "connection refused"},
+		{"a service echoing the endpoint in its body",
+			`{"reason":"BadDeviceToken","url":"https://fcm.googleapis.com/fcm/send/abc-secret"}`,
+			"", "BadDeviceToken"},
+		{"two URLs in one message",
+			`redirected https://a.example/one to https://b.example/two`,
+			"", "redirected"},
+		{"an honest reason with no URL survives whole",
+			`{"reason":"BadJwtToken"}`, `{"reason":"BadJwtToken"}`, "BadJwtToken"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := push.ScrubDetailForTest(c.in)
+			if strings.Contains(got, "://") {
+				t.Errorf("a URL survived the scrub: %q", got)
+			}
+			for _, leak := range []string{"secret-token", "abc-secret", "a.example", "b.example"} {
+				if strings.Contains(got, leak) {
+					t.Errorf("scrub left %q in %q", leak, got)
+				}
+			}
+			if !strings.Contains(got, c.wantKept) {
+				t.Errorf("scrub removed the diagnosis: %q does not carry %q", got, c.wantKept)
+			}
+			if c.wantOut != "" && got != c.wantOut {
+				t.Errorf("scrub changed a clean detail: %q, want %q", got, c.wantOut)
+			}
+		})
+	}
+	// The cap still applies on this path, so a service's oversized body cannot
+	// write an unbounded string into the log.
+	long := push.ScrubDetailForTest(strings.Repeat("x", 5000))
+	if len([]rune(long)) > 210 {
+		t.Errorf("scrubbed detail is %d runes, over the bound", len([]rune(long)))
+	}
+	if push.ScrubDetailForTest("") != "" {
+		t.Error("an empty detail did not stay empty")
+	}
+}
+
 // TestUnreachableServiceIsAuditedNotRetried: a transport failure is a recorded
 // outcome, not an exception and not a retry loop.
 func TestUnreachableServiceIsAuditedNotRetried(t *testing.T) {
@@ -334,6 +435,20 @@ func TestVAPIDTokenIsReusedPerPushServiceAndPerHour(t *testing.T) {
 		t.Error("two different push services were sent the same audience-bound token")
 	}
 
+	// The `sub` claim names the APPLICATION SERVER, which is this household's
+	// own origin — not the push service's (drain r1, D7). A token whose contact
+	// is the audience tells the service the sender is the service.
+	claims := decodeClaims(t, first)
+	if claims["sub"] != "https://sinet.example.ts.net" {
+		t.Errorf("sub = %v, want the subscription's own recorded origin", claims["sub"])
+	}
+	if claims["sub"] == claims["aud"] {
+		t.Errorf("sub and aud are the same value (%v): the contact claim names the push service rather than us", claims["sub"])
+	}
+	if claims["aud"] != strings.TrimSuffix(appleish.URL, "/") {
+		t.Errorf("aud = %v, want the push resource's origin", claims["aud"])
+	}
+
 	// Past the renewal margin the token IS replaced — the control, without
 	// which a cache that never expired would pass the assertion above.
 	e.now = e.now.Add(12 * time.Hour)
@@ -341,6 +456,26 @@ func TestVAPIDTokenIsReusedPerPushServiceAndPerHour(t *testing.T) {
 	if again := appleish.requests[2].header.Get("Authorization"); again == first {
 		t.Error("the token was never renewed")
 	}
+}
+
+// decodeClaims lifts the JWT claim set out of an Authorization header.
+func decodeClaims(t *testing.T, header string) map[string]any {
+	t.Helper()
+	tok := strings.TrimPrefix(header, "vapid t=")
+	tok = strings.SplitN(tok, ",", 2)[0]
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		t.Fatalf("Authorization does not carry a JWT: %q", header)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("claims: %v", err)
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("claims: %v", err)
+	}
+	return out
 }
 
 // TestOversizedPayloadIsRefusedNotTruncated: a silently shortened ciphertext

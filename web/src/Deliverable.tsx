@@ -1254,8 +1254,41 @@ function DoorRow({ door }: { door: Door }) {
           {door.pin_from !== undefined && door.pin_from !== '' ? <> · pin from {door.pin_from}</> : null}
         </p>
       )}
-      {door.available && door.verb === 'request-revision' && <RequestRevision door={door} />}
+      {door.available && driveableRevisionDoor(door) && <RequestRevision door={door} />}
     </>
+  )
+}
+
+/**
+ * driveableRevisionDoor answers whether THIS surface can actually perform the
+ * request-revision door — which is not the same question as whether the door is
+ * open (B6-9 drain r1, D4).
+ *
+ * The verb name covers TWO server states. When a rework card is open the door
+ * carries the answer route, the card's own pin and its `revise_with_guidance`
+ * verb, and the form below drives it. When the deliverable is FINISHED the same
+ * verb names the S13.9 follow-up spawn instead: route `/follow-up`, preset
+ * `revision`, and deliberately **no pin and no answer** — because a follow-up is
+ * a successor TASK, not an answer to a card.
+ *
+ * Gating the form on the verb rendered it in both states, so the finished limb
+ * shipped a full form with an ENABLED submit button whose handler could only
+ * ever report "The door named no route, pin or answer" — precisely the dead
+ * control this file's own rule at the top forbids. Gating on what the door
+ * SUPPLIES makes that rule true: the finished limb still renders its door, its
+ * route, its preset and its reason, and simply offers no control this surface
+ * cannot honour. The follow-up spawn itself has no control anywhere in the SPA,
+ * which is a REPORTED GAP on the S15.12 sweep's own list rather than something
+ * to invent here.
+ */
+function driveableRevisionDoor(door: Door): boolean {
+  return (
+    door.verb === 'request-revision' &&
+    door.route !== '' &&
+    door.payload_hash !== undefined &&
+    door.payload_hash !== '' &&
+    door.answer !== undefined &&
+    door.answer !== ''
   )
 }
 

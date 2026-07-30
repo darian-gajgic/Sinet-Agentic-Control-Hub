@@ -76,6 +76,20 @@ const (
 	OutcomeUnreachable = "unreachable"
 )
 
+// The recorded reasons a subscription left, as the `push.unsubscribed`
+// payload's `reason` field.
+//
+// A CLOSED VOCABULARY, and the two values are two different facts: a person
+// turning notifications off on their own device, and the platform retiring an
+// endpoint the push service reported gone. The first is deliberately NOT called
+// "operator" — `operator` is the D10 ROLE word everywhere else in this
+// codebase, and a member unenrolling their own phone would have recorded a row
+// naming a role they do not hold, for somebody auditing who did what to read.
+const (
+	ReasonOwnerUnenrolled = "owner_unenrolled"
+	ReasonPushServiceGone = "push_service_gone"
+)
+
 // ErrNotFound is "no such subscription for this caller". It deliberately covers
 // "not yours" as well as "not there": an id that answers differently for a
 // stranger is an existence oracle for somebody else's device (the internal/chat
@@ -291,14 +305,14 @@ func (s *Store) Remove(ctx context.Context, userID, endpoint string) (bool, erro
 	if userID == "" || endpoint == "" {
 		return false, fmt.Errorf("%w: identity and endpoint are required", ErrBadEnrolment)
 	}
-	return s.removeWhere(ctx, userID, `user_id = ? AND endpoint = ?`, []any{userID, endpoint}, "operator")
+	return s.removeWhere(ctx, userID, `user_id = ? AND endpoint = ?`, []any{userID, endpoint}, ReasonOwnerUnenrolled)
 }
 
 // removeDead drops a subscription the push service reported gone (404/410).
 // The reason rides the audit row so the record distinguishes a person's own act
 // from the platform retiring an endpoint that stopped existing.
 func (s *Store) removeDead(ctx context.Context, sub Subscription) error {
-	_, err := s.removeWhere(ctx, sub.UserID, `subscription_id = ?`, []any{sub.ID}, "push_service_gone")
+	_, err := s.removeWhere(ctx, sub.UserID, `subscription_id = ?`, []any{sub.ID}, ReasonPushServiceGone)
 	return err
 }
 

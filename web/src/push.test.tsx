@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { Inbox, InboxItem } from './Inbox'
 import { PushDevices } from './PushDevices'
-import { scriptedFetch, signedIn, FakeSource } from './doubles'
+import { fixtures, scriptedFetch, signedIn, FakeSource } from './doubles'
 import { EventStream } from './events'
 import { matchRoute, hrefFor } from './routes'
 import {
@@ -9,12 +10,15 @@ import {
   decodeVAPIDKey,
   enrol,
   enrolmentBody,
+  reconcileBadge,
   swPath,
   unenrol,
   type PushEnv,
   type PushManagerLike,
   type PushSubscriptionLike,
 } from './push'
+import { act } from 'react'
+
 import { flush, mount, settle } from './testing'
 
 import navigateFixture from './fixtures/api/push-navigate.json?raw'
@@ -30,6 +34,9 @@ import pushSubscriptionsMemberRaw from './fixtures/api/push-subscriptions-member
  */
 
 const pushView = () => JSON.parse(pushSubscriptionsRaw) as Record<string, unknown>
+/** The endpoint the fixture world enrolled alice's phone with, so a test can
+ *  hold a subscription the SERVED list really carries. */
+const fixtureAliceEndpoint = 'https://web.push.apple.com/QDzVuUUFuFXY-fixture-alice-phone'
 const pushViewMember = () => JSON.parse(pushSubscriptionsMemberRaw) as Record<string, unknown>
 
 // ── the cross-language deep-link tie (rubric 8) ────────────────────────────
@@ -234,6 +241,43 @@ describe('enrolling this device', () => {
   })
 })
 
+/**
+ * D13, CORRECTED. This used to assert that no rendered string contained a push
+ * host — under a heading about never rendering an endpoint — over a body that
+ * has no endpoint field at all. It could not fail, which is the inert-probe
+ * class this packet was told not to create.
+ *
+ * What CAN fail is the body itself: it is regenerated from the real handler and
+ * byte-compared by the Go suite, so if the server ever started serving an
+ * endpoint this fires here on the very next regeneration. The render-side
+ * statement follows from it — a view cannot display a field it was never sent —
+ * and the store-side wall is `TestMetadataNeverCarriesTheEndpoint`.
+ */
+test('the SERVED device bodies carry no endpoint and no key material', () => {
+  for (const [name, body] of [
+    ['operator', pushView()],
+    ['member', pushViewMember()],
+  ] as const) {
+    const subs = body.subscriptions as Record<string, unknown>[]
+    expect(subs.length, `the ${name} body is empty, so this proves nothing`).toBeGreaterThan(0)
+    for (const s of subs) {
+      for (const [k, v] of Object.entries(s)) {
+        // `origin` is the ONE URL on this wire and it is deliberate: it is the
+        // enrolling page's own address, which is this device's deep-link prefix
+        // (OQ7). It is not a capability — it is where the workspace lives.
+        if (k === 'origin') continue
+        expect(typeof v === 'string' && v.includes('://'), `${name}: field ${k} carries a URL`).toBe(false)
+      }
+      expect(String(s.origin), `${name}: origin is not a bare origin`).toMatch(/^https?:\/\/[^/]+$/)
+      expect(Object.keys(s), `${name}: an endpoint field appeared on the wire`).not.toContain('endpoint')
+      expect(Object.keys(s)).not.toContain('p256dh')
+      expect(Object.keys(s)).not.toContain('auth')
+      // The positive control: the row IS named, by the hash.
+      expect(String(s.endpoint_hash)).toMatch(/^[0-9a-f]{64}$/)
+    }
+  }
+})
+
 test('the VAPID key comes from the served read, never from a constant', () => {
   const served = (pushView().vapid_public_key as string) ?? ''
   expect(served.length).toBeGreaterThan(80)
@@ -241,15 +285,21 @@ test('the VAPID key comes from the served read, never from a constant', () => {
   expect(bytes.length).toBe(65)
   expect(bytes[0]).toBe(0x04)
   // The negative: no source file under web/src carries a key literal.
-  const sources = import.meta.glob('./**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<
-    string,
-    string
-  >
-  const hits = Object.entries(sources)
+  // The scan covers the SHIPPED SERVICE WORKER too (drain r1, D14): sw.js
+  // re-subscribes on a rotation and is precisely where an inline
+  // applicationServerKey would be tempting, and it sits outside `src`.
+  const scanned: Record<string, string> = {
+    ...(import.meta.glob('./**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>),
+    ...(import.meta.glob('../public/*.js', { query: '?raw', import: 'default', eager: true }) as Record<string, string>),
+  }
+  expect(Object.keys(scanned)).toContain('../public/sw.js')
+  const hits = Object.entries(scanned)
     .filter(([p]) => !p.endsWith('push.test.tsx'))
     .filter(([, text]) => text.includes(served))
     .map(([p]) => p)
-  expect(hits, 'the served application server key is hard-coded somewhere in web/src').toEqual([])
+  expect(hits, 'the served application server key is hard-coded in the shipped tree').toEqual([])
+  // The probe: the scan can fail.
+  expect(Object.entries({ './planted.ts': `const k = '${served}'` }).filter(([, t]) => t.includes(served))).toHaveLength(1)
 })
 
 test('enrolmentBody refuses a subscription with no key material', () => {
@@ -288,12 +338,9 @@ describe('the “This device” panel', () => {
     expect(text).toContain('Alice’s phone')
     expect(text).toContain('Op’s laptop')
     expect(text).toContain('every device enrolled in this household')
-    // The whole rendered DOM carries no endpoint. It WALKS the tree rather than
-    // serializing it: serializing would put a token this tree's own escape scan
-    // forbids into this file (the §43 precedent).
-    expect(renderedStrings(ui.container).filter((v) => v.includes('push.apple.com') || v.includes('googleapis'))).toEqual([])
-    // The control: the walk really does see the rendered values, so "no hits"
-    // means "nothing leaked" rather than "the walk read nothing".
+    // The walk really does see the rendered values. It walks rather than
+    // serializing, because serializing would put a token this tree's own escape
+    // scan forbids into this file (the §43 precedent).
     expect(renderedStrings(ui.container).some((v) => v.includes('Alice’s phone'))).toBe(true)
     ui.unmount()
   })
@@ -371,6 +418,75 @@ describe('the “This device” panel', () => {
     }
   }
 
+  test('a device the platform DOES list renders enrolled — the control D10 was missing', async () => {
+    // The endpoint the fixture's own alice row was enrolled with, so the hash
+    // this page computes matches a served one. Without this the enrolled happy
+    // path was never rendered by any test, while a comment claimed it was.
+    scriptedFetch(panelRoutes())
+    const ui = mount(
+      <PushDevices
+        stream={stream()}
+        env={env({ windowPushManager: fakeManager(fakeSubscription(fixtureAliceEndpoint)), permission: 'granted' })}
+      />,
+    )
+    await flush()
+    await settleDevice(ui, 'enrolled')
+    expect(ui.container.querySelector('[data-push-state="enrolled"]')).not.toBeNull()
+    expect(ui.container.textContent).toContain('This device is enrolled')
+    // And the enrol control is gone, because there is nothing left to enrol.
+    const buttons = [...ui.container.querySelectorAll('.push-device button')].map((b) => b.textContent ?? '')
+    expect(buttons).toEqual(['Stop notifications on this device'])
+    ui.unmount()
+  })
+
+  test('pressing Enrol actually enrols, and pressing Stop actually removes (drain r1, D8)', async () => {
+    // The unit tests cover `enrol`/`unenrol` and the mount tests cover the
+    // panel; nothing joined them, so removing BOTH onClick handlers left the
+    // suite green and rubric item 2's "unsubscribe works" was not driven.
+    const manager = fakeManager()
+    const log = scriptedFetch({
+      ...panelRoutes(),
+      'POST /api/push/subscriptions': { body: { replaced: false } },
+      'POST /api/push/subscriptions/remove': { body: { applied: true } },
+    })
+    const ui = mount(
+      <PushDevices
+        stream={stream()}
+        env={env({ windowPushManager: manager, permission: 'granted', origin: 'https://sinet.example.ts.net' })}
+      />,
+    )
+    await flush()
+    await settleDevice(ui, 'not-enrolled')
+
+    const enrolButton = [...ui.container.querySelectorAll('.push-device button')].find((b) =>
+      (b.textContent ?? '').startsWith('Enrol'),
+    ) as HTMLButtonElement
+    expect(enrolButton, 'no enrol control rendered').toBeTruthy()
+    act(() => enrolButton.click())
+    await flush()
+    await settle(2)
+
+    const posted = log.calls.filter((c) => c.method === 'POST' && c.path === '/api/push/subscriptions')
+    expect(posted, 'pressing Enrol posted nothing').toHaveLength(1)
+    expect(posted[0].body).toMatchObject({ origin: 'https://sinet.example.ts.net' })
+    expect(manager.calls[0].userVisibleOnly).toBe(true)
+
+    // Now the stop control, which is the half rubric 2 names explicitly.
+    await settleDevice(ui, 'unknown-subscription')
+    const stopButton = [...ui.container.querySelectorAll('.push-device button')].find((b) =>
+      (b.textContent ?? '').startsWith('Stop'),
+    ) as HTMLButtonElement
+    expect(stopButton, 'no stop control rendered after enrolling').toBeTruthy()
+    act(() => stopButton.click())
+    await flush()
+    await settle(2)
+    expect(
+      log.calls.filter((c) => c.path === '/api/push/subscriptions/remove'),
+      'pressing Stop removed nothing',
+    ).toHaveLength(1)
+    ui.unmount()
+  })
+
   test('a subscription the platform does not list is stated, not glossed', async () => {
     // The browser holds one; the served list carries a DIFFERENT hash. Saying
     // "enrolled" would be false and saying "not enrolled" would be worse.
@@ -407,3 +523,71 @@ function renderedStrings(root: Element): string[] {
   walk(root)
   return out
 }
+
+// ── the badge is reconciled from the served inbox count (drain r1, D2) ─────
+
+describe('the home-screen badge agrees with the queue after an answer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  const badgeSpies = () => {
+    const set = vi.fn(() => Promise.resolve())
+    const clear = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'setAppBadge', { value: set, configurable: true })
+    Object.defineProperty(navigator, 'clearAppBadge', { value: clear, configurable: true })
+    return { set, clear }
+  }
+
+  test('mounting the inbox writes the SERVED count', async () => {
+    const { set } = badgeSpies()
+    const body = fixtures.approvalsMine()
+    const count = (body.items as unknown[]).length
+    expect(count).toBeGreaterThan(1)
+    scriptedFetch({ 'GET /api/approvals': { body } })
+    const ui = mount(<Inbox stream={new EventStream({ createEventSource: (u) => new FakeSource(u) })} />)
+    await flush()
+    // The number is the length of the list actually on screen — the property
+    // OQ5 calls glance agreement, checked against the DOM rather than against
+    // the same variable the badge came from.
+    expect(ui.container.querySelectorAll('.cards > li')).toHaveLength(count)
+    expect(set).toHaveBeenCalledWith(count)
+    ui.unmount()
+  })
+
+  test('an emptied queue CLEARS the badge rather than leaving the last pushed count', async () => {
+    // This is the drill's own step 13: a card was answered, so the badge must
+    // come down. Before this the badge held its last PUSHED value for up to a
+    // full cadence, and the runbook's acceptance criterion could not be met.
+    const { set, clear } = badgeSpies()
+    scriptedFetch({ 'GET /api/approvals': { body: { items: [], cursor: 1 } } })
+    const ui = mount(<Inbox stream={new EventStream({ createEventSource: (u) => new FakeSource(u) })} />)
+    await flush()
+    expect(clear).toHaveBeenCalled()
+    expect(set).not.toHaveBeenCalled()
+    ui.unmount()
+  })
+
+  test('the deep-link surface reconciles too — it is where a tapped notification lands', async () => {
+    const { set } = badgeSpies()
+    const body = fixtures.approvalsMine()
+    const first = (body.items as { id: string }[])[0]
+    scriptedFetch({ 'GET /api/approvals': { body } })
+    const ui = mount(
+      <InboxItem id={first.id} stream={new EventStream({ createEventSource: (u) => new FakeSource(u) })} />,
+    )
+    await flush()
+    expect(set).toHaveBeenCalledWith((body.items as unknown[]).length)
+    ui.unmount()
+  })
+
+  test('a browser with no Badging API is not an error', () => {
+    // Most browsers have none, and the panel must not fail a render over it.
+    const nav = navigator as unknown as Record<string, unknown>
+    delete nav.setAppBadge
+    delete nav.clearAppBadge
+    expect(() => reconcileBadge(3)).not.toThrow()
+    expect(() => reconcileBadge(0)).not.toThrow()
+  })
+})

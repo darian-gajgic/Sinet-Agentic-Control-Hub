@@ -235,3 +235,39 @@ export async function sha256Hex(value: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
+
+/**
+ * reconcileBadge writes the home-screen badge from the count the INBOX just
+ * served (B6-9 drain r1, D2).
+ *
+ * WHY THE CLIENT HAS TO DO THIS AT ALL. The push payload's `app_badge` is
+ * written when a push is COMPOSED, so between one push and the next the badge
+ * holds whatever the last one said. Answering a card lowers the queue and
+ * nothing lowered the badge — which is exactly the mismatch the week-one drill's
+ * step 13 looks for, and it is OQ5's glance agreement failing in the one moment
+ * a person checks it.
+ *
+ * The count is the SERVED one and is never derived twice: it is the length of
+ * the same ranked list the inbox is rendering, which is the same derivation the
+ * notifier counts for the badge it pushes. Zero CLEARS rather than showing a
+ * badge of nothing.
+ *
+ * ITS HONEST LIMIT, stated rather than discovered: it reconciles when the inbox
+ * read lands. A card arriving while somebody is on another surface moves the
+ * badge at the next push, not before — that is the same currency every other
+ * surface has, and inventing a second household-wide poll to do better would be
+ * the ticker §32 forbids.
+ */
+export function reconcileBadge(count: number): void {
+  const nav = navigator as Navigator & {
+    setAppBadge?: (n?: number) => Promise<void>
+    clearAppBadge?: () => Promise<void>
+  }
+  try {
+    if (count > 0) void nav.setAppBadge?.(count)?.catch(() => {})
+    else void nav.clearAppBadge?.()?.catch(() => {})
+  } catch {
+    // Badging is user-configurable in the OS and absent in most browsers. A
+    // refusal is not worth failing a render over.
+  }
+}

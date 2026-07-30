@@ -141,6 +141,39 @@ test('the request-revision door renders BOTH limbs, from two deliverables', asyn
   expect(openRow.querySelector('[data-action="request-revision"]')).not.toBeNull()
 })
 
+test('the FINISHED limb offers NO control it cannot honour (drain r1, D4)', async () => {
+  // The verb `request-revision` covers two server states. Finished means the
+  // S13.9 FOLLOW-UP: route /follow-up, preset revision, and deliberately no pin
+  // and no answer, because a follow-up is a successor task rather than an answer
+  // to a card. Gating the form on the VERB rendered it here anyway, with an
+  // ENABLED submit button whose handler could only report "The door named no
+  // route, pin or answer" — the dead control this file's own rule forbids.
+  const { view } = await review('d-notes', {
+    'GET /api/deliverables/d-notes': { body: fixtures.deliverableDetail() },
+    'GET /api/deliverables/d-notes/compare': { body: fixtures.compareLineDiff() },
+    'GET /api/deliverables/d-notes/comments?revision=2': { body: fixtures.placedComments() },
+  })
+  const row = at(view, '[data-door="request-revision"]')!
+  expect(row.getAttribute('data-available')).toBe('true')
+  expect(
+    row.querySelector('[data-action="request-revision"]'),
+    'the finished limb renders a submit button, and pressing it can only fail',
+  ).toBeNull()
+  expect(row.querySelector('[data-field="revision-guidance"]')).toBeNull()
+  // The door itself is NOT hidden — a closed control is not a hidden door. Its
+  // route, its preset and its reason still render, which is what lets a reader
+  // see the door exists and where it lives.
+  expect(row.textContent).toContain('/api/deliverables/d-notes/follow-up')
+  expect(row.textContent).toContain('preset revision')
+
+  // The control, without which "no button" could mean the form never renders at
+  // all: the CARD-BACKED limb, which supplies a pin and an answer, still does.
+  const open = await review(reworkDeliverableID)
+  const openRow = at(open.view, '[data-door="request-revision"]')!
+  expect(openRow.querySelector('[data-action="request-revision"]')).not.toBeNull()
+  open.view.unmount()
+})
+
 test('the FINISHED limb links the follow-up spawn under the revision preset', async () => {
   // d-notes is accepted, so its request-revision door is the S13.9 follow-up.
   const { view } = await review('d-notes', {

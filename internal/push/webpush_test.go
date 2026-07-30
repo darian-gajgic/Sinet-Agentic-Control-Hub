@@ -59,10 +59,23 @@ func mustDecode(t *testing.T, label, s string) []byte {
 
 func rfcKeys() Keys { return Keys{P256DH: rfcUAPublic, Auth: rfcAuthSecret} }
 
-// TestRFC8291AppendixAEveryIntermediateValue pins the derivation STEP BY STEP
-// against the standard's published example. A single wrong label, a swapped
-// HKDF argument or a reversed key concatenation moves exactly one of these and
-// names itself.
+// TestRFC8291AppendixAEveryIntermediateValue pins the derivation step by step
+// against the standard's published example.
+//
+// WHAT EACH STEP ACTUALLY TIES, said precisely because the first version of this
+// comment was not (drain r1, D9). The three derivation LABELS are production
+// constants and are asserted directly, so changing `keyInfoPrefix`, `cekInfo` or
+// `nonceInfo` fires steps 3 and 6 by name — measured. The three HKDF CALLS in
+// steps 2, 4 and 5 are a parallel derivation through this file's own helpers:
+// they pin the RFC's published numbers (and therefore that the concatenation
+// order and the salt/secret roles this package uses are the standard's), but a
+// production change to the CALL ORDER moves them by nothing. What catches that
+// is the `deriveKeys` comparison below and the final ciphertext — measured too:
+// swapping the extract's salt and secret in production fires on exactly those
+// two lines, and on neither of the step assertions.
+//
+// Both halves are real and neither is decorative; describing the first as if it
+// were the second is the inert-probe class, in a document a reader relies on.
 func TestRFC8291AppendixAEveryIntermediateValue(t *testing.T) {
 	uaPublic := mustDecode(t, "ua_public", rfcUAPublic)
 	asPublic := mustDecode(t, "as_public", rfcASPublic)
@@ -92,7 +105,9 @@ func TestRFC8291AppendixAEveryIntermediateValue(t *testing.T) {
 
 	// Step 2 — PRK_key = HKDF-Extract(auth_secret, ecdh_secret). The auth secret
 	// is the SALT of this extract, which is the argument order most easily got
-	// backwards; reversing it moves this line and nothing else.
+	// backwards. THIS LINE PINS THE RFC'S NUMBER, not production's call: it is
+	// `deriveKeys` below and the ciphertext that move when the production order
+	// is reversed (drain r1, D9).
 	prkKey := hkdfExtract(t, ecdhSecret, authSecret)
 	if got := b64.EncodeToString(prkKey); got != rfcPRKKey {
 		t.Errorf("PRK_key = %s, want %s", got, rfcPRKKey)
@@ -133,8 +148,9 @@ func TestRFC8291AppendixAEveryIntermediateValue(t *testing.T) {
 		t.Errorf("NONCE = %s, want %s", got, rfcNonce)
 	}
 
-	// The same two values through the production derivation, so the steps above
-	// are pinning what Encrypt actually uses rather than a parallel copy.
+	// THE PRODUCTION TIE. The steps above pin the standard's numbers; this pins
+	// the code path, and it is what fires when an HKDF argument order or a key
+	// concatenation is reversed in production (drain r1, D9).
 	prodCEK, prodNonce, err := deriveKeys(asPriv, uaKey, uaPublic, asPublic, authSecret, salt)
 	if err != nil {
 		t.Fatalf("deriveKeys: %v", err)
@@ -553,3 +569,7 @@ func decryptAsReceiver(uaPriv *ecdh.PrivateKey, authSecret, body []byte) ([]byte
 	}
 	return nil, errNoDelimiter
 }
+
+// ScrubDetailForTest exposes the audit-payload boundary to the external
+// push_test package, which is where the leak this closes was found (D1).
+func ScrubDetailForTest(detail string) string { return scrubDetail(detail) }

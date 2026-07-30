@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
 import {
   api,
@@ -16,6 +16,7 @@ import { describeError, inboxEventTypes, useLive } from './live'
 import { Absent, Empty, Freshness, Owner, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { reconcileBadge } from './push'
 
 /**
  * The one approval inbox (Spec S15.6; S3.2; 13.5; S06.9; S14.4–S14.7).
@@ -51,6 +52,14 @@ export function Inbox({ stream }: { stream?: EventStream }) {
     stream,
   })
   const items = live.data?.items ?? []
+  // The badge is reconciled from the SERVED count, not recomputed: it is the
+  // length of the very list below, which is the same derivation the notifier
+  // counts when it composes a push (B6-9 OQ5). Without this the badge holds its
+  // last PUSHED value until the next cadence, so answering a card would leave
+  // the home screen claiming work that is done (drain r1, D2).
+  useEffect(() => {
+    if (live.data !== null) reconcileBadge(items.length)
+  }, [live.data, items.length])
 
   return (
     <section className="surface inbox">
@@ -105,7 +114,14 @@ export function InboxItem({ id, stream }: { id: string; stream?: EventStream }) 
     types: inboxEventTypes,
     stream,
   })
-  const item = (live.data?.items ?? []).find((i) => i.id === id) ?? null
+  const all = live.data?.items ?? []
+  const item = all.find((i) => i.id === id) ?? null
+  // The deep-link surface reconciles too, and it is the one that matters most:
+  // it is where a tapped notification lands, and answering here is exactly the
+  // moment the drill checks the badge against the queue.
+  useEffect(() => {
+    if (live.data !== null) reconcileBadge(all.length)
+  }, [live.data, all.length])
 
   return (
     <section className="surface inbox">

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -157,6 +158,14 @@ type Result struct {
 // problem into a rate-limit ban.
 func (s *Sender) Send(ctx context.Context, sub Subscription, msg Message) Result {
 	res := s.attempt(ctx, sub, msg)
+	// THE ONE BOUNDARY WHERE A DETAIL BECOMES A RECORD. Everything past this
+	// line — the audit payload and the value handed back to the caller — is
+	// scrubbed, because two of the three ways a detail is produced can carry the
+	// endpoint: `*url.Error` from http.Client.Do ALWAYS embeds the full URL it
+	// was given, and a push service is free to echo the request URL back in its
+	// own error body. An endpoint is a capability, so it is scrubbed here rather
+	// than at each producer, where the next producer would have to remember.
+	res.Detail = scrubDetail(res.Detail)
 	if res.Outcome == OutcomeGone {
 		if err := s.store.removeDead(ctx, sub); err != nil {
 			s.store.logger.Warn("push: remove dead subscription", "subscription", sub.ID, "err", err)
@@ -185,7 +194,7 @@ func (s *Sender) attempt(ctx context.Context, sub Subscription, msg Message) Res
 		return Result{Outcome: OutcomeRefused,
 			Detail: fmt.Sprintf("sealed payload is %d bytes, over the %d-byte push-service limit", len(sealed), MaxPayloadBytes)}
 	}
-	auth, err := s.authorization(sub.Endpoint)
+	auth, err := s.authorization(sub.Endpoint, sub.Origin)
 	if err != nil {
 		return Result{Outcome: OutcomeRefused, Detail: err.Error()}
 	}
@@ -229,6 +238,32 @@ func (s *Sender) attempt(ctx context.Context, sub Subscription, msg Message) Res
 // drill fails — but it is a third party's text arriving in our record, so it is
 // bounded rather than trusted to be small.
 const serviceReasonCap = 200
+
+// urlShaped matches any scheme-bearing URL. It is deliberately greedy about the
+// tail — a push endpoint's secret is its PATH, so stopping at the host would
+// leave the capability intact.
+var urlShaped = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s"'` + "`" + `]*`)
+
+// scrubDetail makes a free-text failure reason safe to record.
+//
+// It removes every URL and bounds the length. The URL removal is the
+// load-bearing half: a transport failure is the ORDINARY shape of a failed send
+// (a sleeping host, a dropped tailnet), and `*url.Error.Error()` renders as
+// `Post "https://…/<capability path>": dial tcp …` — so without this the
+// commonest failure would write the one value migration 0021, OQ2, OQ9 and this
+// package's own doc comment all say never leaves. What survives is the
+// classification a drill actually needs ("dial tcp: connection refused", or the
+// service's own `BadJwtToken`), which names no capability.
+func scrubDetail(detail string) string {
+	if detail == "" {
+		return ""
+	}
+	out := strings.TrimSpace(urlShaped.ReplaceAllString(detail, "<endpoint withheld>"))
+	if len([]rune(out)) > serviceReasonCap {
+		out = string([]rune(out)[:serviceReasonCap]) + "…"
+	}
+	return out
+}
 
 func readServiceReason(r io.Reader) string {
 	raw, err := io.ReadAll(io.LimitReader(r, serviceReasonCap+1))
@@ -283,34 +318,50 @@ func composePayload(sub Subscription, msg Message) ([]byte, error) {
 // a token is signed for vapidExpiry ahead and reused until it is within
 // vapidRenewMargin of expiring, which is one signature per push service per
 // several hours.
-func (s *Sender) authorization(endpoint string) (string, error) {
+func (s *Sender) authorization(endpoint, origin string) (string, error) {
 	aud, err := vapidAudience(endpoint)
 	if err != nil {
 		return "", err
 	}
+	contact := vapidSub(origin)
+	// The cache is keyed on BOTH claims a token carries. Two subscriptions to
+	// one push service can legitimately carry different origins (a phone
+	// enrolled over the tailnet, a laptop over loopback in dev), and a token
+	// signed for one would then be sent on behalf of the other.
+	key := aud + "\x00" + contact
 	now := s.store.now()
 
 	s.tokens.Lock()
 	defer s.tokens.Unlock()
-	if tok, ok := s.cached[aud]; ok && now.Add(vapidRenewMargin).Before(tok.expiry) {
+	if tok, ok := s.cached[key]; ok && now.Add(vapidRenewMargin).Before(tok.expiry) {
 		return authorizationHeader(tok.jwt, s.store.PublicKey()), nil
 	}
 	expiry := now.Add(vapidExpiry)
-	jwt, err := vapidJWT(s.store.signingKey(), aud, vapidSub(aud), expiry, nil)
+	jwt, err := vapidJWT(s.store.signingKey(), aud, contact, expiry, nil)
 	if err != nil {
 		return "", err
 	}
-	s.cached[aud] = cachedToken{jwt: jwt, expiry: expiry}
+	s.cached[key] = cachedToken{jwt: jwt, expiry: expiry}
 	return authorizationHeader(jwt, s.store.PublicKey()), nil
 }
 
-// vapidSub is the RFC 8292 `sub` contact claim. The RFC asks for a `mailto:` or
-// `https:` URI identifying the application server, and this platform has no
-// operator email address anywhere in its schema — inventing one would be a
-// fabricated fact about a person. The push service's own origin is the honest
-// answer available: it identifies the sender as the party the service is
-// already talking to, and it is self-grounding rather than configured.
-func vapidSub(aud string) string { return aud }
+// vapidSub is the RFC 8292 §2 `sub` contact claim: a URI identifying the
+// APPLICATION SERVER, so a push service has somebody to reach about its traffic.
+//
+// It is the SUBSCRIPTION'S OWN RECORDED ORIGIN — the address this household
+// reaches its own platform at, which is the honest self-grounding answer and is
+// already stored per row for the same reason `navigate` needs it (OQ7). The
+// platform has no operator email anywhere in its schema and inventing one would
+// be a fabricated fact about a person.
+//
+// CORRECTED (drain r1, D7): this used to return the AUDIENCE — the push
+// service's own origin — which told the service that the application server's
+// contact was the service itself. Apple accepts it, so nothing broke; it was
+// simply not what the claim means, with the right value sitting unused one field
+// away. A dev-posture loopback origin is http rather than the https the RFC
+// prefers, and that is the only case where it is imperfect — and loopback never
+// reaches a real push service.
+func vapidSub(origin string) string { return origin }
 
 // sendEvent is the contract-minimum payload of `push.sent` (B6-9 OQ9): refs, a
 // closed outcome vocabulary and counts. There is no notification text here, no
