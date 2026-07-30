@@ -260,14 +260,25 @@ function apiMembers(src: string): Record<string, string[]> {
  *  4. BY FILE — a file whose request call takes an expression that does not
  *     statically resolve. `events.ts` opens the stream through an injectable
  *     seam (`this.make(this.url(…))`, defaulting to `new EventSource(url)`), so
- *     the literal and the constructor are one hop apart. Its literals are
- *     counted wholesale, `byFile` says so, and the set of such files is
- *     asserted to be exactly one — this is the only place left where presence
- *     implies consumption, and it is named rather than diffuse.
+ *     the literal and the constructor are one hop apart. Such a file's literals
+ *     are counted only where they are NAMED in `BY_FILE_LITERALS`, and the set
+ *     of such files is asserted to be exactly one. Counting them wholesale is
+ *     what the post-cap fix removed: it was the last place where presence still
+ *     implied consumption, so a dead string dropped into `events.ts` re-hid a
+ *     real gap exactly as it had everywhere else before drain r2.
  *
  * Anything else is UNRESOLVED: a literal nothing calls. That is what a dead
  * declaration looks like, and it is exactly what used to be counted as a GET.
  */
+/**
+ * The literals a BY-FILE client is allowed to have counted for it. Naming them
+ * is what keeps the exemption from being the thing it exempts: the one-file pin
+ * says WHICH file may resolve by expression, and this says WHICH strings it may
+ * resolve — so a dead literal dropped into that file is unresolved and loud,
+ * like a dead literal anywhere else. Both are `events.ts`'s own SSE route.
+ */
+const BY_FILE_LITERALS = new Set(['/events', '/events?${qs}'])
+
 function classifyFile(raw: string): {
   consumed: string[]
   keys: string[]
@@ -328,7 +339,7 @@ function classifyFile(raw: string): {
       keys.push(m[1])
       continue
     }
-    if (byFile) {
+    if (byFile && BY_FILE_LITERALS.has(m[1])) {
       consumed.push(key('GET', m[1]))
       continue
     }
