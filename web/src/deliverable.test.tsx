@@ -28,7 +28,7 @@ import { click, flush, mount, typeInto } from './testing'
  * placed comments carrying all five anchor statuses beside a consumed batch, the
  * accept card with real trailers, and the live-session list.
  *
- * Three families are DERIVED from those bodies, each named at its assertion and
+ * Four families are DERIVED from those bodies, each named at its assertion and
  * each for a reason that is about the world and not about convenience (OQ8):
  *
  *  - the ACCEPT OUTCOMES (applied, merge card, read-back, superseded, stale, PIN
@@ -39,8 +39,13 @@ import { click, flush, mount, typeInto } from './testing'
  *    through the real broker server + client, and `TestAcceptCollisionMergeCard`
  *    engineers the collision. A `fakePusher` is composed in THIS fixture world
  *    (internal/api) too, so the push is not the obstacle either. The TRUE reason is the one
- *    the snapshot pins give: a real accept produces a commit whose sha and
- *    timestamps are WALL-CLOCK, and neither can live in a fixed-clock golden body.
+ *    the snapshot pins give: a real accept produces a commit whose SHA is
+ *    unpinnable, because its parent's is — the base commit is seeded without
+ *    GIT_AUTHOR_DATE/GIT_COMMITTER_DATE, so it varies per run and the accept sha
+ *    varies with it, and a varying sha cannot live in a fixed-clock golden body.
+ *    Not the timestamp: `When` is recorded UTC for determinism and this world
+ *    pins the journal clock, so that half would in fact be stable — the reason
+ *    rests on the sha alone.
  *    The accept CARD — which is what the pin, the trailers and the acceptability
  *    come from — is real.
  *  - the PREVIEW dispositions and the comparison. A launched preview spawns a

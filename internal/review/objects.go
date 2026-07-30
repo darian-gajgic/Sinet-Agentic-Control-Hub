@@ -62,7 +62,12 @@ func (s *Store) ObjectPath(sha string) string {
 //
 // The hash is taken over the OPEN handle and the handle is then rewound, rather
 // than read by path twice: what was verified and what is served are the same inode,
-// so an object replaced between the two passes cannot slip through. It is also
+// so an object replaced BY RENAME between the two passes cannot slip through — which
+// is the mechanism `putObject` uses, and the reason this shape was chosen. It is not
+// a guard against an in-place write to the same inode: a `pwrite` after the rewind
+// changes the bytes that were already verified, and nothing here would see it. That
+// is a filesystem the platform does not have (objects are written once by rename and
+// never opened for writing again), so the narrower claim is the honest one. It is also
 // constant-memory, which is why this is an open rather than a ReadFile — measured
 // on the build host at 3.0-3.9 GB/s (68µs for a 200 KiB image, 5.4ms for 20 MiB),
 // and the route's own `immutable` cache header already suppresses the image trio's
