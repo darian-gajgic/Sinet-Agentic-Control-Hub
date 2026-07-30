@@ -294,15 +294,39 @@ func vapidJWT(key *ecdsa.PrivateKey, aud, sub string, exp time.Time, rnd io.Read
 
 // vapidAudience is the `aud` claim for one push resource: the ORIGIN of the
 // endpoint and nothing else (RFC 8292 §2).
+//
+// A REFUSAL NAMES THE FAULT, NEVER THE VALUE (drain r2, R3). This is the
+// enrolment boundary, so the value it refuses is a browser-supplied endpoint —
+// a capability URL — and the refusal is answered to the caller and could be
+// read by whoever next reads a surface error. Saying what was wrong with it is
+// what makes the answer actionable; quoting it back adds nothing and teaches
+// the next reader that endpoints are quotable.
 func vapidAudience(endpoint string) (string, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("push: endpoint is not a URL: %w", err)
+		return "", fmt.Errorf("push: endpoint is not a URL: %s", urlFault(err))
 	}
-	if u.Scheme != "https" || u.Host == "" {
-		return "", fmt.Errorf("push: endpoint %q is not an https URL", endpoint)
+	if u.Scheme != "https" {
+		return "", fmt.Errorf("push: endpoint must be an https URL, and this one has scheme %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return "", errors.New("push: endpoint names no host")
 	}
 	return u.Scheme + "://" + u.Host, nil
+}
+
+// urlFault renders a URL parse failure without the value that failed.
+// `url.Parse` answers a *url.Error whose Error() is `parse "<the whole URL>":
+// <reason>`, so wrapping it verbatim quotes the endpoint back. The inner reason
+// is the actionable half — `invalid URL escape "%zz"`, `missing protocol
+// scheme`, `invalid control character in URL` — and it names at most a fragment
+// of what it rejected.
+func urlFault(err error) string {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return uerr.Err.Error()
+	}
+	return "unparseable"
 }
 
 // vapidPublicKey renders the signing key's public half as RFC 8292's `k`

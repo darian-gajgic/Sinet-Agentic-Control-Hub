@@ -571,5 +571,8 @@ func decryptAsReceiver(uaPriv *ecdh.PrivateKey, authSecret, body []byte) ([]byte
 }
 
 // ScrubDetailForTest exposes the audit-payload boundary to the external
-// push_test package, which is where the leak this closes was found (D1).
-func ScrubDetailForTest(detail string) string { return scrubDetail(detail) }
+// push_test package, which is where the leak this closes was found (D1). The
+// endpoint argument is what lets the boundary remove the scheme-LESS spellings
+// of the one URL it knows about (drain r2, R2); "" is the caller that has no
+// endpoint in hand and gets the shape-based removal alone.
+func ScrubDetailForTest(detail, endpoint string) string { return scrubDetail(detail, endpoint) }

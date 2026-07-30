@@ -17,7 +17,8 @@ import routeInventoryRaw from './fixtures/api/route-inventory.json?raw'
  * coverage below compares two INDEPENDENTLY PRODUCED lists: the server's is
  * written by its own registration calls (internal/api's Handler records each
  * pattern as it registers it) and the client's is extracted from what the client
- * SOURCES actually name. An inventory compared against itself proves nothing —
+ * SOURCES actually CALL — naming a path is not calling it, in any file (drain
+ * r2, R1). An inventory compared against itself proves nothing —
  * B6-8 shipped one and it hid a live defect — so neither side here is allowed to
  * be a hand-kept list.
  */
@@ -81,9 +82,40 @@ export function normalizePath(path: string): string {
   const base = path.split('?')[0]
   // An interpolation that fills a whole SEGMENT is a parameter; one appended to
   // a segment (`/api/tasks${query(f)}`) is a query builder and is dropped.
-  const marked = base.replace(/\$\{[^}]*\}/g, PARAM)
+  const marked = stripInterpolations(base)
   const withParams = marked.split('/' + PARAM).join('/{}').split(PARAM).join('')
   return withParams.replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, '{}').replace(/\/+$/, '') || '/'
+}
+
+/**
+ * stripInterpolations replaces every `${…}` with PARAM, matching BRACES.
+ *
+ * A `\$\{[^}]*\}` regex ends the interpolation at the FIRST `}`, so a nested
+ * object literal breaks it: `api.comments`'s
+ * `/api/deliverables/${…}/comments${query({ revision })}` normalized to
+ * `/api/deliverables/{}/comments)}` — a shape matching no route the server
+ * serves. Found at drain r2 R1, and only findable then: the route looked
+ * consumed because the `useLive` KEY beside it spelled the shape correctly by
+ * hand, and R1 stopped counting keys. One check passing for another check's
+ * reason is the shape of every finding in this section.
+ */
+function stripInterpolations(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '$' && text[i + 1] === '{') {
+      let depth = 0
+      let j = i + 1
+      for (; j < text.length; j++) {
+        if (text[j] === '{') depth++
+        else if (text[j] === '}' && --depth === 0) break
+      }
+      out += PARAM
+      i = j
+      continue
+    }
+    out += text[i]
+  }
+  return out
 }
 
 /** A consumed route is a METHOD and a shape. Comparing shapes alone let a new
@@ -98,20 +130,28 @@ const pathLiteral = /[`'"](\/(?:api|events)[A-Za-z0-9_\-/${}().]*)/
 /**
  * consumedRoutes is every (method, shape) the shipped app actually CALLS.
  *
- * TWO CORRECTIONS THIS FUNCTION EXISTS FOR, both found by an independent pass:
+ * THREE CORRECTIONS THIS FUNCTION EXISTS FOR, each found by an independent pass:
  *
  *  - a path literal is not a method, so a POST landing where a GET already
- *    lived was invisible (D3); and
+ *    lived was invisible (drain r1, D3);
  *  - a literal inside `api.ts`'s client object is a DECLARATION, not
  *    consumption. `api.health` is declared and called by nothing, and the old
- *    scan counted it consumed because the string was present (D5). A
- *    completeness check that UNDER-reports is worse than none, because it will
- *    be believed at a gate.
+ *    scan counted it consumed because the string was present (drain r1, D5);
+ *    and
+ *  - THAT FIX REACHED `api.ts` ONLY (drain r2, R1). Every other file still had
+ *    presence meaning consumption: a never-called `const EVAL_DEAD =
+ *    '/api/workforce'` in any app file re-hid a real gap, which was reproduced.
+ *    A completeness check that UNDER-reports is worse than none, because it
+ *    will be believed at a gate.
  *
- * So `api.ts` is read as a map of member → routes, and a member's routes count
- * only where some other app file names `api.<member>(`. Every other file's
- * literals are read directly: a `useLive` key is a real GET, and the service
- * worker's re-enrolment POST resolves through its own path constant.
+ * SO CONSUMPTION IS A CALL IN EVERY FILE, BY TWO DIFFERENT UNITS.
+ *
+ * `api.ts` is a map of member → routes, and a member's routes count only where
+ * some other app file names `api.<member>(` — the callable unit there is the
+ * MEMBER, because that is what a caller names. Everywhere else the callable
+ * unit is the REQUEST, so each literal has to be shown reaching one
+ * (`classifyFile`), and a literal that reaches nothing is REPORTED rather than
+ * assumed to be either answer.
  */
 function consumedRoutes(): Set<string> {
   const app = appSources()
@@ -132,11 +172,31 @@ function consumedRoutes(): Set<string> {
     if (!called) continue
     for (const r of routes) out.add(r)
   }
-  for (const [path, text] of others) {
-    void path
-    for (const r of routesInFreeText(stripComments(text))) out.add(r)
+  for (const [, text] of others) {
+    for (const r of classifyFile(text).consumed) out.add(r)
   }
   return out
+}
+
+/** unresolvedLiterals is the loud half of the R1 fix: every path literal in a
+ *  non-`api.ts` app file that this scan cannot show reaching a request and
+ *  cannot explain as a subscription key. It is neither counted nor ignored. */
+function unresolvedLiterals(): string[] {
+  return Object.entries(appSources())
+    .filter(([p]) => p !== './api.ts')
+    .flatMap(([p, t]) => classifyFile(t).unresolved.map((lit) => `${p}: ${lit}`))
+    .sort()
+}
+
+/** byFileClients names every file whose request call takes an expression this
+ *  scan cannot resolve to a literal, so its own path literals are counted
+ *  wholesale. It is asserted to be an exact set, because that is the one place
+ *  presence still implies consumption. */
+function byFileClients(): string[] {
+  return Object.entries(appSources())
+    .filter(([p, t]) => p !== './api.ts' && classifyFile(t).byFile)
+    .map(([p]) => p)
+    .sort()
 }
 
 /** declaredButUncalled names every `api` member nothing calls — the hole D5
@@ -157,7 +217,7 @@ function apiHelpers(src: string): Record<string, string[]> {
   for (let i = 0; i < decls.length; i++) {
     const from = decls[i].index ?? 0
     const to = i + 1 < decls.length ? (decls[i + 1].index ?? src.length) : src.length
-    const routes = routesInFreeText(src.slice(from, to))
+    const routes = routesNamedIn(src.slice(from, to))
     if (routes.length > 0) out[decls[i][1]] = routes
   }
   return out
@@ -173,24 +233,149 @@ function apiMembers(src: string): Record<string, string[]> {
   for (let i = 0; i < starts.length; i++) {
     const from = starts[i].index ?? 0
     const to = i + 1 < starts.length ? (starts[i + 1].index ?? body.length) : body.length
-    const routes = routesInFreeText(body.slice(from, to))
+    const routes = routesNamedIn(body.slice(from, to))
     if (routes.length > 0) out[starts[i][1]] = routes
   }
   return out
 }
 
 /**
- * routesInFreeText extracts (method, shape) pairs from a chunk of source.
+ * classifyFile answers, for ONE non-`api.ts` app file, which of its path
+ * literals reach a request — and says so about every literal rather than
+ * assuming (drain r2, R1).
+ *
+ * Four resolutions, each with its reason, and everything else is reported:
+ *
+ *  1. THE TYPED CLIENT CALLS — `post<T>('/x')` / `request<T>('/x')`. A call
+ *     with the literal in its own argument list.
+ *  2. A DIRECT REQUEST — `fetch(…)` or `new EventSource(…)`, with the argument
+ *     either the literal itself or a same-file `const NAME = '/x'`. This is how
+ *     the service worker names its re-enrolment POST.
+ *  3. A `useLive` KEY — NOT a request. `useLive` uses `key` only as an effect
+ *     DEPENDENCY (live.ts's deps array; measured at B6-8 §45 D5, where a
+ *     blanked key disabled nothing), so the request beside it is the `read`
+ *     closure, which names `api.<member>(` and is counted through the member
+ *     map. A key resolves either inside the `useLive(…)` call or as a const
+ *     whose name is passed into one.
+ *  4. BY FILE — a file whose request call takes an expression that does not
+ *     statically resolve. `events.ts` opens the stream through an injectable
+ *     seam (`this.make(this.url(…))`, defaulting to `new EventSource(url)`), so
+ *     the literal and the constructor are one hop apart. Its literals are
+ *     counted wholesale, `byFile` says so, and the set of such files is
+ *     asserted to be exactly one — this is the only place left where presence
+ *     implies consumption, and it is named rather than diffuse.
+ *
+ * Anything else is UNRESOLVED: a literal nothing calls. That is what a dead
+ * declaration looks like, and it is exactly what used to be counted as a GET.
+ */
+function classifyFile(raw: string): {
+  consumed: string[]
+  keys: string[]
+  unresolved: string[]
+  byFile: boolean
+} {
+  const src = stripComments(raw)
+  const consumed: string[] = []
+  const keys: string[] = []
+  const unresolved: string[] = []
+
+  // Resolution 1, which claims the literals inside its own calls.
+  const claimed = new Set<number>()
+  consumed.push(...routesInCalls(src, claimed))
+
+  // A const's name, and where its literal sits.
+  const consts = new Map<string, { path: string; at: number }>()
+  for (const m of src.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(['"`])(\/(?:api|events)[^'"`]*)/g)) {
+    consts.set(m[1], { path: m[3], at: (m.index ?? 0) + m[0].indexOf(m[2]) })
+  }
+
+  const liveSpans = callSpans(src, /\buseLive\s*(?:<[^<>]*>)?\s*\(/g)
+  const requestSpans = callSpans(src, /\b(?:fetch|EventSource)\s*\(/g)
+  const inside = (spans: { from: number; to: number }[], at: number): { from: number; to: number } | undefined =>
+    spans.find((s) => at > s.from && at < s.to)
+
+  // Resolutions 2 and 3, const legs: a const is resolved by where its NAME is
+  // USED, never by where it is written — which is the whole point. A
+  // declaration nobody uses resolves to nothing and falls through to the
+  // unresolved report below.
+  for (const [ident, { path, at }] of consts) {
+    if (claimed.has(at)) continue
+    const uses = [...src.matchAll(new RegExp(`\\b${ident}\\b`, 'g'))].map((u) => u.index ?? 0)
+    if (uses.some((u) => inside(liveSpans, u))) {
+      claimed.add(at)
+      keys.push(path)
+      continue
+    }
+    const req = uses.map((u) => inside(requestSpans, u)).find(Boolean)
+    if (req) {
+      claimed.add(at)
+      const method = /method:\s*['"`]([A-Z]+)/.exec(src.slice(req.from, req.to))
+      consumed.push(key(method ? method[1] : 'GET', path))
+    }
+  }
+
+  // Whether this file opens a request through an expression: a request call
+  // whose argument is neither a literal nor a resolvable const.
+  const byFile = requestSpans.some((s) => {
+    const arg = src.slice(s.from + 1, s.to).split(',')[0].trim()
+    return !/^['"`]/.test(arg) && !consts.has(arg)
+  })
+
+  for (const m of src.matchAll(/['"`](\/(?:api|events)[A-Za-z0-9_\-/${}().]*)/g)) {
+    const at = m.index ?? -1
+    if (claimed.has(at)) continue
+    if (inside(liveSpans, at)) {
+      keys.push(m[1])
+      continue
+    }
+    if (byFile) {
+      consumed.push(key('GET', m[1]))
+      continue
+    }
+    unresolved.push(m[1])
+  }
+  return { consumed, keys, unresolved, byFile }
+}
+
+/**
+ * callSpans finds each call to a named function and returns the source range of
+ * its argument list, parentheses BALANCED — which a regex cannot do, and which
+ * every "is this literal inside that call?" question above needs. Quoted
+ * sections are skipped so a parenthesis inside a string cannot unbalance it.
+ */
+function callSpans(src: string, opener: RegExp): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = []
+  for (const m of src.matchAll(opener)) {
+    const from = (m.index ?? 0) + m[0].length - 1
+    let depth = 0
+    let quote = ''
+    for (let i = from; i < src.length; i++) {
+      const c = src[i]
+      if (quote) {
+        if (c === '\\') i++
+        else if (c === quote) quote = ''
+        continue
+      }
+      if (c === "'" || c === '"' || c === '`') quote = c
+      else if (c === '(') depth++
+      else if (c === ')' && --depth === 0) {
+        out.push({ from, to: i })
+        break
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * routesInCalls extracts the (method, shape) of every literal sitting in one of
+ * the TYPED CLIENT CALLS, and records the index of each literal it claimed.
  *
  * `post<T>('/x')` is a POST; `request<T>('/x')` is a GET unless the same call
- * carries a `method:`; a bare literal (a `useLive` key, an EventSource URL) is a
- * GET; and `fetch(CONST, { method })` resolves CONST through a `const NAME =
- * '/api/…'` in the same text, which is how the service worker names its POST.
+ * carries a `method:`.
  */
-function routesInFreeText(text: string): string[] {
+function routesInCalls(text: string, claimed: Set<number>): string[] {
   const out: string[] = []
-  const claimed = new Set<number>()
-
   for (const m of text.matchAll(/\bpost<[^>]*>\(\s*(['"`][^'"`]+)/g)) {
     const p = pathLiteral.exec(m[1])
     if (!p) continue
@@ -204,16 +389,23 @@ function routesInFreeText(text: string): string[] {
     out.push(key(method ? method[1] : 'GET', p[1]))
     claimed.add((m.index ?? 0) + m[0].indexOf(m[1]))
   }
-  const consts: Record<string, string> = {}
-  for (const m of text.matchAll(/\bconst\s+([A-Z_][A-Z0-9_]*)\s*=\s*['"`](\/(?:api|events)[^'"`]*)/g)) {
-    consts[m[1]] = m[2]
-  }
-  for (const m of text.matchAll(/\bfetch\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,([\s\S]{0,240})/g)) {
-    const target = consts[m[1]]
-    if (!target) continue
-    const method = /method:\s*['"`]([A-Z]+)/.exec(m[2])
-    out.push(key(method ? method[1] : 'GET', target))
-  }
+  return out
+}
+
+/**
+ * routesNamedIn is every route ONE `api.ts` member or exported helper names:
+ * the typed calls above, plus its BARE literals.
+ *
+ * A bare literal counts HERE and nowhere else, and the reason is that the
+ * callable unit differs. In `api.ts` the unit is the member — `objectHref`
+ * composes a URL an `<img src>` reads and no `request<>` call names it, and the
+ * member is only counted at all where an app file writes `api.<member>(`
+ * (drain r1, D5). In every other file the unit is the request itself, so
+ * `classifyFile` requires each literal to reach one (drain r2, R1).
+ */
+function routesNamedIn(text: string): string[] {
+  const claimed = new Set<number>()
+  const out = routesInCalls(text, claimed)
   for (const m of text.matchAll(/['"`](\/(?:api|events)[A-Za-z0-9_\-/${}().]*)/g)) {
     if (claimed.has(m.index ?? -1)) continue
     out.push(key('GET', m[1]))
@@ -426,10 +618,78 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     }
   })
 
+  test('a path literal nothing calls is not consumption, in ANY file (drain r2, R1)', () => {
+    // THE DEFECT THIS REPLACES. D5 made consumption mean a CALL — but only for
+    // `api.ts`. Everywhere else presence still meant consumption, so a single
+    // never-called `const EVAL_DEAD = '/api/workforce'` in any app file put a
+    // real gap back out of sight. Reproduced before this test existed: with the
+    // genuine consumption removed from both real sites the sweep fired, and one
+    // dead line returned it to green.
+    const dead = `const EVAL_DEAD = '/api/workforce'\nexport function Fleet() { return null }\n`
+    const got = classifyFile(dead)
+    expect(got.consumed, 'a dead declaration was counted as a call').toEqual([])
+    expect(got.unresolved, 'a literal reaching no request must be REPORTED, not assumed either way').toEqual([
+      '/api/workforce',
+    ])
+    // And the same literal in a real call still counts, so the rule is "a call"
+    // rather than "no bare literals ever".
+    const called = `const P = '/api/workforce'\nawait fetch(P, { method: 'POST' })\n`
+    expect(classifyFile(called).consumed).toEqual(['POST /api/workforce'])
+    expect(classifyFile(called).unresolved).toEqual([])
+    // A `useLive` key is EXPLAINED rather than counted: live.ts uses `key` only
+    // as an effect dependency (§45 D5 measured it), so the request beside it is
+    // the `read` closure and that is what the member map counts.
+    const live = `useLive({ key: '/api/workforce', read: () => api.workforce() })`
+    expect(classifyFile(live).consumed).toEqual([])
+    expect(classifyFile(live).keys).toEqual(['/api/workforce'])
+    expect(classifyFile(live).unresolved).toEqual([])
+  })
+
+  test('a nested-brace interpolation normalizes to the shape the server serves', () => {
+    // The second finding R1 turned up. `${query({ revision })}` ends at its
+    // INNER brace under a `[^}]*` rule, gluing `)}` onto the shape — so this
+    // member's GET normalized to a route the server does not serve, and the
+    // check stayed green only because the `useLive` key beside it spelled the
+    // shape correctly by hand.
+    expect(normalizePath('/api/deliverables/${encodeURIComponent(id)}/comments${query({ revision })}')).toBe(
+      '/api/deliverables/{}/comments',
+    )
+    expect(consumed.has('GET /api/deliverables/{}/comments'), 'the comments read is consumed by api.comments').toBe(
+      true,
+    )
+  })
+
+  test('every path literal in the shipped app is EXPLAINED, and the one by-file client is named', () => {
+    // The loud half. A literal this scan cannot show reaching a request and
+    // cannot explain as a subscription key fails HERE, naming its file — rather
+    // than silently counting as a GET, which is what let a dead string mask a
+    // gap.
+    expect(
+      unresolvedLiterals(),
+      'these path literals reach no request the scan can see. Either they are dead (delete them) or the scan cannot follow the call (teach it, do not let it assume).',
+    ).toEqual([])
+    // The ONE place presence still implies consumption, named rather than
+    // diffuse: events.ts opens the stream through an injectable seam
+    // (`this.make(this.url(…))`, defaulting to `new EventSource(url)`), so the
+    // literal and the constructor are one hop apart.
+    expect(byFileClients(), 'a second file now opens a request through an expression; teach the scan or name it').toEqual([
+      './events.ts',
+    ])
+    expect(consumed.has('GET /events'), 'the SSE stream is a consumed route and must stay counted').toBe(true)
+  })
+
   test('a DECLARED client verb nothing calls is reported, not counted as consumption', () => {
     // The hole the old scan had (drain r1, D5): a literal inside api.ts made a
-    // route look consumed even when no caller existed. Consumption is now a
-    // CALL, and what the change exposed is recorded here rather than absorbed.
+    // route look consumed even when no caller existed. Consumption is a CALL —
+    // in THIS file at D5 and, since drain r2 R1, in every other file too — and
+    // what the change exposed is recorded here rather than absorbed.
+    //
+    // THE PREDICATE IS SYNTAX-FRAGILE AND THAT IS THE SAFE DIRECTION (drain r2,
+    // R5, accepted rather than fixed). `api.<member>(` does not see a call
+    // rewritten as `(api).workforce.call(api, …)`, or a destructured
+    // `const { workforce } = api`, or `api?.workforce?.()`. All of those make
+    // this test FAIL, naming the member — a loud over-report, not a silent
+    // under-count — which is the direction a completeness check must fail in.
     expect(
       declaredButUncalled(),
       'the set of declared-but-uncalled api members moved. A new one is a dead client verb; a departed one means something started calling it — either way §46 records this list.',

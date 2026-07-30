@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,9 +165,11 @@ func (s *Sender) Send(ctx context.Context, sub Subscription, msg Message) Result
 	// scrubbed, because two of the three ways a detail is produced can carry the
 	// endpoint: `*url.Error` from http.Client.Do ALWAYS embeds the full URL it
 	// was given, and a push service is free to echo the request URL back in its
-	// own error body. An endpoint is a capability, so it is scrubbed here rather
-	// than at each producer, where the next producer would have to remember.
-	res.Detail = scrubDetail(res.Detail)
+	// own error body — with or without the scheme. An endpoint is a capability,
+	// so it is scrubbed here rather than at each producer, where the next
+	// producer would have to remember; and this is the one place that knows
+	// WHICH endpoint the detail was produced against.
+	res.Detail = scrubDetail(res.Detail, sub.Endpoint)
 	if res.Outcome == OutcomeGone {
 		if err := s.store.removeDead(ctx, sub); err != nil {
 			s.store.logger.Warn("push: remove dead subscription", "subscription", sub.ID, "err", err)
@@ -254,15 +258,55 @@ var urlShaped = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s"'` + "`" + `
 // package's own doc comment all say never leaves. What survives is the
 // classification a drill actually needs ("dial tcp: connection refused", or the
 // service's own `BadJwtToken`), which names no capability.
-func scrubDetail(detail string) string {
+//
+// A SCHEME IS NOT WHAT MAKES IT A CAPABILITY (drain r2, R2). `urlShaped`
+// requires `://`, so a service echoing the request back as
+// `"path":"/push/<token>"` or as `host/path` wrote the same secret into the row
+// with the scheme filed off. The host is discoverable — it is a vendor relay —
+// so a bare path in an audit row is a reconstructable capability. The endpoint
+// this attempt was made against is the one literal this function can recognise
+// without guessing, and `Send` holds it, so it is passed in and its scheme-less
+// spellings are removed too. A detail from any other source is unaffected: the
+// removal is by exact match, not by shape.
+func scrubDetail(detail, endpoint string) string {
 	if detail == "" {
 		return ""
 	}
-	out := strings.TrimSpace(urlShaped.ReplaceAllString(detail, "<endpoint withheld>"))
+	out := urlShaped.ReplaceAllString(detail, endpointWithheld)
+	for _, shape := range endpointShapes(endpoint) {
+		out = strings.ReplaceAll(out, shape, endpointWithheld)
+	}
+	out = strings.TrimSpace(out)
 	if len([]rune(out)) > serviceReasonCap {
 		out = string([]rune(out)[:serviceReasonCap]) + "…"
 	}
 	return out
+}
+
+const endpointWithheld = "<endpoint withheld>"
+
+// endpointShapes is one endpoint's scheme-less spellings, LONGEST FIRST so
+// `host/path` is replaced before the `path` it contains.
+//
+// A path of at most one character is not returned: the secret in a push
+// endpoint is its path, and `/` is every URL's — removing that would gut every
+// unrelated message rather than protect anything.
+func endpointShapes(endpoint string) []string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return nil
+	}
+	var paths []string
+	for _, p := range []string{u.EscapedPath(), u.Path} {
+		if len(p) > 1 && !slices.Contains(paths, p) {
+			paths = append(paths, p)
+		}
+	}
+	shapes := make([]string, 0, len(paths)*2)
+	for _, p := range paths {
+		shapes = append(shapes, u.Host+p)
+	}
+	return append(shapes, paths...)
 }
 
 func readServiceReason(r io.Reader) string {

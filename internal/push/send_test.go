@@ -327,30 +327,90 @@ func TestATransportFailureNeverWritesTheCapabilityItFailedToReach(t *testing.T) 
 	}
 }
 
+// TestASchemelessEchoCannotReconstructTheCapabilityEither is drain r2, R2.
+//
+// D1 closed the SCHEME-BEARING shapes, and `urlShaped` requires `://` — so a
+// service echoing the request back as `"path":"/push/alice-phone"` or as
+// `host/path` still wrote the capability into the row with the scheme filed
+// off. The host is discoverable (it is a vendor relay, and this platform's own
+// audit vocabulary names it), so a bare PATH in an audit row is a
+// reconstructable capability, which is the same finding as D1 one shape
+// further out. Driven over the WHOLE row against a service that echoes all
+// three shapes at once.
+func TestASchemelessEchoCannotReconstructTheCapabilityEither(t *testing.T) {
+	e := newEnv(t)
+	svc := newFakeService(t)
+	sub, _, err := e.store.Enrol(e.ctx, "alice", svc.enrolment())
+	if err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	hostPort := strings.TrimPrefix(svc.URL, "https://")
+	svc.status = http.StatusBadRequest
+	svc.body = `{"reason":"BadJwtToken","path":"/push/alice-phone",` +
+		`"hostpath":"` + hostPort + `/push/alice-phone",` +
+		`"url":"` + sub.Endpoint + `"}`
+
+	res := push.NewSender(e.store, svc.Client()).Send(e.ctx, sub, msg("ask:a1"))
+	if res.Outcome != push.OutcomeRefused {
+		t.Fatalf("outcome = %s, want refused", res.Outcome)
+	}
+	rows := e.events(push.EventSent)
+	if len(rows) != 1 {
+		t.Fatalf("push.sent rows = %d, want 1", len(rows))
+	}
+	raw, _ := json.Marshal(rows[0])
+	for _, secret := range []string{"/push/alice-phone", hostPort + "/push/alice-phone", sub.Endpoint} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("the audit row carries %q — a path is a capability with the scheme filed off: %s", secret, raw)
+		}
+		if strings.Contains(res.Detail, secret) {
+			t.Errorf("Send returned a detail carrying %q: %q", secret, res.Detail)
+		}
+	}
+	// The control, without which "no hits" would only mean the detail was
+	// emptied: the service's own diagnosis is exactly what a drill runs on.
+	detail, _ := rows[0]["detail"].(string)
+	if !strings.Contains(detail, "BadJwtToken") {
+		t.Errorf("the scrub removed the diagnosis the drill needs: %q", detail)
+	}
+	if !strings.Contains(detail, "<endpoint withheld>") {
+		t.Errorf("the scrub did not mark where the capability was: %q", detail)
+	}
+}
+
 // TestScrubDetailRemovesEveryURLShapeAndKeepsTheRest drives the boundary
 // directly, including the case a push service's own error BODY echoes the
 // request URL back at us — the second way a capability could reach a row.
 func TestScrubDetailRemovesEveryURLShapeAndKeepsTheRest(t *testing.T) {
-	cases := []struct{ name, in, wantOut, wantKept string }{
+	const ep = "https://web.push.apple.com/QDzVu-secret-token"
+	cases := []struct{ name, in, endpoint, wantOut, wantKept string }{
 		{"a url.Error from the transport",
 			`Post "https://web.push.apple.com/QDzVu-secret-token": dial tcp 17.0.0.1:443: connect: connection refused`,
-			"", "connection refused"},
+			ep, "", "connection refused"},
 		{"a service echoing the endpoint in its body",
 			`{"reason":"BadDeviceToken","url":"https://fcm.googleapis.com/fcm/send/abc-secret"}`,
-			"", "BadDeviceToken"},
+			"", "", "BadDeviceToken"},
 		{"two URLs in one message",
 			`redirected https://a.example/one to https://b.example/two`,
-			"", "redirected"},
+			"", "", "redirected"},
 		{"an honest reason with no URL survives whole",
-			`{"reason":"BadJwtToken"}`, `{"reason":"BadJwtToken"}`, "BadJwtToken"},
+			`{"reason":"BadJwtToken"}`, ep, `{"reason":"BadJwtToken"}`, "BadJwtToken"},
+		// Drain r2, R2 — the three scheme-LESS shapes, each against the endpoint
+		// the attempt was made to.
+		{"a service echoing the bare PATH",
+			`{"reason":"BadJwtToken","path":"/QDzVu-secret-token"}`, ep, "", "BadJwtToken"},
+		{"a service echoing host and path with no scheme",
+			`no route to web.push.apple.com/QDzVu-secret-token`, ep, "", "no route to"},
+		{"a percent-escaped path echoed back",
+			`rejected /a%2Fb-secret`, "https://push.example/a%2Fb-secret", "", "rejected"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := push.ScrubDetailForTest(c.in)
+			got := push.ScrubDetailForTest(c.in, c.endpoint)
 			if strings.Contains(got, "://") {
 				t.Errorf("a URL survived the scrub: %q", got)
 			}
-			for _, leak := range []string{"secret-token", "abc-secret", "a.example", "b.example"} {
+			for _, leak := range []string{"secret-token", "abc-secret", "a.example", "b.example", "b-secret"} {
 				if strings.Contains(got, leak) {
 					t.Errorf("scrub left %q in %q", leak, got)
 				}
@@ -363,13 +423,23 @@ func TestScrubDetailRemovesEveryURLShapeAndKeepsTheRest(t *testing.T) {
 			}
 		})
 	}
+	// The removal is by EXACT match against the endpoint in hand, so it cannot
+	// eat an unrelated message: a detail that merely mentions another path is
+	// left alone, and a root-path endpoint (whose path is every URL's) removes
+	// nothing at all.
+	if got := push.ScrubDetailForTest(`queued behind /api/health`, ep); got != `queued behind /api/health` {
+		t.Errorf("the scrub ate an unrelated path: %q", got)
+	}
+	if got := push.ScrubDetailForTest(`a/b refused`, "https://push.example/"); got != `a/b refused` {
+		t.Errorf("a root-path endpoint scrubbed something: %q", got)
+	}
 	// The cap still applies on this path, so a service's oversized body cannot
 	// write an unbounded string into the log.
-	long := push.ScrubDetailForTest(strings.Repeat("x", 5000))
+	long := push.ScrubDetailForTest(strings.Repeat("x", 5000), ep)
 	if len([]rune(long)) > 210 {
 		t.Errorf("scrubbed detail is %d runes, over the bound", len([]rune(long)))
 	}
-	if push.ScrubDetailForTest("") != "" {
+	if push.ScrubDetailForTest("", ep) != "" {
 		t.Error("an empty detail did not stay empty")
 	}
 }

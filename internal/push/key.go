@@ -143,7 +143,12 @@ func normalizeOrigin(raw string) (string, error) {
 	}
 	u, err := url.Parse(s)
 	if err != nil {
-		return "", fmt.Errorf("origin is not a URL: %w", err)
+		// The same rule as vapidAudience's (drain r2, R3): the PARSE error
+		// quotes the whole raw value, so the fault is reported and the value is
+		// not. The three refusals below deliberately keep naming the origin —
+		// it is the enrolling page's own address rather than capability
+		// material, and "origin X has scheme Y" is what makes them actionable.
+		return "", fmt.Errorf("origin is not a URL: %s", urlFault(err))
 	}
 	if u.Host == "" {
 		return "", fmt.Errorf("origin %q names no host", raw)

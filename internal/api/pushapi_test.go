@@ -232,6 +232,40 @@ func TestPushEnrolmentRefusalsAreClassifiedByCode(t *testing.T) {
 	}
 }
 
+// TestAnEnrolmentRefusalNamesTheFaultAndNotTheValue is drain r2, R3.
+//
+// The send path's scrub (D1, and drain r2 R2) covers what a push SERVICE says
+// back; the enrolment refusal is the other direction — this platform quoting
+// the caller's own value into its answer. Every endpoint refused here is one
+// the platform declined to store, and it is echoed only to the caller who
+// supplied it, so this is a habit rather than a live leak. It is closed anyway:
+// a refusal is worth more when it says what was WRONG, and a message that
+// carries the value teaches the next reader that endpoints are quotable.
+func TestAnEnrolmentRefusalNamesTheFaultAndNotTheValue(t *testing.T) {
+	e := newNotifyEnv(t)
+	const secret = "CAPABILITY-SECRET-PATH"
+	for _, c := range []struct{ name, endpoint, wantSays string }{
+		{"a non-https endpoint", "http://web.push.apple.com/" + secret, "https"},
+		{"an unparseable endpoint", "https://web.push.apple.com/" + secret + "%zz", "escape"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			code, out := e.doPush("alice", http.MethodPost, "/api/push/subscriptions",
+				enrolBody(t, c.endpoint, "https://sinet.example.ts.net", "phone"))
+			if code != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400: %s", code, out)
+			}
+			if strings.Contains(out, secret) || strings.Contains(out, "web.push.apple.com") {
+				t.Errorf("the refusal quotes the endpoint back: %s", out)
+			}
+			// The control: a refusal that says nothing actionable would pass the
+			// line above and be useless to whoever is holding the phone.
+			if !strings.Contains(out, c.wantSays) {
+				t.Errorf("the refusal does not say what was wrong (want it to name %q): %s", c.wantSays, out)
+			}
+		})
+	}
+}
+
 // TestPushRoutesAreSessionRequiredAndUnversioned keeps this family inside the
 // walks every other family is subject to.
 func TestPushRoutesAreSessionRequiredAndUnversioned(t *testing.T) {
