@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -180,44 +179,20 @@ func (s *Server) handleApprovalList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scope := s.readScope(r)
-	expiry, stale, err := s.approvalHorizons()
-	if err != nil {
-		s.writeSurface(w, nil, err)
-		return
-	}
 	cursor, err := s.head(r.Context())
 	if err != nil {
 		s.writeSurface(w, nil, fmt.Errorf("read head cursor: %w", err))
 		return
 	}
-	snap, err := s.proj.inbox(r.Context(), scope)
+	// The ranked derivation is SHARED with the S15.11 notifier (notifier.go):
+	// "which cards are pending for identity X" has exactly one expression, so
+	// the badge on a phone and the queue on this surface cannot disagree about
+	// what is waiting (B6-9 OQ3/OQ5; the §40-C D3 twin hazard).
+	items, _, err := s.rankedApprovals(r.Context(), scope)
 	if err != nil {
 		s.writeSurface(w, nil, err)
 		return
 	}
-	items, err := s.proj.approvalItems(r.Context(), scope, snap, expiry, stale)
-	if err != nil {
-		s.writeSurface(w, nil, err)
-		return
-	}
-	conflicts, err := s.memoryConflictCards(r.Context(), scope)
-	if err != nil {
-		s.writeSurface(w, nil, err)
-		return
-	}
-	items = append(items, conflicts...)
-	// Risk-ranked (S15.6 "cards arrive ranked by risk"), then oldest-first
-	// inside a tier so the queue drains in the order it filled.
-	sort.SliceStable(items, func(i, j int) bool {
-		ri, rj := tierRank[items[i].Tier], tierRank[items[j].Tier]
-		if ri != rj {
-			return ri < rj
-		}
-		if !items[i].ObservedTS.Equal(items[j].ObservedTS) {
-			return items[i].ObservedTS.Before(items[j].ObservedTS)
-		}
-		return items[i].ID < items[j].ID
-	})
 	out := ApprovalList{Items: items, Cursor: cursor}
 	if len(out.Items) > approvalsListCap {
 		out.Items, out.Truncated = out.Items[:approvalsListCap], true

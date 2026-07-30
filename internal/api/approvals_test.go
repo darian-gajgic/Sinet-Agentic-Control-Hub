@@ -29,22 +29,45 @@ import (
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
-// keySettings serves a different duration per ⚙ key, so the expiry horizon and
-// the staleness threshold cannot be confused for one another by accident.
-type keySettings map[string]time.Duration
+// keySettings serves a different value per ⚙ key, so the expiry horizon, the
+// staleness threshold and the notifier cadences cannot be confused for one
+// another by accident. An unknown key FAILS rather than defaulting: a surface
+// reading a key nobody declared must be loud, not quietly served a number.
+type keySettings struct {
+	durations map[string]time.Duration
+	ints      map[string]int64
+}
 
 func (k keySettings) Duration(key string) (time.Duration, error) {
-	d, ok := k[key]
+	d, ok := k.durations[key]
 	if !ok {
-		return 0, fmt.Errorf("no such ⚙ key %q", key)
+		return 0, fmt.Errorf("no such ⚙ duration key %q", key)
 	}
 	return d, nil
 }
 
+func (k keySettings) Int(key string) (int64, error) {
+	v, ok := k.ints[key]
+	if !ok {
+		return 0, fmt.Errorf("no such ⚙ int key %q", key)
+	}
+	return v, nil
+}
+
+// approvalSettings carries the two inbox horizons plus the three ratified
+// G1 Def.3 cadences at their registry defaults (4 h remind / 24 h push /
+// 1 h safety re-ping), which is what the notifier reads live.
 func approvalSettings() keySettings {
 	return keySettings{
-		"effects.approval_expiry": 7 * 24 * time.Hour,
-		"freshness.max_age":       time.Hour,
+		durations: map[string]time.Duration{
+			"effects.approval_expiry": 7 * 24 * time.Hour,
+			"freshness.max_age":       time.Hour,
+		},
+		ints: map[string]int64{
+			"verification.card_remind_hours":   4,
+			"verification.card_push_hours":     24,
+			"verification.safety_reping_hours": 1,
+		},
 	}
 }
 

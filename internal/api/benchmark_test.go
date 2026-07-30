@@ -543,8 +543,8 @@ func TestPartCCountersArePinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 20 {
-		t.Errorf("user_version = %d, want 20 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's, 0020 is B6-7's)", v)
+	if v != 21 {
+		t.Errorf("user_version = %d, want 21 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's, 0020 is B6-7's, 0021 is B6-9's)", v)
 	}
 	// 0018 is the ONLY migration this packet adds; 0019 is B6-3A's (the S10.3
 	// price table's durable home) and moves this sentinel in lockstep.
@@ -553,7 +553,7 @@ func TestPartCCountersArePinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range sqls {
-		if filepath.Base(p) > "0020_zzz" {
+		if filepath.Base(p) > "0021_zzz" {
 			t.Errorf("unexpected migration %q — part C adds exactly 0018, B6-3A exactly 0019 and B6-7 exactly 0020", filepath.Base(p))
 		}
 	}

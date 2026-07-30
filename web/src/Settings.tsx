@@ -11,6 +11,7 @@ import {
 } from './api'
 import type { EventStream } from './events'
 import { describeError, useLive } from './live'
+import { PushDevices } from './PushDevices'
 import { Absent, Empty, Freshness, Stamp } from './parts'
 import {
   HistoryRows,
@@ -80,6 +81,10 @@ export function Settings({ stream }: { stream?: EventStream }) {
             <PerUserValues values={live.data.values} />
           </Panel>
           <RegisteredBlock view={live.data} />
+          {/* Per-DEVICE state, beside the generated form rather than inside it:
+              push enrolment is not a ⚙ registry key, so this panel renders none
+              and §43-B's no-hand-built-registry-control rule stays intact (OQ10). */}
+          <PushDevices stream={stream} />
           <PriceTable stream={stream} />
           <EvalResults stream={stream} />
         </>

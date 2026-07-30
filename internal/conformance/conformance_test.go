@@ -112,8 +112,8 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	// 0018 is B6-2C's (the BENCH-REG §2 direct-arm capture column) and 0019 is
 	// B6-3A's (the S10.3 price table's durable home).
 	// A floor would let an unnoticed migration slip in.
-	if v != 20 {
-		t.Fatalf("user_version = %d, want 20 (migrations through 0020 applied contiguously)", v)
+	if v != 21 {
+		t.Fatalf("user_version = %d, want 21 (migrations through 0021 applied contiguously)", v)
 	}
 	var n int
 	if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM conformance_registry`).Scan(&n); err != nil {

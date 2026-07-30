@@ -28,7 +28,10 @@ package api_test
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -53,6 +56,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
@@ -342,7 +346,94 @@ func fixtureWorld(t *testing.T) *backend {
 	// producer-driven workers mean real appended events, which is the whole point
 	// of driving them — and it moves in lockstep across every body.
 	seedFixtureWorkforce(t, b)
+	seedFixturePushDevices(t, b)
 	return b
+}
+
+// The fixture world's VAPID key, derived from a FIXED scalar rather than
+// generated.
+//
+// It is derived here rather than committed as a PEM for the obvious reason —
+// no private key belongs in this repository — and it is fixed rather than
+// random because `GET /api/push/subscriptions` SERVES the public half, so a
+// per-run key would churn the committed body on every regeneration and
+// TestWebAPIFixturesAreStable would (correctly) refuse it. Writing it through
+// the real PEM file the store reads means the fixture exercises the real
+// load path rather than a seam around it.
+func fixtureVAPIDKey(t *testing.T, stateDir string) {
+	t.Helper()
+	scalar := make([]byte, 32)
+	for i := range scalar {
+		scalar[i] = byte(i + 1)
+	}
+	key, err := ecdh.P256().NewPrivateKey(scalar)
+	if err != nil {
+		t.Fatalf("fixture VAPID scalar: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal fixture VAPID key: %v", err)
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "vapid-key.pem"),
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write fixture VAPID key: %v", err)
+	}
+}
+
+// fixturePushStore composes the S15.11 channel over the world, with the fixed
+// clock and a fixed id generator so a row minted through the REAL enrol verb is
+// reproducible (the internal/chat NewID precedent, §44).
+func fixturePushStore(t *testing.T, b *backend) *push.Store {
+	t.Helper()
+	if b.push != nil {
+		return b.push
+	}
+	dir := filepath.Join(t.TempDir(), "push-state")
+	fixtureVAPIDKey(t, dir)
+	n := 0
+	st, err := push.New(push.Config{
+		DB: b.db, Log: b.log, StateDir: dir,
+		Now:   func() time.Time { return mustTime(t, fxT4) },
+		NewID: func() string { n++; return fmt.Sprintf("push-fixture-%04d", n) },
+	})
+	if err != nil {
+		t.Fatalf("push.New: %v", err)
+	}
+	b.push = st
+	return st
+}
+
+// seedFixturePushDevices enrols two devices through the REAL verb, so the
+// committed body is what the handler serves over rows a producer wrote.
+//
+// TWO OWNERS, because the read is scoped three ways and the operator's body has
+// to be able to show a household. The endpoints are the shape a real push
+// service issues; they are never served back (an endpoint is a capability), so
+// what the committed bodies carry is the hash.
+func seedFixturePushDevices(t *testing.T, b *backend) {
+	t.Helper()
+	st := fixturePushStore(t, b)
+	ctx := context.Background()
+	for _, d := range []struct{ owner, endpoint, label, p256dh, auth string }{
+		{"alice", "https://web.push.apple.com/QDzVuUUFuFXY-fixture-alice-phone", "Alice’s phone",
+			"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+			"BTBZMqHH6r4Tts7J_aSIgg"},
+		{"op", "https://fcm.googleapis.com/fcm/send/fixture-op-laptop", "Op’s laptop",
+			"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8",
+			"DGv6ra1nlYgDCS1FRnbzlw"},
+	} {
+		if _, _, err := st.Enrol(ctx, d.owner, push.Enrolment{
+			Endpoint: d.endpoint,
+			Keys:     push.Keys{P256DH: d.p256dh, Auth: d.auth},
+			Origin:   "https://sinet.example.ts.net",
+			Label:    d.label,
+		}); err != nil {
+			t.Fatalf("enrol fixture device for %s: %v", d.owner, err)
+		}
+	}
 }
 
 // ── the S15.8 review surface (B6-8) ─────────────────────────────────────────
@@ -1681,6 +1772,7 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Benchmark:  fixtureBenchmark{},
 		Chat:       b.chat,
 		Workforce:  fixtureWorkforce(t, b),
+		Push:       fixturePushStore(t, b),
 		Now:        func() time.Time { return mustTime(t, fxT4) },
 	})
 }
@@ -1755,6 +1847,11 @@ func (fixtureBenchmark) SetOptIn(context.Context, string, string, bool) error {
 // SHAPE, and owner scope has its own three-way tests (reads_test.go).
 var webAPIFixtures = []struct{ name, path, who string }{
 	{"tasks", "/api/tasks", ""},
+	// The S15.11 device register, read BOTH ways: `scope` and the row set are
+	// computed per caller, so the operator's household reading and a member's
+	// own are two SERVED bodies rather than two renders of one.
+	{"push-subscriptions", "/api/push/subscriptions", ""},
+	{"push-subscriptions-member", "/api/push/subscriptions", "alice"},
 	{"runs", "/api/runs", ""},
 	{"meters", "/api/meters", ""},
 	{"history-views", "/api/events/views", ""},

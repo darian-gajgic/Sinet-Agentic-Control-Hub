@@ -5,11 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Sinet</title>
     <!-- PWA scaffold (Spec S15.1 "installed as a PWA"): a hand-written manifest
-         and a placeholder icon, no service worker and no PWA plugin. Declarative
-         Web Push needs no SW (S15.11); final icons, the iOS path and any offline
-         decision are B6-9's. -->
+         and an owned icon set, no PWA plugin. CORRECTED 2026-07-30 (P3-B6-9):
+         this comment used to say "no service worker … Declarative Web Push
+         needs no SW". The first half is no longer true and the second was only
+         ever true of Apple platforms — Declarative Web Push is shipped on
+         Safari alone, so every non-Apple device needs a classic subscription,
+         which structurally requires a service-worker receiver. /sw.js is that
+         receiver and NOTHING else: it has no fetch handler, so a cold launch
+         with the host asleep still renders the browser's own error page rather
+         than a cached shell posing as live data. The icon set, the iOS
+         Home-Screen path and the offline decision were all B6-9's, and this is
+         where they landed. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!-- iOS reads this for the Home Screen tile, and Home Screen install is
+         still a hard prerequisite for any web push on iOS 26 (re-verified
+         2026-07-30). It is deliberately NOT pre-rounded: iOS masks it itself. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#101418" />
   </head>
   <body>

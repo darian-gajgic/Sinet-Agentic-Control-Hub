@@ -1527,6 +1527,52 @@ export type Workforce = {
   cursor: number
 }
 
+// ── the S15.11 push family (B6-9) ─────────────────────────────────────────
+//
+// ONE READ AND TWO VERBS. The read carries the `applicationServerKey` a browser
+// must subscribe with — served rather than compiled in, because the key is
+// per-installation and a client constant would be a second copy that silently
+// stops matching after a rotation.
+
+/** One enrolled device, as METADATA. There is deliberately no endpoint field
+ *  here and none may be added: an endpoint is a capability URL — anyone holding
+ *  it can push to that device through the vendor relay — so the platform names
+ *  a subscription by the hash of it, to every caller including the operator. */
+export type PushSubscriptionMetadata = {
+  id: string
+  owner: string
+  endpoint_hash: string
+  origin: string
+  device_login?: string
+  label?: string
+  created_ts: string
+  updated_ts: string
+}
+
+export type PushSubscriptionsView = {
+  vapid_public_key: string
+  subscriptions: PushSubscriptionMetadata[]
+  /** Which reading this body IS, as a sentence: a narrower one must never be
+   *  able to pose as the wider one. */
+  scope: string
+  /** What leaves this machine, in the server's own words (S01.8 register row 2).
+   *  The surface renders this rather than a sentence a component author wrote. */
+  observable: string
+  cursor: number
+}
+
+export type PushEnrolBody = {
+  endpoint: string
+  keys: { p256dh: string; auth: string }
+  /** The ENROLLING PAGE's own origin. `navigate` in a push payload must be
+   *  absolute, and the control plane binds loopback behind the front chain, so
+   *  it cannot see the origin this device reaches it by — this page can. */
+  origin: string
+  label: string
+}
+
+export type PushEnrolled = { subscription: PushSubscriptionMetadata; replaced: boolean }
+
 /**
  * apiPath reports whether a SERVED route is a machine-surface path on this origin.
  *
@@ -1805,6 +1851,20 @@ export const api = {
   // ONE read, and no verb: the v0 map has no mutation affordance at all
   // (S15.10 parks editing to 15.5), so there is nothing else here to call.
   workforce: () => request<Workforce>('/api/workforce'),
+
+  // ── the S15.11 push family (B6-9) ──────────────────────────────────────
+  //
+  // Neither verb performs an outward effect and neither takes a PIN: enrolling
+  // a device releases nothing, and the pushes it enables carry a title, a deep
+  // link and a count — all composed by the platform (S15.6 Low tier).
+  pushSubscriptions: () => request<PushSubscriptionsView>('/api/push/subscriptions'),
+  /** Enrol or REPLACE this device. Keyed on the endpoint server-side, so a
+   *  browser handing back the subscription it already holds answers the
+   *  already-resolved state rather than becoming a second device (S15.2). */
+  enrolPush: (body: PushEnrolBody) => post<PushEnrolled>('/api/push/subscriptions', body),
+  /** This device is leaving. It takes the ENDPOINT because that is what a
+   *  browser has; `applied:false` is the honest repeat. */
+  removePush: (endpoint: string) => post<{ applied: boolean }>('/api/push/subscriptions/remove', { endpoint }),
 
   chatFiles: () => request<{ files: ChatFile[] }>('/api/chat/files'),
   /**

@@ -31,6 +31,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -41,6 +42,14 @@ import (
 // effective ⚙ values by dotted key.
 type Settings interface {
 	Duration(key string) (time.Duration, error)
+	// Int reads an integer-typed key. The S15.11 notifier's three cadence keys
+	// (verification.card_push_hours, safety_reping_hours, card_remind_hours) are
+	// declared Int hours, so Duration cannot read them — this is the additive
+	// widening B6-9 needed, on the same narrow seam every other ⚙ read here
+	// goes through rather than a second settings interface. The int64 return is
+	// the registry's own signature, matched rather than adapted: an interface
+	// that narrowed it would force a conversion at every implementor.
+	Int(key string) (int64, error)
 }
 
 // RunMeter is the S14.3 run-card counter seam result: the run's monotonic
@@ -232,6 +241,19 @@ type Config struct {
 	// so the dependency is narrow and acyclic. nil leaves the route answering
 	// 503.
 	Workforce *worker.Store
+	// Push is the S15.11 Web Push channel (push.go + notifier.go, B6-9): the
+	// per-device subscription registry, the RFC 8291/8292 sender and the VAPID
+	// key. Held directly for the *review.Store / *chat.Store reason
+	// (§39/§40-C/§44): internal/push is a leaf over storage+eventlog, so the
+	// dependency is narrow and acyclic. It performs no evaluation — WHICH cards
+	// are waiting for whom is this package's own derivation and re-deriving it
+	// there would be the twin-maintained-copy hazard. nil leaves the push
+	// routes answering 503 and EvaluatePush a no-op.
+	Push *push.Store
+	// PushSender is the outbound half, held separately so a test can drive the
+	// whole notifier against a fake push service without the production
+	// http.Client existing. nil = a sender over Push.
+	PushSender PushSender
 	// Chat is the S15.7 conversational assistant's durable state behind the
 	// `/api/chat` family (chatapi.go, B6-7): the per-user session registry, the
 	// immutable transcript, the turn lifecycle and the file exchange. Held
@@ -303,6 +325,10 @@ type Server struct {
 	history *history.Store
 	// chat is the S15.7 assistant's store behind /api/chat (B6-7).
 	chat *chat.Store
+	// push + pushSender are the S15.11 channel behind /api/push and the
+	// notifier (B6-9).
+	push       *push.Store
+	pushSender PushSender
 	// workforce is the S08 registry behind /api/workforce (B6-8 part B), read
 	// only — no verb in that file touches it.
 	workforce *worker.Store
@@ -335,6 +361,8 @@ func New(cfg Config) *Server {
 		memGate:    cfg.MemoryGate,
 		history:    cfg.History,
 		chat:       cfg.Chat,
+		push:       cfg.Push,
+		pushSender: cfg.PushSender,
 		workforce:  cfg.Workforce,
 		effects:    cfg.Effects,
 		cancel:     cfg.Cancel,
@@ -348,6 +376,9 @@ func New(cfg Config) *Server {
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter, now: s.clock}
+	}
+	if s.push != nil && s.pushSender == nil {
+		s.pushSender = push.NewSender(s.push, nil)
 	}
 	if s.auth == nil {
 		s.auth = SessionAuthenticator{Sessions: cfg.Sessions, DevFallback: cfg.DevPosture}
@@ -545,6 +576,21 @@ func (s *Server) Handler() http.Handler {
 	// editing through the map is parked to 15.5, so the surface performs no act
 	// and has no audit row to name.
 	protected("GET /api/workforce", s.handleWorkforceRead)
+
+	// The S15.11 Web Push family (B6-9: push.go) — the family the S15.2 table
+	// never listed, added additive-first under its own root like /api/chat. It
+	// records which devices the notifier may reach and nothing else: reads are
+	// owner-scoped server-side and answer with METADATA (an endpoint is a
+	// capability URL and is never served, to anybody), and neither verb performs
+	// an outward effect — enrolling a device releases nothing, and the sending
+	// is the notifier's, driven by the shell.
+	//
+	// `remove` sits one segment deeper than the collection so it can never be
+	// read as a subscription id, and it is a POST because the body carries the
+	// endpoint the browser holds rather than the id the platform minted.
+	protected("GET /api/push/subscriptions", s.handlePushList)
+	protected("POST /api/push/subscriptions", s.handlePushEnrol)
+	protected("POST /api/push/subscriptions/remove", s.handlePushRemove)
 
 	protected("GET /api/memory", s.handleMemoryList)
 	protected("POST /api/memory", s.handleMemoryCreate)

@@ -20,6 +20,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
@@ -51,6 +52,11 @@ type backend struct {
 	rev  *review.Store
 	acc  *accept.Accepter
 	prev *preview.Manager
+	// push is the S15.11 device register, composed ONCE per world with a fixed
+	// clock, a fixed id seam and a DERIVED (not committed) VAPID key, so the
+	// served public key and every row reproduce byte for byte. Nil until a rig
+	// composes it.
+	push *push.Store
 	// work is the S08 worker registry, composed ONCE per world (B6-8 part B)
 	// with a pinned clock and id seam. It has to be shared for the review
 	// store's reason: its Root is where template FILES live, and a per-server
@@ -93,10 +99,14 @@ func appendEvents(t *testing.T, log *eventlog.Log, types ...string) []int64 {
 	return seqs
 }
 
-// fixedSettings serves one duration for every ⚙ key.
-type fixedSettings struct{ d time.Duration }
+// fixedSettings serves one duration and one integer for every ⚙ key.
+type fixedSettings struct {
+	d time.Duration
+	n int64
+}
 
 func (f fixedSettings) Duration(string) (time.Duration, error) { return f.d, nil }
+func (f fixedSettings) Int(string) (int64, error)              { return f.n, nil }
 
 type serverOpts struct {
 	b        *backend

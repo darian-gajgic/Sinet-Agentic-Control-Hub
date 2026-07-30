@@ -32,6 +32,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/retention"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -135,6 +136,13 @@ func producerTypes() []string {
 		chat.EventSessionCreated, chat.EventSessionRenamed, chat.EventSessionDeleted,
 		chat.EventTurnStarted, chat.EventTurnSettled, chat.EventTurnAbandoned,
 		chat.EventFileUploaded, chat.EventFileDeleted,
+		// push (3): the B6-9 S15.11 Web Push channel. A device enrolling, a
+		// device leaving, and ONE send attempt — every mutation the family has.
+		// Failure is an outcome FIELD on push.sent rather than a fourth type:
+		// one act lands one row, and that row is also the only store of "when
+		// did this card last go out", which is what the notifier's dueness
+		// derivation reads (§29/§31/§32 — derive-from-log, no side table).
+		push.EventSubscribed, push.EventUnsubscribed, push.EventSent,
 		// api (1): the B6-2A S15.6 approval-inbox CO-PRODUCER of the already
 		// registered decision.recorded — the effect-card approve/deny, the two
 		// answer acts whose journal transitions leave no run_events row of
@@ -237,13 +245,20 @@ func TestEveryMintedTypeHasAProducer(t *testing.T) {
 // local. asset groups and history.query_audited, so no S00.9 amendment is
 // needed. The registry moves 91/5/96 → 99 minted + 5 declare-only = 104
 // registered.
+// B6-9 REGISTERS THREE, the push.* set of the S15.11 Web Push channel: a
+// subscription enrolling, a subscription leaving, and one send attempt. Failure
+// is an OUTCOME FIELD on push.sent rather than a fourth type, because one act
+// lands one row and a send_failed sibling would double-mint the same act's
+// shape. No new FAMILY: all three ADMIT into family 12 under the same OQ2-(A)
+// broadened-Platform reading, so no S00.9 amendment is needed. The registry
+// moves 99/5/104 → 102 minted + 5 declare-only = 107 registered.
 func TestInventoryTotals(t *testing.T) {
 	distinct := map[string]bool{}
 	for _, typ := range producerTypes() {
 		distinct[typ] = true
 	}
-	if n := len(distinct); n != 99 {
-		t.Errorf("producer inventory = %d distinct types, want 99 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1, +1 price.row_added at B6-3A, +8 chat.* at B6-7; B6-2A/B/C co-produce decision.recorded and add none)", n)
+	if n := len(distinct); n != 102 {
+		t.Errorf("producer inventory = %d distinct types, want 102 (§2; +3 watchdog at B5-3, +1 eval.score_recorded at B5-4, +1 drift.finding at B5-6A, +1 canary.result at B5-6B, +3 at B5-7, +2 at B5-8A, +1 history.query_audited at B5-8B, +2 stage.* at B6-1, +1 price.row_added at B6-3A, +8 chat.* at B6-7, +3 push.* at B6-9; B6-2A/B/C co-produce decision.recorded and add none)", n)
 	}
 	var minted, declareOnly int
 	for _, ts := range eventlog.Registry().Types() {
@@ -256,8 +271,8 @@ func TestInventoryTotals(t *testing.T) {
 			t.Errorf("type %q has unknown status %q", ts.Type, ts.Status)
 		}
 	}
-	if minted != 99 {
-		t.Errorf("registered minted types = %d, want 99", minted)
+	if minted != 102 {
+		t.Errorf("registered minted types = %d, want 102", minted)
 	}
 	if declareOnly != 5 {
 		t.Errorf("declare-only types = %d, want 5", declareOnly)
@@ -894,6 +909,29 @@ func TestRequiredFieldConformance(t *testing.T) {
 			"chat.file_deleted",
 			`{"file":"cf-00ff11ee22dd33cc","owner":"alice","name":"quarterly.csv","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}`,
 			[]string{"file", "owner", "name", "sha256"},
+		},
+		// The three push.* types (B6-9). The subscription travels as a HASH in
+		// all three: the endpoint is a capability URL — anyone holding it can
+		// push to that device — so it is stored, used and never carried in a
+		// payload, a read surface or a log line.
+		{
+			"push.subscribed",
+			`{"subscription":"push-0a1b2c3d4e5f60718293a4b5c6d7e8f9","endpoint_hash":"3c9d1a1f0b9a4e2d8f7c6b5a49382716059483726150493827160594837261a","origin":"https://sinet.example.ts.net","replaced":false}`,
+			[]string{"subscription", "endpoint_hash", "origin"},
+		},
+		{
+			"push.unsubscribed",
+			`{"subscription":"push-0a1b2c3d4e5f60718293a4b5c6d7e8f9","endpoint_hash":"3c9d1a1f0b9a4e2d8f7c6b5a49382716059483726150493827160594837261a","reason":"push_service_gone"}`,
+			[]string{"subscription", "endpoint_hash", "reason"},
+		},
+		{
+			// ONE send attempt. `outcome` is the closed vocabulary a failure is
+			// recorded IN — there is no send_failed type, because one act is
+			// one row, and this row is also the dueness store the notifier
+			// reads (§29/§31/§32).
+			"push.sent",
+			`{"subscription":"push-0a1b2c3d4e5f60718293a4b5c6d7e8f9","endpoint_hash":"3c9d1a1f0b9a4e2d8f7c6b5a49382716059483726150493827160594837261a","card":"ask:ask-verify-0001","class":"approval","outcome":"sent","status":201,"badge":3}`,
+			[]string{"subscription", "endpoint_hash", "card", "class", "outcome", "badge"},
 		},
 	}
 	for _, c := range cases {

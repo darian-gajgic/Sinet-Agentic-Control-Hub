@@ -1,5 +1,6 @@
-<!-- Placeholder install icon (B6-4/OQ8). Final icon set and the iOS
-     apple-touch-icon path are B6-9's, live-verified then. -->
+<!-- The favicon. The raster install icons beside it (icon-192.png,
+     icon-512.png, apple-touch-icon.png) draw this same mark and are generated
+     by tools/appicons from one 64x64 definition, so the four never drift. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sinet">
   <rect width="64" height="64" rx="12" fill="#101418" />
   <circle cx="32" cy="32" r="6" fill="#e6edf3" />

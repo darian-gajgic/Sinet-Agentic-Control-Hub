@@ -291,7 +291,8 @@ func TestLimitEventTypesArePinnedToTheRegistry(t *testing.T) {
 // B6-3A then registered one more, price.row_added (the S10.3 price table's
 // durable home), taking the registry to 96; THIS package registered none of it
 // and is byte-unchanged apart from this count. B6-7 then registered the eight
-// chat.* types of the S15.7 assistant, taking it to 104 — again registered
+// chat.* types of the S15.7 assistant, taking it to 104, and B6-9's three
+// push.* types take it to 107 — again registered
 // entirely outside this package, which still appends in exactly one file. This
 // count is the third registry-size pin (the §40 B6-3A precedent): a packet that
 // mints has to move it, and moving one line of a counter is not a semantic
@@ -300,8 +301,8 @@ func TestLimitEventTypesArePinnedToTheRegistry(t *testing.T) {
 // The Layer 0/1 surface stays read-only, which is the part worth keeping: an
 // append anywhere but layer2.go is still a defect.
 func TestExactlyOneEventTypeIsMinted(t *testing.T) {
-	if n := len(eventlog.Registry().Types()); n != 104 {
-		t.Errorf("the S14.2 registry holds %d types, want 104 (B5-8A's 94 + history.query_audited + B6-3A's price.row_added + B6-7's eight chat.*)", n)
+	if n := len(eventlog.Registry().Types()); n != 107 {
+		t.Errorf("the S14.2 registry holds %d types, want 107 (B5-8A's 94 + history.query_audited + B6-3A's price.row_added + B6-7's eight chat.* + B6-9's three push.*)", n)
 	}
 	if _, ok := eventlog.Registry().TypeSpec(history.EventQueryAudited); !ok {
 		t.Errorf("%q is not registered in the S14.2 contract (CONVENTIONS §29)", history.EventQueryAudited)

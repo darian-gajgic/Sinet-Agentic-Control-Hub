@@ -49,6 +49,7 @@ import (
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
@@ -284,6 +285,7 @@ func Run(ctx context.Context, opts Options) error {
 	// on the api Config, which ROUTES it (/api/chat). Like the query surface it
 	// has no loop — a conversation's WHEN is "when somebody types".
 	var chatSurf *chat.Store
+	var pushSurf *push.Store
 	// meterReader is the S14.3 run-card counter seam (brief §4), wired into the
 	// api from the production ledger below; nil under injected admission (the
 	// snapshot still projects, counters best-effort).
@@ -737,6 +739,24 @@ func Run(ctx context.Context, opts Options) error {
 				"turns", orphans)
 		}
 
+		// The S15.11 Web Push channel (B6-9): the per-device subscription
+		// registry, the RFC 8291/8292 sender, and the VAPID signing key.
+		//
+		// THE KEY LIVES IN THE STATE DIRECTORY at 0600, generated at first
+		// need (OQ8(b), an accepted interim). Moving custody to the credential
+		// broker — so the key never leaves it and signing is a broker
+		// operation, the git-signing-key posture — is a NAMED hardening-session
+		// item: it needs a new broker operation and a secrets-at-rest
+		// placement, both sudo-adjacent host work. The JWT cadence is one
+		// signature per push service per several hours, so nothing about this
+		// design fights the move.
+		pushSurf, err = push.New(push.Config{DB: db, Log: log, StateDir: stateDir})
+		if err != nil {
+			return fmt.Errorf("shell: wire the S15.11 push channel: %w", err)
+		}
+		logger.Info("push: S15.11 Web Push channel wired (B6-9)",
+			"vapid_public_key", pushSurf.PublicKey())
+
 		wd = watchdog.New(watchdog.Deps{
 			DB: db, Log: log, Runs: runs, Settings: reg,
 			Duty:  localSurf.Duty,
@@ -827,6 +847,7 @@ func Run(ctx context.Context, opts Options) error {
 		MemoryGate: memWrites,
 		History:    histSurf, // S14.10 layers, consumed by the S15.7 turn verbs
 		Chat:       chatSurf, // S15.7 sessions/transcript/turns/exchange (B6-7)
+		Push:       pushSurf, // S15.11 subscriptions + the RFC 8291/8292 sender (B6-9)
 		// The B6-8 part-B workforce map: the S08 registry, read only. nil under
 		// injected admission, which leaves the route at 503 rather than
 		// pretending an empty registry is the roster.
@@ -919,6 +940,24 @@ func Run(ctx context.Context, opts Options) error {
 		go watchdogTailLoop(procCtx, wd, log, logger)
 		go watchdogSweepLoop(procCtx, wd, logger)
 		go watchdogDeadManLoop(procCtx, wd, logger)
+	}
+
+	// The S15.11 notifier driver (B6-9): the shell owns WHEN, exactly as it does
+	// for the watchdog sweep and the dead-man probe.
+	//
+	// THE INTERVAL IS A POLL BASELINE, NOT A COUNTDOWN. What makes a card due is
+	// derived from stored state on every pass — the card's own ObservedTS, the ⚙
+	// cadences read live, and the last push for that card read from the event
+	// log — so a restart loses nothing and a card born while the host was
+	// suspended is picked up on the next tick. That is the §32 rule as the
+	// dead-man loop's own comment states it: dueness from the log, never a
+	// wall-clock ticker that resets on restart and freezes across suspend.
+	//
+	// The EDGE TRIGGER is what makes "safety escalations push immediately" true
+	// rather than "within the interval": pushNudge fires after an append that
+	// could have opened a card, and the loop evaluates then instead of waiting.
+	if pushSurf != nil {
+		go notifierLoop(procCtx, srv, log, logger)
 	}
 
 	// The S14.6 watchlist driver (B5-6A): the shell owns WHEN. It ticks on a
@@ -1167,6 +1206,84 @@ func watchdogTailLoop(ctx context.Context, wd *watchdog.Watchdog, log *eventlog.
 				continue
 			}
 			cursor = next
+		}
+	}
+}
+
+// The S15.11 notifier's three structural constants (no ⚙ key is ratified for
+// any of them — the sseBatchSize precedent §7, interim under the standing
+// settings-tab directive). Each has a different reason:
+//
+//   - notifierTailInterval is the EDGE TRIGGER's cadence. It is the watchdog
+//     tail's own 2 s, for the same reason: a card can be born at any moment and
+//     S15.11 says a safety escalation pushes IMMEDIATELY, which must not quietly
+//     mean "at the next sweep". A tick costs one PRAGMA-free `SELECT MAX` on the
+//     event log's primary key and evaluates nothing unless the head moved.
+//   - notifierSweepInterval is the RE-NAG baseline: a card that nobody has
+//     touched still ages past its threshold, and no event announces that. Five
+//     minutes is far finer than the finest ratified cadence (1 h safety re-ping),
+//     so the sweep can never be what makes a re-nag late.
+//   - notifierBurstGap is a burst floor on the edge path only. A busy run emits
+//     events continuously and an evaluation reads the whole inbox derivation, so
+//     without it a running task would re-derive every 2 s for no new decision. A
+//     skipped tick does NOT advance the cursor, so nothing is dropped — the
+//     next tick still sees the head it has not evaluated. Nothing about DUENESS
+//     depends on this number: it decides how often the platform LOOKS, never
+//     what it finds (§32).
+const (
+	notifierTailInterval  = 2 * time.Second
+	notifierSweepInterval = 5 * time.Minute
+	notifierBurstGap      = 10 * time.Second
+)
+
+// notifierLoop drives the S15.11 notifier (B6-9). The shell owns WHEN, exactly
+// as it does for the watchdog sweep and the dead-man probe; the evaluation owns
+// WHAT is due, and derives it entirely from stored state.
+//
+// THE EDGE TRIGGER IS "THE HEAD MOVED", deliberately, rather than a list of
+// card-opening event types. Such a list would be a second copy of what the
+// inbox derivation already knows about which producers can open a card — the
+// twin-maintained-copy hazard in a third place — and it would fail silently, by
+// omission, the day a new producer lands. "Something happened, so re-derive" is
+// the same discipline the frontend applies to its own feed: the read is the
+// truth, the frame is only the trigger. The evaluation is idempotent, so a
+// trigger that turns out to have opened nothing sends nothing.
+func notifierLoop(ctx context.Context, srv *api.Server, log *eventlog.Log, logger *slog.Logger) {
+	cursor, err := log.Head(ctx)
+	if err != nil {
+		logger.Warn("push: notifier head bootstrap", "err", err)
+	}
+	tail := time.NewTicker(notifierTailInterval)
+	defer tail.Stop()
+	sweep := time.NewTicker(notifierSweepInterval)
+	defer sweep.Stop()
+
+	var lastEval time.Time
+	evaluate := func() {
+		if err := srv.EvaluatePush(ctx); err != nil {
+			logger.Warn("push: notifier evaluation", "err", err)
+		}
+		lastEval = time.Now()
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tail.C:
+			head, err := log.Head(ctx)
+			if err != nil {
+				logger.Warn("push: notifier head", "err", err)
+				continue
+			}
+			if head == cursor || time.Since(lastEval) < notifierBurstGap {
+				// The cursor is NOT advanced when the gap holds it back, so the
+				// next tick still sees a head it has not evaluated.
+				continue
+			}
+			cursor = head
+			evaluate()
+		case <-sweep.C:
+			evaluate()
 		}
 	}
 }

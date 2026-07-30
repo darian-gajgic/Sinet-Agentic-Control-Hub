@@ -596,6 +596,26 @@ var v0Types = []TypeSpec{
 		"internal/chat/chat.go (EventFileDeleted); emitted internal/chat/exchange.go Delete",
 		"one object leaving it. Payload {file, owner, name, sha256} — a delete whose record does not say WHAT was deleted cannot be reviewed, and the hash is what makes the departed object identifiable without retaining it"),
 
+	// The S15.11 Web Push channel (B6-9 OQ9). All three ADMIT here under the
+	// same OQ2-(A) broadened reading: a subscription is an owner-attributed
+	// control-plane ASSET and a send is the platform auditing its own outward
+	// act. None is a RUN event — a push has no run, no objective and no receipt
+	// — so no new family and no S00.9 amendment.
+	//
+	// A SUBSCRIPTION IS NAMED BY A HASH IN ALL THREE. The endpoint is a
+	// capability URL: anyone holding it can push to that device through the
+	// vendor relay. It is stored (the sender needs it) and it never reaches a
+	// payload, a read surface or a log line.
+	minted("push.subscribed", FamilyPlatform, VerdictAdmit,
+		"internal/push/push.go (EventSubscribed); emitted internal/push/push.go Enrol",
+		"a device enrolling for S15.11 decision notifications. Payload {subscription, endpoint_hash, origin, replaced} — `replaced` distinguishes a re-subscribe (the same browser handing back the endpoint it already has, which the row is keyed to make a REPLACE) from a new device, which is the difference between a person having two phones and having one twice"),
+	minted("push.unsubscribed", FamilyPlatform, VerdictAdmit,
+		"internal/push/push.go (EventUnsubscribed); emitted internal/push/push.go Remove and removeDead",
+		"a device leaving. Payload {subscription, endpoint_hash, reason} — the reason distinguishes a person's own act from the platform retiring an endpoint the push service reported gone (404/410), which are different facts about the same disappearance"),
+	minted("push.sent", FamilyPlatform, VerdictAdmit,
+		"internal/push/send.go (EventSent); emitted internal/push/send.go recordSend",
+		"ONE push attempt to ONE subscription. Payload {subscription, endpoint_hash, card, class, outcome, status, detail, badge} — the card REF the push points at, the ratified SLA class it went out under, and the outcome from the closed set {sent, gone, refused, unreachable}. FAILURE IS THIS FIELD, NOT A SECOND TYPE: one act lands one row, and a `push.send_failed` sibling would double-mint the same act's shape and force every reader to union two types to answer 'when did this card last go out' — which is exactly the question the notifier's dueness derivation asks of these rows. THE ROW HAS TWO DUTIES: it is the audit that a push happened AND it is the only store of when, so re-nag dueness derives from the log with no side table and no in-memory countdown (§29/§31/§32). It carries no notification text and no endpoint"),
+
 	// ── Family 13: Tools & artifacts (S2.1) ─────────────────────────────
 	minted("tool.completed", FamilyToolsArtifacts, VerdictRename, "internal/adapters/adapters.go:68 (KindToolResult)", "renamed from engine.tool_result; a SECOND emitter is the B5-3 dead-man canary, which injects synthetic tool.completed rows on its platform.deadman.* run to exercise Tier-0 detection end-to-end (internal/watchdog/deadman.go injectLoopTrace) — same type, synthetic provenance"),
 	minted("engine.message", FamilyToolsArtifacts, VerdictAdmit, "internal/adapters/adapters.go:64 (KindMessage)", "raw assistant/user message trace step; the softest engine.* mapping — ADMIT as a trace step"),

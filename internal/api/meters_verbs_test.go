@@ -639,8 +639,8 @@ func TestPartBCountersArePinned(t *testing.T) {
 	// column) and B6-3A landed 0019 (the S10.3 price table's durable home), so
 	// the pin moves in lockstep with the migration that moved it — 0001–0017
 	// stay byte-untouched.
-	if v != 20 {
-		t.Errorf("user_version = %d, want 20 (0001–0017 untouched; 0017 is part B's, 0018 part C's, 0019 B6-3A's, 0020 B6-7's)", v)
+	if v != 21 {
+		t.Errorf("user_version = %d, want 21 (0001–0017 untouched; 0017 is part B's, 0018 part C's, 0019 B6-3A's, 0020 B6-7's, 0021 B6-9's)", v)
 	}
 	// The view the migration recreated must actually exist and be selectable —
 	// a DROP without a matching CREATE would otherwise pass every other test in
