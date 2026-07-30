@@ -59,14 +59,43 @@ func gitDiff(name, oldContent, newContent string) (string, error) {
 		}
 		// Exit 1 = the files differ: the expected outcome, not an error.
 	}
-	return relabel(out.String(), oldPath, newPath, name), nil
+	return relabel(out.String(), oldPath, newPath, diffLabel(name)), nil
 }
 
-// relabel rewrites the temp paths in a unified diff's file headers to the
-// logical path the contents came from. Only the paths git was handed are
-// replaced — by exact string, not by pattern — so no diff BODY line can be
-// touched: a temp path cannot appear in content that was written to that temp
-// path moments earlier.
+// diffLabel is the boundary check on the header label.
+//
+// The label is interpolated into the SERVED diff's header lines, and at v0 every
+// caller passes a constant or a stored object name that `MintRevision` never
+// validates. That is not reachable today, and it becomes reachable the moment a
+// revision carries a tree of producer-named paths — which the mint's own comment
+// anticipates. A name carrying a newline could emit forged `diff --git` lines into
+// the served body, and a name containing " b/" makes the header ambiguous about
+// where the old path ends; both are refused here rather than downstream, because
+// this is where an unvalidated string becomes part of a wire format.
+//
+// A refused name yields the EMPTY label, which leaves git's own output untouched —
+// honest and readable — rather than silently emitting a mangled header.
+func diffLabel(name string) string {
+	// A leading separator would compose `a//abs/path`, so the label is always the
+	// repo-relative form.
+	clean := strings.TrimPrefix(filepath.ToSlash(name), "/")
+	if clean == "" {
+		return ""
+	}
+	if strings.ContainsAny(clean, "\n\r\t") || strings.Contains(clean, " b/") {
+		return ""
+	}
+	return clean
+}
+
+// relabel rewrites the temp paths in a unified diff's file headers to the logical
+// path the contents came from.
+//
+// Only the two paths git was handed are replaced, by exact string rather than by
+// pattern. What makes that safe is UNPREDICTABILITY, not impossibility: the temp
+// directory name is random per call, so content would have to contain a string it
+// could not have known to collide with a header. That is the true claim and it is
+// weaker than "a body line cannot match", which is why it is stated this way.
 func relabel(unified, oldPath, newPath, name string) string {
 	if unified == "" || name == "" {
 		return unified

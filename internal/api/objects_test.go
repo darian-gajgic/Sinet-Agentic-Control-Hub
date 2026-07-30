@@ -3,6 +3,8 @@ package api_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -194,6 +196,47 @@ func TestObjectBytesNeverBecomeASecondRawHTMLChannel(t *testing.T) {
 	if blob.Get("X-Content-Type-Options") != "nosniff" || blob.Get("Content-Security-Policy") == "" {
 		t.Errorf("the attachment lane keeps the same headers: %+v", blob)
 	}
+}
+
+// TestObjectBytesLengthComesFromTheFileNotTheRecordedSize is the D10 check.
+//
+// The handler already refuses to serve when the pinned bytes are MISSING; taking
+// the length from the ref while streaming the file was the same drift left
+// unhandled one step further in — a recorded size larger than the file
+// short-writes, a smaller one truncates. The length now comes from the file, so the
+// two cannot disagree.
+func TestObjectBytesLengthComesFromTheFileNotTheRecordedSize(t *testing.T) {
+	o := newObjectEnv(t)
+	// The ROW cannot drift — a minted revision is immutable by trigger, which is
+	// the store protecting its own record. So the drift is where it really happens:
+	// the bytes on disk move and the recorded size does not.
+	path := o.e.rev.ObjectPath(o.imageSHA)
+	drifted := []byte("\x89PNG\r\n\x1a\nPIXELS-AND-MORE")
+	if err := os.WriteFile(path, drifted, 0o600); err != nil {
+		t.Fatalf("drift the object bytes: %v", err)
+	}
+
+	rr := o.get(t, "alice", "d-shot", o.imageSHA)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read: %d %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if got := rr.Header().Get("Content-Length"); got != strconv.Itoa(len(drifted)) {
+		t.Errorf("Content-Length must be the FILE's length (%d), got %q with a %d-byte body",
+			len(drifted), got, len(body))
+	}
+	if body != string(drifted) {
+		t.Errorf("the served bytes are not the file's bytes: %q", body)
+	}
+	// ⚠ REPORT, adjacent and NOT fixed here: this route streams the object without
+	// the hash re-check `review.Store.readObject` performs ("content is never
+	// trusted from disk without the pin check"). The length is now self-consistent
+	// with what is served, but a drifted object is served rather than refused with
+	// the `content_drift` answer the handler already gives when bytes are missing
+	// entirely. Closing it means either hashing on every read — a real cost for the
+	// image trio, which re-reads the same objects per mode — or exporting the
+	// store's verified read, which widens internal/review again. Referral, not a
+	// silent choice.
 }
 
 // TestObjectBytesAreCachedByTheirOwnHash pins the content-addressed posture: the

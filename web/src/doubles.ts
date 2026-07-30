@@ -354,8 +354,15 @@ export function reviewRoutes(): Record<string, Scripted> {
     [`GET /api/deliverables/${reworkDeliverableID}/accept-card`]: { body: fixtures.acceptCard() },
     [`GET /api/deliverables/${imageDeliverableID}`]: { body: imageDetail() },
     [`GET /api/deliverables/${imageDeliverableID}/compare`]: { body: fixtures.compareImagePair() },
+    // The object surfaces read comments too. Without these the comment block
+    // renders in its ERROR state and nothing notices: a read inside `useLive`
+    // swallows the double's loud throw into `Unreachable` and renders it, so
+    // scriptedFetch's fail-loud design does not reach reads (B6-7 F9 hit the same
+    // limit). Scripting them is what makes those tests exercise the real state.
+    [`GET /api/deliverables/${imageDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },
     [`GET /api/deliverables/${binaryDeliverableID}`]: { body: binaryDetail() },
     [`GET /api/deliverables/${binaryDeliverableID}/compare`]: { body: fixtures.compareBinaryCards() },
+    [`GET /api/deliverables/${binaryDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },
     [`GET /api/deliverables/${notebookDeliverableID}`]: { body: notebookDetail() },
     [`GET /api/deliverables/${notebookDeliverableID}/compare`]: { body: fixtures.compareExtractedText() },
     [`GET /api/deliverables/${notebookDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },

@@ -1294,6 +1294,20 @@ export type ChatUploaded = { file: ChatFile; applied: boolean }
 export type ChatFileDeleted = { file: ChatFile; applied: boolean }
 export type ChatSessionDeleted = { session_id: string; messages: number; turns: number; applied: boolean }
 
+/**
+ * apiPath reports whether a SERVED route is a machine-surface path on this origin.
+ *
+ * It resolves the string the way the browser will before deciding, because that is
+ * the only way the answer matches what the request would actually do: a prefix test
+ * accepts `/api/../evil`, which resolves off the machine surface entirely. A route
+ * naming another origin is refused for the same reason.
+ */
+export function apiPath(route: string): boolean {
+  if (!route.startsWith('/')) return false
+  const resolved = new URL(route, 'https://sinet.invalid')
+  return resolved.origin === 'https://sinet.invalid' && resolved.pathname.startsWith('/api/')
+}
+
 /** query builds a search string, dropping unset filters rather than sending
  *  empty ones — an empty `?person=` is not the same request as no `?person=`. */
 function query(params: Record<string, string | number | undefined>): string {
@@ -1395,10 +1409,13 @@ export const api = {
    * The one check is a boundary check, because a served string is becoming a
    * request target: the route must be an `/api/` path on this origin. A door that
    * named anything else would be a bug in the platform, and following it would be
-   * this client's.
+   * this client's. `startsWith('/api/')` alone was weaker than that sentence —
+   * `/api/../evil` passes it and resolves elsewhere — so the check is the one the
+   * comment claims: resolve the route and require the RESULT to stay under `/api/`
+   * on this origin.
    */
   answerAtDoor: (route: string, body: { payload_hash: string; answer: unknown; pin?: string }) => {
-    if (!route.startsWith('/api/')) {
+    if (!apiPath(route)) {
       return Promise.reject(new ApiError(0, `a door named a route this client will not follow: ${route}`, 'bad_door'))
     }
     return post<ApprovalAnswerResult>(route, body)

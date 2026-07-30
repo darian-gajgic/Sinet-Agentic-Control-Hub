@@ -173,7 +173,8 @@ test('the view consumes Comparison.unified and no other diff source', async () =
   const src = (await import('./Deliverable.tsx?raw')).default as string
   // One parser, and it is the pick's. A second parse of diff text anywhere in this
   // file would be a second answer to "what does this diff say".
-  expect(src).toContain('parseDiff(cmp.unified')
+  expect(src).toContain('parseDiff(unified)')
+  expect(src).toContain('parseUnified(cmp.unified')
   for (const banned of ['diff-match-patch', 'jsdiff', 'createTwoFilesPatch', 'unifiedDiff(']) {
     expect(src, `a second diff parser (${banned}) reached the review view`).not.toContain(banned)
   }
@@ -528,9 +529,6 @@ test('the rework door posts the door OWN ask, pin and revise_with_guidance', asy
   typeInto(at(view, '[data-field="revision-pin"]') as HTMLInputElement, 'hunter2hunter')
   await flush()
 
-  log.set(`POST /api/deliverables/${reworkDeliverableID}/comments`, {
-    body: (fixtures.placedComments() as unknown as PlacedComments).comments[0],
-  })
   // The route is the DOOR'S own — the card id is a composite whose halves the door
   // serves separately, so the surface follows the path it was given rather than
   // assembling one from `ask_id`.
@@ -538,17 +536,21 @@ test('the rework door posts the door OWN ask, pin and revise_with_guidance', asy
     body: { id: `ask:${door.ask_id}`, applied: true, state: 'answered', detail: 'the next round will drain the guidance' },
   })
   click(at(view, '[data-action="request-revision"]'))
-  // Two chained verbs — the guidance comment, then the answer — so the drain of
-  // microtasks has to reach past the first `then`.
   await flush(8)
 
-  // The guidance is a durable comment FIRST — that is what the drain delivers.
-  expect(log.calls.some((c) => c.method === 'POST' && c.path.endsWith('/comments'))).toBe(true)
   const answered = log.calls.find((c) => c.path === door.route)!
   expect(answered.path, 'the answer did not go to the route the door named').toContain(`:${door.ask_id}/answer`)
-  const body = answered.body as { payload_hash: string; answer: { choice: string }; pin?: string }
+  const body = answered.body as {
+    payload_hash: string
+    answer: { choice: string; guidance: { text: string }[] }
+    pin?: string
+  }
   expect(body.payload_hash, "the answer did not quote the door's own pin").toBe(door.payload_hash)
   expect(body.answer.choice).toBe(door.answer)
+  // The guidance rides the ANSWER — the platform records it as durable requester
+  // comments and drains it into the resumed attempt, in that order, in this one
+  // request. The validator refuses the verb without it.
+  expect(body.answer.guidance.map((g) => g.text)).toEqual(['Tighten the summary to two sentences.'])
   expect(body.pin).toBe('hunter2hunter')
   expect(text(view)).toContain('the next round will drain the guidance')
   // The PIN is gone from the form the moment it was sent.
@@ -564,11 +566,13 @@ test('a stale rework pin is a re-read, never a retry', async () => {
     status: 409,
     body: { error: 'stale_payload', detail: 'the card moved', current: {} },
   })
+  typeInto(at(view, '[data-field="guidance"]') as HTMLTextAreaElement, 'Say it again.')
+  await flush()
   click(at(view, '[data-action="request-revision"]'))
   await flush(8)
 
   expect(at(view, '[data-stale="request-revision"]')).not.toBeNull()
-  expect(text(view)).toContain('nothing was sent')
+  expect(text(view)).toContain('NOTHING was written')
   expect(log.calls.filter((c) => c.path === door.route), 'a stale pin was retried').toHaveLength(1)
 })
 
@@ -1063,4 +1067,191 @@ test('a hostile comment body and diff line render as TEXT, not as elements', asy
     [...view.container.querySelectorAll('img')].filter((n) => n.getAttribute('src') === 'x'),
     'a planted img became an element',
   ).toHaveLength(0)
+})
+
+// ── drain r1 ────────────────────────────────────────────────────────────────
+
+test('D1: the preview frame is sandboxed, without top-navigation, and leaks no referrer', async () => {
+  const { view, log } = await review()
+  log.set(`POST /api/deliverables/${reviewDeliverableID}/preview/compare`, {
+    body: {
+      deliverable: reviewDeliverableID,
+      before: sideView('before'),
+      after: sideView('after'),
+      single_instance: false,
+      sync: { mode: 'path', enabled: true },
+    },
+  })
+  click(at(view, '[data-action="launch-compare"]'))
+  await flush()
+
+  const frames = all(view, 'iframe')
+  expect(frames).toHaveLength(2)
+  for (const frame of frames) {
+    // S13.3 names this channel "the sandboxed rendered-document view" and
+    // review.EscapeFirst records it under that name, so the attribute is the
+    // contract rather than a preference.
+    const tokens = (frame.getAttribute('sandbox') ?? '').split(/\s+/).filter((t) => t !== '')
+    expect(tokens.length, 'the preview frame ships with no sandbox at all').toBeGreaterThan(0)
+    expect(tokens.sort()).toEqual(['allow-forms', 'allow-same-origin', 'allow-scripts'].concat(['allow-popups']).sort())
+    // The withheld capability that matters: a framed, model-produced app must not
+    // be able to move the window this PIN is typed into.
+    for (const banned of [
+      'allow-top-navigation',
+      'allow-top-navigation-by-user-activation',
+      'allow-top-navigation-to-custom-protocols',
+      'allow-popups-to-escape-sandbox',
+      'allow-modals',
+      'allow-downloads',
+    ]) {
+      expect(tokens, `the frame grants ${banned}`).not.toContain(banned)
+    }
+    expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+  }
+})
+
+test('D2/D3: EVERY served comment is reachable as a widget or present on the strip', async () => {
+  const { view } = await review()
+  const served = fixtures.placedComments() as unknown as PlacedComments
+  expect(served.comments.length, 'the body carries no comments, so the invariant is untested').toBeGreaterThan(4)
+
+  // Computed from what RENDERED, never from a re-derivation of the production
+  // predicate — which is how the first version of this test passed over a real
+  // gap: it recomputed the strip filter and compared the implementation to a copy
+  // of itself.
+  const inWidgets = new Set(all(view, '.diff-widget [data-comment]').map((n) => n.getAttribute('data-comment')))
+  const onStrip = new Set(all(view, '[data-strip-comment]').map((n) => n.getAttribute('data-strip-comment')))
+  expect(inWidgets.size, 'no comment rendered inside the diff, so one half is untested').toBeGreaterThan(0)
+  expect(onStrip.size, 'nothing rendered on the strip, so the other half is untested').toBeGreaterThan(0)
+
+  for (const c of served.comments) {
+    const id = String(c.id)
+    expect(
+      inWidgets.has(id) || onStrip.has(id),
+      `comment ${id} renders in NEITHER a diff widget nor the strip — it exists only in the flat list`,
+    ).toBe(true)
+  }
+  // And the two are complements, not overlapping sets: a comment in both would mean
+  // the strip is showing something that already has a place.
+  for (const id of inWidgets) {
+    expect(onStrip.has(id ?? ''), `comment ${id} is both anchored and on the strip`).toBe(false)
+  }
+})
+
+test('D2: a placement whose line is outside every rendered hunk lands on the strip', async () => {
+  // The exact shape that used to vanish: a real file, a non-zero line, and no
+  // rendered hunk containing it.
+  const body = fixtures.placedComments() as unknown as PlacedComments
+  const target = body.placements.find((p) => p.anchor !== undefined && p.anchor.line_no !== 0)!
+  target.anchor = { ...target.anchor!, line_no: 9999 }
+  const { view } = await review(reviewDeliverableID, {
+    [`GET /api/deliverables/${reviewDeliverableID}/comments?revision=2`]: { body },
+  })
+  expect(
+    at(view, `[data-strip-comment="${target.comment_id}"]`),
+    'an unreachable anchor rendered nowhere but the flat list',
+  ).not.toBeNull()
+  expect(at(view, `.diff-widget [data-comment="${target.comment_id}"]`)).toBeNull()
+})
+
+test('D4: the guidance rides the ANSWER in one request, and a refusal writes nothing', async () => {
+  const { view, log } = await review(reworkDeliverableID)
+  const door = (fixtures.deliverableRework() as { doors: { verb: string; route: string; payload_hash?: string }[] }).doors.find(
+    (d) => d.verb === 'request-revision',
+  )!
+
+  // Empty guidance arms nothing: the card's own answer schema refuses an empty
+  // list, so a control that could send one would only earn a 400.
+  expect((at(view, '[data-action="request-revision"]') as HTMLButtonElement).disabled).toBe(true)
+
+  typeInto(at(view, '[data-field="guidance"]') as HTMLTextAreaElement, 'Tighten the summary to two sentences.')
+  await flush()
+  log.set(`POST ${door.route}`, {
+    status: 409,
+    body: { error: 'stale_payload', detail: 'the card moved', current: {} },
+  })
+  click(at(view, '[data-action="request-revision"]'))
+  await flush(8)
+
+  // ONE request, and it is the answer — no separate comment write exists to
+  // survive the refusal or to duplicate on a retry.
+  expect(
+    log.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/comments')),
+    'a durable comment was written outside the answer',
+  ).toHaveLength(0)
+  const posted = log.calls.filter((c) => c.path === door.route)
+  expect(posted).toHaveLength(1)
+  const answer = (posted[0].body as { answer: { choice: string; guidance: { text: string }[] } }).answer
+  expect(answer.guidance, 'the answer carried no guidance, which the validator refuses').toHaveLength(1)
+  expect(answer.guidance[0].text).toBe('Tighten the summary to two sentences.')
+
+  // The failure says what was and was not written, and a second press still sends
+  // exactly one request — nothing accumulated.
+  expect(at(view, '[data-stale="request-revision"]')!.textContent).toContain('NOTHING was written')
+  click(at(view, '[data-action="request-revision"]'))
+  await flush(8)
+  expect(log.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/comments'))).toHaveLength(0)
+})
+
+test('D5: the comments read is mounted ONCE, measured against this page own baseline', async () => {
+  const { log } = await review()
+  const comments = log.calls.filter((c) => c.path.includes('/comments')).length
+  // `/api/previews` is one `useLive` on this page, mounted in a child of the
+  // detail exactly as the comment feed is — so it is the page's own floor for what
+  // ONE subscribed read costs on a mount. Asserting against it rather than against
+  // a literal is deliberate: a child-mounted `useLive` reads twice per mount in the
+  // landed machinery (the chat view's exchange sidebar does the same), so a literal
+  // 1 would be asserting a fact about the framework rather than about this view.
+  const baseline = log.calls.filter((c) => c.path === '/api/previews').length
+  expect(baseline, 'the baseline read did not fire, so the comparison proves nothing').toBeGreaterThan(0)
+  expect(comments, `the comments read is mounted twice: ${comments} calls against a ${baseline}-call baseline`).toBe(
+    baseline,
+  )
+})
+
+test('D5: an object surface still owns its own comments read', async () => {
+  const { log } = await review(imageDeliverableID)
+  const comments = log.calls.filter((c) => c.path.includes('/comments')).length
+  const baseline = log.calls.filter((c) => c.path === '/api/previews').length
+  expect(comments, 'a surface with no diff of its own did not read comments exactly once').toBe(baseline)
+})
+
+test('D11: the object surfaces render the real comment state, not an error', async () => {
+  for (const id of [imageDeliverableID, binaryDeliverableID]) {
+    const { view } = await review(id)
+    expect(
+      text(view),
+      `${id} renders the comment block in its error state — the read was unscripted and the throw was swallowed`,
+    ).not.toContain('The control plane is unreachable')
+    expect(at(view, '.comment-list'), `${id} rendered no comments`).not.toBeNull()
+  }
+})
+
+test('D6: a diff the parser rejects renders the honest failure, not a dead surface', async () => {
+  // The shape this packet's own deviation was ABOUT: a served body this parser
+  // throws on. Fixing the producer was necessary and not sufficient.
+  // The EXACT pre-fix shape: a separator line before a real `diff --git` block,
+  // which is what the producer used to emit and what makes gitdiff-parser throw.
+  const served = fixtures.compareLineDiff() as unknown as Comparison
+  const broken = { ...served, unified: `=== site/release.tsx ===\n${served.unified ?? ''}` }
+  const { view } = await review(reviewDeliverableID, {
+    [`GET /api/deliverables/${reviewDeliverableID}/compare`]: { body: broken },
+  })
+  const block = at(view, '[data-diff-unreadable="true"]')
+  expect(block, 'a malformed diff took the surface down instead of rendering a reason').not.toBeNull()
+  expect(block!.textContent).toContain('could not be read as a unified diff')
+  // The text is still readable, as text, so a person can say what is wrong with it.
+  expect(block!.textContent).toContain('=== site/release.tsx ===')
+  // And the rest of the page still works — the doors and the accept are untouched.
+  expect(at(view, '[data-door="accept"]')).not.toBeNull()
+})
+
+test('D14: answerAtDoor refuses a route that escapes the machine surface', async () => {
+  const { apiPath } = await import('./api')
+  expect(apiPath('/api/approvals/ask:x/answer')).toBe(true)
+  // The forms the prefix test admitted and the comment did not claim.
+  expect(apiPath('/api/../evil'), 'a traversal that leaves /api/ was admitted').toBe(false)
+  expect(apiPath('//evil.invalid/api/x'), 'a protocol-relative host was admitted').toBe(false)
+  expect(apiPath('https://evil.invalid/api/x')).toBe(false)
+  expect(apiPath('/apiary/x')).toBe(false)
 })

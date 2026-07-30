@@ -3,12 +3,10 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"os"
 	"path"
-	"strconv"
 
 	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
 )
@@ -100,6 +98,13 @@ func (s *Server) handleDeliverableObject(w http.ResponseWriter, r *http.Request)
 	}
 
 	f, err := os.Open(s.review.ObjectPath(ref.SHA256))
+	if err == nil {
+		defer f.Close()
+	}
+	var info os.FileInfo
+	if err == nil {
+		info, err = f.Stat()
+	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// The row pins a hash whose bytes are gone. That is a platform
@@ -114,7 +119,6 @@ func (s *Server) handleDeliverableObject(w http.ResponseWriter, r *http.Request)
 		s.writeSurface(w, nil, fmt.Errorf("open object %s: %w", ref.SHA256, err))
 		return
 	}
-	defer f.Close()
 
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -122,22 +126,21 @@ func (s *Server) handleDeliverableObject(w http.ResponseWriter, r *http.Request)
 	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Cache-Control", objectCacheControl)
-	h.Set("Content-Length", strconv.FormatInt(ref.Size, 10))
 	if ctype, inline := inlineObjectTypes[ref.Type]; inline {
 		h.Set("Content-Type", ctype)
 	} else {
 		h.Set("Content-Type", "application/octet-stream")
 		h.Set("Content-Disposition", objectDisposition(ref.Name))
 	}
-	if r.Method == http.MethodHead {
-		return
-	}
-	if _, err := io.Copy(w, f); err != nil {
-		// The status and headers are already written, so there is nothing honest
-		// left to say on the wire; the ops log is where a truncated body is
-		// recorded.
-		s.logger.Warn("objects: stream object", "deliverable", d.ID, "sha", ref.SHA256, "err", err)
-	}
+	// ServeContent sets Content-Length from the FILE, not from the recorded size,
+	// and it is what keeps the two self-consistent: taking the length from the ref
+	// while streaming the file would truncate or short-write whenever the two
+	// disagree — which is exactly the drift this handler already refuses to serve
+	// when the bytes are missing entirely. It also handles HEAD and range requests
+	// by construction. The name is passed empty so it can never re-derive a
+	// Content-Type from an extension: the type is decided above, from the closed
+	// allowlist, and sniffing is the thing this route exists to prevent.
+	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 
 // objectRefFor finds the pinned ref for a sha across every revision of one

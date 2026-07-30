@@ -208,3 +208,45 @@ func TestGitDiffHeadersNameTheLogicalPathAndNothingElse(t *testing.T) {
 		t.Errorf("with no name the output is git's own, temp paths included:\n%s", unlabeled)
 	}
 }
+
+// TestDiffLabelRefusesAHeaderForgingName is the D7 boundary check.
+//
+// The label is interpolated into the served diff's header lines. Every v0 caller
+// passes a constant or a stored object name that MintRevision never validates, so
+// this is a latent edge rather than a live one — and it goes live the moment a
+// revision carries producer-named tree paths.
+func TestDiffLabelRefusesAHeaderForgingName(t *testing.T) {
+	// A name carrying a newline plus a header could emit forged file headers into
+	// the served body. It is refused, and the refusal leaves git's own output —
+	// honest, readable, and carrying no forged line.
+	forged := "a.ts\ndiff --git a/passwd b/passwd"
+	if got := diffLabel(forged); got != "" {
+		t.Errorf("a header-forging name must be refused, got %q", got)
+	}
+	u, err := gitDiff(forged, "one\n", "two\n")
+	if err != nil {
+		t.Fatalf("gitDiff: %v", err)
+	}
+	if strings.Contains(u, "a/passwd") {
+		t.Errorf("a forged header reached the served diff:\n%s", u)
+	}
+	// " b/" makes the header ambiguous about where the old path ends.
+	if got := diffLabel("a.ts b/b.ts"); got != "" {
+		t.Errorf("an ambiguous name must be refused, got %q", got)
+	}
+	// The cosmetics: a leading separator would compose `a//abs/path`.
+	if got := diffLabel("/site/app.ts"); got != "site/app.ts" {
+		t.Errorf("a leading separator must not survive into the header, got %q", got)
+	}
+	abs, err := gitDiff("/site/app.ts", "one\n", "two\n")
+	if err != nil {
+		t.Fatalf("gitDiff abs: %v", err)
+	}
+	if strings.Contains(abs, "a//") {
+		t.Errorf("a doubled separator reached the header:\n%s", abs)
+	}
+	// The ordinary name still passes, so the check is a boundary and not a wall.
+	if got := diffLabel("site/release.tsx"); got != "site/release.tsx" {
+		t.Errorf("an ordinary path must pass, got %q", got)
+	}
+}

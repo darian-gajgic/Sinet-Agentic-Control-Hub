@@ -10,9 +10,10 @@ import { expect, test } from 'vitest'
  *
  * THE ALLOWLIST IS EMPTY, AND IT NEVER WIDENED (2026-07-30, P3-B6-8).
  *
- * Three landed texts — this header, the assertion below, and CONVENTIONS §41-B
- * and §43 — promised that the allowlist would widen at B6-8 "with the preview
- * surface it exists for". It did not, and the promise was wrong rather than
+ * FOUR landed texts — this header, the assertion below, and CONVENTIONS §41-B,
+ * §43 and §44-B — promised that the allowlist would widen at B6-8 "with the
+ * preview surface it exists for" (the original count of three omitted §44-B,
+ * which carries the same promise; all four are corrected). It did not, and the promise was wrong rather than
  * unkept: the sanctioned channel landed as an IFRAME BY `src`, which embeds a
  * browsing context BY REFERENCE and trips none of the constructs below. Every
  * banned token is a raw-HTML ASSIGNMENT or a code-execution call; an iframe with
@@ -124,19 +125,30 @@ test('no raw-HTML or code-execution escape hatch exists in web/src', () => {
 test('the scan catches a planted violation', () => {
   // Split, like every other token in this file: the fixtures must plant a
   // violation in the SCANNER's input without planting one in this SOURCE.
-  const planted = {
-    './planted.tsx': 'export const boom = <div dangerously' + 'SetInnerHTML={{ __html: untrusted }} />',
+  // EVERY banned token gets a probe (drain r1, D13). Four of the eight were
+  // unprobed before, which meant four lines of the list were assertions nobody had
+  // shown could fire — and this is the packet that grew the list, so it is the
+  // packet that owes the rest of the probes.
+  const planted: Record<string, string> = {
+    './planted1.tsx': 'export const boom = <div dangerously' + 'SetInnerHTML={{ __html: untrusted }} />',
     './planted2.ts': 'el.inner' + 'HTML = untrusted',
-    './planted3.ts': 'const f = new ' + 'Function("return " + untrusted)',
-    // The B6-8 token, planted like the rest: without this the new ban would be
-    // an unexercised line in a list.
-    './planted4.tsx': 'export const frame = <iframe src' + 'doc={untrusted} />',
+    './planted3.ts': 'el.outer' + 'HTML = untrusted',
+    './planted4.ts': 'document.' + 'write(untrusted)',
+    './planted5.ts': 'const v = eval' + '(untrusted)',
+    './planted6.ts': 'const f = new ' + 'Function("return " + untrusted)',
+    './planted7.ts': 'el.insert' + 'AdjacentHTML("beforeend", untrusted)',
+    './planted8.tsx': 'export const frame = <iframe src' + 'doc={untrusted} />',
   }
   const hits = scan(planted)
 
-  expect(hits).toHaveLength(4)
-  expect(hits[0]).toContain('dangerously' + 'SetInnerHTML')
-  expect(hits[1]).toContain('inner' + 'HTML')
-  expect(hits[2]).toContain('new ' + 'Function')
-  expect(hits[3]).toContain('src' + 'doc')
+  // One hit per planted file, and one per banned token: the scan is shown able to
+  // fail on every construct it forbids, not just on the famous one.
+  expect(hits).toHaveLength(banned.length)
+  expect(Object.keys(planted)).toHaveLength(banned.length)
+  for (const { token } of banned) {
+    expect(
+      hits.some((h) => h.includes(token)),
+      `no planted probe exercises the ${token} ban`,
+    ).toBe(true)
+  }
 })

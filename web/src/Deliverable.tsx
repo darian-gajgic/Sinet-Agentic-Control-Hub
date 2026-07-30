@@ -354,14 +354,14 @@ function SurfaceBody({
       return (
         <>
           <ImagePair cmp={cmp} />
-          <CommentsBlock detail={detail} revision={cmp.new_n} me={me} stream={stream} anchored={null} />
+          <OwnedCommentsBlock detail={detail} revision={cmp.new_n} me={me} stream={stream} anchored={null} />
         </>
       )
     case 'binary-cards':
       return (
         <>
           <ObjectCards cmp={cmp} />
-          <CommentsBlock detail={detail} revision={cmp.new_n} me={me} stream={stream} anchored={null} />
+          <OwnedCommentsBlock detail={detail} revision={cmp.new_n} me={me} stream={stream} anchored={null} />
         </>
       )
     default:
@@ -381,7 +381,7 @@ function SurfaceBody({
             </dl>
           </div>
           <ObjectCards cmp={cmp} />
-          <CommentsBlock detail={detail} revision={cmp.new_n} me={me} stream={stream} anchored={null} />
+          <OwnedCommentsBlock detail={detail} revision={cmp.new_n} me={me} stream={stream} anchored={null} />
         </>
       )
   }
@@ -413,7 +413,8 @@ function DiffSurface({
   me: string
   stream?: EventStream
 }) {
-  const files = parseDiff(cmp.unified ?? '')
+  const parsed = parseUnified(cmp.unified ?? '')
+  const files: RenderedFile[] = parsed.files.map((file) => ({ file, path: renderedPath(file) }))
   const [claim, setClaim] = useState<ClaimedAnchor | null>(null)
 
   const placed = useLive<{ comments: Comment[]; placements: Placement[] }>({
@@ -439,13 +440,16 @@ function DiffSurface({
           </label>
         ))}
       </div>
-      {files.length === 0 ? (
+      {parsed.failure !== '' ? (
+        <UnreadableDiff failure={parsed.failure} unified={cmp.unified ?? ''} />
+      ) : files.length === 0 ? (
         <Empty what="The platform served no diff text for this pair — the two revisions have no differing file." />
       ) : (
-        files.map((file) => (
+        files.map(({ file, path }) => (
           <DiffFile
-            key={`${file.oldPath}:${file.newPath}`}
+            key={path}
             file={file}
+            path={path}
             viewType={viewType}
             comments={placed.data?.comments ?? []}
             placements={placed.data?.placements ?? []}
@@ -457,11 +461,42 @@ function DiffSurface({
         detail={detail}
         revision={cmp.new_n}
         me={me}
-        stream={stream}
         anchored={claim}
         onClearAnchor={() => setClaim(null)}
-        served={placed}
+        feed={placed}
+        files={files}
       />
+    </div>
+  )
+}
+
+/**
+ * parseUnified is the guarded parse, and the reason it exists is this packet's own
+ * history: the deviation this surface required was a SERVED body that made this
+ * exact parser throw. Fixing the producer was necessary and is not sufficient —
+ * a parse that runs bare in render turns one malformed body into a dead review
+ * surface for the whole application, because nothing above it catches.
+ *
+ * So the failure is an ANSWER, the same way an unrecognised `surface` value is: the
+ * reason renders, and the text the platform served renders beside it as text, so a
+ * person can still read the diff and say what is wrong with it.
+ */
+function parseUnified(unified: string): { files: FileData[]; failure: string } {
+  if (unified === '') return { files: [], failure: '' }
+  try {
+    return { files: parseDiff(unified), failure: '' }
+  } catch (err) {
+    return { files: [], failure: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+function UnreadableDiff({ failure, unified }: { failure: string; unified: string }) {
+  return (
+    <div className="diff-unreadable" data-diff-unreadable="true">
+      <Absent
+        reason={`this diff could not be read as a unified diff (${failure}), so it cannot be drawn as one — the text the platform served is below, unchanged`}
+      />
+      <pre className="diff-raw">{unified}</pre>
     </div>
   )
 }
@@ -473,18 +508,19 @@ type ClaimedAnchor = { file_path: string; side: string; line_no: number; line_te
 
 function DiffFile({
   file,
+  path,
   viewType,
   comments,
   placements,
   onSelect,
 }: {
   file: FileData
+  path: string
   viewType: 'split' | 'unified'
   comments: Comment[]
   placements: Placement[]
   onSelect: (a: ClaimedAnchor) => void
 }) {
-  const path = file.newPath !== '' && file.newPath !== '/dev/null' ? file.newPath : file.oldPath
   const tokens = tokenize(file.hunks, { enhancers: [markEdits(file.hunks, { type: 'block' })] })
   const widgets = commentWidgets(file, path, comments, placements)
 
@@ -537,10 +573,11 @@ function claimFrom(path: string, change: ChangeData): ClaimedAnchor {
  * commentWidgets places every comment that HAS a live position in this file at
  * that position, keyed by the widget's own change key.
  *
- * The keys come from the parsed hunks, so a placement the widget cannot reach —
- * a line outside every rendered hunk, a file-level or orphan placement — is
- * deliberately NOT forced in here. Those render on the strip below, which is what
- * makes "no comment without a render location" true rather than hopeful.
+ * The keys come from the parsed hunks, so a placement the widget cannot reach — a
+ * line outside every rendered hunk, a file this pair does not show, a file-level or
+ * orphan placement — is deliberately NOT forced in here. `widgetReach` is what
+ * decides, and the strip renders its exact complement, which is what makes "no
+ * comment without a render location" true rather than hopeful.
  */
 function commentWidgets(
   file: FileData,
@@ -551,13 +588,11 @@ function commentWidgets(
   const byID = new Map(comments.map((c) => [c.id, c]))
   const keyed = new Map<string, Comment[]>()
   for (const p of placements) {
-    const anchor = p.anchor
     const c = byID.get(p.comment_id)
-    if (!anchor || c === undefined) continue
-    if (anchor.file_path !== path || anchor.line_no === 0) continue
-    const key = changeKeyAt(file, anchor.side, anchor.line_no)
-    if (key === null) continue
-    keyed.set(key, [...(keyed.get(key) ?? []), c])
+    if (c === undefined) continue
+    const reach = widgetReach([{ file, path }], p)
+    if (reach === null || reach.path !== path) continue
+    keyed.set(reach.key, [...(keyed.get(reach.key) ?? []), c])
   }
   const out: Record<string, React.ReactNode> = {}
   for (const [key, list] of keyed) {
@@ -570,6 +605,43 @@ function commentWidgets(
     )
   }
   return out
+}
+
+/** One rendered file of the current comparison, with the path the widget map and
+ *  the strip both address it by. */
+export type RenderedFile = { file: FileData; path: string }
+
+/**
+ * widgetReach answers ONE question, and it is the only place that answers it:
+ * WILL a widget render this placement inside the rendered diff, and if so where?
+ *
+ * It exists because the answer was previously computed twice — once by the widget
+ * map and once, differently, by the synthetic strip. The strip asked only whether
+ * the placement had a line number, while the widget map additionally required the
+ * file to be one of the rendered ones AND the line to fall inside a rendered hunk.
+ * A placement that satisfied the first and failed the second rendered NOWHERE but
+ * the flat list, which is the invisible-comment class this surface exists to
+ * prevent (P-T12-2). The strip is now the exact complement of this function, so
+ * the two cannot disagree again.
+ */
+export function widgetReach(
+  files: RenderedFile[],
+  placement: Placement | undefined,
+): { path: string; key: string } | null {
+  const anchor = placement?.anchor
+  if (anchor === undefined || anchor.line_no === 0 || anchor.file_path === '') return null
+  for (const { file, path } of files) {
+    if (path !== anchor.file_path) continue
+    const key = changeKeyAt(file, anchor.side, anchor.line_no)
+    if (key !== null) return { path, key }
+  }
+  return null
+}
+
+/** renderedPath is the identity a parsed file is addressed by — the new side where
+ *  there is one, the old side for a deletion. */
+export function renderedPath(file: FileData): string {
+  return file.newPath !== '' && file.newPath !== '/dev/null' ? file.newPath : file.oldPath
 }
 
 /** changeKeyAt finds the rendered change at (side, line) and returns the key the
@@ -594,21 +666,51 @@ function changeKeyAt(file: FileData, side: string, lineNo: number): string | nul
 /**
  * R4/R5/R6: the comment list, the synthetic strip and the composer.
  *
- * THE INVARIANT: every served comment renders somewhere. A comment with a live
- * position in the diff renders there AND in this list, so a reader scrolling the
- * page never has to find it; a comment with no live position — file-level,
- * orphaned, or anchored outside a rendered hunk — renders on the STRIP, with its
- * original quote and the revision it was said about. That is what makes a finding
- * impossible to lose (P-T12-2).
+ * THE INVARIANT: every served comment renders somewhere, and "somewhere" means a
+ * widget inside the diff or the synthetic strip. A comment a widget WILL render
+ * renders there and in this list; every other comment — file-level, orphaned, in a
+ * file this pair does not show, or on a line outside every rendered hunk — renders
+ * on the STRIP with its original quote and the revision it was said about. The two
+ * sets are complements of ONE predicate (`widgetReach`) rather than two
+ * hand-maintained conditions, because when they were two, a placement that fell
+ * between them rendered nowhere but the flat list (P-T12-2).
  */
+type CommentFeed = {
+  data: { comments: Comment[]; placements: Placement[] } | null
+  error: string
+  stale: boolean
+  reload: () => void
+}
+
+/**
+ * OwnedCommentsBlock is the comment block on a surface that has no diff of its own
+ * — the object and unknown-surface arms — so it owns the read.
+ *
+ * The split is not stylistic. `useLive`'s `key` is only an effect DEPENDENCY: the
+ * read and the subscription run unconditionally, so a hook mounted with an empty
+ * key still reads, still subscribes, and — the part that matters — still SETTLES
+ * its §42 resnapshot debt for data nothing renders. Passing `key: ''` did not
+ * disable anything. The honest answer is not to mount the hook at all, which is a
+ * call-site fix: `useLive` is landed machinery and stays untouched.
+ */
+function OwnedCommentsBlock(props: Omit<Parameters<typeof CommentsBlock>[0], 'feed' | 'files'>) {
+  const feed = useLive<{ comments: Comment[]; placements: Placement[] }>({
+    key: `/api/deliverables/${props.detail.id}/comments?revision=${props.revision}`,
+    read: () => api.comments(props.detail.id, props.revision),
+    types: deliverableEventTypes,
+    stream: props.stream,
+  })
+  return <CommentsBlock {...props} feed={feed} files={[]} />
+}
+
 function CommentsBlock({
   detail,
   revision,
   me,
-  stream,
   anchored,
   onClearAnchor,
-  served,
+  feed,
+  files,
 }: {
   detail: DetailRefs
   revision: number
@@ -616,25 +718,21 @@ function CommentsBlock({
   stream?: EventStream
   anchored: ClaimedAnchor | null
   onClearAnchor?: () => void
-  served?: { data: { comments: Comment[]; placements: Placement[] } | null; error: string; stale: boolean; reload: () => void }
+  feed: CommentFeed
+  /** The files of the CURRENT comparison, which is what decides whether a comment
+   *  has a live position in THIS view. An empty list means no diff is on screen,
+   *  so nothing has one and everything belongs on the strip. */
+  files: RenderedFile[]
 }) {
-  const own = useLive<{ comments: Comment[]; placements: Placement[] }>({
-    key: served ? '' : `/api/deliverables/${detail.id}/comments?revision=${revision}`,
-    read: () => api.comments(detail.id, revision),
-    types: deliverableEventTypes,
-    stream,
-  })
-  const feed = served ?? own
   const comments = feed.data?.comments ?? []
   const placements = feed.data?.placements ?? []
   const byID = new Map(placements.map((p) => [p.comment_id, p]))
 
-  // The strip carries whatever the diff could not: file-level, orphaned, and
-  // anything whose live line is not on screen in this pair.
-  const unanchored = comments.filter((c) => {
-    const p = byID.get(c.id)
-    return p === undefined || p.anchor === undefined || p.anchor.line_no === 0
-  })
+  // The strip is the EXACT COMPLEMENT of widget reachability: every comment a
+  // widget will not render inside the diff renders here, whatever the reason —
+  // file-level, orphaned, in a file this pair does not show, or on a line outside
+  // every rendered hunk. One function decides, so the two cannot drift apart.
+  const unanchored = comments.filter((c) => widgetReach(files, byID.get(c.id)) === null)
 
   return (
     <div className="comments" data-revision={String(revision)}>
@@ -1132,7 +1230,7 @@ function DoorsBlock({ detail }: { detail: DeliverableDetail }) {
         <ul className="doors">
           {detail.doors.map((door) => (
             <li key={door.verb} data-door={door.verb} data-available={door.available ? 'true' : 'false'}>
-              <DoorRow door={door} deliverable={detail.deliverable.id} />
+              <DoorRow door={door} />
             </li>
           ))}
         </ul>
@@ -1141,7 +1239,7 @@ function DoorsBlock({ detail }: { detail: DeliverableDetail }) {
   )
 }
 
-function DoorRow({ door, deliverable }: { door: Door; deliverable: string }) {
+function DoorRow({ door }: { door: Door }) {
   return (
     <>
       <p className="door-head">
@@ -1156,7 +1254,7 @@ function DoorRow({ door, deliverable }: { door: Door; deliverable: string }) {
           {door.pin_from !== undefined && door.pin_from !== '' ? <> · pin from {door.pin_from}</> : null}
         </p>
       )}
-      {door.available && door.verb === 'request-revision' && <RequestRevision door={door} deliverable={deliverable} />}
+      {door.available && door.verb === 'request-revision' && <RequestRevision door={door} />}
     </>
   )
 }
@@ -1171,7 +1269,7 @@ function DoorRow({ door, deliverable }: { door: Door; deliverable: string }) {
  * the card moved, so the answer is a re-read of the deliverable rather than a
  * second post.
  */
-function RequestRevision({ door, deliverable }: { door: Door; deliverable: string }) {
+function RequestRevision({ door }: { door: Door }) {
   const [guidance, setGuidance] = useState('')
   const [pin, setPin] = useState('')
   const [outcome, setOutcome] = useState('')
@@ -1185,22 +1283,27 @@ function RequestRevision({ door, deliverable }: { door: Door; deliverable: strin
       setFailure('The door named no route, pin or answer, so there is nothing to send.')
       return
     }
-    // The guidance is recorded as a comment FIRST, because that is what the drain
-    // delivers to the next attempt; the answer is what starts it.
-    const guidanceFirst =
-      guidance.trim() === ''
-        ? Promise.resolve()
-        : api
-            .addComment(deliverable, { revision: 0, body: guidance, severity: 'blocker' })
-            .then(() => undefined)
-    guidanceFirst
-      .then(() =>
-        api.answerAtDoor(door.route, {
-          payload_hash: door.payload_hash ?? '',
-          answer: { choice: door.answer },
-          pin: pin === '' ? undefined : pin,
-        }),
-      )
+    // The guidance rides the ANSWER, in ONE request. Two facts make that the only
+    // correct shape, and the first cut here got both wrong by posting a separate
+    // comment first:
+    //
+    //  - the card's own answer schema REQUIRES the points. `revise_with_guidance`
+    //    with an empty `guidance` list is refused by the validator, so an answer
+    //    that left them out could never have worked;
+    //  - the drain runs INLINE inside this request. The answer records the
+    //    guidance as durable requester comments and then drains the open set into
+    //    the resumed attempt, in that order, in one transaction's worth of work.
+    //    A comment posted before the answer duplicates on a retry and is
+    //    undeletable; a comment posted after it arrives too late to be drained
+    //    into the round it was written for.
+    //
+    // So there is exactly one write, and a refusal means nothing was written.
+    api
+      .answerAtDoor(door.route, {
+        payload_hash: door.payload_hash,
+        answer: { choice: door.answer, guidance: [{ text: guidance }] },
+        pin: pin === '' ? undefined : pin,
+      })
       .then(
         (res) => {
           setPin('')
@@ -1230,17 +1333,27 @@ function RequestRevision({ door, deliverable }: { door: Door; deliverable: strin
         Guidance for the next round
         <textarea data-field="guidance" value={guidance} onChange={(e) => setGuidance(e.target.value)} />
       </label>
+      {/* Severity is not offered here, and the absence is the point: the platform
+          records a guidance point as a BLOCKER itself (guidance always names a
+          problem to fix), so a severity control on this form would be this surface
+          claiming a choice the answer schema does not have. */}
       <label>
         PIN, if this card asks for one
         <input type="password" data-field="revision-pin" value={pin} onChange={(e) => setPin(e.target.value)} />
       </label>
-      <button type="submit" data-action="request-revision">
+      <button type="submit" data-action="request-revision" disabled={guidance.trim() === ''}>
         Ask for a revision
       </button>
+      {guidance.trim() === '' && (
+        <p className="muted">
+          A revision request needs at least one point to act on — the card&apos;s own answer schema refuses an empty one,
+          so there is nothing to send until you say what to change.
+        </p>
+      )}
       {stale && (
         <p className="warn-flag" data-stale="request-revision">
-          The card moved since this page was read, so nothing was sent. Reload the deliverable to pick up the card as it
-          now is.
+          The card moved since this page was read, so NOTHING was written — not the guidance, not the answer. Reload the
+          deliverable to pick up the card as it now is, then say it again.
         </p>
       )}
       {outcome !== '' && <p className="notice">{outcome}</p>}
@@ -1330,9 +1443,10 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
 }
 
 /**
- * One launched session. A backed one links and embeds its served URL; every
- * NON-backed disposition renders its reason as the answer it is — and renders NO
- * frame at all, because an empty or broken iframe is the failure S13.8 names.
+ * One launched session. A backed one LINKS its served URL — it does not embed it;
+ * embedding is the before/after comparison's job, where the sandboxed frames live.
+ * Every NON-backed disposition renders its reason as the answer it is, and renders
+ * NO frame at all, because an empty or broken iframe is the failure S13.8 names.
  */
 function SessionPanel({ session }: { session: PreviewSession }) {
   const backed = session.state === 'live' && session.url !== undefined && session.url !== ''
@@ -1470,10 +1584,59 @@ function FrameSide({ side, path }: { side: import('./api').SessionView; path: st
       <p className="muted">
         {side.role} · revision {String(side.revision)}
       </p>
-      <iframe title={`${side.role} preview of ${side.deliverable}`} src={frameSrc(side.url, path)} />
+      <iframe
+        title={`${side.role} preview of ${side.deliverable}`}
+        src={frameSrc(side.url, path)}
+        sandbox={previewSandbox}
+        // The SPA's own URL carries the deliverable id, and it would otherwise
+        // travel to the preview as `Referer`. Same reason the external preview
+        // link carries rel="noreferrer noopener".
+        referrerPolicy="no-referrer"
+      />
     </div>
   )
 }
+
+/**
+ * The sandbox the preview frame rides in, token by token.
+ *
+ * S13.3 names this channel "the sandboxed rendered-document view" and
+ * `review.EscapeFirst()` records it under exactly that name, so sandboxing is the
+ * CONTRACT rather than a hardening preference. What is framed is a built
+ * application whose content came out of a model, and being cross-origin stops a
+ * frame reading this document's DOM — it does NOT stop the frame navigating the
+ * top-level window. On a surface that collects a PIN, top-navigation to a
+ * look-alike sign-in is the concrete risk, so it is the one capability most
+ * deliberately withheld.
+ *
+ * GRANTED, each because a preview cannot be a fair try-out without it:
+ *   allow-scripts      — a dev-server preview IS its scripts; without this the
+ *                        frame renders an empty shell and the review is a lie.
+ *   allow-forms        — reviewing an interface means submitting its forms.
+ *   allow-same-origin  — the previewed app needs its OWN origin back for storage
+ *                        and its own fetches. This is safe here for a structural
+ *                        reason worth stating rather than leaving to luck: a
+ *                        preview is served from a different origin than the SPA
+ *                        (the tailnet `preview-<id>.<host>` subdomain, or a
+ *                        loopback port out of this package's 47900-47919 pool), so
+ *                        the token restores the FRAME's origin and never this
+ *                        page's. If a preview were ever served same-origin with
+ *                        the SPA, this token would defeat the whole sandbox and
+ *                        would have to go.
+ *   allow-popups       — an app that opens a window should be seen doing it. The
+ *                        escape token is deliberately NOT granted, so a popup
+ *                        inherits this same sandbox.
+ *
+ * WITHHELD, and why the absence is deliberate:
+ *   allow-top-navigation (and the by-user-activation form) — the phishing edge
+ *                        above; nothing in a preview needs to move this window.
+ *   allow-modals       — a framed app could otherwise block the reviewing page
+ *                        with a dialog.
+ *   allow-downloads    — a try-out has no business writing to the reviewer's disk.
+ *   allow-pointer-lock / allow-presentation / allow-orientation-lock — nothing a
+ *                        preview does needs them.
+ */
+export const previewSandbox = 'allow-scripts allow-forms allow-same-origin allow-popups'
 
 /** frameSrc is the whole composition rule: the SERVED base URL, then the shell's
  *  path. Nothing else can reach an iframe src on this page. */
