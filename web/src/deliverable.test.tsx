@@ -32,17 +32,26 @@ import { click, flush, mount, typeInto } from './testing'
  * each for a reason that is about the world and not about convenience (OQ8):
  *
  *  - the ACCEPT OUTCOMES (applied, merge card, read-back, superseded, stale, PIN
- *    refused). Composing them for real needs a git remote, a broker push and a
- *    collision engineered against a moving HEAD; the accept CARD — which is what
- *    the pin, the trailers and the acceptability come from — is real.
+ *    refused). The reason first recorded here was FALSE — it claimed these need a
+ *    git remote, a broker push and a collision engineered against a moving HEAD,
+ *    all three of which `internal/accept/accept_test.go` already does hermetically:
+ *    `TestAcceptEndToEnd` applies a real accept against a t.TempDir bare remote
+ *    through the real broker server + client, and `TestAcceptCollisionMergeCard`
+ *    engineers the collision. A `fakePusher` is composed in THIS fixture world
+ *    (internal/api) too, so the push is not the obstacle either. The TRUE reason is the one
+ *    the snapshot pins give: a real accept produces a commit whose sha and
+ *    timestamps are WALL-CLOCK, and neither can live in a fixed-clock golden body.
+ *    The accept CARD — which is what the pin, the trailers and the acceptability
+ *    come from — is real.
  *  - the PREVIEW dispositions and the comparison. A launched preview spawns a
  *    process and binds a port, which no hermetic test may do, and the whole point
  *    of the non-backed states is that they render an ANSWER — so they are driven
  *    as the server's own state vocabulary over the real Session shape.
  *  - an UNKNOWN `surface` value, which by definition no current producer emits, and
  *    a SERVED pixel-diff aid, which is a nil seam at v0.
- *  - the two object-surface DETAILS, whose COMPARISONS are the real committed
- *    bodies; a third and fourth committed detail would prove nothing the first does.
+ *  - the THREE object-surface DETAILS — image, binary and notebook — whose
+ *    COMPARISONS are the real committed bodies; a fourth committed detail would
+ *    prove nothing the first does not.
  */
 
 const inertStream = () =>
@@ -360,32 +369,14 @@ test('all five placement statuses render, visibly distinct, from one served body
   expect(text(view)).toContain('file-level — no line position, the quote is kept')
 })
 
-test('THE INVARIANT: no served comment exists without a render location', async () => {
-  const { view } = await review()
-  const served = fixtures.placedComments() as unknown as PlacedComments
-  expect(served.comments.length, 'the body carries no comments, so the invariant is untested').toBeGreaterThan(4)
-
-  for (const c of served.comments) {
-    expect(
-      at(view, `[data-comment="${c.id}"]`),
-      `comment ${c.id} has NO render location anywhere on the surface`,
-    ).not.toBeNull()
-  }
-  // And the ones with no live position are on the strip specifically — which is
-  // what the strip exists for.
-  const placed = new Map(served.placements.map((p) => [p.comment_id, p]))
-  const unanchored = served.comments.filter((c) => {
-    const p = placed.get(c.id)
-    return p === undefined || p.anchor === undefined || p.anchor.line_no === 0
-  })
-  expect(unanchored.length, 'no comment in the body lacks a live position').toBeGreaterThan(1)
-  for (const c of unanchored) {
-    expect(
-      at(view, `[data-strip-comment="${c.id}"]`),
-      `comment ${c.id} has no live position and is not on the strip`,
-    ).not.toBeNull()
-  }
-})
+// THE NO-INVISIBLE-COMMENT INVARIANT lives in ONE test, further down: the
+// DOM-driven `D2/D3: EVERY served comment is reachable as a widget or present on
+// the strip`. The version that sat here was written first and is deleted (drain r2
+// R4) rather than kept beside it: its first half asserted a `[data-comment]` node
+// per served comment, which is a property of `comments.map` running, and its second
+// half recomputed the production strip predicate and compared the implementation to
+// a copy of itself — so it passed on the code D2 found broken. Two tests where one
+// is decorative invites trusting the wrong one.
 
 test('an anchored comment renders AT its placement inside the diff', async () => {
   const { view } = await review()
@@ -1193,27 +1184,38 @@ test('D4: the guidance rides the ANSWER in one request, and a refusal writes not
   expect(log.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/comments'))).toHaveLength(0)
 })
 
-test('D5: the comments read is mounted ONCE, measured against this page own baseline', async () => {
+/** ONE mount of a `useLive` hook on this page costs TWO calls, and the 2 is not
+ *  this view's doing. CONVENTIONS §44-B (drain r1, D7) pins the rule as landed
+ *  machinery WITH its own demonstration: the FIRST subscriber opens the source and
+ *  reads once, and every LATER one JOINS — `EventStream.subscribe` hands a joiner
+ *  an immediate synchronous `onResnapshot('connected')` (`events.ts`), and
+ *  `useLive`'s debt rule (only a read that STARTED AFTER the signal clears it)
+ *  then forces a second. Child-ness is NOT the variable, which is what the earlier
+ *  recording of this measurement got wrong: on `/chat`, two SIBLING hooks in one
+ *  component read once and twice respectively. This page's detail hook is the
+ *  opener, so every other hook here — previews, comments — is a joiner at two.
+ *
+ *  A literal is the right pin BECAUSE §44-B already proves it. The earlier form
+ *  compared the comments count to a live `/api/previews` count, which had a real
+ *  blind spot: a second previews subscriber would make it 4 === 4 and pass
+ *  silently, and any change to the try-it block failed this test while naming the
+ *  comment feed as the culprit. The defect these two tests exist for is a SECOND
+ *  comments mount, which costs four against this two. */
+const oneMountedRead = 2
+
+test('D5: the comments read is mounted ONCE, at the §44-B joiner cost', async () => {
   const { log } = await review()
   const comments = log.calls.filter((c) => c.path.includes('/comments')).length
-  // `/api/previews` is one `useLive` on this page, mounted in a child of the
-  // detail exactly as the comment feed is — so it is the page's own floor for what
-  // ONE subscribed read costs on a mount. Asserting against it rather than against
-  // a literal is deliberate: a child-mounted `useLive` reads twice per mount in the
-  // landed machinery (the chat view's exchange sidebar does the same), so a literal
-  // 1 would be asserting a fact about the framework rather than about this view.
-  const baseline = log.calls.filter((c) => c.path === '/api/previews').length
-  expect(baseline, 'the baseline read did not fire, so the comparison proves nothing').toBeGreaterThan(0)
-  expect(comments, `the comments read is mounted twice: ${comments} calls against a ${baseline}-call baseline`).toBe(
-    baseline,
-  )
+  expect(
+    comments,
+    `the comments read is mounted more than once: ${comments} calls where one subscribed mount costs ${oneMountedRead}`,
+  ).toBe(oneMountedRead)
 })
 
 test('D5: an object surface still owns its own comments read', async () => {
   const { log } = await review(imageDeliverableID)
   const comments = log.calls.filter((c) => c.path.includes('/comments')).length
-  const baseline = log.calls.filter((c) => c.path === '/api/previews').length
-  expect(comments, 'a surface with no diff of its own did not read comments exactly once').toBe(baseline)
+  expect(comments, 'a surface with no diff of its own did not read comments exactly once').toBe(oneMountedRead)
 })
 
 test('D11: the object surfaces render the real comment state, not an error', async () => {
@@ -1254,4 +1256,22 @@ test('D14: answerAtDoor refuses a route that escapes the machine surface', async
   expect(apiPath('//evil.invalid/api/x'), 'a protocol-relative host was admitted').toBe(false)
   expect(apiPath('https://evil.invalid/api/x')).toBe(false)
   expect(apiPath('/apiary/x')).toBe(false)
+  // The ENCODED forms (drain r2 R7). `new URL` does not decode `%2f`, so these
+  // resolved to a path still under /api/ while Go's mux — which unescapes and then
+  // cleans — routes them to /evil. The claim is about the result, so the result is
+  // what is checked.
+  expect(apiPath('/api/..%2fevil'), 'an encoded traversal was admitted').toBe(false)
+  expect(apiPath('/api/..%2Fevil'), 'an encoded traversal was admitted').toBe(false)
+  expect(apiPath('/api/%2e%2e/evil'), 'an encoded dot-dot was admitted').toBe(false)
+  expect(apiPath('/api/%2e%2e%2fevil'), 'a fully encoded traversal was admitted').toBe(false)
+  // An encoded DOUBLE separator is admitted, and that is the right answer rather
+  // than a leftover: decoded it is `/api///evil.invalid/x`, which Go's mux cleans to
+  // `/api/evil.invalid/x` — still on the machine surface, so it is a route that does
+  // not exist rather than a route that escapes. Only the `..` families leave.
+  expect(apiPath('/api/%2f%2fevil.invalid/x')).toBe(true)
+  // A malformed escape is refused rather than thrown out of the caller.
+  expect(apiPath('/api/%zz'), 'a malformed escape must be refused, not raised').toBe(false)
+  // And an ordinary encoded segment still passes — a composite ask id carries a
+  // colon, and an encoded one must not become a refusal.
+  expect(apiPath('/api/approvals/ask%3Ax/answer'), 'an ordinary encoded segment was refused').toBe(true)
 })

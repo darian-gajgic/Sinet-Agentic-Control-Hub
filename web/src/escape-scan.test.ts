@@ -10,10 +10,12 @@ import { expect, test } from 'vitest'
  *
  * THE ALLOWLIST IS EMPTY, AND IT NEVER WIDENED (2026-07-30, P3-B6-8).
  *
- * FOUR landed texts — this header, the assertion below, and CONVENTIONS §41-B,
+ * FIVE landed texts — this header, the assertion below, and CONVENTIONS §41-B,
  * §43 and §44-B — promised that the allowlist would widen at B6-8 "with the
- * preview surface it exists for" (the original count of three omitted §44-B,
- * which carries the same promise; all four are corrected). It did not, and the promise was wrong rather than
+ * preview surface it exists for". All five are corrected. The COUNT here was wrong
+ * twice before it was right: it read THREE and enumerated four (§44-B was missing
+ * from both), then FOUR over the same five names (drain r2 R8 — the enumeration was
+ * the part that was always complete). It did not widen, and the promise was wrong rather than
  * unkept: the sanctioned channel landed as an IFRAME BY `src`, which embeds a
  * browsing context BY REFERENCE and trips none of the constructs below. Every
  * banned token is a raw-HTML ASSIGNMENT or a code-execution call; an iframe with

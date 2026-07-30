@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -44,6 +45,55 @@ func (s *Store) putObject(data []byte) (string, error) {
 // ObjectPath returns the on-disk path of a content-addressed object.
 func (s *Store) ObjectPath(sha string) string {
 	return filepath.Join(s.Root, "objects", sha[:2], sha)
+}
+
+// OpenObjectVerified opens a content-addressed object, re-verifies that the bytes
+// on disk hash to the sha in its own name, and hands back a handle rewound to the
+// start — so a caller that STREAMS gets the same guarantee readObject gives a
+// caller that loads (content is never trusted from disk without the pin check).
+//
+// WHY IT IS EXPORTED (P3-B6-8 drain r2 R9, a coordinator-sanctioned narrow touch of
+// this package, on the same grounds as the diff-header deviation: this is the
+// package that owns object identity). The transport object route serves bytes whose
+// sha is in their own URL. Streaming them unverified meant a drifted object was
+// answered 200 with a plausible Content-Length — the response contradicting its own
+// identity — where every in-process read of the same bytes refuses with
+// ErrContentDrift. That is a correctness question, not a hardening preference.
+//
+// The hash is taken over the OPEN handle and the handle is then rewound, rather
+// than read by path twice: what was verified and what is served are the same inode,
+// so an object replaced between the two passes cannot slip through. It is also
+// constant-memory, which is why this is an open rather than a ReadFile — measured
+// on the build host at 3.0-3.9 GB/s (68µs for a 200 KiB image, 5.4ms for 20 MiB),
+// and the route's own `immutable` cache header already suppresses the image trio's
+// repeat reads.
+//
+// The caller owns the returned handle and must Close it; nothing is returned open
+// on any error path.
+func (s *Store) OpenObjectVerified(sha string) (*os.File, os.FileInfo, error) {
+	if len(sha) < 3 {
+		return nil, nil, fmt.Errorf("%w: object ref %q", ErrBadInput, sha)
+	}
+	f, err := os.Open(s.ObjectPath(sha))
+	if err != nil {
+		return nil, nil, fmt.Errorf("review: object %s: %w", sha, err)
+	}
+	info, err := f.Stat()
+	if err == nil {
+		h := sha256.New()
+		if _, err = io.Copy(h, f); err == nil {
+			if hex.EncodeToString(h.Sum(nil)) != sha {
+				f.Close()
+				return nil, nil, fmt.Errorf("%w: object %s bytes hash differently", ErrContentDrift, sha)
+			}
+			_, err = f.Seek(0, io.SeekStart)
+		}
+	}
+	if err != nil {
+		f.Close()
+		return nil, nil, fmt.Errorf("review: object %s: %w", sha, err)
+	}
+	return f, info, nil
 }
 
 // readObject loads an object and re-verifies its hash — content is never

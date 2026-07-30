@@ -47,6 +47,13 @@ import (
 //   - Cross-Origin-Resource-Policy: same-origin keeps a foreign origin from
 //     embedding these bytes, and X-Frame-Options: DENY keeps the response out of
 //     a frame. Neither affects <img>, which is how the trio reads them.
+//
+// AND THE BYTES ARE VERIFIED BEFORE ANY OF THEM IS WRITTEN (drain r2 R9). A route
+// whose URL contains the hash of its own answer cannot serve bytes that hash to
+// something else; that is the response contradicting its own identity, and it is
+// the posture every in-process content read in internal/review already takes. The
+// check is review.OpenObjectVerified — measured, constant-memory, over the same
+// handle that is then streamed.
 
 // inlineObjectTypes is the CLOSED set of recorded object labels served inline,
 // mapped to the Content-Type actually sent. Two forms of each label are admitted
@@ -97,16 +104,16 @@ func (s *Server) handleDeliverableObject(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	f, err := os.Open(s.review.ObjectPath(ref.SHA256))
+	// VERIFY BEFORE SERVE. The sha in the path IS the identity of the answer, so
+	// bytes that hash differently are the response contradicting itself — the store's
+	// own rule for every in-process read, applied to the streaming one. See
+	// review.OpenObjectVerified for the cost measurement and the same-inode reason.
+	f, info, err := s.review.OpenObjectVerified(ref.SHA256)
 	if err == nil {
 		defer f.Close()
-	}
-	var info os.FileInfo
-	if err == nil {
-		info, err = f.Stat()
-	}
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	} else {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			// The row pins a hash whose bytes are gone. That is a platform
 			// integrity failure, not something the caller can ask differently —
 			// the same posture reviewErr takes on ErrContentDrift.
@@ -114,9 +121,17 @@ func (s *Server) handleDeliverableObject(w http.ResponseWriter, r *http.Request)
 				"deliverable", d.ID, "sha", ref.SHA256, "err", err)
 			s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusInternalServerError, Code: "content_drift",
 				Msg: "this revision pins an object whose bytes are not in the object dir (S13.1 retention)"})
-			return
+		case errors.Is(err, review.ErrContentDrift):
+			// The bytes are there and are NOT the bytes this URL names. Same
+			// vocabulary as the missing case and as reviewErr's — one posture for
+			// one class, rather than a second word for the same failure.
+			s.logger.Error("objects: pinned object bytes do not match their hash",
+				"deliverable", d.ID, "sha", ref.SHA256, "err", err)
+			s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusInternalServerError, Code: "content_drift",
+				Msg: "this revision pins an object whose stored bytes hash differently (S13.2 content addressing)"})
+		default:
+			s.writeSurface(w, nil, fmt.Errorf("open object %s: %w", ref.SHA256, err))
 		}
-		s.writeSurface(w, nil, fmt.Errorf("open object %s: %w", ref.SHA256, err))
 		return
 	}
 

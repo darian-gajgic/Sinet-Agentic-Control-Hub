@@ -198,18 +198,21 @@ func TestObjectBytesNeverBecomeASecondRawHTMLChannel(t *testing.T) {
 	}
 }
 
-// TestObjectBytesLengthComesFromTheFileNotTheRecordedSize is the D10 check.
+// TestObjectBytesRefuseADriftedObjectInsteadOfServingIt is drain r2 R9, and it is
+// what the D10 drift test became.
 //
-// The handler already refuses to serve when the pinned bytes are MISSING; taking
-// the length from the ref while streaming the file was the same drift left
-// unhandled one step further in — a recorded size larger than the file
-// short-writes, a smaller one truncates. The length now comes from the file, so the
-// two cannot disagree.
-func TestObjectBytesLengthComesFromTheFileNotTheRecordedSize(t *testing.T) {
+// D10 fixed the LENGTH (it came from the recorded size while the body came from the
+// file, so the two could disagree) and left the referral: the route still streamed
+// without the hash re-check `review.Store.readObject` performs, so a drifted object
+// was answered 200 with a now-plausible Content-Length. A URL that CONTAINS the hash
+// of its own answer cannot do that — it is the response contradicting its own
+// identity — so the bytes are verified before any of them is written, and drift
+// takes the same `content_drift` posture the missing-bytes case already took.
+func TestObjectBytesRefuseADriftedObjectInsteadOfServingIt(t *testing.T) {
 	o := newObjectEnv(t)
 	// The ROW cannot drift — a minted revision is immutable by trigger, which is
 	// the store protecting its own record. So the drift is where it really happens:
-	// the bytes on disk move and the recorded size does not.
+	// the bytes on disk move underneath a hash that still names the old ones.
 	path := o.e.rev.ObjectPath(o.imageSHA)
 	drifted := []byte("\x89PNG\r\n\x1a\nPIXELS-AND-MORE")
 	if err := os.WriteFile(path, drifted, 0o600); err != nil {
@@ -217,26 +220,64 @@ func TestObjectBytesLengthComesFromTheFileNotTheRecordedSize(t *testing.T) {
 	}
 
 	rr := o.get(t, "alice", "d-shot", o.imageSHA)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("read: %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("a drifted object must be refused, got %d %s", rr.Code, rr.Body.String())
 	}
-	body := rr.Body.String()
-	if got := rr.Header().Get("Content-Length"); got != strconv.Itoa(len(drifted)) {
-		t.Errorf("Content-Length must be the FILE's length (%d), got %q with a %d-byte body",
-			len(drifted), got, len(body))
+	if body := rr.Body.String(); !strings.Contains(body, "content_drift") {
+		t.Errorf("the refusal must carry the platform's own content_drift code, got %s", body)
 	}
-	if body != string(drifted) {
-		t.Errorf("the served bytes are not the file's bytes: %q", body)
+	// And not one drifted byte reached the caller alongside the refusal.
+	if body := rr.Body.String(); strings.Contains(body, "PIXELS-AND-MORE") {
+		t.Errorf("drifted bytes were written before the refusal: %q", body)
 	}
-	// ⚠ REPORT, adjacent and NOT fixed here: this route streams the object without
-	// the hash re-check `review.Store.readObject` performs ("content is never
-	// trusted from disk without the pin check"). The length is now self-consistent
-	// with what is served, but a drifted object is served rather than refused with
-	// the `content_drift` answer the handler already gives when bytes are missing
-	// entirely. Closing it means either hashing on every read — a real cost for the
-	// image trio, which re-reads the same objects per mode — or exporting the
-	// store's verified read, which widens internal/review again. Referral, not a
-	// silent choice.
+	// The sibling object is untouched, so the refusal is about THESE bytes and not
+	// a route that stopped working.
+	if ok := o.get(t, "alice", "d-blob", o.blobSHA); ok.Code != http.StatusOK {
+		t.Errorf("an intact object must still serve: %d %s", ok.Code, ok.Body.String())
+	}
+}
+
+// TestObjectBytesLengthComesFromTheFileNotTheRecordedSize keeps D10's guarantee now
+// that a drifted object is refused rather than served, which is what D10 used to
+// drive it with.
+//
+// The length still must not come from `ref.Size`: it comes from the file, through
+// http.ServeContent, which is also what answers HEAD and Range by construction. A
+// RANGE read is the non-tautological driver — a handler that set Content-Length from
+// the recorded size and copied the file would answer 200 with the whole body, so
+// only arithmetic done over what is actually being served can produce this answer.
+func TestObjectBytesLengthComesFromTheFileNotTheRecordedSize(t *testing.T) {
+	o := newObjectEnv(t)
+	full := "\x89PNG\r\n\x1a\nPIXELS"
+
+	req := httptest.NewRequest("GET", "/api/deliverables/d-shot/objects/"+o.imageSHA, nil)
+	req.Header.Set("Range", "bytes=8-13")
+	rr := httptest.NewRecorder()
+	o.e.server("alice").Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusPartialContent {
+		t.Fatalf("a range read must be answered from the file: %d %s", rr.Code, rr.Body.String())
+	}
+	if got, want := rr.Body.String(), full[8:14]; got != want {
+		t.Errorf("the range body is %q, want %q", got, want)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "6" {
+		t.Errorf("Content-Length must be the SERVED length, got %q", got)
+	}
+	if got, want := rr.Header().Get("Content-Range"), "bytes 8-13/"+strconv.Itoa(len(full)); got != want {
+		t.Errorf("Content-Range %q, want %q", got, want)
+	}
+
+	// And a HEAD carries the whole file's length with no body — the same machinery,
+	// asserted so "ServeContent handles it" is checked rather than assumed.
+	head := httptest.NewRequest("HEAD", "/api/deliverables/d-shot/objects/"+o.imageSHA, nil)
+	hr := httptest.NewRecorder()
+	o.e.server("alice").Handler().ServeHTTP(hr, head)
+	if hr.Code != http.StatusOK || hr.Body.Len() != 0 {
+		t.Errorf("HEAD: %d with a %d-byte body", hr.Code, hr.Body.Len())
+	}
+	if got := hr.Header().Get("Content-Length"); got != strconv.Itoa(len(full)) {
+		t.Errorf("HEAD Content-Length %q, want %d", got, len(full))
+	}
 }
 
 // TestObjectBytesAreCachedByTheirOwnHash pins the content-addressed posture: the

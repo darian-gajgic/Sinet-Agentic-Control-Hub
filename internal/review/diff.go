@@ -76,14 +76,29 @@ func gitDiff(name, oldContent, newContent string) (string, error) {
 // A refused name yields the EMPTY label, which leaves git's own output untouched —
 // honest and readable — rather than silently emitting a mangled header.
 func diffLabel(name string) string {
-	// A leading separator would compose `a//abs/path`, so the label is always the
-	// repo-relative form.
-	clean := strings.TrimPrefix(filepath.ToSlash(name), "/")
+	// git prints the label under the a/ b/ prefixes, so a leading separator would
+	// compose `a//abs/path`. TrimPrefix stripped exactly ONE, so `//abs/path` still
+	// composed it and `///x` composed `a///x` — the comment claimed a property the
+	// code did not have (drain r2 R6). TrimLeft makes the claim true: the label is
+	// always the repo-relative form.
+	clean := strings.TrimLeft(filepath.ToSlash(name), "/")
 	if clean == "" {
 		return ""
 	}
 	if strings.ContainsAny(clean, "\n\r\t") || strings.Contains(clean, " b/") {
 		return ""
+	}
+	// A `..` segment is REFUSED rather than passed through (drain r2 R6). This is
+	// not a traversal fix — nothing resolves the label against a filesystem, and
+	// the served header is read as an identity string by the widget's parse and by
+	// the anchor model. It is refused because that identity is what the label is
+	// FOR: `../../etc/passwd` reaching a header would have the diff claim a path
+	// the deliverable does not own, and the same TrimLeft above exists so a label
+	// cannot claim an absolute one. The empty label is the honest answer for both.
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == ".." {
+			return ""
+		}
 	}
 	return clean
 }

@@ -234,16 +234,46 @@ func TestDiffLabelRefusesAHeaderForgingName(t *testing.T) {
 	if got := diffLabel("a.ts b/b.ts"); got != "" {
 		t.Errorf("an ambiguous name must be refused, got %q", got)
 	}
-	// The cosmetics: a leading separator would compose `a//abs/path`.
-	if got := diffLabel("/site/app.ts"); got != "site/app.ts" {
-		t.Errorf("a leading separator must not survive into the header, got %q", got)
+	// A leading separator would compose `a//abs/path`. EVERY leading separator is
+	// stripped, not one: `TrimPrefix` left `//abs/path` composing exactly the header
+	// the comment said it prevented, and `///x.ts` composing `a///x.ts` (drain r2
+	// R6 — the landed test only ever tried one slash).
+	for name, want := range map[string]string{
+		"/site/app.ts":   "site/app.ts",
+		"//site/app.ts":  "site/app.ts",
+		"///site/app.ts": "site/app.ts",
+	} {
+		if got := diffLabel(name); got != want {
+			t.Errorf("diffLabel(%q) = %q, want %q — a leading separator survived", name, got, want)
+		}
+		abs, err := gitDiff(name, "one\n", "two\n")
+		if err != nil {
+			t.Fatalf("gitDiff %q: %v", name, err)
+		}
+		if strings.Contains(abs, "a//") {
+			t.Errorf("a doubled separator reached the header for %q:\n%s", name, abs)
+		}
 	}
-	abs, err := gitDiff("/site/app.ts", "one\n", "two\n")
+
+	// A `..` segment is refused, so a label can never claim a path outside the tree
+	// the revision describes. Nothing resolves it as a filesystem path — the refusal
+	// is about the header being an IDENTITY, which `../../etc/passwd` is not.
+	for _, escaping := range []string{"../../etc/passwd", "site/../../etc/passwd", "..", "a/../b.ts"} {
+		if got := diffLabel(escaping); got != "" {
+			t.Errorf("diffLabel(%q) = %q, want the empty label", escaping, got)
+		}
+	}
+	esc, err := gitDiff("../../etc/passwd", "one\n", "two\n")
 	if err != nil {
-		t.Fatalf("gitDiff abs: %v", err)
+		t.Fatalf("gitDiff escaping: %v", err)
 	}
-	if strings.Contains(abs, "a//") {
-		t.Errorf("a doubled separator reached the header:\n%s", abs)
+	if strings.Contains(esc, "etc/passwd") {
+		t.Errorf("an escaping label reached the served header:\n%s", esc)
+	}
+	// And a name that merely CONTAINS dots is not a `..` segment, so the check is a
+	// boundary and not a wall on ordinary filenames.
+	if got := diffLabel("site/..hidden/v1.2.ts"); got != "site/..hidden/v1.2.ts" {
+		t.Errorf("an ordinary dotted name must pass, got %q", got)
 	}
 	// The ordinary name still passes, so the check is a boundary and not a wall.
 	if got := diffLabel("site/release.tsx"); got != "site/release.tsx" {

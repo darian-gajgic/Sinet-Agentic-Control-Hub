@@ -1301,11 +1301,27 @@ export type ChatSessionDeleted = { session_id: string; messages: number; turns: 
  * the only way the answer matches what the request would actually do: a prefix test
  * accepts `/api/../evil`, which resolves off the machine surface entirely. A route
  * naming another origin is refused for the same reason.
+ *
+ * AND IT RESOLVES THE DECODED FORM, because the browser is not the only resolver.
+ * The `URL` constructor leaves `%2f` alone, so `/api/..%2fevil` resolved to a path
+ * still under `/api/` while the SERVER — Go's mux, which unescapes and then cleans —
+ * routes it to `/evil` (drain r2 R7). The claim this check makes is about the
+ * RESULT, so it decodes once (once, because the server decodes once: `%252f` stays
+ * a literal `%2f` there too) and re-resolves before deciding. A malformed escape is
+ * refused rather than guessed at.
  */
 export function apiPath(route: string): boolean {
   if (!route.startsWith('/')) return false
   const resolved = new URL(route, 'https://sinet.invalid')
-  return resolved.origin === 'https://sinet.invalid' && resolved.pathname.startsWith('/api/')
+  if (resolved.origin !== 'https://sinet.invalid') return false
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(resolved.pathname)
+  } catch {
+    return false
+  }
+  const settled = new URL(decoded, 'https://sinet.invalid')
+  return settled.origin === 'https://sinet.invalid' && settled.pathname.startsWith('/api/')
 }
 
 /** query builds a search string, dropping unset filters rather than sending
