@@ -56,13 +56,17 @@ test('every bucket is filled from served rows, and no run falls off the screen',
   const buckets = bucketRuns(runs, fixtureNow)
   const by = (id: string) => buckets.find((b) => b.id === id)!.runs.map((r) => r.run_id)
 
-  // Two running runs: the release run and the intake run of the task the S15.7
-  // handoff gave birth to (B6-7 D2 made that task and its run real rows, because
-  // `asks.run_id` is a foreign key and its born card had to be a real ask).
-  expect(by('running').sort()).toEqual(['r-ship', 't-chatborn.intake'])
+  expect(by('running')).toEqual(['r-ship'])
   // Three queued runs: two of alice's and the operator's own.
   expect(by('queued').sort()).toEqual(['r-archive', 'r-ops', 'r-triage'])
-  expect(by('blocked'), 'the run with an open ask is not under the human bucket').toEqual(['r-audit'])
+  // Two runs are waiting on a person — bob's price audit and the intake run of
+  // the task the S15.7 handoff gave birth to — and they are listed in the order
+  // the server sent them, because `bucketRuns` pushes in served order and the
+  // client never re-ranks. `waiting_on_human` is a SERVED flag (parked AND an
+  // open ask), so this is what fills the bucket: `r-ship` is running with two
+  // open asks of its own and is correctly not here.
+  expect(by('blocked'), 'the human bucket is not the served waiting-on-human set, in served order')
+    .toEqual(['t-chatborn.intake', 'r-audit'])
   expect(by('parked'), 'blocked-on-a-human must not also appear as merely parked').toEqual(['r-stall'])
   expect(by('finished')).toEqual(['r-notes'])
   // `claimed` is named by none of the five buckets — and is still on screen.
@@ -117,6 +121,43 @@ test('the gauge assumption is stated, pressure is absent without a denominator, 
   expect(meters.lanes.every((l) => !l.budget_declared)).toBe(true)
   expect(text).toContain('no budget declared')
   view.unmount()
+})
+
+test('the lane figures and the per-person run counts agree with the served runs body', () => {
+  // The meters and the runs list are two reads of ONE world, so their figures are
+  // checkable against each other rather than taken on trust — and until now they
+  // were not: MissionControl renders "{active} of {total}" and Fleet renders the
+  // active count, but no assertion over the shared world touched either number,
+  // so a world change moved them silently (drain r2 R6). These are the server's
+  // own definitions read back, never a client computation: `total_runs` is every
+  // run of an (owner, lane), `active_runs` the non-terminal ones, `parked_runs`
+  // the parked ones, and `per_person.runs` every run a person owns.
+  const runs = servedRuns()
+  const meters = servedMeters()
+  const active = new Set(['new', 'queued', 'claimed', 'running', 'parked', 'draining'])
+  expect(meters.lanes.length, 'the lane table is empty, so the loop below would assert nothing').toBeGreaterThan(0)
+  for (const lane of meters.lanes) {
+    const own = runs.filter((r) => r.owner === lane.owner && r.lane === lane.lane)
+    expect(lane.total_runs, `${lane.owner}/${lane.lane} total_runs`).toBe(own.length)
+    expect(lane.active_runs, `${lane.owner}/${lane.lane} active_runs`).toBe(
+      own.filter((r) => active.has(r.state)).length,
+    )
+    expect(lane.parked_runs, `${lane.owner}/${lane.lane} parked_runs`).toBe(
+      own.filter((r) => r.state === 'parked').length,
+    )
+  }
+  // The per-person grain, the same way. Its `unpriced_runs` column is NOT
+  // checkable from here — it counts receipts, which the runs list does not carry
+  // — so that one figure stays guarded by the Go byte-compare alone, said out
+  // loud rather than implied.
+  const answer = meters.per_person.answer!
+  const person = answer.columns.indexOf('user_id')
+  const count = answer.columns.indexOf('runs')
+  expect(answer.rows.length, 'the per-person view is empty').toBeGreaterThan(0)
+  for (const row of answer.rows) {
+    const owner = row[person] as string
+    expect(row[count], `${owner} runs`).toBe(runs.filter((r) => r.owner === owner).length)
+  }
 })
 
 test('burn rates render at the served per-person grain and are never re-grained onto lanes', () => {
@@ -183,6 +224,49 @@ test('choosing a view asks for it and renders the answer with its layer and conf
   expect(answer.textContent).toContain('r-ship')
   // The view's own plain-language note rides the answer.
   expect(answer.textContent).toContain('NO-RECEIPT')
+  view.unmount()
+})
+
+test('choosing a catalog question asks the Layer-1 route and renders its canned answer', async () => {
+  // The Layer-1 DIRECT leg of the same picker, from the committed body. It had
+  // no test at all, which is why `history-query-answer.json` was a golden file
+  // no web assertion read — its rows grew with the world and nothing here would
+  // have noticed (drain r2 R6). `status.runs_active` declares no slots, so the
+  // Ask button is the whole gesture.
+  const routes = oversightRoutes()
+  routes['GET /api/events/query/status.runs_active'] = { body: fixtures.historyQueryAnswer() }
+  scriptedFetch(routes)
+  window.history.replaceState(null, '', '/')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const select = [...view.container.querySelectorAll('.history-choices select')][1] as HTMLSelectElement
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
+    setter.call(select, 'status.runs_active')
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await flush()
+  const ask = [...view.container.querySelectorAll('.history-slots button')][0] as HTMLButtonElement
+  act(() => ask.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await flush()
+
+  const answer = view.container.querySelector('.history .answer')!
+  expect(answer.getAttribute('data-layer')).toBe('1')
+  // A catalog query is CANNED, never `deterministic`: the confidence is the
+  // store's own reading of the layer and this surface serves it as-is.
+  expect(answer.getAttribute('data-confidence')).toBe('canned')
+  // And the answer's rows are the served rows — including the intake run of the
+  // chat-born task, which is `parked` because the pipeline parks a run when it
+  // issues a card. A run holding an open interview card cannot read `running`.
+  const served = fixtures.historyQueryAnswer() as unknown as Answer
+  expect(answer.querySelectorAll('tbody tr')).toHaveLength(served.rows.length)
+  const born = served.rows.find((r) => r[0] === 't-chatborn.intake')!
+  expect(born, 'the served body no longer carries the chat-born run').toBeDefined()
+  expect(born[served.columns.indexOf('state')], 'a run holding an open interview card cannot read running: the pipeline parks it in the same transaction that issues the card')
+    .toBe('parked')
+  const bornRow = [...answer.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('t-chatborn.intake'))
+  expect(bornRow?.textContent, 'the served state did not reach the screen').toContain('parked')
   view.unmount()
 })
 

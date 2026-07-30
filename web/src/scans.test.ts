@@ -245,3 +245,25 @@ test('no view re-declares a REGISTERED answer vocabulary as its own literal', ()
     expect(served, `the served vocabulary does not carry ${literal}`).toContain(literal)
   }
 })
+
+test('every golden double is consumed by something — a fixture nothing reads is a guard nobody has', () => {
+  // §42 ties the web views to the served bodies by having the vitest doubles
+  // import the SAME files the Go assertor writes. A double nothing calls breaks
+  // the tie silently: the body keeps being produced and byte-compared on the Go
+  // side, while the web side looks guarded and is not — which is how
+  // `history-query-answer.json` grew a row with no web assertion in the world
+  // able to see it (drain r2 R6). This scan is what makes that a failure.
+  const doubles = sources['./doubles.ts']
+  const block = /export const fixtures = \{([\s\S]*?)\n\}/.exec(doubles)
+  expect(block, 'the fixtures object moved — this scan reads its keys out of doubles.ts').not.toBeNull()
+  const keys = [...block![1].matchAll(/^ {2}([A-Za-z0-9_]+):/gm)].map((m) => m[1])
+  expect(keys.length, 'no fixture keys were found, so the check below would pass over nothing').toBeGreaterThan(20)
+
+  const dead = (names: string[]) => {
+    const everywhere = Object.values(sources).join('\n')
+    return names.filter((k) => !new RegExp(`fixtures\\.${k}\\b`).test(everywhere))
+  }
+  expect(dead(keys), 'a golden body is imported and exported but never read by any test').toEqual([])
+  // Probe: the scan can fail. A name no test could be calling is reported.
+  expect(dead(['aDoubleNothingCalls'])).toEqual(['aDoubleNothingCalls'])
+})

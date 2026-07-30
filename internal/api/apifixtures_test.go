@@ -150,12 +150,9 @@ func fixtureWorld(t *testing.T) *backend {
 		// one act that mints a TASK-SCOPED decision carrying the D10 operator
 		// limb, so it is what the task page can render "(as operator)" from.
 		{"t-ops", "op", "Rotate the household keys", "intake", fxT4},
-		// The task the S15.7 handoff gives birth to. Its ask row is what lets the
-		// chat feed answer the born card in place through the real approvals verb
-		// (drain r1 D2), and `asks.run_id` is a FOREIGN KEY — so the run and the
-		// task it belongs to have to be real rows too. That is the honest
-		// direction: the chat fixture already claims this task exists.
-		{"t-chatborn", "alice", "Draft the release notes", "intake", fxT2},
+		// The chat-born task is NOT here: it is seeded after driveFixtureChat, by
+		// seedFixtureChatBornTask, so no turn can answer with a row the
+		// conversation had not yet created.
 	} {
 		exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
 			tk.id, tk.owner, tk.title, tk.kanban, tk.created)
@@ -179,9 +176,6 @@ func fixtureWorld(t *testing.T) *backend {
 		{"r-stall", "bob", "t-stall", "parked", "zai", fxT4},
 		{"r-claim", "alice", "t-claim", "claimed", "anthropic", fxT4},
 		{"r-ops", "op", "t-ops", "queued", "anthropic", fxT4},
-		// The born task's intake run, in the state its own served summary
-		// declares (`running`), so the two agree.
-		{"t-chatborn.intake", "alice", "t-chatborn", "running", "anthropic", fxT2},
 	} {
 		exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
 		            VALUES (?,?,?,?,?,0,?,?)`, r.id, r.owner, r.task, r.state, r.lane, r.created, r.created)
@@ -217,14 +211,7 @@ func fixtureWorld(t *testing.T) *backend {
 		// — was unobservable: removing the filter changed nothing anybody could
 		// see. The three now overlap on `replan` and diverge everywhere else.
 		{"ask-sweep", "r-archive", "question", fixtureTrivialCoverageCard(t)},
-		// The chat-born task's OPEN INTAKE CARD, as a REAL ask row (B6-7 part-B
-		// drain r1, D2). The chat feed renders this card in place and answers it
-		// through the LANDED approvals verb, which pins an answer to the card's
-		// own payload hash — so the widget needs a body where that hash, the
-		// derived action vocabulary and `answerable` are the REAL projector's.
-		// The snapshot is the SAME fixtureChatBornCard the handoff view carries:
-		// one card value, two renderings, so the queue and the feed cannot drift.
-		{"ask-chatborn-1", "t-chatborn.intake", "question", fixtureChatBornCard(t)},
+		// The chat-born card is NOT here either — see seedFixtureChatBornTask.
 	} {
 		exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
 			a.id, a.run, "alice", a.snapshot, a.status, fxT2)
@@ -324,7 +311,50 @@ func fixtureWorld(t *testing.T) *backend {
 	driveFixtureMemoryConflict(t, b)
 	driveFixtureSettings(t, b)
 	driveFixtureChat(t, b)
+	seedFixtureChatBornTask(t, b)
 	return b
+}
+
+// seedFixtureChatBornTask puts the task the S15.7 handoff gives birth to into
+// the world: the task, its intake run, and the OPEN INTAKE CARD as a real
+// `asks` row served through the real projection (drain r1 D2 — the chat feed
+// answers that card in place through the LANDED approvals verb, which pins an
+// answer to the card's own payload hash, so the widget needs a queue row where
+// the hash, the derived action vocabulary and `answerable` are the REAL
+// projector's). The snapshot is the SAME fixtureChatBornCard the handoff view
+// carries: one card value, two renderings, so the queue and the feed cannot
+// drift.
+//
+// WHY THESE ROWS ARE SEEDED AT ALL, precisely. This world's intake seam is
+// fixtureIntake — a double, because internal/api never speaks the pipeline's
+// vocabulary — so no handoff turn births anything here. In PRODUCTION the born
+// rows arrive in two instalments, and neither one produces an ask at handoff
+// time: `stage.Surface.Submit` calls `intake.Pipeline.Start`, which inserts the
+// task and its `<task>.intake` run and NOTHING ELSE (intake/pipeline.go's
+// birth transaction — task, run, first state event), and the interview card is
+// issued LATER by `intake`'s issueCard, which inserts the ask row and
+// TRANSITIONS THE RUN TO `parked` in the same transaction ("gates wait",
+// S06.1). So a task holding an open interview card has a PARKED intake run —
+// `running` beside an open ask is a state the intake pipeline cannot produce,
+// and TestFixtureBornTaskStateIsOneTheIntakePipelineProduces reads that rule
+// out of the pipeline's own source rather than trusting this comment.
+//
+// WHY AFTER driveFixtureChat. Nothing in the chat drive reads these rows — the
+// handoff answers off the fixtureIntake seam, not the DB — and the ask is only
+// needed when the committed BODIES are read, which is after fixtureWorld
+// returns. Seeded at the top of the world instead, the born run appeared in
+// turn 1's `cost_per_run` answer: the conversation's FIRST answer reported the
+// run of a task the conversation gives birth to two turns later. Served order
+// is unaffected either way (`/api/runs` orders by created_ts, run_id).
+func seedFixtureChatBornTask(t *testing.T, b *backend) {
+	t.Helper()
+	exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
+		"t-chatborn", "alice", "Draft the release notes", "intake", fxT2)
+	exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
+	            VALUES (?,?,?,?,?,0,?,?)`,
+		"t-chatborn.intake", "alice", "t-chatborn", "parked", "anthropic", fxT2, fxT2)
+	exec(t, b, `INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts) VALUES (?,?,?,?,?,?)`,
+		"ask-chatborn-1", "t-chatborn.intake", "alice", fixtureChatBornCard(t), "question", fxT2)
 }
 
 // driveFixtureChat seeds the S15.7 assistant world THROUGH ITS REAL VERBS
@@ -1111,8 +1141,20 @@ func (f fixtureIntake) Submit(_ context.Context, userID string, body json.RawMes
 		Clearance: fixtureChatBornClearance,
 		OpenAskID: "ask-chatborn-1",
 		OpenCard:  json.RawMessage(fixtureChatBornCard(f.t)),
+		// `parked`, because this view carries an OPEN interview card and the
+		// pipeline parks the run in the same transaction that issues one
+		// (intake's issueCard: "gates wait", S06.1) — so the view and the seeded
+		// world state agree, and neither is a state the pipeline cannot reach.
+		//
+		// The one fidelity gap left standing, stated rather than papered over:
+		// the REAL Submit returns BEFORE any card is issued (Start births the
+		// task and run; the card comes later), so production's first handoff
+		// response carries no open card at all and the feed would meet it on a
+		// re-read. Rendering the card in place is OQ8(i) as dispositioned, and
+		// closing the gap is a producer/coordinator question — recorded on the
+		// B6 gate list in §44-B, not decided inside a widget drain.
 		Runs: []fixtureRunSummary{
-			{RunID: "t-chatborn.intake", Role: "intake", State: "running", HasReceipt: false},
+			{RunID: "t-chatborn.intake", Role: "intake", State: "parked", HasReceipt: false},
 		},
 	}
 	return json.Marshal(view)
@@ -1441,6 +1483,106 @@ func TestWebAPIFixturesAreStable(t *testing.T) {
 			t.Errorf("%s is not byte-stable across two identical seedings — it carries a live reading, "+
 				"so it cannot be a committed fixture:\n%s\n%s", fx.path, first, second)
 		}
+	}
+}
+
+// TestFixtureBornTaskStateIsOneTheIntakePipelineProduces guards the state
+// seedFixtureChatBornTask puts the born task in — against the rule the pipeline
+// ENFORCES, not against a value somebody remembered.
+//
+// The B6-5 root cause was a fixture world that cannot exist, and the shape it
+// takes here is a run state. `issueCard` inserts the ask row and parks the run
+// in ONE transaction, so a task whose intake card is open and whose run reads
+// `running` is a world production can never reach — and it is not a harmless
+// wrongness: `waiting_on_human` is derived as parked AND an open ask
+// (projection.go), so the impossible row would sit in mission control's running
+// bucket and answer the `running` filter while the task actually waits on a
+// person.
+func TestFixtureBornTaskStateIsOneTheIntakePipelineProduces(t *testing.T) {
+	// The rule, read out of the pipeline's own source. If intake ever stops
+	// parking on a gate, this fails HERE — naming the fixture that would have
+	// gone quietly wrong — rather than leaving this file's comment to be trusted.
+	src, err := os.ReadFile("../intake/pipeline.go")
+	if err != nil {
+		t.Fatalf("read the intake pipeline: %v", err)
+	}
+	const marker = "func (p *Pipeline) issueCard("
+	from := strings.Index(string(src), marker)
+	if from < 0 {
+		t.Fatalf("%s is gone from internal/intake — the rule this test reads has moved", marker)
+	}
+	body := string(src)[from:]
+	if end := strings.Index(body[len(marker):], "\nfunc "); end >= 0 {
+		body = body[:len(marker)+end]
+	}
+	if !strings.Contains(body, "insertAskTx") || !strings.Contains(body, "run.StateParked") {
+		t.Fatalf("issueCard no longer inserts the ask AND parks the run in one place — re-read S06.1 before trusting the fixture:\n%s", body)
+	}
+
+	b := fixtureWorld(t)
+	var runID, state string
+	if err := b.db.QueryRowContext(context.Background(),
+		`SELECT r.run_id, r.state FROM asks a JOIN runs r ON r.run_id = a.run_id
+		  WHERE a.ask_id = ? AND a.answered_ts IS NULL`, "ask-chatborn-1").Scan(&runID, &state); err != nil {
+		t.Fatalf("read the born card's run: %v", err)
+	}
+	if state != "parked" {
+		t.Errorf("%s holds an OPEN intake card in state %q — the pipeline parks a run when it issues a card, so this world cannot exist",
+			runID, state)
+	}
+	// And the handoff view the chat feed renders says the same thing, so the
+	// transcript and the world do not contradict each other.
+	handoff, err := fixtureIntake{t: t}.Submit(context.Background(), "alice", json.RawMessage(`{"title":"Draft the release notes"}`))
+	if err != nil {
+		t.Fatalf("fixture Submit: %v", err)
+	}
+	var view struct {
+		Runs []struct {
+			RunID string `json:"run_id"`
+			State string `json:"state"`
+		} `json:"runs"`
+	}
+	decodeInto(t, string(handoff), &view)
+	for _, r := range view.Runs {
+		if r.RunID == runID && r.State != state {
+			t.Errorf("the handoff view calls %s %q while the world stores %q", runID, r.State, state)
+		}
+	}
+}
+
+// TestChatTranscriptNeverAnswersWithARowItHasNotYetCreated pins the ORDER the
+// fixture world is seeded in, from the outside.
+//
+// A transcript reads forward. Turn 1 is a Layer-0 `cost_per_run` answer over
+// every run in the world and turn 3 is the handoff that gives birth to
+// `t-chatborn`, so seeding the born rows before the chat drive made the
+// conversation's FIRST answer report the run of a task the conversation had not
+// created — a causality inversion in the flagship committed transcript. The
+// answers are real reads, so the only fix is the seeding order, and this is what
+// keeps it.
+func TestChatTranscriptNeverAnswersWithARowItHasNotYetCreated(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(fixtureDir, "chat-session.json"))
+	if err != nil {
+		t.Fatalf("read the committed session body: %v", err)
+	}
+	var body struct {
+		Turns []chat.Turn `json:"turns"`
+	}
+	decodeInto(t, string(raw), &body)
+	born := false
+	for i, turn := range body.Turns {
+		// The handoff turn is where the birth belongs: its own outcome IS the born
+		// task. Every turn before it must not know the name.
+		if turn.Kind == chat.KindTask {
+			born = true
+		}
+		if !born && strings.Contains(string(turn.Outcome), "t-chatborn") {
+			t.Errorf("turn %d (%s, kind %q) already names t-chatborn, and no earlier turn gave birth to it",
+				i+1, turn.ID, turn.Kind)
+		}
+	}
+	if !born {
+		t.Error("the committed transcript has no handoff turn — this test would then be vacuous")
 	}
 }
 
