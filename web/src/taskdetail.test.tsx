@@ -6,7 +6,7 @@ import { ReceiptView } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
 import { EventStream } from './events'
-import { flush, mount } from './testing'
+import { click, flush, mount } from './testing'
 
 /**
  * Task detail (Spec S15.5 ¶3; 9.2; S2.2; S2.4; §38 ruling (a); G2 D2.8),
@@ -387,4 +387,470 @@ test('the D10 operator limb renders as "(as operator)" (drain r2 R2)', async () 
   // own task carry no operator marker.
   const { view: mine } = await task('t-ship', detailRoutes())
   expect(mine.container.textContent, 'a member act was marked as the operator&apos;s').not.toContain('(as operator)')
+})
+
+// ── feature 4.5: cancel, state-computed and honest (P3-UI-2 R3–R8) ────────
+//
+// EVERY SCRIPTED BODY BELOW IS TRANSCRIBED FROM ITS GO SOURCE, cited inline. A
+// hand-written response that drifts from the handler is a test that proves
+// nothing about production (§42's own root-cause lesson), so the shapes come
+// from `stage.CancelOutcome` / `stage.TaskCancelOutcome`
+// (internal/stage/cancel.go:128–148) and the refusal codes from `mapCancelErr`
+// (internal/stage/surface.go:257–274).
+
+/** withRuns re-serves the golden task detail with a chosen set of run states.
+ *  The BODY is the fixture's; only the FSM states vary, and they are
+ *  internal/run/run.go:40–52's own vocabulary. */
+function withRuns(states: string[]): Detail {
+  const detail = fixtures.taskDetail() as unknown as Detail
+  const seed = detail.runs[0]
+  detail.runs = states.map((state, i) => ({ ...seed, run_id: `r-${state}-${String(i)}`, state }))
+  return detail
+}
+
+const allStates = [
+  'new',
+  'queued',
+  'claimed',
+  'running',
+  'draining',
+  'parked',
+  'completed',
+  'crashed',
+  'finalized',
+  'tombstoned',
+  'died-at-gate',
+]
+
+/** The mapping's own detail strings, verbatim from internal/stage/cancel.go. */
+const detailRunningCancelled =
+  'running work cancelled: the run completes carrying the cancel reason (§14 reading 9)' // cancel.go:281
+const detailParkedCancelled = 'parked work cancelled: finalize-with-card, no resume edge (§14 reading 9)' // cancel.go:305
+const detailAlreadyEnded = 'the run had already ended; nothing was cancelled' // cancel.go:255
+const detailCrashed = 'the run already crashed; the recovery ladder owns its disposition (S02.5)' // cancel.go:262
+
+test('cancel renders on exactly the six non-terminal states and on no terminal one', async () => {
+  const detail = withRuns(allStates)
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+
+  const offered = [...view.container.querySelectorAll('[data-cancel-run]')].map((n) =>
+    n.getAttribute('data-cancel-run'),
+  )
+  // The six the ratified mapping has an edge for — and NOT completed, crashed,
+  // finalized, tombstoned or died-at-gate, each of which the verb answers with
+  // an honest no-op rather than a cancellation.
+  expect(offered).toEqual([
+    'r-new-0',
+    'r-queued-1',
+    'r-claimed-2',
+    'r-running-3',
+    'r-draining-4',
+    'r-parked-5',
+  ])
+  // Non-tautological control: every state really is on the page, so the six
+  // above are a filter rather than a short fixture.
+  expect([...view.container.querySelectorAll('.run-receipt')].length).toBe(allStates.length)
+})
+
+test('the task-level control appears only while some run of the task has not ended', async () => {
+  const live = withRuns(['completed', 'parked'])
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: live } })
+  expect(view.container.querySelector('[data-cancel="task"]')).not.toBeNull()
+
+  const over = withRuns(['completed', 'crashed', 'tombstoned'])
+  const { view: done } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: over } })
+  expect(
+    done.container.querySelector('[data-cancel="task"]'),
+    'a task whose work has all ended still offered a cancel',
+  ).toBeNull()
+  expect(done.container.querySelector('[data-cancel-run]')).toBeNull()
+})
+
+test('nothing fires until the confirm is pressed, and then exactly once', async () => {
+  const { view, log } = await task('t-ship', detailRoutes())
+  const before = log.calls.filter((c) => c.method === 'POST').length
+
+  click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+  await flush()
+  // The dialog is open and says, in the platform's words, what cancelling a
+  // RUNNING run does — and still nothing has fired.
+  const dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog.textContent).toContain('It stops now')
+  expect(dialog.textContent).toContain('shutdown ladder')
+  expect(log.calls.filter((c) => c.method === 'POST').length, 'opening a confirm fired the verb').toBe(before)
+
+  scriptedCancel(log, 'r-ship', {
+    run_id: 'r-ship',
+    from: 'running',
+    to: 'completed',
+    applied: true,
+    ladder_invoked: true,
+    detail: detailRunningCancelled,
+  })
+  click(dialog.querySelector('[data-act="confirm"]'))
+  await flush()
+  const posts = log.calls.filter((c) => c.method === 'POST' && c.path === '/api/runs/r-ship/cancel')
+  expect(posts.length, 'the confirm fired the verb once').toBe(1)
+})
+
+/** scriptedCancel answers one run's cancel with a body in the served shape. */
+function scriptedCancel(log: { set(k: string, r: { body?: unknown; status?: number }): void }, run: string, body: unknown, status?: number) {
+  log.set(`POST /api/runs/${run}/cancel`, status === undefined ? { body } : { body, status })
+}
+
+test('an applied cancel renders the edge and the served sentence, then re-reads', async () => {
+  const { view, log } = await task('t-ship', detailRoutes())
+  const readsBefore = log.calls.filter((c) => c.path === '/api/tasks/t-ship').length
+  scriptedCancel(log, 'r-ship', {
+    run_id: 'r-ship',
+    from: 'running',
+    to: 'completed',
+    applied: true,
+    ladder_invoked: true,
+    detail: detailRunningCancelled,
+  })
+  click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const line = view.container.querySelector('[data-outcome]')!
+  expect(line.getAttribute('data-outcome')).toBe('applied')
+  expect(line.textContent).toContain('running → completed')
+  expect(line.textContent, 'the served sentence was paraphrased').toContain(detailRunningCancelled)
+  // The re-read is what makes the rendered state true: this client never flips
+  // a run's state itself (§42 — REST is the truth).
+  expect(log.calls.filter((c) => c.path === '/api/tasks/t-ship').length).toBe(readsBefore + 1)
+  // And the state on screen is still the SERVED one, because the re-read
+  // answered with the same body.
+  expect(view.container.querySelector('.run-receipt[data-run="r-ship"] .muted')?.textContent).toBe('running')
+})
+
+test('the parked and queued edges render their own served sentences', async () => {
+  for (const leg of [
+    { state: 'parked', to: 'finalized', detail: detailParkedCancelled },
+    {
+      state: 'queued',
+      to: 'finalized',
+      // cancel.go:329
+      detail:
+        'queued work cancelled before it ran: finalize-with-card, queue row settled in the same transaction (OQ1)',
+    },
+  ]) {
+    const detail = withRuns([leg.state])
+    const run = `r-${leg.state}-0`
+    const { view, log } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+    scriptedCancel(log, run, {
+      run_id: run,
+      from: leg.state,
+      to: leg.to,
+      applied: true,
+      ladder_invoked: false,
+      detail: leg.detail,
+    })
+    click(view.container.querySelector(`[data-cancel-run="${run}"]`))
+    await flush()
+    // The confirm says what THIS state's cancel does, not a generic sentence.
+    const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+    expect(said).toContain(leg.state === 'parked' ? 'question card on it closes with it' : 'withdrawn before it starts')
+    click(document.querySelector('[data-act="confirm"]'))
+    await flush()
+    const line = view.container.querySelector('[data-outcome]')!
+    expect(line.getAttribute('data-outcome')).toBe('applied')
+    expect(line.textContent).toContain(`${leg.state} → ${leg.to}`)
+    expect(line.textContent).toContain(leg.detail)
+    // The ladder is reported honestly: it did not run here, so nothing claims it did.
+    expect(line.textContent, 'a ladder that never ran was reported').not.toContain('shutdown ladder')
+    view.unmount()
+  }
+})
+
+test('an applied:false answer is the platform being honest, not an error', async () => {
+  // Both no-op arms of the mapping, driven on a run the fixture serves as
+  // non-terminal so the control is offered and the SERVER is what says no.
+  for (const leg of [
+    { note: detailAlreadyEnded, from: 'completed' },
+    { note: detailCrashed, from: 'crashed' },
+  ]) {
+    const { view, log } = await task('t-ship', detailRoutes())
+    scriptedCancel(log, 'r-ship', {
+      run_id: 'r-ship',
+      from: leg.from,
+      to: leg.from,
+      applied: false,
+      ladder_invoked: false,
+      detail: leg.note,
+    })
+    click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+    await flush()
+    click(document.querySelector('[data-act="confirm"]'))
+    await flush()
+
+    const line = view.container.querySelector('[data-outcome]')!
+    expect(line.getAttribute('data-outcome'), 'an honest no-op was rendered as a failure').toBe('noop')
+    expect(line.className, 'a no-op took the error styling').not.toContain('error')
+    expect(line.textContent).toContain('nothing was cancelled')
+    expect(line.textContent).toContain(leg.note)
+    view.unmount()
+  }
+})
+
+test('both 409s read as re-read-and-decide-again rather than as failures', async () => {
+  for (const leg of [
+    // internal/stage/surface.go:262 / :266, with the sentinels' own messages
+    // (internal/stage/cancel.go:151–160).
+    {
+      code: 'claim_in_flight',
+      detail: 'stage: the run is being dispatched right now — retry the cancel in a moment',
+    },
+    {
+      code: 'cancel_raced',
+      detail: 'stage: the run changed state while the cancel was being applied — re-read it and decide again',
+    },
+  ]) {
+    const { view, log } = await task('t-ship', detailRoutes())
+    const readsBefore = log.calls.filter((c) => c.path === '/api/tasks/t-ship').length
+    scriptedCancel(log, 'r-ship', { error: leg.code, detail: leg.detail }, 409)
+    click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+    await flush()
+    click(document.querySelector('[data-act="confirm"]'))
+    await flush()
+
+    const line = view.container.querySelector('[data-outcome]')!
+    expect(line.getAttribute('data-outcome')).toBe('retry')
+    expect(line.className, 'a re-read was rendered in the failure style').not.toContain('error')
+    expect(line.textContent).toContain('re-read it and decide again')
+    expect(line.textContent).toContain(leg.detail)
+    // A 409 is precisely the case where the reader needs fresh state.
+    expect(log.calls.filter((c) => c.path === '/api/tasks/t-ship').length).toBe(readsBefore + 1)
+    view.unmount()
+  }
+})
+
+test('a refusal renders the server’s own code and sentence', async () => {
+  for (const leg of [
+    { status: 503, code: 'not_wired', detail: 'the cancel choreography is not wired in this process' },
+    { status: 403, code: 'forbidden', detail: 'reading another person’s work is the operator’s (S01.9)' },
+    { status: 404, code: 'not_found', detail: 'no such run' },
+  ]) {
+    const { view, log } = await task('t-ship', detailRoutes())
+    scriptedCancel(log, 'r-ship', { error: leg.code, detail: leg.detail }, leg.status)
+    click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+    await flush()
+    click(document.querySelector('[data-act="confirm"]'))
+    await flush()
+
+    const line = view.container.querySelector('[data-outcome]')!
+    expect(line.getAttribute('data-outcome')).toBe('failed')
+    expect(line.textContent).toContain(leg.code)
+    expect(line.textContent).toContain(leg.detail)
+    view.unmount()
+  }
+})
+
+test('a task cancel itemizes every run, and claims the board only when something was cancelled', async () => {
+  const detail = withRuns(['running', 'completed'])
+  const { view, log } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  // stage.TaskCancelOutcome, internal/stage/cancel.go:143–148.
+  log.set('POST /api/tasks/t-ship/cancel', {
+    body: {
+      task_id: 't-ship',
+      kanban_status: 'cancelled',
+      applied: true,
+      runs: [
+        {
+          run_id: 'r-running-0',
+          from: 'running',
+          to: 'completed',
+          applied: true,
+          ladder_invoked: false,
+          detail: detailRunningCancelled,
+        },
+        {
+          run_id: 'r-completed-1',
+          from: 'completed',
+          to: 'completed',
+          applied: false,
+          ladder_invoked: false,
+          detail: detailAlreadyEnded,
+        },
+      ],
+    },
+  })
+  click(view.container.querySelector('[data-cancel="task"]'))
+  await flush()
+  // The confirm counts what it is about to act on, from served state.
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('1 right now')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const items = [...view.container.querySelectorAll('.cancel-runs li')]
+  expect(items.length, 'the task outcome was summarized instead of itemized').toBe(2)
+  expect(items[0].getAttribute('data-outcome')).toBe('applied')
+  expect(items[0].textContent).toContain('running → completed')
+  expect(items[1].getAttribute('data-outcome')).toBe('noop')
+  expect(items[1].textContent).toContain(detailAlreadyEnded)
+  expect(view.container.querySelector('.task-actions [data-outcome]')?.textContent).toContain(
+    'the board reads cancelled',
+  )
+})
+
+test('a task cancel that cancelled nothing never says the task is cancelled', async () => {
+  const detail = withRuns(['completed', 'parked'])
+  const { view, log } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  log.set('POST /api/tasks/t-ship/cancel', {
+    body: {
+      task_id: 't-ship',
+      // The server sends the task's UNCHANGED column when nothing fired
+      // (cancel.go:234–241, drain D4: a no-op cancel never rewrites the board).
+      kanban_status: 'executing',
+      applied: false,
+      runs: [
+        {
+          run_id: 'r-completed-0',
+          from: 'completed',
+          to: 'completed',
+          applied: false,
+          ladder_invoked: false,
+          detail: detailAlreadyEnded,
+        },
+      ],
+    },
+  })
+  click(view.container.querySelector('[data-cancel="task"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const line = view.container.querySelector('.task-actions [data-outcome]')!
+  expect(line.getAttribute('data-outcome')).toBe('noop')
+  expect(line.textContent).toContain('nothing was cancelled')
+  expect(line.textContent, 'a no-op cancel reported a board move that never happened').not.toContain('the board reads')
+  // And the task is still rendered as what it is.
+  expect(view.container.textContent, 'the task was relabelled cancelled by a cancel that cancelled nothing').not.toContain(
+    'executing · cancelled',
+  )
+})
+
+test('the act is the kit’s danger button, and the dismiss fires nothing', async () => {
+  const { view, log } = await task('t-ship', detailRoutes())
+  const trigger = view.container.querySelector('[data-cancel-run="r-ship"]')!
+  expect(trigger.className, 'the cancel trigger is not the kit danger variant').toContain('--red')
+  click(trigger)
+  await flush()
+  const confirm = document.querySelector('[data-act="confirm"]')!
+  expect(confirm.className).toContain('--red')
+
+  const before = log.calls.filter((c) => c.method === 'POST').length
+  click(document.querySelector('[data-act="dismiss"]'))
+  await flush()
+  expect(log.calls.filter((c) => c.method === 'POST').length, 'dismissing the confirm fired the verb').toBe(before)
+  expect(document.querySelector('[data-act="confirm"]'), 'the dialog stayed open after dismissing').toBeNull()
+})
+
+test('a member acts on their OWN run, and the verb is called with their subject', async () => {
+  // NOT the default session: `signedIn` is alice as OPERATOR, so a scoping
+  // test that forgets this override proves nothing about members (§38).
+  const asBob = {
+    body: { authenticated: true, user: { user_id: 'bob', display_name: 'Bob', role: 'member', pin_set: true } },
+  }
+  const detail = fixtures.taskDetail() as unknown as Detail
+  detail.owner = 'bob'
+  const { view, log } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/auth/session': asBob,
+    'GET /api/tasks/t-ship': { body: detail },
+  })
+  scriptedCancel(log, 'r-ship', {
+    run_id: 'r-ship',
+    from: 'running',
+    to: 'completed',
+    applied: true,
+    ladder_invoked: false,
+    detail: detailRunningCancelled,
+  })
+  click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  // Path-only: the run IS the subject, and the acting person is the session's.
+  expect(log.calls.filter((c) => c.path === '/api/runs/r-ship/cancel' && c.method === 'POST').length).toBe(1)
+  expect(view.container.querySelector('[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
+})
+
+test('a member never reaches another owner’s cancel, because they never reach the task', async () => {
+  const asBob = {
+    body: { authenticated: true, user: { user_id: 'bob', display_name: 'Bob', role: 'member', pin_set: true } },
+  }
+  // The READ is owner-scoped (S01.9), so the cross-owner direction is refused
+  // one layer before any control could render. That is the structural leg: no
+  // body, no control, nothing to press.
+  const { view } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/auth/session': asBob,
+    'GET /api/tasks/t-ship': { status: 403, body: { error: 'forbidden', detail: 'not yours to read' } },
+  })
+  expect(view.container.querySelector('[data-cancel-run]')).toBeNull()
+  expect(view.container.querySelector('[data-cancel="task"]')).toBeNull()
+  expect(view.container.textContent).toContain('not yours to read')
+})
+
+test('a run.state_changed frame re-reads the task, so a cancel elsewhere lands here too', async () => {
+  const routes = detailRoutes()
+  const log = scriptedFetch({ ...oversightRoutes(), ...routes })
+  window.history.replaceState(null, '', '/tasks/t-ship')
+  const stream = new EventStream({
+    createEventSource: (url) => new FakeSource(url),
+    probeSession: () => Promise.resolve({ authenticated: true }),
+    schedule: () => 0,
+    cancel: () => {},
+  })
+  const view = mount(<App stream={stream} />)
+  await flush()
+  act(() => FakeSource.last().open())
+  await flush()
+
+  const before = log.calls.filter((c) => c.path === '/api/tasks/t-ship').length
+  act(() =>
+    FakeSource.last().send('run.state_changed', {
+      seq: 950,
+      run_id: 'r-ship',
+      user_id: 'alice',
+      type: 'run.state_changed',
+      schema_version: 1,
+      topics: ['board'],
+      payload: {},
+      ts: '2026-07-20T09:12:00Z',
+    }),
+  )
+  await flush()
+  // A cancel mints no decision row: it RIDES run.state_changed (§39), which
+  // this surface already subscribes to — so the act lands here with no
+  // client-side patching and no live.ts change.
+  expect(
+    log.calls.filter((c) => c.path === '/api/tasks/t-ship').length,
+    'a cancel’s own frame did not re-read the task',
+  ).toBe(before + 1)
+  view.unmount()
+})
+
+test('the cancel controls are reachable and operable at phone width', async () => {
+  const { view } = await task('t-ship', detailRoutes())
+  expect(view.container.querySelector('[data-cancel="task"]')).not.toBeNull()
+  expect(view.container.querySelector('[data-cancel-run="r-ship"]')).not.toBeNull()
+  click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+  await flush()
+  const dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog.querySelector('[data-act="confirm"]')).not.toBeNull()
+
+  // The §41-B method: jsdom has no layout, so the checkable property is that
+  // nothing here pins a pixel width for a 375px viewport to scroll past.
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  const scope = [...view.container.querySelectorAll('.task-actions *, .run-actions *'), ...dialog.querySelectorAll('*'), dialog]
+  expect(scope.length).toBeGreaterThan(5)
+  expect(
+    scope.filter((n) => pinned.test(n.className.toString()) || /\d+px/.test(n.getAttribute('style') ?? '')).length,
+    'a cancel control pins a pixel width a phone cannot fit',
+  ).toBe(0)
+  expect(pinned.test('w-[520px] flex')).toBe(true)
 })

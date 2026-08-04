@@ -241,8 +241,16 @@ export type Answer = {
  *  surface could not answer — rendered as the absence it is. */
 export type MeterView = { answer?: Answer; absent?: string }
 
+/** One person's S10.4 pause switch, at the grain the switch is set at. */
+export type AutomationState = { owner: string; paused: boolean }
+
+/** The pause switch's CURRENT position for the people this read is about.
+ *  `absent` is the position nobody could read — never an unpaused switch. */
+export type AutomationView = { states?: AutomationState[]; absent?: string }
+
 export type Meters = {
   lanes: MeterLane[]
+  automation: AutomationView
   burn_rates: MeterView
   budgets: MeterView
   limit_events: MeterView
@@ -577,6 +585,36 @@ export type RunResumed = {
 }
 
 export type FlagSuppressed = { run_id?: string; anomaly_class: string; suppressed: boolean; detail: string }
+
+/**
+ * One run's cancel disposition (feature 4.5; `stage.CancelOutcome`).
+ *
+ * `applied:false` is the honest idempotent repeat — a run that had already
+ * ended, or a crashed run whose disposition the recovery ladder owns — and is
+ * NOT an error. `from`/`to` are the ratified S02.3 edge the cancel took, and
+ * `detail` is the platform's own account of it: nothing here is authored by
+ * this client.
+ */
+export type CancelOutcome = {
+  run_id: string
+  from: string
+  to: string
+  applied: boolean
+  /** The S03.1 safe-boundary → abort → TERM → KILL ladder ran on a live
+   *  session. Reported honestly, whether or not it was needed. */
+  ladder_invoked: boolean
+  detail: string
+}
+
+/** A task cancel: every non-terminal run under the same mapping, each
+ *  disposition listed individually. One refusing run fails the WHOLE call, so
+ *  this is never a partial-success report. */
+export type TaskCancelOutcome = {
+  task_id: string
+  kanban_status: string
+  runs: CancelOutcome[]
+  applied: boolean
+}
 
 export type DriftDismissed = {
   card_id: string
@@ -1163,6 +1201,44 @@ export function staleAcceptCard(err: unknown): AcceptCard | null {
   return (body as { current?: AcceptCard }).current ?? null
 }
 
+/**
+ * One declared (person, lane) automation budget (S10.4; `api.BudgetRecord`).
+ *
+ * `period_tokens` is in WEIGHTED-CONSUMPTION UNITS — the unit the gauge
+ * accumulates — and `unit` carries that label on the wire precisely so a
+ * surface cannot render the figure as currency by accident (D5). There is no
+ * dollar field here and none may be added.
+ */
+export type BudgetRecord = {
+  owner: string
+  lane: string
+  period_tokens: number
+  unit?: string
+  period_start: string
+  period_days: number
+  declared_ts: string
+  declared_by: string
+}
+
+/** The declaration's outcome. `prior` is present only when a budget existed, so
+ *  a FIRST declaration's honest "there was no budget before" is the ABSENCE of
+ *  the member rather than a zero. */
+export type BudgetDeclared = {
+  budget: BudgetRecord
+  prior?: BudgetRecord
+  detail: string
+}
+
+/** The S10.4 pause switch after a flip. `changed:false` is the honest
+ *  already-in-that-position repeat, and `detail` carries the P-T08-4
+ *  preservation statement in the platform's own words. */
+export type AutomationPause = {
+  owner: string
+  paused: boolean
+  changed: boolean
+  detail: string
+}
+
 /** The board drag's outcome. `applied:false` is the honest stale-board answer,
  *  not an error: the work moved on between the render and the drag. */
 export type PriorityHint = {
@@ -1671,6 +1747,36 @@ export const api = {
 
   priorityHint: (task: string, rank: number, reason?: string) =>
     post<PriorityHint>(`/api/tasks/${encodeURIComponent(task)}/priority-hint`, reason ? { rank, reason } : { rank }),
+
+  // ── the 4.5 cancel verbs and the S10.4 meters mutations (P3-UI-2) ────────
+  //
+  // Both cancel verbs are PATH-ONLY: the run (or task) is the whole request,
+  // and the acting person comes from the session. They are the only entry
+  // points to the cancel choreography, and a control here is a human's button —
+  // nothing in this client may call one on its own (§39: no auto-kill).
+
+  cancelRun: (run: string) => post<CancelOutcome>(`/api/runs/${encodeURIComponent(run)}/cancel`, {}),
+  cancelTask: (task: string) => post<TaskCancelOutcome>(`/api/tasks/${encodeURIComponent(task)}/cancel`, {}),
+  /** The S10.4 budget declaration. `period_tokens` is in the gauge's own
+   *  weighted-consumption units; `person` defaults to the caller and is the
+   *  operator's administer path. */
+  declareBudget: (body: {
+    person?: string
+    lane: string
+    period_tokens: number
+    period_days: number
+    period_start?: string
+    reason?: string
+  }) => post<BudgetDeclared>('/api/meters/budget', body),
+  /**
+   * The 3.3 switch. `paused` is REQUIRED and has no default — the verb refuses
+   * a request that did not say which way it wanted the switch — so this client
+   * never sends a toggle, only a position. Resume is the same endpoint with
+   * `paused:false`; the run-level "resume — I was wrong" is a different verb
+   * (`resumeRun`) on a different subject.
+   */
+  setAutomationPause: (body: { person?: string; paused: boolean; reason?: string }) =>
+    post<AutomationPause>('/api/meters/pause', body),
 
   // ── the S15.6 decision verbs (B6-6) ─────────────────────────────────────
   //

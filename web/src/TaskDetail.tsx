@@ -1,18 +1,24 @@
+import { useState } from 'react'
+
 import {
   api,
+  type CancelOutcome,
   type DeliverableDetail,
   type Receipt,
   type RunDetail,
   type Spec,
+  type TaskCancelOutcome,
   type TaskDecision,
   type TaskDetail as Detail,
   type TaskRunView,
 } from './api'
+import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { activityEventTypes, boardEventTypes, useLive } from './live'
 import { Absent, Empty, Freshness, Money, Owner, Section, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { Button } from './ui'
 
 /**
  * Task detail (Spec S15.5 ¶3; 9.2; S2.2; S2.4; G2 D2.8).
@@ -42,7 +48,7 @@ export function TaskDetail({ id, stream }: { id: string; stream?: EventStream })
   // task does not have YET is exactly the frame that would be dropped, and the
   // new run would never appear until something else happened to trigger a read.
   // One page is open at a time; correctness is worth more than the saving.
-  const { data, error, stale } = useLive<Detail>({
+  const { data, error, stale, reload } = useLive<Detail>({
     key: `/api/tasks/${id}`,
     read: () => api.task(id),
     types: boardEventTypes,
@@ -58,12 +64,13 @@ export function TaskDetail({ id, stream }: { id: string; stream?: EventStream })
           <p className="muted">
             <Owner id={data.owner} /> · {data.kanban_status} · opened <Stamp ts={data.created_ts} />
           </p>
+          <CancelTask taskID={id} runs={data.runs} reload={reload} />
           <SpecBlock detail={data} stale={stale} />
           <StageBlock detail={data} stale={stale} />
           <LiveActivity run={activeRun(data)} stream={stream} />
           <DecisionsBlock decisions={data.decisions} stale={stale} />
           <DeliverablesBlock taskID={id} stream={stream} />
-          <ReceiptsBlock runs={data.runs} stale={stale} />
+          <ReceiptsBlock runs={data.runs} stale={stale} reload={reload} />
         </>
       )}
     </section>
@@ -179,6 +186,165 @@ const terminalStates = ['completed', 'crashed', 'finalized', 'tombstoned', 'died
 export function activeRun(detail: Detail): TaskRunView | null {
   const live = [...detail.runs].reverse().find((r) => !terminalStates.includes(r.state))
   return live ?? detail.runs[detail.runs.length - 1] ?? null
+}
+
+/**
+ * cancellable is ONE list, read the other way round: a run that has not reached
+ * a terminal state is one the 4.5 verb has an edge for.
+ *
+ * A state this list has never seen is offered rather than hidden — the same
+ * forward-tolerance the kanban vocabulary takes (§42): the client owns no state
+ * vocabulary of its own, and the verb refuses what it cannot cancel. Hiding a
+ * control on an unrecognized state would make a new server state silently
+ * uncancellable from every surface.
+ */
+function cancellable(state: string): boolean {
+  return !terminalStates.includes(state)
+}
+
+/**
+ * The plain words for what a cancel DOES to a run in the state it is in
+ * (S02.3 through internal/stage/cancel.go's ratified mapping; §39).
+ *
+ * Every sentence is a promise about a landed edge and asserts nothing beyond
+ * it: no deletion, no rollback, no "stopping" a run that is only queued. The
+ * unknown-state arm says what is actually true — the platform decides — rather
+ * than describing an edge nobody has ratified.
+ */
+function cancelConsequence(state: string): string {
+  switch (state) {
+    case 'running':
+    case 'draining':
+      return 'It stops now: the live session is closed down through its own shutdown ladder, and the run is recorded as ended, carrying the cancel on its record.'
+    case 'parked':
+      return 'It closes now, and any open question card on it closes with it. It will not resume afterwards.'
+    case 'queued':
+      return 'It is withdrawn before it starts, and its place in the queue is settled in the same breath.'
+    case 'claimed':
+    case 'new':
+      return 'It is being dispatched right this moment, so the platform may refuse and ask you to try again in a moment. Nothing half-happens either way.'
+    default:
+      return 'The platform decides which ending applies to a run in this state, and tells you which one it took.'
+  }
+}
+
+/** One run's disposition, rendered from the wire. */
+function runOutcomeNote(res: CancelOutcome): string {
+  if (!res.applied) return 'nothing was cancelled'
+  return res.ladder_invoked
+    ? `${res.from} → ${res.to} · the live session was closed through its shutdown ladder`
+    : `${res.from} → ${res.to}`
+}
+
+/**
+ * R3's task half: one control over every run of the task that has not ended.
+ *
+ * It renders only while there IS such a run — a task whose work is over offers
+ * no cancel, because there is nothing to cancel and a control that can only
+ * report "nothing happened" is a control that should not be there.
+ */
+function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunView[]; reload: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [result, setResult] = useState<TaskCancelOutcome | null>(null)
+  const act = useAct()
+  const live = runs.filter((r) => cancellable(r.state))
+  if (live.length === 0) return null
+
+  return (
+    <div className="task-actions">
+      <Button
+        variant="danger"
+        size="sm"
+        data-cancel="task"
+        onClick={() => {
+          act.clear()
+          setResult(null)
+          setOpen(true)
+        }}
+      >
+        Cancel this task
+      </Button>
+      <ActConfirm
+        open={open}
+        onOpenChange={setOpen}
+        title="Cancel this task?"
+        what={`Every run of this task that has not ended is cancelled — ${String(live.length)} right now — each under the rule for the state it is in. If one of them is mid-dispatch the whole request is refused and nothing is cancelled, so you try again in a moment.`}
+        act="Cancel every unfinished run"
+        busy={act.busy}
+        onConfirm={() => {
+          setOpen(false)
+          act.run(
+            () =>
+              api.cancelTask(taskID).then((res) => {
+                setResult(res)
+                return outcomeOf(
+                  res.applied,
+                  res.applied ? `cancelled, and the board reads ${res.kanban_status}` : 'nothing was cancelled',
+                  '',
+                )
+              }),
+            reload,
+          )
+        }}
+      >
+        <ul className="cancel-preview">
+          {live.map((r) => (
+            <li key={r.run_id} data-run={r.run_id}>
+              <span className="run-id">{r.run_id}</span> <span className="run-state">{r.state}</span> —{' '}
+              {cancelConsequence(r.state)}
+            </li>
+          ))}
+        </ul>
+      </ActConfirm>
+      <OutcomeLine outcome={act.outcome} />
+      {result && (
+        <ul className="cancel-runs">
+          {result.runs.map((r) => (
+            <li key={r.run_id} data-run={r.run_id} data-outcome={r.applied ? 'applied' : 'noop'}>
+              <span className="run-id">{r.run_id}</span> {runOutcomeNote(r)}
+              <span className="muted"> — {r.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** R3's run half: the same verb at the grain a person is looking at. */
+function CancelRun({ run, reload }: { run: TaskRunView; reload: () => void }) {
+  const [open, setOpen] = useState(false)
+  const act = useAct()
+  if (!cancellable(run.state)) return null
+
+  return (
+    <div className="run-actions">
+      <Button
+        variant="danger"
+        size="sm"
+        data-cancel-run={run.run_id}
+        onClick={() => {
+          act.clear()
+          setOpen(true)
+        }}
+      >
+        Cancel this run
+      </Button>
+      <ActConfirm
+        open={open}
+        onOpenChange={setOpen}
+        title={`Cancel run ${run.run_id}?`}
+        what={cancelConsequence(run.state)}
+        act="Cancel this run"
+        busy={act.busy}
+        onConfirm={() => {
+          setOpen(false)
+          act.run(() => api.cancelRun(run.run_id).then((res) => outcomeOf(res.applied, runOutcomeNote(res), res.detail)), reload)
+        }}
+      />
+      <OutcomeLine outcome={act.outcome} />
+    </div>
+  )
 }
 
 /**
@@ -407,8 +573,9 @@ function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventS
   )
 }
 
-/** R14: the receipt per run. */
-function ReceiptsBlock({ runs, stale }: { runs: TaskRunView[]; stale: boolean }) {
+/** R14: the receipt per run — and, where the run has not ended, the 4.5 cancel
+ *  at the grain the person is reading. */
+function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: boolean; reload: () => void }) {
   return (
     <Section title="Receipts" stale={stale}>
       {runs.length === 0 ? (
@@ -419,6 +586,7 @@ function ReceiptsBlock({ runs, stale }: { runs: TaskRunView[]; stale: boolean })
             <h4>
               {r.run_id} <span className="muted">{r.state}</span>
             </h4>
+            <CancelRun run={r} reload={reload} />
             {r.receipt ? <ReceiptView receipt={r.receipt} /> : <Absent reason={r.receipt_absent ?? 'no receipt'} />}
           </div>
         ))

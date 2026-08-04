@@ -356,3 +356,40 @@ test('no kit component carries a raw colour value — colour lives in the token 
   expect(/(#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d)/.test('bg-[#07070d]')).toBe(true)
   expect(/(#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d)/.test('bg-[rgba(148,148,190,0.075)]')).toBe(true)
 })
+
+/**
+ * The primitive layer's own boundary, made checkable by the packet that first
+ * mounts it in production (P3-UI-2).
+ *
+ * `@base-ui/react` is reached THROUGH the kit and nowhere else: that is what
+ * makes "the behaviour is theirs, the look is ours" a property of the tree
+ * rather than a habit. A surface importing the dialog directly would carry its
+ * own focus trap, its own escape stack and its own ARIA — three things that are
+ * only ever noticed when they disagree.
+ */
+test('the primitive package is reached through the kit and from nowhere else', () => {
+  const app = import.meta.glob('../**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<
+    string,
+    string
+  >
+  const importers = Object.entries(app)
+    .filter(([path]) => !path.includes('.test.'))
+    .filter(([, src]) => /from '@base-ui\/react/.test(code(src)))
+    .map(([path]) => path)
+    .sort()
+  // The kit's three primitive-backed components, and nothing outside `ui/`.
+  expect(importers, 'a surface imports the primitive package directly instead of through the kit').toEqual([
+    './Drawer.tsx',
+    './Modal.tsx',
+    './Toast.tsx',
+  ])
+  // The glob really covers the app tree beyond this directory — the surfaces
+  // are where a direct import would be tempting, so a scan that reached only
+  // `ui/` would be checking the one place that is allowed to have one.
+  expect(Object.keys(app), 'the scan did not reach the surfaces').toContain('../Fleet.tsx')
+  expect(Object.keys(app)).toContain('../TaskDetail.tsx')
+  // Non-vacuous both ways: the glob really reached the app tree, and the
+  // detector really matches an import outside the kit.
+  expect(Object.keys(app).length, 'the scan read no sources — it would pass vacuously').toBeGreaterThan(20)
+  expect(/from '@base-ui\/react/.test("import { Dialog } from '@base-ui/react/dialog'")).toBe(true)
+})

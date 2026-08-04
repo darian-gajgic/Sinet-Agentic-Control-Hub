@@ -347,7 +347,28 @@ func fixtureWorld(t *testing.T) *backend {
 	// of driving them — and it moves in lockstep across every body.
 	seedFixtureWorkforce(t, b)
 	seedFixturePushDevices(t, b)
+	driveFixturePause(t, b)
 	return b
+}
+
+// driveFixturePause flips one person's S10.4 automation switch through the REAL
+// verb, so `GET /api/meters` carries a genuinely paused position and a
+// genuinely open one side by side.
+//
+// It is the OPERATOR administering a MEMBER's switch (OQ4's own+operator-any
+// authority), which is the reading the fleet control's administer path renders
+// — and it is driven LAST for the same reason the workforce seeding is: the
+// verb appends a real `decision.recorded` row, so every event_seq the other
+// committed bodies carry stays exactly where it was and only the head cursor
+// moves.
+func driveFixturePause(t *testing.T, b *backend) {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	fixtureServer(t, b, "op").Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/api/meters/pause",
+		strings.NewReader(`{"person":"bob","paused":true,"reason":"bob asked for his headroom back"}`)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("drive the pause switch: %d: %s", rr.Code, rr.Body.String())
+	}
 }
 
 // The fixture world's VAPID key, derived from a FIXED scalar rather than
@@ -1760,6 +1781,20 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		// is the decision ROW the verb mints, which recordDecision writes
 		// itself. The verb, its D10 authorization and its row are all real; the
 		// queue row below carries the rank the real scheduler would persist.
+		// The S10.4 pause switch, REAL — `metering.Pause` over this world's own
+		// users table, which is the store the pause verb writes and the meters
+		// read now reads. Its position is a committed served fact rather than a
+		// scripted one.
+		//
+		// Its SIBLING is deliberately absent: no Budgets store is wired here,
+		// because the lane gauge in this world is `fixtureMeter` and a declared
+		// budget would make one response contradict itself — the Layer-0 budget
+		// view reporting a declaration while the gauge block beside it reported
+		// none, which is exactly the defect §39-B drain D2 fixed. The declared
+		// half's real tie lives where the real gauge is: internal/shell's
+		// HTTP-level test declares through the verb and requires the two halves
+		// of one response to agree.
+		Pause:      metering.NewPause(b.db),
 		Hints:      newFakeHints("r-ops"),
 		Review:     fixtureReview(t, b),
 		Accept:     b.acc,
@@ -1854,6 +1889,11 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	{"push-subscriptions-member", "/api/push/subscriptions", "alice"},
 	{"runs", "/api/runs", ""},
 	{"meters", "/api/meters", ""},
+	// The same read as a MEMBER. The lanes were already owner-scoped, but the
+	// pause switch's position is a per-person fact a control acts on, so "a
+	// member is offered their own switch and nobody else's" has to be a claim
+	// about a served body rather than about a render.
+	{"meters-member", "/api/meters", "alice"},
 	{"history-views", "/api/events/views", ""},
 	{"history-catalog", "/api/events/catalog", ""},
 	{"history-view-answer", "/api/events/views/cost_per_run", ""},

@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { api } from './api'
+import { api, type AutomationState, type MeterLane, type Meters } from './api'
+import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { missionEventTypes, useLive } from './live'
 import { MetersPanel, ViewBlock } from './MissionControl'
 import { Absent, Freshness, Owner, ParkedUntil, Section } from './parts'
+import { Link } from './router'
+import { hrefFor } from './routes'
+import { Button } from './ui'
 
 /**
  * Fleet overview (Spec S15.5 ¶4; 9.3; S2.5; S3.10; D2).
@@ -25,7 +29,8 @@ import { Absent, Freshness, Owner, ParkedUntil, Section } from './parts'
 export function Fleet({ stream }: { stream?: EventStream }) {
   const [person, setPerson] = useState('')
   const [lane, setLane] = useState('')
-  const { data, error, stale } = useLive({
+  const may = useMayAct()
+  const { data, error, stale, reload } = useLive({
     key: '/api/meters',
     read: () => api.meters(),
     types: missionEventTypes,
@@ -97,7 +102,11 @@ export function Fleet({ stream }: { stream?: EventStream }) {
         {shown.length === 0 && <p className="muted">No lane matches this filter.</p>}
       </Section>
 
+      <AutomationPanel meters={data} may={may} reload={reload} />
+
       <MetersPanel meters={data} stale={stale} error={error} />
+
+      <BudgetPanel lanes={shown} meters={data} may={may} reload={reload} />
 
       {data && (
         <Section title="Cost, at each view's own grain" stale={stale}>
@@ -109,6 +118,325 @@ export function Fleet({ stream }: { stream?: EventStream }) {
       <LocalTierSeams />
     </section>
   )
+}
+
+/**
+ * mayAct answers the ONE question both controls on this surface ask: may the
+ * signed-in person act on this owner's subject?
+ *
+ * It states the SAME authority rule the two verbs enforce — own + operator-any
+ * (D10, §39-B OQ4) — rather than inferring one, which is the B6-6 D9 lesson: a
+ * surface that renders a control the door will refuse has invented an authority,
+ * and one that hides a control the door would allow has invented a refusal. The
+ * operator limb mirrors the server's own `isOperatorRead`, dev posture included,
+ * because that is the predicate the read on the other side of this call used.
+ *
+ * IDENTITY IS READ HERE RATHER THAN PASSED IN, and that is a deviation with a
+ * reason: the shell holds the session and hands `me` to the surfaces that need
+ * it, but `App.tsx` is frozen for this packet, so this surface reads the ONE
+ * identity source itself (GET /api/auth/session — §41-B: identity comes from
+ * there and nowhere else). Hoisting it to the shell's own read belongs to the
+ * packet that reopens the shell.
+ *
+ * Until the session lands, nothing is actionable: you cannot be offered an act
+ * before the platform knows who is asking.
+ */
+type MayAct = ((owner: string) => boolean) | null
+
+function useMayAct(): MayAct {
+  const [me, setMe] = useState<{ id: string; operator: boolean } | null>(null)
+  useEffect(() => {
+    let live = true
+    void api.session().then(
+      (s) => {
+        if (live) setMe({ id: s.user?.user_id ?? '', operator: s.dev === true || s.user?.role === 'operator' })
+      },
+      () => {
+        // A session that could not be read leaves `me` null, which offers
+        // nothing. The shell is already telling the reader the session is gone.
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [])
+  if (me === null) return null
+  return (owner: string) => me.operator || owner === me.id
+}
+
+/**
+ * The 3.3 pause switch, one per person this read is about (S10.4; §39-B).
+ *
+ * WHOSE SWITCHES APPEAR IS THE SERVER'S ANSWER, NOT A CLIENT DECISION. The read
+ * is owner-scoped, so a member is served their own position and nobody else's,
+ * and the operator is served the household's — which is exactly the D10
+ * administer path, without this surface ever guessing at a person. Pressing a
+ * row's control names that row's owner in the request, so the subject of the act
+ * is the subject on screen.
+ *
+ * When no position could be read the switch is NOT offered. The absence says
+ * why; a control over a position the platform cannot see would be asking
+ * somebody to flip a switch nobody can find.
+ */
+function AutomationPanel({ meters, may, reload }: { meters: Meters | null; may: MayAct; reload: () => void }) {
+  const served = meters?.automation.states ?? []
+  const mine = may === null ? [] : served.filter((s) => may(s.owner))
+  const absent = meters?.automation.absent ?? ''
+  return (
+    <Section title="Automation">
+      {/* The pre-act explainer (D8): what the switch DOES, in the platform's
+          own terms, before anybody presses it. Every clause is a landed S10.4
+          guarantee — the preservation clause most of all, which is the one
+          people are right to worry about. */}
+      <p className="automation-explainer">
+        Pausing stops the platform from starting any new background work for that person. Work already running parks
+        itself at its next safe boundary. <strong>Nothing queued and nothing parked is thrown away</strong> — it waits,
+        and resuming lets it carry on. Talking to the platform yourself is never held back by this switch.
+      </p>
+      {absent !== '' && <Absent reason={absent} />}
+      {mine.length > 0 && (
+        <ul className="automation-switches">
+          {mine.map((s) => (
+            <PauseSwitch key={s.owner} state={s} reload={reload} />
+          ))}
+        </ul>
+      )}
+      {absent === '' && may !== null && served.length > 0 && mine.length === 0 && (
+        <p className="muted">No automation switch here is yours to flip.</p>
+      )}
+    </Section>
+  )
+}
+
+/**
+ * ONE person's switch, as TWO position verbs — never a toggle.
+ *
+ * The verb itself refuses a request that did not say which way it wanted the
+ * switch, and that refusal is a design this control keeps rather than works
+ * around: both buttons always state the position they ask for, so a stale render
+ * can never send the opposite of what the person meant. The current position is
+ * READ (the meters family serves it) rather than remembered from the last act.
+ */
+function PauseSwitch({ state, reload }: { state: AutomationState; reload: () => void }) {
+  const act = useAct()
+  const flip = (paused: boolean) => {
+    act.run(
+      () =>
+        api
+          .setAutomationPause({ person: state.owner, paused })
+          .then((res) => outcomeOf(res.changed, res.changed ? 'the switch moved' : 'it was already there', res.detail)),
+      reload,
+    )
+  }
+  return (
+    <li className="automation-switch" data-owner={state.owner} data-paused={String(state.paused)}>
+      <p>
+        <Owner id={state.owner} />{' '}
+        <span className="automation-position">
+          {state.paused ? 'background work is paused' : 'background work is running'}
+        </span>
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" size="sm" data-pause="true" disabled={act.busy} onClick={() => flip(true)}>
+          Pause this automation
+        </Button>
+        <Button variant="secondary" size="sm" data-pause="false" disabled={act.busy} onClick={() => flip(false)}>
+          Resume this automation
+        </Button>
+      </div>
+      <OutcomeLine outcome={act.outcome} />
+      {/* Where a run that parked while paused is released: its OWN resume, on
+          the card that is holding it. This points; it does not re-implement. */}
+      <p className="muted">
+        A single run that parked and should go again is released from{' '}
+        <Link to={hrefFor('inbox')}>the inbox</Link>, where it is waiting.
+      </p>
+    </li>
+  )
+}
+
+/**
+ * The S10.4 budget editor, per (owner, lane) — the grain a budget is declared
+ * at, and the grain the gauge reads at (D4).
+ *
+ * THIS PANEL RENDERS NO FIGURE. The declared budget, the pressure and the
+ * remaining figure are all SERVED, and they render where they are served: in the
+ * meters panel above, absences and all. An editor that also printed its own copy
+ * of them would be a second answer to a question the platform already answers —
+ * and the moment they disagreed, the platform would be lying on one of the two
+ * lines. So this offers the act, and the reading stays where the reading lives.
+ */
+function BudgetPanel({
+  lanes,
+  meters,
+  may,
+  reload,
+}: {
+  lanes: MeterLane[]
+  meters: Meters | null
+  may: MayAct
+  reload: () => void
+}) {
+  if (meters === null) return null
+  const mine = may === null ? [] : lanes.filter((l) => may(l.owner))
+  return (
+    <Section title="Automation budgets">
+      <p className="budget-explainer">
+        A budget is a ceiling on how much automation the platform will start for one person in one lane. The gauge above
+        measures that person&apos;s consumption against it, and background work stops being admitted once the pressure
+        reaches the platform&apos;s threshold. It never stops you working with the platform yourself. It is counted in
+        the gauge&apos;s own weighted-consumption units — not money, and not anything this screen converts.
+      </p>
+      {mine.length === 0 ? (
+        <p className="muted">No lane here is yours to put a budget on.</p>
+      ) : (
+        <ul className="budget-rows">
+          {mine.map((l) => (
+            <BudgetRow key={`${l.owner}/${l.lane}`} lane={l} unit={servedUnit(meters)} reload={reload} />
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+/**
+ * servedUnit reads the unit label OFF THE WIRE — the `budget_unit` column of the
+ * Layer-0 budget view — and returns the empty string when nothing has been
+ * declared yet, because before a declaration the platform has served no unit
+ * string at all. The editor then names the unit in words in its own explainer,
+ * which is prose about what the figure means, rather than printing a label it
+ * invented and passing it off as the platform's.
+ */
+function servedUnit(meters: Meters): string {
+  const answer = meters.budgets.answer
+  if (!answer) return ''
+  const at = answer.columns.indexOf('budget_unit')
+  if (at < 0) return ''
+  for (const row of answer.rows) {
+    const value = (row as unknown[])[at]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return ''
+}
+
+/** One (owner, lane) row's editor door. The label says which act it is, from the
+ *  SERVED declaration state — never from anything this client remembers. */
+function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; reload: () => void }) {
+  const [open, setOpen] = useState(false)
+  const act = useAct()
+  const [tokens, setTokens] = useState('')
+  const [days, setDays] = useState('')
+  const [start, setStart] = useState('')
+  const [why, setWhy] = useState('')
+  const figure = Number.parseInt(tokens, 10)
+  const period = Number.parseInt(days, 10)
+  // Mirrors the verb's own bounds so an obviously-refused request does not need
+  // a round trip. It never REPLACES the server's answer: anything that fires
+  // renders whatever the server says about it.
+  const sendable = Number.isInteger(figure) && figure > 0 && Number.isInteger(period) && period > 0
+
+  return (
+    <li className="budget-row" data-owner={lane.owner} data-lane={lane.lane}>
+      <p>
+        <Owner id={lane.owner} /> · <span className="lane-name">{lane.lane}</span>
+      </p>
+      <Button
+        variant="primary"
+        size="sm"
+        data-declare-budget={`${lane.owner}/${lane.lane}`}
+        onClick={() => {
+          act.clear()
+          setOpen(true)
+        }}
+      >
+        {lane.budget_declared ? 'Change this budget' : 'Declare a budget'}
+      </Button>
+      <ActConfirm
+        open={open}
+        onOpenChange={setOpen}
+        title={`Budget for ${lane.owner} in ${lane.lane}`}
+        what={`Once this is declared the gauge measures ${lane.owner}'s ${lane.lane} consumption against it straight away, in the gauge's own weighted-consumption units — a measure of automation, not money, and nothing here converts it into any. To stop this person's automation outright, use the pause switch instead.`}
+        act="Declare this budget"
+        variant="primary"
+        busy={act.busy || !sendable}
+        onConfirm={() => {
+          setOpen(false)
+          act.run(
+            () =>
+              api
+                .declareBudget({
+                  person: lane.owner,
+                  lane: lane.lane,
+                  period_tokens: figure,
+                  period_days: period,
+                  ...(start === '' ? {} : { period_start: start }),
+                  ...(why === '' ? {} : { reason: why }),
+                })
+                .then((res) => outcomeOf(true, declaredNote(res.budget.unit ?? unit, res.prior), res.detail)),
+            reload,
+          )
+        }}
+      >
+        <div className="budget-form">
+          <p className="muted">
+            Lane: <span className="lane-name">{lane.lane}</span> — a budget belongs to one lane, and this is the row you
+            opened.
+          </p>
+          <label>
+            <span>How much{unit === '' ? '' : ` (${unit})`}</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              data-field="period_tokens"
+              value={tokens}
+              onChange={(e) => setTokens(e.currentTarget.value)}
+            />
+          </label>
+          <label>
+            <span>Over how many days</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              data-field="period_days"
+              value={days}
+              onChange={(e) => setDays(e.currentTarget.value)}
+            />
+          </label>
+          <label>
+            <span>Starting when (optional — left empty, it starts now)</span>
+            <input
+              type="text"
+              data-field="period_start"
+              placeholder="2026-08-05T00:00:00Z"
+              value={start}
+              onChange={(e) => setStart(e.currentTarget.value)}
+            />
+          </label>
+          <label>
+            <span>Why (optional — it is kept with the decision)</span>
+            <input type="text" data-field="reason" value={why} onChange={(e) => setWhy(e.currentTarget.value)} />
+          </label>
+        </div>
+      </ActConfirm>
+      <OutcomeLine outcome={act.outcome} />
+    </li>
+  )
+}
+
+/**
+ * The declaration's own account of what it replaced. A FIRST declaration has no
+ * `prior` member, and the absence is what makes "there was no budget before"
+ * true rather than assumed — nothing here fills it in with a zero.
+ */
+function declaredNote(unit: string, prior: { period_tokens: number } | undefined): string {
+  const suffix = unit === '' ? '' : ` ${unit}`
+  if (!prior) return `declared, and there was no budget on this lane before${suffix === '' ? '' : `; it is in${suffix}`}`
+  return `declared, replacing ${String(prior.period_tokens)}${suffix}`
 }
 
 /**

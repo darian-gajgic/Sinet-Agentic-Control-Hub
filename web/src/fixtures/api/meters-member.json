@@ -16,21 +16,6 @@
       "parked_until": null
     },
     {
-      "owner": "op",
-      "lane": "anthropic",
-      "weighted_consumption": 12.5,
-      "cache_read_weight": 0.1,
-      "assumed": true,
-      "pressure_applicable": false,
-      "pressure": null,
-      "budget_declared": false,
-      "budget_remaining": null,
-      "total_runs": 1,
-      "active_runs": 1,
-      "parked_runs": 0,
-      "parked_until": null
-    },
-    {
       "owner": "alice",
       "lane": "local",
       "weighted_consumption": 12.5,
@@ -44,36 +29,13 @@
       "active_runs": 1,
       "parked_runs": 0,
       "parked_until": null
-    },
-    {
-      "owner": "bob",
-      "lane": "zai",
-      "weighted_consumption": 12.5,
-      "cache_read_weight": 0.1,
-      "assumed": true,
-      "pressure_applicable": false,
-      "pressure": null,
-      "budget_declared": false,
-      "budget_remaining": null,
-      "total_runs": 2,
-      "active_runs": 2,
-      "parked_runs": 2,
-      "parked_until": null
     }
   ],
   "automation": {
     "states": [
       {
-        "owner": "op",
-        "paused": false
-      },
-      {
         "owner": "alice",
         "paused": false
-      },
-      {
-        "owner": "bob",
-        "paused": true
       }
     ]
   },
@@ -148,39 +110,9 @@
           null,
           null,
           null
-        ],
-        [
-          "bob",
-          0,
-          null,
-          null,
-          "UNAVAILABLE",
-          "no operator budget is declared for this person, so a remainder has no minuend. This is a recorded absence, not a zero (S10.1).",
-          null,
-          "UNPRICED",
-          null,
-          null,
-          null,
-          null,
-          null
-        ],
-        [
-          "op",
-          0,
-          null,
-          null,
-          "UNAVAILABLE",
-          "no operator budget is declared for this person, so a remainder has no minuend. This is a recorded absence, not a zero (S10.1).",
-          null,
-          "UNPRICED",
-          null,
-          null,
-          null,
-          null,
-          null
         ]
       ],
-      "row_count": 3,
+      "row_count": 1,
       "truncated": false,
       "notes": [
         "the budget remainder — the declared automation budget where one exists (in weighted-consumption units, never dollars: a flat-rate lane has no dollar remainder), and a RECORDED ABSENCE with its reason where none is declared. The dollar columns are NULL either way"
@@ -203,20 +135,8 @@
         "resets_at",
         "lane"
       ],
-      "rows": [
-        [
-          7,
-          "2026-07-20T09:02:00Z",
-          "bob",
-          "r-audit",
-          "limit.event",
-          null,
-          null,
-          null,
-          null
-        ]
-      ],
-      "row_count": 1,
+      "rows": [],
+      "row_count": 0,
       "truncated": false,
       "notes": [
         "the provider limit signals actually hit, with class, signal and reset time; includes the registered legacy type alias so the history does not begin at a rename"
@@ -250,31 +170,9 @@
           1,
           "2026-07-20T09:00:00Z",
           "2026-07-20T09:04:00Z"
-        ],
-        [
-          "bob",
-          2,
-          2,
-          null,
-          "UNPRICED",
-          0,
-          0,
-          "2026-07-20T09:02:00Z",
-          "2026-07-20T09:04:00Z"
-        ],
-        [
-          "op",
-          1,
-          1,
-          null,
-          "UNPRICED",
-          0,
-          0,
-          "2026-07-20T09:04:00Z",
-          "2026-07-20T09:04:00Z"
         ]
       ],
-      "row_count": 3,
+      "row_count": 1,
       "truncated": false,
       "notes": [
         "consumption per person — work is billed to the requester (3.4), so the owner column IS the person"

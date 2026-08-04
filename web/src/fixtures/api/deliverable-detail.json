@@ -78,5 +78,5 @@
       "reason": "a preview launches from a minted revision and answers a defined state for every type — no-preview and requires-container-tier are answers, not failures (S13.8); with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"
     }
   ],
-  "cursor": 86
+  "cursor": 87
 }

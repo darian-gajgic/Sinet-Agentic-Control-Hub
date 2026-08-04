@@ -9,8 +9,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +62,10 @@ func (f *fakeBudgetStore) Budget(_ context.Context, userID, lane string) (api.Bu
 type fakePauseStore struct {
 	mu     sync.Mutex
 	paused map[string]bool
+	// readErr fails the READ leg alone, which is the arm the meters read's
+	// honest-absence branch exists for (a switch whose position could not be
+	// read must never report itself unpaused).
+	readErr error
 }
 
 func newFakePauseStore() *fakePauseStore { return &fakePauseStore{paused: map[string]bool{}} }
@@ -67,7 +73,18 @@ func newFakePauseStore() *fakePauseStore { return &fakePauseStore{paused: map[st
 func (f *fakePauseStore) Paused(_ context.Context, userID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return false, f.readErr
+	}
 	return f.paused[userID], nil
+}
+
+// set writes the switch WITHOUT going through the verb, so a read asserted
+// against it is asserting the store is where the answer comes from.
+func (f *fakePauseStore) set(userID string, paused bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paused[userID] = paused
 }
 
 func (f *fakePauseStore) SetPause(_ context.Context, userID string, paused bool) (bool, error) {
@@ -467,6 +484,116 @@ func TestPauseVerbNeedsAnExplicitPosition(t *testing.T) {
 	e := newVerbEnv(t)
 	if code, out := e.do(t, "alice", "POST", "/api/meters/pause", `{}`); code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400 — a request that did not say which way is not a request: %s", code, out)
+	}
+}
+
+// ── the pause switch's READ side (P3-UI-2 OQ1) ─────────────────────────────
+
+// wireAutomation is the `automation` block of GET /api/meters.
+type wireAutomation struct {
+	Automation struct {
+		States []struct {
+			Owner  string `json:"owner"`
+			Paused bool   `json:"paused"`
+		} `json:"states"`
+		Absent string `json:"absent"`
+	} `json:"automation"`
+}
+
+func automationOf(t *testing.T, e *verbEnv, who string) wireAutomation {
+	t.Helper()
+	var got wireAutomation
+	if err := json.Unmarshal([]byte(e.mustDo(t, who, "GET", "/api/meters", "")), &got); err != nil {
+		t.Fatalf("decode meters as %s: %v", who, err)
+	}
+	return got
+}
+
+// positions flattens the block into owner→paused, so an assertion says what it
+// means rather than indexing into a slice.
+func positions(a wireAutomation) map[string]bool {
+	out := map[string]bool{}
+	for _, s := range a.Automation.States {
+		out[s.Owner] = s.Paused
+	}
+	return out
+}
+
+// TestMetersServeThePauseSwitchesCurrentPosition is the read the pause CONTROL
+// needs: before this, `PauseStore.Paused` existed, the scheduler consulted it,
+// and no handler called it — so a surface could report what it had just done and
+// nothing else. The switch's position is now served on the meters family it
+// belongs to (S15.2), owner-scoped exactly as the lanes beside it are.
+func TestMetersServeThePauseSwitchesCurrentPosition(t *testing.T) {
+	e := newVerbEnv(t)
+	for _, u := range []string{"alice", "bob"} {
+		seedTask(t, e.b, "t-"+u, u, "T", "doing")
+		seedRun(t, e.b, "r-"+u, u, "t-"+u, "running", "anthropic")
+	}
+	// Flipped through the REAL verb, so the read and the write are proven to
+	// be about one switch rather than two.
+	e.mustDo(t, "alice", "POST", "/api/meters/pause", `{"paused":true}`)
+
+	// (a) The operator reads the household: both owners, each with its own
+	//     position, and the one that was flipped is the one that reads paused.
+	if got := positions(automationOf(t, e, "op")); !reflect.DeepEqual(got, map[string]bool{"op": false, "alice": true, "bob": false}) {
+		t.Errorf("operator automation = %v, want alice paused and nobody else", got)
+	}
+	// (b) A member reads their OWN switch and nobody else's — the same scope
+	//     the lanes beside it are served under.
+	if got := positions(automationOf(t, e, "bob")); !reflect.DeepEqual(got, map[string]bool{"bob": false}) {
+		t.Errorf("bob's automation = %v, want bob's own switch alone", got)
+	}
+	if got := positions(automationOf(t, e, "alice")); !reflect.DeepEqual(got, map[string]bool{"alice": true}) {
+		t.Errorf("alice's automation = %v, want her own paused switch", got)
+	}
+	// (c) The caller's own switch is served even with no lane of their own:
+	//     `op` has run nothing, and a person who has run nothing still has a
+	//     switch. (a) already proves it — this states it as the property.
+	if p, ok := positions(automationOf(t, e, "op"))["op"]; !ok || p {
+		t.Error("the operator's own switch is missing from their own read")
+	}
+
+	// (d) THE SABOTAGE PROBE: the field is READ FROM THE STORE, not remembered
+	//     from the verb. Nothing goes through the verb here — the store is
+	//     written behind it, and the read must follow.
+	e.pause.set("bob", true)
+	e.pause.set("alice", false)
+	if got := positions(automationOf(t, e, "op")); !reflect.DeepEqual(got, map[string]bool{"op": false, "alice": false, "bob": true}) {
+		t.Errorf("automation = %v — the served field does not follow the store", got)
+	}
+}
+
+// TestMetersPauseSwitchAbsencesSayWhy holds the direction that matters most: a
+// position nobody could read is an ABSENCE, never an unpaused switch.
+func TestMetersPauseSwitchAbsencesSayWhy(t *testing.T) {
+	e := newVerbEnv(t)
+	seedTask(t, e.b, "t-alice", "alice", "T", "doing")
+	seedRun(t, e.b, "r-alice", "alice", "t-alice", "running", "anthropic")
+
+	// (a) A store that fails the read.
+	e.pause.readErr = errors.New("the users table is unreadable")
+	got := automationOf(t, e, "alice")
+	if len(got.Automation.States) != 0 {
+		t.Errorf("a failed read still served %d positions", len(got.Automation.States))
+	}
+	if !strings.Contains(got.Automation.Absent, "the users table is unreadable") {
+		t.Errorf("the absence does not carry the failure: %q", got.Automation.Absent)
+	}
+
+	// (b) No store wired at all — the honest absence, and the arm every server
+	//     composed without the S10.4 seam takes (decisionEnv wires no Pause).
+	rr := httptest.NewRecorder()
+	e.decisionEnv.server(t, "alice").Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/meters", nil))
+	var unwired wireAutomation
+	if err := json.Unmarshal(rr.Body.Bytes(), &unwired); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if unwired.Automation.Absent == "" || len(unwired.Automation.States) != 0 {
+		t.Errorf("an unwired switch did not render as an absence: %+v", unwired.Automation)
+	}
+	if !strings.Contains(unwired.Automation.Absent, "not wired") {
+		t.Errorf("the unwired absence does not say so: %q", unwired.Automation.Absent)
 	}
 }
 

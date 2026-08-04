@@ -516,30 +516,13 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     path: '/api/memory/{}/remove', gap: true, why: 'REPORTED GAP — the same surface-less family: retiring an entry, which is a real act with no control anywhere in the workspace.' },
   { method: 'POST',
     path: '/api/memory/{}/delete', gap: true, why: 'REPORTED GAP — the same surface-less family: the owner’s hard delete of their own entry.' },
-  {
-    method: 'POST',
-    path: '/api/runs/{}/cancel',
-    gap: true,
-    why: 'REPORTED GAP — feature 4.5 cancel. S15.2 lists cancel as a mutating verb on runs and the verb is landed and owner-scoped; no built surface offers the control. Carried to the B6 gate.',
-  },
-  {
-    method: 'POST',
-    path: '/api/tasks/{}/cancel',
-    gap: true,
-    why: 'REPORTED GAP — the task half of the same landed 4.5 cancel choreography, equally uncontrolled from any surface.',
-  },
-  {
-    method: 'POST',
-    path: '/api/meters/budget',
-    gap: true,
-    why: 'REPORTED GAP — S15.2’s meters family names “budget edits (own)” and S10.4’s verb is landed; the fleet surface renders the meters and offers no editor. It is why every budget reads as UNDECLARED today, which the fleet says honestly.',
-  },
-  {
-    method: 'POST',
-    path: '/api/meters/pause',
-    gap: true,
-    why: 'REPORTED GAP — the 3.3 “pause my automation” switch that S15.2 lists on the meters family, landed as an owner-scoped verb with no control on any surface.',
-  },
+  // CLOSED 2026-08-05 (P3-UI-2), four entries removed from this list rather
+  // than annotated: feature 4.5's two cancel verbs are the task detail's
+  // state-computed action bar and per-run control, the S10.4 budget editor and
+  // the 3.3 pause switch are the fleet's. The stale-entry test below is what
+  // forced their removal the moment a surface called them, which is the whole
+  // reason it exists — an exception list that keeps excusing a consumed route
+  // is a list nobody can trust in the other direction either.
   {
     method: 'POST',
     path: '/api/deliverables/{}/follow-up',
@@ -616,14 +599,20 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     const gaps = exceptions.filter((e) => e.gap).map((e) => e.path)
     // Recorded as a count so a later packet closing one has to move this line
     // deliberately rather than letting the list quietly shrink or grow.
-    // FOURTEEN REGISTERED ROUTES over THIRTEEN distinct shapes: `/api/memory`
-    // is a gap at both its verbs, and the POST — creating a knowledge entry —
-    // is the family's most consequential one. Counting by shape alone hid it
-    // (drain r1, D6), so all three numbers are pinned rather than one.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(14)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(13)
+    // TEN REGISTERED ROUTES over NINE distinct shapes: `/api/memory` is a gap
+    // at both its verbs, and the POST — creating a knowledge entry — is the
+    // family's most consequential one. Counting by shape alone hid it (drain
+    // r1, D6), so all three numbers are pinned rather than one.
+    //
+    // MOVED 2026-08-05 (P3-UI-2), 14 → 10 routes over 13 → 9 shapes: the two
+    // 4.5 cancel verbs, the S10.4 budget editor and the 3.3 pause switch are
+    // consumed by the task detail and the fleet. Four routes, four shapes —
+    // none of them shared a shape with anything else on the list. CONVENTIONS
+    // §46's gap record carries the dated pointer (§48).
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(10)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(9)
     const gapRoutes = inventory.filter((r) => gaps.includes(normalizePath(r.path)))
-    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(14)
+    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(10)
     for (const e of exceptions.filter((x) => x.gap)) {
       expect(e.why, `${e.path} is flagged a gap but does not say so in its reason`).toContain('REPORTED GAP')
     }

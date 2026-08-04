@@ -57,6 +57,25 @@ type MeterLane struct {
 	ParkedUntil *string `json:"parked_until"`
 }
 
+// AutomationState is one person's S10.4 pause switch as this read serves it:
+// the position the switch is IN, at the grain the switch is set at (per person,
+// never per lane — pausing is not a lane act).
+type AutomationState struct {
+	Owner  string `json:"owner"`
+	Paused bool   `json:"paused"`
+}
+
+// AutomationView is the pause switch's current position for the people this
+// read is already about. It mirrors MeterView's shape deliberately: when the
+// store is not wired the position is UNKNOWN, and an unknown switch renders as
+// an absence with its reason rather than as an unpaused one — "not paused" is a
+// reading, and a reading nobody took is the one thing this surface may not
+// serve (§42).
+type AutomationView struct {
+	States []AutomationState `json:"states,omitempty"`
+	Absent string            `json:"absent,omitempty"`
+}
+
 // MeterView is one Layer-0 view served through internal/history's own verb, so
 // the figures arrive at the view's OWN grain and are never re-grained here. An
 // unavailable surface is an absence with its reason, never an empty table
@@ -69,6 +88,12 @@ type MeterView struct {
 // Meters is the S15.2 meters resource.
 type Meters struct {
 	Lanes []MeterLane `json:"lanes"`
+	// Automation is the S10.4 pause switch's CURRENT position per person, read
+	// from the same store the pause verb writes. It is here because the switch
+	// is a meters-family fact (S15.2 lists "pause my automation" on this family)
+	// and because a control that can only report what it just did cannot tell a
+	// person what is true now.
+	Automation AutomationView `json:"automation"`
 	// BurnRates serves cost_burn_rate rows VERBATIM at the view's own grain,
 	// which is per PERSON (usd per observed day). It is deliberately not
 	// re-grained onto (owner, lane): dividing a person's rate across their
@@ -110,6 +135,7 @@ func (s *Server) handleMeters(w http.ResponseWriter, r *http.Request) {
 		s.writeSurface(w, nil, err)
 		return
 	}
+	out.Automation = s.automationStates(r.Context(), scope, person, out.Lanes)
 	hs := history.Scope{Operator: scope.Operator, UserID: scope.UserID}
 	out.BurnRates = s.meterView(r.Context(), "cost_burn_rate", hs, limit)
 	out.Budgets = s.meterView(r.Context(), "cost_budget_remainder", hs, limit)
@@ -120,6 +146,48 @@ func (s *Server) handleMeters(w http.ResponseWriter, r *http.Request) {
 	// Redacted at the edge: limit_event_history lifts fields straight out of
 	// run_events payloads, which is payload content on a REST response (R20).
 	s.writeReadRedacted(w, out)
+}
+
+// automationStates reads the S10.4 pause switch for the people this response is
+// already about, through the SAME PauseStore the pause verb writes.
+//
+// SCOPE IS THE LANES' OWN and is not widened by a character: the subjects are
+// the owners `meterLanes` just served under the caller's scope — a member's own
+// id, or the operator's whole (or `?person=`-narrowed) set — plus the CALLER
+// themselves whenever the request is not narrowed to somebody else. That one
+// addition is not a scope change: a member's entire scope IS their own id, and
+// the operator may read anybody's. It is here because a person who has run
+// nothing has no lane row to carry their switch, and a switch you cannot see is
+// a switch you cannot honestly be offered.
+//
+// A store that fails is an ABSENCE with the failure's own reason. Reporting
+// "not paused" because the read broke would be the one answer this switch must
+// never give.
+func (s *Server) automationStates(ctx context.Context, scope ownerScope, person string, lanes []MeterLane) AutomationView {
+	if s.pause == nil {
+		return AutomationView{Absent: "the S10.4 pause switch is not wired in this process, so its current position cannot be read here"}
+	}
+	owners := []string{}
+	seen := map[string]bool{}
+	if person == "" || person == scope.UserID {
+		owners, seen[scope.UserID] = append(owners, scope.UserID), true
+	}
+	for _, l := range lanes {
+		if !seen[l.Owner] {
+			seen[l.Owner] = true
+			owners = append(owners, l.Owner)
+		}
+	}
+	states := make([]AutomationState, 0, len(owners))
+	for _, o := range owners {
+		paused, err := s.pause.Paused(ctx, o)
+		if err != nil {
+			s.logger.Warn("meters: read pause switch", "owner", o, "err", err)
+			return AutomationView{Absent: "the S10.4 pause switch could not be read: " + err.Error()}
+		}
+		states = append(states, AutomationState{Owner: o, Paused: paused})
+	}
+	return AutomationView{States: states}
 }
 
 // meterView routes ONE Layer-0 view read. It builds no SQL, applies no clamp of

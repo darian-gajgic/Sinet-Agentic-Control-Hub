@@ -34,6 +34,7 @@ import queryAnswerRaw from './fixtures/api/history-query-answer.json?raw'
 import viewAnswerRaw from './fixtures/api/history-view-answer.json?raw'
 import viewsRaw from './fixtures/api/history-views.json?raw'
 import metersRaw from './fixtures/api/meters.json?raw'
+import metersMemberRaw from './fixtures/api/meters-member.json?raw'
 import runsRaw from './fixtures/api/runs.json?raw'
 import receiptRaw from './fixtures/api/receipt.json?raw'
 import runDetailRaw from './fixtures/api/run-detail.json?raw'
@@ -185,6 +186,10 @@ export const fixtures = {
   tasks: () => parse<Record<string, unknown>>(tasksRaw),
   runs: () => parse<Record<string, unknown>>(runsRaw),
   meters: () => parse<Record<string, unknown>>(metersRaw),
+  /** The same read as a MEMBER. The pause switch is a per-person fact a control
+   *  acts on, so "a member is offered their own switch and nobody else's" is a
+   *  claim about a served body rather than about a render. */
+  metersMember: () => parse<Record<string, unknown>>(metersMemberRaw),
   historyViews: () => parse<Record<string, unknown>>(viewsRaw),
   historyCatalog: () => parse<Record<string, unknown>>(catalogRaw),
   historyViewAnswer: () => parse<Record<string, unknown>>(viewAnswerRaw),

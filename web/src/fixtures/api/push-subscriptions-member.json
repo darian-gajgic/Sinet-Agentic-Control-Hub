@@ -13,5 +13,5 @@
   ],
   "scope": "your own enrolled devices",
   "observable": "Push timing and volume reach your browser vendor's push service (Apple or Google). The notification itself is encrypted to this device's own keys, so the relay sees when and how often — never what.",
-  "cursor": 86
+  "cursor": 87
 }
