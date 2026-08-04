@@ -89,6 +89,8 @@ The database is new, so most surfaces are honestly **empty** — that is the thi
 
 **D7 — Readings en bloc.** The phase accumulated a set of smaller judgments, each recorded with its reasoning in `P3/CONVENTIONS.md` §38–§46. They are listed in §7 below; ratifying them as a block is the pattern from B3–B5.
 
+**D8 — The visual design pass** *(added 2026-08-04, on the operator's question "is this frontend a preview or final?")*. Grounded finding: the frozen spec contains no visual design language anywhere — S15 is an API/behavior contract and FC-v1 is component picks — so B6's bar was purely behavioral, and the styling layer is exactly that deep: one hand-written 1,409-line `web/src/index.css`, no design system; the architecture is final, the appearance is v0. The pass = a real design language and layout polish across the 11 routes (repo-only, $0, behavior-preserving; any styling framework arrives through the adoption rail with lock entries; assets bundled, escape-scan rules bind). **Sequencing: after the D3 route-gap work lands, before the D6 production upgrade**, so the design covers the complete control set and bring-up deploys the finished look once.
+
 ## 7. Carried items, for ratification as a block
 
 - **The Layer-1 catalog is at its band ceiling (50/50).** The next catalog query breaches it and forces the band decision. B6-8 avoided it deliberately by deriving its per-version read transport-side.
@@ -129,4 +131,5 @@ _To be filled in from the operator's free-text response. Free-text answers are a
 - D5 timestamps:
 - D6 the production install:
 - D7 readings en bloc (§7):
+- D8 visual design pass: **ANSWERED 2026-08-04 (operator, free text): ratified as the eighth work item, sequencing agreed (after D3, before D6). The design brief — what the operator wants and how — is deliberately deferred: the operator declares it at the pass's own gate, when D8 is reached. Do not ask for it earlier, and do not start D8 without it.**
 - Click-through observations (A: wrong/ugly/confusing · B: fabricated numbers · C: dead controls · D: missing):

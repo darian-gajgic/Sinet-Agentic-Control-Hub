@@ -12,16 +12,16 @@ Authority order: **`Spec/core-architecture-v1.md` (frozen v1, tag `spec-v1`; dra
 
 **No build work remains in P3.** The only thing between here and bring-up is the **B6 gate**, which is written and presented:
 
-- `P3/gates/B6-report.md` — evidence, deviations, **seven decisions (D1–D7)**, a fourteen-item carried block, standing operator items, and an empty §9 for the answers.
+- `P3/gates/B6-report.md` — evidence, deviations, **eight decisions (D1–D8 — D8 the visual design pass, added + ratified 2026-08-04 with its design brief deferred to D8's own gate)**, a fourteen-item carried block, standing operator items, and §9 for the answers (D8's is recorded; **D1–D7 remain open**).
 - `P3/gates/B6-clickthrough.sh` — **one command**, tested end to end, refuses to touch production.
 
-Nothing is mid-pipeline. Tree clean apart from the five long-standing operator files. **Everything pushed — `origin/main` = `3f4dd7c`.**
+Nothing is mid-pipeline. Tree clean apart from the long-standing operator files. **Everything pushed (re-verified 2026-08-04, after the module-rename roll-forward — see STATE).**
 
 ---
 
 ## 2. This session's first acts, in order
 
-1. **If the operator has answered the gate** (free text is authoritative — do not re-ask via a form): record the answers in `P3/gates/B6-report.md` §9 and in STATE, close the gate, then execute whatever D1–D7 direct. **D3 (which of the fourteen route gaps to build) and D6 (whether to upgrade the production install) are the two that create work.**
+1. **If the operator has answered the gate** (free text is authoritative — do not re-ask via a form): record the answers in `P3/gates/B6-report.md` §9 and in STATE, close the gate, then execute whatever D1–D7 direct. **D3 (which of the fourteen route gaps to build), D6 (whether to upgrade the production install) and D8 (the visual design pass — sequenced after D3, before D6; ask the operator for the design brief AT the D8 boundary, never earlier) are the three that create work.**
 2. **If they have not answered:** do not start build work. Re-present §6 of the report in plain language and wait. A phase gate is one of the three sanctioned pause conditions.
 3. **Do not re-open closed phases or re-litigate ratified dispositions.** B6's OQ sets are all ratified and recorded in STATE's log.
 4. Session-entry battery, so you build on measured ground:
@@ -59,6 +59,7 @@ Nothing is mid-pipeline. Tree clean apart from the five long-standing operator f
 - **D5** timestamps: verbatim UTC today; relative/local beside it is a taste call on live surfaces.
 - **D6** **the production install** — `/usr/local/bin/sinet` is still the 20 July B2-gate binary and no production database has ever applied migration 0020 or 0021.
 - **D7** the §7 carried block, en bloc.
+- **D8** *(added 2026-08-04)* the visual design pass — **already ratified**: the spec named no visual language anywhere, so the SPA's appearance is v0 (one 1,409-line hand-written CSS file) on a final architecture; the pass runs after D3 and before D6, and **the operator declares what they want and how at D8's own gate — deliberately not before**.
 
 ---
 
