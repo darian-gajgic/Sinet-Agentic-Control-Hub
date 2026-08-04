@@ -22,8 +22,8 @@ export function Panel({ className, head, children, ...rest }: PanelProps) {
     <div
       className={cn(
         'rounded-(--radius) border border-border',
-        'bg-[linear-gradient(155deg,rgba(148,148,190,0.075),rgba(148,148,190,0.028))]',
-        'transition-[border-color,transform,box-shadow]',
+        'bg-(image:--panel-grad)',
+        'motion-safe:transition-[border-color,transform,box-shadow]',
         'hover:border-[var(--border-l)] hover:shadow-(--shadow) motion-safe:hover:-translate-y-0.5',
         className,
       )}

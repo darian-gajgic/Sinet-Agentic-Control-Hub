@@ -32,7 +32,7 @@ export function StatTile({ label, value, icon, tone = 'accent', foot, className 
       style={toneStyle(tone)}
       className={cn(
         'relative overflow-hidden rounded-(--radius) border border-border',
-        'bg-[linear-gradient(155deg,rgba(148,148,190,0.075),rgba(148,148,190,0.028))]',
+        'bg-(image:--panel-grad)',
         'p-(--density-pad)',
         'before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-(--tone) before:content-[""]',
         className,

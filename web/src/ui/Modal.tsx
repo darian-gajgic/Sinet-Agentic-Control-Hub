@@ -33,7 +33,7 @@ export function Modal({ open, onOpenChange, title, description, children, footer
         <Dialog.Backdrop
           className={cn(
             'fixed inset-0 z-40 bg-black/55 backdrop-blur-[var(--blur-overlay)]',
-            'transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
+            'motion-safe:transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
           )}
         />
         <Dialog.Popup
@@ -41,7 +41,7 @@ export function Modal({ open, onOpenChange, title, description, children, footer
             'fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2',
             'rounded-(--radius) border border-border bg-popover text-popover-foreground shadow-(--shadow)',
             'p-(--density-pad)',
-            'transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
+            'motion-safe:transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
             'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
             'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
             className,

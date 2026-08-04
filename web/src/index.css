@@ -89,6 +89,18 @@
   --pink: #f472b6;
   --grad: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
   --grad-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.22), rgba(34, 211, 238, 0.12));
+
+  /* The glass material, as a token rather than a literal repeated at each box
+     that wants it: the kit's Panel and StatTile both consume `--panel-grad`, so
+     the material is re-pointable in one place and no component carries a raw
+     colour value (§47). */
+  --panel-grad-from: rgba(148, 148, 190, 0.075);
+  --panel-grad-to: rgba(148, 148, 190, 0.028);
+  --panel-grad: linear-gradient(155deg, var(--panel-grad-from), var(--panel-grad-to));
+
+  /* The skeleton's sweep, likewise a token: one band of the panel neutral
+     travelling across a transparent track. */
+  --skeleton-sweep: linear-gradient(90deg, transparent, var(--panel-3), transparent);
   --sidebar-w: 232px;
   --radius-sm: 9px;
   --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
@@ -327,6 +339,21 @@ a {
 
   to {
     transform: translate3d(1.5%, 1%, 0) scale(1.1);
+  }
+}
+
+/* The skeleton shimmer (design proposal §1, "shimmer skeletons"). The keyframe
+   lives here because a keyframe cannot be declared from a utility; the GATE
+   lives on the utility, as `motion-safe:`, which the kit-motion scan enforces
+   for every animation and transition in web/src/ui. Under `reduce` the sweep
+   never starts and the block is a flat panel-neutral rectangle. */
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
   }
 }
 

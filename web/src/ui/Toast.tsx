@@ -69,7 +69,7 @@ function ToastList() {
         className={cn(
           'rounded-(--radius-sm) border border-border border-l-4 border-l-(--tone)',
           'bg-popover/85 p-3 text-sm shadow-(--shadow-soft) backdrop-blur-[var(--blur-overlay)]',
-          'transition-[opacity,transform] duration-200',
+          'motion-safe:transition-[opacity,transform] duration-200',
           'data-[starting-style]:translate-x-4 data-[starting-style]:opacity-0',
           'data-[ending-style]:translate-x-4 data-[ending-style]:opacity-0',
           // The overflow beyond the visible limit is hidden rather than dropped.

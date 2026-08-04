@@ -31,14 +31,14 @@ export function Drawer({ open, onOpenChange, title, children, className }: Drawe
         <Dialog.Backdrop
           className={cn(
             'fixed inset-0 z-40 bg-black/55 backdrop-blur-[var(--blur-overlay)]',
-            'transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
+            'motion-safe:transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
           )}
         />
         <Dialog.Popup
           className={cn(
-            'fixed inset-y-0 right-0 z-50 flex w-full flex-col sm:w-[520px]',
+            'fixed inset-y-0 right-0 z-50 flex w-full flex-col md:w-[520px]',
             'border-l border-border bg-popover text-popover-foreground shadow-(--shadow)',
-            'transition-transform duration-250 data-[ending-style]:translate-x-full data-[starting-style]:translate-x-full',
+            'motion-safe:transition-transform duration-250 data-[ending-style]:translate-x-full data-[starting-style]:translate-x-full',
             className,
           )}
         >
