@@ -969,21 +969,37 @@ describe('client-side filtering narrows the DISPLAY, never the scope (S15.2)', (
 describe('timestamps render through one primitive, verbatim (B6-9 OQ12)', () => {
   const app = appSources()
 
-  test('only parts.tsx renders a timestamp element', () => {
+  test('only the timestamp primitives render a timestamp element', () => {
+    // WIDENED, not weakened (P3-UI-1): the B6 gate's D5 answer ratified a SECOND
+    // timestamp primitive — `ui/Timestamp.tsx`, which adds the relative-beside-
+    // verbatim `live` variant the audit-only `Stamp` deliberately does not have.
+    // Naming it here is what keeps this a closed list: a THIRD file rendering
+    // <time>, or a view rendering one inline, still fails, and each primitive is
+    // asserted to still exist so the list cannot pass by naming a dead file.
+    const primitives = ['./parts.tsx', './ui/Timestamp.tsx']
     const hits = Object.entries(app)
-      .filter(([p]) => p !== './parts.tsx')
+      .filter(([p]) => !primitives.includes(p))
       .filter(([, t]) => stripComments(t).includes('<time'))
       .map(([p]) => p)
-    expect(hits, 'a view renders its own <time> element instead of using <Stamp>').toEqual([])
-    expect(stripComments(app['./parts.tsx'] ?? ''), 'the primitive itself is gone').toContain('<time')
+    expect(hits, 'a view renders its own <time> element instead of using a timestamp primitive').toEqual([])
+    for (const p of primitives) {
+      expect(stripComments(app[p] ?? ''), `the primitive ${p} is gone`).toContain('<time')
+    }
+    // Both variants of the D5 primitive keep the served UTC in `dateTime`: the
+    // relative label is an ADDITION, never a substitution (B6 §9 D5).
+    expect(stripComments(app['./ui/Timestamp.tsx'] ?? '')).toContain('dateTime={ts}')
   })
 
   test('no view formats a date itself', () => {
     // The policy recorded at v0 is VERBATIM UTC: every stamp the platform serves
-    // is UTC RFC3339, and reformatting one is a transformation of a fact. A
-    // relative/local presentation beside it is a real want and is deliberately
-    // an operator-taste question for the B6 click-through, not a decision this
-    // packet takes on its own.
+    // is UTC RFC3339, and reformatting one is a transformation of a fact.
+    //
+    // The open half of this note — "a relative presentation beside it is a real
+    // want, deferred to the B6 click-through" — was ANSWERED by the gate's D5
+    // decision and built at P3-UI-1: `ui/Timestamp.tsx` renders relative time
+    // BESIDE the verbatim UTC in its `live` variant. That answer changes nothing
+    // here. Relative-beside-verbatim is an addition; LOCALIZING an instant is
+    // still a transformation of a fact, and is still banned tree-wide.
     const formatters = ['toLocaleString(', 'toLocaleDateString(', 'toLocaleTimeString(', 'Intl.DateTimeFormat']
     const hits: string[] = []
     for (const [path, text] of Object.entries(app)) {

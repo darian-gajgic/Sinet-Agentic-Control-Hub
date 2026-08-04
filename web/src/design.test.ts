@@ -245,3 +245,34 @@ test('both density classes ship, comfortable is the default, and compact really 
   // No persistence and no ⚙ key: web storage is banned and none was invented.
   expect(css).not.toContain('localStorage')
 })
+
+test('toggling the density class on a real root really moves the spacing tokens', () => {
+  // The structural check above proves the two blocks disagree in the SOURCE.
+  // This one proves the cascade does what the source says: the real blocks are
+  // lifted out of the real stylesheet — not retyped — applied to a real root,
+  // and read back through getComputedStyle.
+  const style = document.createElement('style')
+  style.textContent = `:root,\n.density-comfortable {${block(':root,\n.density-comfortable')
+    .split('{')
+    .slice(1)
+    .join('{')}}\n.density-compact {${block('.density-compact').split('{').slice(1).join('{')}}`
+  document.head.appendChild(style)
+
+  const root = document.documentElement
+  const read = (name: string) => getComputedStyle(root).getPropertyValue(name).trim()
+
+  root.className = 'density-comfortable'
+  const comfortable = read('--density-pad')
+  root.className = 'density-compact'
+  const compact = read('--density-pad')
+
+  expect(comfortable, 'the comfortable scale resolved to nothing').not.toBe('')
+  expect(compact, 'compact did not tighten the padding').not.toBe(comfortable)
+
+  // And with no class at all the tree still renders comfortable, because :root
+  // carries the same values — a component never sees an empty spacing token.
+  root.className = ''
+  expect(read('--density-pad')).toBe(comfortable)
+
+  style.remove()
+})
