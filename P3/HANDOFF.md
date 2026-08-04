@@ -21,7 +21,7 @@ Nothing is mid-pipeline. Tree clean apart from the long-standing operator files.
 
 ## 2. This session's first acts, in order
 
-1. **The gate is CLOSED and the batch is directed.** First act: the **design-approach proposal** — the Nexus-frontend survey + live GitHub sourcing (status/results in the STATE log), synthesized and presented to the operator. **OPERATOR APPROVAL of that declaration is required before any D3 packet is cut** — this is the operator's own D3 condition, and presenting it is the next sanctioned pause.
+1. **The gate is CLOSED, the batch is directed, and the design-approach proposal is WRITTEN and PRESENTED** — `P3/design/design-approach-proposal.md`, with its three survey inputs beside it (Nexus harvest · UI-foundation sourcing · Odysseus pattern study, AGPL ideas-only). **OPERATOR APPROVAL is required before any UI packet is cut** (the operator's own D3 condition — this pause is ACTIVE). On the operator's free-text answer: record it verbatim in the proposal §6 + STATE; if approved, cut and ground packet UI-1 (foundation) per the proposal §4.
 2. **After approval:** cut and run the D3 packets in the declared design language (order in STATE: cancel → pause → budget → benchmark opt-in → memory family → history ask/search), folding in the C-1 login fix, the D5 timestamp render and the two cosmetic S00.9 amendments; then the D8 pass over the pre-existing routes; then the D6 upgrade ceremony (coordinator-executed, `sudo -v`, prod-DB backup first); then bring-up (S19.6) with the D2 sweep.
 3. **Do not re-open closed phases or re-litigate ratified dispositions.** B6's OQ sets are all ratified and recorded in STATE's log.
 4. Session-entry battery, so you build on measured ground:
