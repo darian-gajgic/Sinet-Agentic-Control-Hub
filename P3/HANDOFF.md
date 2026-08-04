@@ -1,4 +1,4 @@
-# P3 handoff — last rewritten 2026-07-30 (end of session): **THE BUILD IS FINISHED. The B6 gate is OPEN and it is the operator's to answer.**
+# P3 handoff — last rewritten 2026-08-04: **THE BUILD IS FINISHED and the B6 GATE IS CLOSED. The directed UI batch is open — the design-approach declaration comes FIRST and needs operator approval.**
 
 **Read this first, then `P3/STATE.md`.** This file is a *snapshot* to orient a fresh session in two minutes. It goes stale; **`P3/STATE.md` is the single source of truth and outranks anything here.** If they disagree, STATE wins and this file gets corrected.
 
@@ -10,9 +10,9 @@ Authority order: **`Spec/core-architecture-v1.md` (frozen v1, tag `spec-v1`; dra
 
 **B0–B5 CLOSED. B6 COMPLETE — 13 of 13 packets built and validated. There is no unbuilt route left in the SPA (`built` = 11 = the whole table).**
 
-**No build work remains in P3.** The only thing between here and bring-up is the **B6 gate**, which is written and presented:
+**The B6 gate is CLOSED (2026-08-04) and work RESUMES under its directions** — the UI batch: design-approach declaration (operator-approved) → the fourteen controls → the D8 pass → the D6 upgrade (coordinator-executed, `sudo -v`) → bring-up. The gate files:
 
-- `P3/gates/B6-report.md` — evidence, deviations, **eight decisions (D1–D8 — D8 the visual design pass, added + ratified 2026-08-04 with its design brief deferred to D8's own gate)**, a fourteen-item carried block, standing operator items, and §9 for the answers (D8's is recorded; **D1–D7 remain open**).
+- `P3/gates/B6-report.md` — evidence, deviations, **eight decisions, ALL ANSWERED — §9 is the FINAL record**, a fourteen-item carried block (ratified en bloc), standing operator items, and the click-through findings A-1/A-2/C-1.
 - `P3/gates/B6-clickthrough.sh` — **one command**, tested end to end, refuses to touch production.
 
 Nothing is mid-pipeline. Tree clean apart from the long-standing operator files. **Everything pushed (re-verified 2026-08-04, after the module-rename roll-forward — see STATE).**
@@ -21,8 +21,8 @@ Nothing is mid-pipeline. Tree clean apart from the long-standing operator files.
 
 ## 2. This session's first acts, in order
 
-1. **If the operator has answered the gate** (free text is authoritative — do not re-ask via a form): record the answers in `P3/gates/B6-report.md` §9 and in STATE, close the gate, then execute whatever D1–D7 direct. **D3 (which of the fourteen route gaps to build), D6 (whether to upgrade the production install) and D8 (the visual design pass — sequenced after D3, before D6; ask the operator for the design brief AT the D8 boundary, never earlier) are the three that create work.**
-2. **If they have not answered:** do not start build work. Re-present §6 of the report in plain language and wait. A phase gate is one of the three sanctioned pause conditions.
+1. **The gate is CLOSED and the batch is directed.** First act: the **design-approach proposal** — the Nexus-frontend survey + live GitHub sourcing (status/results in the STATE log), synthesized and presented to the operator. **OPERATOR APPROVAL of that declaration is required before any D3 packet is cut** — this is the operator's own D3 condition, and presenting it is the next sanctioned pause.
+2. **After approval:** cut and run the D3 packets in the declared design language (order in STATE: cancel → pause → budget → benchmark opt-in → memory family → history ask/search), folding in the C-1 login fix, the D5 timestamp render and the two cosmetic S00.9 amendments; then the D8 pass over the pre-existing routes; then the D6 upgrade ceremony (coordinator-executed, `sudo -v`, prod-DB backup first); then bring-up (S19.6) with the D2 sweep.
 3. **Do not re-open closed phases or re-litigate ratified dispositions.** B6's OQ sets are all ratified and recorded in STATE's log.
 4. Session-entry battery, so you build on measured ground:
    `gofmt -l internal/ cmd/ tools/` · `go vet ./...` · `go build ./...` · `go test ./... -count=1` · `go run ./tools/lockgate` · `cd web && npm run typecheck && npm run test && npm run build`
@@ -50,16 +50,9 @@ Nothing is mid-pipeline. Tree clean apart from the long-standing operator files.
 
 ---
 
-## 4. What the gate is asking (full text in `P3/gates/B6-report.md` §6)
+## 4. What the gate DECIDED (2026-08-04 — the full record is `P3/gates/B6-report.md` §9)
 
-- **D1** adoption ratifications for the frontend tree (the closure is **not** all-MIT — `diff-match-patch` is Apache-2.0).
-- **D2** the pre-registered paid golden sweep (~$2.10 projected, $5.00 stop), never executed.
-- **D3** **the fourteen route gaps** the S15.12 sweep reports — the memory family entire (including `POST /api/memory`, which counting-by-shape had hidden behind the GET at its own path), cancel on runs and tasks, the budget editor, the pause switch, the benchmark opt-in, history's ask/search. **Which to build, in what order.**
-- **D4** workforce operator-visibility — rests on a coordinator reading of S15.10's two-clause sentence; wants explicit ratification.
-- **D5** timestamps: verbatim UTC today; relative/local beside it is a taste call on live surfaces.
-- **D6** **the production install** — `/usr/local/bin/sinet` is still the 20 July B2-gate binary and no production database has ever applied migration 0020 or 0021.
-- **D7** the §7 carried block, en bloc.
-- **D8** *(added 2026-08-04)* the visual design pass — **already ratified**: the spec named no visual language anywhere, so the SPA's appearance is v0 (one 1,409-line hand-written CSS file) on a final architecture; the pass runs after D3 and before D6, and **the operator declares what they want and how at D8's own gate — deliberately not before**.
+All eight answered: **D1/D4/D7 ratified** (D7 incl. the two cosmetic S00.9 amendments, applied in the UI-batch window) · **D2 authorized** — runs at bring-up after D6 ($2.10 proj / $5.00 stop) · **D3 conditional: declare the HOW first** — the Nexus frontend + other GitHub tools as copy/reference sources; all fourteen controls then built in the declared language (order: cancel → pause → budget → benchmark opt-in → memory family → history ask/search) · **D5 as recommended** (relative-beside-UTC on live surfaces, UTC-only in audit; taste delegated) · **D6 authorized, coordinator-executed via `sudo -v`** — one upgrade after the UI batch, prod-DB backup first · **D8 ratified**, its declaration pulled BEFORE D3 by the D3 condition.
 
 ---
 
