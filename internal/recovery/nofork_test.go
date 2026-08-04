@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/recovery"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/recovery"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // noForkLadder builds a ladder with the predicate under test.

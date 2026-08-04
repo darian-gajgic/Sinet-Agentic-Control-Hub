@@ -23,8 +23,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // Session and PIN policy constants. Spec S01.9 ratifies the mechanisms —

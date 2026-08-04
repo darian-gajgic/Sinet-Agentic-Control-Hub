@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // suppress.go — the S14.4 per-rule suppression EFFECT (brief R19; OQ6). A

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // Recording (Spec S07.11): every verdict is recorded with its reasons, per

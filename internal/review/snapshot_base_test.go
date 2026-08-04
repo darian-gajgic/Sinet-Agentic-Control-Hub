@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 )
 
 // The S13.5 wiring seams landing at B4-2: the snapshot-sha fill-once slot and

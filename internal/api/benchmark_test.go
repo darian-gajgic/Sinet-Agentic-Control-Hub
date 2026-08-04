@@ -20,10 +20,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
 // ── the fake practice ───────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 // The stream-json parser. Contract (S03.1, MUST): forward-tolerant —

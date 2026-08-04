@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // projection_benchmark_test.go — the B5-7 benchmark inbox derivations (S14.7):

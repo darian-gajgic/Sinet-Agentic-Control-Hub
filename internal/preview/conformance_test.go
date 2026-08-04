@@ -27,7 +27,7 @@ func TestImportGraph(t *testing.T) {
 	}
 	allowedInternal := map[string]bool{}
 	for _, p := range []string{"project", "review", "sandbox", "units", "eventlog", "portpool", "storage", "settings"} {
-		allowedInternal["github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/"+p] = true
+		allowedInternal["github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/"+p] = true
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {

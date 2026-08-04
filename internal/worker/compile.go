@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
 )
 
 // compile.go — Spec S08.3: at spawn the control plane compiles (template

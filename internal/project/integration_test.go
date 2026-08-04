@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // The composition-root flow the shell wires (Spec S13.5/S13.1, R19/R20/R25):

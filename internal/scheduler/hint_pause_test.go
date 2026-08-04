@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // hint_pause_test.go — the S15.5 drag hint and the S10.4 pause switch, at the

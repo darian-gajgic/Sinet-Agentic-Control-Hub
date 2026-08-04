@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
 )
 
 // Identity is the caller identity a request carries once the identity

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/lockfile"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/evals"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/lockfile"
 )
 
 // The pinned runner is exercised hermetically against a STUB binary under

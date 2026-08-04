@@ -11,13 +11,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchdog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/evals"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchdog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchlist"
 )
 
 // watchlist_seams_test.go — the B5-6A composition-root coverage. Hermetic: the

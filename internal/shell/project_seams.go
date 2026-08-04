@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // deliverableTaskID derives a task id from THE task deliverable id

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 )
 
 const rev1Body = "alpha\nbravo\ncharlie\ndelta\necho\n"

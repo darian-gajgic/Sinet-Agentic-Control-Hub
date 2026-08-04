@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 )
 
 // The platform-side reciter (Spec S05.3; Research/18 §7-C1, operator

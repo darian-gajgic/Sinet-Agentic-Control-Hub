@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // The S13.10 restore drill — scheduled and TESTED: a backup that is not

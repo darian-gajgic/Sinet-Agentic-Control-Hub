@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/preview"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/portpool"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/preview"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/units"
 )
 
 // The S13.8 preview module, constructed at the composition root from the

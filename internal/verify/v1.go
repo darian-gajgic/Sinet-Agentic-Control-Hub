@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // V1 — domain check packs and plan-conformance checks (Spec S07.3). The

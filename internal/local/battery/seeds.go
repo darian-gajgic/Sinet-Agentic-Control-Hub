@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // seeds.go — the versioned T15 seed suites (Spec S12.9; brief R6). These are

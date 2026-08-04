@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // turns.go — the S15.7 turn lifecycle: a turn opens with the message that

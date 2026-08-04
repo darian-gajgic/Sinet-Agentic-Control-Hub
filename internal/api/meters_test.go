@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 )
 
 type wireMeters struct {
@@ -308,7 +308,7 @@ func TestNoMoneyIsComputedInTheAPI(t *testing.T) {
 				t.Errorf("%s names %q — the price table lives in internal/metering and internal/api never reaches it", name, id)
 			}
 		}
-		if strings.Contains(src, `"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"`) {
+		if strings.Contains(src, `"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"`) {
 			t.Errorf("%s imports internal/metering — the API seam reads a priced figure through the MeterReader seam, never the ledger", name)
 		}
 		for _, line := range strings.Split(src, "\n") {

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
 )
 
 func TestReviewSchemaRidesVerifyE2E(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/benchmark"
 )
 
 // stats_test.go pins BENCH-REG §7 against its own registered reference points.

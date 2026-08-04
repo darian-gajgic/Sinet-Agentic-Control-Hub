@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // advisory.go — the composition-bridge adapter that takes the S07.4 entailment

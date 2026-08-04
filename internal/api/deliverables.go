@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 )
 
 // deliverables.go — the S15.2 deliverables family (P3-B6-3B): the owner-scoped

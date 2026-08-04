@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // preempt_test.go — hermetic tests of the S12.7 kill-not-freeze discipline

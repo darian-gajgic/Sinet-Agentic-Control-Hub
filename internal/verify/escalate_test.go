@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // S07.7 acceptance — liveness proof 1, the planted-defect e2e class:

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // S07.10/S07.4 seed acceptance: the three versioned operator-editable

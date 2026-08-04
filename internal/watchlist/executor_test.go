@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchlist"
 )
 
 // executor_test.go — the D4 first-boot flood locks.

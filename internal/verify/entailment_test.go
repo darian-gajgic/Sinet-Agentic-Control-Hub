@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // S07.4 acceptance: the entailment machinery is present and SHIPS IDLE —

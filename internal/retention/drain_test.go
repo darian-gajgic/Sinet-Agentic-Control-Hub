@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/retention"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/redact"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/retention"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // drain_test.go — P3-B5-8A drain round 1. Each test is the evaluator's own

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // Answering non-intake asks (Spec S07.7: escalations are structured,

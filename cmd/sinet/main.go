@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/cli"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/cli"
 )
 
 func main() {

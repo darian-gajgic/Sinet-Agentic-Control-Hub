@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // Settings is the shell-facing view of the settings registry (Spec S01.10):

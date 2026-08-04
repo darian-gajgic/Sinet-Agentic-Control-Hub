@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // composedSrc is the draft the fake composer emits — a valid S08.1

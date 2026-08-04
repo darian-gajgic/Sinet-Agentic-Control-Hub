@@ -5,15 +5,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // local_test.go — the S12.1 class-(b) duty-seam adapters (brief R20/R21): the

@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/push"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // The S15.11 notifier, driven end to end (B6-9).

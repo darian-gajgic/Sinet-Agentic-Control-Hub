@@ -1,6 +1,6 @@
 package api
 
-import "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+import "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 
 // topics.go is the S14.3 topic map (brief §2): the coarse routing grouping
 // ABOVE the S14.2 event-type families, computed as data. The one SSE endpoint

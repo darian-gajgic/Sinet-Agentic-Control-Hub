@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // pause.go — the in-flight half of S10.4's pause-my-automation (P3-B6-2B, R12;

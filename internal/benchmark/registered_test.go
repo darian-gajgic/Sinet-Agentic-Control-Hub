@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 )
 
 // registered_test.go is this packet's ANTI-DRIFT INSTRUMENT.

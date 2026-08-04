@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // local.go — the S12.1 class-(b) duty-seam adapters (brief R20/R21). The

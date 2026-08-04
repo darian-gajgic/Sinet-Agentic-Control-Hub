@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 )
 
 // Per-type comparison behavior (Spec S13.2): the PDF extracted-text

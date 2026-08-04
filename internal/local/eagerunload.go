@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // eagerunload.go — the S12.2 / G2 Def.6 ratified operator-wins switch (brief

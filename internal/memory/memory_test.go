@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
 )
 
 func TestGateProvenanceAndLifecycleStamping(t *testing.T) {

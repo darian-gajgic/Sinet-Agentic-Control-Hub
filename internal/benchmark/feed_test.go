@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/benchmark"
 )
 
 // feed_test.go pins BENCH-REG §13's stage 2 — the measured done-directly

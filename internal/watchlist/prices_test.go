@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/lockfile"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/lockfile"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchlist"
 )
 
 // TestVendoredPriceDataMatchesTheLockPin: the vendored bytes cannot drift from

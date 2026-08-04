@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // gate.go is BENCH-REG §11 (the 15.3 gate) and §12 (the alarm).

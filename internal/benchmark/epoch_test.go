@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/benchmark"
 )
 
 // epoch_test.go pins BENCH-REG §9 — the rule that decides which records may be

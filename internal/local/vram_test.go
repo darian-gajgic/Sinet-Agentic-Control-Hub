@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // vram_test.go — black-box tests of the S12.7 admission math + S12.8 battery

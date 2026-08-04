@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
 )
 
 // STANDING conformance battery (Spec S09.1, S09.3; R11 §4.8): the

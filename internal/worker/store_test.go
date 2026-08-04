@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // The store lifecycle battery (Spec S08.1–S08.7, S08.10): rows + files,

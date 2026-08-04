@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
 )
 
 // manager builds a Manager over the fixture, returning it and the recording

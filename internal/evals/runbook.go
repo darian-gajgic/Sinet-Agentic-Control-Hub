@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // The revalidation runbook (Spec S14.8 ¶3): flag dependent workers/judges/

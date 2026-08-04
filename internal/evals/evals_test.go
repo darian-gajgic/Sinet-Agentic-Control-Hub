@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/evals"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // ── migration + floor registry (rubric 9, 19) ──
@@ -431,7 +431,7 @@ func TestAggregateGreenIsInsufficient(t *testing.T) {
 
 // ── import wall (rubric 16) ──
 
-const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
+const modulePath = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/"
 
 // bannedImports are the packages internal/evals must never import. It is the
 // S14.8 executor: it records through the S14.5 registry and reads the in-tree

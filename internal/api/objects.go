@@ -8,7 +8,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 )
 
 // objects.go — GET /api/deliverables/{deliverable}/objects/{sha} (P3-B6-8, OQ2b).

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // routing_test.go — the S08.8 selection battery: deterministic selector

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/benchmark"
 )
 
 // greenFloors is a limb-(d) seam reporting a domain's suites green at their

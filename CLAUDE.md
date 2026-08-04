@@ -32,5 +32,5 @@ Findings go in `Research/` — one file per topic, named `NN-topic-slug.md` in s
 
 ## Git
 
-- Default branch: `main`. Remote: private GitHub repo `dariannixda-eng/Sinet-Agentic-Control-Hub`.
+- Default branch: `main`. Remote: private GitHub repo `darian-gajgic/Sinet-Agentic-Control-Hub`.
 - Commit research findings as they complete; push after milestone commits.

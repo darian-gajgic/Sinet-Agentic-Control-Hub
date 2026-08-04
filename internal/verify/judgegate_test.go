@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // P-T06-5 (Spec S14.8 ¶3): a judge-model change blocks unsupervised judging

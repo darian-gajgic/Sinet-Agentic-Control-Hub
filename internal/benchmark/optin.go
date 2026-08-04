@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // optin.go is BENCH-REG §4.2.1's standing opt-in: eligibility limb 1.

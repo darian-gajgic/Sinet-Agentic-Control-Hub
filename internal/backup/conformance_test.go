@@ -25,12 +25,12 @@ func TestImportWallsHold(t *testing.T) {
 		"internal/verify", "internal/worker", "internal/ledger",
 	}
 	allowedInternal := map[string]bool{
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage":  true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog": true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker":   true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage":  true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog": true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker":   true,
 		// settings is a config composition dependency of the one-shot mode
 		// entry (mode.go) — a low-level config package, never engine-facing.
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings": true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings": true,
 	}
 	fset := token.NewFileSet()
 	for _, name := range files {

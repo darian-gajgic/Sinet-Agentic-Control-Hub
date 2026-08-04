@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/push"
 )
 
 // push.go is the transport of the S15.11 Web Push family: which of a person's

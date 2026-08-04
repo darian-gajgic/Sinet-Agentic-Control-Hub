@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/push"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/push"
 )
 
 // A FAKE PUSH SERVICE, ON LOOPBACK TLS. Nothing in this file dials a real push

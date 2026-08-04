@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/lockfile"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/lockfile"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchlist"
 )
 
 func seedByID(t *testing.T) map[string]watchlist.Row {

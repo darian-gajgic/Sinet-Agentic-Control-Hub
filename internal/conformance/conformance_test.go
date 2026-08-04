@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 const repoRoot = "../../"
@@ -720,7 +720,7 @@ func (h *harness) insertDeadmanBirth(t *testing.T, runID string, ts time.Time) {
 
 func TestImportWall(t *testing.T) {
 	allowed := map[string]bool{}
-	const modPrefix = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/"
+	const modPrefix = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/"
 	for _, p := range []string{"storage", "eventlog", "settings"} {
 		allowed[modPrefix+p] = true
 	}

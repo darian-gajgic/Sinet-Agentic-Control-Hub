@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // tier2.go — the S14.4 Tier-2 pause-and-flag routing (brief R15–R22). ALWAYS on

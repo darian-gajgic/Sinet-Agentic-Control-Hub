@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker/automation"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker/automation"
 )
 
 // workforce_test.go — GET /api/workforce (B6-8 part B, R11–R14 + R19).

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // fakeCancel records the actor and subject each cancel verb hands to the

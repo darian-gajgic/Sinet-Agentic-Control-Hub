@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 )
 
 // assertServedByTheAppShell is the post-B6-4 form of "this path is not an API

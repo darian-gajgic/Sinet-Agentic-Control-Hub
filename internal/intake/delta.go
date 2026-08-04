@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 )
 
 // Delta re-approval (Spec S06.9): every post-approval change to SPEC or

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 )
 
 // PlanSource is the S06-owned implementation of the ledger assembly's

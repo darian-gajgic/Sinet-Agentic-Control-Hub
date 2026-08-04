@@ -3,7 +3,7 @@ package history_test
 import (
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 )
 
 // TestRoutingQualityJoinsCausesToOutcomes — acceptance 26. S14.10 ¶5: "a

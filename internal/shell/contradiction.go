@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
 )
 
 // contradiction.go — the S09.7 contradiction-screen adapter (brief R16), LIVE

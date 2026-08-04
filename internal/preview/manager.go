@@ -20,11 +20,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/units"
 )
 
 // manager.go is the S13.8 preview lifecycle manager: launch → disposition →

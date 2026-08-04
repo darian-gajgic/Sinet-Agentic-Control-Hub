@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/benchmark"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/benchmark"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/evals"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // benchmark_seams_test.go — the B5-7 composition-root coverage. Hermetic and

@@ -3,8 +3,8 @@ package shell
 import (
 	"context"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/stage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/chat"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
 )
 
 // chat_seams.go — the composition bridge for the S15.7 assistant (P3-B6-7).

@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 // Settings is the narrow ⚙ reader this adapter needs (CONVENTIONS §2:

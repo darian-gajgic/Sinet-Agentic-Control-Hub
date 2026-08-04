@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 )
 
 // client returns a browser-shaped caller for ts: the test server's TLS

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/scheduler"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/scheduler"
 )
 
 // canary_auth.go — the P-T17-1 auth canary (Spec S14.6 ¶3 bullet 1; S03.6;

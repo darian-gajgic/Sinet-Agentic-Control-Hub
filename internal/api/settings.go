@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
 // settings.go — the S15.9 settings family (P3-B6-3A): the one registry read

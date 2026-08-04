@@ -40,7 +40,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // A1 hostname commitment (Spec S01.8, amendment A1, operator 2026-07-19):

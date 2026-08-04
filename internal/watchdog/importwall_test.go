@@ -47,7 +47,7 @@ var (
 // forbiddenImports are packages a killer would need but the watchdog must not.
 var forbiddenImports = []string{"os/exec", "syscall"}
 
-const modPrefix = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/"
+const modPrefix = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/"
 
 func TestNoAutoKillPrimitives(t *testing.T) {
 	fset := token.NewFileSet()
@@ -167,7 +167,7 @@ func TestWatchdogImportAllowlist(t *testing.T) {
 // cycle is possible and internal/local stays a read-only consumer.
 func TestLocalDoesNotImportWatchdog(t *testing.T) {
 	fset := token.NewFileSet()
-	const watchdogPath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchdog"
+	const watchdogPath = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchdog"
 	for _, path := range sourceFiles(t, "../local") {
 		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if err != nil {

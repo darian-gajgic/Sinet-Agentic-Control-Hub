@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/evals"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/evals"
 )
 
 // fakeRunner scores the probe battery from a script: one outcome set per

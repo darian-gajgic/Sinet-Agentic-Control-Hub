@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/webui"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/webui"
 )
 
 // withSPA puts the SPA embedded in this binary (Spec S01.5; S01.4 keeps Caddy

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 )
 
 // prices.go — the genai-prices refresh, which ALWAYS lands as a PROPOSAL

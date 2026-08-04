@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // canary_logprob.go — the logprob canary (Spec S14.6 ¶3 bullet 4).

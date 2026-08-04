@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 )
 
 // classify.go — the S14.6 ¶2 second pass: EVERY hit (page diff, feed entry, API

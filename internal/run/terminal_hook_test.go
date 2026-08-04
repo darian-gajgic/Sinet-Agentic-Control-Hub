@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // terminal_hook_test.go — the B5-8A run-end seam (Spec S14.9 ¶1: "at run end,

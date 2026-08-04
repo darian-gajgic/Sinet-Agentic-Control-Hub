@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 func writePending(t *testing.T, ctlDir string, p PendingRecitation) {

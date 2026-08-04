@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/units"
 )
 
 // units.go renders the per-preview systemd-socket-proxyd idle-stop unit TEXT

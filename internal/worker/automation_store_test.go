@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker/automation"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker/automation"
 )
 
 // kind=automation end-to-end (Spec S08.9): same schema, same lifecycle,

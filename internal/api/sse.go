@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/redact"
 )
 
 // sseBatchSize bounds one cursor read of the tail loop — the short-batch

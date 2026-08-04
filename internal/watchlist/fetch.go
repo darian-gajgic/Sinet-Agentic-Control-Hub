@@ -19,7 +19,7 @@ import (
 // UserAgent identifies Sinet's poller to every origin it touches. An explicit,
 // contactable agent string is basic politeness on a public-feed poller and is
 // what lets an origin rate-limit us specifically rather than opaquely.
-const UserAgent = "sinet-watchlist/1 (+https://github.com/dariannixda-eng/Sinet-Agentic-Control-Hub)"
+const UserAgent = "sinet-watchlist/1 (+https://github.com/darian-gajgic/Sinet-Agentic-Control-Hub)"
 
 // Fetch bounds. Structural constants (S18 ratifies no key — the §7
 // sseBatchSize precedent): a watch source that needs more than this is a

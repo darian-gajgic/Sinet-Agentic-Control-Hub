@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // The verify ↔ S13 seam contract: minting at the handoff (one per round),

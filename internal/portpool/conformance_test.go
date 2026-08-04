@@ -15,7 +15,7 @@ import (
 // run, never assumed.
 func TestImportGraphStdlibOnly(t *testing.T) {
 	allowedInternal := map[string]bool{
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings": true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings": true,
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {

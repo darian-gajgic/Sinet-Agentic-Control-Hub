@@ -11,7 +11,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // sampling.go is BENCH-REG §4: the hook that fires at verdict-eligibility, the

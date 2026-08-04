@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
 )
 
 // envProbeListener re-execs the test binary as a listener inside a composed

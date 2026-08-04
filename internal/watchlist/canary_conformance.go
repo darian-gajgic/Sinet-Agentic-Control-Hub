@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
 )
 
 // canary_conformance.go — the conformance canaries (Spec S14.6 ¶3 bullet 2:

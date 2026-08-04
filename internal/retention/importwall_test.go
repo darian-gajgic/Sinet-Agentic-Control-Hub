@@ -15,7 +15,7 @@ import (
 // with a FORWARD allowlist so a new edge is deliberate, and a non-tautology
 // probe: a wall that cannot fail guarantees nothing.
 
-const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
+const modulePath = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/"
 
 // allowed is the sanctioned forward allowlist for internal/retention: storage,
 // eventlog and settings + stdlib, plus internal/redact as a DECLARED drain-r1

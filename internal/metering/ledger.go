@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // keyDivergenceAlarm is the ⚙ tier-1-vs-tier-2 value divergence threshold

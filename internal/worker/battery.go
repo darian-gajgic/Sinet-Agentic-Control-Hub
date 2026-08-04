@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/worker/automation"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker/automation"
 )
 
 // battery.go — the four-station validation battery (Spec S08.6): 7.2's

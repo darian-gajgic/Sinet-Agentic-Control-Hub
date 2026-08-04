@@ -21,7 +21,7 @@ Spec/  Research/  Docs/   read-only for build sessions
 
 ## 2. Go conventions (S01.5)
 
-- **Module path:** `github.com/dariannixda-eng/Sinet-Agentic-Control-Hub` (the real repo; private, never fetched by proxy — the uppercase path is accepted).
+- **Module path:** `github.com/darian-gajgic/Sinet-Agentic-Control-Hub` (the real repo; private, never fetched by proxy — the uppercase path is accepted).
 - **Toolchain pin:** the `go` directive in `go.mod` (`1.26.5`) is the single source of truth; the `Go toolchain` entry in `components.lock` mirrors it and `tools/lockgate` fails on any mismatch. Toolchain bumps are adoption-rail events (dated lock edit + go.mod change together).
 - **stdlib-first.** Any third-party Go module is an S16 adoption: S16.4 checklist plus a `components.lock` entry (with the module path in the entry's `modules` list) land in the same commit as the first import. CI enforces this (§4).
 - **Formatting/linting:** `gofmt`-clean and `go vet`-clean, both enforced in CI. No additional linters at B0 (a linter is a dependency; adopt it through the rail or not at all).

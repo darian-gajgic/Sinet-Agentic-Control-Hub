@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 )
 
 // importwall_test.go — the OQ4 import wall (the §31/§32/§33/§34/§35/§36
@@ -18,7 +18,7 @@ import (
 // caught too, with a FORWARD allowlist so a new edge is deliberate, and a
 // non-tautology probe: a wall that cannot fail guarantees nothing.
 
-const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
+const modulePath = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/"
 
 // allowed is the sanctioned forward allowlist for internal/history, per the
 // ratified OQ4 disposition.

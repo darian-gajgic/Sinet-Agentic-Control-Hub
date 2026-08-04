@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/redact"
 )
 
 // index.go — the S14.10 ¶4 index layer this packet owns:

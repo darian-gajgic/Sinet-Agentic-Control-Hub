@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/chat"
 )
 
 // exchange_test.go — the S15.7 file exchange: owner attribution, the structural

@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 // ⚙ keys this adapter consumes (Spec S03 settings table; declared in the

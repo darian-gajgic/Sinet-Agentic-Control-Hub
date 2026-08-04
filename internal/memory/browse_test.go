@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
 )
 
 // browse_test.go — the three reads a human-facing browse surface needs

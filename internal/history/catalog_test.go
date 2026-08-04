@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 )
 
 func runID(i int) string { return fmt.Sprintf("r-bulk-%02d", i) }

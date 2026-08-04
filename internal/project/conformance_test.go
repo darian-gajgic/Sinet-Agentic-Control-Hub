@@ -29,8 +29,8 @@ func TestImportGraphStorageEventlogOnly(t *testing.T) {
 		"internal/verify", "internal/worker", "internal/scheduler",
 	}
 	allowedInternal := map[string]bool{
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage":  true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog": true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage":  true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog": true,
 	}
 	fset := token.NewFileSet()
 	for _, name := range files {

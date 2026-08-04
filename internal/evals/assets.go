@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // Per-asset eval-object binding (Spec S14.8 ¶2): every worker template version

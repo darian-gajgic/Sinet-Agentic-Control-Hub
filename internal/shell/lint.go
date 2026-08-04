@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchdog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchdog"
 )
 
 // ErrNonLoopback is the named fail-closed error of the listener-binding

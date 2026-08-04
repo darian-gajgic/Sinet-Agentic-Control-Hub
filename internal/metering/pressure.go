@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // ⚙ keys of the S10.4 consumption-pressure gauge, owned by Spec S10.

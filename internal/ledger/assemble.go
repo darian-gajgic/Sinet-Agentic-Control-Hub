@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // Fresh-context-per-stage assembly (Spec S05.3/S05.4): every pipeline stage

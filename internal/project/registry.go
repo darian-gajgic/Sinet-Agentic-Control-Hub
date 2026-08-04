@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // The project/repository registry (Spec S13.7). Control-plane verbs over

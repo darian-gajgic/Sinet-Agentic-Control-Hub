@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
 )
 
 // memory.go — the S15.2 memory family (P3-B6-3C): the scoped browse reads, the

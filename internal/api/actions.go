@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // actions.go is the S15.2 task/run/deliverable action verbs: cancel (4.5) and

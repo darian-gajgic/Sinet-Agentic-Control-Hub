@@ -37,9 +37,9 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // Size discipline (Spec S13.10): GitHub enforces a 100 MB file limit, so the

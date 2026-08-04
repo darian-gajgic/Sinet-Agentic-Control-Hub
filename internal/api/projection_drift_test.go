@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // projection_drift_test.go — the B5-6A drift-card inbox derivation (S14.6 ¶2):

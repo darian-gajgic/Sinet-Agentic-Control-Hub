@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 )
 
 // gpuhook_test.go — the S10.9 GPU-admission policy hook (brief R13): a

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // tier0.go — the S14.4 Tier-0 deterministic counters (brief R1–R8). Each is a

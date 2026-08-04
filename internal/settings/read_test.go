@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
 )
 
 // read_test.go — the bulk reads the S15.9 settings surface serves from

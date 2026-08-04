@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/redact"
 )
 
 // TestRedactClasses proves each secret pattern class of Research/18 §3-C2 is

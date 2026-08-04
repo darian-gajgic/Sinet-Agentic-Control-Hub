@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/api"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sdnotify"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sdnotify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/shell"
 )
 
 func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }

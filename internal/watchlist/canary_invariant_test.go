@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/watchlist"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/watchlist"
 )
 
 // canary_invariant_test.go — the R29 HARD INVARIANT proof, mirroring the shape
@@ -138,10 +138,10 @@ func TestCanaryNoKillWallTripsOnPlantedSource(t *testing.T) {
 		{"terminate call", `package p
 func f(x interface{ Terminate() }) { x.Terminate() }`},
 		{"tombstone state ident", `package p
-import "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+import "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 func f() run.State { return run.StateTombstoned }`},
 		{"state built from a string literal", `package p
-import "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run"
+import "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 func f() run.State { return run.State("tombstoned") }`},
 		{"os/exec import", `package p
 import "os/exec"

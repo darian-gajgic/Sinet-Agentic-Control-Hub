@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os/exec"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 // confiner.go is the dev-mode realization of adapters.Confiner (the B1-1

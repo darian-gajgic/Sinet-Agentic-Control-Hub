@@ -101,7 +101,7 @@ What earned its keep across B6-8 and B6-9 — the strongest evidence in the phas
 - **Production front chain LIVE:** `tailscale serve` → Caddy on 127.0.0.1:8481 → the production unit on 8482; `sinet-control` + `sinet-broker` active. **Verified still active and still owning their ports while the click-through ran on 8483.**
 - **The installed production binary is `/usr/local/bin/sinet`, dated 20 July** (the B2-gate install, never rebuilt) — which is why no production DB has applied 0020 or 0021. **That is gate decision D6.**
 - **The click-through leaves a throwaway state dir at `~/.sinet-b6-clickthrough`** (binary + fresh DB + logs). `./P3/gates/B6-clickthrough.sh --clean` removes it.
-- ⚠ **GitHub push identity** — `~/.gitconfig` routes credentials through `gh auth git-credential`, using gh's **active** account. `sinet-ai` cannot see this private repo and its pushes fail with a misleading `Repository not found`. The active account is `dariannixda-eng` and pushes work.
+- ⚠ **GitHub push identity** — `~/.gitconfig` routes credentials through `gh auth git-credential`, using gh's **active** account. `sinet-ai` cannot see this private repo and its pushes fail with a misleading `Repository not found`. The active account is `darian-gajgic` and pushes work.
 - Local inference tier live-capable, user-level: llama-swap v241, llama.cpp b10085 CUDA sm_120, weights in `~/.sinet-b45` (~38 GB, outside the repo). No driver/kernel/system-CUDA change, ever.
 - **B5 organs:** promptfoo 0.121.19 + changedetection.io 0.55.8 installed (user-level); changedetection.io not running; `sinet-watchlist.service` generated-only; all four canaries disarmed.
 - Service-context confined runs stay blocked by the AppArmor userns finding until the **hardening session** (needs sudo).

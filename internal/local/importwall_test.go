@@ -16,7 +16,7 @@ import (
 // nor worker). And internal/worker NEVER imports internal/local (the
 // TieBreaker arrives via the existing interface seam).
 
-const modPrefix = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/"
+const modPrefix = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/"
 
 func TestLocalImportWall(t *testing.T) {
 	allowed := map[string]bool{}

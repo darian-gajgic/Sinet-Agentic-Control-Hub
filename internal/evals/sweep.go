@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/conformance"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
 )
 
 // The regression sweep (Spec S14.8 ¶3 "on-trigger + ⚙ eval.sweep_interval full

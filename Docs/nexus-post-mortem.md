@@ -1,6 +1,6 @@
 # Nexus Post-Mortem — Prior Art (Own)
 
-**Date:** 2026-07-16. **Subject:** Nexus Agent OS + Hermes (github.com/dariannixda-eng/Nexus-Agentic-Coding-Setup), built ~2026-07-07 → 2026-07-15 by the owner. **Purpose of this document:** input for briefing v2.2 (runbook Step 0.2) and standing reference for the rebuild. Source basis: the repo README and `docs/DOCUMENTATION.md` (904 lines, dated 2026-07-15), including its own §13 measured self-assessment — read that file directly for full detail.
+**Date:** 2026-07-16. **Subject:** Nexus Agent OS + Hermes (github.com/darian-gajgic/Nexus-Agentic-Coding-Setup), built ~2026-07-07 → 2026-07-15 by the owner. **Purpose of this document:** input for briefing v2.2 (runbook Step 0.2) and standing reference for the rebuild. Source basis: the repo README and `docs/DOCUMENTATION.md` (904 lines, dated 2026-07-15), including its own §13 measured self-assessment — read that file directly for full detail.
 **Companion:** `component-harvest-map-v1.md` carries the item-by-item harvest with adoption modes, target slices, and effort; this document carries the system description, the failure analysis, and the strategic conclusions.
 
 ---

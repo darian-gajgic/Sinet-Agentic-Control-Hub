@@ -8,7 +8,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // swap.go — the Spec S12.10 model-swap gate (brief R10–R15). A duty alias is

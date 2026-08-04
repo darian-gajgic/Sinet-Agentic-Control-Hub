@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/memory"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
 )
 
 // TestFileCommitFillsThroughRealGitCommitter (F12): the S09.2 commit-on-approval

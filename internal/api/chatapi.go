@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/chat"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/redact"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/chat"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/redact"
 )
 
 // chatapi.go — the S15.7 conversational assistant family (P3-B6-7 part A):

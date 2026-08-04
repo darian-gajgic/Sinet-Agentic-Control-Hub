@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // compact.go — the S14.9 ¶2 scheduled compaction pass.

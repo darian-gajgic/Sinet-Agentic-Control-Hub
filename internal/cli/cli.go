@@ -17,16 +17,16 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/backup"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/buildinfo"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/local"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/portpool"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/sandbox"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/settings"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/shell"
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/units"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/backup"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/buildinfo"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/portpool"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/shell"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/units"
 )
 
 // Exit codes.

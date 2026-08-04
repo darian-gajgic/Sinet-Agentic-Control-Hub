@@ -19,7 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/lockfile"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/lockfile"
 )
 
 func main() {

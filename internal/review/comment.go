@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
 
 // CommentInput is one human review comment (6.2) entering the schema.

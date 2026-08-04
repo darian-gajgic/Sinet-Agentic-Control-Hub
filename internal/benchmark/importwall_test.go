@@ -17,7 +17,7 @@ import (
 // wall — because BENCH-REG §12 says nothing is auto-killed and running work is
 // untouched, and a benchmark that can park a run is not an observer.
 
-const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
+const modulePath = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/"
 
 const pkgDir = "internal/benchmark"
 

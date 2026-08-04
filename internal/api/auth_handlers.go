@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/auth"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
 )
 
 // The login/session endpoints of Spec S01.9 (S15.2: "Login/session

@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
 )
 
 // DialectVersion is the versioned dialect identity. It fills the

@@ -3,7 +3,7 @@ package intake_test
 import (
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
 // TestRegistryDangerZonesPinnedInLedger proves the S13.7 registry feed into

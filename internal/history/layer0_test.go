@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 )
 
 // migrationText reads migration 0016 — the views' authority. Tests assert
@@ -128,7 +128,7 @@ func TestNoMoneyByGeneration(t *testing.T) {
 				t.Errorf("%s references the token field %q — the query layer never turns tokens into money", name, tf)
 			}
 		}
-		if strings.Contains(src, `"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/metering"`) {
+		if strings.Contains(src, `"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"`) {
 			t.Errorf("%s imports internal/metering — the query layer selects a priced view; it never reaches the price table", name)
 		}
 	}

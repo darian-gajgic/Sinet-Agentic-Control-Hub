@@ -20,11 +20,11 @@ func TestImportWallHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowedInternal := map[string]bool{
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/project": true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/gates":   true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/broker":  true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/review":  true,
-		"github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/internal/run":     true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project": true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates":   true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker":  true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review":  true,
+		"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run":     true,
 	}
 	fset := token.NewFileSet()
 	for _, name := range files {

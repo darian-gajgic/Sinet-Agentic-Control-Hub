@@ -14,7 +14,7 @@ import (
 // exact-or-prefix so a SUBPACKAGE of a banned package is caught too, with a
 // non-tautology probe: a wall that cannot fail guarantees nothing.
 
-const modulePath = "github.com/dariannixda-eng/Sinet-Agentic-Control-Hub/"
+const modulePath = "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/"
 
 // forbidden names the packages internal/watchlist must never import, with the
 // reason each edge is barred.
