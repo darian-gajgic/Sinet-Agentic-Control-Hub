@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { api, type AutomationState, type MeterLane, type Meters } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
@@ -320,6 +320,22 @@ function servedUnit(meters: Meters): string {
   return ''
 }
 
+/**
+ * wholePositive is the budget field's own parse, and `Number.parseInt` is
+ * deliberately NOT it.
+ *
+ * `parseInt('3.5')` is 3 and `parseInt('3e5')` is 3: both read a typed figure as
+ * a DIFFERENT one and fire it without a word. A budget is the wrong place in
+ * this platform to be approximately right, so anything that is not a plain run
+ * of digits is refused with its reason and nothing is sent.
+ */
+function wholePositive(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!/^[0-9]+$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
 /** One (owner, lane) row's editor door. The label says which act it is, from the
  *  SERVED declaration state — never from anything this client remembers. */
 function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; reload: () => void }) {
@@ -329,12 +345,20 @@ function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; relo
   const [days, setDays] = useState('')
   const [start, setStart] = useState('')
   const [why, setWhy] = useState('')
-  const figure = Number.parseInt(tokens, 10)
-  const period = Number.parseInt(days, 10)
+  const figure = wholePositive(tokens)
+  const period = wholePositive(days)
   // Mirrors the verb's own bounds so an obviously-refused request does not need
   // a round trip. It never REPLACES the server's answer: anything that fires
   // renders whatever the server says about it.
-  const sendable = Number.isInteger(figure) && figure > 0 && Number.isInteger(period) && period > 0
+  const budget = figure !== null && period !== null ? { period_tokens: figure, period_days: period } : null
+  // A typed figure the field cannot read is REFUSED with the reason, never
+  // quietly rounded into a different one.
+  const held =
+    tokens.trim() !== '' && figure === null
+      ? 'A budget is a whole number of units — write it out in full, with no decimal point and no exponent.'
+      : days.trim() !== '' && period === null
+        ? 'A period is a whole number of days.'
+        : ''
 
   return (
     <li className="budget-row" data-owner={lane.owner} data-lane={lane.lane}>
@@ -359,8 +383,9 @@ function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; relo
         what={`Once this is declared the gauge measures ${lane.owner}'s ${lane.lane} consumption against it straight away, in the gauge's own weighted-consumption units — a measure of automation, not money, and nothing here converts it into any. To stop this person's automation outright, use the pause switch instead.`}
         act="Declare this budget"
         variant="primary"
-        busy={act.busy || !sendable}
+        busy={act.busy || budget === null}
         onConfirm={() => {
+          if (budget === null) return // the act row is disabled without it; the narrowing is said out loud
           setOpen(false)
           act.run(
             () =>
@@ -368,8 +393,7 @@ function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; relo
                 .declareBudget({
                   person: lane.owner,
                   lane: lane.lane,
-                  period_tokens: figure,
-                  period_days: period,
+                  ...budget,
                   ...(start === '' ? {} : { period_start: start }),
                   ...(why === '' ? {} : { reason: why }),
                 })
@@ -390,6 +414,7 @@ function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; relo
               min="1"
               step="1"
               inputMode="numeric"
+              className="font-mono tabular-nums"
               data-field="period_tokens"
               value={tokens}
               onChange={(e) => setTokens(e.currentTarget.value)}
@@ -402,11 +427,17 @@ function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; relo
               min="1"
               step="1"
               inputMode="numeric"
+              className="font-mono tabular-nums"
               data-field="period_days"
               value={days}
               onChange={(e) => setDays(e.currentTarget.value)}
             />
           </label>
+          {held !== '' && (
+            <p className="warn-flag" data-held="true">
+              {held}
+            </p>
+          )}
           <label>
             <span>Starting when (optional — left empty, it starts now)</span>
             <input
@@ -433,10 +464,17 @@ function BudgetRow({ lane, unit, reload }: { lane: MeterLane; unit: string; relo
  * `prior` member, and the absence is what makes "there was no budget before"
  * true rather than assumed — nothing here fills it in with a zero.
  */
-function declaredNote(unit: string, prior: { period_tokens: number } | undefined): string {
+function declaredNote(unit: string, prior: { period_tokens: number } | undefined): ReactNode {
   const suffix = unit === '' ? '' : ` ${unit}`
   if (!prior) return `declared, and there was no budget on this lane before${suffix === '' ? '' : `; it is in${suffix}`}`
-  return `declared, replacing ${String(prior.period_tokens)}${suffix}`
+  // The figure is a served number, so it takes the mono/tabular treatment the
+  // token contract gives every number on this platform (§47).
+  return (
+    <>
+      declared, replacing <span className="font-mono tabular-nums">{String(prior.period_tokens)}</span>
+      {suffix}
+    </>
+  )
 }
 
 /**

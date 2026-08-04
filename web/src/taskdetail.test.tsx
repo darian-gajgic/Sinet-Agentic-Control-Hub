@@ -630,8 +630,13 @@ test('both 409s read as re-read-and-decide-again rather than as failures', async
 test('a refusal renders the server’s own code and sentence', async () => {
   for (const leg of [
     { status: 503, code: 'not_wired', detail: 'the cancel choreography is not wired in this process' },
-    { status: 403, code: 'forbidden', detail: 'reading another person’s work is the operator’s (S01.9)' },
-    { status: 404, code: 'not_found', detail: 'no such run' },
+    // BYTE-EXACT from the source each one comes from. The cancel verbs
+    // authorize through `authorizeOwner` (internal/api/reads.go:444–452), whose
+    // refusal is the bare word — NOT `readPerson`'s S01.9 sentence, which
+    // belongs to the `?person=` filter on the read family and never reaches
+    // here — and whose 404 is `fmt.Errorf("%s not found", what)` with what="run".
+    { status: 403, code: 'forbidden', detail: 'forbidden' },
+    { status: 404, code: 'not_found', detail: 'run not found' },
   ]) {
     const { view, log } = await task('t-ship', detailRoutes())
     scriptedCancel(log, 'r-ship', { error: leg.code, detail: leg.detail }, leg.status)
@@ -701,9 +706,13 @@ test('a task cancel that cancelled nothing never says the task is cancelled', as
   log.set('POST /api/tasks/t-ship/cancel', {
     body: {
       task_id: 't-ship',
-      // The server sends the task's UNCHANGED column when nothing fired
-      // (cancel.go:234–241, drain D4: a no-op cancel never rewrites the board).
-      kanban_status: 'executing',
+      // The server sends the ZERO VALUE when nothing fired: `TaskCancelOutcome`
+      // is built with no Kanban and the field is only ever set inside the
+      // `if out.Applied` branch (cancel.go:221–241, drain D4 — a no-op cancel
+      // never rewrites the board), and the json tag carries no omitempty. So
+      // production serves "", and a body claiming the task's real column here
+      // would be a shape no handler produces.
+      kanban_status: '',
       applied: false,
       runs: [
         {
@@ -853,4 +862,97 @@ test('the cancel controls are reachable and operable at phone width', async () =
     'a cancel control pins a pixel width a phone cannot fit',
   ).toBe(0)
   expect(pinned.test('w-[520px] flex')).toBe(true)
+})
+
+// ── drain r1: the confirm tells the truth about a NON-ATOMIC verb (D1) ────
+
+test('the task confirm does not promise an atomicity the backend does not have', async () => {
+  const detail = withRuns(['running', 'claimed'])
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  click(view.container.querySelector('[data-cancel="task"]'))
+  await flush()
+  const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+  // `stage.CancelTask` walks its runs and each cancel COMMITS ON ITS OWN
+  // (cancel.go:221–233), so a mid-dispatch refusal stops the walk with
+  // everything already cancelled still cancelled.
+  expect(said).toContain('the request stops there')
+  expect(said).toContain('the runs already cancelled stay cancelled')
+  expect(said, 'the confirm promised an all-or-nothing the verb does not give').not.toContain('nothing is cancelled')
+})
+
+test('a task-cancel 409 says the walk stopped part-way; a run-cancel 409 says nothing fired', async () => {
+  const detail = withRuns(['running', 'claimed'])
+  const { view, log } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  const inFlight = 'stage: the run is being dispatched right now — retry the cancel in a moment'
+  log.set('POST /api/tasks/t-ship/cancel', { status: 409, body: { error: 'claim_in_flight', detail: inFlight } })
+  click(view.container.querySelector('[data-cancel="task"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const line = view.container.querySelector('.task-actions [data-outcome]')!
+  expect(line.getAttribute('data-outcome')).toBe('retry')
+  expect(line.textContent).toContain('the request stopped where it was refused')
+  expect(line.textContent).toContain('anything already cancelled stays cancelled')
+  expect(line.textContent, 'the multi-subject verb claimed nothing fired').not.toContain('nothing fired')
+  expect(line.textContent).toContain(inFlight)
+
+  // The single-subject verb DOES fire nothing on a 409, and still says so.
+  scriptedCancel(log, 'r-running-0', { error: 'claim_in_flight', detail: inFlight }, 409)
+  click(view.container.querySelector('[data-cancel-run="r-running-0"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  expect(view.container.querySelector('.run-receipt[data-run="r-running-0"] [data-outcome]')?.textContent).toContain(
+    'nothing fired',
+  )
+})
+
+// ── drain r1: the two confirm arms that had copy and no assertion (D4/N10) ─
+
+test('the mid-dispatch and unrecognized-state confirms each say their own truth', async () => {
+  for (const leg of [
+    { state: 'claimed', says: 'being dispatched right this moment' },
+    { state: 'new', says: 'being dispatched right this moment' },
+    // A state this client has never seen is OFFERED, and its confirm says what
+    // is actually true: the platform decides which ending applies.
+    { state: 'quiescing', says: 'The platform decides which ending applies' },
+  ]) {
+    const detail = withRuns([leg.state])
+    const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+    click(view.container.querySelector(`[data-cancel-run="r-${leg.state}-0"]`))
+    await flush()
+    const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+    expect(said, `the ${leg.state} confirm does not say what a cancel does to it`).toContain(leg.says)
+    // Nothing invented: no deletion, no rollback, on any arm.
+    expect(said.toLowerCase()).not.toContain('delete')
+    expect(said.toLowerCase()).not.toContain('roll back')
+    view.unmount()
+  }
+})
+
+// ── drain r1: the operator's act on ANOTHER owner's run, fired (D4) ───────
+
+test('the operator cancels another owner’s run, and the act really fires', async () => {
+  // The default session IS alice-as-operator; the SUBJECT is bob's. That is the
+  // operator limb of `authorizeOwner` (reads.go:444–452) exercised as an act
+  // rather than as a render.
+  const detail = fixtures.taskDetail() as unknown as Detail
+  detail.owner = 'bob'
+  const { view, log } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  expect(view.container.querySelector('.owner')?.textContent).toContain('bob')
+  scriptedCancel(log, 'r-ship', {
+    run_id: 'r-ship',
+    from: 'running',
+    to: 'completed',
+    applied: true,
+    ladder_invoked: false,
+    detail: detailRunningCancelled,
+  })
+  click(view.container.querySelector('[data-cancel-run="r-ship"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  expect(log.calls.filter((c) => c.method === 'POST' && c.path === '/api/runs/r-ship/cancel').length).toBe(1)
+  expect(view.container.querySelector('[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
 })

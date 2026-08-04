@@ -268,7 +268,13 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
         open={open}
         onOpenChange={setOpen}
         title="Cancel this task?"
-        what={`Every run of this task that has not ended is cancelled — ${String(live.length)} right now — each under the rule for the state it is in. If one of them is mid-dispatch the whole request is refused and nothing is cancelled, so you try again in a moment.`}
+        // The truth about this verb, and it is not atomic: `stage.CancelTask`
+        // walks the task's runs in order and each cancel COMMITS ON ITS OWN, so
+        // a run that turns out to be mid-dispatch stops the walk with everything
+        // already cancelled still cancelled (internal/stage/cancel.go:221–233).
+        // Saying "nothing is cancelled" here would be a promise the platform
+        // does not keep, on the one screen where that matters most.
+        what={`Every run of this task that has not ended is cancelled — ${String(live.length)} right now — each under the rule for the state it is in. If one of them turns out to be mid-dispatch the request stops there: the runs already cancelled stay cancelled, and this page re-reads so you can see how far it got before trying the rest.`}
         act="Cancel every unfinished run"
         busy={act.busy}
         onConfirm={() => {
@@ -284,13 +290,14 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
                 )
               }),
             reload,
+            'the request stopped where it was refused — anything already cancelled stays cancelled, and this page has re-read',
           )
         }}
       >
         <ul className="cancel-preview">
           {live.map((r) => (
             <li key={r.run_id} data-run={r.run_id}>
-              <span className="run-id">{r.run_id}</span> <span className="run-state">{r.state}</span> —{' '}
+              <span className="run-id font-mono">{r.run_id}</span> <span className="run-state">{r.state}</span> —{' '}
               {cancelConsequence(r.state)}
             </li>
           ))}
@@ -301,7 +308,7 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
         <ul className="cancel-runs">
           {result.runs.map((r) => (
             <li key={r.run_id} data-run={r.run_id} data-outcome={r.applied ? 'applied' : 'noop'}>
-              <span className="run-id">{r.run_id}</span> {runOutcomeNote(r)}
+              <span className="run-id font-mono">{r.run_id}</span> {runOutcomeNote(r)}
               <span className="muted"> — {r.detail}</span>
             </li>
           ))}

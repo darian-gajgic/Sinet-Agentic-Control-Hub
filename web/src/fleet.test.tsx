@@ -290,7 +290,7 @@ test('a refused flip renders the server’s own code and sentence', async () => 
   for (const leg of [
     // meters_verbs.go:277–279 / :457–469 / :253–255.
     { status: 403, code: 'forbidden', detail: "pausing another person's automation is the operator's (D10)" },
-    { status: 404, code: 'not_found', detail: 'no such person: "ghost"' },
+    { status: 404, code: 'not_found', detail: 'no such person "ghost": a budget or a pause is declared for somebody' },
     { status: 503, code: 'not_wired', detail: 'the S10.4 pause switch is not wired in this process' },
   ]) {
     const view = await fleet({ 'POST /api/meters/pause': { status: leg.status, body: { error: leg.code, detail: leg.detail } } })
@@ -579,4 +579,138 @@ test('every new control is reachable and operable at phone width', async () => {
   expect(fixed.map((n) => n.className.toString()), 'a control pins a pixel width a phone cannot fit').toEqual([])
   // Probe: the detector really matches what it forbids.
   expect(pinned.test('w-[520px] flex')).toBe(true)
+})
+
+// ── drain r1: both authority directions FIRED, not only rendered (D4) ─────
+
+test('a member flips their OWN switch, and the request names them', async () => {
+  const log = scriptedFetch({
+    ...oversightRoutes(),
+    'GET /api/auth/session': asMember('alice'),
+    'GET /api/meters': { body: fixtures.metersMember() },
+    'POST /api/meters/pause': { body: { owner: 'alice', paused: true, changed: true, detail: pausedDetail } },
+  })
+  window.history.replaceState(null, '', '/fleet')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  click(view.container.querySelector('.automation-switch[data-owner="alice"] [data-pause="true"]'))
+  await flush()
+  const sent = log.calls.filter((c) => c.path === '/api/meters/pause')
+  expect(sent.length, 'a member could not flip their own switch').toBe(1)
+  expect(sent[0].body).toEqual({ person: 'alice', paused: true })
+  expect(view.container.querySelector('.automation-switch[data-owner="alice"] [data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
+  view.unmount()
+})
+
+test('a member declares their OWN budget, and the operator declares another owner’s', async () => {
+  const answer = (owner: string, lane: string) => ({
+    body: {
+      budget: {
+        owner,
+        lane,
+        period_tokens: 250000,
+        unit: 'weighted-consumption units (S10.4)',
+        period_start: '2026-08-05T00:00:00Z',
+        period_days: 30,
+        declared_ts: '2026-08-05T00:00:00Z',
+        declared_by: owner,
+      },
+      detail: declaredDetail,
+    },
+  })
+
+  // (a) the member, on their own lane — the own limb of own+operator-any.
+  const memberLog = scriptedFetch({
+    ...oversightRoutes(),
+    'GET /api/auth/session': asMember('alice'),
+    'GET /api/meters': { body: fixtures.metersMember() },
+    'POST /api/meters/budget': answer('alice', 'anthropic'),
+  })
+  window.history.replaceState(null, '', '/fleet')
+  const mine = mount(<App stream={inertStream()} />)
+  await flush()
+  await openEditor(mine, 'alice/anthropic', '250000', '30')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  const asMine = memberLog.calls.filter((c) => c.path === '/api/meters/budget')
+  expect(asMine.length, 'a member could not declare their own budget').toBe(1)
+  expect(asMine[0].body).toEqual({ person: 'alice', lane: 'anthropic', period_tokens: 250000, period_days: 30 })
+  mine.unmount()
+
+  // (b) the operator, on BOB's lane — the administer limb, fired.
+  const opLog = scriptedFetch({ ...oversightRoutes(), 'POST /api/meters/budget': answer('bob', 'zai') })
+  window.history.replaceState(null, '', '/fleet')
+  const theirs = mount(<App stream={inertStream()} />)
+  await flush()
+  await openEditor(theirs, 'bob/zai', '9000', '7')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  const asOp = opLog.calls.filter((c) => c.path === '/api/meters/budget')
+  expect(asOp.length, 'the operator could not declare another owner’s budget').toBe(1)
+  expect(asOp[0].body).toEqual({ person: 'bob', lane: 'zai', period_tokens: 9000, period_days: 7 })
+  expect(theirs.container.querySelector('.budget-row[data-owner="bob"] [data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
+  theirs.unmount()
+})
+
+// ── drain r1: the figure is read exactly as typed, or refused (D5/D6) ─────
+
+test('a figure that is not a whole number is refused with its reason, and nothing fires', async () => {
+  for (const typed of ['3.5', '3e5']) {
+    const log = scriptedFetch(oversightRoutes())
+    window.history.replaceState(null, '', '/fleet')
+    const view = mount(<App stream={inertStream()} />)
+    await flush()
+    click(view.container.querySelector('[data-declare-budget="alice/anthropic"]'))
+    await flush()
+    typeInto(document.querySelector('[data-field="period_tokens"]') as HTMLInputElement, typed)
+    typeInto(document.querySelector('[data-field="period_days"]') as HTMLInputElement, '30')
+    await flush()
+
+    // `Number.parseInt` reads both of these as 3 — a DIFFERENT figure from the
+    // one that was typed. Firing that silently is the one thing a budget field
+    // must not do, so the act is held and the reason is on screen.
+    // Non-vacuous: the field really holds what was typed, so the refusal is
+    // about the VALUE rather than about an input the harness never filled.
+    expect((document.querySelector('[data-field="period_tokens"]') as HTMLInputElement).value).toBe(typed)
+    const held = document.querySelector('[data-held]')
+    expect(held, `"${typed}" was accepted instead of refused`).not.toBeNull()
+    expect(held?.textContent).toContain('whole number of units')
+    expect((document.querySelector('[data-act="confirm"]') as HTMLButtonElement).disabled).toBe(true)
+    expect(log.calls.filter((c) => c.path === '/api/meters/budget').length, `"${typed}" fired something`).toBe(0)
+    view.unmount()
+  }
+})
+
+test('served and typed figures take the mono, tabular treatment the token contract gives numbers', async () => {
+  const prior = {
+    owner: 'alice',
+    lane: 'anthropic',
+    period_tokens: 100000,
+    unit: 'weighted-consumption units (S10.4)',
+    period_start: '2026-07-01T00:00:00Z',
+    period_days: 30,
+    declared_ts: '2026-07-01T00:00:00Z',
+    declared_by: 'alice',
+  }
+  const view = await fleet({
+    'POST /api/meters/budget': {
+      body: { budget: { ...prior, period_tokens: 250000 }, prior, detail: declaredDetail },
+    },
+  })
+  await openEditor(view, 'alice/anthropic', '250000', '30')
+  for (const field of ['period_tokens', 'period_days']) {
+    const input = document.querySelector(`[data-field="${field}"]`)!
+    expect(input.className, `${field} does not render its figure mono`).toContain('font-mono')
+    expect(input.className).toContain('tabular-nums')
+  }
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  const figure = view.container.querySelector('.budget-row[data-lane="anthropic"] [data-outcome] .font-mono')!
+  expect(figure.textContent, 'the served prior figure is not the one rendered mono').toBe('100000')
+  expect(figure.className).toContain('tabular-nums')
+  // The sentence still reads as one sentence.
+  expect(view.container.querySelector('.budget-row[data-lane="anthropic"] [data-outcome]')?.textContent).toContain(
+    'replacing 100000 weighted-consumption units (S10.4)',
+  )
 })

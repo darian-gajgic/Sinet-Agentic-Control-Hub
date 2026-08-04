@@ -43,15 +43,27 @@ export type ActOutcome = {
   kind: ActKind
   /** This client's one-line account of WHICH arm it is. Never a restatement of
    *  the platform's reasoning — that is `detail`'s job. */
-  note: string
+  note: ReactNode
   /** The server's own sentence, rendered verbatim and never parsed. */
   detail: string
 }
 
 /** applied/noop from a verb that reports whether it did anything. */
-export function outcomeOf(applied: boolean, note: string, detail: string): ActOutcome {
+export function outcomeOf(applied: boolean, note: ReactNode, detail: string): ActOutcome {
   return { kind: applied ? 'applied' : 'noop', note, detail }
 }
+
+/**
+ * The default 409 note, and it is a CLAIM ABOUT THE VERB rather than a
+ * pleasantry: a conflict on a single-subject verb fires nothing, because the
+ * one transition it would have made is the one that was refused.
+ *
+ * A MULTI-SUBJECT verb cannot say this and must not. `stage.CancelTask` walks
+ * its runs in order and each cancel commits on its own, so a run refusing
+ * mid-dispatch stops the walk with everything already cancelled STILL cancelled
+ * (internal/stage/cancel.go:221–233). Such a call site passes its own note.
+ */
+export const nothingFired = 'nothing fired — re-read it and decide again'
 
 /**
  * refusalOf classifies from the server's MACHINE CODE, never from its prose.
@@ -61,12 +73,12 @@ export function outcomeOf(applied: boolean, note: string, detail: string): ActOu
  * look again. Everything else the server refuses is rendered as the refusal it
  * is, carrying the server's own text.
  */
-export function refusalOf(err: unknown): ActOutcome {
+export function refusalOf(err: unknown, conflictNote: string = nothingFired): ActOutcome {
   if (err instanceof ApiError) {
     const retry = err.status === 409
     return {
       kind: retry ? 'retry' : 'failed',
-      note: retry ? 'nothing fired — re-read it and decide again' : `refused (${err.code || String(err.status)})`,
+      note: retry ? conflictNote : `refused (${err.code || String(err.status)})`,
       detail: err.message,
     }
   }
@@ -112,7 +124,7 @@ export type Act = {
    * refusal re-reads, because a refusal is often the platform telling you the
    * thing you are looking at has moved.
    */
-  run(fire: () => Promise<ActOutcome>, reread: () => void): void
+  run(fire: () => Promise<ActOutcome>, reread: () => void, conflictNote?: string): void
   clear(): void
 }
 
@@ -122,10 +134,12 @@ export function useAct(): Act {
   return {
     busy,
     outcome,
-    run(fire, reread) {
+    // `conflictNote` is how a MULTI-SUBJECT verb says what its own 409 means.
+    // The default claims nothing fired, which only a single-subject verb may.
+    run(fire, reread, conflictNote) {
       setBusy(true)
       fire()
-        .then(setOutcome, (err: unknown) => setOutcome(refusalOf(err)))
+        .then(setOutcome, (err: unknown) => setOutcome(refusalOf(err, conflictNote)))
         .finally(() => {
           setBusy(false)
           reread()
