@@ -594,12 +594,187 @@
       "notes": "S16.3-bound pick, materialized at P3-B6-4. ONE entry covers both packages because they ship as one versioned unit — @jsonforms/react peers @jsonforms/core at the EXACT same version, so they can never move independently. EXECUTION-TIME re-verification (registry.npmjs.org, 2026-07-29): both published 2026-06-16 at 3.8.0, license MIT UNCHANGED, neither deprecated, both still the latest release — no fallback activates. Closure: ajv, ajv-formats, lodash. S16.4 walk: #1 seam — the settings view (S15.9); the Sinet-owned renderer SET is B6-6's work over this core. #2 organ-grade: a renderer driven by data. #3 health at the pinned ref: repo alive (pushed 2026-07-27), Eclipse Foundation backing, ~2 releases/yr since 3.0 — institutional stability was the reason it beat RJSF (FC-v1 §4). #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY: a Categorization+Control fixture — the S15.9 vocabulary shape the B6-3A emitter produces — renders in the harness from a fixture, not from the API. #6 adopt-unmodified. #7 react peer `…||^19.0.0` admits 19.2.8; core/react pinned in lockstep. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
     },
     {
+      "name": "@base-ui/react",
+      "kind": "frontend",
+      "pin": "1.7.0",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/@base-ui/react, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "the headless behaviour layer under the primitive kit: dialog, drawer and toast semantics (focus trap, escape stack, portal, ARIA) the kit styles in the Nexus language",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "hand-rolled behaviour behind the same kit exports, or the Radix track (`radix-ui` 1.6.x is alive) — the swap is contained to web/src/ui/ because nothing outside the kit imports it",
+      "abandonment": "MUI drops it or the 1.x line stalls → re-seat the kit on hand-rolled behaviour; default ⚙ adoption.abandonment_months otherwise (S16.7)",
+      "watch": [
+        "the Radix↔Base-UI ecosystem transition: shadcn made Base UI its default primitive layer on 2026-07-03, and the vendored-TSX posture is what keeps that churn off shipped components",
+        "1.x API stability — stable since 1.0.0 (2025-12-11), young line, bounded by the exact pin",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "@base-ui/react"
+      ],
+      "notes": "NEW adoption at P3-UI-1 under the operator-approved design proposal (P3/design/design-approach-proposal.md §2). EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. 1.7.0 published 2026-08-04, MIT, not deprecated, and the package NAME was re-checked because it has been renamed once already (@base-ui-components/react → @base-ui/react at 1.0.0) — the current name is what is pinned. S16.4 walk: #1 seam — the primitive kit's behaviour layer, imported only from web/src/ui/. #2 organ-grade: a headless widget library, no orchestration opinions. #3 health at the pinned ref: 1.7.0 is the current release of a stable line, MUI-backed. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: Modal and Drawer render real Base UI dialogs in the harness and the Toast stack runs through its provider (web/src/ui/*.test.tsx). #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 peers react ^17||^18||^19 admit the pinned 19.2.8; date-fns and @date-fns/tz are OPTIONAL peers and are not installed. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE. Runtime closure arrives with it (@base-ui/utils, @floating-ui/react-dom, @floating-ui/utils, use-sync-external-store, @babel/runtime) and is covered by the computed-closure rule (§41), not enumerated here."
+    },
+    {
+      "name": "lucide-react",
+      "kind": "frontend",
+      "pin": "1.28.0",
+      "license": {
+        "spdx": "ISC",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/lucide-react, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "the icon set: per-icon tree-shaken SVG components, in the same 24×24 round-cap language the design already speaks",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "an owned inline-SVG icon set — already the declared fallback style, and the redraw path the design proposal names for any icon lucide draws worse",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "bundle contribution: named imports must stay tree-shaken — a barrel that survives into the chunk would be hundreds of kB of JS, measured at every packet landing",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "lucide-react"
+      ],
+      "notes": "NEW adoption at P3-UI-1 (design proposal §2). EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. 1.28.0 published 2026-07-30, ISC, not deprecated. S16.4 walk: #1 seam — presentation only — icons, no behaviour. #2 organ-grade: a leaf asset library. #3 health at the pinned ref: 1.28.0 current, released within the week of adoption. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: seven named icons render in the shell nav and are asserted in the harness; MEASURED at landing, the whole icon contribution is +4.18 kB raw / +1.59 kB gzip of JS, which is the tree-shaking claim checked rather than believed. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 peers react ^16.5.1||^17||^18||^19 admit the pinned 19.2.8. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
+      "name": "clsx",
+      "kind": "frontend",
+      "pin": "2.1.1",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/clsx, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "conditional className joining — the inner half of cn()",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "a trivial owned re-implementation behind cn(): it is a leaf utility with one job",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "clsx"
+      ],
+      "notes": "NEW adoption at P3-UI-1 (design proposal §2). EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. S16.4 walk: #1 seam — a leaf utility inside the primitive kit. #2 organ-grade: a leaf library, trivially replaceable. #3 health at the pinned ref: 2.1.1 is the current release at adoption. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: every kit component composes its classes through cn(), which is exercised by each component's own render test. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 no React peer to satisfy; the package is framework-agnostic. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
+      "name": "tailwind-merge",
+      "kind": "frontend",
+      "pin": "3.6.0",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/tailwind-merge, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "last-wins conflict resolution between Tailwind utility classes — the outer half of cn(), so a caller's className can override a variant's",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "an owned re-implementation behind cn(), or dropping override support and ordering classes by hand at each call site",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "Tailwind major alignment: tailwind-merge tracks Tailwind's utility grammar, so a Tailwind major is what moves it",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "tailwind-merge"
+      ],
+      "notes": "NEW adoption at P3-UI-1 (design proposal §2). EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. S16.4 walk: #1 seam — a leaf utility inside the primitive kit. #2 organ-grade: a leaf library, trivially replaceable. #3 health at the pinned ref: 3.6.0 is the current release at adoption. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: cn() is asserted to let a caller's utility beat the variant's in the kit tests. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 no React peer to satisfy; the package is framework-agnostic. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
+      "name": "class-variance-authority",
+      "kind": "frontend",
+      "pin": "0.7.1",
+      "license": {
+        "spdx": "Apache-2.0",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/class-variance-authority, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "the variant→class map every kit primitive's variants are declared with",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "owned variant maps — a lookup object per component, which is what cva is",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "class-variance-authority"
+      ],
+      "notes": "NEW adoption at P3-UI-1 (design proposal §2). EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. S16.4 walk: #1 seam — a leaf utility inside the primitive kit. #2 organ-grade: a leaf library, trivially replaceable. #3 health at the pinned ref: 0.7.1 is the current release at adoption. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: Button, Chip, StatusDot and the rest declare their variants through cva and each variant is rendered in the harness. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 no React peer; it depends on clsx ^2.1.1, satisfied by the pinned 2.1.1. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
+      "name": "tw-animate-css",
+      "kind": "frontend",
+      "pin": "1.4.0",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/tw-animate-css, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "the CSS-only animation utility set Tailwind v4 dropped from core, imported by the stylesheet",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "owned @keyframes in index.css — it is CSS with no runtime",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7)",
+      "watch": [
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "tw-animate-css"
+      ],
+      "notes": "NEW adoption at P3-UI-1 (design proposal §2). EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. S16.4 walk: #1 seam — a leaf utility inside the primitive kit. #2 organ-grade: a leaf library, trivially replaceable. #3 health at the pinned ref: 1.4.0 is the current release at adoption. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: imported by web/src/index.css and compiled into the built stylesheet; the reduced-motion kill switch covers its utilities too. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 no React peer to satisfy; the package is framework-agnostic. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
+      "name": "Fontsource: Inter Variable + JetBrains Mono",
+      "kind": "frontend",
+      "pin": "5.3.0",
+      "license": {
+        "spdx": "OFL-1.1",
+        "scope": "BOTH packages at the pinned version, path-scoped at the INSTALLED refs (node_modules/@fontsource-variable/inter and node_modules/@fontsource/jetbrains-mono). Each declares `license: OFL-1.1` in package.json and carries a single root LICENSE that is the SIL Open Font License 1.1 verbatim, prefaced by the upstream font copyright (Inter: 'Copyright 2016 The Inter Project Authors'; JetBrains Mono: 'Copyright 2020 The JetBrains Mono Project Authors'). READ RATHER THAN ASSUMED: there is no code/font licence SPLIT in either installed ref — the packages are @font-face CSS plus the woff2/woff binaries, and OFL-1.1 covers the whole of what is shipped. OFL-1.1 permits bundling and redistribution as part of a larger work; the fonts are shipped UNMODIFIED and under their reserved names, so the Reserved Font Name clause is not engaged.",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "the two bundled typefaces: Inter (variable weight axis) for prose and JetBrains Mono for every number, id, timestamp and status token — the tabular-figure instrument-panel discipline the design rests on",
+        "section": "S15.1"
+      },
+      "replacement": "self-vendored woff2 files under web/public with owned @font-face rules (OFL-1.1 permits it) — the packages are a delivery convenience, not a dependency of the design",
+      "abandonment": "Fontsource unmaintained → vendor the woff2 files directly; the system-ui stack is the degraded fallback already declared in the font-family lists",
+      "watch": [
+        "upstream font releases (Inter, JetBrains Mono) — a font update is a deliberate visual change, never a silent one",
+        "bundle contribution: 16 assets / 417.30 kB at landing, of which the four .woff fallbacks (112.07 kB) and the five non-latin Inter subsets (85.17 kB) are BUNDLED BUT NEVER SERVED to this platform's readers — a named tightening candidate for a later packet, recorded rather than left to be discovered",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "@fontsource-variable/inter",
+        "@fontsource/jetbrains-mono"
+      ],
+      "notes": "NEW adoption at P3-UI-1 (design proposal §1). ONE entry for TWO packages because both resolve to the identical version 5.3.0 — the JSON Forms precedent; they split the day their versions diverge. EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. Both 5.3.0, published 2026-07-19, OFL-1.1, neither deprecated. ZERO CDN: Nexus and Odysseus both fetched these faces from Google Fonts and this platform must not — the packages are imported from web/src/main.tsx so Vite bundles the woff2 files into dist/assets under content hashes and the binary embeds them, which is checked by grepping the built dist for any external asset reference. S16.4 walk: #1 seam — static assets; no code path, no runtime behaviour. #2 organ-grade: asset delivery, replaceable by vendoring the same files. #3 health at the pinned ref: both current at adoption, actively republished. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: the built dist carries the hashed .woff2 assets and the stylesheet's @font-face rules resolve to them; measured at landing. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 no peers — CSS and binary assets only. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
       "name": "React 19 + Vite + TypeScript tree",
       "kind": "toolchain",
-      "pin": "8.1.5+sha256:d55b62cc02a7dc4a762e878d7bccad661a5fc35bf32ad49b70ba06b506a486ae",
+      "pin": "8.1.5+sha256:f368954b877b28051c922c2056e8e9c6a26f826f2a2c1a84e677f29b22ec0d73",
       "license": {
         "spdx": "MIT AND Apache-2.0 AND ISC AND BSD-3-Clause AND BSD-2-Clause AND MPL-2.0 AND BlueOak-1.0.0 AND 0BSD AND MIT-0 AND CC0-1.0",
-        "scope": "the whole installed tree at the pinned lockfile — license fields read from every installed package.json in web/node_modules on 2026-07-29 (240 packages): MIT ×186, Apache-2.0 ×6 (incl. typescript), ISC ×4, BSD-3-Clause ×4, MPL-2.0 ×3 (lightningcss + its two linux-x64 native binaries, reached through Vite 8's rolldown/lightningcss CSS pipeline — the copyleft-file-scope licence in this set, and build-time only: nothing of it reaches the release binary), BSD-2-Clause ×2, MIT-0 ×2, BlueOak-1.0.0 ×1 (lru-cache), 0BSD ×1 (tslib), CC0-1.0 ×1 (mdn-data). No GPL/AGPL anywhere in the tree; no package lacks a licence field (the two hits are vendored benchmark sub-folders inside secure-json-parse and fast-uri, not installed packages)",
+        "scope": "the whole installed tree at the pinned lockfile — license fields read from every installed package.json in web/node_modules (240 packages on 2026-07-29; RE-READ 2026-08-04 after the P3-UI-1 adoptions, 529 packages): MIT ×186, Apache-2.0 ×6 (incl. typescript), ISC ×4, BSD-3-Clause ×4, MPL-2.0 ×3 (lightningcss + its two linux-x64 native binaries, reached through Vite 8's rolldown/lightningcss CSS pipeline — the copyleft-file-scope licence in this set, and build-time only: nothing of it reaches the release binary), BSD-2-Clause ×2, MIT-0 ×2, BlueOak-1.0.0 ×1 (lru-cache), 0BSD ×1 (tslib), CC0-1.0 ×1 (mdn-data). No GPL/AGPL anywhere in the tree; no package lacks a licence field (the two hits are vendored benchmark sub-folders inside secure-json-parse and fast-uri, not installed packages)",
         "checked": "2026-07-29"
       },
       "role": {
@@ -613,12 +788,12 @@
         "peer-range / toolchain health: frontend peers vs the pinned React and Vite (S16.7)",
         "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
       ],
-      "last_review": "2026-07-29",
+      "last_review": "2026-08-04",
       "npm_packages": [
         "react",
         "react-dom"
       ],
-      "notes": "Resolves TBD-P3(SPA scaffold) at P3-B6-4. THE PIN IS THE TREE IDENTITY, not a package version: '<vite version>+sha256:<hash of web/package-lock.json>', the content-hash discipline §4 already applies to vendored content, applied to the resolved tree (the genai-prices precedent). tools/lockgate recomputes it, so any dependency movement fails CI until it becomes a deliberate, dated lock edit. Resolved versions: vite 8.1.5, react + react-dom 19.2.8, typescript 6.0.3, @vitejs/plugin-react 6.0.4, @types/react 19.2.17, @types/react-dom 19.2.3, @types/node 22.20.1. SCOPE: this entry claims the two PRODUCTION roots (react, react-dom) explicitly and covers the entire devDependency tree WHOLESALE — every package npm flags dev/devOptional is toolchain-scoped by classification (§41). Vite 8.1.x is the CURRENT major and ~4.5 months old at adoption: first adoption of a settled line, not a day-one major, and the lag rider governs every major FROM here. TypeScript is pinned on the 6.0.x line (6.0.3) — TS 7.0.x, the native-compiler replacement line, was 3 weeks old at adoption and is NOT adopted; it is a candidate for a future scheduled pass, not for a scaffold. Dropped from the create-vite template: oxlint (a linter is a dependency and none is ratified — the §2 no-additional-linters posture applied to npm). Node/npm are HOST tools the platform cannot pin: the maintainer's host runs node v22.22.1 with npm 9.2.0, and CI pins node 22.23.1 (the OS-mechanism-row precedent — record the observed version rather than pretend to own it). One advisory engine warning on the host: jsdom 30.0.0 declares node ^22.22.2 and the host is one patch below it; the harness was verified to run correctly there anyway, and CI's 22.23.1 satisfies the range. NOTHING of this tree exists at runtime — no vite/rolldown/lightningcss code is reachable from the Go binary, which serves only the built assets embedded by internal/webui. S16.4 walk: #1 seam — the build, dev-time only, no runtime service exposure (S16.3 row). #2 organ-grade: replaceable build tooling. #3 health at the pinned ref: vite 8.1.5 current, react 19.2.8 current stable. #4 licence: the whole-tree set above, re-scanned at every pass. #5 capability verified BEHAVIORALLY: typecheck, test and production build all run green, and the built output is served out of the binary by an integration test. #6 adopt-unmodified: no node_modules patching, no patch-package. #7 install posture `npm ci --ignore-scripts`; no package's install script was needed. #8 exact pin (content hash) + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+      "notes": "Resolves TBD-P3(SPA scaffold) at P3-B6-4. THE PIN IS THE TREE IDENTITY, not a package version: '<vite version>+sha256:<hash of web/package-lock.json>', the content-hash discipline §4 already applies to vendored content, applied to the resolved tree (the genai-prices precedent). tools/lockgate recomputes it, so any dependency movement fails CI until it becomes a deliberate, dated lock edit. Resolved versions: vite 8.1.5, react + react-dom 19.2.8, typescript 6.0.3, @vitejs/plugin-react 6.0.4, @types/react 19.2.17, @types/react-dom 19.2.3, @types/node 22.20.1. SCOPE: this entry claims the two PRODUCTION roots (react, react-dom) explicitly and covers the entire devDependency tree WHOLESALE — every package npm flags dev/devOptional is toolchain-scoped by classification (§41). Vite 8.1.x is the CURRENT major and ~4.5 months old at adoption: first adoption of a settled line, not a day-one major, and the lag rider governs every major FROM here. TypeScript is pinned on the 6.0.x line (6.0.3) — TS 7.0.x, the native-compiler replacement line, was 3 weeks old at adoption and is NOT adopted; it is a candidate for a future scheduled pass, not for a scaffold. Dropped from the create-vite template: oxlint (a linter is a dependency and none is ratified — the §2 no-additional-linters posture applied to npm). Node/npm are HOST tools the platform cannot pin: the maintainer's host runs node v22.22.1 with npm 9.2.0, and CI pins node 22.23.1 (the OS-mechanism-row precedent — record the observed version rather than pretend to own it). One advisory engine warning on the host: jsdom 30.0.0 declares node ^22.22.2 and the host is one patch below it; the harness was verified to run correctly there anyway, and CI's 22.23.1 satisfies the range. NOTHING of this tree exists at runtime — no vite/rolldown/lightningcss code is reachable from the Go binary, which serves only the built assets embedded by internal/webui. S16.4 walk: #1 seam — the build, dev-time only, no runtime service exposure (S16.3 row). #2 organ-grade: replaceable build tooling. #3 health at the pinned ref: vite 8.1.5 current, react 19.2.8 current stable. #4 licence: the whole-tree set above, re-scanned at every pass. #5 capability verified BEHAVIORALLY: typecheck, test and production build all run green, and the built output is served out of the binary by an integration test. #6 adopt-unmodified: no node_modules patching, no patch-package. #7 install posture `npm ci --ignore-scripts`; no package's install script was needed. #8 exact pin (content hash) + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE. DATED LOCK EDIT 2026-08-04 (P3-UI-1): the pin is RE-COMPUTED because the lockfile moved — eleven adoptions landed (Tailwind pair + shadcn CLI dev-side; @base-ui/react, lucide-react, clsx, tailwind-merge, class-variance-authority, tw-animate-css and the two Fontsource packages runtime-side), each with its own entry above. The tree grew 241 → 566 lockfile nodes, of which the shadcn CLI alone contributes ~311, all dev/devOptional and therefore toolchain-scoped wholesale by classification rather than by walking. The pin is not a version bump: react, react-dom, vite, typescript and every other package this entry names are UNMOVED at their recorded versions. Pre-existing and NOT introduced here: npm audit reports one high-severity advisory against fast-uri 3.1.4, which was already a production transitive at the pre-packet commit and is untouched by this packet."
     },
     {
       "name": "Vitest",
@@ -669,6 +844,59 @@
         "jsdom"
       ],
       "notes": "NEW adoption at P3-B6-4 (OQ7). jsdom was chosen over happy-dom as the DEFAULT because the radix-based assistant-ui probe is the most demanding renderer in the tree and jsdom is the more complete implementation; OQ7 admitted happy-dom only on behavioral evidence that jsdom was materially problematic, and no such evidence appeared — the probes pass on jsdom, so the default stands. Live-verified 2026-07-29: 30.0.0 is `latest`, MIT, not deprecated. ENGINE NOTE: 30.0.0 declares node ^22.22.2 || ^24.15.0 || >=26.0.0 and the maintainer's host runs 22.22.1 — npm prints an advisory EBADENGINE warning there. Verified behaviorally on the host anyway (document construction, React commit, event dispatch); CI pins node 22.23.1, which satisfies the range, so the warning is host-local and does not ride into CI. S16.4 walk: #1 seam — the harness environment, test-only. #2 organ-grade: a DOM implementation. #3 health: current major, actively released. #4 licence path-scoped at the installed ref, above. #5 capability verified BEHAVIORALLY by every harness test. #6 adopt-unmodified. #7 engine note above. #8 exact pin + funeral plan above. #9 watch rows above. #10 operator ratification QUEUED FOR THE B6 GATE."
+    },
+    {
+      "name": "Tailwind CSS v4 (compiler + Vite plugin)",
+      "kind": "toolchain",
+      "pin": "4.3.3",
+      "license": {
+        "spdx": "MIT",
+        "scope": "BOTH packages at the pinned version, path-scoped at the INSTALLED refs (node_modules/tailwindcss and node_modules/@tailwindcss/vite): each declares `license: MIT` and carries a single root LICENSE, no enterprise/ee/pro carve-out directory",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "the styling substrate: a BUILD-TIME compiler that emits only the utilities the sources use. Nothing of it exists at runtime — the binary serves compiled assets alone",
+        "section": "S15.1"
+      },
+      "replacement": "remove the plugin and the @import, and inline the compiled utilities back into owned CSS — the sheet still ships compiled, so there is no runtime loss; daisyUI or plain owned CSS per the sourcing ranks",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7); a Vite major the plugin cannot follow is the practical trigger",
+      "watch": [
+        "peer range vs the pinned Vite major (@tailwindcss/vite 4.3.3 peers vite ^5.2.0||^6||^7||^8)",
+        "Tailwind majors are adopted on a LAG, never day-one — the G3 D3.3 rider applied to the CSS toolchain",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "tailwindcss",
+        "@tailwindcss/vite"
+      ],
+      "notes": "NEW adoption at P3-UI-1, superseding §41's 'No CSS framework' sentence through the rail under the operator-approved design proposal — datedly, in §47 and in a dated note on §41 itself, never silently. EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. ONE entry for TWO packages because they release in lockstep and both resolve to 4.3.3; they split the day the live versions differ. devDependencies — toolchain-scoped wholesale, never in the release binary. S16.4 walk: #1 seam — the CSS build step, dev-time only, no runtime service exposure. #2 organ-grade: a compiler, replaceable by its own output. #3 health at the pinned ref: 4.3.3 published 2026-08-04, the current release. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: the production build compiles index.css through the plugin and emits a 35.02 kB stylesheet; the harness runs the same config with css: true and all 24 suites stay green, so no VITEST gating was needed. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 peers vite ^5.2.0||^6||^7||^8 admit the pinned 8.1.5. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
+    },
+    {
+      "name": "shadcn CLI (component generator)",
+      "kind": "toolchain",
+      "pin": "4.16.1",
+      "license": {
+        "spdx": "MIT",
+        "scope": "the published npm package at the pinned version — path-scoped scan of the INSTALLED ref (node_modules/shadcn, the exact bytes this tree consumes): LICENSE at the package root, package.json license field as recorded above, no enterprise/ee/pro carve-out directory (LICENSE.md at the package root)",
+        "checked": "2026-08-04"
+      },
+      "role": {
+        "summary": "dev-time component GENERATOR, never a runtime dependency: it writes TSX into web/src, which then becomes code this repo owns and maintains",
+        "section": "S15.1/FC-v1"
+      },
+      "replacement": "drop the generator — vendored TSX is owned code and keeps working untouched; further components are hand-written, which is what this packet's own kit already is",
+      "abandonment": "default (⚙ adoption.abandonment_months, S16.7); nothing shipped depends on it, so abandonment costs only future generation",
+      "watch": [
+        "the registry's default primitive track: shadcn made Base UI the default on 2026-07-03, but at 4.16.1 the `add` command still resolves STYLE-addressed items whose declared dependency is `radix-ui` (see notes)",
+        "dev-tree size: this one devDependency brings ~311 packages, all toolchain-scoped by classification",
+        "quarterly dependency pass (S16.7), co-scheduled with the ⚙ frontend.dependency_pass_interval SPA pass (S15.1; conformance row frontend-dependency-pass)"
+      ],
+      "last_review": "2026-08-04",
+      "npm_packages": [
+        "shadcn"
+      ],
+      "notes": "NEW adoption at P3-UI-1 under coordinator disposition OQ1(a) — an exact-pinned devDependency with its own toolchain entry, the Vitest precedent, so UI-2..7 can generate reproducibly. EXECUTION-TIME re-verification against registry.npmjs.org on 2026-08-04 (the packet's one sanctioned network act, $0): version, licence, deprecation status and package NAME each re-read live; the research-time pin in P3/design/ui-foundation-sourcing.md was confirmed rather than assumed, and no version drifted between research and adoption. 4.16.1 published 2026-07-31, MIT, not deprecated. RECORDED FINDING, and the reason this packet's kit is hand-written: `shadcn add` resolves items by STYLE (https://ui.shadcn.com/r/styles/<style>/<item>.json), and at 4.16.1 the reachable styles resolve to the RADIX track — a dry run of `add button` declares a `radix-ui` dependency, which is outside the CLOSED runtime set the design proposal fixed and is named NOT-ADOPTED in the packet brief. `--base` is an `init`-only flag and the config value that reports `base: base` (style `base-ui`) is not an addressable registry style. So nothing was installed and nothing was generated: the CLI is adopted for its scaffold mechanics (web/components.json, the @/* alias) and UI-2..7 must re-seat any generated component's radix-ui imports onto the pinned @base-ui/react before it lands, or hand-write it. S16.4 walk: #1 seam — dev-time code generation; no import path from the app to it. #2 organ-grade: a generator, and its output is owned the moment it lands. #3 health at the pinned ref: 4.16.1 current, actively released. #4 licence: path-scoped at the INSTALLED ref, above. #5 capability verified BEHAVIORALLY: verified behaviourally on the real tree: it reads web/components.json, resolves the project (Vite, src dir, TS, Tailwind v4, @ alias) and dry-runs a component write — which is also how the radix-ui finding above was made. #6 adopt-unmodified: node_modules is never patched, no patch-package, no fork. #7 no peers; engines node >=20.18.1, satisfied by the host's 22.22.1 and CI's 22.23.1. #8 exact pin + funeral plan written above before first use. #9 watch rows registered above. #10 operator ratification QUEUED FOR THE UI-BATCH / EXIT GATE."
     },
     {
       "name": "actions/setup-node",

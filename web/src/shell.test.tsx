@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { ConnectionState } from './ConnectionState'
 import { EventStream, type EventSourceLike, type Status } from './events'
-import { routes, type RouteDef } from './routes'
+import { hrefFor, routes, type RouteDef } from './routes'
 import { Stub } from './Stub'
 import { flush, mount } from './testing'
 
@@ -147,8 +147,62 @@ test('the nav reaches every navigable surface, and only real paths', async () =>
 
   // Scoped to the SHELL nav: mission control now carries a second <nav> for
   // the personal filters, and this assertion is about the primary one.
+  //
+  // The nav is GROUPED as of UI-1, and this assertion is what proves grouping
+  // is presentation only: the rendered links are still exactly the table's
+  // navigable rows, in exactly the table's order. Grouping computes the
+  // consecutive runs of a label over that order, so it cannot reorder or drop.
   const hrefs = [...view.container.querySelectorAll('.shell-nav a')].map((a) => a.getAttribute('href'))
   expect(hrefs).toEqual(routes.filter((r) => r.nav).map((r) => r.pattern))
+  view.unmount()
+})
+
+test('the nav is grouped, and every navigable route sits inside a group', async () => {
+  routeFetch({ 'GET /api/auth/session': signedIn })
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const groups = [...view.container.querySelectorAll('.shell-nav .nav-group')]
+  expect(groups.length, 'the nav renders no groups').toBeGreaterThan(1)
+  // Every link belongs to a group: a link rendered outside one would be a
+  // surface that fell out of the grouping and lost its heading.
+  const inGroups = groups.flatMap((g) => [...g.querySelectorAll('a')])
+  expect(inGroups).toHaveLength(routes.filter((r) => r.nav).length)
+  // The labels are real text, not empty headings.
+  const labels = groups.map((g) => g.querySelector('.nav-group-label')?.textContent ?? '')
+  expect(labels.every((l) => l.length > 0), 'a group renders an empty label').toBe(true)
+  view.unmount()
+})
+
+test('the aurora is one decorative field the reader cannot reach', async () => {
+  routeFetch({ 'GET /api/auth/session': signedIn })
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const auroras = view.container.querySelectorAll('.aurora')
+  // ONE field, behind everything — not one per surface.
+  expect(auroras).toHaveLength(1)
+  // It carries no meaning, so it is hidden from assistive technology outright
+  // rather than left for a screen reader to describe.
+  expect(auroras[0].getAttribute('aria-hidden')).toBe('true')
+  expect(auroras[0].textContent, 'the backdrop carries content').toBe('')
+  view.unmount()
+})
+
+test('the brand mark leads back to mission control and says nothing twice', async () => {
+  routeFetch({ 'GET /api/auth/session': signedIn })
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const brand = view.container.querySelector('.brand')!
+  expect(brand.getAttribute('href')).toBe(hrefFor('mission-control'))
+  // The gradient mark is decoration beside the wordmark, so it is hidden rather
+  // than announced as a second copy of the name.
+  expect(brand.querySelector('.brand-mark')?.getAttribute('aria-hidden')).toBe('true')
+  expect(brand.textContent).toContain('Sinet')
   view.unmount()
 })
 

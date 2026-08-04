@@ -57,6 +57,16 @@ var LockEntryNames = []string{
 	"Vitest",
 	"jsdom",
 	"actions/setup-node",
+	// The styling substrate and the primitive kit's runtime deps (P3-UI-1).
+	"@base-ui/react",
+	"lucide-react",
+	"clsx",
+	"tailwind-merge",
+	"class-variance-authority",
+	"tw-animate-css",
+	"Fontsource: Inter Variable + JetBrains Mono",
+	"Tailwind CSS v4 (compiler + Vite plugin)",
+	"shadcn CLI (component generator)",
 }
 
 // LockRowID is the deterministic watch-row id for a components.lock entry. The

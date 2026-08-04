@@ -1,23 +1,221 @@
-/* Owned CSS. No framework is adopted: a CSS framework is a dependency and none
-   is on the S16.4 rail (P3/CONVENTIONS.md §41).
+/* The Sinet design system. Tailwind CSS v4 IS adopted, through the S16.4 rail,
+   under the operator-approved design proposal (P3/CONVENTIONS.md §47, which
+   supersedes §41's "No CSS framework" sentence with a dated note). It is a
+   build-time compiler: no Tailwind code is reachable from the binary, which
+   serves the compiled assets alone. Everything below the token blocks is owned
+   CSS and stays owned.
 
    One responsive workspace, not two products (Spec S1.10 via S15.12). The
    layout is phone-first and widens at the breakpoint; nothing carries a fixed
    pixel width, so the shell never scrolls horizontally on a 375px screen. */
 
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* ── tokens ────────────────────────────────────────────────────────────────
+   Dark-first: the dark values sit directly on :root and no light ramp is
+   built. The class-switched theme root stays addable later without moving a
+   single consumer, because every consumer reads a variable rather than a hex.
+   Raw hex belongs in this block and in the aurora field, nowhere else. */
+
 :root {
   color-scheme: dark;
-  --bg: #101418;
-  --panel: #161c22;
-  --fg: #e6edf3;
-  --muted: #9aa7b4;
-  --line: #26303a;
-  --accent: #6fb3d2;
-  --ok: #57a773;
-  --warn: #d1a054;
-  --bad: #cf6b5a;
-  font-family: system-ui, sans-serif;
+
+  /* The shadcn base set, poured from the Nexus values. This one mapping themes
+     the primitive kit, @assistant-ui/react (which natively assumes these
+     names), the JSON Forms renderers and the react-diff-view chrome. */
+  --background: #07070d;
+  --foreground: #eaeaf4;
+  --card: rgba(148, 148, 190, 0.055);
+  --card-foreground: #eaeaf4;
+  --popover: #12121d;
+  --popover-foreground: #eaeaf4;
+  --primary: #7c5cff;
+  --primary-foreground: #f6f4ff;
+  --secondary: rgba(148, 148, 190, 0.09);
+  --secondary-foreground: #eaeaf4;
+  --muted-foreground: #9a9ab2;
+  --accent-foreground: #f6f4ff;
+  --destructive: #f87171;
+  --destructive-foreground: #1a0d0d;
+  --input: rgba(148, 148, 190, 0.28);
+  --ring: #7c5cff;
+  --radius: 14px;
+
+  /* The two shadcn SURFACE slots whose names collide with the landed nine.
+     `--accent` and `--muted` are landed token names carrying landed meanings
+     (brand violet, dimmed text), and re-pointing them is what re-bases every
+     landed surface with zero structural edits. shadcn's surface semantics are
+     preserved under these names instead, and `@theme inline` binds them to the
+     `bg-accent` / `bg-muted` utilities — so the utility means what shadcn means
+     while the variable keeps meaning what this stylesheet has always meant. */
+  --accent-surface: rgba(148, 148, 190, 0.14);
+  --muted-surface: rgba(148, 148, 190, 0.09);
+
+  /* shadcn sidebar slots. */
+  --sidebar: rgba(10, 10, 18, 0.72);
+  --sidebar-foreground: #eaeaf4;
+  --sidebar-primary: #7c5cff;
+  --sidebar-primary-foreground: #f6f4ff;
+  --sidebar-accent: rgba(148, 148, 190, 0.14);
+  --sidebar-accent-foreground: #eaeaf4;
+  --sidebar-border: rgba(148, 148, 190, 0.16);
+  --sidebar-ring: #7c5cff;
+
+  /* shadcn chart slots, drawn from the status family so a later chart cannot
+     invent a sixth palette. */
+  --chart-1: #7c5cff;
+  --chart-2: #22d3ee;
+  --chart-3: #4ade80;
+  --chart-4: #fbbf24;
+  --chart-5: #f472b6;
+
+  /* Sinet extensions: the parts of the Nexus language shadcn has no name for. */
+  --bg-2: #0b0b15;
+  --panel-solid: #12121d;
+  --panel-2: rgba(148, 148, 190, 0.09);
+  --panel-3: rgba(148, 148, 190, 0.14);
+  --border-l: rgba(148, 148, 190, 0.28);
+  --text-dim: #9a9ab2;
+  --text-faint: #5e5e78;
+  --accent-2: #5eead4;
+  --cyan: #22d3ee;
+  --accent-glow: rgba(124, 92, 255, 0.16);
+  --green: #4ade80;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --blue: #60a5fa;
+  --orange: #fb923c;
+  --pink: #f472b6;
+  --grad: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
+  --grad-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.22), rgba(34, 211, 238, 0.12));
+  --sidebar-w: 232px;
+  --radius-sm: 9px;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.28);
+  --blur-shell: 18px;
+  --blur-overlay: 10px;
+  --aurora-1: rgba(124, 92, 255, 0.13);
+  --aurora-2: rgba(34, 211, 238, 0.09);
+  --aurora-3: rgba(94, 234, 212, 0.06);
+  --aurora-4: rgba(244, 114, 182, 0.05);
+
+  /* The nine landed tokens, re-pointed at the new palette (§47). They keep
+     their names and their meanings, so every surface built before this packet
+     re-bases onto the Nexus language without one structural edit, and each
+     surface sheds its own CSS in its own later packet. */
+  --bg: var(--background);
+  --panel: var(--card);
+  --fg: var(--foreground);
+  --muted: #9a9ab2;
+  --line: rgba(148, 148, 190, 0.16);
+  --accent: #7c5cff;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  /* `--border` is both a shadcn name and the landed `--line` value. One
+     material, one definition. */
+  --border: var(--line);
+
+  font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+  font-synthesis-weight: none;
   line-height: 1.5;
+}
+
+/* ── density ───────────────────────────────────────────────────────────────
+   Two root classes switch the spacing scale and nothing else: Nexus's density
+   comes from small type over roomy boxes, so compact tightens the boxes and
+   leaves the type ramp alone. Comfortable is the default and its values sit on
+   :root as well, so a tree that never gets a class still renders correctly.
+   No persistence (web storage is banned, §41-B) and no switcher control — a
+   control is later-packet scope and no ⚙ key for density exists. */
+
+:root,
+.density-comfortable {
+  --density-gap: 14px;
+  --density-pad: 18px;
+  --density-pad-y: 13px;
+  --density-row: 8px;
+  --density-content: 26px;
+}
+
+.density-compact {
+  --density-gap: 9px;
+  --density-pad: 12px;
+  --density-pad-y: 9px;
+  --density-row: 5px;
+  --density-content: 16px;
+}
+
+/* ── Tailwind wiring ───────────────────────────────────────────────────────
+   `@theme inline` binds utility names to the variables above, so `bg-card`,
+   `text-muted-foreground` and `border-border` all resolve from the ONE token
+   set. It is also where the two colliding names are decoupled: the utility
+   follows shadcn's meaning, the variable keeps the landed one. */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-surface);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent-surface);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--accent);
+  --color-brand-2: var(--cyan);
+  --color-ok: var(--green);
+  --color-warn: var(--yellow);
+  --color-bad: var(--red);
+  --color-info: var(--blue);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --font-sans: 'Inter Variable', Inter, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+}
+
+/* ── reduced motion ────────────────────────────────────────────────────────
+   The kill switch. Every animation this stylesheet authors is ALSO written
+   inside `prefers-reduced-motion: no-preference`, so a reduce reader gets the
+   static composition rather than a neutralized animation — this block is the
+   backstop that catches anything a later packet forgets, including utilities
+   from tw-animate-css. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 * {
@@ -26,9 +224,64 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--background);
+  color: var(--foreground);
   overflow-x: hidden;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tailwind's preflight zeroes the browser's own type rhythm, and the landed
+   per-surface sections were written against that rhythm. These four rules give
+   it back until each surface sheds its CSS in its own packet (the §47 migration
+   ledger says which packet sheds which section). */
+h1,
+h2,
+h3,
+h4 {
+  margin: 0.6em 0;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+h1 {
+  font-size: 19px;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+h3,
+h4 {
+  font-size: 15px;
+}
+
+p,
+dl,
+dd,
+ul,
+ol,
+blockquote {
+  margin: 0.6em 0;
+}
+
+ul,
+ol {
+  padding-inline-start: 1.4em;
+  list-style: revert;
+}
+
+/* Every number, id, timestamp and status token is mono with tabular figures —
+   the instrument-panel discipline the whole design rests on (harvest §6-5). */
+code,
+kbd,
+pre,
+samp,
+time,
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 img,
@@ -42,6 +295,41 @@ a {
   color: var(--accent);
 }
 
+/* ── aurora ────────────────────────────────────────────────────────────────
+   One fixed field behind everything: four radial gradients at 5–13% opacity
+   over the near-black base. Dark then reads as depth rather than absence. It is
+   decorative, so it is aria-hidden in the markup and takes no pointer events.
+   The drift is authored under `no-preference` alone; a reduce reader gets the
+   same composition, standing still. */
+
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 12% 8%, var(--aurora-1), transparent 60%),
+    radial-gradient(50rem 34rem at 88% 12%, var(--aurora-2), transparent 60%),
+    radial-gradient(46rem 40rem at 72% 88%, var(--aurora-3), transparent 62%),
+    radial-gradient(40rem 32rem at 22% 82%, var(--aurora-4), transparent 62%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aurora {
+    animation: aurora-drift 26s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes aurora-drift {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1.04);
+  }
+
+  to {
+    transform: translate3d(1.5%, 1%, 0) scale(1.1);
+  }
+}
+
 /* ── shell ─────────────────────────────────────────────────────────────── */
 
 .shell {
@@ -50,19 +338,60 @@ a {
   flex-direction: column;
 }
 
+/* The sidebar is a blurred band across the top of a phone and a column at the
+   breakpoint — one workspace widening, never a second product (S1.10). */
+.shell-side {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: var(--sidebar);
+  backdrop-filter: blur(var(--blur-shell));
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.shell-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+/* The one gradient, as identity. */
+.brand-mark {
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--grad);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+
 .shell-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.brand {
-  font-weight: 600;
-  text-decoration: none;
-  color: var(--fg);
+  background: var(--sidebar);
+  backdrop-filter: blur(var(--blur-shell));
+  border-bottom: 1px solid var(--border);
 }
 
 .who {
@@ -79,14 +408,44 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 0.75rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--line);
+}
+
+/* Grouping is PRESENTATION, defined by the shell component. The route table's
+   ids, patterns, titles and nav flags are untouched by it, and the groups are
+   ordered so the rendered nav is the table's own order. */
+.nav-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.nav-group-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .shell-nav a {
-  padding: 0.25rem 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: var(--density-row) 0;
   text-decoration: none;
   color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.nav-icon {
+  flex: none;
+  opacity: 0.85;
+}
+
+.shell-nav a:hover {
+  color: var(--fg);
 }
 
 .shell-nav a[aria-current='page'] {
@@ -104,29 +463,76 @@ a {
 
 /* ── connection state ──────────────────────────────────────────────────── */
 
+/* The connection pill. Glow carries severity peripherally; the LABEL is always
+   rendered, so a non-live state can never read as live (S15.12). */
 .conn {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   margin: 0;
-  font-size: 0.875rem;
+  padding: 0.3rem 0.7rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
   color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
 }
 
 .conn-dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 50%;
   background: var(--muted);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.conn[data-status='live'] {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  border-color: color-mix(in srgb, var(--green) 25%, transparent);
 }
 
 .conn[data-status='live'] .conn-dot {
   background: var(--ok);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .conn[data-status='live'] .conn-dot {
+    animation: dot-pulse 2s ease-in-out infinite;
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.conn[data-status='connecting'],
+.conn[data-status='catching-up'] {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 9%, transparent);
+  border-color: color-mix(in srgb, var(--yellow) 25%, transparent);
+}
+
 .conn[data-status='connecting'] .conn-dot,
 .conn[data-status='catching-up'] .conn-dot {
   background: var(--warn);
+}
+
+.conn[data-status='disconnected'],
+.conn[data-status='unreachable'] {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  border-color: color-mix(in srgb, var(--red) 25%, transparent);
 }
 
 .conn[data-status='disconnected'] .conn-dot,
@@ -1262,6 +1668,47 @@ td {
 @media (min-width: 48rem) {
   .conn-detail {
     display: inline;
+  }
+
+  /* The sidebar layout appears here and only here: on a phone the same markup
+     is a wrapping band above the content. */
+  .shell {
+    flex-direction: row;
+  }
+
+  .shell-side {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100vh;
+    flex: none;
+    width: var(--sidebar-w);
+    gap: 1.4rem;
+    padding: 1.2rem 1rem;
+    overflow-y: auto;
+    border-bottom: none;
+    border-inline-end: 1px solid var(--sidebar-border);
+  }
+
+  .shell-nav {
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+
+  .nav-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+  }
+
+  .shell-nav a {
+    padding: var(--density-row) 12px;
+  }
+
+  .shell-nav a[aria-current='page'] {
+    background: var(--grad-soft);
+    border-bottom: none;
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .shell-main {

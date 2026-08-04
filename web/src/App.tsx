@@ -1,4 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Columns3,
+  Inbox as InboxIcon,
+  LayoutDashboard,
+  MessagesSquare,
+  Server,
+  SlidersHorizontal,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 
 import { ApiError, Unreachable, api, type Session } from './api'
 import { Board } from './Board'
@@ -14,8 +24,38 @@ import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound, Stub } from './Stub'
 import { Link, navigate, useRoute } from './router'
-import { hrefFor, routes } from './routes'
+import { hrefFor, routes, type RouteDef, type RouteID } from './routes'
 import { Workforce } from './Workforce'
+
+/**
+ * Sidebar grouping is PRESENTATION and lives here, not in the route table:
+ * `routes.ts` owns ids, patterns, titles and nav flags, and this packet leaves
+ * every one of them byte-unchanged.
+ *
+ * Sections are the CONSECUTIVE RUNS of this label over the table's own nav
+ * order, which is what makes grouping incapable of reordering or dropping a
+ * link: every navigable route is walked exactly once, in table order, and one
+ * with no label here still renders — in its own unlabelled run.
+ */
+const navGroupOf: Partial<Record<RouteID, string>> = {
+  'mission-control': 'Command',
+  board: 'Command',
+  fleet: 'Command',
+  inbox: 'Decisions',
+  settings: 'System',
+  chat: 'Intelligence',
+  workforce: 'Intelligence',
+}
+
+const navIcons: Partial<Record<RouteID, LucideIcon>> = {
+  'mission-control': LayoutDashboard,
+  board: Columns3,
+  fleet: Server,
+  inbox: InboxIcon,
+  settings: SlidersHorizontal,
+  chat: MessagesSquare,
+  workforce: Users,
+}
 
 /**
  * The app shell: one responsive workspace (Spec S1.10 via S15.12), the stable
@@ -54,92 +94,120 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
 
   return (
     <div className="shell">
-      <header className="shell-head">
+      <div className="aurora" aria-hidden="true" />
+
+      <aside className="shell-side">
         <Link to={hrefFor('mission-control')} className="brand">
+          <span className="brand-mark" aria-hidden="true" />
           Sinet
         </Link>
-        <ConnectionState status={status} />
+
         {authed && (
-          <span className="who">
-            {session?.user?.display_name ?? (session?.dev === true ? 'dev' : '')}
-            <button
-              type="button"
-              onClick={() => {
-                void api.logout().then(reload, reload)
-              }}
-            >
-              Sign out
-            </button>
-          </span>
-        )}
-      </header>
-
-      {authed && (
-        <nav className="shell-nav" aria-label="Surfaces">
-          {routes
-            .filter((r) => r.nav)
-            .map((r) => (
-              <Link key={r.id} to={r.pattern} aria-current={r.id === route.id ? 'page' : undefined}>
-                {r.title}
-              </Link>
+          <nav className="shell-nav" aria-label="Surfaces">
+            {navSections().map((section) => (
+              <div className="nav-group" key={section.label || section.items[0].id}>
+                {section.label !== '' && <span className="nav-group-label">{section.label}</span>}
+                {section.items.map((r) => {
+                  const Icon = navIcons[r.id]
+                  return (
+                    <Link key={r.id} to={r.pattern} aria-current={r.id === route.id ? 'page' : undefined}>
+                      {Icon && <Icon className="nav-icon" size={16} strokeWidth={1.7} aria-hidden="true" />}
+                      {r.title}
+                    </Link>
+                  )
+                })}
+              </div>
             ))}
-        </nav>
-      )}
-
-      <main className="shell-main">
-        {session === null ? (
-          <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
-        ) : route.id === 'login' ? (
-          <Login session={session} onSignedIn={reload} />
-        ) : route.id === 'not-found' ? (
-          <NotFound pathname={window.location.pathname} />
-        ) : route.id === 'mission-control' ? (
-          // The personal filters are `/?view=…` on this surface: stable,
-          // bookmarkable URLs that fill the route table rather than renaming it.
-          <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
-        ) : route.id === 'board' ? (
-          // The caller's own identity decides what is drag-reorderable, and the
-          // server refuses the rest: the operator is not excepted from "your
-          // own queued work" (S15.5).
-          <Board me={session.user?.user_id ?? ''} stream={stream} />
-        ) : route.id === 'fleet' ? (
-          <Fleet stream={stream} />
-        ) : route.id === 'task' ? (
-          <TaskDetail id={params.id} stream={stream} />
-        ) : route.id === 'inbox' ? (
-          <Inbox stream={stream} />
-        ) : route.id === 'inbox-item' ? (
-          // The id arrives DECODED from the route table, which matters: real
-          // card ids carry ':', '#' and a unit separator, so the round trip
-          // through hrefFor/matchRoute is the only thing that keeps a deep
-          // link pointing at the card it names (S15.11).
-          <InboxItem id={params.id} stream={stream} />
-        ) : route.id === 'settings' ? (
-          <Settings stream={stream} />
-        ) : route.id === 'chat' ? (
-          // The open conversation is `/chat?session=…` — a stable, bookmarkable,
-          // push-`navigate`-able URL that fills the route table rather than
-          // adding to it, exactly as the personal filters do on mission control.
-          <Chat stream={stream} search={window.location.search} />
-        ) : route.id === 'deliverable' ? (
-          // The caller's own identity decides whether the ACCEPT FORM renders:
-          // an accept is the owner's own outward act under their own credentials,
-          // so a non-owner (the operator included) reads the card and cannot act
-          // on it. That is presentation over a served body — the server refuses
-          // the verb regardless (S15.2).
-          <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
-        ) : route.id === 'workforce' ? (
-          // View-only by construction (S15.10 parks editing to 15.5): the map
-          // takes no identity prop because it offers no act. What each caller
-          // may SEE is decided server-side and the read says out loud which
-          // reading it returned.
-          <Workforce stream={stream} />
-        ) : (
-          <Stub route={route} params={params} />
+          </nav>
         )}
-      </main>
+      </aside>
+
+      <div className="shell-body">
+        <header className="shell-head">
+          <ConnectionState status={status} />
+          {authed && (
+            <span className="who">
+              {session?.user?.display_name ?? (session?.dev === true ? 'dev' : '')}
+              <button
+                type="button"
+                onClick={() => {
+                  void api.logout().then(reload, reload)
+                }}
+              >
+                Sign out
+              </button>
+            </span>
+          )}
+        </header>
+
+        <main className="shell-main">
+          {session === null ? (
+            <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
+          ) : route.id === 'login' ? (
+            <Login session={session} onSignedIn={reload} />
+          ) : route.id === 'not-found' ? (
+            <NotFound pathname={window.location.pathname} />
+          ) : route.id === 'mission-control' ? (
+            // The personal filters are `/?view=…` on this surface: stable,
+            // bookmarkable URLs that fill the route table rather than renaming it.
+            <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
+          ) : route.id === 'board' ? (
+            // The caller's own identity decides what is drag-reorderable, and the
+            // server refuses the rest: the operator is not excepted from "your
+            // own queued work" (S15.5).
+            <Board me={session.user?.user_id ?? ''} stream={stream} />
+          ) : route.id === 'fleet' ? (
+            <Fleet stream={stream} />
+          ) : route.id === 'task' ? (
+            <TaskDetail id={params.id} stream={stream} />
+          ) : route.id === 'inbox' ? (
+            <Inbox stream={stream} />
+          ) : route.id === 'inbox-item' ? (
+            // The id arrives DECODED from the route table, which matters: real
+            // card ids carry ':', '#' and a unit separator, so the round trip
+            // through hrefFor/matchRoute is the only thing that keeps a deep
+            // link pointing at the card it names (S15.11).
+            <InboxItem id={params.id} stream={stream} />
+          ) : route.id === 'settings' ? (
+            <Settings stream={stream} />
+          ) : route.id === 'chat' ? (
+            // The open conversation is `/chat?session=…` — a stable, bookmarkable,
+            // push-`navigate`-able URL that fills the route table rather than
+            // adding to it, exactly as the personal filters do on mission control.
+            <Chat stream={stream} search={window.location.search} />
+          ) : route.id === 'deliverable' ? (
+            // The caller's own identity decides whether the ACCEPT FORM renders:
+            // an accept is the owner's own outward act under their own credentials,
+            // so a non-owner (the operator included) reads the card and cannot act
+            // on it. That is presentation over a served body — the server refuses
+            // the verb regardless (S15.2).
+            <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
+          ) : route.id === 'workforce' ? (
+            // View-only by construction (S15.10 parks editing to 15.5): the map
+            // takes no identity prop because it offers no act. What each caller
+            // may SEE is decided server-side and the read says out loud which
+            // reading it returned.
+            <Workforce stream={stream} />
+          ) : (
+            <Stub route={route} params={params} />
+          )}
+        </main>
+      </div>
     </div>
   )
+}
+
+/** navSections cuts the table's nav order into the consecutive runs that share
+ *  a group label. Order in, order out. */
+function navSections(): { label: string; items: RouteDef[] }[] {
+  const sections: { label: string; items: RouteDef[] }[] = []
+  for (const r of routes.filter((x) => x.nav)) {
+    const label = navGroupOf[r.id] ?? ''
+    const last = sections.at(-1)
+    if (last && last.label === label) last.items.push(r)
+    else sections.push({ label, items: [r] })
+  }
+  return sections
 }
 
 /** safeNext keeps a return-to on this origin: an absolute or protocol-relative

@@ -1,5 +1,8 @@
+import path from 'node:path'
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 /**
  * The dev-proxy target environment variable. There is deliberately NO default.
@@ -39,7 +42,22 @@ function isDevServer(command: string): boolean {
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
-  plugins: [react()],
+  // Tailwind v4 is a COMPILER, not a runtime: the plugin reads the `@import
+  // "tailwindcss"` in index.css and emits only the utilities the sources use.
+  // No Tailwind code is reachable from the binary, which serves built assets
+  // alone (P3/CONVENTIONS.md §47).
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    // `@/…` is the shadcn CLI's own import convention, so generated components
+    // resolve their siblings without a hand edit. Mirrored in tsconfig.app.json.
+    //
+    // Resolved from the working directory rather than `import.meta.url`: the
+    // harness imports this very module through Vite's own transform to assert
+    // the dev-proxy rules, and there `import.meta.url` is not a file URL. Every
+    // invocation that reads this config — `vite`, `vite build`, `vitest` — runs
+    // with `web/` as the working directory, which is also this config's root.
+    alias: { '@': path.resolve(process.cwd(), 'src') },
+  },
   build: {
     // The build output IS the embed source: Go embeds internal/webui/dist into
     // the one release binary (Spec S01.5). `web/` stays a pure npm tree with no

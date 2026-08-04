@@ -20,7 +20,7 @@ function block(selector: string): string {
 
 test('the stylesheet is really the shell stylesheet', () => {
   expect(css.length).toBeGreaterThan(500)
-  for (const selector of ['.shell', '.shell-head', '.shell-nav', '.shell-main']) {
+  for (const selector of ['.shell', '.shell-side', '.shell-body', '.shell-head', '.shell-nav', '.shell-main']) {
     expect(css, `${selector} is not styled`).toContain(`${selector} {`)
   }
 })
@@ -28,8 +28,13 @@ test('the stylesheet is really the shell stylesheet', () => {
 test('no layout container carries a fixed pixel width', () => {
   for (const selector of [
     '.shell',
+    // The sidebar restyle (UI-1) is held to the same rule: at PHONE width it
+    // carries no width at all, and takes --sidebar-w only inside the breakpoint.
+    '.shell-side',
+    '.shell-body',
     '.shell-head',
     '.shell-nav',
+    '.nav-group',
     '.shell-main',
     '.panel',
     // The B6-5 oversight surfaces are held to the same rule.
@@ -63,6 +68,24 @@ test('the nav wraps rather than overflowing, so every surface stays reachable at
   const nav = block('.shell-nav')
   expect(nav).toContain('flex-wrap: wrap')
   expect(nav).not.toContain('overflow-x: hidden')
+  // The nav is grouped now (UI-1). A group that could not wrap would push its
+  // own links off a 375px screen even though the nav around it wraps.
+  expect(block('.nav-group')).toContain('flex-wrap: wrap')
+})
+
+test('the sidebar layout appears at the breakpoint and the phone gets the same markup, stacked', () => {
+  // Phone-first, applied to the shell chrome itself: the base is a column with
+  // the sidebar as a wrapping band above the content, and the side-by-side
+  // layout exists only inside the min-width query (S1.10).
+  expect(block('.shell')).toContain('flex-direction: column')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  const wideShell = wide.slice(wide.indexOf('.shell {'), wide.indexOf('}', wide.indexOf('.shell {')))
+  expect(wideShell, 'the sidebar never lays out beside the content on a wide screen').toContain('flex-direction: row')
+  const wideSide = wide.slice(wide.indexOf('.shell-side {'), wide.indexOf('}', wide.indexOf('.shell-side {')))
+  expect(wideSide, 'the sidebar takes no width at the breakpoint').toContain('width: var(--sidebar-w)')
+  // The content column can shrink below its content's intrinsic width, which is
+  // what stops a wide table inside it from widening the whole page.
+  expect(block('.shell-body')).toContain('min-width: 0')
 })
 
 test('the shell is phone-first and widens at a breakpoint, not the other way round', () => {
