@@ -1,5 +1,7 @@
 # P3 handoff — last rewritten 2026-08-04 (end of session): **THE BUILD IS FINISHED, THE B6 GATE IS CLOSED, and the directed UI batch waits on ONE thing: the operator's approval of the design-approach proposal. That approval is this session's first item.**
 
+> **CORRECTION 2026-08-04 (in-session, next session): the approval LANDED** — operator free text recorded verbatim in proposal §6 + STATE ("ok than I aprove all design decisions."; items 1–3 as recommended, no taste overrides). **The UI batch is OPEN: queue UI-1..UI-7 cut in STATE (the section above "Operator hands-on items"), UI-1 foundation grounding launched.** The §2 "first acts" below are executed; STATE is current and outranks the rest of this snapshot.
+
 **Read this first, then `P3/STATE.md`.** This file is a *snapshot* to orient a fresh session in two minutes. It goes stale; **`P3/STATE.md` is the single source of truth and outranks anything here.** If they disagree, STATE wins and this file gets corrected.
 
 Authority order: **`Spec/core-architecture-v1.md` (frozen v1, tag `spec-v1`; drafts in `Spec/drafts/` are canonical text)** → `Spec/benchmark-preregistration-v1.md` (BENCH-REG, signed) and `Spec/frontend-components-v1.md` (FC-v1) → `P3/CONVENTIONS.md` → **`P3/design/design-approach-proposal.md` (design authority for the UI batch once approved — subordinate to the spec on all behavior)** → `P3/STATE.md` → this file. `Research/` is a **closed archive**; `Docs/` is **read-only**.

@@ -1,6 +1,6 @@
 # Sinet UI — design-approach proposal (2026-08-04)
 
-**Status: PRESENTED — awaiting operator approval.** *(Amended pre-approval 2026-08-04: §3 "Nexus functionality carry" + §4 seeded exit walk, on the operator's structure-and-functionality question.)* This is the declaration the operator's D3 condition requires ("we have to declare how to build them before we start"), under D8's ratified mandate (looks **and** intelligibility). Authority: B6 gate record `P3/gates/B6-report.md` §9 (D3, D8, findings A-1/A-2/C-1). Inputs: `nexus-frontend-harvest.md` · `ui-foundation-sourcing.md` · `odysseus-pattern-study.md` (all three in this directory). FC-v1's binding picks are untouched — this proposal adds a design layer; it changes no behavior contract.
+**Status: APPROVED 2026-08-04 — operator free-text answer recorded verbatim in §6. This document is now the UI batch's design authority, subordinate to the spec on all behavior.** *(Amended pre-approval 2026-08-04: §3 "Nexus functionality carry" + §4 seeded exit walk, on the operator's structure-and-functionality question.)* This is the declaration the operator's D3 condition requires ("we have to declare how to build them before we start"), under D8's ratified mandate (looks **and** intelligibility). Authority: B6 gate record `P3/gates/B6-report.md` §9 (D3, D8, findings A-1/A-2/C-1). Inputs: `nexus-frontend-harvest.md` · `ui-foundation-sourcing.md` · `odysseus-pattern-study.md` (all three in this directory). FC-v1's binding picks are untouched — this proposal adds a design layer; it changes no behavior contract.
 
 Once approved (free text; recorded here + STATE), the UI batch builds against this document. Deviations found mid-build return here as dated amendments.
 
@@ -71,4 +71,4 @@ Bundled assets only, no CDN, no runtime fetches · escape-scan rules unchanged (
 3. **Approve the pattern set + work plan** (§3–§4), including the self-teaching layer as first-class scope. *(Recommended: yes.)*
 4. Any taste overrides (aurora on/off, glass intensity, density default, anything you want different) — free text.
 
-**Operator answer (recorded verbatim on approval):** _pending_
+**Operator answer (recorded verbatim on approval):** **APPROVED 2026-08-04** — *"ok than I aprove all design decisions."* Coordinator reading (logged in STATE): items 1–3 approved as recommended (the look · the substrate · the pattern set + work plan with the self-teaching layer first-class); item 4 — no taste overrides given, so the proposal's stated defaults stand (aurora on, glass and motion as specified, density default = comfortable with the compact root class shipped).
