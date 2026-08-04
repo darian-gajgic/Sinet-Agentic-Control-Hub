@@ -334,3 +334,35 @@ All accessed 2026-07-16. Tier P = primary (provider/project's own page, repo, or
 72. S — event-corroboration set: tech.yahoo.com "Free Qwen Is Dead" (weeks-late press for #35), visualstudiomagazine.com Copilot-billing backlash (same-day trade press), 9to5google post-cutoff coverage — press-lag calibration for §6.
 
 *Sourcing notes:* every load-bearing claim carries ≥2 independent sources or an explicit single-source flag inline (notable single-source items: Terminal-Bench/SWE-Pro Grok-4.5 placements, LongCat license terms, MiMo OpenRouter share, BytePlus quota digits, Featherless current tier lineup, Z.AI dollar digits — all flagged where used). ToS/pricing claims rest on provider primaries except where pages were 403/JS-walled — those are marked and carry corroboration chains. The 13 most load-bearing claims went through a dedicated adversarial pass; its corrections are folded in (xAI "weekly pool" refuted → quota shape undocumented; StepFun "no restrictive clause" corrected → tools-whitelist + anti-circumvention clauses exist; BytePlus $5 Lite → suspended promo, standard $10; K3 "unreleased" → launched 2026-07-16; AA v4.0 figures → superseded by v4.1). Launch-day facts (K3, AA board) are pinned to 2026-07-16 and expected to drift within days — §6's cadence exists for exactly this.
+
+## 11. Addendum (2026-07-27, post-campaign) — Anthropic Fable 5 safeguard fallback to Opus 4.8
+
+*Added after the campaign close on operator instruction (2026-07-27), because the presentation deck cited this
+provider behavior without a research-file record. Verified live on 2026-07-27. This is a §2-class behavior-drift
+fact on the primary lane's vendor; it does not reopen any campaign conclusion.*
+
+**Documented behavior (vendor):** when Claude Fable 5's dual-use safeguards block a request, it "may fallback to a
+non-Mythos model, currently Opus 4.8"; automatic model switching is **active by default** in Claude, Claude Cowork,
+**Claude Code**, Claude Design, and Claude for Microsoft 365, and the blocked request is **re-run on Claude Opus 4.8
+in the same conversation** — i.e. the vendor documents a *per-request* fallback. [S-A1]
+
+**Observed behavior (open bug):** in Claude Code the downgrade is **session-sticky in practice**, not per-request:
+after a safeguard flag the session continues on `claude-opus-4-8` "for hundreds of turns" while the UI still shows
+Fable 5. Documented instances: one session flagged 2026-07-16T03:01Z served **319 consecutive messages as Opus 4.8,
+reverting after ~23 h**; another served **485 of 578** assistant messages on Opus post-flag; **~840 assistant
+messages across ~23 hours** in the headline case; **40 flagged sessions since 2026-06-30**, with **18 incidents on
+2026-07-16 alone** (a ~9× spike coinciding with an availability incident that day). Issue **open** as of
+2026-07-27 (labels: bug, area:model, area:ui). [S-A2]
+
+**Reconciliation:** the two records are doc-vs-observed, not a contradiction — the campaign's own operational
+experience (2026-07-19, safeguard false-positives on this project's security vocabulary) matched the *documented*
+per-request bounce and was lossless; issue 78888 documents the *sticky* failure mode of the same mechanism. Both
+carry the same platform consequence (already in the deck): the served model must be a recorded fact per call
+(requested vs served in the event log), never a UI label, and a duty-slot model change triggers revalidation.
+
+**Not established by these sources:** how billing is metered during the fallback (neither source states whether
+usage is charged/weighed at Fable 5 or Opus 4.8 rates) — treat any billing claim as unverified.
+
+**Sources:**
+- [S-A1] P — https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5 — Anthropic help center, "Why Claude switched models in your conversation with Fable 5" (accessed 2026-07-27).
+- [S-A2] P — https://github.com/anthropics/claude-code/issues/78888 — "Fable 5 silent reroute to Opus 4.8" (opened 2026-07-18; open at access 2026-07-27).
