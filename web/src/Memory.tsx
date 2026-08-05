@@ -12,7 +12,8 @@ import {
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { useLive } from './live'
-import { Absent, Freshness } from './parts'
+import { Absent, Freshness, SurfaceHead } from './parts'
+import { Hint } from './hints'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { Button, Chip, EmptyState, Panel, Timestamp, type Tone } from './ui'
@@ -133,13 +134,20 @@ export function Memory({ me, operator, stream }: { me: string; operator: boolean
 
   return (
     <section className="surface">
-      <h1>Memory</h1>
+      {/* The §51 SurfaceHead idiom, applied here at UI-7 (R10/R11). The landed
+          h1 and its paragraph said the right things in the wrong treatment; the
+          words are kept and the SERVED `visibility` sentence below stays the
+          scope authority, because what you can see is the platform's statement
+          rather than this page's summary of it. */}
+      <SurfaceHead
+        title="Memory"
+        what="What the platform has been told to remember, and what it may use again. Every entry here was written by a person through the gate; nothing on this page was inferred."
+      />
       <Freshness stale={live.stale} error={live.error} hasData={data !== null} />
-
-      <p className="muted">
-        What the platform has been told to remember, and what it may use again. Every entry here was written by a person
-        through the S09 gate; nothing on this page was inferred.
-      </p>
+      <Hint id="memory-filters">
+        The filters below are part of the QUESTION, not a sieve over what you already have — changing one asks the
+        platform again.
+      </Hint>
 
       <Panel head={<strong>What you can see here</strong>}>
         {/* The SERVED rule, verbatim. "Why is that entry not here?" is a question

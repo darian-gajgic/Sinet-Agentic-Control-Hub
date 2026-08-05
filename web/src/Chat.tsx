@@ -46,7 +46,8 @@ import {
 import { Absent, Empty, Freshness, SurfaceHead } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
-import { Button, Timestamp } from './ui'
+import { Button, EmptyState, Timestamp } from './ui'
+import { Hint } from './hints'
 import { cn } from './lib/utils'
 
 /**
@@ -146,7 +147,11 @@ export function Chat({ stream, search }: { stream?: EventStream; search: string 
 
       <div className="chat-body">
         <SessionRail
-          sessions={sessions.data?.sessions ?? []}
+          // SERVED-GATED (§51 drain D1). `?? []` would render a read that has
+          // not answered yet as a served empty, so the rail would teach "no
+          // conversations yet" while /api/chat/sessions was still in flight.
+          // `null` is the not-answered state and `Freshness` owns that window.
+          sessions={sessions.data?.sessions ?? null}
           active={active}
           stale={sessions.stale}
           error={sessions.error}
@@ -227,7 +232,7 @@ function SessionRail({
   onRename,
   onDelete,
 }: {
-  sessions: ChatSession[]
+  sessions: ChatSession[] | null
   active: string
   stale: boolean
   error: string
@@ -249,10 +254,15 @@ function SessionRail({
           New
         </Button>
       </div>
-      <Freshness stale={stale} error={error} hasData={sessions.length > 0} />
-      {sessions.length === 0 && !stale && <Empty what="No conversations yet." />}
+      <Freshness stale={stale} error={error} hasData={(sessions ?? []).length > 0} />
+      {sessions !== null && sessions.length === 0 && (
+        <EmptyState
+          what="No conversations yet."
+          why="Starting one puts it here and keeps it — conversations live on the platform, not in this browser, so they are here on your next visit and on your other devices."
+        />
+      )}
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {sessions.map((s) => (
+        {(sessions ?? []).map((s) => (
           <li
             key={s.session_id}
             data-session-id={s.session_id}
@@ -924,6 +934,10 @@ function Composer({
   const selected = (registries.catalog?.queries ?? []).find((q) => q.name === pick.query)
   return (
     <ComposerPrimitive.Root className="chat-composer flex max-w-full flex-col gap-2">
+      <Hint id="composer-verb">
+        You choose what a message does — ask, run a named view, run a catalog question, or start a task. Nothing here
+        guesses that for you.
+      </Hint>
       <div
         // The wide arm must be a UTILITY now, not an owned rule: after the
         // cascade fix an owned `@media` rule sits in `@layer base` and can no

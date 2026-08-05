@@ -26,6 +26,9 @@ import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound, Stub } from './Stub'
 import { Link, navigate, useRoute } from './router'
+import { ToastProvider } from './ui'
+import { TurnToasts, useEtiquette } from './etiquette'
+import { TourButton, TourOverlay, tourSteps, useTour } from './tour'
 import { hrefFor, routes, type RouteDef, type RouteID } from './routes'
 import { Workforce } from './Workforce'
 
@@ -79,6 +82,14 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
   const { session, reload, failure } = useSession()
   const authed = session?.authenticated === true
   const status = useConnection(authed, stream)
+  // CENSUS HUNK (b) — background-run etiquette (P3-UI-7 R15). It joins the
+  // stream `useConnection` already opened; it opens nothing, adds no topic and
+  // reads nothing. The dot is cleared by arriving on the route.
+  const { dots, requests } = useEtiquette(route.id, authed, stream)
+  // CENSUS HUNK (c) — the guided tour (P3-UI-7 R13). It NEVER auto-starts:
+  // nothing in this client persists, so a self-starting tour would ambush every
+  // load. `TourButton` below is the only thing that can start it.
+  const tour = useTour()
 
   // Fail closed, both directions: no session outside /login, and no /login
   // once there is one. `next` survives the round trip so a deep link that
@@ -116,8 +127,17 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
   }, [authed, route.id, session])
 
   return (
-    <div className="shell">
-      <div className="aurora" aria-hidden="true" />
+    // CENSUS HUNK (a) — `ToastProvider`'s ONE production mount (P3-UI-7 R16;
+    // named as UI-7's by both §48's and §51's seam lists). It wraps the whole
+    // shell tree, so every test that mounts <App> inherits it and no surface
+    // has to provide its own. `ui/Toast.tsx` is byte-frozen: the cap of four
+    // and the `data-limited` overflow are the kit's, asserted at this mount.
+    <ToastProvider>
+      <div className="shell">
+        <div className="aurora" aria-hidden="true" />
+        {/* The toast sink lives inside the provider because `useToast` reads
+            its manager. It subscribes to nothing — see `useEtiquette`. */}
+        <TurnToasts requests={requests} />
 
       <aside className="shell-side">
         <Link to={hrefFor('mission-control')} className="brand">
@@ -133,9 +153,24 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 {section.items.map((r) => {
                   const Icon = navIcons[r.id]
                   return (
-                    <Link key={r.id} to={r.pattern} aria-current={r.id === route.id ? 'page' : undefined}>
+                    <Link
+                      key={r.id}
+                      to={r.pattern}
+                      aria-current={r.id === route.id ? 'page' : undefined}
+                      // The dot says "something arrived here while you were
+                      // elsewhere" and NOTHING about how much: no count can be
+                      // derived from frames without risking disagreement with
+                      // the queue the person then opens (§42).
+                      data-dot={dots[r.id] === true ? 'true' : undefined}
+                    >
                       {Icon && <Icon className="nav-icon" size={16} strokeWidth={1.7} aria-hidden="true" />}
                       {r.title}
+                      {dots[r.id] === true && (
+                        <span
+                          className="ms-auto size-1.5 shrink-0 rounded-full bg-(--accent) motion-safe:animate-[dot-pulse_2s_ease-in-out_infinite]"
+                          aria-label="new since you were last here"
+                        />
+                      )}
                     </Link>
                   )
                 })}
@@ -148,6 +183,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
       <div className="shell-body">
         <header className="shell-head">
           <ConnectionState status={status} />
+          {authed && <TourButton onStart={tour.start} />}
           {authed && (
             <span className="who">
               {session?.user?.display_name ?? (session?.dev === true ? 'dev' : '')}
@@ -263,7 +299,18 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           )}
         </main>
       </div>
-    </div>
+
+        {tour.running && tour.step !== null && (
+          <TourOverlay
+            step={tour.step}
+            index={tourSteps.indexOf(tour.step)}
+            total={tourSteps.length}
+            onNext={tour.next}
+            onStop={tour.stop}
+          />
+        )}
+      </div>
+    </ToastProvider>
   )
 }
 
