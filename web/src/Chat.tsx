@@ -46,7 +46,22 @@ import {
 import { Absent, Empty, Freshness, SurfaceHead } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
-import { Timestamp } from './ui'
+import { Button, Timestamp } from './ui'
+import { cn } from './lib/utils'
+
+/**
+ * The three regions' shared panel treatment (P3-UI-7 R8).
+ *
+ * The kit's `Panel` is deliberately NOT mounted here: it wraps its children in
+ * an inner padded `<div>`, and this surface's landed assertions traverse the
+ * region elements directly (`.chat-sessions li`, `.chat-files li`, the viewport's
+ * own children). Carrying the SAME look through utilities restyles the regions
+ * without moving one node of the tree those pins walk — the §51 "class kept as
+ * the DOM hook, presentation moved to utilities" resolution, applied to a
+ * primitive rather than to a rule.
+ */
+const chatPanel =
+  'max-w-full min-w-0 rounded-(--radius) border border-border bg-(image:--panel-grad) p-(--density-pad)'
 
 /**
  * The conversational assistant (Spec S15.7; S15.4; FC-v1 §3; S14.10).
@@ -113,7 +128,7 @@ export function Chat({ stream, search }: { stream?: EventStream; search: string 
   )
 
   return (
-    <section className="chat" data-live="assistant">
+    <section className="chat flex max-w-full flex-col gap-4" data-live="assistant">
       {/* THE THREE-VERB CONTRACT, in operator words (B6 gate record §9 finding
           A-2; P3-UI-7 R7c). The landed line named two of the three and left out
           file exchange, which is a verb this surface really has
@@ -154,7 +169,7 @@ export function Chat({ stream, search }: { stream?: EventStream; search: string 
         />
 
         {active === '' ? (
-          <div className="chat-thread">
+          <div className={cn(chatPanel, 'chat-thread')}>
             <Empty what="No conversation open. Pick one from the list, or start a new one." />
           </div>
         ) : (
@@ -227,52 +242,71 @@ function SessionRail({
   const [armed, setArmed] = useState('')
 
   return (
-    <nav className="chat-sessions" aria-label="Conversations">
-      <div className="chat-sessions-head">
+    <nav className={cn(chatPanel, 'chat-sessions')} aria-label="Conversations">
+      <div className="chat-sessions-head flex flex-wrap items-baseline justify-between gap-2">
         <h3>Conversations</h3>
-        <button type="button" onClick={onCreate}>
+        <Button variant="primary" size="sm" onClick={onCreate}>
           New
-        </button>
+        </Button>
       </div>
       <Freshness stale={stale} error={error} hasData={sessions.length > 0} />
       {sessions.length === 0 && !stale && <Empty what="No conversations yet." />}
-      <ul>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {sessions.map((s) => (
-          <li key={s.session_id} data-session-id={s.session_id} data-active={s.session_id === active ? 'true' : 'false'}>
+          <li
+            key={s.session_id}
+            data-session-id={s.session_id}
+            data-active={s.session_id === active ? 'true' : 'false'}
+            className={cn(
+              'flex flex-col gap-1 wrap-anywhere',
+              // The active conversation carries the identity rail, exactly as the
+              // shed `li[data-active='true']` rule drew it.
+              s.session_id === active && 'border-s-[3px] border-[var(--accent)] ps-2',
+            )}
+          >
             <Link to={sessionHref(s.session_id)} aria-current={s.session_id === active ? 'page' : undefined}>
               <SessionTitle session={s} />
             </Link>
-            <span className="chat-session-acts">
-              <button type="button" onClick={() => { setRenaming(s.session_id); setDraft(s.title) }}>
+            <span className="chat-session-acts flex flex-wrap items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setRenaming(s.session_id); setDraft(s.title) }}
+              >
                 Rename
-              </button>
+              </Button>
               {armed === s.session_id ? (
-                <button type="button" onClick={() => { setArmed(''); onDelete(s.session_id) }}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => { setArmed(''); onDelete(s.session_id) }}
+                >
                   Confirm delete
-                </button>
+                </Button>
               ) : (
-                <button type="button" onClick={() => setArmed(s.session_id)}>
+                <Button variant="ghost" size="sm" onClick={() => setArmed(s.session_id)}>
                   Delete
-                </button>
+                </Button>
               )}
             </span>
             {renaming === s.session_id && (
-              <span className="chat-rename">
+              <span className="chat-rename flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   aria-label="Conversation title"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => {
                     setRenaming('')
                     onRename(s.session_id, draft)
                   }}
                 >
                   Save
-                </button>
+                </Button>
               </span>
             )}
           </li>
@@ -287,7 +321,7 @@ function SessionRail({
  *  fabricated summary of a conversation that has not happened. */
 function SessionTitle({ session }: { session: ChatSession }) {
   if (session.title === '') return <Absent reason="Untitled — nothing said yet" />
-  return <span className="chat-session-title">{session.title}</span>
+  return <span className="chat-session-title wrap-anywhere">{session.title}</span>
 }
 
 // ── one conversation ──────────────────────────────────────────────────────
@@ -419,14 +453,14 @@ function Conversation({
   })
 
   return (
-    <div className="chat-thread">
+    <div className={cn(chatPanel, 'chat-thread')}>
       <ConversationHead view={view} />
       <Freshness stale={detail.stale} error={detail.error} hasData={view !== null} />
       {failure !== null && <FailureLine failure={failure} />}
 
       <AssistantRuntimeProvider runtime={runtime}>
         <ThreadPrimitive.Root className="chat-thread-root">
-          <ThreadPrimitive.Viewport className="chat-viewport">
+          <ThreadPrimitive.Viewport className="chat-viewport flex max-w-full flex-col gap-3">
             <ThreadPrimitive.Empty>
               <Empty what="Nothing said in this conversation yet." />
             </ThreadPrimitive.Empty>
@@ -492,7 +526,10 @@ function ConversationHead({ view }: { view: ChatSessionView | null }) {
  *  like every other piece of content on every surface (S15.12). */
 function SaidBubble() {
   return (
-    <MessagePrimitive.Root className="chat-said" data-role="user">
+    <MessagePrimitive.Root
+      className="chat-said max-w-full rounded-(--radius-sm) border border-border bg-(--panel) p-2 whitespace-pre-wrap wrap-anywhere"
+      data-role="user"
+    >
       <MessagePrimitive.Parts />
     </MessagePrimitive.Root>
   )
@@ -530,11 +567,11 @@ function TurnBubble({
       data-turn-fact={fact.kind}
     >
       {fact.kind === 'running' && (
-        <div className="chat-running">
-          <p>{fact.headline}</p>
-          <button type="button" onClick={onStop}>
+        <div className="chat-running flex flex-wrap items-center gap-2">
+          <p className="m-0">{fact.headline}</p>
+          <Button variant="danger" size="sm" onClick={onStop}>
             Stop this turn
-          </button>
+          </Button>
         </div>
       )}
 
@@ -596,12 +633,12 @@ function AnswerOutcome({
 }) {
   const escalatable = answer.layer < 2 && question !== ''
   return (
-    <div className="chat-answer">
+    <div className="chat-answer max-w-full overflow-x-auto">
       <AnswerView answer={answer} onChoose={(query) => onChoose(query, question)} />
       {escalatable && (
-        <button type="button" className="chat-escalate" onClick={() => onEscalate(question)}>
+        <Button variant="secondary" size="sm" className="chat-escalate mt-2" onClick={() => onEscalate(question)}>
           Escalate this question to open SQL (Layer 2, lower confidence, audited)
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -622,18 +659,22 @@ function ProducedChips({ produced, files }: { produced: string[]; files: ChatFil
     )
   }
   return (
-    <ul className="chat-chips" data-chips="some">
+    <ul className="chat-chips m-0 flex list-none flex-col gap-2 p-0" data-chips="some">
       {produced.map((id) => {
         const file = files.find((f) => f.file_id === id)
         return (
-          <li key={id} className="chip" data-chip={id}>
+          <li
+            key={id}
+            className="chip"
+            data-chip={id}
+          >
             {file ? (
               <>
-                <span className="chip-name">{file.name}</span> <span className="muted">{String(file.size_bytes)} bytes</span>
+                <span className="chip-name wrap-anywhere">{file.name}</span> <span className="muted">{String(file.size_bytes)} bytes</span>
               </>
             ) : (
               <>
-                <span className="chip-name">{id}</span> <Absent reason="no longer in the exchange folder" />
+                <span className="chip-name wrap-anywhere">{id}</span> <Absent reason="no longer in the exchange folder" />
               </>
             )}
           </li>
@@ -696,11 +737,11 @@ function BornTaskView({
 }) {
   const open = openIntakeCard(queue, task.task_id)
   return (
-    <div className="chat-born" data-task={task.task_id}>
+    <div className="chat-born max-w-full overflow-x-auto" data-task={task.task_id}>
       <p>
         Task started: <Link to={hrefFor('task', { id: task.task_id })}>{task.title}</Link>
       </p>
-      <dl className="chat-born-facts">
+      <dl className="chat-born-facts my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 [&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground">
         <dt>task</dt>
         <dd>{task.task_id}</dd>
         <dt>stage</dt>
@@ -805,7 +846,7 @@ function IntakeCardInPlace({
         {card.tier !== undefined && <span className="muted"> · {card.tier}</span>}
       </p>
       {questions.length === 0 && <Empty what="This card carries no questions to answer here." />}
-      <ul className="chat-intake-questions">
+      <ul className="chat-intake-questions m-0 flex list-none flex-col gap-2 p-0">
         {questions.map((q) => (
           <li key={q.id} data-question={q.id}>
             <label>
@@ -834,9 +875,9 @@ function IntakeCardInPlace({
         ))}
       </ul>
       <div className="chat-intake-acts">
-        <button type="button" disabled={busy || answered.length === 0} onClick={() => void send()}>
+        <Button variant="primary" size="sm" disabled={busy || answered.length === 0} onClick={() => void send()}>
           Answer here
-        </button>
+        </Button>
         <Link to={hrefFor('inbox')}>Open the decision queue</Link>
         {found !== null && <Link to={hrefFor('inbox-item', { id: found.id })}>Open this card</Link>}
       </div>
@@ -882,8 +923,15 @@ function Composer({
 }) {
   const selected = (registries.catalog?.queries ?? []).find((q) => q.name === pick.query)
   return (
-    <ComposerPrimitive.Root className="chat-composer">
-      <div className="chat-verbs" role="group" aria-label="What this turn should do">
+    <ComposerPrimitive.Root className="chat-composer flex max-w-full flex-col gap-2">
+      <div
+        // The wide arm must be a UTILITY now, not an owned rule: after the
+        // cascade fix an owned `@media` rule sits in `@layer base` and can no
+        // longer override a utility on the same element, so the landed
+        // `.chat-verbs { flex-direction: row }` breakpoint would be dead here.
+        // `md:` IS the landed 48rem breakpoint (§47).
+        className="chat-verbs flex flex-col gap-1 md:flex-row md:flex-wrap md:items-center [&_label]:flex [&_label]:items-center [&_label]:gap-2"
+        role="group" aria-label="What this turn should do">
         {composerVerbs.map((v) => (
           <label key={v.kind} data-verb={v.kind}>
             <input
@@ -901,7 +949,7 @@ function Composer({
       {registries.error !== '' && <p className="error">{registries.error}</p>}
 
       {pick.verb === 'view' && (
-        <label className="chat-arg">
+        <label className="chat-arg flex max-w-full flex-col gap-2">
           A named view
           <select value={pick.view} onChange={(e) => setPick({ ...pick, view: e.target.value })}>
             <option value="">Choose a view…</option>
@@ -915,7 +963,7 @@ function Composer({
       )}
 
       {pick.verb === 'query' && (
-        <div className="chat-arg">
+        <div className="chat-arg flex max-w-full flex-col gap-2">
           <label>
             A catalog question
             <select value={pick.query} onChange={(e) => setPick({ ...pick, query: e.target.value, slots: {} })}>
@@ -941,12 +989,12 @@ function Composer({
       )}
 
       {pick.verb === 'task' && (
-        <div className="chat-arg">
+        <div className="chat-arg flex max-w-full flex-col gap-2">
           <label>
             Title (optional — the platform uses your first line if you leave it)
             <input type="text" value={pick.title} onChange={(e) => setPick({ ...pick, title: e.target.value })} />
           </label>
-          <fieldset className="chat-inputs">
+          <fieldset className="chat-inputs [&_label]:flex [&_label]:items-center [&_label]:gap-2">
             <legend>Hand files to this task</legend>
             {files.length === 0 ? (
               <Empty what="Nothing in your exchange folder to hand over." />
@@ -1052,7 +1100,7 @@ function Exchange({
 
   return (
     <aside
-      className="chat-exchange"
+      className={cn(chatPanel, 'chat-exchange data-[drop-target=over]:border-[var(--accent)]')}
       data-drop-target={over ? 'over' : 'idle'}
       onDragOver={(e: DragEvent<HTMLElement>) => {
         e.preventDefault()
@@ -1067,7 +1115,7 @@ function Exchange({
     >
       <h3>Exchange folder</h3>
       <p className="muted">Drop files here, or browse. They stay yours until you delete them.</p>
-      <label className="chat-browse">
+      <label className="chat-browse flex flex-col gap-1">
         Browse…
         <input
           type="file"
@@ -1083,16 +1131,16 @@ function Exchange({
       {files.length === 0 && !stale ? (
         <Empty what="Nothing in your exchange folder." />
       ) : (
-        <ul className="chat-files">
+        <ul className="chat-files m-0 flex list-none flex-col gap-2 p-0">
           {files.map((f) => (
             <li key={f.file_id} data-file={f.file_id}>
-              <span className="chat-file-name">{f.name}</span>
+              <span className="chat-file-name wrap-anywhere">{f.name}</span>
               <span className="muted">{String(f.size_bytes)} bytes</span>
               <span className="muted chat-file-sha">{f.sha256}</span>
               <Timestamp ts={f.uploaded_ts} variant="live" />
-              <button type="button" onClick={() => onDelete(f.file_id)}>
+              <Button variant="ghost" size="sm" onClick={() => onDelete(f.file_id)}>
                 Delete
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

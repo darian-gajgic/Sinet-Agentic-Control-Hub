@@ -20,6 +20,8 @@ import { EventStream } from './events'
 import { chatIntakeEventTypes, chatSessionEventTypes, chatTurnEventTypes } from './live'
 import { navigate } from './router'
 import { hrefFor, matchRoute, routes } from './routes'
+import chatSource from './Chat.tsx?raw'
+import cssSource from './index.css?raw'
 import { click, choose, flush, mount, typeInto } from './testing'
 
 /**
@@ -169,6 +171,30 @@ test('the surface head states the THREE-verb contract, and promises nothing this
   for (const claim of ['edits', 'changes your', 'rewrites', 'fixes']) {
     expect(line, `the head claimed the assistant acts on your work: ${claim}`).not.toContain(claim)
   }
+  view.unmount()
+})
+
+test('a responsive arm the restyle relies on is a UTILITY, because an owned rule can no longer beat one', async () => {
+  // THE HAZARD CLASS THIS GUARDS, found during the A2 restyle and fixed there.
+  // Before the cascade fix (§53) the owned sheet was unlayered, so an owned
+  // `@media` rule beat any utility on the same element. It now sits in
+  // `@layer base` and LOSES to `@layer utilities`. So the moment the restyle
+  // gave `.chat-verbs` a `flex-col` utility, the landed wide-screen arm
+  // `.chat-verbs { flex-direction: row }` became DEAD — the picker would have
+  // stayed a column at every width, and no jsdom test could have seen it.
+  // The arm is therefore a `md:` utility now, and the owned rule is gone.
+  const { view } = await open(hrefFor('chat'))
+  const verbsSource = chatSource.slice(chatSource.indexOf('className="chat-verbs'))
+  expect(verbsSource.slice(0, 200), 'the verb picker lost its wide-screen arm').toContain('md:flex-row')
+
+  // ...and the owned rule it replaces really is gone, so there is exactly ONE
+  // source for this breakpoint rather than two that can disagree.
+  const wide = cssSource.slice(cssSource.indexOf('@media (min-width:'))
+  expect(wide, 'the owned wide arm for .chat-verbs survived beside the utility').not.toContain('.chat-verbs')
+  // The sibling arm that kept its owned rule is untouched and still there —
+  // which is what makes the assertion above about `.chat-verbs` specifically
+  // rather than about the media block having been emptied.
+  expect(wide).toContain('.chat-composer-row')
   view.unmount()
 })
 

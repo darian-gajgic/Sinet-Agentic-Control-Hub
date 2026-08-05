@@ -254,9 +254,11 @@
    THE CONTENTS ARE DELIBERATELY NOT RE-INDENTED. `design.test.ts:17`,
    `responsive.test.ts:17` and `sweep.test.tsx:798` locate rules with
    `css.indexOf('\n<selector> {')` — line-start anchored — so indenting this
-   block by two spaces would silently re-point every one of those landed
-   predicates. The fix must not move a landed test; a landed test that moves on
-   a pure-cascade commit is itself a finding.
+   block by two spaces would make every one of those locators FAIL LOUDLY:
+   `indexOf` returns -1 and the suite reports "<selector> is not styled at all".
+   (Corrected 2026-08-05, A1 evaluation N1: this said "silently re-point", which
+   names the wrong failure mode.) The fix must not move a landed test; a landed
+   test that moves on a pure-cascade commit is itself a finding.
 
    The reduced-motion kill switch above stays UNLAYERED on purpose: for
    `!important` declarations the layer order is REVERSED (unlayered important is
@@ -1057,13 +1059,6 @@ td {
    of the surfaces S1.10 names as phone-complete, so every act (send, stop, pick
    a verb, upload, delete, answer an intake card) has to be reachable at 375px. */
 
-.chat {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  max-width: 100%;
-}
-
 .chat-body {
   display: flex;
   flex-direction: column;
@@ -1071,64 +1066,11 @@ td {
   max-width: 100%;
 }
 
-.chat-sessions,
-.chat-exchange,
-.chat-thread {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.75rem;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.chat-sessions-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  justify-content: space-between;
-}
-
-.chat-sessions ul,
-.chat-files,
-.chat-chips,
-.chat-intake-questions {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.chat-sessions li,
-.chat-files li {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  overflow-wrap: anywhere;
-}
-
-.chat-sessions li[data-active='true'] {
-  border-inline-start: 3px solid var(--accent);
-  padding-inline-start: 0.5rem;
-}
-
-.chat-session-acts,
-.chat-rename,
 .chat-intake-acts {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-}
-
-/* A conversation title and a file name are both content, and content on a phone
-   wraps rather than pushing the page sideways. */
-.chat-session-title,
-.chat-file-name,
-.chip-name {
-  overflow-wrap: anywhere;
 }
 
 /* A sha256 is 64 characters that must not widen the page. */
@@ -1137,14 +1079,6 @@ td {
   overflow-wrap: anywhere;
 }
 
-.chat-viewport {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-width: 100%;
-}
-
-.chat-said,
 .chat-turn {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1155,12 +1089,6 @@ td {
   white-space: pre-wrap;
 }
 
-.chat-said {
-  background: var(--panel);
-}
-
-.chat-answer,
-.chat-born,
 .chat-intake {
   max-width: 100%;
   /* An answer is a table and a table is wider than a phone: it scrolls inside
@@ -1168,54 +1096,11 @@ td {
   overflow-x: auto;
 }
 
-.chat-born-facts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.25rem 0.75rem;
-  margin: 0.5rem 0;
-}
-
-.chat-born-facts dt {
-  color: var(--muted);
-}
-
-.chat-born-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .chip {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.125rem 0.625rem;
   overflow-wrap: anywhere;
-}
-
-.chat-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: 100%;
-}
-
-.chat-verbs {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.chat-verbs label,
-.chat-inputs label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.chat-arg {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: 100%;
 }
 
 .chat-composer-row {
@@ -1237,19 +1122,6 @@ td {
   resize: vertical;
 }
 
-.chat-escalate {
-  margin-top: 0.5rem;
-}
-
-.chat-exchange[data-drop-target='over'] {
-  border-color: var(--accent);
-}
-
-.chat-browse {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
 
 /* ── the S15.8 review surface (B6-8) ───────────────────────────────────────
    Owned CSS only. react-diff-view's own stylesheet styles the widget's own DOM
@@ -1651,7 +1523,6 @@ td {
     flex: 1 1 0;
   }
 
-  .chat-verbs,
   .chat-composer-row {
     flex-direction: row;
     flex-wrap: wrap;
