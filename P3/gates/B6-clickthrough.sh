@@ -109,7 +109,7 @@ else
   if SINET_SEED_DEMO_WORLD="$STATE" go test ./internal/api -run TestSeedDemoWorld -count=1 -v \
        >"$STATE/seed.log" 2>&1; then
     touch "$STATE/.seeded"
-    ok "demo world seeded — every surface below has rows to show"
+    ok "demo world seeded — every surface below has rows, bar the owner-scoped ones (see below)"
     sed -n 's/^ *seedworld_test\.go:[0-9]*: /    /p' "$STATE/seed.log"
   else
     bad "the demo seed failed"; note "see $STATE/seed.log"; die "seeding failed"
@@ -186,9 +186,17 @@ show — including the task detail and the review surface, which an empty databa
 has kept unreachable until now. Where something is still absent it should tell
 you WHY: never a blank panel, never a fabricated zero, never an endless spinner.
 
-You are browsing under the dev fallback, which needs no PIN. To exercise the
-real login, use "Sign in" in the header — the people are printed above, and
-they all share the same demo PIN.
+You are browsing under the DEV FALLBACK, which needs no PIN — and that identity
+is nobody in particular, so the owner-scoped surfaces answer accordingly:
+
+   - /chat is EMPTY for it. Conversations belong to a person, and the seeded
+     ones are alice's. That is correct, not a defect.
+   - /memory still shows entries: the seeded house-scope ones address everyone,
+     which is what the page's own served visibility sentence says.
+
+To see alice's conversations — and to exercise the login flow itself, which is
+the point of the C-1 Sign-in affordance — use "Sign in" in the header. The
+people are printed above and they all share the same demo PIN.
 
 Two things are honestly DIFFERENT from the committed fixtures, and neither is a
 defect: the meters and the price table render the REAL stores' answers here
@@ -209,7 +217,9 @@ Walk these eleven, in this order. Every one is a real route.
    8.  /chat          The assistant
    9.  /deliverables/:id  (from a task) — diff (split by default, unified
                       toggle), anchored comments, try-it frames, accept
-  10.  /workforce     The workforce map — empty on a fresh host is CORRECT
+  10.  /workforce     The workforce map — the seed composes three workers, so
+                      this has rows here; on a genuinely fresh host it is empty
+                      and that is also CORRECT
                       ("no standing army": machinery is composed when earned)
   11.  Resize to a phone width and re-walk 1, 5, 6 — phone-complete is a
        requirement; diff review and settings-bulk are desktop-comfortable.

@@ -32,6 +32,15 @@ type backend struct {
 	db    *storage.DB
 	log   *eventlog.Log
 	store *auth.Store
+	// root is where this world's FILE-BACKED stores live: the content-addressed
+	// review objects, the project checkout, the chat exchange, the portpool and
+	// the preview scratch. It matters because those bytes must outlive the
+	// process that minted them whenever the world is seeded for something else
+	// to serve — a `t.TempDir()` root is removed when the test binary exits, so
+	// the rows survive and the OBJECTS do not, and every read that opens one
+	// answers 500 (P3-UI-7 C-1 drain D1). Empty means "per-store throwaway",
+	// which is what a caller with no composed world gets.
+	root string
 	// reg is the settings registry the DB was opened against. It is exposed so
 	// the drain-D4 Layer-2 rig can build a real local.Registry over it.
 	reg *settings.Registry

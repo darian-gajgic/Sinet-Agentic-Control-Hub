@@ -121,6 +121,25 @@ func (fixtureMeter) LaneMeter(context.Context, string, string) (api.LaneMeter, e
 // fixtureWorld seeds the deterministic world the committed bodies are taken
 // from. Rows go in through raw SQL with literal timestamps deliberately: the
 // shared seed helpers stamp time.Now(), which no committed byte may depend on.
+// fixtureRoot names one file-backed store's directory under this world's root.
+//
+// THE HAZARD IT CLOSES (P3-UI-7 C-1 drain D1). Each of these stores used its own
+// `t.TempDir()`, which the test binary removes when it exits. That is invisible
+// and harmless while the SAME process both mints and serves — every committed
+// fixture is produced that way — and it is fatal the moment a world is seeded
+// for a DIFFERENT process to serve: the database keeps the rows and the
+// content-addressed bytes are gone, so `compare` and `comments` answer 500 on a
+// deliverable whose metadata reads perfectly. This file's own B6-8 note already
+// warned about exactly this class one process in; the seed took it one process
+// further out.
+func fixtureRoot(t *testing.T, b *backend, name string) string {
+	t.Helper()
+	if b.root == "" {
+		return filepath.Join(t.TempDir(), name)
+	}
+	return filepath.Join(b.root, name)
+}
+
 func fixtureWorld(t *testing.T) *backend {
 	t.Helper()
 	return fixtureWorldOn(t, newBackend(t), t.TempDir())
@@ -136,6 +155,11 @@ func fixtureWorld(t *testing.T) *backend {
 // its behaviour exactly: a fresh backend over `t.TempDir()`.
 func fixtureWorldOn(t *testing.T, b *backend, root string) *backend {
 	t.Helper()
+	// Every file-backed store in this world roots HERE. Under the fixture
+	// writer that is a `t.TempDir()` and nothing changes; under the demo seed it
+	// is the throwaway state directory, so the minted bytes outlive the seeding
+	// process and the binary that opens the database next can serve them.
+	b.root = root
 	// The S09 store is composed ONCE, here, so every fixtureServer over this
 	// backend shares one knowledge root (see backend.mem).
 	store, err := memory.NewStore(b.db, b.log, b.reg, filepath.Join(root, "knowledge"))
@@ -513,7 +537,7 @@ func fixturePushStore(t *testing.T, b *backend) *push.Store {
 	if b.push != nil {
 		return b.push
 	}
-	dir := filepath.Join(t.TempDir(), "push-state")
+	dir := fixtureRoot(t, b, "push-state")
 	fixtureVAPIDKey(t, dir)
 	n := 0
 	st, err := push.New(push.Config{
@@ -907,7 +931,7 @@ func driveFixtureChat(t *testing.T, b *backend) {
 	ctx := context.Background()
 	n := 0
 	store, err := chat.New(chat.Config{
-		DB: b.db, Log: b.log, Root: filepath.Join(t.TempDir(), "exchange"),
+		DB: b.db, Log: b.log, Root: fixtureRoot(t, b, "exchange"),
 		Now: func() time.Time { return mustTime(t, fxT2) },
 		NewID: func(prefix string) string {
 			n++
@@ -1788,7 +1812,7 @@ func fixtureReview(t *testing.T, b *backend) *review.Store {
 	t.Helper()
 	if b.rev == nil {
 		b.rev = &review.Store{
-			DB: b.db, Log: b.log, Settings: b.reg, Root: t.TempDir(),
+			DB: b.db, Log: b.log, Settings: b.reg, Root: fixtureRoot(t, b, "review"),
 			Now: func() time.Time { return mustTime(t, fxT4) },
 		}
 	}
@@ -1811,7 +1835,7 @@ func fixtureReview(t *testing.T, b *backend) *review.Store {
 func fixtureAcceptAndPreview(t *testing.T, b *backend) {
 	t.Helper()
 	rev := fixtureReview(t, b)
-	proj, err := project.New(project.Config{DB: b.db, Log: b.log, Root: filepath.Join(t.TempDir(), "projects")})
+	proj, err := project.New(project.Config{DB: b.db, Log: b.log, Root: fixtureRoot(t, b, "projects")})
 	if err != nil {
 		t.Fatalf("project.New: %v", err)
 	}
@@ -1823,7 +1847,7 @@ func fixtureAcceptAndPreview(t *testing.T, b *backend) {
 		t.Fatalf("accept.New: %v", err)
 	}
 	ports, err := portpool.New(portpool.Config{
-		Dir: filepath.Join(t.TempDir(), "portpool"), Lo: 47900, Hi: 47919,
+		Dir: fixtureRoot(t, b, "portpool"), Lo: 47900, Hi: 47919,
 		Now: func() time.Time { return mustTime(t, fxT4) },
 	})
 	if err != nil {
@@ -1832,7 +1856,7 @@ func fixtureAcceptAndPreview(t *testing.T, b *backend) {
 	prev, err := preview.New(preview.Config{
 		Reviews: rev, Projects: proj, Ports: ports,
 		Caddy: preview.NewCaddyClient("", ""), Events: b.log,
-		Settings: dlvPreviewSettings{cap: 2}, Scratch: filepath.Join(t.TempDir(), "preview-clones"),
+		Settings: dlvPreviewSettings{cap: 2}, Scratch: fixtureRoot(t, b, "preview-clones"),
 		Now: func() time.Time { return mustTime(t, fxT4) },
 	})
 	if err != nil {
@@ -2500,7 +2524,7 @@ func fixtureWorkforce(t *testing.T, b *backend) *worker.Store {
 		ids := fixtureIDs(t, fxWorkerNotes, fxWorkerNotesV1, fxWorkerNotesV2,
 			fxWorkerDigest, fxWorkerDigestV1, fxWorkerAudit, fxWorkerAuditV1)
 		st, err := worker.NewStore(worker.Config{
-			DB: b.db, Log: b.log, Settings: b.reg, Root: filepath.Join(t.TempDir(), "workers"),
+			DB: b.db, Log: b.log, Settings: b.reg, Root: fixtureRoot(t, b, "workers"),
 			Now: func() time.Time { return mustTime(t, fxT4) }, NewID: ids,
 		})
 		if err != nil {

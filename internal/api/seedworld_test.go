@@ -66,8 +66,13 @@ func TestSeedDemoWorld(t *testing.T) {
 			t.Fatalf("%s points at production (%s). Refusing.", seedEnv, abs)
 		}
 	}
-	if os.Getenv("STATE_DIRECTORY") != "" || os.Getenv("NOTIFY_SOCKET") != "" {
-		t.Fatal("STATE_DIRECTORY / NOTIFY_SOCKET are set, which is production posture. Refusing to seed.")
+	// The three the click-through's preflight unsets, so the refusal and the
+	// preflight name the SAME set — an asymmetry here would mean a posture the
+	// script clears but the seed would still accept (drain r1 D5).
+	for _, v := range []string{"STATE_DIRECTORY", "CONFIGURATION_DIRECTORY", "NOTIFY_SOCKET"} {
+		if os.Getenv(v) != "" {
+			t.Fatalf("%s is set, which is production posture. Refusing to seed.", v)
+		}
 	}
 
 	ctx := context.Background()
