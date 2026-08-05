@@ -35,7 +35,7 @@ Spec/  Research/  Docs/   read-only for build sessions
 
 - stdlib `testing` only — assertion/mocking libraries are dependencies and none are adopted.
 - Tests are colocated `_test.go` files; table-driven where natural; test binaries and fixtures never write outside `t.TempDir()`.
-- `go build ./...` and `go test ./...` green is a precondition for every commit — packets never commit red.
+- `go build ./...` and `go test ./...` green is a precondition for every commit — packets never commit red. **Amendment-A carve-out (2026-08-05, first exercised P3-RW-1):** the tests-first pipeline (SKILL.md amendments A/E) deliberately commits the brief's acceptance tests FAILING — by the grounding agent and/or the executor's red-tests commit — before the implementation commit restores green. Sanction scope: the packet's own paths only, `go build ./...` stays green (inert type surface to make red tests compile is fine, behavior is not), the red window is declared in the commit message, and the packet's implementation commit closes it. Everything else still never commits red.
 - The real `components.lock` and workflow files are validated inside the test suite (`internal/lockfile`) as well as by the standalone gate, so plain `go test ./...` trips on manifest breakage.
 - Bring-up measurements (S19.6) are not Go tests: they are coordinator/operator-run probes recording to `P3/measurements/`.
 
