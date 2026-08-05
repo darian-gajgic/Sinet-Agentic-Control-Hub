@@ -123,10 +123,22 @@ func (fixtureMeter) LaneMeter(context.Context, string, string) (api.LaneMeter, e
 // shared seed helpers stamp time.Now(), which no committed byte may depend on.
 func fixtureWorld(t *testing.T) *backend {
 	t.Helper()
-	b := newBackend(t)
+	return fixtureWorldOn(t, newBackend(t), t.TempDir())
+}
+
+// fixtureWorldOn seeds THIS world onto a caller-supplied backend and knowledge
+// root.
+//
+// The split exists so the committed golden fixtures and the dev-only demo seed
+// (seedworld_test.go) drive ONE world rather than two copies that can drift —
+// the §40-C twin-maintained-copy hazard, which this file's own header names as
+// the reason the fixtures exist at all. `fixtureWorld` keeps its signature and
+// its behaviour exactly: a fresh backend over `t.TempDir()`.
+func fixtureWorldOn(t *testing.T, b *backend, root string) *backend {
+	t.Helper()
 	// The S09 store is composed ONCE, here, so every fixtureServer over this
 	// backend shares one knowledge root (see backend.mem).
-	store, err := memory.NewStore(b.db, b.log, b.reg, filepath.Join(t.TempDir(), "knowledge"))
+	store, err := memory.NewStore(b.db, b.log, b.reg, filepath.Join(root, "knowledge"))
 	if err != nil {
 		t.Fatalf("memory.NewStore: %v", err)
 	}

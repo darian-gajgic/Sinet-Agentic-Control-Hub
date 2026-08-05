@@ -88,6 +88,34 @@ fi
 ok "binary built at $BIN"
 note "the installed production binary /usr/local/bin/sinet is untouched"
 
+# ── 2b. Seed the demo world (dev-only, throwaway only) ──────────────────────
+#
+# The click-through used to run against an EMPTY database, so the surfaces that
+# need rows to exist at all — the task detail, and the whole review surface with
+# its diff, its anchored comments and its try-it frames — were never walkable.
+# This drives the SAME producers the committed golden fixtures come from into
+# THIS throwaway state directory.
+#
+# It cannot touch production: the seed refuses any path under /var/lib/sinet or
+# /etc/sinet and refuses to run at all when STATE_DIRECTORY or NOTIFY_SOCKET is
+# set, and the preflight above has already cleared both. It cannot reach the
+# shipped binary either: it lives in a _test.go file, which `go build ./cmd/sinet`
+# never compiles.
+bold "Seeding the demo world"
+
+if [[ -f "$STATE/.seeded" ]]; then
+  ok "already seeded — re-run with --clean first to build it fresh"
+else
+  if SINET_SEED_DEMO_WORLD="$STATE" go test ./internal/api -run TestSeedDemoWorld -count=1 -v \
+       >"$STATE/seed.log" 2>&1; then
+    touch "$STATE/.seeded"
+    ok "demo world seeded — every surface below has rows to show"
+    sed -n 's/^ *seedworld_test\.go:[0-9]*: /    /p' "$STATE/seed.log"
+  else
+    bad "the demo seed failed"; note "see $STATE/seed.log"; die "seeding failed"
+  fi
+fi
+
 # ── 3. Start the throwaway control plane ────────────────────────────────────
 bold "Starting a throwaway control plane"
 
@@ -153,22 +181,34 @@ cat <<EOF
 
 $(bold "OPEN THIS: $URL")
 
-This database is brand new, so most surfaces will be honestly EMPTY. That is
-the thing to look at: an empty surface should tell you it is empty and why —
-never a blank panel, never a fabricated zero, never a spinner that never ends.
+This database is SEEDED with a demo world, so every surface below has rows to
+show — including the task detail and the review surface, which an empty database
+has kept unreachable until now. Where something is still absent it should tell
+you WHY: never a blank panel, never a fabricated zero, never an endless spinner.
+
+You are browsing under the dev fallback, which needs no PIN. To exercise the
+real login, use "Sign in" in the header — the people are printed above, and
+they all share the same demo PIN.
+
+Two things are honestly DIFFERENT from the committed fixtures, and neither is a
+defect: the meters and the price table render the REAL stores' answers here
+(the fixture world's doubles cannot reach a throwaway binary), and the tour and
+first-use hints are part of the app rather than the seed — "Show me around" in
+the header starts the tour, and hints re-appear on a full reload.
 
 Walk these eleven, in this order. Every one is a real route.
 
    1.  /              Mission control — running / queued / parked, meters
    2.  /board         The live board — stage columns, card faces
-   3.  /tasks/:id     (from the board, if any card exists)
+   3.  /tasks/:id     (from the board — cards exist now)
    4.  /fleet         Per-person and per-model meters, budget remainders
    5.  /inbox         The approval inbox — ranked, with tier mechanics
    6.  /settings      Every setting, generated from the registry, with
                       clamp bounds, restart badges and audit history
    7.  /settings      -> the "This device" panel — push enrolment
    8.  /chat          The assistant
-   9.  /deliverables/:id  (from a task, if any exists) — diff, comments, try-it
+   9.  /deliverables/:id  (from a task) — diff (split by default, unified
+                      toggle), anchored comments, try-it frames, accept
   10.  /workforce     The workforce map — empty on a fresh host is CORRECT
                       ("no standing army": machinery is composed when earned)
   11.  Resize to a phone width and re-walk 1, 5, 6 — phone-complete is a
