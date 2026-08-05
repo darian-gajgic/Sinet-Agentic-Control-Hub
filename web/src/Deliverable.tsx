@@ -497,9 +497,9 @@ function RevisionPicker({
  *  the surface rather than being folded into it. */
 function SurfaceLabel({ cmp }: { cmp: Comparison }) {
   if (cmp.label === undefined || cmp.label === '') return null
-  // The two shared blocks `.warn-flag` and `.notice` KEEP their rules — nine and
-  // ten consumers across the tree, most of them on byte-frozen surfaces — so the
-  // hue stays theirs and this adds only rhythm.
+  // The two shared blocks `.warn-flag` and `.notice` KEEP their rules — their
+  // consumers span the tree, most on byte-frozen surfaces (the §53 stay-notes
+  // carry the measured lists) — so the hue stays theirs and this adds only rhythm.
   return (
     <p className={cn(cmp.fallback === true ? 'warn-flag' : 'notice', 'my-2 text-sm')} data-surface-label={cmp.surface}>
       {cmp.fallback === true ? 'Fallback surface: ' : ''}
