@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  BookMarked,
+  BookOpen,
   Columns3,
+  Database,
+  FolderOpen,
+  HeartPulse,
+  History as HistoryIcon,
   Inbox as InboxIcon,
   LayoutDashboard,
+  Menu,
   MessagesSquare,
+  PackageCheck,
   Server,
   SlidersHorizontal,
+  Sparkles,
+  Trophy,
   Users,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -20,11 +29,14 @@ import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
 import { Inbox, InboxItem } from './Inbox'
+import { inboxEventTypes, useLive } from './live'
 import { Memory, MemoryEntryView } from './Memory'
 import { Settings } from './Settings'
 import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
-import { NotFound, Stub } from './Stub'
+import { NotFound } from './Stub'
+import { ComingSurface, HistorySurface } from './Placeholders'
+import { ProjectScopeContext, scopedRoutes, useProjectScope } from './project'
 import { Link, navigate, useRoute } from './router'
 import { ToastProvider } from './ui'
 import { TurnToasts, useEtiquette } from './etiquette'
@@ -33,85 +45,118 @@ import { hrefFor, routes, type RouteDef, type RouteID } from './routes'
 import { Workforce } from './Workforce'
 
 /**
- * Sidebar grouping is PRESENTATION and lives here, not in the route table:
- * `routes.ts` owns ids, patterns, titles and nav flags, and this packet leaves
- * every one of them byte-unchanged.
+ * The app shell, reworked to the ratified art direction (2026-08-05): the Nexus
+ * violet-glass control room — grouped sidebar over a blurred near-black band,
+ * topbar with the page's own title and the global project selector, connection
+ * state always visible — recreated from the real Nexus source
+ * (~/Nexus-Agentic-Coding-Setup/app/static/) on this stack.
  *
- * Sections are the CONSECUTIVE RUNS of this label over the table's own nav
- * order, which is what makes grouping incapable of reordering or dropping a
- * link: every navigable route is walked exactly once, in table order, and one
- * with no label here still renders — in its own unlabelled run.
+ * Sidebar grouping is PRESENTATION and lives here, not in the route table:
+ * `routes.ts` owns ids, patterns, titles and nav flags. Sections are the
+ * CONSECUTIVE RUNS of this label over the table's own nav order, which is what
+ * makes grouping incapable of reordering or dropping a link: every navigable
+ * route is walked exactly once, in table order, and one with no label here
+ * still renders — in its own unlabelled run.
+ *
+ * The groups are the product map §2's: Work · Results · Intelligence · System.
  */
 const navGroupOf: Partial<Record<RouteID, string>> = {
-  'mission-control': 'Command',
-  board: 'Command',
-  fleet: 'Command',
-  inbox: 'Decisions',
-  settings: 'System',
+  'mission-control': 'Work',
+  projects: 'Work',
+  new: 'Work',
+  board: 'Work',
+  inbox: 'Work',
+  reviews: 'Results',
+  lessons: 'Results',
   chat: 'Intelligence',
-  workforce: 'Intelligence',
+  history: 'Intelligence',
   memory: 'Intelligence',
+  workforce: 'System',
+  fleet: 'System',
+  health: 'System',
+  settings: 'System',
+  manual: 'System',
 }
 
 const navIcons: Partial<Record<RouteID, LucideIcon>> = {
   'mission-control': LayoutDashboard,
+  projects: FolderOpen,
+  new: Sparkles,
   board: Columns3,
-  fleet: Server,
   inbox: InboxIcon,
-  settings: SlidersHorizontal,
+  reviews: PackageCheck,
+  lessons: Trophy,
   chat: MessagesSquare,
+  history: HistoryIcon,
+  memory: Database,
   workforce: Users,
-  memory: BookMarked,
+  fleet: Server,
+  health: HeartPulse,
+  settings: SlidersHorizontal,
+  manual: BookOpen,
+}
+
+/** The topbar's one-line answer to "what is this page for" (the Nexus page-sub,
+ *  carried). Routes without one render the title alone. */
+const pageSub: Partial<Record<RouteID, string>> = {
+  'mission-control': 'The household’s work at a glance',
+  projects: 'Work lives in projects',
+  new: 'Describe a goal in plain words',
+  board: 'Every task by stage',
+  task: 'One task, end to end',
+  inbox: 'Everything that needs a person',
+  'inbox-item': 'One decision',
+  reviews: 'Judge the work that came back',
+  deliverable: 'One deliverable under review',
+  lessons: 'What worked, and what taught a lesson',
+  chat: 'Ask about anything, hand over work',
+  history: 'The platform’s own record, queryable',
+  memory: 'What the platform knows, scoped and sourced',
+  'memory-entry': 'One knowledge entry',
+  workforce: 'The workforce map — who does what, measured',
+  fleet: 'Who burns what, on whose account',
+  health: 'Known issues first, honestly',
+  settings: 'Every setting, with bounds and history',
+  manual: 'How to use each surface, in plain words',
+  login: 'Tailnet first, PIN second',
 }
 
 /**
- * The app shell: one responsive workspace (Spec S1.10 via S15.12), the stable
- * URLs every deep link and push `navigate` field will target (S15.11), the
- * S01.9 session, and the always-visible connection state (S15.12).
- *
- * EVERY ROUTE IN THE TABLE IS BUILT. The workforce map was the last stub and it
- * landed with B6-8 part B, so no URL this SPA publishes answers with a
- * not-built-yet page. `Stub` stays as the terminal arm below because a later
- * packet publishes its route BEFORE it builds the surface — the URL contract is
- * what deep links and push payloads are written against, so it moves first — and
- * a route in that state has to say so rather than render blank. A stub reads
- * nothing from the API: honest absence, never a mocked screen that looks real.
+ * EVERY ROUTE IN THE TABLE IS BUILT — the seven rework placeholders included,
+ * each an honest surface that says what will appear there. `Stub` retired from
+ * the switch because nothing routes to it; NotFound remains the terminal arm.
  */
 export default function App({ stream }: { stream?: EventStream } = {}) {
   const { route, params } = useRoute()
   const { session, reload, failure } = useSession()
   const authed = session?.authenticated === true
   const status = useConnection(authed, stream)
-  // CENSUS HUNK (b) — background-run etiquette (P3-UI-7 R15). It joins the
-  // stream `useConnection` already opened; it opens nothing, adds no topic and
-  // reads nothing. The dot is cleared by arriving on the route.
   const { dots, requests, drain } = useEtiquette(route.id, authed, stream)
-  // CENSUS HUNK (c) — the guided tour (P3-UI-7 R13). It NEVER auto-starts:
-  // nothing in this client persists, so a self-starting tour would ambush every
-  // load. `TourButton` below is the only thing that can start it.
+  // The guided tour (P3-UI-7 R13). It NEVER auto-starts: nothing in this client
+  // persists, so a self-starting tour would ambush every load. The header's
+  // TourButton and the Manual page's launcher are the only things that start it.
   const tour = useTour(authed)
+
+  // The global project scope (map §2): tab-lifetime state, no storage (§41-B).
+  const [project, setProject] = useState('')
+
+  // The phone nav drawer (the Nexus mobile pass, min-width-first). Route
+  // changes close it, so a nav tap never leaves the drawer over the new page.
+  const [navOpen, setNavOpen] = useState(false)
+  useEffect(() => {
+    setNavOpen(false)
+  }, [route.id, params.id])
 
   // Fail closed, both directions: no session outside /login, and no /login
   // once there is one. `next` survives the round trip so a deep link that
   // arrived signed-out still lands where it was going.
   //
-  // THE DEV-FALLBACK CARVE-OUT (B6 gate §9 finding C-1, fixed at P3-UI-4).
-  //
-  // `SessionAuthenticator` resolves EVERY session-less request in dev posture to
-  // the fixed dev identity (internal/api/identity.go:83–97), so `authed` is
-  // permanently true there. The bounce below therefore made /login unreachable
-  // in dev and `api.logout()` a no-op — the re-read simply resolved to the dev
-  // identity again — defeating the identity layer's own stated intent one layer
-  // up ("sessions still win when present, so the full login flow is exercisable
-  // in dev", identity.go:74–76).
-  //
-  // `session.dev === true` is the wire's own marker for that fallback and for
-  // nothing else: the served shape is `{authenticated:true, dev:true}` with NO
-  // `user` object, where a real session serves `{authenticated:true, user:{…}}`
-  // with `dev` omitted (internal/api/auth_handlers.go:91–116). Real cookies
-  // always win, so a dev-posture person who signs in stops matching this arm
-  // immediately. PRODUCTION IS BYTE-EQUIVALENT: without the fallback `dev` is
-  // never true, so both arms behave exactly as before.
+  // THE DEV-FALLBACK CARVE-OUT (B6 gate §9 finding C-1, fixed at P3-UI-4):
+  // `session.dev === true` is the wire's own marker for the dev identity —
+  // served as `{authenticated:true, dev:true}` with NO `user` object — and a
+  // real cookie always wins, so a dev-posture person who signs in stops
+  // matching this arm immediately. Production is byte-equivalent: without the
+  // fallback `dev` is never true.
   const devFallback = authed && session?.dev === true
   useEffect(() => {
     if (session === null) return
@@ -127,190 +172,411 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
   }, [authed, route.id, session])
 
   return (
-    // CENSUS HUNK (a) — `ToastProvider`'s ONE production mount (P3-UI-7 R16;
-    // named as UI-7's by both §48's and §51's seam lists). It wraps the whole
-    // shell tree, so every test that mounts <App> inherits it and no surface
-    // has to provide its own. `ui/Toast.tsx` is byte-frozen: the cap of four
-    // and the `data-limited` overflow are the kit's, asserted at this mount.
     <ToastProvider>
-      <div className="shell">
-        <div className="aurora" aria-hidden="true" />
-        {/* The toast sink lives inside the provider because `useToast` reads
-            its manager. It subscribes to nothing — see `useEtiquette`. */}
-        <TurnToasts requests={requests} drain={drain} />
+      <ProjectScopeContext.Provider value={{ project, setProject }}>
+        <div className="shell">
+          <div className="aurora" aria-hidden="true" />
+          <TurnToasts requests={requests} drain={drain} />
 
-      <aside className="shell-side">
-        <Link to={hrefFor('mission-control')} className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          Sinet
-        </Link>
+          {/* The scrim renders only while the drawer is open, under the sidebar
+              and over the page: one tap anywhere outside the nav closes it. */}
+          {navOpen && (
+            <div
+              className="shell-scrim"
+              data-scrim
+              aria-hidden="true"
+              onClick={() => {
+                setNavOpen(false)
+              }}
+            />
+          )}
 
-        {authed && (
-          <nav className="shell-nav" aria-label="Surfaces">
-            {navSections().map((section) => (
-              <div className="nav-group" key={section.label || section.items[0].id}>
-                {section.label !== '' && <span className="nav-group-label">{section.label}</span>}
-                {section.items.map((r) => {
-                  const Icon = navIcons[r.id]
-                  return (
-                    <Link
-                      key={r.id}
-                      to={r.pattern}
-                      aria-current={r.id === route.id ? 'page' : undefined}
-                      // The dot says "something arrived here while you were
-                      // elsewhere" and NOTHING about how much: no count can be
-                      // derived from frames without risking disagreement with
-                      // the queue the person then opens (§42).
-                      data-dot={dots[r.id] === true ? 'true' : undefined}
-                    >
-                      {Icon && <Icon className="nav-icon" size={16} strokeWidth={1.7} aria-hidden="true" />}
-                      {r.title}
-                      {dots[r.id] === true && (
-                        <span
-                          className="ms-auto size-1.5 shrink-0 rounded-full bg-(--accent) motion-safe:animate-[dot-pulse_2s_ease-in-out_infinite]"
-                          aria-label="new since you were last here"
-                        />
-                      )}
-                    </Link>
-                  )
-                })}
+
+          <div className="shell-body">
+            <header className="shell-head">
+              <button
+                type="button"
+                className="menu-btn"
+                aria-label="Open navigation"
+                onClick={() => {
+                  setNavOpen(true)
+                }}
+              >
+                <Menu size={17} strokeWidth={2} aria-hidden="true" />
+              </button>
+              <div className="page-title">
+                <h1>{route.title}</h1>
+                {pageSub[route.id] !== undefined && <span className="page-sub">{pageSub[route.id]}</span>}
               </div>
-            ))}
-          </nav>
-        )}
-      </aside>
+              <div className="head-right">
+                {authed && <ProjectSelector route={route.id} stream={stream} />}
+                {authed && <TourButton onStart={tour.start} />}
+                <ConnectionState status={status} />
+                {authed && (
+                  <span className="who">
+                    {devFallback ? (
+                      <Link to={hrefFor('login')} data-auth="sign-in">
+                        Sign in
+                      </Link>
+                    ) : (
+                      <>
+                        <span className="who-avatar" aria-hidden="true">
+                          {(session?.user?.display_name ?? '?').slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="who-name">{session?.user?.display_name ?? ''}</span>
+                        <button
+                          type="button"
+                          data-auth="sign-out"
+                          onClick={() => {
+                            void api.logout().then(reload, reload)
+                          }}
+                        >
+                          Sign out
+                        </button>
+                      </>
+                    )}
+                    {devFallback && <span className="who-name muted">dev</span>}
+                  </span>
+                )}
+              </div>
+            </header>
 
-      <div className="shell-body">
-        <header className="shell-head">
-          <ConnectionState status={status} />
-          {authed && <TourButton onStart={tour.start} />}
-          {authed && (
-            <span className="who">
-              {session?.user?.display_name ?? (session?.dev === true ? 'dev' : '')}
-              {/* The affordance is whichever one can actually WORK, and the two
-                  server states are the only two rendered (C-1). Under the dev
-                  fallback there is no session to revoke, so a Sign out would
-                  clear nothing and leave the same identity resolved on the
-                  re-read — a control that cannot honour its own label. What is
-                  true there is that nobody is signed in yet, so the offer is the
-                  one act that changes it, pointing at the picker the carve-out
-                  above now lets render. This is not a synthesized "signed out"
-                  state: the dev fallback is the ABSENCE of a person, with
-                  browsing rights the server grants and this client never
-                  second-guesses. */}
-              {devFallback ? (
-                <Link to={hrefFor('login')} data-auth="sign-in">
-                  Sign in
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  data-auth="sign-out"
-                  onClick={() => {
-                    void api.logout().then(reload, reload)
-                  }}
-                >
-                  Sign out
-                </button>
-              )}
-            </span>
+            <main className="shell-main">
+              <div className="view-in" key={`${route.id}:${params.id ?? ''}`}>
+                {session === null ? (
+                  <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
+                ) : route.id === 'login' ? (
+                  <Login session={session} onSignedIn={reload} />
+                ) : route.id === 'not-found' ? (
+                  <NotFound pathname={window.location.pathname} />
+                ) : route.id === 'mission-control' ? (
+                  <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
+                ) : route.id === 'board' ? (
+                  <Board me={session.user?.user_id ?? ''} stream={stream} />
+                ) : route.id === 'fleet' ? (
+                  <Fleet
+                    me={session.user?.user_id ?? ''}
+                    operator={session.dev === true || session.user?.role === 'operator'}
+                    stream={stream}
+                  />
+                ) : route.id === 'task' ? (
+                  <TaskDetail id={params.id} stream={stream} />
+                ) : route.id === 'inbox' ? (
+                  <Inbox stream={stream} />
+                ) : route.id === 'inbox-item' ? (
+                  <InboxItem id={params.id} stream={stream} />
+                ) : route.id === 'settings' ? (
+                  <Settings stream={stream} />
+                ) : route.id === 'chat' ? (
+                  <Chat stream={stream} search={window.location.search} />
+                ) : route.id === 'deliverable' ? (
+                  <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
+                ) : route.id === 'workforce' ? (
+                  <Workforce stream={stream} />
+                ) : route.id === 'memory' ? (
+                  <Memory
+                    me={session.user?.user_id ?? ''}
+                    operator={session.user?.role === 'operator'}
+                    stream={stream}
+                  />
+                ) : route.id === 'memory-entry' ? (
+                  <MemoryEntryView
+                    id={params.id}
+                    me={session.user?.user_id ?? ''}
+                    operator={session.user?.role === 'operator'}
+                    stream={stream}
+                  />
+                ) : route.id === 'history' ? (
+                  <HistorySurface />
+                ) : route.id === 'manual' ? (
+                  <ComingSurface id="manual" onStartTour={tour.start} />
+                ) : (
+                  // projects · new · reviews · lessons · health — the map's
+                  // published-ahead placeholders, each an honest surface.
+                  <ComingSurface id={route.id} />
+                )}
+              </div>
+            </main>
+          </div>
+
+          <aside className="shell-side" data-open={navOpen ? 'true' : undefined}>
+            <div className="brand-row">
+              <Link to={hrefFor('mission-control')} className="brand">
+                <span className="brand-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <polygon points="12 2.5 21 7.5 21 16.5 12 21.5 3 16.5 3 7.5" />
+                    <polygon points="12 7 16.5 9.5 16.5 14.5 12 17 7.5 14.5 7.5 9.5" />
+                    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <span className="brand-txt">
+                  <span className="brand-name">Sinet</span>
+                  <span className="brand-sub">Agentic Control Hub</span>
+                </span>
+              </Link>
+              <button
+                type="button"
+                className="menu-btn nav-close"
+                aria-label="Close navigation"
+                onClick={() => {
+                  setNavOpen(false)
+                }}
+              >
+                <X size={16} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+
+            {authed && <SideNav route={route} dots={dots} stream={stream} status={status} />}
+            <SideFooter authed={authed} />
+          </aside>
+
+          {tour.running && tour.step !== null && (
+            <TourOverlay
+              step={tour.step}
+              index={tourSteps.indexOf(tour.step)}
+              total={tourSteps.length}
+              onNext={tour.next}
+              onStop={tour.stop}
+            />
           )}
-        </header>
-
-        <main className="shell-main">
-          {session === null ? (
-            <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
-          ) : route.id === 'login' ? (
-            <Login session={session} onSignedIn={reload} />
-          ) : route.id === 'not-found' ? (
-            <NotFound pathname={window.location.pathname} />
-          ) : route.id === 'mission-control' ? (
-            // The personal filters are `/?view=…` on this surface: stable,
-            // bookmarkable URLs that fill the route table rather than renaming it.
-            <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
-          ) : route.id === 'board' ? (
-            // The caller's own identity decides what is drag-reorderable, and the
-            // server refuses the rest: the operator is not excepted from "your
-            // own queued work" (S15.5).
-            <Board me={session.user?.user_id ?? ''} stream={stream} />
-          ) : route.id === 'fleet' ? (
-            // The caller's own identity decides which pause switches and budget
-            // editors render. The operator limb is DEV-INCLUSIVE because it
-            // mirrors the server's own `isOperatorRead` — the predicate the read
-            // on the other side of those verbs used — which is deliberately not
-            // the users-row-role-only flag the memory surface takes below.
-            <Fleet
-              me={session.user?.user_id ?? ''}
-              operator={session.dev === true || session.user?.role === 'operator'}
-              stream={stream}
-            />
-          ) : route.id === 'task' ? (
-            <TaskDetail id={params.id} stream={stream} />
-          ) : route.id === 'inbox' ? (
-            <Inbox stream={stream} />
-          ) : route.id === 'inbox-item' ? (
-            // The id arrives DECODED from the route table, which matters: real
-            // card ids carry ':', '#' and a unit separator, so the round trip
-            // through hrefFor/matchRoute is the only thing that keeps a deep
-            // link pointing at the card it names (S15.11).
-            <InboxItem id={params.id} stream={stream} />
-          ) : route.id === 'settings' ? (
-            <Settings stream={stream} />
-          ) : route.id === 'chat' ? (
-            // The open conversation is `/chat?session=…` — a stable, bookmarkable,
-            // push-`navigate`-able URL that fills the route table rather than
-            // adding to it, exactly as the personal filters do on mission control.
-            <Chat stream={stream} search={window.location.search} />
-          ) : route.id === 'deliverable' ? (
-            // The caller's own identity decides whether the ACCEPT FORM renders:
-            // an accept is the owner's own outward act under their own credentials,
-            // so a non-owner (the operator included) reads the card and cannot act
-            // on it. That is presentation over a served body — the server refuses
-            // the verb regardless (S15.2).
-            <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
-          ) : route.id === 'workforce' ? (
-            // View-only by construction (S15.10 parks editing to 15.5): the map
-            // takes no identity prop because it offers no act. What each caller
-            // may SEE is decided server-side and the read says out loud which
-            // reading it returned.
-            <Workforce stream={stream} />
-          ) : route.id === 'memory' ? (
-            // The caller's own identity decides which of the four gate verbs
-            // render, and the doors DIFFER: a correction and a retirement are
-            // owner-or-operator, a true deletion is strictly the owner's, and a
-            // house entry is the operator's to write. The role bit here is the
-            // users-row one, because that is what the S09 gate resolves the
-            // actor against — it opens nothing of another person's user-scope
-            // store, which is a content line and not the §30 telemetry one.
-            <Memory
-              me={session.user?.user_id ?? ''}
-              operator={session.user?.role === 'operator'}
-              stream={stream}
-            />
-          ) : route.id === 'memory-entry' ? (
-            <MemoryEntryView
-              id={params.id}
-              me={session.user?.user_id ?? ''}
-              operator={session.user?.role === 'operator'}
-              stream={stream}
-            />
-          ) : (
-            <Stub route={route} params={params} />
-          )}
-        </main>
-      </div>
-
-        {tour.running && tour.step !== null && (
-          <TourOverlay
-            step={tour.step}
-            index={tourSteps.indexOf(tour.step)}
-            total={tourSteps.length}
-            onNext={tour.next}
-            onStop={tour.stop}
-          />
-        )}
-      </div>
+        </div>
+      </ProjectScopeContext.Provider>
     </ToastProvider>
+  )
+}
+
+/**
+ * The grouped nav with its two honest badges.
+ *
+ * BADGES ARE SERVED COUNTS, NEVER FRAME ARITHMETIC: both ride `useLive`, so a
+ * frame triggers a RE-READ of the queue and the count is always the length of
+ * the list the person will find when they open the surface. A read that has
+ * not landed renders NO badge — never a fabricated zero.
+ *
+ *  - Inbox: every open card in the caller's own served queue.
+ *  - Health & evals: the oversight subset of the same queue (watchdog flags,
+ *    drift, conformance, alarms) plus runs the platform has wedged — the
+ *    "known issues" the map's Health surface will list.
+ */
+const overseeKinds = ['watchdog_flag', 'drift_card', 'conformance_card', 'benchmark_alarm']
+
+function SideNav({
+  route,
+  dots,
+  stream,
+  status,
+}: {
+  route: RouteDef
+  dots: Partial<Record<string, boolean>>
+  stream?: EventStream
+  status: Status
+}) {
+  const asks = useLive({
+    key: '/api/approvals#nav',
+    read: () => api.approvals(),
+    types: inboxEventTypes,
+    stream,
+  })
+
+  const badges: Partial<Record<RouteID, number>> = {}
+  if (asks.data !== null) {
+    badges.inbox = asks.data.items.length
+    // The oversight subset of the same served queue. Wedged runs join this
+    // count when the Health surface itself lands (build step 6) — counting
+    // them here would cost the shell a second global read for a number no
+    // placeholder page can drill into yet.
+    badges.health = asks.data.items.filter((i) => overseeKinds.includes(i.kind)).length
+  }
+
+  return (
+    <nav className="shell-nav" aria-label="Surfaces">
+      {navSections().map((section) => (
+        <div className="nav-group" key={section.label || section.items[0].id}>
+          {section.label !== '' && <span className="nav-group-label">{section.label}</span>}
+          {section.items.map((r) => {
+            const Icon = navIcons[r.id]
+            const badge = badges[r.id]
+            return (
+              <Link
+                key={r.id}
+                to={r.pattern}
+                aria-current={r.id === route.id ? 'page' : undefined}
+                data-pinned={r.id === 'chat' ? 'true' : undefined}
+                // The dot says "something arrived here while you were
+                // elsewhere" and NOTHING about how much (§42).
+                data-dot={dots[r.id] === true ? 'true' : undefined}
+              >
+                {Icon && <Icon className="nav-icon" size={18} strokeWidth={1.7} aria-hidden="true" />}
+                <span className="nav-label">{r.title}</span>
+                {r.id === 'chat' && (
+                  // The assistant's live mark is the STREAM's state, not a
+                  // decoration: it pulses only while the feed is genuinely live.
+                  <span
+                    className={
+                      status === 'live'
+                        ? 'ms-auto text-[9px] text-(--accent-2) motion-safe:animate-[dot-pulse_2s_ease-in-out_infinite]'
+                        : 'ms-auto text-[9px] text-(--text-faint)'
+                    }
+                    aria-hidden="true"
+                  >
+                    ◉
+                  </span>
+                )}
+                {badge !== undefined && badge > 0 && (
+                  <span className="nav-badge" aria-label={`${String(badge)} waiting`}>
+                    {badge}
+                  </span>
+                )}
+                {dots[r.id] === true && (badge === undefined || badge === 0) && r.id !== 'chat' && (
+                  <span
+                    className="ms-auto size-1.5 shrink-0 rounded-full bg-(--accent) motion-safe:animate-[dot-pulse_2s_ease-in-out_infinite]"
+                    aria-label="new since you were last here"
+                  />
+                )}
+              </Link>
+            )
+          })}
+        </div>
+      ))}
+    </nav>
+  )
+}
+
+/**
+ * The sidebar footer: the Nexus CPU · MEM · GPU · GPU-MEM micro-meters as
+ * HONEST placeholders — the host-monitoring wiring is operator-deferred (map
+ * §6), so the tracks render empty with no value, never a fabricated zero — and
+ * the version line, read once from the platform's own health answer.
+ */
+function SideFooter({ authed }: { authed: boolean }) {
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    // One read at mount; the version changes only on deploy. Pre-session route:
+    // it answers signed-out too, and a failure leaves the line at its name.
+    api.health().then(
+      (h) => {
+        setVersion(typeof h.version === 'string' ? h.version : '')
+      },
+      () => {
+        setVersion('')
+      },
+    )
+  }, [])
+
+  return (
+    <div className="side-foot">
+      {authed && (
+        <div className="sys-mini" title="Host meters are not wired yet — the monitoring seam is operator-deferred.">
+          {['CPU', 'MEM', 'GPU', 'GPU MEM'].map((m) => (
+            <div className="mini-row" key={m}>
+              <span>{m}</span>
+              <span className="mini-bar" aria-hidden="true" />
+              <b>—</b>
+            </div>
+          ))}
+          <p className="mini-note">host meters — not wired yet</p>
+        </div>
+      )}
+      <p className="side-version">SINET{version !== '' ? ` ${version}` : ''}</p>
+    </div>
+  )
+}
+
+/**
+ * The global project selector (map §2) — the Nexus focus-context chips carried
+ * onto the real contract. The choice list is DERIVED FROM SERVED ROWS: every
+ * distinct project on the caller's own tasks read, "(no project)" included,
+ * because it is a real served bucket. Scoping is presentation over
+ * already-owner-scoped reads; surfaces without a project dimension say so here
+ * instead of pretending.
+ */
+function ProjectSelector({ route, stream }: { route: RouteID; stream?: EventStream }) {
+  const { project, setProject } = useProjectScope()
+  // JOIN, NEVER OPEN (§45): the topbar sits above <main> in the tree, so its
+  // effects would commit before the route view's and this read would become
+  // the stream's opener — putting every view into joiner debt (two reads per
+  // mount). One deferred commit keeps the view the opener; the selector pays
+  // its own join re-snapshot instead, which is the cheap side of that trade.
+  const [joined, setJoined] = useState(false)
+  useEffect(() => {
+    setJoined(true)
+  }, [])
+
+  const applied = scopedRoutes.has(route)
+
+  return (
+    <span className="scope" data-scoped={project !== '' ? 'true' : undefined}>
+      <FolderOpen className="scope-ico" size={14} strokeWidth={1.8} aria-hidden="true" />
+      <label className="scope-label">
+        <span className="sr-only">Project scope</span>
+        <select
+          className="scope-select"
+          value={project}
+          onChange={(e) => {
+            setProject(e.target.value)
+          }}
+        >
+          <option value="">All projects</option>
+          {joined ? (
+            <ScopeOptions project={project} stream={stream} />
+          ) : (
+            project !== '' && <option value={project}>{project}</option>
+          )}
+        </select>
+      </label>
+      {project !== '' && (
+        <button
+          type="button"
+          className="scope-clear"
+          title="Clear the project scope"
+          aria-label="Clear the project scope"
+          onClick={() => {
+            setProject('')
+          }}
+        >
+          ✕
+        </button>
+      )}
+      {project !== '' && !applied && (
+        <span className="scope-note" title="This page has no project dimension, so the scope does not narrow it.">
+          not applied here
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The choice list, DERIVED FROM SERVED ROWS: every distinct project on the
+ * caller's own tasks read, "(no project)" included because it is a real served
+ * bucket. Its own component so the subscription can join one commit after the
+ * route view opened the stream (see ProjectSelector). The list moves when a
+ * task is born — the intake family's frame — not on every run heartbeat.
+ */
+function ScopeOptions({ project, stream }: { project: string; stream?: EventStream }) {
+  const tasks = useLive({
+    key: '/api/tasks#projects',
+    read: () => api.tasks(),
+    types: ['intake.state'],
+    stream,
+  })
+
+  const names = [...new Set((tasks.data?.tasks ?? []).map((t) => t.project))].sort((a, b) =>
+    // "(no project)" sinks to the end; the rest alphabetical.
+    a === '(no project)' ? 1 : b === '(no project)' ? -1 : a.localeCompare(b),
+  )
+  // A selected project stays selectable even if its tasks left the read —
+  // clearing somebody's scope for them would be the selector deciding.
+  const options = project !== '' && !names.includes(project) ? [...names, project] : names
+
+  return (
+    <>
+      {options.map((p) => (
+        <option key={p} value={p}>
+          {p}
+        </option>
+      ))}
+    </>
   )
 }
 
@@ -348,9 +614,6 @@ function useSession() {
         setSession(s)
       },
       (err: unknown) => {
-        // The session route is pre-session, so a 401 here is not a thing; a
-        // failure means the control plane is unreachable or broken, and the
-        // shell says which rather than showing a login form that cannot work.
         setFailure(
           err instanceof Unreachable
             ? 'The control plane is unreachable — the host may be asleep or the tailnet down.'
@@ -369,8 +632,7 @@ function useSession() {
 /**
  * useConnection owns the tab's ONE stream. The shell subscribes with no topics
  * and no event types: it consumes no data, it only reports whether the feed is
- * live — so the indicator is honest on every route, including the stubs that
- * render nothing.
+ * live — so the indicator is honest on every route.
  */
 function useConnection(authed: boolean, injected?: EventStream): Status {
   const [status, setStatus] = useState<Status>('logged-out')
@@ -387,8 +649,6 @@ function useConnection(authed: boolean, injected?: EventStream): Status {
     const unsubscribe = stream.subscribe({
       onResnapshot: (_reason, done) => {
         // The shell holds no state to re-load, so it is immediately caught up.
-        // A view with state answers this by re-reading its REST snapshot and
-        // calling done() when that read lands — clearing its own debt only.
         done()
       },
     })

@@ -6,19 +6,30 @@ import { hrefFor, matchRoute, routes } from './routes'
 // push `navigate` field will carry, so they are pinned here: a later packet
 // fills a surface in, it never renames the route.
 test('the URL contract is exactly the recorded set', () => {
+  // EXTENDED 2026-08-05 (rework step 1, product map v2.1 §2): seven ADDITIONS —
+  // /projects /new /reviews /lessons /history /health /manual. Every pattern
+  // that existed before is byte-identical below; the ban is on renames, and an
+  // addition publishes a path nothing pointed at before (the /memory precedent).
   expect(routes.map((r) => `${r.id} ${r.pattern}`)).toEqual([
     'mission-control /',
+    'projects /projects',
+    'new /new',
     'board /board',
     'task /tasks/:id',
-    'fleet /fleet',
     'inbox /inbox',
     'inbox-item /inbox/:id',
-    'settings /settings',
-    'chat /chat',
+    'reviews /reviews',
     'deliverable /deliverables/:id',
-    'workforce /workforce',
+    'lessons /lessons',
+    'chat /chat',
+    'history /history',
     'memory /memory',
     'memory-entry /memory/:id',
+    'workforce /workforce',
+    'fleet /fleet',
+    'health /health',
+    'settings /settings',
+    'manual /manual',
     'login /login',
   ])
 })
@@ -47,6 +58,17 @@ const built = [
   // publishes a path before it fills it in.
   'memory',
   'memory-entry',
+  // Rework step 1 (map v2.1 §2): the seven new routes land BUILT — each answers
+  // with an honest placeholder surface that says what will appear there and
+  // where that job is done today. /history additionally carries the served
+  // query layers that moved off Home when Home became a glance.
+  'projects',
+  'new',
+  'reviews',
+  'lessons',
+  'history',
+  'health',
+  'manual',
 ]
 
 test('every surface is either built or names the packet that will build it', () => {

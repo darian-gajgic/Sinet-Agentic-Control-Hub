@@ -79,7 +79,9 @@ test('the route was filled, not renamed — and it was the last unbuilt one', ()
   const row = routes.find((r) => r.id === 'workforce')!
   expect(row.owner, 'the workforce row still names an owning packet').toBe('')
   expect(row.pattern, 'the route was renamed — a deep link would break (§41-B fill-never-rename)').toBe('/workforce')
-  expect(row.title).toBe('Workforce')
+  // Retitled 'Specialists' at rework step 1 (map v2.1 §2: plain names; title
+  // change only — the pattern above is what deep links break on, and it holds).
+  expect(row.title).toBe('Specialists')
   expect(row.nav).toBe(true)
   expect(matchRoute('/workforce').route.id).toBe('workforce')
   // Nothing is unbuilt any more: this was the eleventh and last row.

@@ -71,7 +71,9 @@ export function FilterBar({ active }: { active: FilterID | '' }) {
           key={f.id}
           to={hrefForFilter(f.id)}
           aria-current={f.id === active ? 'page' : undefined}
-          className="rounded-(--radius-sm) px-2 py-1 text-sm text-muted-foreground no-underline aria-[current=page]:bg-(image:--grad-soft) aria-[current=page]:text-foreground"
+          // The Nexus subtab pill: quiet glass at rest, the identity gradient
+          // when selected (style.css:752-763), one formula for all four.
+          className="rounded-full border border-border bg-(--panel) px-3.5 py-1.5 text-xs font-semibold text-muted-foreground no-underline hover:border-(--border-l) hover:text-foreground aria-[current=page]:border-[rgba(124,92,255,0.5)] aria-[current=page]:bg-[linear-gradient(90deg,rgba(124,92,255,0.35),rgba(34,211,238,0.15))] aria-[current=page]:text-white"
         >
           {f.label}
         </Link>

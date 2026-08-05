@@ -96,9 +96,11 @@ test('the stage story renders from served rows, with no derived percentage', asy
   expect(stages.length).toBeGreaterThan(0)
   expect(stages[0].getAttribute('data-stage')).toBe('execute')
   const text = (view.container.textContent ?? '').toLowerCase()
-  for (const banned of ['%', 'percent', 'eta']) {
+  for (const banned of ['%', 'percent']) {
     expect(text, `the task detail rendered "${banned}"`).not.toContain(banned)
   }
+  // 'eta' as a WORD — the shell's brand row concatenates to "sinetagentic…".
+  expect(text, 'the task detail rendered "eta"').not.toMatch(/\beta\b/)
 })
 
 test('lineage renders both directions, and a multi-project claim renders as the ambiguity it is', async () => {

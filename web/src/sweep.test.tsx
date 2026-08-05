@@ -440,11 +440,13 @@ const inventory = (JSON.parse(routeInventoryRaw) as { routes: InventoryRoute[] }
  */
 const exceptions: { method: string; path: string; why: string; gap?: boolean }[] = [
   // ── Server surfaces the SPA was never asked to render ──────────────────
-  {
-    method: 'GET',
-    path: '/api/health',
-    why: 'the readiness surface. It answers 200/503 for the front chain, for systemd and for an operator with curl — not for a workspace. The SPA\u2019s own connection truth is the session probe plus the SSE state (\u00a741-B), which is why nothing calls it. NOTE: `api.health` is a DECLARED-BUT-UNCALLED client member, and it is exactly what made the old shape-only scan report this route as consumed (drain r1, D5).',
-  },
+  //
+  // CLOSED 2026-08-05 (rework step 1): `GET /api/health` left this list the
+  // moment the shell's sidebar footer started reading it — one call at mount
+  // for the served version line, exactly the stale-entry test's trigger. The
+  // SPA's connection truth is still the session probe plus the SSE state
+  // (§41-B); the footer renders the platform's own version string, not
+  // liveness.
   {
     method: 'POST',
     path: '/api/auth/verify-pin',
@@ -691,7 +693,9 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     expect(
       declaredButUncalled(),
       'the set of declared-but-uncalled api members moved. A new one is a dead client verb; a departed one means something started calling it — either way §46 records this list.',
-    ).toEqual(['health'])
+      // EMPTIED 2026-08-05 (rework step 1): `health` departed when the shell's
+      // sidebar footer started calling it for the served version line.
+    ).toEqual([])
     // The floor, so a scan that suddenly matched nothing could not pass here.
     const app = appSources()
     expect(Object.keys(app).length).toBeGreaterThan(20)

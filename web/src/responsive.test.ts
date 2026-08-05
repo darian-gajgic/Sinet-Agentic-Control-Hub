@@ -65,25 +65,45 @@ test('no layout container carries a fixed pixel width', () => {
   }
 })
 
-test('the nav wraps rather than overflowing, so every surface stays reachable at phone width', () => {
-  const nav = block('.shell-nav')
-  expect(nav).toContain('flex-wrap: wrap')
-  expect(nav).not.toContain('overflow-x: hidden')
-  // The nav is grouped now (UI-1). A group that could not wrap would push its
-  // own links off a 375px screen even though the nav around it wraps.
-  expect(block('.nav-group')).toContain('flex-wrap: wrap')
+test('the phone nav is an off-canvas drawer, and every surface stays reachable at phone width', () => {
+  // REWRITTEN 2026-08-05 (rework step 1). The nav grew to fifteen entries, so
+  // the phone base is no longer a wrapping band — it is the Nexus mobile pass,
+  // min-width-first: an off-canvas drawer the topbar's menu button opens, with
+  // a scrim that closes it. The reachability CONTRACT is unchanged: every nav
+  // link is in the drawer's markup at every width, and nothing scrolls the
+  // page sideways (asserted below).
+  const side = block('.shell-side')
+  expect(side, 'the drawer is not taken out of flow at phone width').toContain('position: fixed')
+  expect(side, 'the drawer is not off-canvas at rest').toContain('transform: translateX(')
+  expect(block(".shell-side[data-open='true']"), 'opening the drawer does not bring it on screen').toContain(
+    'transform: none',
+  )
+  // The opener exists at the base and disappears at the breakpoint, where the
+  // drawer becomes the static column; the scrim covers the page under it.
+  expect(block('.menu-btn')).toContain('display: flex')
+  const wide = css.slice(css.indexOf('@media (min-width:'))
+  const wideMenu = wide.slice(wide.indexOf('.menu-btn {'), wide.indexOf('}', wide.indexOf('.menu-btn {')))
+  expect(wideMenu, 'the menu button survives onto the desktop, where there is no drawer').toContain('display: none')
+  expect(block('.shell-scrim')).toContain('position: fixed')
+  // The nav is a column that scrolls INSIDE the drawer, so no entry is ever
+  // clipped off a short screen.
+  expect(block('.shell-nav')).toContain('overflow-y: auto')
+  expect(block('.shell-nav')).toContain('flex-direction: column')
 })
 
-test('the sidebar layout appears at the breakpoint and the phone gets the same markup, stacked', () => {
-  // Phone-first, applied to the shell chrome itself: the base is a column with
-  // the sidebar as a wrapping band above the content, and the side-by-side
-  // layout exists only inside the min-width query (S1.10).
+test('the sidebar column appears at the breakpoint and the phone gets the same markup as a drawer', () => {
+  // Phone-first, applied to the shell chrome itself: the base is a column (the
+  // topbar over the content, the nav off-canvas), and the side-by-side layout
+  // exists only inside the min-width query (S1.10).
   expect(block('.shell')).toContain('flex-direction: column')
   const wide = css.slice(css.indexOf('@media (min-width:'))
   const wideShell = wide.slice(wide.indexOf('.shell {'), wide.indexOf('}', wide.indexOf('.shell {')))
   expect(wideShell, 'the sidebar never lays out beside the content on a wide screen').toContain('flex-direction: row')
+  // The one width the sidebar ever takes is the design token, declared at the
+  // base (the drawer and the column are the same markup at the same width).
+  expect(block('.shell-side')).toContain('width: var(--sidebar-w)')
   const wideSide = wide.slice(wide.indexOf('.shell-side {'), wide.indexOf('}', wide.indexOf('.shell-side {')))
-  expect(wideSide, 'the sidebar takes no width at the breakpoint').toContain('width: var(--sidebar-w)')
+  expect(wideSide, 'the drawer does not become a static column at the breakpoint').toContain('position: sticky')
   // The content column can shrink below its content's intrinsic width, which is
   // what stops a wide table inside it from widening the whole page.
   expect(block('.shell-body')).toContain('min-width: 0')

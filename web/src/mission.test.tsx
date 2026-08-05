@@ -45,6 +45,17 @@ async function mission() {
   return { view, log }
 }
 
+/** The query layers moved to /history at rework step 1 (map v2.1 §3: Home
+ *  stays a glance; the instrument lives where the map puts it). Same scripted
+ *  world, different door — every panel contract below is unchanged. */
+async function historyPage() {
+  const log = scriptedFetch(oversightRoutes())
+  window.history.replaceState(null, '', '/history')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+  return { view, log }
+}
+
 const servedRuns = () => (fixtures.runs() as unknown as RunList).runs
 const servedMeters = () => fixtures.meters() as unknown as Meters
 
@@ -107,13 +118,15 @@ test('parked items show "parked until…" when the row carries one, and no time 
 })
 
 test('who owns what is visible on every item, and every item drills through', async () => {
+  // REWRITTEN at rework step 1: Home's items are the roster rows and the feed
+  // rows now. The contract is byte-identical — every item says whose it is,
+  // structurally, and drills through URLs from the contract, never built strings.
   const { view } = await mission()
-  const rows = [...view.container.querySelectorAll('.row')]
+  const rows = [...view.container.querySelectorAll('.roster-row'), ...view.container.querySelectorAll('.feed-row')]
   expect(rows.length).toBeGreaterThan(0)
   for (const row of rows) {
     expect(row.querySelector('.owner'), 'an item does not say whose it is (D2/S3.10)').not.toBeNull()
   }
-  // Drill-through resolves through the URL contract, never a built string.
   const hrefs = rows.map((r) => r.querySelector('a')?.getAttribute('href'))
   expect(hrefs).toContain('/tasks/t-ship')
   expect(hrefs).toContain('/tasks/t-audit')
@@ -200,7 +213,7 @@ test('a Layer-0 view that could not be read renders its reason, not an empty tab
 // ── the history panel (R3) ────────────────────────────────────────────────
 
 test('the choice surface comes from the served registries, not a hand-written list', async () => {
-  const { view } = await mission()
+  const { view } = await historyPage()
   const selects = [...view.container.querySelectorAll('.history-choices select')]
   expect(selects.length).toBe(2)
 
@@ -220,7 +233,7 @@ test('choosing a view asks for it and renders the answer with its layer and conf
   const routes = oversightRoutes()
   routes['GET /api/events/views/cost_per_run'] = { body: fixtures.historyViewAnswer() }
   scriptedFetch(routes)
-  window.history.replaceState(null, '', '/')
+  window.history.replaceState(null, '', '/history')
   const view = mount(<App stream={inertStream()} />)
   await flush()
 
@@ -266,7 +279,7 @@ test('choosing a catalog question asks the Layer-1 route and renders its canned 
   const routes = oversightRoutes()
   routes['GET /api/events/query/status.runs_active'] = { body: fixtures.historyQueryAnswer() }
   scriptedFetch(routes)
-  window.history.replaceState(null, '', '/')
+  window.history.replaceState(null, '', '/history')
   const view = mount(<App stream={inertStream()} />)
   await flush()
 
@@ -358,7 +371,7 @@ test('a refusal renders with its audit, and open SQL always shows its lower-conf
 })
 
 test('the history panel says it is a query instrument, not a live projection', async () => {
-  const { view } = await mission()
+  const { view } = await historyPage()
   const panel = view.container.querySelector('.history')!
   expect(panel.getAttribute('data-live')).toBe('query-instrument')
   expect(panel.textContent).toContain('not a live projection')
@@ -397,7 +410,7 @@ async function fire(view: { container: HTMLElement }, name: 'ask' | 'search'): P
 }
 
 test('the ask layer answers with its disambiguation card, and a card IS an answer', async () => {
-  const { view, log } = await mission()
+  const { view, log } = await historyPage()
   await fire(view, 'ask')
 
   // The request is the one the committed body answers, path and all.
@@ -548,7 +561,7 @@ test('choosing from the card SELECTS that question with its own empty slots and 
   const routes = oversightRoutes()
   routes['GET /api/events/query/cost.for_run?slot_run_id=r-ship'] = { body: fixtures.historyQueryAnswer() }
   const log = scriptedFetch(routes)
-  window.history.replaceState(null, '', '/')
+  window.history.replaceState(null, '', '/history')
   const view = mount(<App stream={inertStream()} />)
   await flush()
   await fire(view, 'ask')
@@ -582,7 +595,7 @@ test('choosing from the card SELECTS that question with its own empty slots and 
 })
 
 test('search sends the question VERBATIM and renders the store’s own rows, excerpts and notes', async () => {
-  const { view, log } = await mission()
+  const { view, log } = await historyPage()
   await fire(view, 'search')
 
   // VERBATIM. Nothing is stripped, folded or de-punctuated here: redaction is
@@ -652,7 +665,7 @@ test('a redaction marker inside an excerpt renders verbatim, and so does the sec
   routes['GET /api/events/search?q=anthropic+key+rotation'] = { body: withMarker }
   routes['GET /api/events/search?q=sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXX'] = { body: secretOnly }
   scriptedFetch(routes)
-  window.history.replaceState(null, '', '/')
+  window.history.replaceState(null, '', '/history')
   const view = mount(<App stream={inertStream()} />)
   await flush()
 
@@ -678,7 +691,7 @@ test('a redaction marker inside an excerpt renders verbatim, and so does the sec
 })
 
 test('an empty question is HELD at both forms, fires nothing, and never reads as busy', async () => {
-  const { view, log } = await mission()
+  const { view, log } = await historyPage()
   const before = log.calls.length
 
   for (const name of ['ask', 'search'] as const) {
@@ -707,7 +720,7 @@ test('an empty question is HELD at both forms, fires nothing, and never reads as
 })
 
 test('busy means exactly one request in flight, and it is a different state from held', async () => {
-  const { view } = await mission()
+  const { view } = await historyPage()
   const form = formOf(view, 'ask')
   const button = () => actOf(formOf(view, 'ask'), 'ask')
 
@@ -737,7 +750,7 @@ test('busy means exactly one request in flight, and it is a different state from
 test('a typed question survives the answer it produced AND the refusal it produced', async () => {
   const routes = oversightRoutes()
   const log = scriptedFetch(routes)
-  window.history.replaceState(null, '', '/')
+  window.history.replaceState(null, '', '/history')
   const view = mount(<App stream={inertStream()} />)
   await flush()
 
@@ -761,7 +774,7 @@ test('a typed question survives the answer it produced AND the refusal it produc
 })
 
 test('the lower-confidence flag belongs to layer 2 alone — absent on ask and search, present on an escalation', async () => {
-  const { view } = await mission()
+  const { view } = await historyPage()
 
   // (a) ASK. It stops at its card and never falls through to Layer 2 — the
   //     transport says so at internal/api/historyapi.go:25–28 and the store is
@@ -801,7 +814,7 @@ test('the two controls are reachable and operable at 375px', async () => {
   // jsdom has no layout engine, so what is checkable is the STRUCTURE that makes
   // a phone-width surface work (the §41-B method): nothing pins a pixel width,
   // the row wraps, and every responsive utility widens UP.
-  const { view } = await mission()
+  const { view } = await historyPage()
   const scope = [
     ...view.container.querySelectorAll('[data-form="ask"], [data-form="ask"] *, [data-form="search"], [data-form="search"] *'),
   ]
@@ -826,23 +839,20 @@ test('the two controls are reachable and operable at 375px', async () => {
 // ── D5 applied: relative BESIDE the verbatim instant (P3-UI-4) ────────────
 
 test('a run line renders relative time beside its served instant, never instead of it', async () => {
+  // REWRITTEN at rework step 1 against the roster row; the D5 contract is
+  // unchanged: both instants render as <time> carrying the served UTC verbatim,
+  // and the relative labels are ADDITIONS beside them, never substitutions.
   const { view } = await mission()
   const parked = servedRuns().find((r) => r.parked_until)!
   expect(parked, 'the fixture world no longer parks a run with a horizon').toBeDefined()
-  const row = [...view.container.querySelectorAll('.rows .row')].find((r) => r.textContent?.includes(parked.task_id))!
+  const row = [...view.container.querySelectorAll('.roster-row')].find((r) =>
+    r.textContent?.includes(parked.run_id),
+  )!
   expect(row, 'the parked run did not reach the screen').toBeDefined()
 
-  const stamps = [...row.querySelectorAll('time')]
-  // ParkedUntil's horizon first, then the last-activity stamp.
-  for (const [stamp, served] of [
-    [stamps[0], parked.parked_until!],
-    [stamps[1], parked.last_activity_ts!],
-  ] as const) {
-    expect(stamp.getAttribute('dateTime')).toBe(served)
-    expect(stamp.textContent, 'the verbatim UTC was dropped').toBe(served)
-    const beside = stamp.parentElement!.parentElement!.textContent ?? ''
-    expect(beside.endsWith(served), 'the instant is not rendered beside its label').toBe(true)
-    expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(served.length)
+  const stamps = [...row.querySelectorAll('time')].map((t) => [t.getAttribute('dateTime'), t.textContent])
+  for (const served of [parked.parked_until!, parked.last_activity_ts!]) {
+    expect(stamps, `the served instant ${served} was dropped or rewritten`).toContainEqual([served, served])
   }
   // With the clock pinned the two labels are exact, and they run in OPPOSITE
   // directions: a past stamp freezes toward understating age, a future horizon
@@ -853,9 +863,12 @@ test('a run line renders relative time beside its served instant, never instead 
 })
 
 test('a lane with no served horizon says so rather than inventing one to be live about', async () => {
-  const { view } = await mission()
-  const lane = servedMeters().lanes.find((l) => l.parked_runs > 0)!
+  // The lane table lives on Fleet now (rework step 1); the panel is mounted
+  // directly, exactly as the other meter contracts above mount it.
+  const meters = servedMeters()
+  const lane = meters.lanes.find((l) => l.parked_runs > 0)!
   expect(lane.parked_until ?? null, 'the fixture lane now carries a horizon').toBeNull()
+  const view = mount(<MetersPanel meters={meters} stale={false} error="" />)
   const cell = [...view.container.querySelectorAll('.meters .absent')].map((n) => n.textContent)
   expect(cell, 'the park-with-no-horizon arm did not survive the migration').toContain('parked, no horizon given')
   view.unmount()
@@ -1001,38 +1014,67 @@ test('the surface teaches what it is, and the line does not contradict S15.5', a
   view.unmount()
 })
 
-test('each bucket teaches what puts a run in it — the tile foot, the section, and the empty state agree', async () => {
+test('each bucket teaches what puts a run in it — the tiles, the roster sections and the sort agree', async () => {
+  // REWRITTEN at rework step 1 (map §3): the six bucket tiles became the four
+  // map tiles plus the roster's own bucket sections. The contract this keeps:
+  // no figure on screen that the sort below it does not carry, and every
+  // bucket's teaching sentence is the ONE in `bucketMeaningFor` — asserted
+  // through the section tooltip so tile, section and sort cannot drift.
   const { view } = await mission()
-  // Every bucket says its own rule, once, in one place. The tiles count the
-  // rows ON SCREEN and say so; a tile carrying a figure no list below it
-  // carries would be inventing one (§45-B R2).
-  const tiles = [...view.container.querySelectorAll('[data-tiles="buckets"] > *')]
-  expect(tiles).toHaveLength(bucketRuns(servedRuns(), fixtureNow).length)
-  for (const b of bucketRuns(servedRuns(), fixtureNow)) {
-    const tile = tiles.find((t) => t.textContent?.includes(b.title))!
-    expect(tile, `${b.id} has no tile`).toBeDefined()
-    expect(tile.textContent, `${b.id}'s tile does not say what it counts`).toContain('runs on screen')
-    expect(tile.textContent, `${b.id}'s tile figure is not the rows on screen`).toContain(String(b.runs.length))
-    const why = view.container.querySelector(`[data-bucket-why="${b.id}"]`)
-    expect(why?.textContent?.length ?? 0, `${b.id} does not teach what puts a run in it`).toBeGreaterThan(30)
+  const buckets = bucketRuns(servedRuns(), fixtureNow)
+  const of = (id: string) => buckets.find((b) => b.id === id)!
+
+  // The three counting tiles carry exactly the sort's own numbers.
+  const tiles = [...view.container.querySelectorAll('[data-tiles="home"] > *')]
+  expect(tiles).toHaveLength(4)
+  for (const [label, id] of [
+    ['Running', 'running'],
+    ['Waiting on you', 'blocked'],
+    ['Parked', 'parked'],
+  ] as const) {
+    const tile = tiles.find((t) => t.textContent?.includes(label))!
+    expect(tile, `no ${label} tile`).toBeDefined()
+    expect(tile.textContent, `${label}'s figure is not the sort's own count`).toContain(String(of(id).runs.length))
+  }
+
+  // Every non-empty bucket renders its section with its count and its ONE
+  // teaching sentence riding it.
+  for (const b of buckets.filter((x) => x.id !== 'finished' && x.runs.length > 0)) {
+    const sec = view.container.querySelector(`[data-bucket="${b.id}"]`)!
+    expect(sec, `${b.id} has rows and no roster section`).not.toBeNull()
+    expect(sec.textContent).toContain(String(b.runs.length))
+    expect(sec.querySelector('.roster-sec-head')?.getAttribute('title')).toBe(bucketMeaningFor(b.id))
   }
   view.unmount()
 })
 
-test('an empty bucket teaches instead of only admitting it is empty — and never over a loading state', async () => {
-  // The `other` bucket is the one the fixture world leaves populated and the
-  // finished bucket empties once the window closes, so this drives a real
-  // served empty rather than a hand-built one.
+test('an empty bucket disappears rather than lying, and an empty WORLD teaches instead of admitting', async () => {
+  // REWRITTEN at rework step 1: Home is a glance now, so an empty bucket
+  // renders NO section (its absence is the honest render — the roster's
+  // whole-empty state teaches instead). The finished window closing is the
+  // served way to drive one empty.
   const later = fixtureNow + 6 * 24 * 60 * 60 * 1000
   vi.spyOn(Date, 'now').mockReturnValue(later)
   const { view } = await mission()
-  const finished = view.container.querySelector('[data-bucket="finished"]')
-  expect(finished, 'the finished bucket still has rows — this asserts nothing').toBeNull()
-  const text = view.container.textContent ?? ''
-  expect(text).toContain('Nothing is recently finished.')
-  expect(text, 'the empty state does not teach what would fill it').toContain('Ended in the last day')
+  expect(
+    view.container.querySelector('.roster-fin'),
+    'the closed finished window still renders a recently-finished block',
+  ).toBeNull()
   view.unmount()
 
+  // The whole-empty world teaches what fills the roster, over a SERVED answer.
+  const none = fixtures.runs() as unknown as RunList
+  none.runs = []
+  const routes = oversightRoutes()
+  routes['GET /api/runs'] = { body: none }
+  scriptedFetch(routes)
+  window.history.replaceState(null, '', '/')
+  const empty = mount(<App stream={inertStream()} />)
+  await flush()
+  const text = empty.container.textContent ?? ''
+  expect(text).toContain('Nothing is on shift.')
+  expect(text, 'the empty state does not teach what would fill it').toContain('A run appears here the moment work starts')
+  empty.unmount()
 })
 
 test('NONE-VS-NOT-LOADED: a pending read renders the loading affordance and no teaching empty', async () => {
@@ -1056,11 +1098,10 @@ test('NONE-VS-NOT-LOADED: a pending read renders the loading affordance and no t
   expect(view.container.querySelector('.surface'), 'no surface mounted, so this proves nothing').not.toBeNull()
   expect(view.container.querySelector('[data-surface-what]')).not.toBeNull()
   expect(view.container.querySelector('[data-freshness]')?.getAttribute('data-freshness')).toBe('catching-up')
-  for (const bucket of ['running', 'queued', 'parked', 'blocked on a human', 'recently finished']) {
-    expect(view.container.textContent, `a teaching empty rendered over a pending read: ${bucket}`).not.toContain(
-      `Nothing is ${bucket}.`,
-    )
-  }
+  expect(
+    view.container.textContent,
+    'a teaching empty rendered over a pending read',
+  ).not.toContain('Nothing is on shift.')
   view.unmount()
 
   // …and once the read lands EMPTY, the teaching state is exactly what appears.
@@ -1072,8 +1113,8 @@ test('NONE-VS-NOT-LOADED: a pending read renders the loading affordance and no t
   window.history.replaceState(null, '', '/')
   const landed = mount(<App stream={inertStream()} />)
   await flush()
-  expect(landed.container.textContent, 'a served empty does not teach').toContain('Nothing is running.')
-  expect(landed.container.textContent).toContain('A run the platform is working on right now.')
+  expect(landed.container.textContent, 'a served empty does not teach').toContain('Nothing is on shift.')
+  expect(landed.container.textContent).toContain('A run appears here the moment work starts')
   landed.unmount()
 })
 
@@ -1129,7 +1170,7 @@ test('the new renders are reachable at 375px: nothing pins a pixel width, and ev
   const { view } = await mission()
   const added = [
     ...view.container.querySelectorAll(
-      '[data-surface-what], [data-tiles="buckets"], [data-tiles="buckets"] *, [data-stall], [data-stall] *, [data-capacity], [data-capacity] *',
+      '[data-surface-what], [data-tiles="home"], [data-tiles="home"] *, [data-stall], [data-stall] *, .roster-row, .roster-row *, .feed-row, .feed-row *',
     ),
   ]
   expect(added.length, 'the phone leg reached none of the new renders').toBeGreaterThan(8)
@@ -1142,9 +1183,9 @@ test('the new renders are reachable at 375px: nothing pins a pixel width, and ev
 
   // The tile row is a two-column stack at phone width and only widens at the
   // breakpoints — the phone is the base, not the exception (S1.10).
-  const tiles = view.container.querySelector('[data-tiles="buckets"]')!
+  const tiles = view.container.querySelector('[data-tiles="home"]')!
   expect(tiles.className).toContain('grid-cols-2')
-  expect(tiles.className).toContain('lg:grid-cols-6')
+  expect(tiles.className).toContain('xl:grid-cols-4')
   expect(tiles.className, 'a max-width query entered the surface').not.toMatch(/\bmax-(sm|md|lg):/)
   view.unmount()
 })

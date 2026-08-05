@@ -395,7 +395,9 @@ test('the dev fallback reaches the login picker instead of being bounced off it'
   await flush()
 
   expect(window.location.pathname, 'the dev fallback was bounced off /login again').toBe('/login')
-  const select = view.container.querySelector('select')!
+  // Scoped to MAIN: under the dev fallback the topbar renders the project
+  // selector (also a <select>), and this assertion is about the login picker.
+  const select = view.container.querySelector('main select')! as HTMLSelectElement
   expect(select, 'the picker did not render under the dev fallback').not.toBeNull()
   expect([...select.options].map((o) => o.value)).toEqual(['alice'])
   // Login.tsx is byte-unchanged: it always could render here, and this is the
@@ -465,7 +467,7 @@ test('the whole dev-posture cycle is honest: fallback → picker → real sessio
 
   const view = mount(<App stream={inertStream()} />)
   await flush()
-  expect(view.container.querySelector('select'), 'the cycle cannot start: no picker').not.toBeNull()
+  expect(view.container.querySelector('main select'), 'the cycle cannot start: no picker').not.toBeNull()
   expect(view.container.querySelector('[data-auth="sign-in"]')).not.toBeNull()
 
   // (2) A REAL LOGIN. The cookie is the server's and JS cannot read it, so what

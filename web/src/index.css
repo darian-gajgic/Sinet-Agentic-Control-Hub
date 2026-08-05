@@ -107,10 +107,14 @@
   --shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.28);
   --blur-shell: 18px;
   --blur-overlay: 10px;
+  /* CORRECTED 2026-08-05 (rework step 1): verified against the real Nexus
+     source (style.css:48–58). The first pour drifted — aurora-2 was 0.09 for
+     Nexus's 0.07, aurora-3 was teal for Nexus's violet 0.08, and aurora-4 was a
+     PINK Nexus never had (its fourth radial is teal 0.05). */
   --aurora-1: rgba(124, 92, 255, 0.13);
-  --aurora-2: rgba(34, 211, 238, 0.09);
-  --aurora-3: rgba(94, 234, 212, 0.06);
-  --aurora-4: rgba(244, 114, 182, 0.05);
+  --aurora-2: rgba(34, 211, 238, 0.07);
+  --aurora-3: rgba(124, 92, 255, 0.08);
+  --aurora-4: rgba(94, 234, 212, 0.05);
 
   /* The nine landed tokens, re-pointed at the new palette (§47). They keep
      their names and their meanings, so every surface built before this packet
@@ -371,14 +375,14 @@ a {
 
 .aurora {
   position: fixed;
-  inset: 0;
+  inset: -20%;
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(60rem 40rem at 12% 8%, var(--aurora-1), transparent 60%),
-    radial-gradient(50rem 34rem at 88% 12%, var(--aurora-2), transparent 60%),
-    radial-gradient(46rem 40rem at 72% 88%, var(--aurora-3), transparent 62%),
-    radial-gradient(40rem 32rem at 22% 82%, var(--aurora-4), transparent 62%);
+    radial-gradient(38% 45% at 18% 8%, var(--aurora-1), transparent 65%),
+    radial-gradient(32% 40% at 85% 20%, var(--aurora-2), transparent 65%),
+    radial-gradient(45% 50% at 70% 95%, var(--aurora-3), transparent 65%),
+    radial-gradient(30% 35% at 8% 85%, var(--aurora-4), transparent 65%);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -389,11 +393,11 @@ a {
 
 @keyframes aurora-drift {
   from {
-    transform: translate3d(-1.5%, -1%, 0) scale(1.04);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 
   to {
-    transform: translate3d(1.5%, 1%, 0) scale(1.1);
+    transform: translate3d(2.5%, -2%, 0) scale(1.06);
   }
 }
 
@@ -412,7 +416,13 @@ a {
   }
 }
 
-/* ── shell ─────────────────────────────────────────────────────────────── */
+/* ── shell ─────────────────────────────────────────────────────────────────
+   The Nexus control-room anatomy (real source: app/static/style.css:64–169,
+   index.html:15–93), phone-first on this stack. The PHONE base is the Nexus
+   mobile pass re-expressed min-width-first: the sidebar is an off-canvas
+   drawer opened from the topbar's menu button, so all fifteen surfaces stay
+   reachable at 375px without a four-row link band; at the breakpoint the same
+   markup is the fixed 232px blurred column beside the content. */
 
 .shell {
   min-height: 100vh;
@@ -420,18 +430,42 @@ a {
   flex-direction: column;
 }
 
-/* The sidebar is a blurred band across the top of a phone and a column at the
-   breakpoint — one workspace widening, never a second product (S1.10). */
+/* The drawer (phone base). Off-canvas until data-open; the SAME markup becomes
+   the static sidebar inside the breakpoint. No literal pixel width: the width
+   is the one token the design names. */
 .shell-side {
-  position: relative;
-  z-index: 1;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  width: var(--sidebar-w);
   background: var(--sidebar);
   backdrop-filter: blur(var(--blur-shell));
-  border-bottom: 1px solid var(--sidebar-border);
+  border-inline-end: 1px solid var(--sidebar-border);
+  transform: translateX(-104%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .shell-side {
+    transition: transform 0.22s ease;
+  }
+}
+
+.shell-side[data-open='true'] {
+  transform: none;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+}
+
+/* One tap outside the open drawer closes it. Under the sidebar, over the page. */
+.shell-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(4, 4, 10, 0.55);
+  backdrop-filter: blur(2px);
 }
 
 .shell-body {
@@ -443,53 +477,74 @@ a {
   min-width: 0;
 }
 
+/* ── sidebar: brand ── */
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 16px 16px 20px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 4px;
-  text-transform: uppercase;
+  gap: 11px;
   text-decoration: none;
   color: var(--fg);
 }
 
-/* The one gradient, as identity. */
+/* The one gradient, as identity (Nexus .logo-mark). */
 .brand-mark {
   flex: none;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: var(--grad);
-  box-shadow: 0 0 14px var(--accent-glow);
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(124, 92, 255, 0.45);
 }
 
-.shell-head {
+.brand-mark svg {
+  width: 22px;
+  height: 22px;
+}
+
+.brand-txt {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: var(--sidebar);
-  backdrop-filter: blur(var(--blur-shell));
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  line-height: 1.15;
 }
 
-.who {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-inline-start: auto;
-  color: var(--muted);
+.brand-name {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
 }
 
-/* The nav reaches every surface at phone width: it wraps rather than
-   overflowing, so no link is ever unreachable on a small screen. */
+.brand-sub {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 2.6px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ── sidebar: nav ── */
+
 .shell-nav {
+  flex: 1;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 10px 6px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* Grouping is PRESENTATION, defined by the shell component. The route table's
@@ -497,50 +552,407 @@ a {
    ordered so the rendered nav is the table's own order. */
 .nav-group {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem 0.75rem;
+  flex-direction: column;
 }
 
 .nav-group-label {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 2.2px;
   text-transform: uppercase;
   color: var(--text-faint);
+  padding: 14px 12px 6px;
 }
 
 .shell-nav a {
-  display: inline-flex;
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: var(--density-row) 0;
+  gap: 11px;
+  padding: 8px 12px;
+  margin-bottom: 2px;
   text-decoration: none;
-  color: var(--muted);
+  color: var(--text-dim);
   border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .shell-nav a {
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
 }
 
 .nav-icon {
   flex: none;
-  opacity: 0.85;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nav-icon {
+    transition: color 0.15s;
+  }
+}
+
+.nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shell-nav a:hover {
   color: var(--fg);
+  background: var(--panel-2);
+}
+
+.shell-nav a:hover .nav-icon {
+  color: var(--text-dim);
 }
 
 .shell-nav a[aria-current='page'] {
-  color: var(--fg);
-  border-bottom: 2px solid var(--accent);
+  color: #fff;
+  background: linear-gradient(90deg, rgba(124, 92, 255, 0.28), rgba(34, 211, 238, 0.1));
+  box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.35);
 }
+
+.shell-nav a[aria-current='page'] .nav-icon {
+  color: var(--accent-2);
+}
+
+/* The pinned assistant entry (Nexus .nav-jarvis): the identity gradient as a
+   standing tint, brighter on hover, without stealing the active state. */
+.shell-nav a[data-pinned='true']:not([aria-current='page']) {
+  background: linear-gradient(90deg, rgba(124, 92, 255, 0.14), rgba(34, 211, 238, 0.07));
+  box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.25);
+  color: var(--fg);
+}
+
+.shell-nav a[data-pinned='true']:not([aria-current='page']):hover {
+  box-shadow:
+    inset 0 0 0 1px rgba(124, 92, 255, 0.55),
+    0 0 18px rgba(124, 92, 255, 0.18);
+}
+
+.shell-nav a[data-pinned='true'] .nav-icon {
+  color: var(--accent);
+}
+
+/* A served queue count. Red glow = "somebody is waiting on you" readable
+   peripherally (Nexus .badge). Rendered only over a landed read, never a
+   fabricated zero. */
+.nav-badge {
+  margin-inline-start: auto;
+  background: var(--red);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  border-radius: 10px;
+  padding: 1px 7px;
+  min-width: 18px;
+  text-align: center;
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.4);
+}
+
+/* ── sidebar: footer (Nexus .sidebar-footer / .sys-mini) ── */
+
+.side-foot {
+  padding: 14px 18px 16px;
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.sys-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.mini-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.mini-row span:first-child {
+  width: 48px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.mini-row b {
+  width: 34px;
+  text-align: right;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+/* The track renders EMPTY on purpose: the host-monitoring seam is operator-
+   deferred, and an empty track with no value is the honest reading. */
+.mini-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--panel-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-note {
+  margin: 2px 0 0;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+}
+
+.side-version {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ── topbar (Nexus .topbar) ── */
+
+.shell-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 10px 12px;
+  background: rgba(10, 10, 18, 0.55);
+  backdrop-filter: blur(var(--blur-shell));
+  border-bottom: 1px solid var(--border);
+}
+
+.menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(20, 20, 32, 0.55);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.brand-row .nav-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.page-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.page-title h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-sub {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.head-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-inline-start: auto;
+  min-width: 0;
+}
+
+/* The signed-in chip (Nexus .user-chip). */
+.who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(20, 20, 32, 0.55);
+  color: var(--muted);
+}
+
+.who-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--grad);
+}
+
+.who-name {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.who button {
+  width: auto;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.who button:hover {
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.who a {
+  color: var(--accent-2);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+/* ── the global project selector (the Nexus focus chips, carried) ── */
+
+.scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(20, 20, 32, 0.55);
+  color: var(--text-dim);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.scope[data-scoped='true'] {
+  border-color: rgba(124, 92, 255, 0.4);
+  background: rgba(124, 92, 255, 0.07);
+  color: var(--fg);
+}
+
+.scope-ico {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.scope[data-scoped='true'] .scope-ico {
+  color: var(--accent-2);
+}
+
+.scope-label {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.scope-select {
+  width: auto;
+  max-width: 11rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.scope-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.scope-select option {
+  background: var(--panel-solid);
+  color: var(--fg);
+}
+
+.scope-clear {
+  width: auto;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.scope-clear:hover {
+  color: var(--red);
+}
+
+.scope-note {
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* ── main ── */
 
 .shell-main {
   flex: 1;
-  padding: 1.5rem 1rem;
+  padding: 14px 12px 28px;
   width: 100%;
-  max-width: 60rem;
+  max-width: 110rem;
   margin-inline: auto;
+}
+
+/* The Nexus view entrance: content fades up once per navigation. Gated; a
+   reduce reader gets the settled composition immediately. */
+@media (prefers-reduced-motion: no-preference) {
+  .view-in {
+    animation: view-in 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ── connection state ──────────────────────────────────────────────────── */
@@ -550,17 +962,19 @@ a {
 .conn {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 7px;
   margin: 0;
-  padding: 0.3rem 0.7rem;
+  padding: 5px 12px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 11px;
-  letter-spacing: 0.6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
   color: var(--muted);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 20px;
+  white-space: nowrap;
 }
 
 .conn-dot {
@@ -1392,8 +1806,8 @@ td {
     display: inline;
   }
 
-  /* The sidebar layout appears here and only here: on a phone the same markup
-     is a wrapping band above the content. */
+  /* The sidebar column appears here and only here: on a phone the same markup
+     is the off-canvas drawer the menu button opens. */
   .shell {
     flex-direction: row;
   }
@@ -1404,37 +1818,34 @@ td {
     align-self: flex-start;
     height: 100vh;
     flex: none;
-    width: var(--sidebar-w);
-    gap: 1.4rem;
-    padding: 1.2rem 1rem;
-    overflow-y: auto;
-    border-bottom: none;
-    border-inline-end: 1px solid var(--sidebar-border);
+    transform: none;
+    box-shadow: none;
+    z-index: 1;
+    /* The aside sits AFTER the content in the DOM — so the route view's own
+       hook, whose effects commit first, is what opens the one event stream
+       (§45: the opener reads once, a joiner re-snapshots). Order puts the
+       column back on the left; on the phone the drawer is out of flow. */
+    order: -1;
   }
 
-  .shell-nav {
-    flex-direction: column;
-    gap: 1.1rem;
+  .menu-btn {
+    display: none;
   }
 
-  .nav-group {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.15rem;
+  .shell-scrim {
+    display: none;
   }
 
-  .shell-nav a {
-    padding: var(--density-row) 12px;
+  .shell-head {
+    padding: 14px 30px;
   }
 
-  .shell-nav a[aria-current='page'] {
-    background: var(--grad-soft);
-    border-bottom: none;
-    box-shadow: inset 2px 0 0 var(--accent);
+  .head-right {
+    gap: 0.9rem;
   }
 
   .shell-main {
-    padding: 2rem;
+    padding: 26px 30px 34px;
   }
 
   button {
@@ -1529,6 +1940,438 @@ td {
     flex: 1 1 0;
     min-width: 0;
   }
+
+  /* The roster's wide columns: stage · lane, cost · effort and last activity
+     join the row where there is room for them. */
+  .roster-row {
+    grid-template-columns: 18px minmax(0, 2fr) 6rem minmax(0, 1fr) auto 8rem 9rem;
+  }
+
+  .wide-cell {
+    display: block;
+  }
+}
+
+/* The hero's now-strip needs genuine width; below this the tiles and the
+   roster carry the same facts. Min-width only — the phone is the base. */
+@media (min-width: 80rem) {
+  .hero-now {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-inline-start: auto;
+    flex: none;
+    width: 300px;
+    position: relative;
+    z-index: 1;
+  }
+}
+
+/* ── Home (rework step 1): hero → tiles → roster → burn + feed ──────────────
+   The Nexus dashboard hierarchy on Sinet's real rows. Phone-first like the
+   rest of the sheet: the hero's now-strip and the roster's wide columns exist
+   only inside min-width queries, and nothing here pins a pixel width. */
+
+.home-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  min-height: 140px;
+  padding: 20px 22px;
+  margin-bottom: var(--density-gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(60% 90% at 50% 10%, rgba(124, 92, 255, 0.1), transparent 70%),
+    linear-gradient(155deg, rgba(148, 148, 190, 0.06), rgba(10, 10, 18, 0.35));
+}
+
+/* Decoration only (the Nexus hero orb — the dropped 3D galaxy's honest
+   stand-in). Behind the copy, unreachable, still under reduce. */
+.hero-orb {
+  position: absolute;
+  top: 50%;
+  left: 68%;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 35% 30%, rgba(124, 92, 255, 0.45), rgba(34, 211, 238, 0.12) 60%, transparent 75%);
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-orb {
+    animation: orb-float 5s ease-in-out infinite;
+  }
+}
+
+@keyframes orb-float {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.07);
+  }
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hero-kicker {
+  margin: 0;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.hero-headline {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
+
+.hero-headline b {
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-what {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: 56ch;
+}
+
+/* The now-strip appears only where there is honest room for it. */
+.hero-now {
+  display: none;
+}
+
+.now-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.now-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(7, 7, 13, 0.6);
+  backdrop-filter: blur(8px);
+  text-decoration: none;
+  color: var(--fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .now-row {
+    transition: border-color 0.15s;
+  }
+}
+
+a.now-row:hover {
+  border-color: var(--accent);
+}
+
+.now-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.now-task {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-meta {
+  font-size: 9.5px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.now-empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 12px;
+}
+
+/* Panel headers share the Nexus tracked-uppercase title voice. */
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.panel-meta {
+  margin-inline-start: auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.panel-meta a {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+
+.panel-meta a:hover {
+  text-decoration: underline;
+}
+
+/* ── roster ── */
+
+.roster-sec {
+  margin-bottom: 10px;
+}
+
+.roster-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 4px 0;
+}
+
+.roster-sec-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.roster-count {
+  background: var(--panel-3);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.roster-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.roster-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.roster-row:last-child {
+  border-bottom: none;
+}
+
+.r-dot {
+  display: flex;
+  justify-content: center;
+}
+
+.r-task {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.r-title {
+  font-weight: 600;
+  color: var(--fg);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.r-title:hover {
+  color: var(--accent-2);
+}
+
+.r-under {
+  display: block;
+  font-size: 10px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.r-owner {
+  font-size: 11.5px;
+}
+
+.r-stage {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  min-width: 0;
+}
+
+.r-cost {
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.r-when {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+/* The wide-only columns: absent at phone width, where the row keeps its dot,
+   title, owner and state — the drill-through carries the rest. */
+.wide-cell {
+  display: none;
+}
+
+.r-flag {
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: var(--orange);
+}
+
+.r-banner {
+  grid-column: 1 / -1;
+}
+
+.roster-fin {
+  margin-top: 8px;
+}
+
+.roster-fin > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ── per-person burn ── */
+
+.burn-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.burn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.burn-row:last-child {
+  border-bottom: none;
+}
+
+.burn-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.burn-rate {
+  margin-inline-start: auto;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.burn-under {
+  flex-basis: 100%;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+/* ── feed ── */
+
+.feed-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.feed-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.feed-row:last-child {
+  border-bottom: none;
+}
+
+.feed-when {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.feed-dot {
+  align-self: center;
+}
+
+.feed-text {
+  color: var(--text-dim);
+  line-height: 1.45;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+a.feed-text:hover {
+  color: var(--fg);
 }
 
 .step-needs {

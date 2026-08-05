@@ -9,21 +9,35 @@
  * The table is owned rather than adopted (OQ6): the S15 need is pathname
  * routes, deep links and bookmarks — no loaders, no nested-data machinery — and
  * a router at that size is not an organ.
+ *
+ * EXTENDED 2026-08-05 (frontend rework step 1, product map v2.1 §2): seven new
+ * routes — /projects, /new, /reviews, /lessons, /history, /health, /manual —
+ * added per the approved map. ADDITIONS publish paths nothing pointed at
+ * before; every previously published pattern below is byte-identical. Two rows
+ * changed TITLE only (the map's plain names): mission-control is "Home" and
+ * workforce is "Specialists" — the URLs never rename.
  */
 
 export type RouteID =
   | 'mission-control'
+  | 'projects'
+  | 'new'
   | 'board'
   | 'task'
-  | 'fleet'
   | 'inbox'
   | 'inbox-item'
-  | 'settings'
-  | 'chat'
+  | 'reviews'
   | 'deliverable'
-  | 'workforce'
+  | 'lessons'
+  | 'chat'
+  | 'history'
   | 'memory'
   | 'memory-entry'
+  | 'workforce'
+  | 'fleet'
+  | 'health'
+  | 'settings'
+  | 'manual'
   | 'login'
   | 'not-found'
 
@@ -39,26 +53,32 @@ export type RouteDef = {
   nav: boolean
 }
 
+/**
+ * Nav order IS the product map §2 order — the shell's grouping cuts this
+ * table's nav rows into consecutive runs, so the sidebar cannot reorder it.
+ * The seven new routes are BUILT (owner: ''): each answers with an honest
+ * placeholder surface that says what will appear there, never a blank page.
+ */
 export const routes: RouteDef[] = [
-  { id: 'mission-control', pattern: '/', title: 'Mission control', owner: '', nav: true },
+  { id: 'mission-control', pattern: '/', title: 'Home', owner: '', nav: true },
+  { id: 'projects', pattern: '/projects', title: 'Projects', owner: '', nav: true },
+  { id: 'new', pattern: '/new', title: 'Describe a goal', owner: '', nav: true },
   { id: 'board', pattern: '/board', title: 'Board', owner: '', nav: true },
   { id: 'task', pattern: '/tasks/:id', title: 'Task', owner: '', nav: false },
-  { id: 'fleet', pattern: '/fleet', title: 'Fleet', owner: '', nav: true },
   { id: 'inbox', pattern: '/inbox', title: 'Inbox', owner: '', nav: true },
   { id: 'inbox-item', pattern: '/inbox/:id', title: 'Approval', owner: '', nav: false },
-  { id: 'settings', pattern: '/settings', title: 'Settings', owner: '', nav: true },
-  { id: 'chat', pattern: '/chat', title: 'Assistant', owner: '', nav: true },
+  { id: 'reviews', pattern: '/reviews', title: 'Reviews', owner: '', nav: true },
   { id: 'deliverable', pattern: '/deliverables/:id', title: 'Deliverable', owner: '', nav: false },
-  { id: 'workforce', pattern: '/workforce', title: 'Workforce', owner: '', nav: true },
-  // ADDED 2026-08-05 (P3-UI-3), the first addition since the table was written.
-  // The ban this file records is on RENAMES — a published path is what a deep
-  // link and a push `navigate` field were written against. An ADDITION publishes
-  // a path nothing pointed at before, and S09.4's v0 activation table requires
-  // one: "Manual L2 — human-direct entries via workspace UI [XREF:S15]". The
-  // entry route exists so a conflict edge naming another entry is navigable,
-  // which is the S15.11 deep-links-always-land ethos on this family.
+  { id: 'lessons', pattern: '/lessons', title: 'Wins & Lessons', owner: '', nav: true },
+  { id: 'chat', pattern: '/chat', title: 'Assistant', owner: '', nav: true },
+  { id: 'history', pattern: '/history', title: 'History', owner: '', nav: true },
   { id: 'memory', pattern: '/memory', title: 'Memory', owner: '', nav: true },
   { id: 'memory-entry', pattern: '/memory/:id', title: 'Memory entry', owner: '', nav: false },
+  { id: 'workforce', pattern: '/workforce', title: 'Specialists', owner: '', nav: true },
+  { id: 'fleet', pattern: '/fleet', title: 'Fleet', owner: '', nav: true },
+  { id: 'health', pattern: '/health', title: 'Health & evals', owner: '', nav: true },
+  { id: 'settings', pattern: '/settings', title: 'Settings', owner: '', nav: true },
+  { id: 'manual', pattern: '/manual', title: 'Manual', owner: '', nav: true },
   { id: 'login', pattern: '/login', title: 'Sign in', owner: '', nav: false },
 ]
 

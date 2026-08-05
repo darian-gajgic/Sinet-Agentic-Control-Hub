@@ -106,9 +106,12 @@ test('waiting-on-a-human and parked-until are distinguished on the face', async 
 test('no view renders a percentage, a completion fraction or an ETA', async () => {
   const { view } = await board()
   const text = (view.container.textContent ?? '').toLowerCase()
-  for (const banned of ['%', 'percent', 'complete:', 'eta', 'estimated time', 'remaining time']) {
+  for (const banned of ['%', 'percent', 'complete:', 'estimated time', 'remaining time']) {
     expect(text, `the board rendered "${banned}" — the API serves no such figure (§30)`).not.toContain(banned)
   }
+  // 'eta' is scanned as a WORD: adjacent spans concatenate in textContent, and
+  // the shell's brand row reads "sinetagentic…" — letters, not a figure.
+  expect(text, 'the board rendered "eta" — the API serves no such figure (§30)').not.toMatch(/\beta\b/)
   // Non-tautology: the scan is reading a board with real cards on it.
   expect(text).toContain('ship the release notes')
 })

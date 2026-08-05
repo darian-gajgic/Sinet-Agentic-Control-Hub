@@ -1,32 +1,36 @@
-import { api, type MeterView, type Meters, type RunListItem } from './api'
+import { Activity, Clock3, Coins, UserCheck } from 'lucide-react'
+
+import {
+  api,
+  type Answer,
+  type ApprovalItem,
+  type MeterView,
+  type Meters,
+  type RunListItem,
+  type TaskListItem,
+} from './api'
 import type { EventStream } from './events'
 import { FilterBar, FilterView, filterFromSearch } from './Filters'
-import { AnswerView, HistoryPanel } from './History'
-import { missionEventTypes, useLive } from './live'
-import {
-  Absent,
-  Freshness,
-  Owner,
-  ParkedUntil,
-  Section,
-  StallBanner,
-  SurfaceHead,
-  ThresholdRing,
-} from './parts'
+import { AnswerView } from './History'
+import { inboxEventTypes, missionEventTypes, useLive } from './live'
+import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, ThresholdRing } from './parts'
+import { useProjectScope } from './project'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Chip, EmptyState, StatTile, StatusDot, Timestamp, type Tone } from './ui'
+import { Chip, EmptyState, Panel, StatTile, StatusDot, Timestamp, type Tone } from './ui'
 
 /**
- * Mission control (Spec S15.5 ¶1; S3.1): one live screen of the household's
- * work — everything running, queued, parked, blocked on a human, and recently
- * finished, with the consumption meters beside it and the filterable history
- * under it.
+ * Home (Spec S15.5 ¶1; S3.1; product map v2.1 §3): the household's work at a
+ * glance — hero, four stat tiles, the live roster, per-person burn, a slim
+ * recent-activity feed, and the personal filters. The deep instruments live
+ * where the map puts them: consumption detail on Fleet, the query layers on
+ * History. Home stays a glance, and everything on it drills through.
  *
  * WHO OWNS WHAT IS ON EVERY ITEM. The server has already scoped the read — a
  * member's answer contains only their own rows — so this view filters nothing
- * for privacy and hides no owner. Showing less than was served would be a
- * second, weaker access-control implementation living in a browser (S15.2).
+ * for privacy and hides no owner (S15.2). The PROJECT scope narrows the
+ * DISPLAY of that already-scoped answer: tasks by their served project value,
+ * runs by their task's, and what the narrowing hides is counted on screen.
  */
 
 /**
@@ -34,9 +38,9 @@ import { Chip, EmptyState, StatTile, StatusDot, Timestamp, type Tone } from './u
  *
  * A structural display constant with its reason (§41 precedent; no ⚙ key
  * exists and the browser cannot read the registry before login): 24 hours,
- * because mission control answers "what happened since I last looked" and a day
- * is the span a household's work is actually planned across. It changes only
- * what is SHOWN — every finished run remains readable through the run and task
+ * because Home answers "what happened since I last looked" and a day is the
+ * span a household's work is actually planned across. It changes only what is
+ * SHOWN — every finished run remains readable through the run and task
  * surfaces and through the history layers.
  */
 const recentlyFinishedWindowMs = 24 * 60 * 60 * 1000
@@ -58,9 +62,6 @@ export type Bucket = { id: string; title: string; runs: RunListItem[] }
  */
 const bucketMeaning: Record<string, { tone: Tone; why: string }> = {
   running: { tone: 'green', why: 'A run the platform is working on right now.' },
-  // The bucket holds `new` AND `queued` (bucketRuns below), and a `new` run has
-  // not been accepted by anything yet — it has been created and not yet
-  // dispatched. "Accepted" was true of only half the rows (drain r1, D5c).
   queued: {
     tone: 'blue',
     why: 'Created or queued and not started yet — waiting for the scheduler to pick it up when its lane has room.',
@@ -70,7 +71,7 @@ const bucketMeaning: Record<string, { tone: Tone; why: string }> = {
     why: 'Parked with an open question, so it moves again only once a person answers it in the inbox.',
   },
   parked: { tone: 'yellow', why: 'Stopped on a clock rather than on a person — it resumes at its own horizon.' },
-  finished: { tone: 'accent', why: 'Ended in the last day. Older work stays readable from its task and the history below.' },
+  finished: { tone: 'accent', why: 'Ended in the last day. Older work stays readable from its task and from History.' },
   other: {
     tone: 'pink',
     why: 'A state these five do not name — mid-dispatch, draining, or one a later version added. It is shown rather than hidden.',
@@ -91,10 +92,9 @@ export const bucketMeaningFor = (id: string): string => meaningOf(id).why
  * blocked-on-a-human is a strict subset of parked (the server derives it as
  * "parked with an open ask"), so a run waiting on a person is shown under the
  * person bucket only and the parked bucket is left meaning "waiting on a
- * clock". The final bucket exists so that a state none of the five name — a
- * claimed or draining run today, a state a later packet adds tomorrow — is
- * still on the screen. A run must never vanish from mission control because
- * this list did not anticipate its state.
+ * clock". The final bucket exists so that a state none of the five name is
+ * still on the screen. A run must never vanish from Home because this list did
+ * not anticipate its state.
  */
 export function bucketRuns(runs: RunListItem[], now: number): Bucket[] {
   const buckets: Bucket[] = [
@@ -126,9 +126,16 @@ export function MissionControl({
   search = '',
 }: { stream?: EventStream; me?: string; search?: string } = {}) {
   const filter = filterFromSearch(search)
+  const { project } = useProjectScope()
   const work = useLive({
     key: '/api/runs',
     read: () => api.runs(),
+    types: missionEventTypes,
+    stream,
+  })
+  const tasks = useLive({
+    key: '/api/tasks',
+    read: () => api.tasks(),
     types: missionEventTypes,
     stream,
   })
@@ -138,67 +145,254 @@ export function MissionControl({
     types: missionEventTypes,
     stream,
   })
+  const asks = useLive({
+    key: '/api/approvals',
+    read: () => api.approvals(),
+    types: inboxEventTypes,
+    stream,
+  })
+
+  // The project scope narrows the DISPLAY of the already-owner-scoped answers.
+  // A run's project is its task's served project value; a run with no task has
+  // no project dimension, so a scope hides it and the hiding is counted.
+  const allTasks = tasks.data?.tasks ?? []
+  const taskOf = new Map(allTasks.map((t) => [t.task_id, t]))
+  const scopedTasks = project === '' ? allTasks : allTasks.filter((t) => t.project === project)
+  const allRuns = work.data?.runs ?? []
+  const runs =
+    project === ''
+      ? allRuns
+      : allRuns.filter((r) => r.task_id !== '' && taskOf.get(r.task_id)?.project === project)
+  const hiddenStandalone = project === '' ? 0 : allRuns.filter((r) => r.task_id === '').length
 
   // Read once per render rather than on a ticker: this view re-renders when the
   // feed says something changed, and a clock of its own would be the one thing
   // §32 rules out.
-  const buckets = bucketRuns(work.data?.runs ?? [], Date.now())
-  // A teaching empty is a statement about what the platform ANSWERED, so it
-  // renders only over an answer. Before the read lands `Freshness` owns the
-  // window and says "catching up" — teaching "nothing is running" there would
-  // erase the line between none and not-loaded (§42; parts.tsx:103–113).
+  const buckets = bucketRuns(runs, Date.now())
+  const bucket = (id: string) => buckets.find((b) => b.id === id)!
   const answered = work.data !== null
 
   return (
     <section className="surface">
-      <SurfaceHead
-        title="Mission control"
-        what="One live screen of the household's work — what is running, queued, parked, blocked on a human and recently finished — with the consumption meters beside it."
+      <HomeHero
+        buckets={buckets}
+        tasks={scopedTasks}
+        taskOf={taskOf}
+        project={project}
+        answered={answered}
       />
+
       <FilterBar active={filter} />
       {filter !== '' && <FilterView id={filter} me={me} stream={stream} />}
-      <Freshness stale={work.stale} error={work.error} hasData={work.data !== null} />
+      <Freshness stale={work.stale || tasks.stale} error={work.error} hasData={work.data !== null} />
 
-      {/* A count of the rows ON SCREEN, which is presentation over the served
-          list rather than a figure of its own. The labels say so, and no tile
-          carries a number no list below it carries. */}
-      <div className="my-4 grid grid-cols-2 gap-(--density-gap) sm:grid-cols-3 lg:grid-cols-6" data-tiles="buckets">
-        {buckets.map((b) => (
-          <StatTile
-            key={b.id}
-            label={b.title}
-            tone={meaningOf(b.id).tone}
-            value={String(b.runs.length)}
-            foot="runs on screen"
-          />
-        ))}
+      {/* Counts of the rows ON SCREEN — presentation over the served lists,
+          which the labels say. No tile carries a number no list below carries. */}
+      <div className="my-4 grid grid-cols-2 gap-(--density-gap) xl:grid-cols-4" data-tiles="home">
+        <StatTile
+          label="Running"
+          tone="green"
+          icon={<Activity size={15} strokeWidth={1.8} aria-hidden="true" />}
+          value={String(bucket('running').runs.length)}
+          foot="runs executing now"
+        />
+        <StatTile
+          label="Waiting on you"
+          tone="orange"
+          icon={<UserCheck size={15} strokeWidth={1.8} aria-hidden="true" />}
+          value={String(bucket('blocked').runs.length)}
+          foot={
+            <>
+              answered from the <Link to={hrefFor('inbox')}>Inbox</Link>
+              {asks.data !== null && <> · {String(asks.data.items.length)} open cards</>}
+            </>
+          }
+        />
+        <StatTile
+          label="Parked"
+          tone="yellow"
+          icon={<Clock3 size={15} strokeWidth={1.8} aria-hidden="true" />}
+          value={String(bucket('parked').runs.length)}
+          foot={<ParkedFoot parked={bucket('parked').runs} />}
+        />
+        <SpendTile view={meters.data?.per_period} scoped={project !== ''} absentAll={meters.data === null} />
       </div>
 
-      {buckets.map((b) => (
-        <Section title={b.title} key={b.id} stale={work.stale}>
-          <p className="mt-0 mb-2 max-w-prose text-xs text-muted-foreground" data-bucket-why={b.id}>
-            {meaningOf(b.id).why}
-          </p>
-          {b.id === 'blocked' && b.runs.length > 0 && <BlockedDoor />}
-          {b.runs.length === 0 ? (
-            answered && <EmptyState what={`Nothing is ${b.title.toLowerCase()}.`} why={meaningOf(b.id).why} />
-          ) : (
-            <ul className="rows" data-bucket={b.id}>
-              {b.runs.map((r) => (
-                <li key={r.run_id} className="row flex flex-col gap-1 border-b border-border py-2">
-                  <RunLine run={r} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      ))}
+      <RosterPanel
+        buckets={buckets}
+        taskOf={taskOf}
+        answered={answered}
+        stale={work.stale}
+        hiddenStandalone={hiddenStandalone}
+        project={project}
+      />
 
-      <MetersPanel meters={meters.data} stale={meters.stale} error={meters.error} />
-      <HistoryPanel />
+      <div className="grid gap-(--density-gap) lg:grid-cols-2">
+        <BurnPanel meters={meters.data} stale={meters.stale} error={meters.error} />
+        <ActivityPanel runs={runs} asks={asks.data?.items ?? []} taskOf={taskOf} answered={answered} />
+      </div>
     </section>
   )
 }
+
+/* ── hero (the Nexus dashboard hero, without the dropped 3D galaxy) ──────── */
+
+function HomeHero({
+  buckets,
+  tasks,
+  taskOf,
+  project,
+  answered,
+}: {
+  buckets: Bucket[]
+  tasks: TaskListItem[]
+  taskOf: Map<string, TaskListItem>
+  project: string
+  answered: boolean
+}) {
+  const running = buckets.find((b) => b.id === 'running')!.runs
+  const blocked = buckets.find((b) => b.id === 'blocked')!.runs
+  const projects = new Set(tasks.map((t) => t.project))
+
+  return (
+    <div className="home-hero">
+      <div className="hero-orb" aria-hidden="true" />
+      <div className="hero-copy">
+        <p className="hero-kicker">{project === '' ? 'Sinet · control room' : `Project · ${project}`}</p>
+        <p className="hero-headline">
+          {answered ? (
+            <>
+              <b className="mono">{String(running.length)}</b> running ·{' '}
+              <b className="mono">{String(blocked.length)}</b> waiting on you
+            </>
+          ) : (
+            'Reading the platform…'
+          )}
+        </p>
+        <p className="hero-what" data-surface-what>
+          Everything running, queued, parked, blocked on a human or recently finished — with each person&apos;s burn
+          from the meters beside it.
+          {answered && (
+            <>
+              {' '}
+              {String(tasks.length)} task{tasks.length === 1 ? '' : 's'}
+              {project === '' && projects.size > 0 && (
+                <> across {String(projects.size)} project bucket{projects.size === 1 ? '' : 's'}</>
+              )}
+              .
+            </>
+          )}
+        </p>
+      </div>
+      <div className="hero-now">
+        <p className="now-title">
+          <StatusDot tone="green" live={running.length > 0} /> Executing right now
+        </p>
+        {running.length === 0 ? (
+          <p className="now-empty">{answered ? 'No run is executing right now' : 'catching up…'}</p>
+        ) : (
+          running.slice(0, 4).map((r) => <NowRow key={r.run_id} run={r} task={taskOf.get(r.task_id)} />)
+        )}
+        {running.length > 4 && <p className="now-empty">and {String(running.length - 4)} more below</p>}
+      </div>
+    </div>
+  )
+}
+
+function NowRow({ run, task }: { run: RunListItem; task?: TaskListItem }) {
+  const body = (
+    <>
+      <span className="now-head">
+        <StatusDot tone="green" live />
+        <span className="truncate">{task?.title ?? run.run_id}</span>
+      </span>
+      <span className="now-task">
+        <Owner id={run.owner} /> · {run.stage !== '' ? run.stage : 'no stage marker yet'} · {run.lane}
+      </span>
+      <span className="now-meta">
+        <Timestamp ts={run.last_activity_ts} variant="live" />
+      </span>
+    </>
+  )
+  return run.task_id !== '' ? (
+    <Link to={hrefFor('task', { id: run.task_id })} className="now-row">
+      {body}
+    </Link>
+  ) : (
+    <span className="now-row">{body}</span>
+  )
+}
+
+/* ── tiles ───────────────────────────────────────────────────────────────── */
+
+function ParkedFoot({ parked }: { parked: RunListItem[] }) {
+  if (parked.length === 0) return <>waiting on a clock</>
+  // The EARLIEST served horizon — a pick from served instants, not arithmetic.
+  const horizons = parked.map((r) => r.parked_until).filter((h): h is string => h !== null && h !== '')
+  if (horizons.length === 0) return <Absent reason="parked, no horizon given" />
+  const next = horizons.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a))
+  return (
+    <>
+      next resumes <Timestamp ts={next} variant="live" />
+    </>
+  )
+}
+
+/**
+ * Spend today — per person, exactly as the served `cost_per_period` view
+ * answers it (day × person × priced_usd). Money is picked off rows, NEVER
+ * summed across people (§37): a household total is arithmetic nobody
+ * performed, so the tile lists each person's own served figure instead.
+ * "Today" is the served UTC day, and the foot says so.
+ */
+function SpendTile({ view, scoped, absentAll }: { view?: MeterView; scoped: boolean; absentAll: boolean }) {
+  const icon = <Coins size={15} strokeWidth={1.8} aria-hidden="true" />
+  const today = new Date().toISOString().slice(0, 10)
+  const note = scoped ? ' · household-wide, not narrowed by the project scope' : ''
+
+  let value: React.ReactNode = '—'
+  let foot: React.ReactNode = `no receipts today (UTC day)${note}`
+
+  if (absentAll) {
+    foot = 'meters not read yet'
+  } else if (view === undefined || (view.answer === undefined && view.absent !== undefined)) {
+    foot = <Absent reason={view?.absent ?? 'not served'} />
+  } else if (view.answer !== undefined) {
+    const rows = todayRows(view.answer, today)
+    if (rows.length > 0) {
+      value = (
+        <span className="flex flex-col gap-0.5">
+          {rows.map((r) => (
+            <span key={r.person} className="text-[15px] leading-tight">
+              <Owner id={r.person} />{' '}
+              {r.usd === null ? <span className="muted">unpriced</span> : <Money usd={r.usd} />}
+            </span>
+          ))}
+        </span>
+      )
+      foot = `per person, ${today} (UTC)${note}`
+    }
+  }
+
+  return <StatTile label="Spend today" tone="blue" icon={icon} value={value} foot={foot} />
+}
+
+/** todayRows reads the served per-period answer BY ITS OWN COLUMNS — the view's
+ *  grain is (day, person), and a row whose day is today is today's reading. */
+function todayRows(answer: Answer, today: string): { person: string; usd: number | null }[] {
+  const day = answer.columns.indexOf('day')
+  const person = answer.columns.indexOf('user_id')
+  const usd = answer.columns.indexOf('priced_usd')
+  if (day === -1 || person === -1 || usd === -1) return []
+  return answer.rows
+    .filter((r) => String(r[day]) === today)
+    .map((r) => ({
+      person: String(r[person]),
+      usd: typeof r[usd] === 'number' ? (r[usd] as number) : null,
+    }))
+}
+
+/* ── the live roster ─────────────────────────────────────────────────────── */
 
 /** The blocked bucket's door. Answering happens on the inbox — this says so and
  *  fires nothing, because the ask's own verbs live where the card is. */
@@ -214,67 +408,360 @@ function BlockedDoor() {
   )
 }
 
-/** One work item. Every item drills through to its task detail — built with
- *  `hrefFor` over the URL contract, never a hand-assembled path.
- *
- *  A row carries no card id — the run list serves none — so a stopped row's
- *  door points at the SURFACE where its ask is answered rather than at a card
- *  this client would have had to guess (§42-B). */
-function RunLine({ run }: { run: RunListItem }) {
+/**
+ * The roster (the Nexus dashboard roster, on Sinet's real rows): every
+ * non-terminal run, grouped by the same disjoint buckets the sort defines,
+ * each row joined to its task's card face for the title and cost. Recently
+ * finished runs sit under it, collapsed — the feed tells the story, the
+ * roster is who is on shift.
+ */
+function RosterPanel({
+  buckets,
+  taskOf,
+  answered,
+  stale,
+  hiddenStandalone,
+  project,
+}: {
+  buckets: Bucket[]
+  taskOf: Map<string, TaskListItem>
+  answered: boolean
+  stale: boolean
+  hiddenStandalone: number
+  project: string
+}) {
+  const live = buckets.filter((b) => b.id !== 'finished')
+  const finished = buckets.find((b) => b.id === 'finished')!
+  const liveCount = live.reduce((n, b) => n + b.runs.length, 0)
+
   return (
-    <>
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <StatusDot tone={run.wedged ? 'red' : run.state === 'running' ? 'green' : 'accent'} live={run.state === 'running'} />
-        {run.task_id !== '' ? (
-          <Link to={hrefFor('task', { id: run.task_id })} className="font-mono text-sm tabular-nums">
-            {run.task_id}
-          </Link>
-        ) : (
-          <Absent reason="no task — this run stands alone" />
+    <Section title="The roster" stale={stale}>
+      <Panel
+        className="roster"
+        head={
+          <>
+            <span className="panel-title">Live work</span>
+            <span className="panel-meta">
+              {answered ? `${String(liveCount)} runs on shift` : 'catching up…'}
+            </span>
+          </>
+        }
+      >
+        {answered && liveCount === 0 && (
+          <EmptyState
+            what="Nothing is on shift."
+            why="A run appears here the moment work starts — running first, then queued, blocked-on-a-person and parked, each saying why it sits where it does."
+          />
         )}
-        <Chip className="run-state" tone={run.state === 'running' ? 'green' : 'accent'}>
-          {run.state}
-        </Chip>
-        {run.wedged && (
-          <Chip className="warn-flag" tone="red">
-            wedged
-          </Chip>
+        {live.map(
+          (b) =>
+            b.runs.length > 0 && (
+              <div key={b.id} className="roster-sec" data-bucket={b.id}>
+                <p className="roster-sec-head" title={meaningOf(b.id).why}>
+                  <StatusDot tone={meaningOf(b.id).tone} live={b.id === 'running'} />
+                  <span className="roster-sec-title">{b.title}</span>
+                  <span className="roster-count mono">{String(b.runs.length)}</span>
+                </p>
+                {b.id === 'blocked' && <BlockedDoor />}
+                <ul className="roster-rows">
+                  {b.runs.map((r) => (
+                    <RosterRow key={r.run_id} run={r} task={taskOf.get(r.task_id)} />
+                  ))}
+                </ul>
+              </div>
+            ),
         )}
-        <Owner id={run.owner} />
-        <span className="run-stage text-xs text-muted-foreground">
-          {run.stage !== '' ? run.stage : <Absent reason="no stage marker yet" />}
-        </span>
-        <span className="run-lane font-mono text-xs text-muted-foreground">{run.lane}</span>
-        {run.waiting_on_human && <span className="waiting-human text-xs text-[var(--orange)]">waiting on a person</span>}
-        {run.state === 'parked' && <ParkedUntil until={run.parked_until} />}
-        <span className="muted ms-auto text-xs">
-          last activity <Timestamp ts={run.last_activity_ts} variant="live" />
-        </span>
-      </span>
-      {run.wedged && (
-        <StallBanner
-          kind="wedged"
-          tone="red"
-          what="Flagged and paused: the platform stopped this run rather than let it loop, and it waits for a person."
-        >
-          <Link to={hrefFor('inbox')}>Its card is in the inbox</Link>
-        </StallBanner>
-      )}
-    </>
+        {hiddenStandalone > 0 && (
+          <p className="muted mt-2 text-xs">
+            {String(hiddenStandalone)} run{hiddenStandalone === 1 ? '' : 's'} without a task {hiddenStandalone === 1 ? 'is' : 'are'} outside
+            every project, so the {project} scope hides {hiddenStandalone === 1 ? 'it' : 'them'} — clear the scope to
+            see {hiddenStandalone === 1 ? 'it' : 'them'}.
+          </p>
+        )}
+        {finished.runs.length > 0 && (
+          <details className="roster-fin">
+            <summary>
+              Recently finished — {String(finished.runs.length)} run{finished.runs.length === 1 ? '' : 's'} in the last
+              day
+            </summary>
+            <ul className="roster-rows">
+              {finished.runs.map((r) => (
+                <RosterRow key={r.run_id} run={r} task={taskOf.get(r.task_id)} />
+              ))}
+            </ul>
+          </details>
+        )}
+      </Panel>
+    </Section>
   )
 }
 
+const stateTone = (r: RunListItem): Tone =>
+  r.wedged
+    ? 'red'
+    : r.state === 'running'
+      ? 'green'
+      : r.state === 'parked'
+        ? r.waiting_on_human
+          ? 'orange'
+          : 'yellow'
+        : terminalStates.includes(r.state)
+          ? 'accent'
+          : 'blue'
+
+/** One roster row: the run joined to its task's card face. The cost is the
+ *  task face's cost and renders ONLY beside the run it was served for — the
+ *  task's latest — never guessed onto an older generation. */
+function RosterRow({ run, task }: { run: RunListItem; task?: TaskListItem }) {
+  const isLatest = task?.latest_run?.run_id === run.run_id
+  const cost = isLatest ? (task?.latest_run?.cost_so_far_usd ?? null) : null
+  const effort = isLatest ? (task?.latest_run?.effort_mode ?? '') : ''
+
+  return (
+    <li className="roster-row">
+      <span className="r-dot">
+        <StatusDot tone={stateTone(run)} live={run.state === 'running'} />
+      </span>
+      <span className="r-task">
+        {run.task_id !== '' ? (
+          <Link to={hrefFor('task', { id: run.task_id })} className="r-title">
+            {task?.title ?? run.task_id}
+          </Link>
+        ) : (
+          <span className="r-title">
+            <Absent reason="no task — this run stands alone" />
+          </span>
+        )}
+        <span className="r-under mono">
+          {run.run_id}
+          {task !== undefined && task.project !== '' && ` · ${task.project}`}
+        </span>
+      </span>
+      <span className="r-owner">
+        <Owner id={run.owner} />
+      </span>
+      <span className="r-stage wide-cell">
+        {run.stage !== '' ? run.stage : <Absent reason="no stage yet" />}
+        <span className="r-under mono">{run.lane}</span>
+      </span>
+      <span className="r-state">
+        <Chip tone={stateTone(run)}>{run.wedged ? 'wedged' : run.state}</Chip>
+      </span>
+      <span className="r-cost wide-cell">
+        {cost !== null ? <Money usd={cost} /> : <Absent reason="no meter reading" />}
+        {effort !== '' && <span className="r-under">{effort}</span>}
+      </span>
+      <span className="r-when wide-cell">
+        <Timestamp ts={run.last_activity_ts} variant="live" />
+      </span>
+      {run.waiting_on_human && <span className="r-flag waiting-human">waiting on a person</span>}
+      {run.state === 'parked' && (
+        // EVERY parked run shows its horizon (or the honest no-horizon line) —
+        // waiting-on-a-person rows included, because a recorded horizon is a
+        // served fact the row must not drop.
+        <span className="r-flag">
+          <ParkedUntil until={run.parked_until} />
+        </span>
+      )}
+      {run.wedged && (
+        <span className="r-banner">
+          <StallBanner
+            kind="wedged"
+            tone="red"
+            what="Flagged and paused: the platform stopped this run rather than let it loop, and it waits for a person."
+          >
+            <Link to={hrefFor('inbox')}>Its card is in the inbox</Link>
+          </StallBanner>
+        </span>
+      )}
+    </li>
+  )
+}
+
+/* ── per-person burn ─────────────────────────────────────────────────────── */
+
+/**
+ * Per-person burn: the served burn-rate view at its OWN grain (per person, per
+ * observed day), each figure read off its row by column name — never divided,
+ * never summed (§37) — beside the pause switch's served position. The deep
+ * tables live on Fleet.
+ */
+function BurnPanel({ meters, stale, error }: { meters: Meters | null; stale: boolean; error: string }) {
+  const paused = new Map((meters?.automation.states ?? []).map((s) => [s.owner, s.paused]))
+
+  return (
+    <Panel
+      className="burn"
+      head={
+        <>
+          <span className="panel-title">Per-person burn</span>
+          <span className="panel-meta">
+            <Link to={hrefFor('fleet')}>full meters on Fleet</Link>
+          </span>
+        </>
+      }
+    >
+      <Freshness stale={stale} error={error} hasData={meters !== null} />
+      {meters !== null &&
+        (meters.burn_rates.answer !== undefined ? (
+          <BurnRows answer={meters.burn_rates.answer} paused={paused} />
+        ) : (
+          <Absent reason={meters.burn_rates.absent ?? 'not available'} />
+        ))}
+      {meters !== null && meters.automation.absent !== undefined && (
+        <p className="muted mt-2 text-xs">pause switches: {meters.automation.absent}</p>
+      )}
+    </Panel>
+  )
+}
+
+function BurnRows({ answer, paused }: { answer: Answer; paused: Map<string, boolean> }) {
+  const col = (name: string) => answer.columns.indexOf(name)
+  const person = col('user_id')
+  const rate = col('usd_per_day')
+  const total = col('priced_usd')
+  const days = col('observed_days')
+  const status = col('pricing_status')
+
+  // A shape this render does not recognise still reaches the screen, at the
+  // served grain, through the generic answer table — shown rather than hidden.
+  if (person === -1 || rate === -1) return <AnswerView answer={answer} />
+
+  if (answer.rows.length === 0)
+    return (
+      <EmptyState
+        what="No burn rate yet."
+        why="A person appears here once their first receipt lands; the rate is USD per observed day across their receipts."
+      />
+    )
+
+  return (
+    <ul className="burn-rows">
+      {answer.rows.map((r, i) => (
+        <li className="burn-row" key={String(r[person]) + String(i)}>
+          <span className="burn-who">
+            <Owner id={String(r[person])} />
+            {paused.get(String(r[person])) === true && <Chip tone="yellow">automation paused</Chip>}
+          </span>
+          <span className="burn-rate mono">
+            {typeof r[rate] === 'number' ? `USD ${String(r[rate])} / day` : <Absent reason="unpriced" />}
+          </span>
+          <span className="burn-under">
+            {total !== -1 && typeof r[total] === 'number' && <>USD {String(r[total])} priced</>}
+            {days !== -1 && <> over {String(r[days])} observed day{String(r[days]) === '1' ? '' : 's'}</>}
+            {status !== -1 && <> · {String(r[status])}</>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/* ── the slim recent-activity feed ───────────────────────────────────────── */
+
+type FeedItem = {
+  key: string
+  ts: string
+  tone: Tone
+  text: string
+  /** Whose row this is — rendered structurally (D2/S3.10), never only prose. */
+  owner: string
+  href?: string
+  live?: boolean
+}
+
+/**
+ * The feed is a MERGE OF SERVED ROWS sorted by their own served instants —
+ * runs by last activity, open cards by when they were first seen. Nothing here
+ * is an event log of its own: the platform's real record is History's.
+ */
+function ActivityPanel({
+  runs,
+  asks,
+  taskOf,
+  answered,
+}: {
+  runs: RunListItem[]
+  asks: ApprovalItem[]
+  taskOf: Map<string, TaskListItem>
+  answered: boolean
+}) {
+  const items: FeedItem[] = []
+  for (const r of runs) {
+    const at = r.last_activity_ts ?? r.updated_ts
+    if (!at) continue
+    const title = taskOf.get(r.task_id)?.title ?? r.task_id
+    items.push({
+      key: `run:${r.run_id}`,
+      ts: at,
+      tone: stateTone(r),
+      text: `${title !== '' ? title : r.run_id} — ${r.wedged ? 'wedged' : r.state}${r.stage !== '' ? ` at ${r.stage}` : ''}`,
+      owner: r.owner,
+      href: r.task_id !== '' ? hrefFor('task', { id: r.task_id }) : undefined,
+      live: r.state === 'running',
+    })
+  }
+  for (const a of asks) {
+    items.push({
+      key: `ask:${a.id}`,
+      ts: a.observed_ts,
+      tone: a.tier === 'high' ? 'red' : 'orange',
+      text: `${a.kind} waits on a person (${a.tier} tier)`,
+      owner: a.owner,
+      href: hrefFor('inbox-item', { id: a.id }),
+    })
+  }
+  items.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
+  const shown = items.slice(0, 9)
+
+  return (
+    <Panel
+      className="feed"
+      head={
+        <>
+          <span className="panel-title">Recent activity</span>
+          <span className="panel-meta">
+            <Link to={hrefFor('history')}>the full record is History</Link>
+          </span>
+        </>
+      }
+    >
+      {answered && shown.length === 0 && (
+        <EmptyState
+          what="Nothing has moved yet."
+          why="Run activity and cards that need a person land here, newest first, each linking to the thing it names."
+        />
+      )}
+      <ul className="feed-rows">
+        {shown.map((it) => (
+          <li className="feed-row" key={it.key}>
+            <span className="feed-when">
+              <Timestamp ts={it.ts} variant="live" />
+            </span>
+            <StatusDot tone={it.tone} live={it.live === true} className="feed-dot" />
+            {it.href !== undefined ? (
+              <Link to={it.href} className="feed-text">
+                {it.text}
+              </Link>
+            ) : (
+              <span className="feed-text">{it.text}</span>
+            )}
+            <Owner id={it.owner} />
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  )
+}
+
+/* ── the deep meters (mounted by FLEET — Home stays a glance) ────────────── */
+
 /**
  * The meters (S15.5; S2.5; S10 through /api/meters), rendered faithfully.
- *
- * Three honesties this panel exists to keep:
- *  - the S10.4 gauge's `assumed` label rides every reading it applies to — the
- *    assumption is stated, never dropped (G1 Def.10);
- *  - pressure renders ONLY when the gauge says it applies, because a pressure
- *    figure without a declared budget would be a fabricated denominator;
- *  - burn rates render at the view's OWN grain, which is per PERSON. This
- *    client never divides a person's rate across their lanes to fill a
- *    per-lane column — money is read, never computed (§37).
+ * Exported for Fleet, which is where the map puts the deep tables; the three
+ * honesties are unchanged: the `assumed` label rides every reading it applies
+ * to, pressure renders only when the gauge says it applies, and burn rates
+ * render at the view's own grain — money is read, never computed (§37).
  */
 export function MetersPanel({ meters, stale, error }: { meters: Meters | null; stale: boolean; error: string }) {
   return (
@@ -312,11 +799,6 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
                       )}
                     </td>
                     <td>
-                      {/* The ring is the ONE capacity idiom on these surfaces,
-                          and it renders only what the gauge served: the two
-                          landed gates are the whole condition, and the figure
-                          stays beside it because a ring is a glance and a
-                          number is the answer. */}
                       {l.pressure_applicable && l.pressure !== null ? (
                         <span className="inline-flex items-center gap-2">
                           <ThresholdRing
@@ -354,9 +836,6 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
             />
           )}
 
-          {/* What the ring means, in one line. It is deliberately about the
-              DECLARATION and never about a cutoff: where background work stops
-              being admitted is a server setting no browser can read. */}
           <p className="mt-2 text-xs text-muted-foreground" data-ring-legend>
             The ring beside a pressure figure shows that figure as a share of the declared budget for that lane — green
             below three quarters, orange from there, red once the declared budget is reached.
@@ -364,16 +843,6 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
 
           <ViewBlock title="Burn rate (per person, per observed day)" view={meters.burn_rates} />
           <ViewBlock title="Budget remainders" view={meters.budgets} />
-          {/* Never stall silently — KEYED ON THE CURRENT SIGNAL, and that is a
-              correction (drain r1, D2). This banner used to fire on the
-              limit-events view carrying any row, but `cost.limit_events` is
-              pure history: `SELECT … FROM limit_event_history … ORDER BY
-              event_seq DESC` (internal/history/catalog.go:554–559), with no
-              filter on `resets_at`. A row stays there after its window has
-              rolled, so one old event would have held a present-tense alarm up
-              forever — an alarm about nothing, which is the opposite of never
-              stalling silently. The lane rows on this same read carry the
-              CURRENT fact, so that is what it says. */}
           {meters.lanes.some((l) => l.parked_runs > 0) && (
             <StallBanner
               kind="parked-lanes"
@@ -383,8 +852,6 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
               <Link to={hrefFor('inbox')}>Parked runs are released from their cards in the inbox</Link>
             </StallBanner>
           )}
-          {/* Recorded history, and labelled as such: these rows are every limit
-              signal the platform ever stored, most of them long since reset. */}
           <ViewBlock title="Limit events — recorded history, not a current state" view={meters.limit_events} />
         </>
       )}

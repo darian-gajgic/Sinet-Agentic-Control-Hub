@@ -144,9 +144,16 @@ test('an opening frame lights the dot of the route you are NOT on, and arriving 
 
   await send(source, 'engine.gate_ask')
   expect(dotOn(view, 'inbox'), 'an opening frame did not light the inbox dot').toBe(true)
-  // NO COUNTS anywhere: the dot is a fact, not a figure.
+  // THE DOT CARRIES NO COUNT: it is a fact, not a figure — no number can be
+  // derived from frames without risking disagreement with the queue (§42).
+  // The nav BADGE beside it is a different thing entirely: a SERVED queue
+  // length that rides a useLive re-read (rework step 1, map §2 "glowing
+  // pending badge"), so digits inside the badge are the served count and
+  // digits anywhere ELSE in the link are still a violation.
   const link = view.container.querySelector(`a[href="${hrefFor('inbox')}"]`)!
-  expect(link.textContent, 'the dot carries a count the frames cannot justify').not.toMatch(/\d/)
+  const badge = link.querySelector('.nav-badge')
+  const outsideBadge = (link.textContent ?? '').replace(badge?.textContent ?? '', '')
+  expect(outsideBadge, 'the dot carries a count the frames cannot justify').not.toMatch(/\d/)
 
   // Arriving on the route answers it.
   act(() => {
