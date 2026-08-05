@@ -37,7 +37,7 @@ Internal evidence agrees: the ledger records every defect class caught by a fres
 
 **6. Watch item, not a pipeline defect: operator habituation.** Longitudinal evidence: approval rates for agent PRs rise (+14.5pp) while review effort falls (−22%) over time. The operator's spot-diff attention is a depleting resource — the deterministic gates must remain non-skippable because human scrutiny provably erodes.
 
-## Proposed amendments (operator decision pending — nothing applied)
+## Amendments — **RATIFIED by the operator (free-text, "apply all five") and APPLIED to SKILL.md 2026-08-05**
 
 - **A. Tests-first, executor-immutable** (answers flaws 1 + half of 3): the grounding stage (or a dedicated fresh test-author agent) derives the acceptance tests red-first from the brief; the executor makes them green and may not modify them; any executor edit to an existing test file is an automatic evaluation finding.
 - **B. Suite-strength leg** (flaw 2): a mutation-score pass (Go: go-mutesting or equivalent, live-verified at adoption time) run per phase gate — not per packet — plus property-based tests where the spec states invariants.
