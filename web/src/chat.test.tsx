@@ -1044,6 +1044,36 @@ test('the uploaded list renders as served, and delete is the landed verb', async
   view.unmount()
 })
 
+test('both list families carry the stacking set the one shed rule used to give them', async () => {
+  // THE DEFECT THIS PINS (A2 drain D1). `.chat-sessions li, .chat-files li` was
+  // ONE owned rule — display:flex, column, gap, overflow-wrap — and the A2
+  // restyle carried its utilities to the conversation rows and MISSED the file
+  // rows. In the real page that collapses a file row to inline flow: name,
+  // size, sha256, stamp and Delete run together with no separating space.
+  // jsdom has no layout engine, so nothing in this suite could see it; what IS
+  // checkable is that both families carry the same authored set, and that is
+  // what this asserts.
+  const files = servedFiles()
+  const { view } = await open(chatHref)
+  const stacking = ['flex', 'flex-col', 'gap-1', 'wrap-anywhere']
+
+  const fileRow = view.container.querySelector(`[data-file="${CSS.escape(files[0].file_id)}"]`)!
+  expect(fileRow, 'no file row rendered, so this test would prove nothing').not.toBeNull()
+  for (const u of stacking) {
+    expect([...fileRow.classList], `a file row lost ${u} — the row collapses to inline flow`).toContain(u)
+  }
+
+  // The direction that makes it discriminating: the SESSION rows are the other
+  // half of that same shed rule, and they must carry the identical set. A fix
+  // that changed one family's vocabulary and not the other's fails here.
+  const sessionRow = view.container.querySelector('[data-session-id]')!
+  expect(sessionRow, 'no conversation row rendered').not.toBeNull()
+  for (const u of stacking) {
+    expect([...sessionRow.classList], `a conversation row lost ${u}`).toContain(u)
+  }
+  view.unmount()
+})
+
 test('produced-files chips render the served attribution, and an empty one says so', async () => {
   const body = served()
   const withChips = body.turns.find((t) => (t.produced ?? []).length > 0)!

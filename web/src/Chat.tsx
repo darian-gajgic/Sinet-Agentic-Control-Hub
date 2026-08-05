@@ -1133,7 +1133,17 @@ function Exchange({
       ) : (
         <ul className="chat-files m-0 flex list-none flex-col gap-2 p-0">
           {files.map((f) => (
-            <li key={f.file_id} data-file={f.file_id}>
+            <li
+              key={f.file_id}
+              data-file={f.file_id}
+              // The SAME set the conversation rows carry. Both <li> families were
+              // ONE shed rule (`.chat-sessions li, .chat-files li`), so both must
+              // carry its presentation or the row collapses to inline flow —
+              // name, size, sha, stamp and Delete with no separating space.
+              // jsdom has no layout engine and cannot see that, so the set is
+              // pinned in chat.test.tsx instead.
+              className="flex flex-col gap-1 wrap-anywhere"
+            >
               <span className="chat-file-name wrap-anywhere">{f.name}</span>
               <span className="muted">{String(f.size_bytes)} bytes</span>
               <span className="muted chat-file-sha">{f.sha256}</span>
