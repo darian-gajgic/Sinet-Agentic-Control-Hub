@@ -152,14 +152,22 @@ export function InboxItem({ id, stream }: { id: string; stream?: EventStream }) 
 }
 
 /**
- * WithForms is the ONE read of the blind-pair form data, and it exists in this
- * shape for two reasons.
+ * WithForms is the CARDS' read of the blind-pair form data, and it exists in
+ * this shape for two reasons.
  *
  * It is read ONCE for the whole queue rather than per card, because it is one
  * question with one answer — and it is mounted only when a benchmark card is
- * actually on screen, so an inbox with none never asks a subsystem that may not
- * be wired in this process. A hook cannot be called conditionally, which is why
- * the condition lives in what MOUNTS rather than in what the hook does.
+ * actually on screen. A hook cannot be called conditionally, which is why the
+ * condition lives in what MOUNTS rather than in what the hook does.
+ *
+ * ⚠ CORRECTED 2026-08-05 (P3-UI-3): this was "the ONE read", and it no longer
+ * is. The standing opt-in panel above reads the same route unconditionally,
+ * because it has to render whether or not a pair is pending — so an inbox that
+ * ALSO carries a benchmark card now makes the request twice, and the sentence
+ * about never asking an unwired subsystem is no longer true of this surface
+ * either. Folding the two into one read means restructuring this component,
+ * which was outside that packet's sanction; the duplication is recorded in
+ * CONVENTIONS §49 rather than left for someone to discover here.
  */
 function WithForms({
   items,

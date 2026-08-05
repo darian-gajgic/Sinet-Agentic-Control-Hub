@@ -324,6 +324,13 @@ export function MemoryEntryView({
   })
   const detail = live.data
   const entry = detail?.entry ?? null
+  // The purge answer is held HERE and not in the button that fired it. A
+  // successful delete turns the entry into a tombstone, the tombstone branch
+  // drops the verbs, and the verbs take their own outcome line down with them —
+  // so the served sentence and the honest limits would vanish at exactly the
+  // moment they are being read (drain r1, D2). They describe the entry, and the
+  // entry is this page's subject.
+  const [purge, setPurge] = useState<{ detail: string; limits: string[] } | null>(null)
 
   return (
     <section className="surface">
@@ -337,7 +344,8 @@ export function MemoryEntryView({
         <>
           <EntryBody entry={entry} />
           <ConflictCards conflicts={detail?.conflicts ?? []} />
-          <EntryVerbs entry={entry} me={me} operator={operator} reload={live.reload} />
+          <EntryVerbs entry={entry} me={me} operator={operator} reload={live.reload} onPurged={setPurge} />
+          <PurgeAnswer answer={purge} />
         </>
       )}
     </section>
@@ -640,11 +648,13 @@ function EntryVerbs({
   me,
   operator,
   reload,
+  onPurged,
 }: {
   entry: MemoryEntry
   me: string
   operator: boolean
   reload: () => void
+  onPurged: (answer: { detail: string; limits: string[] }) => void
 }) {
   const owner = entry.owner === me
   const mayEdit = owner || operator
@@ -662,9 +672,9 @@ function EntryVerbs({
   return (
     <div className="mt-6 flex flex-col gap-4" data-verbs="entry">
       {mayEdit && <EditControl entry={entry} reload={reload} />}
-      {mayRemove && <RetireControl entry={entry} reload={reload} />}
+      {mayRemove && <RetireControl entry={entry} owner={owner} reload={reload} />}
       {mayDelete ? (
-        <DeleteControl entry={entry} reload={reload} />
+        <DeleteControl entry={entry} reload={reload} onPurged={onPurged} />
       ) : (
         <p className="muted" data-verb-absent="delete">
           Purging this entry outright is its owner's own right and nobody else's — an administrator may retire it, and
@@ -791,9 +801,14 @@ function EntryComposer({
         data-busy={String(act.busy)}
         disabled={act.busy}
         onClick={() => {
-          act.clear()
+          // A REFUSED write keeps its draft. The gate's reason is on screen and
+          // the fix is usually one field, so retyping the whole entry would be a
+          // punishment for a refusal the person did not choose. An APPLIED write
+          // starts clean, because the next entry is a different entry — and the
+          // outcome is deliberately NOT cleared on open, so the distinction
+          // survives a dialog the reader opened and closed again.
+          if (act.outcome?.kind !== 'failed') setDraft(emptyDraft())
           setWritten(null)
-          setDraft(emptyDraft())
           setOpen(true)
         }}
       >
@@ -845,9 +860,11 @@ function EditControl({ entry, reload }: { entry: MemoryEntry; reload: () => void
         data-busy={String(act.busy)}
         disabled={act.busy}
         onClick={() => {
-          act.clear()
+          // Same rule as the composer, and the reset side matters more here: a
+          // clean open re-syncs from the SERVED entry, so a version somebody
+          // else superseded while this page was open prefills as it now is.
+          if (act.outcome?.kind !== 'failed') setDraft(draftOf(entry))
           setWritten(null)
-          setDraft(draftOf(entry))
           setOpen(true)
         }}
       >
@@ -1084,7 +1101,7 @@ function DraftForm({
  * history and its row stays for audit; a true deletion is a separate right with
  * a separate control. Nothing here says "gone".
  */
-function RetireControl({ entry, reload }: { entry: MemoryEntry; reload: () => void }) {
+function RetireControl({ entry, owner, reload }: { entry: MemoryEntry; owner: boolean; reload: () => void }) {
   const [open, setOpen] = useState(false)
   const [why, setWhy] = useState('')
   const [removed, setRemoved] = useState<{ status: string; influence: MemoryInfluenceRef[] } | null>(null)
@@ -1110,7 +1127,13 @@ function RetireControl({ entry, reload }: { entry: MemoryEntry; reload: () => vo
         open={open}
         onOpenChange={setOpen}
         title="Retire this entry"
-        what="Retiring takes this entry out of every future assembly straight away — nothing new will be built with it. Its content stays in git history and its row stays for audit, so this is not a deletion: purging the content outright is a separate right with its own control below."
+        what={
+          'Retiring takes this entry out of every future assembly straight away — nothing new will be built with it. ' +
+          'Its content stays in git history and its row stays for audit, so this is not a deletion: purging the content outright is a separate right, ' +
+          (owner
+            ? 'and it is yours — its own control is below this one.'
+            : "and it belongs to whoever wrote the entry. You cannot purge it, and there is no control here that will.")
+        }
         act="Retire it"
         variant="danger"
         busy={act.busy}
@@ -1180,9 +1203,16 @@ function InfluenceList({ influence }: { influence: MemoryInfluenceRef[] }) {
  * act; the wire states its limits, and neither is this client's summary of the
  * other.
  */
-function DeleteControl({ entry, reload }: { entry: MemoryEntry; reload: () => void }) {
+function DeleteControl({
+  entry,
+  reload,
+  onPurged,
+}: {
+  entry: MemoryEntry
+  reload: () => void
+  onPurged: (answer: { detail: string; limits: string[] }) => void
+}) {
   const [open, setOpen] = useState(false)
-  const [deleted, setDeleted] = useState<{ note: string; limits: string[] } | null>(null)
   const act = useAct()
 
   return (
@@ -1195,7 +1225,6 @@ function DeleteControl({ entry, reload }: { entry: MemoryEntry; reload: () => vo
         disabled={act.busy}
         onClick={() => {
           act.clear()
-          setDeleted(null)
           setOpen(true)
         }}
       >
@@ -1214,29 +1243,45 @@ function DeleteControl({ entry, reload }: { entry: MemoryEntry; reload: () => vo
           act.run(
             () =>
               api.memoryDelete(entry.entry_id).then((res) => {
-                setDeleted({ note: res.tombstone_note, limits: res.limits })
-                return outcomeOf(res.tombstone, res.tombstone ? 'the content is purged' : 'no tombstone came back', res.detail)
+                onPurged({ detail: res.detail, limits: res.limits })
+                // The served sentence rides the PAGE's block, not this line, so
+                // it has exactly one home whether or not the re-read has already
+                // taken this control down. A refusal keeps its detail here,
+                // because a refused delete leaves the entry — and this control —
+                // exactly where they were.
+                return outcomeOf(res.tombstone, res.tombstone ? 'the content is purged' : 'no tombstone came back', '')
               }),
             reload,
           )
         }}
       />
       <OutcomeLine outcome={act.outcome} />
-      {deleted !== null && (
-        <div className="mt-2" data-block="deletion-limits">
-          <p className="text-sm" data-tombstone-note="served">
-            {deleted.note}
-          </p>
-          <h3 className="mt-2 text-xs tracking-wide text-muted-foreground uppercase">What a purge does not reach</h3>
-          <ul className="flex list-none flex-col gap-1 p-0 text-sm">
-            {deleted.limits.map((l) => (
-              <li key={l} data-limit="served">
-                {l}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    </div>
+  )
+}
+
+/**
+ * What the platform said about the purge, rendered where it survives.
+ *
+ * The four limits are the S09.5 honest limits SERVED AS DATA — what a deletion
+ * does not and cannot reach — and they render verbatim rather than summarised.
+ * They belong beside the stub they describe.
+ */
+function PurgeAnswer({ answer }: { answer: { detail: string; limits: string[] } | null }) {
+  if (answer === null) return null
+  return (
+    <div className="mt-4" data-block="deletion-limits">
+      <p className="text-sm" data-purge-detail="served">
+        {answer.detail}
+      </p>
+      <h3 className="mt-2 text-xs tracking-wide text-muted-foreground uppercase">What a purge does not reach</h3>
+      <ul className="flex list-none flex-col gap-1 p-0 text-sm">
+        {answer.limits.map((l) => (
+          <li key={l} data-limit="served">
+            {l}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

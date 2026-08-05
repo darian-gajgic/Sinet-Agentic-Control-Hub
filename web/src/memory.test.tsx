@@ -667,7 +667,7 @@ test('retiring says exactly what retiring is — and never that anything is gone
   const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
   expect(said).toContain('out of every future assembly')
   expect(said).toContain('stays in git history')
-  expect(said).toContain('a separate right with its own control')
+  expect(said).toContain('a separate right, and it is yours — its own control is below this one.')
   // The three claims a soft removal must not make.
   expect(said, 'the retire confirm claimed a deletion').not.toContain('gone')
   expect(said).not.toContain('permanently')
@@ -790,12 +790,14 @@ test('the owner’s delete is a distinct control with its own confirm, and the l
 
   const line = view.container.querySelector('[data-outcome]')!
   expect(line.getAttribute('data-outcome')).toBe('applied')
-  expect(line.textContent).toContain(deletedBody.detail)
+  // The served sentence lives on the PAGE's block and has exactly one home
+  // there, so it cannot be taken down by the re-read that follows the act
+  // (drain r1, D2) and cannot be printed twice while it is still up.
+  expect(view.container.querySelector('[data-purge-detail="served"]')?.textContent).toBe(deletedBody.detail)
+  expect(view.container.querySelectorAll('[data-purge-detail="served"]')).toHaveLength(1)
+  expect(line.textContent, 'the served sentence is printed in two places').not.toContain(deletedBody.detail)
   const limits = [...view.container.querySelectorAll('[data-limit="served"]')].map((l) => l.textContent)
   expect(limits, 'the honest limits were summarised instead of served').toEqual(deletedBody.limits)
-  expect(view.container.querySelector('[data-block="deletion-limits"]')?.textContent).toContain(
-    'removed at owner request',
-  )
   // And the re-read really re-read.
   expect(log.calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(1)
   view.unmount()
@@ -896,4 +898,178 @@ test('every control is reachable and operable at 375px', async () => {
   await flush()
   expect(view.container.querySelector('[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
   view.unmount()
+})
+
+// ── drain r1 ───────────────────────────────────────────────────────────────
+
+test('D1 — an entry that is not there renders the server’s own 404, on the read and on a verb', async () => {
+  // internal/api/memory.go:716–718 — `memoryScopeRead` answers every
+  // entry-scoped route the same way, 404 BEFORE 403, so an unknown id can never
+  // become an existence oracle. The string is transcribed byte-exact.
+  const notFound = { error: 'not_found', detail: 'memory entry not found' }
+
+  // (a) the READ arm: the surface says what the control plane said, and renders
+  // no entry, no verbs and no invented "deleted" story.
+  const { view: gone } = await detail(detailRoute(notFound, 404))
+  expect(gone.container.querySelector('.error')?.textContent).toBe(
+    'The control plane answered 404: memory entry not found',
+  )
+  expect(gone.container.querySelector('[data-entry-id]')).toBeNull()
+  expect(gone.container.querySelector('[data-verbs="entry"]')).toBeNull()
+  gone.unmount()
+
+  // (b) the fired-VERB arm: the entry was readable and had gone by the time the
+  // act landed — a real race, and the outcome arm for it is `failed` carrying
+  // the same served sentence.
+  const { view } = await detail({
+    ...detailRoute(fixtures.memoryEntry()),
+    [`POST /api/memory/${memoryEntryID}/remove`]: { status: 404, body: notFound },
+  })
+  click(view.container.querySelector('[data-open="retire"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  const line = view.container.querySelector('[data-outcome]')!
+  expect(line.getAttribute('data-outcome')).toBe('failed')
+  expect(line.textContent).toContain('refused (not_found)')
+  expect(line.textContent).toContain('memory entry not found')
+  // A 404 is not a 409: nothing claims the act may be retried against a subject
+  // that has moved.
+  expect(line.textContent).not.toContain('nothing fired — re-read it and decide again')
+  view.unmount()
+})
+
+test('D2 — a delete lands, the page re-reads, and what comes back renders as the tombstone', async () => {
+  const { view, log } = await detail({
+    ...detailRoute(fixtures.memoryEntry()),
+    [`POST /api/memory/${memoryEntryID}/delete`]: { body: deletedBody },
+  })
+  // Before: a live entry with its content and its verbs.
+  expect(view.container.querySelector('[data-content="served"]')?.textContent).toBe(entryA().content)
+  expect(view.container.querySelector('[data-control="memory-delete"]')).not.toBeNull()
+
+  // The control plane's ANSWER to the next read changes because the delete
+  // happened — which is the composition the isolated arms could not prove.
+  log.set(`GET /api/memory/${memoryEntryID}`, {
+    body: {
+      entry: {
+        ...entryA(),
+        title: '',
+        content: undefined,
+        topic_key: undefined,
+        status: 'removed',
+        tombstone: true,
+        tombstone_note: 'removed at owner request',
+      },
+      conflicts: [],
+      cursor: 90,
+    },
+  })
+
+  const readsBefore = log.calls.filter((c) => c.method === 'GET').length
+  click(view.container.querySelector('[data-open="delete"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  // The sequence, in order: the verb fired, the unconditional re-read ran, and
+  // the entry now renders as the stub.
+  //
+  // The `[data-outcome]` marker is deliberately NOT asserted here: on this path
+  // the re-read turns the entry into a tombstone, the tombstone branch drops the
+  // verbs, and the control that fired goes with them. What replaces the marker
+  // is stronger than it — the page's own state now says the entry is deleted,
+  // and the platform's sentence about the purge is below it. The `applied` arm
+  // itself is asserted where the control survives to show it (the isolated
+  // delete test, whose re-read still answers with a live entry).
+  expect(log.calls.some((c) => c.path.endsWith('/delete'))).toBe(true)
+  expect(log.calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(readsBefore)
+
+  expect(view.container.querySelector('[data-tombstone="true"]'), 'the re-read did not reach the detail').not.toBeNull()
+  expect(view.container.querySelector('[data-content="served"]'), 'purged content survived the re-read').toBeNull()
+  expect(view.container.querySelector('[data-verbs="none"]')).not.toBeNull()
+  expect(view.container.querySelector('[data-control="memory-delete"]'), 'a purged entry still offered a purge').toBeNull()
+  // And the answer SURVIVES the re-read that removed the control which fired it
+  // — the served sentence and the four honest limits are still beside the stub
+  // they describe. Before this round they went down with the verbs.
+  expect(view.container.querySelector('[data-purge-detail="served"]')?.textContent).toBe(deletedBody.detail)
+  expect([...view.container.querySelectorAll('[data-limit="served"]')].map((l) => l.textContent)).toEqual(
+    deletedBody.limits,
+  )
+  expect(view.container.querySelector('[data-tombstone-note="served"]')?.textContent).toBe('removed at owner request')
+  view.unmount()
+})
+
+test('D3 — the retire confirm is true in the operator’s posture too', async () => {
+  const house = { entry: { ...entryA(), owner: 'alice', scope: 'house' }, conflicts: [], cursor: 89 }
+  const { view } = await detail(detailRoute(house), { me: 'op', operator: true })
+  // There is no delete control below this one for an operator, so pointing at
+  // one would be the surface inventing a door for the reader.
+  expect(view.container.querySelector('[data-control="memory-delete"]')).toBeNull()
+  click(view.container.querySelector('[data-open="retire"]'))
+  await flush()
+  const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+  expect(said).toContain('a separate right, and it belongs to whoever wrote the entry')
+  expect(said).toContain('there is no control here that will')
+  expect(said, 'the operator was pointed at a control that is not there').not.toContain('its own control is below')
+  view.unmount()
+})
+
+test('D5 — a refused write keeps the draft; an applied one starts the next entry clean', async () => {
+  const { view, log } = await openComposer({
+    'GET /api/memory': { body: fixtures.memory() },
+    // internal/memory/memory.go:164 → 400 (internal/api/memory.go:809–815).
+    'POST /api/memory': { status: 400, body: { error: 'bad_request', detail: 'memory: invalid entry' } },
+  })
+  fillDraft('a title worth keeping', 'a body worth keeping')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  expect(view.container.querySelector('[data-outcome]')?.getAttribute('data-outcome')).toBe('failed')
+
+  // Re-open: the gate's reason is on screen and the fix is usually one field,
+  // so the typing survives.
+  click(view.container.querySelector('[data-open="create"]'))
+  await flush()
+  expect(
+    (document.querySelector('[data-field="title"]') as HTMLInputElement).value,
+    'a refusal cost the person their draft',
+  ).toBe('a title worth keeping')
+  expect((document.querySelector('[data-field="content"]') as HTMLTextAreaElement).value).toBe('a body worth keeping')
+
+  // Correct it and let it land. The draft is not re-typed — it is the same one.
+  log.set('POST /api/memory', { body: fixtures.memoryEntry() })
+  typeInto(document.querySelector('[data-field="title"]') as HTMLInputElement, 'a corrected title')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  expect(view.container.querySelector('[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
+  const sent = log.calls.filter((c) => c.method === 'POST').at(-1)!.body as Record<string, unknown>
+  expect(sent.title).toBe('a corrected title')
+  expect(sent.content).toBe('a body worth keeping')
+
+  // And after an APPLIED write the next open is clean, because the next entry
+  // is a different entry.
+  click(view.container.querySelector('[data-open="create"]'))
+  await flush()
+  expect((document.querySelector('[data-field="title"]') as HTMLInputElement).value).toBe('')
+  expect((document.querySelector('[data-field="content"]') as HTMLTextAreaElement).value).toBe('')
+  view.unmount()
+})
+
+test('D6 — the fixture helper serves ONE caller’s world, session and browse together', async () => {
+  // The hazard the parameter removes: two committed bodies are two different
+  // callers' ANSWERS, and keying them by URL alone let a test mounted as one
+  // person assert the other's body.
+  scriptedFetch(memoryRoutes('op'))
+  window.history.replaceState(null, '', '/memory')
+  const asOp = mount(<App stream={inertStream()} />)
+  await flush()
+  expect(asOp.container.querySelectorAll('[data-entry-id]')).toHaveLength(0)
+  asOp.unmount()
+
+  scriptedFetch(memoryRoutes('alice'))
+  window.history.replaceState(null, '', '/memory')
+  const asAlice = mount(<App stream={inertStream()} />)
+  await flush()
+  expect(asAlice.container.querySelectorAll('[data-entry-id]')).toHaveLength(memberList().entries.length)
+  asAlice.unmount()
 })

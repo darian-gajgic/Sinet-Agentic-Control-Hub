@@ -316,14 +316,31 @@ export const fixtures = {
 export const memoryEntryID = 'k-fixture-release-notes-a'
 export const memoryOtherEntryID = 'k-fixture-release-notes-b'
 
-/** The reads the S09 memory surfaces make, answered from the committed bodies.
- *  The unfiltered key is the operator's answer and the `?status=active` key is
- *  alice's, which is what the two committed bodies are. */
-export function memoryRoutes(): Record<string, Scripted> {
+/** The operator's own session, for the leg where WHOSE body is served is the
+ *  claim being made. `signedIn` is alice — who also holds the role bit — so a
+ *  test that wanted the operator's ANSWER and not merely the operator's ROLE
+ *  needs a different subject, not a different flag. */
+export const signedInAsOperator: Scripted = {
+  body: { authenticated: true, user: { user_id: 'op', display_name: 'Op', role: 'operator', pin_set: true } },
+}
+
+/**
+ * The reads the S09 memory surfaces make, answered from the committed bodies.
+ *
+ * THE POSTURE IS A PARAMETER, not something the URL implies. `memory.json` and
+ * `memory-operator.json` are two different CALLERS' answers to the same family,
+ * and an earlier version of this helper keyed them by URL alone — so a test
+ * mounted as one person could assert the other person's body and pass, which is
+ * exactly the scoping mistake these bodies exist to catch. Now the session and
+ * both browse keys move together, and asking for a posture gets that posture
+ * throughout.
+ */
+export function memoryRoutes(whose: 'alice' | 'op' = 'alice'): Record<string, Scripted> {
+  const browse = whose === 'op' ? fixtures.memoryOperator() : fixtures.memory()
   return {
-    'GET /api/auth/session': signedIn,
-    'GET /api/memory': { body: fixtures.memoryOperator() },
-    'GET /api/memory?status=active': { body: fixtures.memory() },
+    'GET /api/auth/session': whose === 'op' ? signedInAsOperator : signedIn,
+    'GET /api/memory': { body: browse },
+    'GET /api/memory?status=active': { body: browse },
     [`GET /api/memory/${memoryEntryID}`]: { body: fixtures.memoryEntry() },
   }
 }
