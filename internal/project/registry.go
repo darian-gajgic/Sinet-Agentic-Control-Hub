@@ -323,6 +323,22 @@ func (s *Store) MatchForIntake(ctx context.Context, h MatchHint) (Entry, bool, e
 	return best, true, nil
 }
 
+// PinForIntake resolves a request's SUBMITTED project pin: the registry id a
+// requester chose explicitly (the Projects-tab door, P3-RW-1) rather than named
+// in the request text. It is MatchForIntake's sibling and shares its edge — the
+// same visibility predicate over the same lifecycle rule — but resolves by id
+// and refuses distinguishably, so a pin the requester cannot have is a refusal
+// rather than the scan's ordinary "nothing matched" (Spec S13.7 "the registry
+// feeds intake resolution"; S15.2 server-side authority).
+//
+// An entry that does not exist and one the requester cannot see return the SAME
+// ErrNotFound with the same text: telling them apart would leak the existence of
+// another person's project. A VISIBLE entry that is not yet active returns
+// ErrNotActive — the requester may know that honestly.
+func (s *Store) PinForIntake(ctx context.Context, projectID, userID string) (Entry, error) {
+	return Entry{}, errors.New("project: PinForIntake not implemented (P3-RW-1)")
+}
+
 // visibleTo reports whether user owns or is an invited member of the entry.
 func visibleTo(e Entry, user string) bool {
 	if e.Owner == user {

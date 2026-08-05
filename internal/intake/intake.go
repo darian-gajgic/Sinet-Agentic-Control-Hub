@@ -27,6 +27,7 @@ package intake
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -98,6 +99,13 @@ type Request struct {
 	// State carrying this Request is marshaled whole onto every intake.state
 	// event, so recording them here IS recording them on the intake record.
 	Inputs []Input `json:"inputs,omitempty"`
+	// Project OPTIONALLY pins the request to a registered project by registry
+	// id (P3-RW-1). The Projects-tab door hands the id, so a pinned request
+	// resolves its registry slice DIRECTLY — the S06.2 name-token scan of the
+	// request text is not consulted. Empty keeps that scan exactly as before
+	// (additive-first, S15.2). Durable for free: the State carrying this
+	// Request is marshaled whole onto every intake.state event.
+	Project string `json:"project,omitempty"`
 }
 
 // Deterministic floor classes (Spec S06.2): any of these forces the high
@@ -388,6 +396,22 @@ var (
 	ErrBelowFloor = errors.New("intake: tier cannot drop below a deterministic floor")
 	// ErrTaxonomy covers invalid taxonomy or trigger files.
 	ErrTaxonomy = errors.New("intake: invalid taxonomy")
+	// ErrPinRefused is the class of Request.Project refusals (P3-RW-1). A
+	// requester who pins a project asked for THAT project: an invalid pin is
+	// refused loudly at Submit and no task is born believing it got one
+	// (S15.2 — the browser is a display, never an authority). It is the only
+	// registry-seam error Start does not swallow: the name-token scan's
+	// degrade posture (no match, no slice) is unchanged.
+	ErrPinRefused = errors.New("intake: submitted project pin refused")
+	// ErrPinUnknown covers a pinned project that does not exist AND one the
+	// requester may not see — deliberately ONE refusal, because telling them
+	// apart would leak the existence of another person's project (S13.7
+	// visibility; S15.2 server-side authority).
+	ErrPinUnknown = fmt.Errorf("%w: no such project for this requester", ErrPinRefused)
+	// ErrPinNotActive covers a pinned project the requester CAN see that has
+	// not been owner-approved yet (S13.7: only active entries feed intake
+	// resolution). Visible, so it may be named honestly.
+	ErrPinNotActive = fmt.Errorf("%w: project is registered but not active yet", ErrPinRefused)
 	// ErrCitationUnresolved reports a PLAN citing a project-truth knowledge
 	// entry that cannot be resolved to an active version at approval (Spec
 	// S09.6): a loud capture failure, never a silent no-op that would escape
