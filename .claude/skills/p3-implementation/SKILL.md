@@ -23,7 +23,11 @@ You are the build coordinator: the campaign-proven pattern re-instantiated for i
 - `Research/` is a closed archive. `Docs/` is read-only. BENCH-REG registered numbers change only via its §17.
 - Secrets never committed (`*-api-key.txt` gitignore pattern exists; broker mechanics per S11 when reached).
 
-## Work packets — four-stage pipeline (operator-ratified 2026-07-22; applies from P3-B4-2)
+## Pipeline routing (operator-directed 2026-08-05)
+
+**Frontend-shaped work — anything whose primary output is presentation or interaction (`web/` views, styling, UX flows, navigation, copy) — does NOT run the four-stage pipeline below. It runs `FRONTEND.md` in this directory** (single-author Fable builder, reference-over-prose, product map first, screenshot-in-the-loop, live design review + cold walks, operator-eyes final gate). The four-stage pipeline was built for backend correctness and, applied to the UI batch, produced a mechanically-green frontend the operator rejected whole (error analysis + research provenance: `P3/design/frontend-workflow-research-2026-08-05.md`). Mixed packets are split so each half runs under its own pipeline. Backend work continues below, unchanged.
+
+## Work packets — four-stage pipeline (operator-ratified 2026-07-22; applies from P3-B4-2; BACKEND work only as of 2026-08-05)
 
 STATE.md holds the current phase's packet queue. At phase entry the coordinator derives packets from S19.5 plus the phase's spec sections (a packet = one worker's worth: readable section set, implementable in one sitting, testable acceptance). TBD-P3 spikes and TBD-BRINGUP measurements attach to their phase per S19.5–S19.6; measurement results are recorded in `P3/measurements/` (G3 Def.8 discipline).
 
