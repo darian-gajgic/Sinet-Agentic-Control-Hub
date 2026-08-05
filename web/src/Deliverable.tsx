@@ -24,10 +24,10 @@ import {
 import type { EventStream } from './events'
 import { deliverableEventTypes, describeError, useLive } from './live'
 import { ActConfirm, OutcomeLine, useAct } from './controls'
-import { Absent, Empty, Freshness, Owner, Section, Stamp } from './parts'
+import { Absent, Empty, Freshness, Owner, Section, Stamp, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Button } from './ui'
+import { Button, Chip, EmptyState, cn, toneStyle, type Tone } from './ui'
 
 /**
  * The review surface (Spec S15.8; S13.1–S13.4, S13.6, S13.8; FC-v1 §2).
@@ -84,6 +84,149 @@ const defaultBlend = 0.5
 
 type ImageMode = '2-up' | 'swipe' | 'onion'
 
+// ── the restyle vocabulary (P3-UI-7 seam C-2; design proposal §1/§3) ─────────
+//
+// THE METHOD IS §51's, unchanged: a class keeps its name as the DOM hook it
+// already was, and the PRESENTATION moves to utilities. Nothing here is renamed,
+// so every landed assertion that selects on a class or a `data-` attribute still
+// selects on it.
+//
+// ⚠ THE ONE RULE THAT BOUNDS EVERYTHING BELOW (§53's carried hazard). Since the
+// cascade fix the owned sheet sits in `@layer base`, so an owned rule can no
+// longer override a utility on the same element — the `.chat-verbs` regression.
+// The review section keeps ten rules that `responsive.test.ts` is written
+// against, and NO element carrying one of them is given a utility for the same
+// property here. The kept set, and the property each keeps, is listed at the
+// stylesheet's own section head.
+
+/** The resting look of a review region — the A2 `chatPanel` idiom (§53), same
+ *  tokens, same reason: `Panel`'s hover lift/shadow is right for a card you can
+ *  press and wrong for a static region, and several of these regions are
+ *  landmark elements a generic `<div>` would erase. Border, radius, panel
+ *  gradient and density padding; no motion, no hover. */
+const reviewPanel = 'rounded-(--radius) border border-border bg-(image:--panel-grad) p-(--density-pad)'
+
+/**
+ * The composer textareas.
+ *
+ * `textarea` is the ONE form element the sheet's global chrome never covered
+ * (`input, select, button`), so before this restyle every free-text box on the
+ * surface rendered the user agent's own default beside inputs that carried the
+ * owned chrome. The utilities give it the same border, radius, surface and
+ * padding the native controls already have, plus the 4rem floor and the
+ * `min-width: 0` the shed rule carried — which is what makes a long line wrap
+ * inside a flex column instead of widening it.
+ */
+const reviewTextarea =
+  'min-h-16 w-full min-w-0 rounded-(--radius-sm) border border-border bg-background p-2 text-foreground'
+
+/**
+ * ⚠ THE RADIO ROWS, and this is a REPORTED LEGIBILITY DEFECT this restyle fixes
+ * rather than a cosmetic preference.
+ *
+ * The sheet's global chrome makes every `label` a flex COLUMN and every
+ * `input` `width: 100%`. Inside the three review pickers — which are flex ROWS
+ * at the breakpoint — that stacked a stretched radio ABOVE its own text and let
+ * the text overflow its column, so at 1280px the shipped page read
+ * "(o) (o) / Side by side  Inline": two radios adjacent and two labels adjacent,
+ * with nothing saying which belonged to which. Verified in a real browser over
+ * the served dist, and verified LANDED rather than introduced here — the label
+ * markup is byte-identical to the pre-packet file.
+ *
+ * The fix is a utility, and after the cascade fix that is the only shape it can
+ * take: an owned rule can no longer override a utility, so the winner has to be
+ * the utility. It competes with the GLOBAL `label`/`input` chrome and with
+ * nothing this section keeps — the three container rules sit on the parents.
+ */
+const radioRow = 'flex-row items-center gap-2'
+const radioInput = 'w-auto'
+
+/** The one treatment for a served id, hash, count or line number — §47's
+ *  "every number, id, timestamp and status token". `code`, `pre` and `time`
+ *  already carry it from the sheet's own global rule, so this is for the spans
+ *  that are none of those. */
+const figure = 'font-mono tabular-nums'
+
+/** A tone-carrying inline token, on the ONE chip formula (§47) over `--tone`.
+ *  It is deliberately NOT the kit `Chip`: these slots render the platform's own
+ *  MEANING SENTENCES verbatim ("blocker — this triggers another round"), and a
+ *  sentence given the uppercase mono status-token treatment stops reading as a
+ *  sentence — the §53 A2 content-vs-status-token judgement, applied the other
+ *  way round. Single-WORD statuses do take the kit `Chip`. */
+const toneToken =
+  'inline-flex items-center gap-1.5 rounded-(--radius-sm) border px-1.5 py-0.5 text-xs ' +
+  'text-(--tone) border-[color-mix(in_srgb,var(--tone)_25%,transparent)] ' +
+  'bg-[color-mix(in_srgb,var(--tone)_9%,transparent)]'
+
+/**
+ * Every tone map below is over a CLOSED served vocabulary, and every one of them
+ * hands back `null` for a value this build has never seen.
+ *
+ * That is the §51 D5b rule applied: a status colour that disagrees with the word
+ * beside it is the one thing a status colour must not do, and a future server's
+ * value coloured by a guess would do exactly that. `null` renders the value in
+ * the neutral treatment with no tone claimed — the same forward tolerance the
+ * text arms already take (`placementMeaning`'s default returns the raw value).
+ */
+function severityTone(severity: string): Tone | null {
+  switch (severity) {
+    case 'blocker':
+      return 'red'
+    case 'note':
+      return 'blue'
+    default:
+      return null
+  }
+}
+
+/** The five S13.3 placement statuses. `exact` and `mapped` are both confirmed
+ *  positions, so both read as settled; `drifted` is the near-miss the recorded
+ *  status exists to make visible; `orphan` has no live location at all, which is
+ *  the state a reviewer most needs to notice. `file` claims no line and takes no
+ *  hue, because file-level is not a degraded line-level — it is its own answer. */
+function placementTone(status: string | undefined): Tone | null {
+  switch (status) {
+    case 'exact':
+      return 'green'
+    case 'mapped':
+      return 'blue'
+    case 'drifted':
+      return 'yellow'
+    case 'orphan':
+      return 'orange'
+    default:
+      return null
+  }
+}
+
+/** A tone-carrying span that renders its text VERBATIM, and renders it in the
+ *  neutral treatment when no tone is claimed. */
+function ToneSpan({
+  tone,
+  className,
+  children,
+  ...rest
+}: { tone: Tone | null; className?: string; children: React.ReactNode } & Record<string, unknown>) {
+  if (tone === null) {
+    return (
+      <span
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-(--radius-sm) border border-border px-1.5 py-0.5 text-xs text-muted-foreground',
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </span>
+    )
+  }
+  return (
+    <span style={toneStyle(tone)} className={cn(toneToken, className)} {...rest}>
+      {children}
+    </span>
+  )
+}
+
 export function Deliverable({ id, me, stream }: { id: string; me: string; stream?: EventStream }) {
   const { data, error, stale, reload } = useLive<DeliverableDetail>({
     key: `/api/deliverables/${id}`,
@@ -94,15 +237,30 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
 
   return (
     <section className="surface deliverable">
-      <h1>{data ? data.deliverable.id : 'Deliverable'}</h1>
+      {/* R11's line. What it may NOT say is as pinned as what it says: approval
+          state is served PER ARTIFACT (§38 ruling (a)), so this page never
+          calls anything approved or signed off, and it never offers acceptance
+          as something it can take back — no un-accept verb exists at any shape.
+          The one accept the SPA has is the owner's own outward push. */}
+      <SurfaceHead
+        title={data ? data.deliverable.id : 'Deliverable'}
+        what="Review one deliverable end to end: read the revisions the platform minted, compare one round against another, comment on a line or on the whole file, try the built thing in a frame, and accept a revision when it is right. An accept pushes a commit under your own credentials, and nothing on this page takes one back."
+      />
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && (
         <>
-          <p className="muted">
+          <p className={cn('mt-0 mb-3 text-xs text-muted-foreground', figure)} data-provenance="deliverable">
             <Owner id={data.deliverable.owner} /> · {data.deliverable.type} ·{' '}
-            <span className="dlv-state" data-state={data.deliverable.state}>
+            <ToneSpan
+              // The state vocabulary is the SERVER's and this build owns no map
+              // of it, so the token claims no hue: a state coloured by a guess
+              // would be a status colour disagreeing with its own word (§51 D5b).
+              tone={null}
+              className="dlv-state text-[11px] tracking-wide uppercase"
+              data-state={data.deliverable.state}
+            >
               {data.deliverable.state}
-            </span>{' '}
+            </ToneSpan>{' '}
             · <Link to={hrefFor('task', { id: data.deliverable.task_id })}>{data.deliverable.task_id}</Link>
             {data.deliverable.project_id ? <> · {data.deliverable.project_id}</> : null}
             {data.deliverable.subject_ref ? <> · {data.deliverable.subject_ref}</> : null}
@@ -138,20 +296,30 @@ function RevisionsBlock({ detail, stale }: { detail: DeliverableDetail; stale: b
   return (
     <Section title="Revisions" stale={stale}>
       {detail.revisions.length === 0 ? (
-        <Empty what="No revision is minted yet, so there is nothing to review." />
+        <EmptyState
+          what="No revision is minted yet, so there is nothing to review."
+          why="A revision appears here when a run mints one — the platform records its content pin, the run and attempt that produced it, and the verification verdict, and each one stays for good."
+        />
       ) : (
+        // `.revisions` KEEPS its rule, and this element gains NO layout utility.
+        // Two reasons, both structural: `TaskDetail.tsx:841` renders the same
+        // class and that file is byte-frozen here (so the rule cannot follow the
+        // markup), and the ordered-list marker this rule indents is the numbering
+        // itself — a `flex` utility would silently drop it on one consumer and
+        // keep it on the other. §53's brief expected the markup move to free the
+        // rule; the grep says a second consumer holds it.
         <ol className="revisions">
           {detail.revisions.map((r) => (
-            <li key={r.n} data-revision={String(r.n)}>
-              <span className="rev-n">revision {String(r.n)}</span>{' '}
-              <span className="muted">
+            <li key={r.n} data-revision={String(r.n)} className="wrap-anywhere text-sm">
+              <span className={cn('rev-n font-semibold', figure)}>revision {String(r.n)}</span>{' '}
+              <span className={cn('text-xs text-muted-foreground', figure)}>
                 {r.pin_kind} {revisionPin(r) === '' ? <Absent reason="no pin recorded" /> : revisionPin(r)}
               </span>
-              <span className="muted">
+              <span className={cn('text-xs text-muted-foreground', figure)}>
                 {' '}
                 · minted by {r.run_id === undefined || r.run_id === '' ? <Absent reason="no minting run" /> : r.run_id}
               </span>
-              <span className="muted">
+              <span className={cn('text-xs text-muted-foreground', figure)}>
                 {' '}
                 ·{' '}
                 {r.verdict_ref === undefined || r.verdict_ref === 0 ? (
@@ -160,7 +328,7 @@ function RevisionsBlock({ detail, stale }: { detail: DeliverableDetail; stale: b
                   <span data-verdict-ref={String(r.verdict_ref)}>verdict #{String(r.verdict_ref)}</span>
                 )}
               </span>
-              <span className="muted">
+              <span className={cn('text-xs text-muted-foreground', figure)}>
                 {' '}
                 · <Stamp ts={r.created_ts} />
               </span>
@@ -181,21 +349,31 @@ function revisionPin(r: Revision): string {
 function LineageEdges({ detail }: { detail: DeliverableDetail }) {
   const lin = detail.lineage
   if (lin.succeeds.length === 0 && lin.succeeded_by.length === 0) {
-    return <p className="muted">No follow-up lineage: this deliverable neither followed from one nor spawned a task.</p>
+    return (
+      <p className="mb-0 text-xs text-muted-foreground">
+        No follow-up lineage: this deliverable neither followed from one nor spawned a task.
+      </p>
+    )
   }
+  // `.lineage` KEEPS its rule for the same reason `.revisions` does —
+  // `TaskDetail.tsx:739` is the second consumer and is byte-frozen — so no
+  // margin utility competes with its `margin-block` here.
   return (
     <div className="lineage">
       {lin.succeeds.map((s) => (
-        <p key={`from-${s.deliverable_id}-${s.revision_n}`} data-lineage="succeeds">
+        <p key={`from-${s.deliverable_id}-${s.revision_n}`} data-lineage="succeeds" className="my-1 text-sm">
           Follows from{' '}
-          <Link to={hrefFor('deliverable', { id: s.deliverable_id })}>
+          <Link to={hrefFor('deliverable', { id: s.deliverable_id })} className={figure}>
             {s.deliverable_id} r{String(s.revision_n)}
           </Link>
         </p>
       ))}
       {lin.succeeded_by.map((s) => (
-        <p key={`to-${s.task_id}`} data-lineage="succeeded-by">
-          Followed up by <Link to={hrefFor('task', { id: s.task_id })}>{s.task_id}</Link>
+        <p key={`to-${s.task_id}`} data-lineage="succeeded-by" className="my-1 text-sm">
+          Followed up by{' '}
+          <Link to={hrefFor('task', { id: s.task_id })} className={figure}>
+            {s.task_id}
+          </Link>
         </p>
       ))}
     </div>
@@ -255,16 +433,20 @@ function RevisionPicker({
   served: Comparison | null
 }) {
   const numbers = detail.revisions.map((r) => r.n)
+  // `.rev-picker` KEEPS its rule (flex column at phone width, row inside the one
+  // breakpoint), so this element takes no display/flex/gap/margin utility: an
+  // owned `@media` arm in `@layer base` LOSES to a competing utility, and that is
+  // the `.chat-verbs` regression class no jsdom test in the tree can see (§53).
   return (
     <div className="rev-picker">
-      <p data-compared={served ? `${served.old_n}:${served.new_n}` : ''}>
+      <p className="m-0 text-sm" data-compared={served ? `${served.old_n}:${served.new_n}` : ''}>
         {served ? (
           <>
             Comparing{' '}
             <strong>{served.old_n === 0 ? 'the pre-task base' : `revision ${String(served.old_n)}`}</strong> with{' '}
             <strong>revision {String(served.new_n)}</strong>
             {pair.new === undefined && pair.old === undefined && (
-              <span className="muted"> — the platform&apos;s own round-over-round default</span>
+              <span className="text-muted-foreground"> — the platform&apos;s own round-over-round default</span>
             )}
           </>
         ) : (
@@ -302,9 +484,9 @@ function RevisionPicker({
         </select>
       </label>
       {(pair.old !== undefined || pair.new !== undefined) && (
-        <button type="button" data-action="round-over-round" onClick={() => onPick({})}>
+        <Button variant="ghost" size="sm" data-action="round-over-round" onClick={() => onPick({})}>
           Back to round-over-round
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -315,8 +497,11 @@ function RevisionPicker({
  *  the surface rather than being folded into it. */
 function SurfaceLabel({ cmp }: { cmp: Comparison }) {
   if (cmp.label === undefined || cmp.label === '') return null
+  // The two shared blocks `.warn-flag` and `.notice` KEEP their rules — nine and
+  // ten consumers across the tree, most of them on byte-frozen surfaces — so the
+  // hue stays theirs and this adds only rhythm.
   return (
-    <p className={cmp.fallback === true ? 'warn-flag' : 'notice'} data-surface-label={cmp.surface}>
+    <p className={cn(cmp.fallback === true ? 'warn-flag' : 'notice', 'my-2 text-sm')} data-surface-label={cmp.surface}>
       {cmp.fallback === true ? 'Fallback surface: ' : ''}
       {cmp.label}
     </p>
@@ -369,11 +554,17 @@ function SurfaceBody({
     default:
       return (
         <>
-          <div className="surface-unknown" data-surface={cmp.surface}>
+          <div className={cn('surface-unknown', reviewPanel)} data-surface={cmp.surface}>
             <Absent
               reason={`no rich comparison surface for the answer "${cmp.surface}" — this build does not know how to draw it, so here is what the platform served`}
             />
-            <dl className="served-fields">
+            <dl
+              className={cn(
+                'served-fields mt-2 mb-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs',
+                '[&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground',
+                figure,
+              )}
+            >
               <dt>surface</dt>
               <dd>{cmp.surface}</dd>
               <dt>type</dt>
@@ -428,10 +619,15 @@ function DiffSurface({
 
   return (
     <div className="diff-surface">
+      {/* `.diff-controls` KEEPS its rule — flex column, row at the breakpoint —
+          so the toggle row takes no layout utility. The radios themselves are
+          native and utility-less on purpose: they keep the owned form chrome,
+          which is the negative leg the cascade record measured (§53 A1). */}
       <div className="diff-controls">
         {(['split', 'unified'] as const).map((v) => (
-          <label key={v}>
+          <label key={v} className={radioRow}>
             <input
+              className={radioInput}
               type="radio"
               name="diff-view"
               data-view-type={v}
@@ -445,6 +641,9 @@ function DiffSurface({
       {parsed.failure !== '' ? (
         <UnreadableDiff failure={parsed.failure} unified={cmp.unified ?? ''} />
       ) : files.length === 0 ? (
+        // Deliberately `Empty`-grade rather than a teaching state: this is a
+        // MID-FORM absence with the reason already in the sentence, and R12 says
+        // migrate only where a teaching `why` is true and useful.
         <Empty what="The platform served no diff text for this pair — the two revisions have no differing file." />
       ) : (
         files.map(({ file, path }) => (
@@ -494,11 +693,11 @@ function parseUnified(unified: string): { files: FileData[]; failure: string } {
 
 function UnreadableDiff({ failure, unified }: { failure: string; unified: string }) {
   return (
-    <div className="diff-unreadable" data-diff-unreadable="true">
+    <div className={cn('diff-unreadable', reviewPanel)} data-diff-unreadable="true">
       <Absent
         reason={`this diff could not be read as a unified diff (${failure}), so it cannot be drawn as one — the text the platform served is below, unchanged`}
       />
-      <pre className="diff-raw">{unified}</pre>
+      <pre className="diff-raw mt-2 mb-0 overflow-x-auto text-xs">{unified}</pre>
     </div>
   )
 }
@@ -527,9 +726,12 @@ function DiffFile({
   const widgets = commentWidgets(file, path, comments, placements)
 
   return (
-    <div className="diff-file" data-file={path}>
-      <h4 className="diff-file-head">
-        {path} <span className="muted">{file.type}</span>
+    // `.diff-file` KEEPS its rule whole (`margin` + `overflow-x: auto`, the one
+    // property `responsive.test.ts:233` is written against), so no margin or
+    // overflow utility competes with it here.
+    <div className={cn('diff-file', 'rounded-(--radius) border border-border')} data-file={path}>
+      <h4 className={cn('diff-file-head my-1 wrap-anywhere px-2 pt-2 text-sm', figure)}>
+        {path} <span className="text-xs text-muted-foreground">{file.type}</span>
       </h4>
       <Diff
         viewType={viewType}
@@ -599,7 +801,10 @@ function commentWidgets(
   const out: Record<string, React.ReactNode> = {}
   for (const [key, list] of keyed) {
     out[key] = (
-      <div className="diff-widget" data-widget-key={key}>
+      <div
+        className="diff-widget border-s-[3px] border-current px-2 py-1.5"
+        data-widget-key={key}
+      >
         {list.map((c) => (
           <CommentCard key={c.id} comment={c} placement={placements.find((p) => p.comment_id === c.id)} />
         ))}
@@ -737,34 +942,50 @@ function CommentsBlock({
   const unanchored = comments.filter((c) => widgetReach(files, byID.get(c.id)) === null)
 
   return (
-    <div className="comments" data-revision={String(revision)}>
+    <div className={cn('comments', reviewPanel, 'mt-3')} data-revision={String(revision)}>
       <Freshness stale={feed.stale} error={feed.error} hasData={feed.data !== null} />
-      <h4>Comments on revision {String(revision)}</h4>
-      {comments.length === 0 ? (
-        <Empty what="Nobody has commented on this revision yet." />
-      ) : (
-        <ul className="comment-list">
-          {comments.map((c) => (
-            <li key={c.id}>
-              <CommentCard comment={c} placement={byID.get(c.id)} />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="synthetic-strip" data-strip="unanchored">
-        <h5>Without a place in this view</h5>
-        {unanchored.length === 0 ? (
-          <Empty what="Every comment on this revision has a live position in the diff above." />
+      <h4 className="mt-0 mb-2">Comments on revision {String(revision)}</h4>
+      {/* SERVED-GATED (§51 drain D1). `comments` is `feed.data?.comments ?? []`,
+          so before this gate a read still in flight rendered as a served empty
+          and taught "nobody has commented" about a question the platform had not
+          answered. `feed.data !== null` is the answered state; `Freshness` owns
+          the window before it. The same gate covers the strip below, whose
+          sentence ("every comment has a live position") would otherwise be a
+          statement about an empty list nobody had been sent yet. */}
+      {feed.data !== null &&
+        (comments.length === 0 ? (
+          <EmptyState
+            what="Nobody has commented on this revision yet."
+            why="Selecting a line in the diff anchors a comment to it; leaving the anchor off files it against the deliverable. A verification run's findings land here too, and a blocker is what makes the platform run another round."
+          />
         ) : (
-          <ul>
-            {unanchored.map((c) => (
-              <li key={c.id} data-strip-comment={String(c.id)}>
+          <ul className="comment-list m-0 flex list-none flex-col gap-2 ps-0">
+            {comments.map((c) => (
+              <li key={c.id}>
                 <CommentCard comment={c} placement={byID.get(c.id)} />
               </li>
             ))}
           </ul>
-        )}
+        ))}
+
+      <div className="synthetic-strip my-2 border-s-[3px] border-current px-2 py-1.5" data-strip="unanchored">
+        <h5 className="mt-0 mb-1">Without a place in this view</h5>
+        {feed.data !== null &&
+          (unanchored.length === 0 ? (
+            // Deliberately `Empty`-grade: this is a mid-form absence and, unlike
+            // an empty list, it is a POSITIVE statement about the comments that
+            // do exist — there is no "what would make a row appear here" that is
+            // useful to teach.
+            <Empty what="Every comment on this revision has a live position in the diff above." />
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 ps-0">
+              {unanchored.map((c) => (
+                <li key={c.id} data-strip-comment={String(c.id)}>
+                  <CommentCard comment={c} placement={byID.get(c.id)} />
+                </li>
+              ))}
+            </ul>
+          ))}
       </div>
 
       <CommentComposer
@@ -793,26 +1014,34 @@ function CommentCard({ comment, placement }: { comment: Comment; placement?: Pla
   const c = comment
   return (
     <div
-      className="comment"
+      className="comment py-1.5"
       data-comment={String(c.id)}
       data-status={c.status}
       data-kind={c.kind}
       data-placement={placement?.status ?? 'unplaced'}
     >
-      <p className="comment-head">
-        <Owner id={c.owner} /> <span className="severity" data-severity={c.severity}>
+      <p className="comment-head m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <Owner id={c.owner} />{' '}
+        <ToneSpan tone={severityTone(c.severity)} className="severity" data-severity={c.severity}>
           {severityMeaning(c.severity)}
-        </span>{' '}
-        <span className="muted">
+        </ToneSpan>{' '}
+        <span className={cn('text-muted-foreground', figure)}>
           {c.kind} · said about revision {String(c.revision_n)} · <Stamp ts={c.created_ts} />
         </span>
       </p>
-      <p className="comment-body">{c.body}</p>
+      {/* `.comment-body` KEEPS its rule (`overflow-wrap: anywhere`, the LAST-but-one
+          selector of the group `responsive.test.ts:245` reads through `.signing`),
+          so no wrap utility competes with it. */}
+      <p className="comment-body my-1 text-sm">{c.body}</p>
       {c.suggested_change !== undefined && c.suggested_change !== '' && (
-        <pre className="suggested">{c.suggested_change}</pre>
+        // `.suggested` KEEPS its rule (`overflow-x` + `white-space`, the group
+        // `responsive.test.ts:242` reads through `.merge-card pre`).
+        <pre className="suggested rounded-(--radius-sm) border border-border bg-background p-2 text-xs">
+          {c.suggested_change}
+        </pre>
       )}
       {(c.category !== undefined && c.category !== '') || (c.criterion !== undefined && c.criterion !== '') ? (
-        <p className="muted finding-meta">
+        <p className={cn('finding-meta m-0 text-xs text-muted-foreground', figure)}>
           {c.category !== undefined && c.category !== '' ? <>category {c.category} </> : null}
           {c.criterion !== undefined && c.criterion !== '' ? <>· criterion {c.criterion}</> : null}
         </p>
@@ -846,27 +1075,33 @@ function PlacementLine({ comment, placement }: { comment: Comment; placement?: P
   const claimed = comment.anchor
   const live = placement?.anchor
   return (
-    <p className="placement">
-      <span className="placement-status" data-status={placement?.status ?? 'unplaced'}>
+    // `.placement` KEEPS its rule (`overflow-wrap`, same pinned group), so no
+    // wrap utility competes; the same holds for `.quote code` below.
+    <p className="placement my-1 text-xs">
+      <ToneSpan
+        tone={placementTone(placement?.status)}
+        className="placement-status"
+        data-status={placement?.status ?? 'unplaced'}
+      >
         {placementMeaning(placement?.status)}
-      </span>
+      </ToneSpan>
       {live !== undefined && live.line_no !== 0 ? (
-        <span className="muted">
+        <span className={cn('text-muted-foreground', figure)}>
           {' '}
           · now at {live.file_path}:{String(live.line_no)} ({live.side} side)
         </span>
       ) : null}
       {live !== undefined && live.line_no === 0 && live.file_path !== '' ? (
-        <span className="muted"> · on {live.file_path}</span>
+        <span className={cn('text-muted-foreground', figure)}> · on {live.file_path}</span>
       ) : null}
       {claimed !== undefined && claimed.line_text !== '' ? (
-        <span className="quote">
+        <span className={cn('quote text-muted-foreground', figure)}>
           {' '}
           · quoted <code>{claimed.line_text}</code> at {claimed.file_path}:{String(claimed.line_no)}
         </span>
       ) : null}
       {comment.origin_anchor !== undefined && comment.origin_anchor !== '' ? (
-        <span className="muted"> · as supplied: {comment.origin_anchor}</span>
+        <span className={cn('text-muted-foreground', figure)}> · as supplied: {comment.origin_anchor}</span>
       ) : null}
     </p>
   )
@@ -894,20 +1129,29 @@ function placementMeaning(status: string | undefined): string {
 }
 
 function LifecycleLine({ comment }: { comment: Comment }) {
+  // Open and consumed are the two ends of the S13.4 drain, and they take the two
+  // tones that say so: an open comment is still owed a round, a consumed one has
+  // had its round and carries the [F#] the attempt received it as.
   if (comment.status !== 'consumed') {
-    return <p className="lifecycle" data-lifecycle="open">Open — the next round will drain this.</p>
+    return (
+      <p className="lifecycle my-1 text-xs" data-lifecycle="open">
+        <ToneSpan tone="blue">Open — the next round will drain this.</ToneSpan>
+      </p>
+    )
   }
   return (
-    <p className="lifecycle" data-lifecycle="consumed">
-      <span className="finding-number">
+    <p className="lifecycle my-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" data-lifecycle="consumed">
+      <ToneSpan tone="green" className={cn('finding-number font-semibold', figure)}>
         [F{comment.finding_number === undefined ? '?' : String(comment.finding_number)}]
-      </span>{' '}
-      consumed <Stamp ts={comment.consumed_at} /> by{' '}
-      {comment.consumed_by === undefined || comment.consumed_by === '' ? (
-        <Absent reason="no consuming attempt recorded" />
-      ) : (
-        <span className="attempt-ref">{comment.consumed_by}</span>
-      )}
+      </ToneSpan>{' '}
+      <span className={cn('text-muted-foreground', figure)}>
+        consumed <Stamp ts={comment.consumed_at} /> by{' '}
+        {comment.consumed_by === undefined || comment.consumed_by === '' ? (
+          <Absent reason="no consuming attempt recorded" />
+        ) : (
+          <span className="attempt-ref font-semibold">{comment.consumed_by}</span>
+        )}
+      </span>
     </p>
   )
 }
@@ -968,17 +1212,22 @@ function CommentComposer({
         submit()
       }}
     >
-      <h5>Add a comment as {me === '' ? 'yourself' : me}</h5>
-      <p className="muted" data-claim={anchored === null ? '' : `${anchored.file_path}:${anchored.line_no}`}>
+      <h5 className="m-0">Add a comment as {me === '' ? 'yourself' : me}</h5>
+      <p
+        className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+        data-claim={anchored === null ? '' : `${anchored.file_path}:${anchored.line_no}`}
+      >
         {anchored === null ? (
           <>Select a line in the diff to anchor this, or leave it file-level.</>
         ) : (
           <>
-            Anchored at {anchored.file_path}:{String(anchored.line_no)} ({anchored.side} side), quoting{' '}
-            <code>{anchored.line_text}</code>{' '}
-            <button type="button" data-action="clear-anchor" onClick={() => onClearAnchor?.()}>
+            <span className={figure}>
+              Anchored at {anchored.file_path}:{String(anchored.line_no)} ({anchored.side} side), quoting{' '}
+              <code>{anchored.line_text}</code>
+            </span>{' '}
+            <Button variant="ghost" size="sm" data-action="clear-anchor" onClick={() => onClearAnchor?.()}>
               Drop the anchor
-            </button>
+            </Button>
           </>
         )}
       </p>
@@ -990,7 +1239,12 @@ function CommentComposer({
       )}
       <label>
         What you want to say
-        <textarea data-field="body" value={body} onChange={(e) => setBody(e.target.value)} />
+        <textarea
+          className={reviewTextarea}
+          data-field="body"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+        />
       </label>
       <label>
         Severity
@@ -1003,14 +1257,19 @@ function CommentComposer({
       </label>
       <label>
         Suggested change (optional)
-        <textarea data-field="suggested" value={suggested} onChange={(e) => setSuggested(e.target.value)} />
+        <textarea
+          className={reviewTextarea}
+          data-field="suggested"
+          value={suggested}
+          onChange={(e) => setSuggested(e.target.value)}
+        />
       </label>
-      <button type="submit" data-action="add-comment" disabled={body.trim() === ''}>
+      <Button variant="primary" size="sm" type="submit" data-action="add-comment" disabled={body.trim() === ''}>
         Add comment
-      </button>
-      {failure !== '' && <p className="error">{failure}</p>}
+      </Button>
+      {failure !== '' && <p className="error m-0 text-sm">{failure}</p>}
       {born !== null && (
-        <p className="notice" data-born-status={born.anchor_status}>
+        <p className="notice m-0 text-sm" data-born-status={born.anchor_status}>
           Recorded. The platform placed it as <strong>{placementMeaning(born.anchor_status)}</strong> — that is where it
           lives, whatever position was claimed.
         </p>
@@ -1038,12 +1297,22 @@ function ImagePair({ cmp }: { cmp: Comparison }) {
   const newRef = (cmp.new_objects ?? [])[0]
 
   return (
-    <div className="image-pair" data-mode={mode}>
+    <div className={cn('image-pair', reviewPanel)} data-mode={mode}>
       <ChangedVerdict cmp={cmp} />
+      {/* `.image-modes` and `.two-up` both KEEP their rules — each is read by
+          `responsive.test.ts:251/:255` and each has a live wide-screen arm — so
+          neither takes a layout utility. */}
       <div className="image-modes">
         {(['2-up', 'swipe', 'onion'] as const).map((m) => (
-          <label key={m}>
-            <input type="radio" name="image-mode" data-image-mode={m} checked={mode === m} onChange={() => setMode(m)} />
+          <label key={m} className={radioRow}>
+            <input
+              className={radioInput}
+              type="radio"
+              name="image-mode"
+              data-image-mode={m}
+              checked={mode === m}
+              onChange={() => setMode(m)}
+            />
             {m}
           </label>
         ))}
@@ -1056,9 +1325,9 @@ function ImagePair({ cmp }: { cmp: Comparison }) {
       )}
       {mode === 'swipe' && (
         <div className="swipe">
-          <div className="swipe-stack">
+          <div className="swipe-stack relative">
             <ImageSide label={sideLabel('new', cmp.new_n)} deliverable={cmp.deliverable_id} ref_={newRef} />
-            <div className="swipe-top" style={{ width: `${swipeAt}%` }}>
+            <div className="swipe-top absolute inset-y-0 start-0 end-auto overflow-hidden" style={{ width: `${swipeAt}%` }}>
               <ImageSide label={sideLabel('old', cmp.old_n)} deliverable={cmp.deliverable_id} ref_={oldRef} />
             </div>
           </div>
@@ -1075,9 +1344,9 @@ function ImagePair({ cmp }: { cmp: Comparison }) {
       )}
       {mode === 'onion' && (
         <div className="onion">
-          <div className="onion-stack">
+          <div className="onion-stack relative">
             <ImageSide label={sideLabel('old', cmp.old_n)} deliverable={cmp.deliverable_id} ref_={oldRef} />
-            <div className="onion-top" style={{ opacity: blend }}>
+            <div className="onion-top absolute inset-0 overflow-hidden" style={{ opacity: blend }}>
               <ImageSide label={sideLabel('new', cmp.new_n)} deliverable={cmp.deliverable_id} ref_={newRef} />
             </div>
           </div>
@@ -1106,15 +1375,17 @@ function sideLabel(side: string, n: number): string {
 
 function ImageSide({ label, deliverable, ref_ }: { label: string; deliverable: string; ref_?: ObjectRef }) {
   const [failed, setFailed] = useState(false)
+  // `.image-side` sheds its `margin: 0` to a utility; `.image-side img` KEEPS its
+  // own rule, so the <img> below carries no sizing utility.
   if (ref_ === undefined) {
     return (
-      <figure className="image-side" data-image-side="absent">
+      <figure className="image-side m-0" data-image-side="absent">
         <Absent reason={`${label}: this side pins no object`} />
       </figure>
     )
   }
   return (
-    <figure className="image-side" data-image-side={ref_.sha256}>
+    <figure className="image-side m-0" data-image-side={ref_.sha256}>
       {failed ? (
         <Absent
           reason={`${label}: the platform does not serve ${ref_.type === undefined || ref_.type === '' ? 'this type' : ref_.type} inline, so it cannot be drawn here — download the object to inspect it`}
@@ -1122,7 +1393,7 @@ function ImageSide({ label, deliverable, ref_ }: { label: string; deliverable: s
       ) : (
         <img src={objectHref(deliverable, ref_.sha256)} alt={`${label}: ${ref_.name}`} onError={() => setFailed(true)} />
       )}
-      <figcaption className="muted">{label}</figcaption>
+      <figcaption className="mt-1 text-xs text-muted-foreground">{label}</figcaption>
     </figure>
   )
 }
@@ -1131,10 +1402,10 @@ function ImageSide({ label, deliverable, ref_ }: { label: string; deliverable: s
  *  nothing is the truthful render when no producer filled it. */
 function PixelDiffAid({ cmp }: { cmp: Comparison }) {
   if (cmp.pixel_diff === undefined) {
-    return <p className="muted">No pixel-diff aid was computed for this pair.</p>
+    return <p className="my-2 text-xs text-muted-foreground">No pixel-diff aid was computed for this pair.</p>
   }
   return (
-    <p className="pixel-diff" data-pixel-diff="served">
+    <p className={cn('pixel-diff my-2 text-xs', figure)} data-pixel-diff="served">
       Pixel-diff aid:{' '}
       {cmp.pixel_diff.changed_ratio === undefined ? (
         <Absent reason="no changed ratio recorded" />
@@ -1158,7 +1429,9 @@ function PixelDiffAid({ cmp }: { cmp: Comparison }) {
  *  certainty about two opaque blobs. */
 function ChangedVerdict({ cmp }: { cmp: Comparison }) {
   return (
-    <p className="changed-verdict" data-changed={cmp.changed === true ? 'true' : 'false'}>
+    // The hash verdict is a FACT rather than a status: "they differ" is neither
+    // good nor bad on a review surface, so it takes no hue and reads as prose.
+    <p className="changed-verdict my-1 text-sm" data-changed={cmp.changed === true ? 'true' : 'false'}>
       {cmp.changed === true
         ? 'The two sides differ: their content hashes are not the same.'
         : 'The two sides are identical by content hash.'}
@@ -1180,25 +1453,33 @@ function ObjectCards({ cmp }: { cmp: Comparison }) {
   ]
   if (sides.every((s) => s.refs.length === 0)) return null
   return (
-    <div className="object-cards">
+    <div className={cn('object-cards mt-2 flex flex-col gap-2', reviewPanel)}>
       <ChangedVerdict cmp={cmp} />
       {sides.map((side) => (
         <div className="object-side" key={side.label} data-object-side={side.label}>
-          <h5>{side.label}</h5>
+          <h5 className="mt-0 mb-1">{side.label}</h5>
           {side.refs.length === 0 ? (
             <Absent reason="this side pins no object" />
           ) : (
-            <ul>
+            <ul className="m-0 flex list-none flex-col gap-2 ps-0">
               {side.refs.map((ref) => (
-                <li key={ref.sha256} data-object={ref.sha256}>
-                  <span className="object-name">{ref.name}</span>{' '}
-                  <span className="muted">
+                <li key={ref.sha256} data-object={ref.sha256} className="text-sm">
+                  <span className={cn('object-name font-semibold', figure)}>{ref.name}</span>{' '}
+                  <span className={cn('text-xs text-muted-foreground', figure)}>
                     {String(ref.size)} bytes ·{' '}
                     {ref.type === undefined || ref.type === '' ? <Absent reason="no type recorded" /> : ref.type}
                   </span>
                   <br />
-                  <code className="object-sha">{ref.sha256}</code>{' '}
-                  <a href={objectHref(cmp.deliverable_id, ref.sha256)} data-action="download-object" download={ref.name}>
+                  {/* `.deliverable .object-sha` KEEPS its rule — it is the LAST
+                      selector of the group `responsive.test.ts:239` reads — so
+                      the hash takes no wrap utility of its own. */}
+                  <code className="object-sha text-xs">{ref.sha256}</code>{' '}
+                  <a
+                    href={objectHref(cmp.deliverable_id, ref.sha256)}
+                    data-action="download-object"
+                    download={ref.name}
+                    className="text-xs"
+                  >
                     Download to inspect
                   </a>
                 </li>
@@ -1227,11 +1508,19 @@ function DoorsBlock({ detail, reload }: { detail: DeliverableDetail; reload: () 
   return (
     <Section title="What you can do">
       {detail.doors.length === 0 ? (
-        <Empty what="The platform named no doors on this deliverable." />
+        <EmptyState
+          what="The platform named no doors on this deliverable."
+          why="A door appears here when the platform will actually let you through it — asking for a revision, spawning a follow-up, launching a preview, accepting. What is open depends on the deliverable's state and on whose work it is, so this list changes as the work moves."
+        />
       ) : (
-        <ul className="doors">
+        <ul className="doors m-0 flex list-none flex-col gap-3 ps-0">
           {detail.doors.map((door) => (
-            <li key={door.verb} data-door={door.verb} data-available={door.available ? 'true' : 'false'}>
+            <li
+              key={door.verb}
+              data-door={door.verb}
+              data-available={door.available ? 'true' : 'false'}
+              className={cn(reviewPanel, 'flex flex-col gap-1')}
+            >
               <DoorRow door={door} detail={detail} reload={reload} />
             </li>
           ))}
@@ -1244,13 +1533,18 @@ function DoorsBlock({ detail, reload }: { detail: DeliverableDetail; reload: () 
 function DoorRow({ door, detail, reload }: { door: Door; detail: DeliverableDetail; reload: () => void }) {
   return (
     <>
-      <p className="door-head">
-        <span className="door-verb">{door.verb}</span>{' '}
-        <span className={door.available ? 'notice' : 'muted'}>{door.available ? 'open' : 'closed'}</span>
+      <p className="door-head m-0 flex flex-wrap items-center gap-2">
+        <span className={cn('door-verb font-semibold', figure)}>{door.verb}</span>{' '}
+        {/* open/closed is a single-WORD status, so it takes the kit `Chip`'s
+            status-token treatment — unlike the meaning SENTENCES elsewhere on
+            this surface, which stay prose (§53 A2's content-vs-token judgement). */}
+        <Chip tone={door.available ? 'green' : 'yellow'}>{door.available ? 'open' : 'closed'}</Chip>
       </p>
-      <p className="door-reason">{door.reason}</p>
+      {/* `.door-reason` KEEPS its rule (the `responsive.test.ts:245` group), so
+          no wrap utility competes with it. */}
+      <p className="door-reason m-0 text-sm">{door.reason}</p>
       {door.route !== '' && (
-        <p className="muted door-route">
+        <p className={cn('door-route m-0 text-xs text-muted-foreground', figure)}>
           {door.method} {door.route}
           {door.preset !== undefined && door.preset !== '' ? <> · preset {door.preset}</> : null}
           {door.pin_from !== undefined && door.pin_from !== '' ? <> · pin from {door.pin_from}</> : null}
@@ -1310,10 +1604,11 @@ function SpawnFollowUp({
   const held = objective.trim() === '' ? 'A follow-up needs its own ask — say what the successor should do.' : ''
 
   return (
-    <div className="follow-up" data-control="follow-up">
-      <label>
+    <div className="follow-up mt-1 flex flex-col items-start gap-2" data-control="follow-up">
+      <label className="w-full">
         What should the follow-up do?
         <textarea
+          className={reviewTextarea}
           data-field="follow-up-objective"
           value={objective}
           onChange={(e) => setObjective(e.currentTarget.value)}
@@ -1330,7 +1625,7 @@ function SpawnFollowUp({
         Spawn a follow-up
       </Button>
       {held !== '' && (
-        <p className="muted" data-held="follow-up">
+        <p className="m-0 text-xs text-muted-foreground" data-held="follow-up">
           {held}
         </p>
       )}
@@ -1374,7 +1669,7 @@ function SpawnFollowUp({
       />
       <OutcomeLine outcome={act.outcome} />
       {act.outcome?.kind === 'applied' && (
-        <p className="muted">
+        <p className="m-0 text-xs text-muted-foreground">
           It is a task now, so it lives on the board and its own detail — this deliverable is unchanged.
         </p>
       )}
@@ -1487,7 +1782,12 @@ function RequestRevision({ door }: { door: Door }) {
     >
       <label>
         Guidance for the next round
-        <textarea data-field="guidance" value={guidance} onChange={(e) => setGuidance(e.target.value)} />
+        <textarea
+          className={reviewTextarea}
+          data-field="guidance"
+          value={guidance}
+          onChange={(e) => setGuidance(e.target.value)}
+        />
       </label>
       {/* Severity is not offered here, and the absence is the point: the platform
           records a guidance point as a BLOCKER itself (guidance always names a
@@ -1497,23 +1797,23 @@ function RequestRevision({ door }: { door: Door }) {
         PIN, if this card asks for one
         <input type="password" data-field="revision-pin" value={pin} onChange={(e) => setPin(e.target.value)} />
       </label>
-      <button type="submit" data-action="request-revision" disabled={guidance.trim() === ''}>
+      <Button variant="primary" size="sm" type="submit" data-action="request-revision" disabled={guidance.trim() === ''}>
         Ask for a revision
-      </button>
+      </Button>
       {guidance.trim() === '' && (
-        <p className="muted">
+        <p className="m-0 text-xs text-muted-foreground">
           A revision request needs at least one point to act on — the card&apos;s own answer schema refuses an empty one,
           so there is nothing to send until you say what to change.
         </p>
       )}
       {stale && (
-        <p className="warn-flag" data-stale="request-revision">
+        <p className="warn-flag m-0 text-sm" data-stale="request-revision">
           The card moved since this page was read, so NOTHING was written — not the guidance, not the answer. Reload the
           deliverable to pick up the card as it now is, then say it again.
         </p>
       )}
-      {outcome !== '' && <p className="notice">{outcome}</p>}
-      {failure !== '' && <p className="error">{failure}</p>}
+      {outcome !== '' && <p className="notice m-0 text-sm">{outcome}</p>}
+      {failure !== '' && <p className="error m-0 text-sm">{failure}</p>}
     </form>
   )
 }
@@ -1557,8 +1857,9 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
       {previewDoor === undefined ? (
         <Absent reason="the platform named no preview door on this deliverable" />
       ) : previewDoor.available ? (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           data-action="launch-preview"
           onClick={() =>
             launch(() =>
@@ -1569,15 +1870,16 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
           }
         >
           Launch a preview
-        </button>
+        </Button>
       ) : (
-        <p className="muted" data-closed="preview">
+        <p className="m-0 text-sm text-muted-foreground" data-closed="preview">
           {previewDoor.reason}
         </p>
       )}
       {compareDoor !== undefined && compareDoor.available && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           data-action="launch-compare"
           onClick={() =>
             launch(() =>
@@ -1588,9 +1890,9 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
           }
         >
           Compare before and after
-        </button>
+        </Button>
       )}
-      {failure !== '' && <p className="error">{failure}</p>}
+      {failure !== '' && <p className="error m-0 text-sm">{failure}</p>}
       {session !== null && <SessionPanel session={session} />}
       {pair !== null && <DualFrames pair={pair} />}
       <LiveSessions feed={sessions} />
@@ -1607,15 +1909,19 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
 function SessionPanel({ session }: { session: PreviewSession }) {
   const backed = session.state === 'live' && session.url !== undefined && session.url !== ''
   return (
-    <div className="preview-session" data-preview-state={session.state} data-backed={backed ? 'true' : 'false'}>
-      <p>
-        <span className="preview-lane">{session.lane}</span> · revision {String(session.revision)} ·{' '}
-        <span className="preview-state">{session.state}</span>
-        {session.routed ? <span className="muted"> · routed through the front chain</span> : null}
+    <div
+      className={cn('preview-session mt-2', reviewPanel)}
+      data-preview-state={session.state}
+      data-backed={backed ? 'true' : 'false'}
+    >
+      <p className={cn('mt-0 mb-1 text-sm', figure)}>
+        <span className="preview-lane font-semibold">{session.lane}</span> · revision {String(session.revision)} ·{' '}
+        <span className="preview-state font-semibold">{session.state}</span>
+        {session.routed ? <span className="text-muted-foreground"> · routed through the front chain</span> : null}
       </p>
       {backed ? (
         <>
-          <p>
+          <p className={cn('m-0 wrap-anywhere text-sm', figure)}>
             <a href={session.url} data-action="open-preview" target="_blank" rel="noreferrer noopener">
               {session.url}
             </a>
@@ -1642,11 +1948,16 @@ function PortPicker({ session }: { session: PreviewSession }) {
   const [chosen, setChosen] = useState(ports[0]?.number)
   if (ports.length < 2) return null
   return (
+    // `.port-picker` KEEPS its rule (column, row at the breakpoint), so no
+    // layout utility competes with it.
     <div className="port-picker" data-ports={String(ports.length)}>
-      <p className="muted">This preview listens on more than one port — pick the one you want.</p>
+      <p className="m-0 text-xs text-muted-foreground">
+        This preview listens on more than one port — pick the one you want.
+      </p>
       {ports.map((p) => (
-        <label key={p.number}>
+        <label key={p.number} className={radioRow}>
           <input
+            className={radioInput}
             type="radio"
             name="preview-port"
             data-port={String(p.number)}
@@ -1676,7 +1987,10 @@ function DualFrames({ pair }: { pair: PreviewComparison }) {
   const resync = () => setApplied(path)
 
   return (
-    <div className="dual-frames" data-single-instance={pair.single_instance ? 'true' : 'false'}>
+    <div className={cn('dual-frames mt-2', reviewPanel)} data-single-instance={pair.single_instance ? 'true' : 'false'}>
+      {/* `.frame-path` KEEPS its rule and is read TWICE by `responsive.test.ts`
+          (:251 for the phone column, :255 for the wide arm), so this form takes
+          no layout utility at all. */}
       <form
         className="frame-path"
         onSubmit={(e) => {
@@ -1688,21 +2002,26 @@ function DualFrames({ pair }: { pair: PreviewComparison }) {
           Path on both sides
           <input data-field="frame-path" value={path} onChange={(e) => setPath(e.target.value)} />
         </label>
-        <button type="submit" data-action="apply-path">
+        <Button variant="secondary" size="sm" type="submit" data-action="apply-path">
           Go
-        </button>
-        <button type="button" data-action="resync" onClick={resync}>
+        </Button>
+        <Button variant="ghost" size="sm" data-action="resync" onClick={resync}>
           Re-sync both sides
-        </button>
+        </Button>
       </form>
-      <p className="muted" data-sync-mode={pair.sync.mode} data-sync-enabled={pair.sync.enabled ? 'true' : 'false'}>
+      <p
+        className="my-2 text-xs text-muted-foreground"
+        data-sync-mode={pair.sync.mode}
+        data-sync-enabled={pair.sync.enabled ? 'true' : 'false'}
+      >
         {pair.sync.enabled
           ? 'Synced navigation is driven from here: the path above is applied to both sides together. A click INSIDE a frame moves that frame alone — these previews are separate origins, so this page cannot see where a frame has navigated to. Re-sync puts both back on the path above.'
           : 'Nothing to sync: there is only one instance below.'}
       </p>
+      {/* `.frames` KEEPS its rule for the same reason `.frame-path` does. */}
       <div className="frames">
         {pair.before === undefined ? (
-          <div className="frame-absent" data-frame="before">
+          <div className="frame-absent rounded-(--radius-sm) border border-dashed border-current p-2" data-frame="before">
             <Absent
               reason={
                 pair.before === undefined && pair.single_instance
@@ -1724,7 +2043,11 @@ function FrameSide({ side, path }: { side: import('./api').SessionView; path: st
   const backed = side.state === 'live' && side.url !== ''
   if (!backed) {
     return (
-      <div className="frame-absent" data-frame={side.role} data-preview-state={side.state}>
+      <div
+        className="frame-absent rounded-(--radius-sm) border border-dashed border-current p-2"
+        data-frame={side.role}
+        data-preview-state={side.state}
+      >
         <Absent
           reason={
             side.reason === undefined || side.reason === ''
@@ -1737,9 +2060,11 @@ function FrameSide({ side, path }: { side: import('./api').SessionView; path: st
   }
   return (
     <div className="frame" data-frame={side.role}>
-      <p className="muted">
+      <p className={cn('mt-0 mb-1 text-xs text-muted-foreground', figure)}>
         {side.role} · revision {String(side.revision)}
       </p>
+      {/* `.frame iframe` KEEPS its rule (`responsive.test.ts:263`), so the frame
+          itself carries no sizing utility. */}
       <iframe
         title={`${side.role} preview of ${side.deliverable}`}
         src={frameSrc(side.url, path)}
@@ -1809,20 +2134,29 @@ function LiveSessions({ feed }: { feed: ReturnType<typeof useLive<PreviewSession
   const [failure, setFailure] = useState('')
   const sessions = feed.data?.sessions ?? []
   return (
-    <div className="live-previews">
-      <h4>Preview sessions running now</h4>
+    <div className={cn('live-previews mt-3', reviewPanel)}>
+      <h4 className="mt-0 mb-1">Preview sessions running now</h4>
       <Freshness stale={feed.stale} error={feed.error} hasData={feed.data !== null} />
-      {sessions.length === 0 ? (
-        <Empty what="No preview session is running." />
-      ) : (
-        <ul>
+      {/* SERVED-GATED (§51 drain D1), the same class as the comment feed above:
+          `sessions` is `feed.data?.sessions ?? []`, so an unanswered `/api/previews`
+          rendered as a served empty and taught "no preview session is running"
+          before the platform had said anything at all. */}
+      {feed.data !== null &&
+        (sessions.length === 0 ? (
+          <EmptyState
+            what="No preview session is running."
+            why="Launching a preview above puts it here, with the lane it runs in and whose it is, until you stop it or the platform reclaims the port."
+          />
+        ) : (
+        <ul className="m-0 flex list-none flex-col gap-2 ps-0">
           {sessions.map((s) => (
-            <li key={s.id} data-session={s.id}>
-              <span className="muted">
+            <li key={s.id} data-session={s.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className={cn('text-xs text-muted-foreground', figure)}>
                 {s.deliverable} r{String(s.revision)} · {s.state} · {s.lane} · <Owner id={s.user} />
               </span>{' '}
-              <button
-                type="button"
+              <Button
+                variant="danger"
+                size="sm"
                 data-action="stop-preview"
                 onClick={() => {
                   setFailure('')
@@ -1839,14 +2173,18 @@ function LiveSessions({ feed }: { feed: ReturnType<typeof useLive<PreviewSession
                 }}
               >
                 Stop
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
+        ))}
+      {note !== '' && (
+        <p className="notice m-0 text-sm" data-stop-detail="served">
+          {note}
+        </p>
       )}
-      {note !== '' && <p className="notice" data-stop-detail="served">{note}</p>}
       {failure !== '' && (
-        <p className="error" data-stop-failed="true">
+        <p className="error m-0 text-sm" data-stop-failed="true">
           {failure} The session is kept, so stopping it again is safe.
         </p>
       )}
@@ -1893,24 +2231,24 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
         <Absent reason="the platform named no accept door on this deliverable" />
       ) : (
         <>
-          <p className="door-reason">{door.reason}</p>
-          <button type="button" data-action="read-accept-card" onClick={read}>
+          <p className="door-reason mt-0 mb-2 text-sm">{door.reason}</p>
+          <Button variant="secondary" size="sm" data-action="read-accept-card" onClick={read}>
             Read the accept card
-          </button>
+          </Button>
         </>
       )}
-      {failure !== '' && <p className="error">{failure}</p>}
+      {failure !== '' && <p className="error m-0 text-sm">{failure}</p>}
       {card !== null && (
         <>
           {changed && (
-            <p className="warn-flag" data-stale-accept="true">
+            <p className="warn-flag my-2 text-sm" data-stale-accept="true">
               The card moved since it was read, so nothing was accepted. What is below is the card as it is NOW — check
               it before accepting again.
             </p>
           )}
           <AcceptCardView card={card} />
           {!mine ? (
-            <p className="muted" data-authorship="not-mine">
+            <p className="my-2 text-sm text-muted-foreground" data-authorship="not-mine">
               This is {owner}&apos;s work to accept. An accept pushes a commit under the accepting person&apos;s own
               credentials, so only they can do it — reading the card is not the same as being able to act on it.
             </p>
@@ -1932,12 +2270,12 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
               onFailure={setFailure}
             />
           ) : (
-            <p className="muted" data-not-acceptable="true">
+            <p className="my-2 text-sm text-muted-foreground" data-not-acceptable="true">
               {card.reason}
             </p>
           )}
           {pinRefused !== '' && (
-            <p className="error" data-pin-refused="true">
+            <p className="error my-2 text-sm" data-pin-refused="true">
               {pinRefused} Enter your PIN again — nothing was accepted.
             </p>
           )}
@@ -1953,8 +2291,16 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
  *  commit, not afterwards. */
 function AcceptCardView({ card }: { card: AcceptCard }) {
   return (
-    <div className="accept-card" data-acceptable={card.acceptable ? 'true' : 'false'}>
-      <dl>
+    <div className={cn('accept-card my-2', reviewPanel)} data-acceptable={card.acceptable ? 'true' : 'false'}>
+      {/* The `dd` wrap that `.accept-card dd` carried moves to a descendant
+          utility on the container, so one string covers every field. */}
+      <dl
+        className={cn(
+          'mt-0 mb-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm',
+          '[&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground',
+          figure,
+        )}
+      >
         <dt>Revision</dt>
         <dd>{String(card.revision_n)}</dd>
         <dt>Content pin</dt>
@@ -1980,7 +2326,7 @@ function AcceptCardView({ card }: { card: AcceptCard }) {
           <code data-payload-hash={card.payload_hash}>{card.payload_hash}</code>
         </dd>
       </dl>
-      <h5>Commit trailers, exactly as they will be written</h5>
+      <h5 className="mt-0 mb-1">Commit trailers, exactly as they will be written</h5>
       {card.trailers === '' ? (
         <Absent
           reason={
@@ -1990,11 +2336,19 @@ function AcceptCardView({ card }: { card: AcceptCard }) {
           }
         />
       ) : (
-        <pre className="trailers" data-trailers="verbatim">
+        // `.trailers` KEEPS its rule (the `responsive.test.ts:242` group).
+        <pre className="trailers rounded-(--radius-sm) border border-border bg-background p-2 text-xs" data-trailers="verbatim">
           {card.trailers}
         </pre>
       )}
-      <p className="muted provenance">
+      {/* ⚠ THE `provenance` CLASS IS DROPPED HERE, and that is a finding rather
+          than a tidy. `.provenance` is the WORKFORCE map's rule — a `<dl>` laid
+          out as a grid (index.css, the S15.10 section) — and this is a `<p>` of
+          prose, so the accept card was silently taking a grid display, a grid
+          column template and a margin written for somebody else's markup.
+          `Workforce.tsx` is byte-frozen, so the rule stays for its real owner and
+          this line carries its own utilities instead. */}
+      <p className={cn('my-2 text-xs text-muted-foreground', figure)} data-provenance="accept-card">
         {card.provenance.minting_run_id === undefined || card.provenance.minting_run_id === '' ? (
           <Absent reason="no minting run recorded" />
         ) : (
@@ -2004,7 +2358,9 @@ function AcceptCardView({ card }: { card: AcceptCard }) {
           </>
         )}
       </p>
-      <p className="signing" data-signing-structural={card.signing.structural ? 'true' : 'false'}>
+      {/* `.signing` KEEPS its rule — it is the LAST selector of the group
+          `responsive.test.ts:245` reads — so no wrap utility competes. */}
+      <p className="signing m-0 text-sm" data-signing-structural={card.signing.structural ? 'true' : 'false'}>
         {card.signing.statement}
       </p>
     </div>
@@ -2079,9 +2435,9 @@ function AcceptForm({
         Your PIN
         <input type="password" data-field="accept-pin" value={pin} onChange={(e) => setPin(e.target.value)} />
       </label>
-      <button type="submit" data-action="accept" disabled={sending}>
+      <Button variant="primary" size="sm" type="submit" data-action="accept" disabled={sending}>
         Accept this revision
-      </button>
+      </Button>
     </form>
   )
 }
@@ -2095,9 +2451,19 @@ function AcceptForm({
  */
 function AcceptOutcomeView({ outcome }: { outcome: AcceptOutcome }) {
   return (
-    <div className="accept-outcome" data-applied={outcome.applied ? 'true' : 'false'} data-state={outcome.state}>
-      <p className={outcome.applied ? 'notice' : 'muted'}>{outcome.detail}</p>
-      <dl>
+    <div
+      className={cn('accept-outcome my-2', reviewPanel)}
+      data-applied={outcome.applied ? 'true' : 'false'}
+      data-state={outcome.state}
+    >
+      <p className={cn(outcome.applied ? 'notice' : 'text-muted-foreground', 'mt-0 mb-2 text-sm')}>{outcome.detail}</p>
+      <dl
+        className={cn(
+          'm-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm',
+          '[&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground',
+          figure,
+        )}
+      >
         <dt>State</dt>
         <dd>{outcome.state}</dd>
         <dt>Commit</dt>
@@ -2146,12 +2512,20 @@ function AcceptOutcomeView({ outcome }: { outcome: AcceptOutcome }) {
  */
 function MergeCardPanel({ view }: { view: import('./api').MergeCardView }) {
   return (
-    <div className="merge-card" data-merge-card="true">
-      <h5>This does not apply cleanly — nothing was pushed</h5>
+    <div className={cn('merge-card mt-2', reviewPanel)} data-merge-card="true">
+      <h5 className="mt-0 mb-1">This does not apply cleanly — nothing was pushed</h5>
       {view.card === null ? (
         <Absent reason="the collision card itself was not served" />
       ) : (
-        <dl>
+        // `.merge-card pre` KEEPS its rule (`responsive.test.ts:242`), so the
+        // conflict block below carries no overflow or white-space utility.
+        <dl
+          className={cn(
+            'm-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm',
+            '[&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground',
+            figure,
+          )}
+        >
           <dt>Onto</dt>
           <dd>
             <code>{view.card.onto}</code>
@@ -2172,12 +2546,19 @@ function MergeCardPanel({ view }: { view: import('./api').MergeCardView }) {
           )}
         </dl>
       )}
-      <ul className="merge-options">
+      {/* `.merge-options` KEEPS its rule (`responsive.test.ts:251`), so it takes
+          no layout utility; only the list decoration moves. */}
+      <ul className="merge-options mt-2 list-none ps-0">
         {view.options.map((o) => (
-          <li key={o.option} data-merge-option={o.option} data-answerable={o.answerable ? 'true' : 'false'}>
-            <span className="option-name">{o.option}</span> — {o.reason}
+          <li
+            key={o.option}
+            data-merge-option={o.option}
+            data-answerable={o.answerable ? 'true' : 'false'}
+            className="text-sm"
+          >
+            <span className={cn('option-name font-semibold', figure)}>{o.option}</span> — {o.reason}
             {o.route !== undefined && o.route !== '' && (
-              <span className="muted">
+              <span className={cn('text-xs text-muted-foreground', figure)}>
                 {' '}
                 · {o.route}
                 {o.preset !== undefined && o.preset !== '' ? ` · preset ${o.preset}` : ''}
@@ -2186,7 +2567,7 @@ function MergeCardPanel({ view }: { view: import('./api').MergeCardView }) {
           </li>
         ))}
       </ul>
-      <p className="muted" data-durability="served">
+      <p className="m-0 text-xs text-muted-foreground" data-durability="served">
         {view.durability}
       </p>
     </div>

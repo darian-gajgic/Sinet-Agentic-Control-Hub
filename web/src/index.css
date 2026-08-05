@@ -1123,26 +1123,53 @@ td {
 }
 
 
-/* ── the S15.8 review surface (B6-8) ───────────────────────────────────────
+/* ── the S15.8 review surface (B6-8; SHED at P3-UI-7 seam C-2, 2026-08-05) ──
    Owned CSS only. react-diff-view's own stylesheet styles the widget's own DOM
    (adopt-don't-fork: re-implementing its presentation would be forking it); what
    is below is the Sinet frame around it — the image trio, the metadata cards, the
    synthetic strip, the doors, the frames and the accept card. Phone-first, like
    the rest of the sheet: everything stacks by default and widens at the one
-   breakpoint. */
+   breakpoint.
+
+   WHAT SHED AND WHERE IT WENT (13 selector blocks / 22 declarations): the
+   font-weight group, `.diff-file-head`, `.diff-widget`, `.comment`, the
+   list-reset group, `.synthetic-strip`, the composer textarea group,
+   `.image-side`, the swipe/onion stacking trio, `.frame-absent` and the
+   `dd` wrap group. Each had `Deliverable.tsx` as its ONLY consumer, verified by
+   grep, and each replacement utility is verified to compile in the built sheet.
+
+   ⚠ WHAT STAYS, AND WHY IT IS NOT LAZINESS. Since the cascade fix this sheet
+   sits in `@layer base`, so an owned rule LOSES to a competing utility — which
+   means a kept rule and a utility for the same property cannot coexist on one
+   element, and a kept `@media` arm is the shape that dies silently (the
+   `.chat-verbs` regression, §53). Ten rules below are read directly by the
+   BYTE-FROZEN `responsive.test.ts`, so they stay AND no element carrying one is
+   given a utility for that property:
+     `.diff-file`                     overflow-x          responsive.test.ts:233
+     `.deliverable .object-sha`       overflow-wrap       :239  (LAST of its group)
+     `.merge-card pre`                overflow-x          :242  (LAST of its group)
+     `.signing`                       overflow-wrap       :245  (LAST of its group)
+     `.merge-options` `.frame-path` `.frames`  flex-direction: column   :251
+     `.two-up` `.frame-path` `.image-modes`    present in the wide query :255
+     `.image-side img`                max-width           :262  (LAST of its group)
+     `.frame iframe`                  width               :263
+   The wide-screen arms for `.deliverable .rev-picker`, `.diff-controls`,
+   `.image-modes`, `.port-picker`, `.frame-path`, `.two-up` and `.frames` live in
+   the one `@media (min-width: 48rem)` block below and are the reason those seven
+   elements carry no flex utility at all.
+
+   SEPARATELY KEPT, and the brief predicted otherwise: `.lineage` and `.revisions`
+   (in the content section above) do NOT shed. R22 said "if the markup move frees
+   them"; the grep says it does not — `TaskDetail.tsx:739` and `:841` render both
+   classes and that file is byte-frozen here. Corrected consumer list:
+   `.lineage` — Deliverable + TaskDetail; `.revisions` — Deliverable + TaskDetail.
+   Nothing in this section is renamed; every class stays the DOM hook it was. */
 
 .deliverable .rev-picker {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   margin-bottom: 0.5rem;
-}
-
-.deliverable .rev-n,
-.deliverable .object-name,
-.deliverable .attempt-ref,
-.deliverable .finding-number {
-  font-weight: 600;
 }
 
 .deliverable .quote code,
@@ -1164,20 +1191,6 @@ td {
   overflow-x: auto;
 }
 
-.diff-file-head {
-  margin: 0.25rem 0;
-  overflow-wrap: anywhere;
-}
-
-.diff-widget {
-  padding: 0.35rem 0.5rem;
-  border-left: 3px solid currentColor;
-}
-
-.comment {
-  padding: 0.35rem 0;
-}
-
 .comment-body,
 .door-reason,
 .placement,
@@ -1192,21 +1205,6 @@ td {
   white-space: pre;
 }
 
-.comment-list,
-.synthetic-strip ul,
-.doors,
-.live-previews ul,
-.object-side ul {
-  list-style: none;
-  padding-left: 0;
-}
-
-.synthetic-strip {
-  margin: 0.5rem 0;
-  padding: 0.35rem 0.5rem;
-  border-left: 3px solid currentColor;
-}
-
 .comment-composer,
 .request-revision,
 .accept-form,
@@ -1216,21 +1214,11 @@ td {
   gap: 0.35rem;
 }
 
-.comment-composer textarea,
-.request-revision textarea {
-  min-width: 0;
-  min-height: 4rem;
-}
-
 .two-up,
 .frames {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-}
-
-.image-side {
-  margin: 0;
 }
 
 .deliverable img,
@@ -1239,36 +1227,10 @@ td {
   height: auto;
 }
 
-.swipe-stack,
-.onion-stack {
-  position: relative;
-}
-
-.swipe-top,
-.onion-top {
-  position: absolute;
-  inset: 0 auto 0 0;
-  overflow: hidden;
-}
-
-.onion-top {
-  inset: 0;
-}
-
 .frame iframe {
   width: 100%;
   min-height: 20rem;
   border: 1px solid currentColor;
-}
-
-.frame-absent {
-  padding: 0.5rem;
-  border: 1px dashed currentColor;
-}
-
-.accept-card dd,
-.accept-outcome dd {
-  overflow-wrap: anywhere;
 }
 
 /* ── the S15.10 workforce map (B6-8 part B) ─────────────────────────────────

@@ -18,6 +18,13 @@ import {
 } from './doubles'
 import { EventStream } from './events'
 import { click, flush, mount, typeInto } from './testing'
+// The restyle's own pins read the real shipped sources, because the cascade
+// hazard they guard against is a property of the STYLESHEET beside the MARKUP
+// and neither one alone can show it (§53).
+import cssSource from './index.css?raw'
+import deliverableSource from './Deliverable.tsx?raw'
+import taskDetailSource from './TaskDetail.tsx?raw'
+import workforceSource from './Workforce.tsx?raw'
 
 /**
  * The review surface (Spec S15.8; S13.1–S13.4, S13.6, S13.8; FC-v1 §2), driven
@@ -1513,5 +1520,289 @@ test('the control is reachable and operable at 375px', async () => {
   click(dialog.querySelector('[data-act="confirm"]'))
   await flush()
   expect(at(view, '[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
+  view.unmount()
+})
+
+// ── P3-UI-7 seam C-2: the restyle's own pins ────────────────────────────────
+//
+// Everything above this line passed the restyle UNMODIFIED — no landed
+// predicate was re-pointed, re-worded or weakened — which is the honest form of
+// "presentation moved and behaviour did not". What follows is the new work: the
+// R11 head, the R12 teaching states with their served gates, and a standing
+// guard for the carried cascade hazard.
+
+test('R11: the head says what the surface is, and its overclaims are absent', async () => {
+  const { view } = await review()
+  const what = at(view, '[data-surface-what]')!
+  const line = what.textContent ?? ''
+
+  // The five verbs this surface really has, each of which is driven by a landed
+  // test above: the revision lineage, the round-over-round comparison, the
+  // anchored comment loop, try-it, and the one accept.
+  for (const fact of ['revision', 'compare', 'comment', 'try', 'accept']) {
+    expect(line.toLowerCase(), `the head does not name ${fact}`).toContain(fact)
+  }
+  // And the fact that makes the accept worth warning about at all.
+  expect(line).toContain('your own credentials')
+
+  // THE OVERCLAIMS. Approval state is served PER ARTIFACT (§38 ruling (a)), so
+  // this page may not call anything approved or signed off; and no verb at any
+  // shape un-accepts a revision, so it may not offer one.
+  for (const banned of ['approved', 'signed off', 'sign-off', 'reversible', 'undo', 'revert', 'roll back']) {
+    expect(line.toLowerCase(), `the head claims "${banned}"`).not.toContain(banned)
+  }
+  // Non-vacuity: the negatives run over a line that really exists and really
+  // says something, so a missing head could not pass them.
+  expect(line.length, 'the head line is empty, so the negatives above prove nothing').toBeGreaterThan(120)
+  view.unmount()
+})
+
+test('R12: the comment feed teaches only AFTER it has answered, never during', async () => {
+  // THE D1 SHAPE (§51 drain D1). `comments` is `feed.data?.comments ?? []`, so
+  // without the gate a read still in flight renders as a served empty and
+  // teaches "nobody has commented" about a question nobody has answered.
+  const pending = await review(reviewDeliverableID, {
+    'GET /api/deliverables/d-site/comments?revision=2': { pending: true },
+  })
+  expect(text(pending.view)).not.toContain('Nobody has commented on this revision yet.')
+  expect(
+    text(pending.view),
+    'the strip spoke about comments the platform had not sent',
+  ).not.toContain('Every comment on this revision has a live position')
+  // The surface really IS mounted and really HAS asked — otherwise the negative
+  // would be looking at an empty page (the instrument §51 D1 had to fix).
+  expect(at(pending.view, '.comments'), 'the comment block never mounted').not.toBeNull()
+  expect(
+    pending.log.calls.some((c) => c.path.includes('/comments?revision=2')),
+    'the comment read never fired, so nothing was pending',
+  ).toBe(true)
+  pending.view.unmount()
+
+  // Once it answers EMPTY, the teaching state is exactly what appears — and it
+  // teaches what makes a row show up rather than only admitting there are none.
+  const empty = await review(reviewDeliverableID, {
+    'GET /api/deliverables/d-site/comments?revision=2': { body: { comments: [], placements: [] } },
+  })
+  expect(text(empty.view)).toContain('Nobody has commented on this revision yet.')
+  expect(text(empty.view), 'the empty state teaches nothing').toContain('anchors a comment to it')
+  empty.view.unmount()
+})
+
+test('R12: the preview-session list teaches only AFTER /api/previews has answered', async () => {
+  const pending = await review(reviewDeliverableID, { 'GET /api/previews': { pending: true } })
+  expect(text(pending.view)).not.toContain('No preview session is running.')
+  expect(at(pending.view, '.live-previews'), 'the session block never mounted').not.toBeNull()
+  pending.view.unmount()
+
+  const empty = await review(reviewDeliverableID, { 'GET /api/previews': { body: { sessions: [] } } })
+  expect(text(empty.view)).toContain('No preview session is running.')
+  expect(text(empty.view), 'the empty state teaches nothing').toContain('Launching a preview above puts it here')
+  empty.view.unmount()
+})
+
+test('R12: the served-empty revision and door lists teach what makes a row appear', async () => {
+  const detail = fixtures.deliverableReview() as { revisions: unknown[]; doors: unknown[] }
+  const { view } = await review(reviewDeliverableID, {
+    'GET /api/deliverables/d-site': { body: { ...detail, revisions: [], doors: [] } },
+  })
+  expect(text(view)).toContain('No revision is minted yet, so there is nothing to review.')
+  expect(text(view), 'the revision empty teaches nothing').toContain('when a run mints one')
+  expect(text(view)).toContain('The platform named no doors on this deliverable.')
+  expect(text(view), 'the door empty teaches nothing').toContain('actually let you through it')
+  view.unmount()
+})
+
+test('⚠ the carried cascade hazard: no kept owned rule competes with a utility on the same element', async () => {
+  // THE MECHANISM, stated so the next reader does not have to re-derive it.
+  // Since the cascade fix the owned sheet sits in `@layer base`, so an owned rule
+  // — media-gated or not — LOSES to `@layer utilities`. `.chat-verbs` is the
+  // instance that shipped (§53 A2): the moment a utility arrived, the owned
+  // wide-screen arm went DEAD and no jsdom test in the tree could see it.
+  //
+  // The review surface answers the same question the other way round: these
+  // seven elements KEEP their owned rules, so they must carry NO layout utility.
+  // Both halves are asserted, because either alone passes for the wrong reason.
+  const wide = cssSource.slice(cssSource.indexOf('@media (min-width:'))
+
+  // The check is PROPERTY-AWARE rather than "no layout utility anywhere", and it
+  // has to be: a kept rule only wins or loses on the properties it declares, so
+  // banning every spacing utility would ban ones that cannot collide and would
+  // teach the next reader the wrong rule. The banned families are read off the
+  // sheet's own declarations, so the guard cannot drift from the rules it
+  // guards.
+  const utilityFor: Record<string, RegExp> = {
+    display: /(^|\s)(flex|grid|inline-flex|inline-grid|block|hidden|contents)(\s|$)/,
+    'flex-direction': /(^|\s)(md:)?(flex-col|flex-row)(\s|$)/,
+    'flex-wrap': /(^|\s)(md:)?(flex-wrap|flex-nowrap)(\s|$)/,
+    'align-items': /(^|\s)(md:)?items-/,
+    gap: /(^|\s)gap(-[xy])?-/,
+    'margin-bottom': /(^|\s)(mb-|my-|m-)/,
+    'min-width': /(^|\s)min-w-/,
+    flex: /(^|\s)flex-(1|auto|initial|none)(\s|$)/,
+  }
+  /** Every property the sheet declares for one selector, base arm and wide arm. */
+  const declaredFor = (selector: string): string[] => {
+    const props = new Set<string>()
+    for (const source of [cssSource, wide]) {
+      let from = 0
+      for (;;) {
+        const at_ = source.indexOf(selector, from)
+        if (at_ === -1) break
+        from = at_ + selector.length
+        const open = source.indexOf('{', at_)
+        const close = source.indexOf('}', at_)
+        // Only a rule this selector really heads or joins — the run between the
+        // selector and the next `{` must be selector text, never a declaration.
+        if (open === -1 || (close !== -1 && close < open)) continue
+        if (/[:;]/.test(source.slice(at_ + selector.length, open))) continue
+        for (const decl of source.slice(open + 1, source.indexOf('}', open)).split(';')) {
+          const name = decl.split(':')[0].trim()
+          if (name !== '') props.add(name)
+        }
+      }
+    }
+    return [...props]
+  }
+
+  const kept = [
+    // `.rev-picker` is scoped under `.deliverable`; the rest are bare.
+    { cls: 'rev-picker', selector: '.deliverable .rev-picker', arm: true },
+    { cls: 'diff-controls', selector: '.diff-controls', arm: true },
+    { cls: 'image-modes', selector: '.image-modes', arm: true },
+    { cls: 'port-picker', selector: '.port-picker', arm: true },
+    { cls: 'frame-path', selector: '.frame-path', arm: true },
+    { cls: 'two-up', selector: '.two-up', arm: true },
+    { cls: 'frames', selector: '.frames', arm: true },
+    // `merge-options` is the CONTROL: it has no wide arm and it does carry
+    // utilities (`mt-2 list-none ps-0`) for properties its rule never declares,
+    // so it proves the guard discriminates rather than banning everything.
+    { cls: 'merge-options', selector: '.merge-options', arm: false },
+  ]
+  let propertiesChecked = 0
+  for (const { cls, selector, arm } of kept) {
+    const declared = declaredFor(selector)
+    expect(declared.length, `.${cls} lost its owned rule — the sheet declares nothing for it`).toBeGreaterThan(0)
+    expect(declared, `.${cls} stopped being a flex container, so this entry is stale`).toContain('flex-direction')
+    // Its wide-screen arm, where it has one, is still in the media query.
+    if (arm) expect(wide, `.${cls} lost its wide-screen arm`).toContain(`.${cls}`)
+
+    const marks = [...deliverableSource.matchAll(new RegExp(`className="${cls}([^"]*)"`, 'g'))]
+    expect(marks.length, `no <element className="${cls} …"> is rendered — the check reached nothing`).toBeGreaterThan(0)
+    for (const property of declared) {
+      const banned = utilityFor[property]
+      if (banned === undefined) continue
+      propertiesChecked++
+      for (const m of marks) {
+        expect(
+          banned.test(m[1]),
+          `.${cls} gained a "${property}" utility beside its kept owned rule: "${m[1]}"`,
+        ).toBe(false)
+      }
+    }
+  }
+  expect(propertiesChecked, 'no property was actually checked — the guard is vacuous').toBeGreaterThan(20)
+
+  // The detector really bites, in both directions, on the two families that
+  // actually killed `.chat-verbs`.
+  expect(utilityFor['flex-direction'].test(' flex flex-col gap-2')).toBe(true)
+  expect(utilityFor.display.test(' flex flex-col gap-2')).toBe(true)
+  expect(utilityFor['flex-direction'].test(' mt-2 list-none ps-0')).toBe(false)
+  expect(utilityFor.display.test(' text-sm font-semibold')).toBe(false)
+
+  // And the ten `responsive.test.ts` reads this surface must not break: each
+  // named selector still heads a rule carrying the declaration that suite asks
+  // for. That file is byte-frozen, so this is the shed's own tripwire.
+  for (const [selector, decl] of [
+    ['.diff-file', 'overflow-x: auto'],
+    ['.deliverable .object-sha', 'overflow-wrap: anywhere'],
+    ['.merge-card pre', 'overflow-x: auto'],
+    ['.signing', 'overflow-wrap: anywhere'],
+    ['.merge-options', 'flex-direction: column'],
+    ['.frame-path', 'flex-direction: column'],
+    ['.frames', 'flex-direction: column'],
+    ['.image-side img', 'max-width: 100%'],
+    ['.frame iframe', 'width: 100%'],
+  ] as const) {
+    const at_ = cssSource.indexOf(`\n${selector} {`)
+    expect(at_, `${selector} is not styled at all — responsive.test.ts would fail`).toBeGreaterThan(-1)
+    expect(cssSource.slice(at_, cssSource.indexOf('}', at_)), `${selector} lost ${decl}`).toContain(decl)
+  }
+})
+
+test('the shed rules are gone and their replacements really compile', async () => {
+  // Each shed rule had `Deliverable.tsx` as its only consumer (grep-verified at
+  // the shed), so what has to be true afterwards is that the presentation moved
+  // rather than vanished — the §53 A2 D1 lesson, where a shed rule's utilities
+  // reached one of two `<li>` families and not the other.
+  for (const gone of [
+    '.diff-file-head {',
+    '.diff-widget {',
+    '.comment {',
+    '.synthetic-strip {',
+    '.image-side {',
+    '.swipe-stack,',
+    '.frame-absent {',
+    '.accept-card dd,',
+  ]) {
+    expect(cssSource, `${gone} survived the shed`).not.toContain(gone)
+  }
+  // `.lineage` and `.revisions` did NOT shed, and that is the recorded finding:
+  // TaskDetail.tsx renders both classes and is byte-frozen here, so the brief's
+  // "if the markup move frees them" is false. The rules must still be present.
+  expect(cssSource, '.lineage shed while TaskDetail still consumes it').toContain('.lineage {')
+  expect(cssSource, '.revisions shed while TaskDetail still consumes it').toContain('.revisions {')
+  expect(taskDetailSource, 'TaskDetail stopped consuming .lineage, so the stay-note is stale').toContain(
+    'className="lineage"',
+  )
+  expect(taskDetailSource, 'TaskDetail stopped consuming .revisions, so the stay-note is stale').toContain(
+    'className="revisions"',
+  )
+
+  // The replacements are carried at the sites the shed rules used to reach —
+  // every family, not just the first one.
+  const { view } = await review()
+  // ⚠ SELECTED BY `[data-widget-key]`, NOT by `.diff-widget`, and the reason is a
+  // collision this shed surfaced: `diff-widget` is ALSO react-diff-view's own
+  // class for the row it mounts a widget into, so the owned rule was painting
+  // the adopted widget's `<tr>` AND our div inside it — one left rail and one
+  // padding, applied twice. The rule is gone, the presentation now lands once on
+  // our own element, and the adopted stylesheet is left to style its own DOM
+  // (adopt-don't-fork). `.diff-widget` stays as the class it was: the landed
+  // pins select `.diff-widget [data-comment]`, which reaches ours either way.
+  expect(at(view, '[data-widget-key]')?.className, 'the widget rail did not move to utilities').toContain(
+    'border-s-[3px]',
+  )
+  expect(at(view, '.synthetic-strip')?.className, 'the strip rail did not move to utilities').toContain('border-s-[3px]')
+  expect(at(view, '.comment')?.className, 'the comment padding did not move to utilities').toContain('py-1.5')
+  expect(at(view, '.diff-file-head')?.className, 'the file head did not move to utilities').toContain('wrap-anywhere')
+  expect(at(view, '.comment-list')?.className, 'the comment list decoration did not move').toContain('list-none')
+  expect(at(view, '.doors')?.className, 'the door list decoration did not move').toContain('list-none')
+  // The accept card's `dd` wrap moved to ONE descendant utility on the container,
+  // so both dl consumers are covered by the same string rather than by two.
+  click(at(view, '[data-action="read-accept-card"]'))
+  await flush()
+  expect(at(view, '.accept-card dl')?.className, 'the accept card dd wrap did not move').toContain(
+    '[&_dd]:wrap-anywhere',
+  )
+  view.unmount()
+})
+
+test('⚠ the accept card stopped borrowing the workforce map`s .provenance grid', async () => {
+  // THE FINDING. `.provenance` is the S15.10 workforce rule — `display: grid`
+  // with a grid column template, written for a `<dl>` — and the accept card
+  // rendered a `<p>` of prose under the same class, so it silently took a grid
+  // display and a margin meant for somebody else's markup. `Workforce.tsx` is
+  // byte-frozen, so the rule stays for its real owner and this line carries its
+  // own utilities.
+  const { view } = await review()
+  click(at(view, '[data-action="read-accept-card"]'))
+  await flush()
+  const prov = at(view, '[data-provenance="accept-card"]')!
+  expect(prov, 'the accept card lost its provenance line').not.toBeNull()
+  expect(prov.className, 'the accept card still carries the workforce grid class').not.toContain('provenance')
+  expect(prov.className, 'the provenance line is not in the mono/tabular treatment').toContain('font-mono')
+  // The rule itself is untouched, because its real consumer still renders it.
+  expect(cssSource, '.provenance was shed out from under Workforce.tsx').toContain('.provenance {')
+  expect(workforceSource, 'Workforce stopped consuming .provenance').toContain('className="provenance"')
   view.unmount()
 })
