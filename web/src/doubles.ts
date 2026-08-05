@@ -29,8 +29,10 @@ import previewsRaw from './fixtures/api/previews.json?raw'
 import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
 import deliverablesOfTaskRaw from './fixtures/api/deliverables-of-task.json?raw'
+import askAnswerRaw from './fixtures/api/history-ask-answer.json?raw'
 import catalogRaw from './fixtures/api/history-catalog.json?raw'
 import queryAnswerRaw from './fixtures/api/history-query-answer.json?raw'
+import searchAnswerRaw from './fixtures/api/history-search-answer.json?raw'
 import viewAnswerRaw from './fixtures/api/history-view-answer.json?raw'
 import viewsRaw from './fixtures/api/history-views.json?raw'
 import memoryRaw from './fixtures/api/memory.json?raw'
@@ -197,6 +199,25 @@ export const fixtures = {
   historyCatalog: () => parse<Record<string, unknown>>(catalogRaw),
   historyViewAnswer: () => parse<Record<string, unknown>>(viewAnswerRaw),
   historyQueryAnswer: () => parse<Record<string, unknown>>(queryAnswerRaw),
+  /**
+   * The two S14.10 layers P3-UI-4 gave a surface, both produced by the REAL
+   * handlers over the fixture world (internal/api/apifixtures_test.go).
+   *
+   * `historyAskAnswer` is the DISAMBIGUATION CARD, and it is the honest one: the
+   * fixture server wires the query store with no Duty and no Advisory, so the
+   * ask layer takes internal/history/layer1.go:154's no-local-tier branch and
+   * answers with its own reason and real catalog choices — which is exactly what
+   * every test process and every unwired dev host gets, at $0 and with no model
+   * in the loop.
+   *
+   * `historySearchAnswer` is a search over a corpus the REAL projector wrote
+   * (`indexFixtureHistory` runs `retention.Index` over the world's own event
+   * log): two rows across two kinds and two owners, with the indexer's own refs
+   * and its own bounded excerpts. §38 D12 is why it is a real corpus and not
+   * rows written here — a search assertion over an empty index proves nothing.
+   */
+  historyAskAnswer: () => parse<Record<string, unknown>>(askAnswerRaw),
+  historySearchAnswer: () => parse<Record<string, unknown>>(searchAnswerRaw),
   taskDetail: () => parse<Record<string, unknown>>(taskDetailRaw),
   taskDetailDraft: () => parse<Record<string, unknown>>(taskDetailDraftRaw),
   taskDetailBare: () => parse<Record<string, unknown>>(taskDetailBareRaw),
@@ -309,6 +330,42 @@ export const fixtures = {
   memoryEntry: () => parse<Record<string, unknown>>(memoryEntryRaw),
 }
 
+/**
+ * The two questions the committed history bodies are the ANSWERS TO, and the
+ * request keys that reach them.
+ *
+ * They are exported rather than inlined because a test that types the question
+ * and a double that answers it must be naming the same string: the committed
+ * body was produced by the real handler for THIS question, so asking a different
+ * one and serving this answer would be a fixture pretending to be a reply. The
+ * keys are built the way `api.ts` builds them (`URLSearchParams`), which is also
+ * byte-for-byte what Go's `url.QueryEscape` produced when the bodies were
+ * generated — verified, not assumed.
+ */
+export const historyAskQuestion = 'what did the release notes deployment cost?'
+export const historySearchQuestion = 'did anything ship, and what changed on the anthropic side?'
+export const historyAskPath = `/api/events/ask?${new URLSearchParams({ q: historyAskQuestion }).toString()}`
+export const historySearchPath = `/api/events/search?${new URLSearchParams({ q: historySearchQuestion }).toString()}`
+export const historyAskKey = `GET ${historyAskPath}`
+export const historySearchKey = `GET ${historySearchPath}`
+
+/**
+ * The DEV-POSTURE FALLBACK session, in the shape the SERVER sends.
+ *
+ * `SessionAuthenticator` resolves a session-less request to the fixed dev
+ * identity whenever DevFallback is on (internal/api/identity.go:83–97), and
+ * `handleAuthSession` serves that as `{authenticated:true, dev:true}` with NO
+ * `user` object — the branch that populates one runs only `if !id.Dev`
+ * (internal/api/auth_handlers.go:91–104). `signedIn` and `signedInAsOperator`
+ * are both REAL sessions, where `dev` is absent entirely.
+ *
+ * Those two shapes are precisely what the C-1 arms discriminate on, which is why
+ * this double has to be the served shape rather than an approximation of it: a
+ * double that invented a `user` here, or an `authenticated:false`, would let the
+ * client's arms pass against a state the platform never sends.
+ */
+export const devFallbackSession: Scripted = { body: { authenticated: true, dev: true } }
+
 /** The two entry ids the committed memory bodies name. They are SURROGATES
  *  pinned after the real write ran (internal/api/apifixtures_test.go), because
  *  migration 0004 makes a knowledge entry's id immutable and the gate mints it
@@ -354,6 +411,8 @@ export function oversightRoutes(): Record<string, Scripted> {
     'GET /api/meters': { body: fixtures.meters() },
     'GET /api/events/views': { body: fixtures.historyViews() },
     'GET /api/events/catalog': { body: fixtures.historyCatalog() },
+    [historyAskKey]: { body: fixtures.historyAskAnswer() },
+    [historySearchKey]: { body: fixtures.historySearchAnswer() },
     // The signed-in identity in these suites is alice, so the inbox read is
     // the one SHE would get — including the cards she can answer.
     'GET /api/approvals': { body: fixtures.approvalsMine() },

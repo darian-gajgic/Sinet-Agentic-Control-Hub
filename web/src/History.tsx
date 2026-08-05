@@ -3,6 +3,15 @@ import { useEffect, useState } from 'react'
 import { api, type Answer, type HistoryRegistry } from './api'
 import { describeError } from './live'
 import { Empty } from './parts'
+import { Button } from './ui'
+
+/** The question both free-text controls hold back, mirroring the ONE bound the
+ *  transport applies at its own boundary (`historyQuestion`,
+ *  internal/api/historyapi.go:197–204: a trimmed-empty `?q=` is refused 400).
+ *  Pre-validation exists to stop a request that is already refused, never to
+ *  answer for the server — everything that fires renders the server's own words. */
+const emptyQuestionReason =
+  'A question is required — the query surface refuses an empty one, so there is nothing to send yet.'
 
 /**
  * Filterable history (Spec S15.5; S2.10 through the S14 query layers).
@@ -33,7 +42,17 @@ export function HistoryPanel() {
   const [queryName, setQueryName] = useState('')
   const [slots, setSlots] = useState<Record<string, string>>({})
   const [answer, setAnswer] = useState<Answer | null>(null)
-  const [asking, setAsking] = useState(false)
+  /** Which control has a request in flight, or '' for none. It is the SOURCE
+   *  rather than a boolean because four gestures share one answer slot and each
+   *  one's own button has to be able to say "this is mine, and it is in flight"
+   *  — which is not the same statement as "this form is not ready to send"
+   *  (§49 N7: busy and held are two facts, and one prop for both answered the
+   *  wrong question). */
+  const [pending, setPending] = useState<'' | 'view' | 'query' | 'ask' | 'search'>('')
+  const asking = pending !== ''
+
+  const [question, setQuestion] = useState('')
+  const [term, setTerm] = useState('')
 
   useEffect(() => {
     // The registries are compiled-in data, not a projection: one read each.
@@ -47,16 +66,16 @@ export function HistoryPanel() {
     )
   }, [])
 
-  const ask = (run: () => Promise<Answer>) => {
-    setAsking(true)
+  const ask = (source: 'view' | 'query' | 'ask' | 'search', run: () => Promise<Answer>) => {
+    setPending(source)
     run().then(
       (a) => {
         setAnswer(a)
-        setAsking(false)
+        setPending('')
         setFailure('')
       },
       (err: unknown) => {
-        setAsking(false)
+        setPending('')
         setFailure(describeError(err))
       },
     )
@@ -82,7 +101,7 @@ export function HistoryPanel() {
               const name = e.target.value
               setView(name)
               setQueryName('')
-              if (name !== '') ask(() => api.historyView(name))
+              if (name !== '') ask('view', () => api.historyView(name))
             }}
           >
             <option value="">Choose a view…</option>
@@ -127,15 +146,135 @@ export function HistoryPanel() {
               />
             </label>
           ))}
-          <button type="button" onClick={() => ask(() => api.historyQuery(selected.name, slots))}>
+          <button type="button" onClick={() => ask('query', () => api.historyQuery(selected.name, slots))}>
             Ask
           </button>
         </div>
       )}
 
+      <div className="flex flex-col gap-4 md:flex-row md:items-start">
+        <QuestionForm
+          name="ask"
+          label="Ask in your own words"
+          note="The platform matches your question to one of the questions above and fills it in. When it cannot, it answers with the ones it could have run — that is an answer, not a failure, and it says why."
+          act="Ask"
+          value={question}
+          onChange={setQuestion}
+          pending={pending}
+          onFire={(q) => ask('ask', () => api.historyAsk(q))}
+        />
+        <QuestionForm
+          name="search"
+          label="Search the recorded history"
+          note="Your words are sent exactly as typed. What comes back are bounded excerpts with the reference each was found under — the record itself is read from that reference."
+          act="Search"
+          value={term}
+          onChange={setTerm}
+          pending={pending}
+          onFire={(q) => ask('search', () => api.historySearch(q))}
+        />
+      </div>
+
       {asking && <p className="muted">Asking…</p>}
-      {answer && <AnswerView answer={answer} onChoose={(name) => ask(() => api.historyQuery(name, slots))} />}
+      {answer && (
+        <AnswerView
+          answer={answer}
+          onChoose={(name) => {
+            // A CARD CHOICE SELECTS THE QUESTION; IT DOES NOT FIRE IT.
+            //
+            // The choices are catalog NAMES, and a catalog question has typed
+            // slots of its own. The landed binding fired the chosen name with
+            // whatever slots the picker happened to be holding — for a card that
+            // came from the free-text ask, those are another question's slots or
+            // none at all, so the reader would have got a different question's
+            // answer under the one they clicked. So the choice lands where a
+            // Layer-1 question is asked from, with its slots empty and rendered,
+            // and the person fires it deliberately.
+            //
+            // The card is deliberately NOT cleared: it is the context the choice
+            // was made in, and it stays on screen until an answer replaces it.
+            setView('')
+            setQueryName(name)
+            setSlots({})
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+/**
+ * The two free-text verbs' shared form (P3-UI-4).
+ *
+ * They are ONE component because they differ only in their words and their
+ * verb: both take a question, both refuse an empty one at the same bound the
+ * transport applies, both render their answer through the panel's single
+ * `AnswerView`. Two copies would be two places for the held/busy distinction to
+ * drift apart.
+ *
+ * BUSY AND HELD ARE TWO FACTS (§49 N7). `data-busy` is true only while THIS
+ * form's own request is in flight; a form that has simply not been filled in
+ * says so at the field and fires nothing. The button is disabled by either, but
+ * the two reasons never collapse into one another on screen.
+ *
+ * The draft survives everything: an answer, a refusal and the other form firing
+ * all leave what was typed exactly where it was, because losing it would make
+ * fixing one word mean retyping the sentence.
+ */
+function QuestionForm({
+  name,
+  label,
+  note,
+  act,
+  value,
+  onChange,
+  pending,
+  onFire,
+}: {
+  name: 'ask' | 'search'
+  label: string
+  note: string
+  act: string
+  value: string
+  onChange: (v: string) => void
+  pending: string
+  onFire: (q: string) => void
+}) {
+  const held = value.trim() === '' ? emptyQuestionReason : ''
+  const busy = pending === name
+
+  return (
+    <form
+      className="flex min-w-0 flex-1 flex-col gap-2"
+      data-form={name}
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (held !== '' || busy) return
+        onFire(value)
+      }}
+    >
+      <label className="flex flex-col gap-1">
+        {label}
+        <input
+          type="text"
+          data-field={name}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full min-w-0 rounded-(--radius-sm) border border-border bg-transparent px-2 py-1 text-sm"
+        />
+      </label>
+      <p className="muted">{note}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="sm" data-act={name} data-busy={String(busy)} disabled={busy || held !== ''}>
+          {act}
+        </Button>
+        {held !== '' && (
+          <span className="muted" data-held={name}>
+            {held}
+          </span>
+        )}
+      </div>
+    </form>
   )
 }
 

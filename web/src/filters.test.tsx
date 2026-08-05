@@ -184,3 +184,92 @@ test('a filter is live like every other view and marks itself while catching up'
   await flush()
   expect(view.container.textContent).toContain('Running')
 })
+
+// ── D5: relative BESIDE verbatim UTC, on every live site here (P3-UI-4) ───
+
+/**
+ * assertLiveStamp is the D5 live contract read off one rendered call site.
+ *
+ * THE ONE FORBIDDEN OUTCOME is a relative label that REPLACED the instant it
+ * describes: "3m ago" is computed against a device clock nobody controls, and
+ * between frames it freezes with the data it describes — understating age on a
+ * past stamp and overstating the time left on a future one — so the served
+ * string it sits beside is what stays true.
+ *
+ * The check is clock-independent on purpose: it asserts the rendered text ENDS
+ * with the served instant and is longer than it, rather than naming a label that
+ * would depend on when the suite runs.
+ */
+function assertLiveStamp(stamp: Element | null | undefined, served: string, what: string): void {
+  expect(stamp, `${what}: no timestamp rendered`).toBeTruthy()
+  expect(stamp!.getAttribute('dateTime'), `${what}: dateTime is not the served instant`).toBe(served)
+  expect(stamp!.textContent, `${what}: the verbatim UTC was dropped`).toBe(served)
+  const beside = stamp!.parentElement!.parentElement!.textContent ?? ''
+  expect(beside.endsWith(served), `${what}: the instant is not rendered beside its label`).toBe(true)
+  expect(beside.length, `${what}: no relative label renders beside the instant`).toBeGreaterThan(served.length)
+}
+
+test('what-needs-me renders relative time beside the verbatim instant, never instead of it', async () => {
+  const { view } = await open('/?view=what-needs-me')
+  const approvals = fixtures.approvalsMine() as unknown as { items: { id: string; observed_ts: string }[] }
+  const item = approvals.items[0]
+  const row = [...view.container.querySelectorAll('.rows .row')].find((r) => r.textContent?.includes(item.id))!
+  expect(row, 'the served card did not reach the screen').toBeDefined()
+  assertLiveStamp(row.querySelector('time'), item.observed_ts, 'an approval’s observed_ts')
+
+  const dels = fixtures.deliverablesInReview() as unknown as {
+    deliverables: { deliverable_id: string; updated_ts: string }[]
+  }
+  const d = dels.deliverables[0]
+  const drow = [...view.container.querySelectorAll('.rows .row')].find((r) => r.textContent?.includes(d.deliverable_id))!
+  assertLiveStamp(drow.querySelector('time'), d.updated_ts, 'a deliverable’s updated_ts')
+  view.unmount()
+})
+
+test('a parked run carries BOTH live instants: its horizon and its last activity', async () => {
+  const served = fixtures.runs() as unknown as {
+    runs: { run_id: string; task_id: string; parked_until: string | null; last_activity_ts: string | null }[]
+  }
+  const parked = served.runs.find((r) => r.parked_until)!
+  expect(parked, 'the fixture world no longer parks a run with a horizon').toBeDefined()
+  const { view } = await open('/?view=mine', { 'GET /api/runs?person=alice': { body: fixtures.runs() } })
+
+  const row = [...view.container.querySelectorAll('[data-filter] .row')].find((r) =>
+    r.textContent?.includes(parked.task_id),
+  )!
+  expect(row, 'the served run did not reach the screen').toBeDefined()
+  const stamps = [...row.querySelectorAll('time')]
+  // The park horizon is a FUTURE instant, and a frozen future label overstates
+  // the time left — which is precisely why the instant never leaves.
+  assertLiveStamp(stamps[0], parked.parked_until!, 'a park horizon')
+  expect(row.textContent).toContain('parked until')
+  assertLiveStamp(stamps[1], parked.last_activity_ts!, 'a run’s last_activity_ts')
+  view.unmount()
+})
+
+test('an unrecorded instant says so, and an unreadable one renders verbatim with no label', async () => {
+  // R20, both arms, on a live surface. An absence is RENDERED, not filled; and
+  // an instant this client could not parse still renders exactly as served,
+  // because inventing "3m ago" for something we could not read is the one thing
+  // the primitive must never do.
+  const blank = fixtures.runs() as unknown as { runs: Record<string, unknown>[] }
+  blank.runs = [{ ...blank.runs[0], parked_until: null, last_activity_ts: '' }]
+  const { view } = await open('/?view=mine', { 'GET /api/runs?person=alice': { body: blank } })
+  const row = [...view.container.querySelectorAll('[data-filter] .row')][0]
+  expect(row.querySelector('time'), 'an empty instant rendered a <time> anyway').toBeNull()
+  const absences = [...row.querySelectorAll('.absent')].map((n) => n.textContent)
+  expect(absences, 'the primitive’s absence arm did not render').toContain('not recorded')
+  // ParkedUntil's own absence arm is byte-kept through the migration: a park
+  // with no horizon still says so rather than inventing a time to be live about.
+  expect(absences, 'the park-with-no-horizon arm moved').toContain('parked, no horizon given')
+  view.unmount()
+
+  const odd = fixtures.runs() as unknown as { runs: Record<string, unknown>[] }
+  odd.runs = [{ ...odd.runs[0], parked_until: null, last_activity_ts: 'whenever' }]
+  const { view: v2 } = await open('/?view=mine', { 'GET /api/runs?person=alice': { body: odd } })
+  const stamp = v2.container.querySelector('[data-filter] .row time')!
+  expect(stamp.getAttribute('dateTime')).toBe('whenever')
+  expect(stamp.textContent).toBe('whenever')
+  expect(stamp.parentElement!.textContent, 'a label was invented for an instant nobody could read').toBe('whenever')
+  v2.unmount()
+})

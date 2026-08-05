@@ -83,6 +83,25 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
   // Fail closed, both directions: no session outside /login, and no /login
   // once there is one. `next` survives the round trip so a deep link that
   // arrived signed-out still lands where it was going.
+  //
+  // THE DEV-FALLBACK CARVE-OUT (B6 gate §9 finding C-1, fixed at P3-UI-4).
+  //
+  // `SessionAuthenticator` resolves EVERY session-less request in dev posture to
+  // the fixed dev identity (internal/api/identity.go:83–97), so `authed` is
+  // permanently true there. The bounce below therefore made /login unreachable
+  // in dev and `api.logout()` a no-op — the re-read simply resolved to the dev
+  // identity again — defeating the identity layer's own stated intent one layer
+  // up ("sessions still win when present, so the full login flow is exercisable
+  // in dev", identity.go:74–76).
+  //
+  // `session.dev === true` is the wire's own marker for that fallback and for
+  // nothing else: the served shape is `{authenticated:true, dev:true}` with NO
+  // `user` object, where a real session serves `{authenticated:true, user:{…}}`
+  // with `dev` omitted (internal/api/auth_handlers.go:91–116). Real cookies
+  // always win, so a dev-posture person who signs in stops matching this arm
+  // immediately. PRODUCTION IS BYTE-EQUIVALENT: without the fallback `dev` is
+  // never true, so both arms behave exactly as before.
+  const devFallback = authed && session?.dev === true
   useEffect(() => {
     if (session === null) return
     if (!authed && route.id !== 'login') {
@@ -90,7 +109,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
       navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
       return
     }
-    if (authed && route.id === 'login') {
+    if (authed && session.dev !== true && route.id === 'login') {
       const next = new URLSearchParams(window.location.search).get('next')
       navigate(safeNext(next), { replace: true })
     }
@@ -132,14 +151,32 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           {authed && (
             <span className="who">
               {session?.user?.display_name ?? (session?.dev === true ? 'dev' : '')}
-              <button
-                type="button"
-                onClick={() => {
-                  void api.logout().then(reload, reload)
-                }}
-              >
-                Sign out
-              </button>
+              {/* The affordance is whichever one can actually WORK, and the two
+                  server states are the only two rendered (C-1). Under the dev
+                  fallback there is no session to revoke, so a Sign out would
+                  clear nothing and leave the same identity resolved on the
+                  re-read — a control that cannot honour its own label. What is
+                  true there is that nobody is signed in yet, so the offer is the
+                  one act that changes it, pointing at the picker the carve-out
+                  above now lets render. This is not a synthesized "signed out"
+                  state: the dev fallback is the ABSENCE of a person, with
+                  browsing rights the server grants and this client never
+                  second-guesses. */}
+              {devFallback ? (
+                <Link to={hrefFor('login')} data-auth="sign-in">
+                  Sign in
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  data-auth="sign-out"
+                  onClick={() => {
+                    void api.logout().then(reload, reload)
+                  }}
+                >
+                  Sign out
+                </button>
+              )}
             </span>
           )}
         </header>

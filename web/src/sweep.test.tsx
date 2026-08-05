@@ -516,20 +516,15 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     method: 'POST',
     path: '/api/deliverables/{}/follow-up',
     gap: true,
-    why: 'REPORTED GAP — the S13.9 follow-up spawn. The review surface SERVES and RENDERS this door with its route and its `revision` preset, and NOTHING in the SPA calls it. CORRECTED (drain r1, D4): the first characterization said "shown, not pressable", which understated it — the surface shipped a full form with an ENABLED submit button whose handler could only report "The door named no route, pin or answer", because the form was gated on the door\u2019s VERB rather than on what it supplies. The dead control is fixed; the missing capability is what remains, and it is this gap.',
+    why: 'REPORTED GAP — the S13.9 follow-up spawn. The review surface SERVES and RENDERS this door with its route and its `revision` preset, and NOTHING in the SPA calls it. CORRECTED (drain r1, D4): the first characterization said "shown, not pressable", which understated it — the surface shipped a full form with an ENABLED submit button whose handler could only report "The door named no route, pin or answer", because the form was gated on the door\u2019s VERB rather than on what it supplies. The dead control is fixed; the missing capability is what remains, and it is this gap. DISPOSITION 2026-08-05 (P3-UI-4 grounding): this is the FOURTEENTH D3 control and it sat in NO queue row — the ratified six-group order never named it, and the comment below assigned it to a row that did not carry it. The coordinator amended the UI-4 row to own it (OQ1(a)), so the gap has a home and closes inside the controls phase rather than outliving the batch.',
   },
-  {
-    method: 'GET',
-    path: '/api/events/ask',
-    gap: true,
-    why: 'REPORTED GAP — the S14.10 intent-filling ask layer. The assistant routes by GESTURE (a verb radio) rather than by intent, deliberately (§44 OQ3: no model classifies a turn), so this layer has no caller today.',
-  },
-  {
-    method: 'GET',
-    path: '/api/events/search',
-    gap: true,
-    why: 'REPORTED GAP — the S14.10 redact-before-match search over the history. It is built, bounded and audited server-side, and no surface offers a search box to reach it.',
-  },
+  //
+  // CLOSED 2026-08-05 (P3-UI-4), TWO entries removed rather than annotated: the
+  // two S14.10 free-text layers are the history panel's two new controls — the
+  // ask layer, which answers with its disambiguation card wherever no local tier
+  // is wired, and the redact-before-match search over the redacted corpus. The
+  // stale-entry test below forced both the moment the panel called them.
+  // CONVENTIONS §46's gap record carries the dated pointer (§50).
 ]
 
 describe('the SPA consumes every API built above (S19.5)', () => {
@@ -597,13 +592,21 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     // three-number pin exists to keep visible. CONVENTIONS §46's gap record
     // carries the dated pointer (§49).
     //
-    // WHAT IS LEFT, and each is a capability rather than a missing screen: the
-    // S13.9 follow-up spawn, and the two S14.10 history layers (the ask layer
-    // and the redact-before-match search) — UI-4's row.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(3)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(3)
+    // MOVED 2026-08-05 (P3-UI-4), 3 → 1 routes over 3 → 1 shapes: the two S14.10
+    // free-text layers are the history panel's ask and search controls. Two
+    // routes, two shapes, neither shared with anything else on the list.
+    //
+    // WHAT IS LEFT is ONE route over one shape, and it is a capability rather
+    // than a missing screen: the S13.9 follow-up spawn. Its own entry above now
+    // records the disposition that gave it a home — it was the fourteenth D3
+    // control with no queue row, and this comment's earlier claim that all three
+    // were "UI-4's row" was the thing that hid it, since STATE's row named only
+    // the two history layers. The follow-up control is the amended row's, and
+    // this pin moves again the moment a surface calls it.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(1)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(1)
     const gapRoutes = inventory.filter((r) => gaps.includes(normalizePath(r.path)))
-    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(3)
+    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(1)
     for (const e of exceptions.filter((x) => x.gap)) {
       expect(e.why, `${e.path} is flagged a gap but does not say so in its reason`).toContain('REPORTED GAP')
     }

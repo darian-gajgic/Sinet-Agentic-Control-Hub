@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
 import { ConnectionState } from './ConnectionState'
+import { devFallbackSession } from './doubles'
 import { EventStream, type EventSourceLike, type Status } from './events'
 import { hrefFor, routes, type RouteDef } from './routes'
 import { Stub } from './Stub'
@@ -364,6 +365,121 @@ test('signing out posts to the logout route and re-reads identity', async () => 
   await flush()
 
   expect(calls.some((c) => c.path === '/api/auth/logout' && c.method === 'POST')).toBe(true)
+  view.unmount()
+})
+
+// ── C-1: the dev-posture login defeat (B6 gate §9), fixed at P3-UI-4 ──────
+//
+// THE SHAPES THESE ARMS DISCRIMINATE ON ARE THE SERVED ONES, not this file's
+// idea of them. `SessionAuthenticator` resolves every session-less request in
+// dev posture to the fixed dev identity (internal/api/identity.go:83–97), and
+// `handleAuthSession` serves that as `{authenticated:true, dev:true}` with NO
+// `user` object — the branch that fills one runs only `if !id.Dev`
+// (internal/api/auth_handlers.go:91–104). A real session is the other shape:
+// `user` present, `dev` omitted. Real cookies always win (identity.go:84–92).
+//
+// So `authed` was permanently true in dev: /login was unreachable and the header
+// offered a Sign out whose logout cleared nothing the next resolve would not
+// hand straight back.
+
+test('the dev fallback reaches the login picker instead of being bounced off it', async () => {
+  routeFetch({
+    'GET /api/auth/session': devFallbackSession,
+    'GET /api/auth/users': {
+      body: { users: [{ user_id: 'alice', display_name: 'Alice', role: 'operator', pin_set: true }] },
+    },
+  })
+  window.history.replaceState(null, '', '/login')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  expect(window.location.pathname, 'the dev fallback was bounced off /login again').toBe('/login')
+  const select = view.container.querySelector('select')!
+  expect(select, 'the picker did not render under the dev fallback').not.toBeNull()
+  expect([...select.options].map((o) => o.value)).toEqual(['alice'])
+  // Login.tsx is byte-unchanged: it always could render here, and this is the
+  // one layer above it that would not let it.
+  expect(view.container.querySelector('input[type=password]')).not.toBeNull()
+  view.unmount()
+})
+
+test('a real session still bounces off /login, so the carve-out cannot be reached by omission', async () => {
+  // The other direction of the same arm, and the one that must NOT move: in
+  // production there is no fallback, `dev` is never true, and this is byte-for-
+  // byte the behaviour that shipped.
+  routeFetch({ 'GET /api/auth/session': signedIn })
+  window.history.replaceState(null, '', '/login?next=%2Fboard')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  expect(window.location.pathname, 'a real session was left sitting on the login picker').toBe('/board')
+  view.unmount()
+})
+
+test('under the dev fallback the header offers Sign in, never a Sign out that cannot work', async () => {
+  routeFetch({ 'GET /api/auth/session': devFallbackSession })
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const who = view.container.querySelector('.who')!
+  // The who-line keeps its honest label: this is not a person.
+  expect(who.textContent).toContain('dev')
+  expect(who.querySelector('[data-auth="sign-out"]'), 'a Sign out that revokes nothing is offered').toBeNull()
+  const signIn = who.querySelector('[data-auth="sign-in"]')!
+  expect(signIn, 'the dev posture offers no affordance that reaches the picker').not.toBeNull()
+  expect(signIn.getAttribute('href')).toBe(hrefFor('login'))
+  expect(signIn.textContent).toBe('Sign in')
+  // NO INVENTED STATE: the client renders the two states the server serves and
+  // never synthesizes a third. The dev identity still browses — deny-by-default
+  // is the server's job and it already holds — so the nav is intact.
+  expect(view.container.querySelectorAll('.shell-nav a').length).toBeGreaterThan(0)
+  view.unmount()
+})
+
+test('the whole dev-posture cycle is honest: fallback → picker → real session → sign out → fallback', async () => {
+  const impl: Record<string, Route> = {
+    'GET /api/auth/session': devFallbackSession,
+    'GET /api/auth/users': {
+      body: { users: [{ user_id: 'alice', display_name: 'Alice', role: 'operator', pin_set: true }] },
+    },
+    'POST /api/auth/login': { body: { user_id: 'alice', expires: '2026-08-28T00:00:00Z' } },
+    'POST /api/auth/logout': { status: 204 },
+  }
+  const calls = routeFetch(impl)
+  window.history.replaceState(null, '', '/login')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+  expect(view.container.querySelector('select'), 'the cycle cannot start: no picker').not.toBeNull()
+  expect(view.container.querySelector('[data-auth="sign-in"]')).not.toBeNull()
+
+  // (2) A REAL LOGIN. The cookie is the server's and JS cannot read it, so what
+  //     is proved here is that the act FIRED and that the next SESSION READ is
+  //     what changed the screen — never a state this client flipped itself.
+  setValue(view.container.querySelector('input[type=password]') as HTMLInputElement, '4321')
+  impl['GET /api/auth/session'] = signedIn
+  submit(view.container.querySelector('form')!)
+  await flush()
+  expect(calls.some((c) => c.method === 'POST' && c.path === '/api/auth/login')).toBe(true)
+
+  // (3) The real session now bounces off /login exactly as it always did, and
+  //     the header offers the act it CAN honour.
+  expect(window.location.pathname).toBe(hrefFor('mission-control'))
+  expect(view.container.querySelector('[data-auth="sign-in"]'), 'Sign in survived a real session').toBeNull()
+  const out = view.container.querySelector('[data-auth="sign-out"]') as HTMLButtonElement
+  expect(out, 'a real session was offered no way out').not.toBeNull()
+
+  // (4) Signing out revokes and re-reads; the server falls back to dev again and
+  //     the offer goes back to the one that works.
+  impl['GET /api/auth/session'] = devFallbackSession
+  click(out)
+  await flush()
+  expect(calls.some((c) => c.method === 'POST' && c.path === '/api/auth/logout')).toBe(true)
+  expect(view.container.querySelector('[data-auth="sign-out"]'), 'a Sign out survived the logout it fired').toBeNull()
+  expect(view.container.querySelector('[data-auth="sign-in"]')).not.toBeNull()
   view.unmount()
 })
 

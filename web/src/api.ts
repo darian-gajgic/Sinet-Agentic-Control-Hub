@@ -1882,6 +1882,28 @@ export const api = {
     for (const [k, v] of Object.entries(slots)) if (v !== '') params[`slot_${k}`] = v
     return request<Answer>(`/api/events/query/${encodeURIComponent(name)}${query(params)}`)
   },
+  /**
+   * Layer 1 INTENT-FILLED: the question in somebody's own words, matched against
+   * the catalog by the local tier.
+   *
+   * It is typed `Answer` like every other layer because an unresolved question
+   * is ALSO an answer — the store returns its disambiguation card and the
+   * transport serves it at 200 with the audit intact, deliberately
+   * (internal/api/historyapi.go:127–141). Nothing here treats a card as an
+   * error, because the platform does not.
+   */
+  historyAsk: (q: string) => request<Answer>(`/api/events/ask${query({ q })}`),
+  /**
+   * The redact-before-match search over the indexed corpus.
+   *
+   * `q` goes VERBATIM. Redaction is the STORE's property — it redacts the
+   * question, strips the markers it left, matches only what survives, verifies
+   * each hit against the marker-free body and bounds every excerpt
+   * (internal/history/search.go:81–145) — so a client that pre-stripped anything
+   * would be a second implementation of that rule, free to disagree with the one
+   * the guarantee actually rests on.
+   */
+  historySearch: (q: string) => request<Answer>(`/api/events/search${query({ q })}`),
 
   /**
    * The ONE mutation the oversight views call. Rank is an ordering position

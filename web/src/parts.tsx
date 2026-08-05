@@ -1,5 +1,14 @@
 import type { ReactNode } from 'react'
 
+// Imported from the MODULE rather than the kit barrel on purpose: the barrel
+// also exports the three primitives that carry `@base-ui/react`, and `parts.tsx`
+// is reached from nearly every surface — pulling the dialog and toast machinery
+// into that graph to render a horizon would be a bundle cost with no consumer.
+// The resulting parts ↔ ui/Timestamp cycle is safe by construction: both modules
+// export hoisted function declarations and neither calls the other at module
+// evaluation time, only at render.
+import { Timestamp } from './ui/Timestamp'
+
 /**
  * The shared render primitives every oversight surface is built from
  * (P3/CONVENTIONS.md §42).
@@ -33,25 +42,39 @@ export function Money({ usd }: { usd: number | null | undefined }) {
   return <span className="money">USD {String(usd)}</span>
 }
 
-/** Stamp renders a served timestamp verbatim.
+/** Stamp renders a served timestamp verbatim — the AUDIT render.
  *
  *  Deliberately not localized: every stamp the platform serves is UTC RFC3339,
  *  reformatting one is a transformation of a fact, and an ambiguous "2:00" on a
- *  park horizon is worse than an unambiguous instant. Human-friendly rendering
- *  is a real want and belongs with the S15.12 sweep, on the whole surface at
- *  once, not per view. */
+ *  park horizon is worse than an unambiguous instant.
+ *
+ *  DATED 2026-08-05 (P3-UI-4, §50). The human-friendly rendering this comment
+ *  used to defer to "the S15.12 sweep" has been DECIDED and applied: the B6 gate
+ *  D5 answer is relative time BESIDE the verbatim UTC on live surfaces and UTC
+ *  ALONE in audit and history detail. `ui/Timestamp.tsx` is that primitive and
+ *  the live sites were migrated to it here. `Stamp` is not deprecated and did
+ *  not move: it already renders exactly the audit half of that contract, and the
+ *  eighteen record sites that keep calling it are keeping the answer rather than
+ *  waiting for one. */
 export function Stamp({ ts }: { ts: string | null | undefined }) {
   if (!ts) return <Absent reason="not recorded" />
   return <time dateTime={ts}>{ts}</time>
 }
 
 /** ParkedUntil is the S15.5 "parked until…" line — including the honest case
- *  where the platform is parked but nothing told it for how long. */
+ *  where the platform is parked but nothing told it for how long.
+ *
+ *  The horizon is a LIVE reading (D5, P3-UI-4): "in 20m" is what a person is
+ *  actually asking when they read a park line, so it renders beside the served
+ *  instant rather than instead of it. Between frames the label freezes with the
+ *  data it describes, and a frozen FUTURE horizon freezes toward overstating the
+ *  time left — which is exactly why the verbatim UTC never leaves. The absence
+ *  arm is byte-kept: a park with no horizon still says so and invents nothing. */
 export function ParkedUntil({ until }: { until: string | null | undefined }) {
   if (!until) return <Absent reason="parked, no horizon given" />
   return (
     <span className="parked-until">
-      parked until <Stamp ts={until} />
+      parked until <Timestamp ts={until} variant="live" />
     </span>
   )
 }

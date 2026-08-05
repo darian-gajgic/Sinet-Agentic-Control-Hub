@@ -433,3 +433,40 @@ test('a drag whose write FAILS says so instead of silently snapping back', async
   expect(note?.textContent).toContain('The re-rank did not land')
   expect(note?.textContent).toContain('503')
 })
+
+// ── D5 applied: the card face's park horizon (P3-UI-4) ────────────────────
+
+test('a card parked on a CLOCK renders its horizon verbatim with the label beside it', async () => {
+  // The landed fixture's parked card is also waiting on a person, and that
+  // branch wins on the face — so the horizon limb has to be driven. A run parked
+  // with nobody in the way is exactly the state this line exists for.
+  const tasks = { tasks: fixtureTasks(), cursor: 89, truncated: false }
+  tasks.tasks = tasks.tasks.map((t) =>
+    t.task_id === 't-audit' && t.latest_run
+      ? { ...t, latest_run: { ...t.latest_run, waiting_on_human: false, state: 'parked' } }
+      : t,
+  )
+  const { view } = await board({ ...oversightRoutes(), 'GET /api/tasks': { body: tasks } })
+
+  const face = [...view.container.querySelectorAll('.card-face')].find((c) =>
+    c.textContent?.includes('Audit the price table'),
+  )!
+  expect(face, 'the parked card did not reach the board').toBeDefined()
+  const served = '2026-07-20T12:00:00Z'
+  const stamp = face.querySelector('.parked-until time')!
+  expect(stamp, 'the park horizon rendered no instant').not.toBeNull()
+  expect(stamp.getAttribute('dateTime')).toBe(served)
+  // A FUTURE horizon is the freeze direction that OVERSTATES: between frames the
+  // label reads as more time left than there is, and only this instant corrects
+  // it. The server enforces the real horizon regardless.
+  expect(stamp.textContent, 'the verbatim UTC was dropped').toBe(served)
+  const beside = stamp.parentElement!.parentElement!.textContent ?? ''
+  expect(beside.endsWith(served), 'the instant is not beside its label').toBe(true)
+  expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(served.length)
+  expect(face.querySelector('.parked-until')!.textContent).toContain('parked until')
+
+  // THE CARD FACE IS STILL THE PINNED SET: ParkedUntil's internal render moving
+  // to the primitive adds nothing to the face.
+  expect(face.querySelectorAll('dt')).toHaveLength(5)
+  view.unmount()
+})

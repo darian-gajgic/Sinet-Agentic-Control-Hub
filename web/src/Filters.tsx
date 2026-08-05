@@ -1,9 +1,10 @@
 import { api, type ApprovalItem, type Deliverable, type RunListItem } from './api'
 import type { EventStream } from './events'
 import { missionEventTypes, useLive } from './live'
-import { Absent, Empty, Freshness, Owner, ParkedUntil, Section, Stamp } from './parts'
+import { Absent, Empty, Freshness, Owner, ParkedUntil, Section } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
+import { Timestamp } from './ui'
 
 /**
  * The four personal filters (Spec S15.5 ¶5; S1.4; S1.10).
@@ -152,7 +153,7 @@ function ApprovalLine({ item }: { item: ApprovalItem }) {
       {item.step_up_required && <span className="warn-flag">PIN required</span>}
       {item.stale && <span className="warn-flag">{(item.stale_reasons ?? ['stale']).join('; ')}</span>}
       <span className="muted">
-        seen <Stamp ts={item.observed_ts} />
+        seen <Timestamp ts={item.observed_ts} variant="live" />
       </span>
     </>
   )
@@ -168,7 +169,7 @@ function DeliverableLine({ deliverable }: { deliverable: Deliverable }) {
       <Owner id={deliverable.owner} />
       <Link to={hrefFor('task', { id: deliverable.task_id })}>{deliverable.task_id}</Link>
       <span className="muted">
-        updated <Stamp ts={deliverable.updated_ts} />
+        updated <Timestamp ts={deliverable.updated_ts} variant="live" />
       </span>
     </>
   )
@@ -231,7 +232,7 @@ function FilterRunLine({ run }: { run: RunListItem }) {
       {run.waiting_on_human && <span className="waiting-human">waiting on a person</span>}
       {run.state === 'parked' && <ParkedUntil until={run.parked_until} />}
       <span className="muted">
-        <Stamp ts={run.last_activity_ts} />
+        <Timestamp ts={run.last_activity_ts} variant="live" />
       </span>
     </>
   )

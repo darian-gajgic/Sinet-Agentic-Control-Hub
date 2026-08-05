@@ -714,3 +714,36 @@ test('served and typed figures take the mono, tabular treatment the token contra
     'replacing 100000 weighted-consumption units (S10.4)',
   )
 })
+
+// ── D5 applied: the lane table's park horizon (P3-UI-4) ───────────────────
+
+test('a lane with parked runs and no served horizon says so; one with a horizon renders it live', async () => {
+  // The served world's own arm first: lanes carry parked runs and NO horizon,
+  // so the line says the platform was not told for how long rather than
+  // inventing a time for a relative label to be about. That arm is byte-kept
+  // through the migration.
+  const served = fixtures.meters() as unknown as Meters
+  const lane = served.lanes.find((l) => l.parked_runs > 0)!
+  expect(lane, 'no lane in the fixture world has a parked run').toBeDefined()
+  expect(lane.parked_until ?? null, 'the fixture lane now carries a horizon').toBeNull()
+  const view = await fleet()
+  expect([...view.container.querySelectorAll('.absent')].map((n) => n.textContent)).toContain(
+    'parked, no horizon given',
+  )
+  view.unmount()
+
+  // And the other arm, driven: with a horizon served, the instant renders
+  // verbatim with the relative label BESIDE it — never in place of it.
+  const withHorizon = fixtures.meters() as unknown as Meters
+  const stamp = '2026-07-20T12:00:00Z'
+  withHorizon.lanes = withHorizon.lanes.map((l) => (l.parked_runs > 0 ? { ...l, parked_until: stamp } : l))
+  const v2 = await fleet({ 'GET /api/meters': { body: withHorizon } })
+  const time = v2.container.querySelector('.parked-until time')!
+  expect(time, 'the served horizon rendered no instant').not.toBeNull()
+  expect(time.getAttribute('dateTime')).toBe(stamp)
+  expect(time.textContent, 'the verbatim UTC was dropped').toBe(stamp)
+  const beside = time.parentElement!.parentElement!.textContent ?? ''
+  expect(beside.endsWith(stamp), 'the instant is not beside its label').toBe(true)
+  expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(stamp.length)
+  v2.unmount()
+})

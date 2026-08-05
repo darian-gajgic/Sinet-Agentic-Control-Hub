@@ -32,6 +32,8 @@ Every surface is a client of the same HTTP API and the one SSE endpoint — the 
 | meters | `/api/meters` | consumption, pressure, budgets, burn rates, limit-event status per (person, lane, period) | budget edits (own); pause-my-automation switch (3.3) | S10 |
 | memory [coordinator-draft] | `/api/memory` | scoped memory/knowledge entries (person / project / house) with provenance and gate status | manual entry create/edit — S09's write gate applies (own-store writes tier Medium; house promotion operator-only, D10) | S09 |
 | events | `/events` (SSE) + `/api/events` (history) | the live stream; filterable history (S2.10) through the S14 query layers | — (append is control-plane-internal) | S14 |
+| chat | `/api/chat` | per-user assistant sessions, their turns, and the exchange files a conversation carries (S15.7); sessions are platform-owned, and work is handed to intake (S06) rather than created here | session create / rename / delete; turn submit / stop; file upload / delete | S15.7; handoff S06; file confinement S11 |
+| push | `/api/push` | Declarative Web Push subscriptions, one per (identity, device) (S15.11); an endpoint is a capability URL and is never served back | subscribe; remove | S15.11 (register row 2 [XREF:S01 — S01.8]) |
 
 Login/session endpoints are S01.9's and are not restated here [XREF:S01]. Contract rules binding every family:
 
@@ -75,7 +77,7 @@ Pick-level riders [FC-v1 §1–4]:
 
 **Live board (9.1, S1.3).** Tasks are cards moving through their stages in real time from the SSE feed; cards group by project with follow-up lineage visible (S1.1–S1.2 semantics [XREF:S06]). A card face shows exactly the S1.3 set: what it is, whose it is, current stage, effort mode — with any disclosed downgrade note (3.5) [G2 D2.1; XREF:S10] — cost so far, and waiting-on-human. Drag-drop uses @hello-pangea/dnd; **stage columns are never writable by drag** — stage is FSM state owned by the control plane [XREF:S02]. The sanctioned v0 drag interaction is reordering one's *own queued* tasks as a scheduler priority hint [coordinator-draft; XREF:S10].
 
-**Task detail (9.2, S1.7)** shows the confirmed specification with its numbered acceptance criteria, the approved plan, per-stage progress with the live activity feed (S2.2), every human decision along the way (S2.4), every deliverable revision [XREF:S13], and the receipt: ceremony-vs-execution itemization and the done-directly figure under its ratified labels — "direct-use estimate (heuristic)" / "measured, n=…" [G2 D2.8; data XREF:S10].
+**Task detail (9.2, S1.7)** shows the confirmed specification with its numbered acceptance criteria, the approved plan, per-stage progress with the live activity feed (S2.2), every human decision along the way (S2.4), every deliverable revision [XREF:S13], and the receipt: ceremony-vs-execution itemization and the done-directly figure under its ratified labels — "direct-use estimate (heuristic)" / "measured (benchmark n=…)" [G2 D2.8; data XREF:S10].
 
 **Fleet overview (9.3)** answers what is running on whose account at what burn rate: per-person/per-model consumption meters and automation-budget remainders (S2.5), limit-event status and history ("parked until…"), all filterable [XREF:S10; XREF:S14]. Accounts are always distinguished (S3.10; D2).
 

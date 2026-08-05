@@ -1188,3 +1188,54 @@ test('the consent position re-reads on the frame the flip itself mints', async (
   expect(reads(), 'a decision frame did not re-read the standing consent').toBeGreaterThan(before)
   view.unmount()
 })
+
+// ── D5 applied: the inbox's four live sites (P3-UI-4) ─────────────────────
+
+/** The D5 live contract at one call site: the served instant renders VERBATIM
+ *  inside `<time dateTime>`, with the relative label BESIDE it. Relative-only
+ *  is the forbidden outcome — and it matters most here, because the inbox's
+ *  stamps point FORWARD: a frozen "in 3h" overstates the time left, and only
+ *  the instant beside it corrects that. Clock-independent by design. */
+function assertBeside(stamp: Element | null | undefined, served: string, what: string): void {
+  expect(stamp, `${what}: no timestamp rendered`).toBeTruthy()
+  expect(stamp!.getAttribute('dateTime'), `${what}: dateTime is not the served instant`).toBe(served)
+  expect(stamp!.textContent, `${what}: the verbatim UTC was dropped`).toBe(served)
+  const beside = stamp!.parentElement!.parentElement!.textContent ?? ''
+  expect(beside.includes(served), `${what}: the instant is not beside its label`).toBe(true)
+  expect(beside.length, `${what}: a relative label replaced the instant`).toBeGreaterThan(served.length)
+}
+
+test('a card renders its observed and expiry instants verbatim, with the labels beside them', async () => {
+  const list = mine()
+  const withExpiry = list.items.find((i) => i.expiry_at)!
+  expect(withExpiry, 'the fixture inbox no longer carries an expiring card').toBeDefined()
+  const { view } = await open('/inbox', list as unknown as Record<string, unknown>)
+
+  const node = row(view, withExpiry.id)
+  assertBeside(node.querySelector('time'), withExpiry.observed_ts, 'the observed stamp')
+  assertBeside(node.querySelector('.expiry time'), withExpiry.expiry_at!, 'the expiry stamp')
+  // The landed countdown is a DIFFERENT statement and it stays: it reads at
+  // second precision and says whether the deadline has passed at all, which the
+  // coarse label does not. The server enforces the real expiry regardless.
+  expect(node.querySelector('.expiry')?.textContent).toMatch(/\(past\)|\(in /)
+  view.unmount()
+})
+
+test('the engine deadline and the conflict notice are live too, and the verdict record is not', async () => {
+  const list = mine()
+  const expiring = list.items.find((i) => i.expiry_at)!
+  const engine = {
+    ...list,
+    items: list.items.map((i) => (i.id === expiring.id ? { ...i, engine_expiry_ts: '2026-07-20T09:06:00Z' } : i)),
+  }
+  const { view } = await open('/inbox', engine as unknown as Record<string, unknown>)
+  const node = row(view, expiring.id)
+  const stamps = [...node.querySelectorAll('.expiry time')]
+  assertBeside(stamps[1], '2026-07-20T09:06:00Z', 'the engine’s own deadline')
+
+  const conflict = list.items.find((i) => i.kind === 'memory_conflict')!
+  expect(conflict, 'the fixture inbox no longer carries a memory conflict').toBeDefined()
+  const cnode = row(view, conflict.id)
+  assertBeside(cnode.querySelector('time'), conflict.observed_ts, 'the conflict card’s observed stamp')
+  view.unmount()
+})

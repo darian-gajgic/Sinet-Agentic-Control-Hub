@@ -18,7 +18,7 @@ import { activityEventTypes, boardEventTypes, useLive } from './live'
 import { Absent, Empty, Freshness, Money, Owner, Section, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Button } from './ui'
+import { Button, Timestamp } from './ui'
 
 /**
  * Task detail (Spec S15.5 ¶3; 9.2; S2.2; S2.4; G2 D2.8).
@@ -62,7 +62,7 @@ export function TaskDetail({ id, stream }: { id: string; stream?: EventStream })
       {data && (
         <>
           <p className="muted">
-            <Owner id={data.owner} /> · {data.kanban_status} · opened <Stamp ts={data.created_ts} />
+            <Owner id={data.owner} /> · {data.kanban_status} · opened <Timestamp ts={data.created_ts} variant="live" />
           </p>
           <CancelTask taskID={id} runs={data.runs} reload={reload} />
           <SpecBlock detail={data} stale={stale} />
@@ -402,7 +402,7 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
             {card.last_activity ? (
               <>
                 <span className="muted">{card.last_activity.type}</span> {card.last_activity.line}{' '}
-                <Stamp ts={card.last_activity.ts} />
+                <Timestamp ts={card.last_activity.ts} variant="live" />
               </>
             ) : (
               <Absent reason="nothing has happened on this run yet" />
@@ -451,7 +451,7 @@ function StageBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
               {s.outcome && <span className="stage-outcome"> · {s.outcome}</span>}
               <span className="muted">
                 {' '}
-                <Stamp ts={s.ts} />
+                <Timestamp ts={s.ts} variant="live" />
               </span>
             </li>
           ))}

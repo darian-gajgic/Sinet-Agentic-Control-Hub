@@ -3,9 +3,10 @@ import type { EventStream } from './events'
 import { FilterBar, FilterView, filterFromSearch } from './Filters'
 import { AnswerView, HistoryPanel } from './History'
 import { missionEventTypes, useLive } from './live'
-import { Absent, Empty, Freshness, Owner, ParkedUntil, Section, Stamp } from './parts'
+import { Absent, Empty, Freshness, Owner, ParkedUntil, Section } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { Timestamp } from './ui'
 
 /**
  * Mission control (Spec S15.5 ¶1; S3.1): one live screen of the household's
@@ -145,7 +146,7 @@ function RunLine({ run }: { run: RunListItem }) {
       {run.waiting_on_human && <span className="waiting-human">waiting on a person</span>}
       {run.state === 'parked' && <ParkedUntil until={run.parked_until} />}
       <span className="muted">
-        last activity <Stamp ts={run.last_activity_ts} />
+        last activity <Timestamp ts={run.last_activity_ts} variant="live" />
       </span>
     </>
   )

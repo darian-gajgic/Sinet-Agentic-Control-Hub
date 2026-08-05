@@ -18,7 +18,7 @@ import { Absent, Empty, Freshness, Owner, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { reconcileBadge } from './push'
-import { Button, Panel } from './ui'
+import { Button, Panel, Timestamp } from './ui'
 
 /**
  * The one approval inbox (Spec S15.6; S3.2; 13.5; S06.9; S14.4–S14.7).
@@ -392,7 +392,7 @@ function CardHead({ item }: { item: ApprovalItem }) {
       )}
       {item.step_up_required && <span className="warn-flag">PIN required</span>}
       <span className="muted">
-        seen <Stamp ts={item.observed_ts} />
+        seen <Timestamp ts={item.observed_ts} variant="live" />
       </span>
       <Expiry item={item} />
       <Staleness item={item} />
@@ -441,7 +441,7 @@ function Expiry({ item }: { item: ApprovalItem }) {
   const remaining = Date.parse(item.expiry_at) - Date.now()
   return (
     <span className="expiry" data-expiry={item.expiry_at}>
-      expires <Stamp ts={item.expiry_at} />
+      expires <Timestamp ts={item.expiry_at} variant="live" />
       <span className={remaining <= 0 ? 'warn-flag' : 'muted'}>
         {' '}
         {remaining <= 0 ? '(past)' : `(in ${describeSpan(remaining)})`}
@@ -449,7 +449,7 @@ function Expiry({ item }: { item: ApprovalItem }) {
       {item.engine_expiry_ts && (
         <span className="muted">
           {' '}
-          · the engine's own deadline: <Stamp ts={item.engine_expiry_ts} />
+          · the engine's own deadline: <Timestamp ts={item.engine_expiry_ts} variant="live" />
         </span>
       )}
     </span>
@@ -861,7 +861,7 @@ function ConflictContent({ card }: { card: MemoryConflict | undefined }) {
         <Link to={hrefFor('inbox-item', { id: `memory_conflict:${String(card.conflict_id)}` })}>
           {card.entry_id}
         </Link>{' '}
-        and {card.other_entry_id} · noticed <Stamp ts={card.detected_ts} />
+        and {card.other_entry_id} · noticed <Timestamp ts={card.detected_ts} variant="live" />
       </p>
     </div>
   )

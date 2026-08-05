@@ -43,6 +43,7 @@ import (
 
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/accept"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
@@ -57,6 +58,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/preview"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/push"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/retention"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
@@ -349,7 +351,47 @@ func fixtureWorld(t *testing.T) *backend {
 	seedFixturePushDevices(t, b)
 	driveFixturePause(t, b)
 	driveFixtureMemoryRetire(t, b)
+	indexFixtureHistory(t, b)
 	return b
+}
+
+// indexFixtureHistory runs the REAL B5-8A projector over this world's own event
+// log, so `GET /api/events/search` is answered from a corpus somebody's
+// machinery WROTE (P3-UI-4).
+//
+// It exists because of the §38 D12 lesson: a search test over an empty index
+// passes while proving nothing, and a committed search body whose rows were
+// hand-inserted here would be this file's idea of what the indexer writes
+// rather than what it writes. Running `retention.Index` instead means the
+// bodies, the refs, the kinds and the owner column are all the projector's, and
+// the write-time redaction (index.go's `searchBody`) is the real one.
+//
+// It appends NO event — the pass writes `history_fts`, `run_event_rollup` and
+// its own cursor row inside one WriteTx and touches the log only to read it —
+// so the head `cursor` every other committed body carries cannot move. That is
+// also why its position in the ordering above is free; it runs last so it sees
+// every row the drivers before it wrote.
+func indexFixtureHistory(t *testing.T, b *backend) {
+	t.Helper()
+	rs, err := retention.New(retention.Config{
+		DB: b.db, Log: b.log, Settings: b.reg,
+		Now: func() time.Time { return mustTime(t, fxT4) },
+	})
+	if err != nil {
+		t.Fatalf("retention.New: %v", err)
+	}
+	if _, err := rs.EnsureKeepForeverSeeded(context.Background()); err != nil {
+		t.Fatalf("EnsureKeepForeverSeeded: %v", err)
+	}
+	res, err := rs.Index(context.Background())
+	if err != nil {
+		t.Fatalf("index history: %v", err)
+	}
+	// A pass that indexed nothing would leave the committed search body vacuous
+	// in exactly the way D12 is about, and it would do it silently.
+	if res.Indexed == 0 {
+		t.Fatalf("the history index pass wrote no rows: the search fixture would be answered from an empty corpus")
+	}
 }
 
 // driveFixtureMemoryRetire retires the two entries driveFixtureMemoryConflict
@@ -1963,6 +2005,26 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	{"history-catalog", "/api/events/catalog", ""},
 	{"history-view-answer", "/api/events/views/cost_per_run", ""},
 	{"history-query-answer", "/api/events/query/status.runs_active", ""},
+	// The two S14.10 layers P3-UI-4 gives a surface, both answered by the REAL
+	// handlers over this world rather than scripted:
+	//
+	//   ask    — no local tier is wired here (`history.New` above takes no Duty
+	//            and no Advisory), so this is the honest degraded posture the
+	//            SPA meets in every test process and in dev: the layer answers
+	//            with its disambiguation CARD and its own reason, at 200, with
+	//            real catalog choices. $0, deterministic, and the one answer a
+	//            client can be built against without a model in the loop.
+	//   search — over the corpus `indexFixtureHistory` had the real projector
+	//            write, so the rows, refs, kinds, owner column and excerpts are
+	//            all the indexer's own (§38 D12: an empty corpus proves nothing).
+	{"history-ask-answer", "/api/events/ask?q=" + url.QueryEscape("what did the release notes deployment cost?"), ""},
+	//
+	// The search question is chosen to reach BOTH indexed kinds this world
+	// carries — a recorded verdict and a drift finding, owned by two different
+	// people — because a one-row body would let the surface's list render, its
+	// per-row ref and its owner column all be right by accident.
+	{"history-search-answer", "/api/events/search?q=" +
+		url.QueryEscape("did anything ship, and what changed on the anthropic side?"), ""},
 	{"task-detail", "/api/tasks/t-ship", ""},
 	{"task-detail-draft", "/api/tasks/t-triage", ""},
 	{"task-detail-bare", "/api/tasks/t-archive", ""},

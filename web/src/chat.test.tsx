@@ -1348,3 +1348,24 @@ test('a transport failure and a server answer are different classes at the table
   expect(describeChatFailure(new Unreachable(new Error('down'))).class).toBe('transport')
   expect(describeChatFailure(new ApiError(503, 'seat down', 'not_wired', {})).class).toBe('not-wired')
 })
+
+// ── D5 applied: the exchange file's live stamp (P3-UI-4) ──────────────────
+
+test('an exchange file renders its upload instant verbatim, with the relative label beside it', async () => {
+  const { view } = await open(`/chat?session=${chatSessionID}`)
+  const file = servedFiles()[0]
+  expect(file, 'the fixture world serves no exchange file').toBeDefined()
+
+  const node = view.container.querySelector(`[data-file="${file.file_id}"]`)!
+  expect(node, 'the served file did not reach the screen').not.toBeNull()
+  const stamp = node.querySelector('time')!
+  expect(stamp, 'the file lost its stamp').not.toBeNull()
+  expect(stamp.getAttribute('dateTime')).toBe(file.uploaded_ts)
+  // The verbatim instant never leaves: the label beside it is derived from a
+  // device clock and freezes between frames, and only this string stays true.
+  expect(stamp.textContent, 'the verbatim UTC was dropped').toBe(file.uploaded_ts)
+  const beside = stamp.parentElement!.parentElement!.textContent ?? ''
+  expect(beside.endsWith(file.uploaded_ts), 'the instant is not beside its label').toBe(true)
+  expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(file.uploaded_ts.length)
+  view.unmount()
+})

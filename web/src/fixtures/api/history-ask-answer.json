@@ -1,0 +1,56 @@
+{
+  "layer": 1,
+  "query": "catalog.disambiguation",
+  "confidence": "canned",
+  "question": "what did the release notes deployment cost?",
+  "columns": [],
+  "rows": [],
+  "row_count": 0,
+  "truncated": false,
+  "card": {
+    "question": "what did the release notes deployment cost?",
+    "reason": "the local tier is not wired here, so intent cannot be classified — pick a query by name (the catalog is the reliability floor and is always available)",
+    "choices": [
+      {
+        "query": "cost.budget_remainder",
+        "category": "cost",
+        "description": "the budget remainder — a recorded absence at v0, with its reason"
+      },
+      {
+        "query": "cost.burn_rate",
+        "category": "cost",
+        "description": "the burn rate — usd per observed day, with the span it was observed over"
+      },
+      {
+        "query": "cost.by_period",
+        "category": "cost",
+        "description": "consumption per day within a date range"
+      },
+      {
+        "query": "cost.done_directly",
+        "category": "cost",
+        "description": "the done-directly line per run, cited from the registered formula"
+      },
+      {
+        "query": "cost.for_person",
+        "category": "cost",
+        "description": "what one person's work cost — the person axis"
+      },
+      {
+        "query": "cost.for_project",
+        "category": "cost",
+        "description": "what one project cost — the project axis, via the intake-resolved linkage"
+      },
+      {
+        "query": "cost.for_run",
+        "category": "cost",
+        "description": "what one run cost, from the priced receipt"
+      },
+      {
+        "query": "cost.for_task",
+        "category": "cost",
+        "description": "what one task cost across all of its runs"
+      }
+    ]
+  }
+}

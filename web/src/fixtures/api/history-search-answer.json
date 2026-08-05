@@ -1,0 +1,35 @@
+{
+  "layer": 0,
+  "query": "search.history",
+  "confidence": "deterministic",
+  "question": "did anything ship, and what changed on the anthropic side?",
+  "columns": [
+    "rowid",
+    "kind",
+    "ref",
+    "user_id",
+    "excerpt"
+  ],
+  "rows": [
+    [
+      29,
+      "drift",
+      "event:29",
+      "platform",
+      "the messages endpoint deprecates a parameter this platform sends breaking anthropic-changelog flag-now anthropic fp-anthropic-1"
+    ],
+    [
+      84,
+      "verdict",
+      "r-notes",
+      "alice",
+      "SHIP"
+    ]
+  ],
+  "row_count": 2,
+  "truncated": false,
+  "notes": [
+    "matched against the redacted corpus (codor C2): a query for a secret's plaintext cannot confirm the secret",
+    "excerpts are bounded and redacted; render the record from its ref"
+  ]
+}

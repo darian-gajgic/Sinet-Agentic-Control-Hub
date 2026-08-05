@@ -43,9 +43,10 @@ import {
   describeError,
   useLive,
 } from './live'
-import { Absent, Empty, Freshness, Stamp } from './parts'
+import { Absent, Empty, Freshness } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
+import { Timestamp } from './ui'
 
 /**
  * The conversational assistant (Spec S15.7; S15.4; FC-v1 §3; S14.10).
@@ -1082,7 +1083,7 @@ function Exchange({
               <span className="chat-file-name">{f.name}</span>
               <span className="muted">{String(f.size_bytes)} bytes</span>
               <span className="muted chat-file-sha">{f.sha256}</span>
-              <Stamp ts={f.uploaded_ts} />
+              <Timestamp ts={f.uploaded_ts} variant="live" />
               <button type="button" onClick={() => onDelete(f.file_id)}>
                 Delete
               </button>

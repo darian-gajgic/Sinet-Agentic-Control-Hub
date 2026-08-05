@@ -956,3 +956,42 @@ test('the operator cancels another owner’s run, and the act really fires', asy
   expect(log.calls.filter((c) => c.method === 'POST' && c.path === '/api/runs/r-ship/cancel').length).toBe(1)
   expect(view.container.querySelector('[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
 })
+
+// ── D5 applied: the task detail's three live sites (P3-UI-4) ──────────────
+
+/** The D5 live contract at one call site: the served instant renders VERBATIM
+ *  inside `<time dateTime>` and the relative label sits BESIDE it. A site that
+ *  rendered relative-only is the one forbidden outcome — the label is computed
+ *  against a device clock and freezes between frames, so what stays true is the
+ *  string the platform served. Clock-independent by design. */
+function assertBeside(stamp: Element | null | undefined, served: string, what: string): void {
+  expect(stamp, `${what}: no timestamp rendered`).toBeTruthy()
+  expect(stamp!.getAttribute('dateTime'), `${what}: dateTime is not the served instant`).toBe(served)
+  expect(stamp!.textContent, `${what}: the verbatim UTC was dropped`).toBe(served)
+  const beside = stamp!.parentElement!.parentElement!.textContent ?? ''
+  expect(beside.endsWith(served), `${what}: the instant is not beside its label`).toBe(true)
+  expect(beside.length, `${what}: a relative label replaced the instant`).toBeGreaterThan(served.length)
+}
+
+test('opened, last activity and each stage boundary all render relative beside verbatim', async () => {
+  const served = fixtures.taskDetail() as unknown as Detail
+  const run = fixtures.runDetail() as unknown as RunDetail
+  const { view } = await task('t-ship', detailRoutes())
+
+  const opened = [...view.container.querySelectorAll('p.muted')].find((p) => p.textContent?.includes('opened'))!
+  expect(opened, 'the opened line did not render').toBeDefined()
+  assertBeside(opened.querySelector('time'), served.created_ts, 'the opened stamp')
+  assertBeside(view.container.querySelector('.activity-line time'), run.card!.last_activity!.ts, 'the activity stamp')
+
+  const stage = served.stage_progress[0]
+  expect(stage, 'the served task no longer records a stage boundary').toBeDefined()
+  assertBeside(view.container.querySelector(`.stages [data-stage="${stage.stage}"] time`), stage.ts, 'a stage boundary')
+
+  // The AUDIT sites on this same surface deliberately did NOT move: a decision
+  // and a revision are records, and a record needs the instant alone.
+  const decision = view.container.querySelector('.decisions time')
+  expect(decision, 'the decision record lost its stamp').not.toBeNull()
+  expect(decision!.textContent, 'an audit record dropped its verbatim instant').toBe(decision!.getAttribute('dateTime'))
+  expect(decision!.parentElement!.textContent, 'an audit record grew a relative label').not.toMatch(/\bago\b|\bin \d/)
+  view.unmount()
+})
