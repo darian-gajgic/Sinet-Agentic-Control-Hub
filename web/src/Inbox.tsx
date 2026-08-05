@@ -443,6 +443,11 @@ function CardHead({ item }: { item: ApprovalItem }) {
         </Link>
         <span data-provenance-field="kind">{item.kind}</span>
         <Owner id={item.owner} />
+        {/* The run ref stays here, as the run ref it is. It is a served fact
+            about which run raised the card, and it is NOT the jump: the task
+            route keys on task ids and this is a run id. Leg 4 below carries the
+            resolved task. */}
+        {item.run_id && <span data-provenance-field="run">run {item.run_id}</span>}
         <span>
           seen <Timestamp ts={item.observed_ts} variant="live" />
         </span>
@@ -599,33 +604,33 @@ function checkFirst(item: ApprovalItem): string {
 /**
  * LEG 4 — the jump to the work, and it renders ONLY what the wire carries.
  *
- * `run_id` is the one work reference an approval card serves (api.ts:512–538);
- * there is no task id and no deliverable id on any card, so no deliverable jump
- * exists to render and none is improvised. A card with no `run_id` — a blind
- * pair, a memory conflict — gets no leg at all rather than a door to nowhere.
+ * The card serves TWO work references and they are not interchangeable. `run_id`
+ * is the run that raised the card and is the run ref the provenance line above
+ * carries. `task_id` is the TASK that run belongs to, resolved server-side from
+ * the run row (internal/api/approvals.go, `fillTaskRefs`) — and it is the one the
+ * task route can be given, because a run id is "<task_id>.<stage>[.gN]" while the
+ * task read keys on `tasks.task_id`, so the two id spaces never overlap.
  *
- * ⚠ REPORTED, and the reason this leg names the reference rather than its
- * destination. The landed link hands the served RUN id to the TASK route
- * (`hrefFor('task')`), whose handler resolves that parameter against the tasks
- * table's own id (internal/api/reads.go:813–815). Those are different id
- * spaces: not one of the
- * eight `run_id` values the golden approvals bodies serve appears among the ten
- * task ids in the same fixture world, so for every card that carries one the
- * page it opens answers with its own not-found. The TARGET is landed behaviour
- * and is byte-preserved here — repointing it needs either a served task ref on
- * the card or a run→task resolving read, both beyond this packet's freeze — so
- * what this leg does NOT do is put an inviting label on it. It says which run
- * the card came from, which is exactly what is on the wire. Recorded in
- * CONVENTIONS §52 with its evidence.
+ * ⚠ HISTORY, kept so nobody re-introduces it. Before P3-UI-6 drain r1 this leg
+ * handed the served RUN id to the task route, which meant every card's link
+ * resolved to the task read's own not-found — structurally, for every card, not
+ * as an edge case. The field above was sanctioned to fix it at the source rather
+ * than by teaching this client to derive a task id from a run id, which would
+ * have been a second implementation of a mapping only the run row actually
+ * knows. The link is now labelled for what it opens because it now opens it.
+ *
+ * ABSENCE INVENTS NOTHING. A card with no run — a blind pair, a memory conflict
+ * — has no leg. A card whose run resolves to no task serves no `task_id` and
+ * likewise has no leg, rather than a door to a page that does not exist.
  */
 function JumpToWork({ item }: { item: ApprovalItem }) {
-  if (!item.run_id) return null
+  if (!item.task_id) return null
   return (
-    <p className="text-sm" data-jump="run">
-      <span className="text-muted-foreground">the run this came from: </span>
-      <Link to={hrefFor('task', { id: item.run_id })} className="font-mono tabular-nums">
-        {item.run_id}
-      </Link>
+    <p className="text-sm" data-jump="task">
+      <Link to={hrefFor('task', { id: item.task_id })}>
+        Open the task this came from — its deliverable revisions and receipts are there
+      </Link>{' '}
+      <span className="font-mono tabular-nums text-muted-foreground">{item.task_id}</span>
     </p>
   )
 }

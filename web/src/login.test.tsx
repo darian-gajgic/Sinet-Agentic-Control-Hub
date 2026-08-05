@@ -47,10 +47,28 @@ test('the picker says who is signing in, and promises nothing this page cannot d
   expect(what, 'the line does not say what the page is for').toContain('Who is signing in on this device')
   expect(what, 'the line drops the shared-house fact the picker exists for').toContain("accounts are the household's")
   expect(what).toContain('pick yours and enter your PIN')
-  // The client holds no credential and no token: the cookie is HttpOnly and the
-  // PIN lives in component state only until the request that spends it returns.
-  expect(what).toContain('checked by the platform')
-  expect(what, 'the line does not say the browser keeps nothing').toContain('no copy of it and no token of its own')
+  // THE SUBJECT IS THE PAGE, and it must stay the page (drain r1, D2). The PIN
+  // input carries the landed `autocomplete="current-password"`, which invites the
+  // browser's own password manager to store the PIN — so a line claiming "this
+  // browser keeps no copy" would be false, and the page may only speak for
+  // itself: it holds no credential, it clears the PIN on every path, and the
+  // session is the server's HttpOnly cookie.
+  expect(what).toContain('sent to the platform to be checked')
+  expect(what, 'the line drops the page-holds-no-credential fact').toContain('stores no credential of its own')
+  expect(what, 'the line does not say the PIN is cleared').toContain('cleared the moment the answer comes back')
+  expect(what, "the line does not name what the session actually is").toContain("platform's own session cookie")
+  expect(what, 'the page claims it cannot read the cookie, which is the HttpOnly fact').toContain('cannot read')
+
+  // The negative that D2 is about: NO claim about what the BROWSER does or does
+  // not keep. This page does not control the password manager and may not speak
+  // for it.
+  for (const claim of ['browser keeps no', 'this browser keeps', 'nothing is stored in your browser', 'no copy of it']) {
+    expect(what.toLowerCase(), `the line speaks for the browser: ${claim}`).not.toContain(claim.toLowerCase())
+  }
+  // …and the landed shape the claim would have contradicted is still there,
+  // untouched, which is what makes the negative load-bearing.
+  const pinField = view.container.querySelector('input[type=password]') as HTMLInputElement
+  expect(pinField.autocomplete, 'the pinned PIN autocomplete shape moved').toBe('current-password')
 
   // The overclaims. There is no self-service account creation outside the
   // bootstrap window, no password reset and no remembered sign-in — a line

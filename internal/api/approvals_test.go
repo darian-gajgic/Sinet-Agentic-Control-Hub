@@ -1396,3 +1396,59 @@ func TestDenyRecordsItsDecisionOnlyAfterTheJournalActSucceeds(t *testing.T) {
 		t.Errorf("a refused deny left %d orphan audit rows (drain D6)", got-before)
 	}
 }
+
+// TestCardsCarryTheTaskTheirRunBelongsTo drives the P3-UI-6 drain-r1 sanction in
+// both directions.
+//
+// WHY THE FIELD EXISTS. A run id is "<task_id>.<stage>[.gN]" and the task read
+// keys on `tasks.task_id`, so the two id spaces never overlap — a surface handed
+// only `run_id` could not link to a task page without inventing the mapping, and
+// the inbox's landed link resolved to the task read's own not-found for every
+// card. The projector resolves it from the run row instead, which is the only
+// place the mapping actually lives.
+func TestCardsCarryTheTaskTheirRunBelongsTo(t *testing.T) {
+	e := newDecisionEnv(t)
+	seedTask(t, e.b, "t-1", "alice", "T", "doing")
+	seedRun(t, e.b, "t-1.build", "alice", "t-1", "parked", "lane")
+	seedCard(t, e.b, "ask-linked", "t-1.build", "alice", approvalCard("medium", "LINKED"), time.Now())
+	// A run with NO task: the join misses, and the field must stay absent rather
+	// than acquiring a guessed id.
+	seedRun(t, e.b, "t-0.orphan", "alice", "", "parked", "lane")
+	seedCard(t, e.b, "ask-orphan", "t-0.orphan", "alice", approvalCard("medium", "ORPHAN"), time.Now())
+
+	list := decodeList(t, e.mustDo(t, "alice", "GET", "/api/approvals", ""))
+
+	linked, ok := itemByID(list, "ask:ask-linked")
+	if !ok {
+		t.Fatal("the linked card is missing from the inbox")
+	}
+	if linked.RunID != "t-1.build" {
+		t.Errorf("the run ref moved: got %q, want %q — it is still the run that raised the card", linked.RunID, "t-1.build")
+	}
+	if linked.TaskID != "t-1" {
+		t.Errorf("the card did not resolve its task: got %q, want %q", linked.TaskID, "t-1")
+	}
+	// The whole point, asserted rather than assumed: the two refs are DIFFERENT,
+	// so handing the run id to the task route could never have worked.
+	if linked.TaskID == linked.RunID {
+		t.Error("run and task ref are the same string — this test proves nothing about the id spaces")
+	}
+
+	orphan, ok := itemByID(list, "ask:ask-orphan")
+	if !ok {
+		t.Fatal("the orphan card is missing from the inbox")
+	}
+	if orphan.RunID != "t-0.orphan" {
+		t.Errorf("the orphan card lost its run ref: got %q", orphan.RunID)
+	}
+	if orphan.TaskID != "" {
+		t.Errorf("a run with no task acquired one: got %q — honest absence is the contract", orphan.TaskID)
+	}
+
+	// A card that names no run at all resolves nothing and stays that way.
+	for _, it := range list.Items {
+		if it.RunID == "" && it.TaskID != "" {
+			t.Errorf("card %q carries a task ref with no run to have resolved it from: %q", it.ID, it.TaskID)
+		}
+	}
+}

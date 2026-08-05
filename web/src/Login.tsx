@@ -202,9 +202,20 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
  * offering one would be a door that is not there. It promises no remembered
  * sign-in either: a device hint PREFILLS the picker and never signs anybody in,
  * which stays the server's call on the grant.
+ *
+ * ⚠ CORRECTED 2026-08-05 (P3-UI-6 drain r1, D2). This line first said "this
+ * BROWSER keeps no copy of it and no token of its own", and its first clause was
+ * FALSE: the PIN input below carries the landed `autoComplete="current-password"`
+ * — a pinned shape this packet must not change — which is an explicit invitation
+ * to the browser's own password manager to store exactly that. What this page can
+ * truthfully speak for is ITSELF, which is also what the file's doc comment at the
+ * top claims: the client holds no credential, the PIN is cleared in `finally` on
+ * every path, and the session it leaves behind is the server's HttpOnly cookie
+ * that JS cannot read. The subject moved from the browser to the page, so the copy
+ * claims nothing about software this page does not control.
  */
 const signInWhat =
-  "Who is signing in on this device. The accounts are the household's — pick yours and enter your PIN. The PIN is checked by the platform, and this browser keeps no copy of it and no token of its own."
+  "Who is signing in on this device. The accounts are the household's — pick yours and enter your PIN. This page stores no credential of its own: your PIN is sent to the platform to be checked and cleared the moment the answer comes back, and what signing in leaves behind is the platform's own session cookie, which this page cannot read."
 
 /** describe keeps the server's collapsed failure collapsed: a login-shaped
  *  failure says only that it failed, because the event log carries the precise

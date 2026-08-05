@@ -1361,7 +1361,9 @@ test('the row anatomy renders five legs, and every fact in them is one the wire 
 
   // (3) what to check first, and (4) the jump — both below.
   expect(node.querySelector('[data-check-first]'), 'the check-first leg is missing').not.toBeNull()
-  expect(node.querySelector('[data-jump="run"]'), 'a card with a served run ref has no jump leg').not.toBeNull()
+  expect(node.querySelector('[data-jump="task"]'), 'a card with a served task ref has no jump leg').not.toBeNull()
+  expect(prov.querySelector('[data-provenance-field="run"]')?.textContent, 'the run ref left the provenance line')
+    .toContain(item.run_id ?? '')
 
   // (5) the verbs, still the card's OWN served vocabulary and nothing else.
   expect([...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(
@@ -1392,31 +1394,87 @@ test('an unknown kind still gets a row under its SERVED name — anatomy include
     .toBeNull()
 })
 
-test('the jump leg is the SERVED run ref, and a card with none grows no door', async () => {
+test('the jump leg is the SERVED task ref, and a card with none grows no door', async () => {
   const served = mine()
   const { view } = await open('/inbox', served)
 
-  const withRun = card(served, 'ask:ask-ship')
-  expect(withRun.run_id, 'the fixture card serves no run ref').toBeTruthy()
-  const jump = row(view, withRun.id).querySelector('[data-jump="run"]')!
-  expect(jump.textContent).toContain(withRun.run_id ?? '')
-  expect(jump.querySelector('a')?.getAttribute('href')).toBe(`/tasks/${String(withRun.run_id)}`)
+  // The task ref is what the task ROUTE can be given, and the link uses it.
+  const withTask = card(served, 'ask:ask-ship')
+  expect(withTask.task_id, 'the fixture card serves no task ref').toBeTruthy()
+  const jump = row(view, withTask.id).querySelector('[data-jump="task"]')!
+  expect(jump, 'a card with a served task ref has no jump leg').not.toBeNull()
+  expect(jump.querySelector('a')?.getAttribute('href')).toBe(`/tasks/${String(withTask.task_id)}`)
+  // …and the label claims the task page, which it now really opens.
+  expect(jump.textContent).toContain('Open the task this came from')
+  expect(jump.textContent).toContain('deliverable revisions and receipts')
 
-  // A card with no run ref renders no jump at all — absence invents nothing.
+  // THE RUN REF IS NOT THE JUMP, and it did not go missing either: it stays in
+  // the provenance line as the run ref it is. Handing it to the task route is
+  // the defect drain r1 fixed — the two id spaces never overlap.
+  const prov = row(view, withTask.id).querySelector('[data-provenance-field="run"]')
+  expect(prov?.textContent, 'the served run ref stopped being rendered').toContain(withTask.run_id ?? '')
+  expect(withTask.run_id, 'the fixture stopped distinguishing the two id spaces').not.toBe(withTask.task_id)
+  expect(jump.querySelector('a')?.getAttribute('href'), 'the jump handed a run id to the task route again')
+    .not.toBe(`/tasks/${String(withTask.run_id)}`)
+
+  // A card with no run — and so no task — renders no jump at all.
   const bare = served.items.find((i) => !i.run_id)
   expect(bare, 'every fixture card carries a run ref, so the absence arm is undriven').toBeTruthy()
+  expect(bare?.task_id, 'a card with no run somehow carries a task ref').toBeFalsy()
   expect(row(view, bare?.id ?? '').querySelector('[data-jump]'), 'a jump was invented for a card with no work ref')
     .toBeNull()
 
+  // The other absence arm: a run whose row resolves to NO task serves the field
+  // empty, and the leg stays absent rather than linking to nothing.
+  const unresolved: ApprovalList = {
+    ...served,
+    items: served.items.map((i) => (i.id === withTask.id ? { ...i, task_id: undefined } : i)),
+  }
+  const { view: v2 } = await open('/inbox', unresolved)
+  expect(row(v2, withTask.id).querySelector('[data-jump]'), 'an unresolved task ref still rendered a door').toBeNull()
+  expect(
+    row(v2, withTask.id).querySelector('[data-provenance-field="run"]'),
+    'the run ref left with the jump it is not',
+  ).not.toBeNull()
+
   // AND NO DELIVERABLE JUMP EXISTS, because no card serves a deliverable ref.
-  // The proposal's "jump-to-deliverable" is answered by the one work reference
-  // the wire actually carries; a deliverable link would be a fact off the wire.
+  // The proposal's "jump-to-deliverable" is answered by the task page, which is
+  // where the revisions and receipts live; a deliverable link would be a fact
+  // off the wire.
   for (const i of served.items) {
-    for (const field of ['deliverable', 'deliverable_id', 'task_id', 'artifact_id']) {
+    for (const field of ['deliverable', 'deliverable_id', 'artifact_id']) {
       expect(Object.keys(i), `a card serves ${field} after all — the jump leg should carry it`).not.toContain(field)
     }
   }
   expect(view.container.querySelector('a[href^="/deliverables/"]'), 'the inbox invented a deliverable link').toBeNull()
+})
+
+test('THE NON-VACUITY THE OLD LINK NEVER HAD: every served task ref resolves on the task read', async () => {
+  // The finding drain r1 fixed was structural, not an edge case: a run id is
+  // "<task_id>.<stage>[.gN]" and the task read keys on `tasks.task_id`, so the
+  // old link resolved to the task read's own not-found for EVERY card. A href
+  // test alone could never have caught that — it asserted the shape of a string.
+  // This asserts the thing that matters: the id the leg links to is one the task
+  // surface really serves, checked against the golden task body from the same
+  // fixture world.
+  const taskIDs = new Set((fixtures.tasks() as { tasks: { task_id: string }[] }).tasks.map((t) => t.task_id))
+  expect(taskIDs.size, 'the task fixture is empty, so this would assert nothing').toBeGreaterThan(1)
+
+  for (const body of [mine(), all()]) {
+    const linked = body.items.filter((i) => i.task_id)
+    expect(linked.length, 'no card serves a task ref, so the leg is untested').toBeGreaterThan(1)
+    for (const i of linked) {
+      expect(taskIDs, `${i.id} links to a task the task read does not serve: ${String(i.task_id)}`).toContain(i.task_id)
+      // Every card that names a run resolves one — the join is not half-wired.
+      expect(i.run_id, `${i.id} carries a task ref with no run to have resolved it from`).toBeTruthy()
+    }
+    // …and the direction that proves the two id spaces really are different:
+    // not one served run id is a task id.
+    for (const i of body.items.filter((x) => x.run_id)) {
+      expect(taskIDs, `${i.id}'s run id IS a task id — the old link would have worked and this leg proves nothing`)
+        .not.toContain(i.run_id)
+    }
+  }
 })
 
 /** checkFirstOf reads one card's class-grain guidance line off the rendered row. */
@@ -1542,4 +1600,50 @@ test('the anatomy is readable at phone width: nothing new pins a pixel width', a
   // passes the form these renders use.
   expect(pinned.test('flex w-[520px]')).toBe(true)
   expect(pinned.test('max-w-prose text-sm')).toBe(false)
+})
+
+test('a KNOWN kind whose card family is unrecognized gets no guidance, and loses nothing else', async () => {
+  // The second honest-absence arm, and the one the unknown-KIND test does not
+  // reach (drain r1, D3). `ask` is a kind this file knows well, but it carries
+  // four card families and `answerEnvelope` reads the family off the STORED
+  // card. A snapshot whose family it does not recognize yields `unknown`, and
+  // there is no line to write for it: the guidance names what to read on a card
+  // of this class, and nobody has said what this card's class is.
+  //
+  // It is not a hypothetical shape — it is exactly what an `ask` carrying a card
+  // body from a family this surface has not been taught looks like, which is the
+  // forward direction §42 keeps open.
+  const served = mine()
+  const shipCard = card(served, 'ask:ask-ship')
+  const strange: ApprovalList = {
+    ...served,
+    items: served.items.map((i) =>
+      i.id === shipCard.id ? { ...i, card: { kind: 'approval.rollup', rollup: { of: ['ask-a', 'ask-b'] } } } : i,
+    ),
+  }
+  const { view } = await open('/inbox', strange)
+  const node = row(view, shipCard.id)
+
+  // No guidance, because none could be written honestly.
+  expect(node.querySelector('[data-check-first]'), 'guidance was invented for a card family nobody has written one for')
+    .toBeNull()
+
+  // …and NOTHING ELSE went missing with it. The card still renders in full: its
+  // display class off the served kind, its provenance line, its served verbs,
+  // and its jump leg — an unrecognized family costs the reader guidance, never
+  // the card.
+  expect(node.querySelector('[data-display-class]')?.textContent).toBe('question')
+  expect(node.querySelector('[data-provenance="card"]')?.textContent).toContain(shipCard.id)
+  expect([...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(
+    shipCard.actions,
+  )
+  expect(node.querySelector('[data-jump="task"]'), 'the jump leg left with the guidance').not.toBeNull()
+  // The card body still renders its own fields through the generic face rather
+  // than disappearing.
+  expect(node.textContent, 'an unrecognized card family rendered nothing at all').toContain('approval.rollup')
+
+  // The control: the SAME card with its landed family back gets its line, so
+  // this is about the family and not about a row that never had one.
+  const { view: v2 } = await open('/inbox', served)
+  expect(row(v2, shipCard.id).querySelector('[data-check-first]')?.getAttribute('data-check-first')).toBe('proposal')
 })

@@ -126,7 +126,15 @@ type ApprovalItem struct {
 	Kind  string `json:"kind"`
 	Owner string `json:"owner"`
 	RunID string `json:"run_id,omitempty"`
-	Tier  string `json:"tier"`
+	// TaskID is the TASK the card's run belongs to, resolved from the run row
+	// this card already names (P3-UI-6 drain r1, sanctioned). It exists because
+	// `run_id` and `task_id` are DIFFERENT id spaces — a run id is
+	// "<task_id>.<stage>[.gN]" and the task read keys on `tasks.task_id` — so a
+	// surface handed only a run ref could never link to the task page without
+	// inventing the mapping. Absent when the card names no run, and absent when
+	// the run row carries no task: an honest absence, never a guessed id.
+	TaskID string `json:"task_id,omitempty"`
+	Tier   string `json:"tier"`
 
 	// Answerable is false for the kinds whose verbs are not this packet's; the
 	// reason names where the verb lives rather than pretending the card is inert.
@@ -359,6 +367,12 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 			"a benchmark alarm is platform-scope: the operator dispositions it (POST /api/approvals/{id}/dispose, BENCH-REG §12)")
 		out = append(out, it)
 	}
+	// One pass, after every derivation has contributed its cards: resolve the
+	// TASK each card's run belongs to, so the inbox can link to the task page
+	// instead of handing a run id to a route that keys on task ids.
+	if err := p.fillTaskRefs(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -427,6 +441,53 @@ func (s *Server) memoryConflictCards(ctx context.Context, scope ownerScope) ([]A
 		out = append(out, it)
 	}
 	return out, nil
+}
+
+// fillTaskRefs resolves each card's TASK from the run the card already names.
+//
+// ONE lookup for the whole page, over the `runs` table's own `task_id` column —
+// the projector reads what the run row already stores and derives nothing. It
+// is deliberately NOT scoped: the subject is a run this caller has already been
+// served a card for, so re-filtering it here would be a second authority model
+// beside the one that decided the card was theirs to see.
+//
+// A run with no row, or a row whose `task_id` is null, leaves the field empty.
+// That is the honest absence the surface renders as "no jump leg" rather than a
+// door to a task page that does not exist.
+func (p *projector) fillTaskRefs(ctx context.Context, items []ApprovalItem) error {
+	runs := []string{}
+	seen := map[string]bool{}
+	for _, it := range items {
+		if it.RunID != "" && !seen[it.RunID] {
+			seen[it.RunID] = true
+			runs = append(runs, it.RunID)
+		}
+	}
+	if len(runs) == 0 {
+		return nil
+	}
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT run_id, COALESCE(task_id, '') FROM runs WHERE run_id IN (`+placeholders(len(runs))+`)`,
+		toAny(runs)...)
+	if err != nil {
+		return fmt.Errorf("resolve task refs: %w", err)
+	}
+	defer rows.Close()
+	taskOf := map[string]string{}
+	for rows.Next() {
+		var runID, taskID string
+		if err := rows.Scan(&runID, &taskID); err != nil {
+			return fmt.Errorf("resolve task refs: %w", err)
+		}
+		taskOf[runID] = taskID
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("resolve task refs: %w", err)
+	}
+	for i := range items {
+		items[i].TaskID = taskOf[items[i].RunID]
+	}
+	return nil
 }
 
 // The oversight card action vocabulary (B6-2B). One verb per kind, named by the

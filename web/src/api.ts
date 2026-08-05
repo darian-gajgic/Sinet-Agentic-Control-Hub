@@ -515,6 +515,13 @@ export type ApprovalItem = {
   kind: string
   owner: string
   run_id?: string
+  /** The TASK the card's run belongs to, resolved server-side from the run row
+   *  (internal/api/approvals.go, `fillTaskRefs`). It exists because `run_id` and
+   *  `task_id` are different id spaces — a run id is "<task_id>.<stage>[.gN]" and
+   *  the task read keys on `tasks.task_id` — so this is the only ref on the card
+   *  that the task route can be given. Absent when the card names no run, and
+   *  absent when the run carries no task: honest absence, never a guessed id. */
+  task_id?: string
   tier: string
   answerable: boolean
   not_answerable_reason?: string
