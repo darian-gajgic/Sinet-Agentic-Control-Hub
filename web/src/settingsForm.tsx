@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 
 import type { SettingValue } from './api'
 import { Absent, Stamp } from './parts'
+import { Chip } from './ui'
 
 /**
  * The Sinet-owned JSON Forms renderer set and the nested-data bridge
@@ -237,7 +238,7 @@ export const SinetControl = withJsonFormsControlProps((props: ControlProps) => {
   const outcome = ctx.outcomes[key]
   return (
     <div className="setting" data-setting={key} data-dirty={dirty ? 'true' : 'false'}>
-      <label className="setting-label" htmlFor={`f-${key}`}>
+      <label className="text-sm font-semibold" htmlFor={`f-${key}`}>
         {served.title}
       </label>
       <Badges v={served} />
@@ -249,12 +250,13 @@ export const SinetControl = withJsonFormsControlProps((props: ControlProps) => {
       <p className="setting-help" data-help-for={key}>
         {served.help}
       </p>
-      <p className="muted" data-override={served.overridden ? 'set' : 'default'}>
+      <p className="text-xs text-muted-foreground" data-override={served.overridden ? 'set' : 'default'}>
         {served.overridden
           ? 'explicitly set — a reset deletes the override and follows the ratified default again'
           : 'following the ratified default: no override row exists for this setting'}
         {' · '}
-        default {JSON.stringify(served.default)} · ratified by {served.ratified_by}
+        default <span className="font-mono tabular-nums">{JSON.stringify(served.default)}</span> · ratified by{' '}
+        {served.ratified_by}
       </p>
 
       {ctx.editable && (
@@ -300,7 +302,10 @@ export const SinetControl = withJsonFormsControlProps((props: ControlProps) => {
         History
       </button>
       {outcome && (
-        <p className={outcome.failed ? 'error' : 'notice'} data-write-outcome={outcome.failed ? 'failed' : 'applied'}>
+        <p
+          className={outcome.failed ? 'text-sm text-[var(--red)]' : 'text-sm text-[var(--green)]'}
+          data-write-outcome={outcome.failed ? 'failed' : 'applied'}
+        >
           {outcome.detail}
         </p>
       )}
@@ -328,7 +333,7 @@ function Editor({
 }) {
   if (!editable) {
     return (
-      <output id={id} className="setting-value" data-readonly="true">
+      <output id={id} className="setting-value font-mono tabular-nums" data-readonly="true">
         {JSON.stringify(value)}
       </output>
     )
@@ -399,24 +404,24 @@ function Badges({ v }: { v: SettingValue }) {
   return (
     <span className="badges">
       {v.restart_required && (
-        <span className="warn-flag" data-badge="restart">
+        <Chip tone="yellow" data-badge="restart">
           restart required
-        </span>
+        </Chip>
       )}
       {v.auto && (
-        <span className="muted" data-badge="auto">
+        <Chip tone="blue" className="normal-case tracking-normal" data-badge="auto">
           automation may move this within its bounds
-        </span>
+        </Chip>
       )}
       {v.per_user && (
-        <span className="muted" data-badge="per-user">
+        <Chip tone="accent" data-badge="per-user">
           per person
-        </span>
+        </Chip>
       )}
       {v.dormant && (
-        <span className="warn-flag" data-badge="dormant">
+        <Chip tone="orange" className="normal-case tracking-normal" data-badge="dormant">
           dormant: {v.dormant}
-        </span>
+        </Chip>
       )}
     </span>
   )
@@ -427,7 +432,7 @@ function Badges({ v }: { v: SettingValue }) {
 function Bounds({ v }: { v: SettingValue }) {
   if (!v.numeric) return null
   return (
-    <p className="muted bounds" data-bounds={v.key}>
+    <p className="text-xs tabular-nums text-muted-foreground" data-bounds={v.key}>
       {v.floor === undefined && v.ceiling === undefined ? (
         'unbounded: the registry clamps this setting at neither end'
       ) : (
@@ -512,7 +517,7 @@ function BoundsEditor({ v, ctx }: { v: SettingValue; ctx: FormContext }) {
       >
         Save bounds
       </button>
-      <span className="muted">both blank resets to the ratified clamp</span>
+      <span className="text-xs text-muted-foreground">both blank resets to the ratified clamp</span>
     </div>
   )
 }
@@ -569,17 +574,17 @@ function PerUserEditor({ v, ctx }: { v: SettingValue; ctx: FormContext }) {
 export function PerUserValues({ values }: { values: SettingValue[] }) {
   const withOverrides = values.filter((v) => v.user_values && Object.keys(v.user_values).length > 0)
   if (withOverrides.length === 0) {
-    return <p className="muted">No per-person override is in force on any setting.</p>
+    return <p className="text-sm text-muted-foreground">No per-person override is in force on any setting.</p>
   }
   return (
     <ul className="per-user-values">
       {withOverrides.map((v) => (
         <li key={v.key} data-per-user={v.key}>
-          <span className="setting-key">{v.key}</span>
+          <span className="setting-key font-mono tabular-nums">{v.key}</span>
           <ul>
             {Object.entries(v.user_values ?? {}).map(([user, val]) => (
               <li key={user} data-per-user-of={user}>
-                {user}: {JSON.stringify(val)}
+                {user}: <span className="font-mono tabular-nums">{JSON.stringify(val)}</span>
               </li>
             ))}
           </ul>
@@ -593,15 +598,15 @@ export function PerUserValues({ values }: { values: SettingValue[] }) {
  *  VERBATIM, when, and why. Values print as their stored JSON because that is
  *  what they are — re-formatting an audited value would be editing the record. */
 export function HistoryRows({ entries }: { entries: { id: number; actor: string; old: unknown; new: unknown; ts: string; reason?: string; user_id?: string }[] }) {
-  if (entries.length === 0) return <p className="muted">Nothing has ever changed this setting.</p>
+  if (entries.length === 0) return <p className="text-sm text-muted-foreground">Nothing has ever changed this setting.</p>
   return (
     <ol className="audit-rows">
       {entries.map((e) => (
-        <li key={e.id} data-audit={String(e.id)}>
+        <li key={e.id} className="text-sm" data-audit={String(e.id)}>
           <span className="owner">{e.actor}</span>
-          {e.user_id && <span className="muted"> for {e.user_id}</span>}{' '}
+          {e.user_id && <span className="text-muted-foreground"> for {e.user_id}</span>}{' '}
           <code>{JSON.stringify(e.old)}</code> → <code>{JSON.stringify(e.new)}</code> <Stamp ts={e.ts} />
-          {e.reason && <span className="muted"> — {e.reason}</span>}
+          {e.reason && <span className="text-muted-foreground"> — {e.reason}</span>}
         </li>
       ))}
     </ol>

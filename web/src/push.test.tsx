@@ -591,3 +591,77 @@ describe('the home-screen badge agrees with the queue after an answer', () => {
     expect(() => reconcileBadge(0)).not.toThrow()
   })
 })
+
+// ── D8 pass II: the panel says what enrolment IS, and teaches when empty ───
+
+describe('the push panel explains itself (P3-UI-6)', () => {
+  beforeEach(() => {
+    FakeSource.reset()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const stream = () => new EventStream({ createEventSource: (url) => new FakeSource(url) })
+
+  test('the panel-grain what-line says enrolment is per DEVICE and is not a setting', async () => {
+    // A SUPPORTED browser, because the served observable sentence renders
+    // inside the device block and the unsupported arm returns before it.
+    scriptedFetch(panelRoutes())
+    const ui = mount(<PushDevices stream={stream()} env={env({ windowPushManager: fakeManager() })} />)
+    await flush()
+    const what = ui.container.querySelector('[data-panel-what="push"]')?.textContent ?? ''
+
+    expect(what, 'the panel does not say what enrolment is').toContain('per DEVICE')
+    expect(what).toContain('this browser on this machine')
+    // §43-B: this panel touches no ⚙ registry key, and the line says so rather
+    // than letting a reader inside the settings tab assume it is one.
+    expect(what, 'the line lets enrolment read as a setting').toContain('not a setting')
+    expect(what).toContain("changes the platform's configuration")
+
+    // WHAT LEAVES THIS MACHINE IS THE SERVER'S SENTENCE, not this line's: the
+    // S15.11/S01.8 observable statement renders verbatim and is not paraphrased
+    // here, so a client-authored summary can never disagree with it.
+    const observable = pushView().observable as string
+    expect(ui.container.textContent, 'the served observable sentence was dropped').toContain(observable)
+    expect(what, 'the what-line re-typed the served observable sentence').not.toContain(observable)
+    ui.unmount()
+  })
+
+  test('an empty device list TEACHES what puts a row there — and teaches nothing while the read is in flight', async () => {
+    scriptedFetch({ ...panelRoutes(), 'GET /api/push/subscriptions': { body: { ...pushView(), subscriptions: [] } } })
+    const ui = mount(<PushDevices stream={stream()} env={env({ hasPushManager: false })} />)
+    await flush()
+    const text = ui.container.textContent ?? ''
+    expect(text).toContain('No device is enrolled.')
+    expect(text, 'the empty state teaches nothing about what adds a row').toContain('when a device is enrolled')
+    expect(text, 'the empty state does not say what "none" means').toContain('nothing is sent anywhere')
+    ui.unmount()
+
+    // The D1 shape: this panel's OWN read never answers, so nothing may teach.
+    scriptedFetch({ ...panelRoutes(), 'GET /api/push/subscriptions': { pending: true } })
+    const waiting = mount(<PushDevices stream={stream()} env={env({ hasPushManager: false })} />)
+    await flush()
+    expect(waiting.container.textContent, 'a teaching empty rendered over a read that had not answered').not.toContain(
+      'No device is enrolled.',
+    )
+    waiting.unmount()
+  })
+
+  test('the restyled panel pins no pixel width, so a phone still enrols a device', async () => {
+    const pinned = /w-\[\d+px\]|min-w-\[\d+px\]|max-w-\[\d+px\]/
+    scriptedFetch(panelRoutes())
+    const ui = mount(<PushDevices stream={stream()} env={env({ windowPushManager: fakeManager(), permission: 'granted' })} />)
+    await flush()
+    const nodes = [...ui.container.querySelectorAll('[data-panel-what="push"], [data-push-scope], [data-push-state]')]
+    expect(nodes.length, 'the walk found none of the panel renders').toBeGreaterThan(1)
+    for (const n of nodes) {
+      expect(pinned.test((n as HTMLElement).className.toString()), 'a panel render pins a pixel width').toBe(false)
+      expect(/\d+px/.test(n.getAttribute('style') ?? ''), 'a panel render pins an inline width').toBe(false)
+    }
+    // Both-way probe on the detector.
+    expect(pinned.test('w-[380px] flex')).toBe(true)
+    expect(pinned.test('max-w-prose text-sm text-muted-foreground')).toBe(false)
+    ui.unmount()
+  })
+})

@@ -647,3 +647,195 @@ test('the registered block renders with each value carrying its own read-only ma
     expect(view.container.textContent).toContain(v.registered_absent ?? '')
   }
 })
+
+// ── D8 pass II: the surface header and the A-2 read-only explanation ───────
+
+test('the settings tab says what it is, and promises no editing it cannot deliver', async () => {
+  const { view } = await openSettings()
+  const what = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+
+  expect(what, 'the line does not say what is on the page').toContain('Every setting the platform has')
+  for (const fact of ['bounds', 'badges', 'help', 'history']) {
+    expect(what.toLowerCase(), `the line drops what a row carries (${fact})`).toContain(fact)
+  }
+  // The page's own central claim, which is what makes completeness checkable.
+  expect(what).toContain('generated from the registry')
+  expect(what, 'the line does not say why a setting is here').toContain('because the registry declares it')
+
+  // AUTHORITY IS SERVED, so the header may not promise editing to anybody: who
+  // may write is the server's answer and it is stated once, in its own words.
+  for (const claim of ['you can change', 'you can edit', 'edit any', 'editable', 'save']) {
+    expect(what.toLowerCase(), `the header promises editing (${claim}) the server may refuse`).not.toContain(claim)
+  }
+})
+
+/** The three authority sentences the server serves, transcribed byte-exact from
+ *  internal/api/settings.go — :455 (dev), :458 (member), :460 (operator). The
+ *  client can tell the three postures apart ONLY through this string, which is
+ *  why it is the whole content of the one `[data-editable]` element. */
+const devReason =
+  'the dev-posture identity reads but never administers (§9): settings writes need a real operator session'
+
+/** devPosture is a hand-scripted body: no golden fixture is produced under the
+ *  dev fallback, because the fixture world runs with real sessions. Only the
+ *  authority pair moves — everything else is the committed member body, so the
+ *  render under test is the real emission. */
+const devPosture = () => {
+  const member = fixtures.settingsMember() as unknown as SettingsView
+  return { ...member, editable: false, editable_reason: devReason }
+}
+
+test('a read-only page EXPLAINS itself, and the served reason stays alone in its own element', async () => {
+  const member = fixtures.settingsMember() as unknown as SettingsView
+  const { view } = await openSettings({
+    'GET /api/settings': { body: member },
+    'GET /api/settings/prices': { body: fixtures.pricesMember() },
+  })
+
+  // The landed pin holds unchanged: ONE element, and the server's sentence is
+  // the whole of its text. The explanation has to be a SIBLING or this breaks.
+  const notice = view.container.querySelector('[data-editable="false"]')
+  expect(notice?.textContent).toBe(member.editable_reason)
+  expect(view.container.querySelectorAll('[data-editable]')).toHaveLength(1)
+
+  const block = view.container.querySelector('[data-readonly-explained="true"]')
+  expect(block, 'a read-only page still explains nothing — the A-2 finding').not.toBeNull()
+  expect(block, 'the explanation was folded into the served-reason element').not.toBe(notice)
+  const said = block?.textContent ?? ''
+
+  // (a) it is read-only for you, and the platform's own reason is the line above
+  expect(said).toContain('read-only for you')
+  expect(said, 'the block does not point at the served reason').toContain("platform's own reason")
+  // (b) THE CONNECTION the gate record says nobody could make: absent-not-disabled
+  expect(said).toContain('no Save')
+  expect(said).toContain('no Reset')
+  expect(said).toContain('bounds editor')
+  expect(said).toContain('append a price')
+  expect(said, 'the block does not teach absent-not-disabled').toContain('does not show a control it would refuse')
+  // (c) everything is still readable
+  for (const readable of ['value', 'bounds', 'badges', 'help', 'History', 'price table', 'recorded results']) {
+    expect(said, `the block does not say ${readable} still reads`).toContain(readable)
+  }
+  // (d) the record's own posture-neutral sentence
+  expect(said).toContain('Editing is real behind a real operator session')
+
+  // …and the block's claim is TRUE on the page it is on: every write affordance
+  // really is absent, and History really is there.
+  expect(everySetting(view).length).toBeGreaterThan(0)
+  for (const sel of ['[data-action="save"]', '[data-action="reset"]', '[data-action="edit-bounds"]', '[data-action="add-price-row"]', '[data-action="save-for-user"]']) {
+    expect(view.container.querySelectorAll(sel), `the explanation says ${sel} is absent, and it is not`).toHaveLength(0)
+  }
+  expect(view.container.querySelectorAll('[data-action="history"]').length).toBeGreaterThan(0)
+})
+
+test('the explanation overclaims nothing: no bounced door, no unavailable read, no posture it was told', async () => {
+  const member = fixtures.settingsMember() as unknown as SettingsView
+  const { view } = await openSettings({
+    'GET /api/settings': { body: member },
+    'GET /api/settings/prices': { body: fixtures.pricesMember() },
+  })
+  const block = view.container.querySelector('[data-readonly-explained="true"]')!
+  const said = (block.textContent ?? '').toLowerCase()
+
+  // NO /login DOOR. For a signed-in member that link bounces straight back to
+  // where they came from, which would be a control that cannot do what it says
+  // — the C-1 defect, repeated. The dev reader's door is the header's own.
+  expect(block.querySelectorAll('a'), 'the explanation offers a link').toHaveLength(0)
+  expect(said, 'the explanation points at the sign-in door').not.toContain('sign in')
+  expect(said).not.toContain('/login')
+  expect(said, 'the explanation promises a member that logging in unlocks editing').not.toContain('log in')
+
+  // IT NEVER SAYS A READ IS UNAVAILABLE, because none is: History sits outside
+  // the write gate on purpose and every value renders read-only.
+  for (const claim of ['not available', 'unavailable', 'hidden from you', 'cannot see', 'you cannot read']) {
+    expect(said, `the explanation claims something is withheld: ${claim}`).not.toContain(claim)
+  }
+  // IT NEVER NAMES A POSTURE. Which reason applies is the SERVER's statement,
+  // and it is already on screen above in the server's own words.
+  for (const word of ['dev posture', 'dev-posture', 'member', 'operator session is missing']) {
+    expect(said, `the client-authored copy names a posture (${word})`).not.toContain(word)
+  }
+  // The one place "operator" may appear is the record's own sentence.
+  expect(said.split('operator').length - 1, 'the copy names the operator more than the one recorded sentence').toBe(1)
+})
+
+test('the dev-posture reader gets the SAME explanation under the SERVER\'s own dev sentence', async () => {
+  // internal/api/settings.go:455, byte-exact: the dev fallback identity reads
+  // and administers nothing. The client distinguishes the postures ONLY through
+  // this string, so the arm is driven over a body that really carries it.
+  const { view } = await openSettings({
+    'GET /api/settings': { body: devPosture() },
+    'GET /api/settings/prices': { body: fixtures.pricesMember() },
+  })
+  const notice = view.container.querySelector('[data-editable="false"]')
+  expect(notice?.textContent, 'the dev reason was not rendered verbatim').toBe(devReason)
+  expect(view.container.querySelectorAll('[data-editable]')).toHaveLength(1)
+
+  // Same explanation, keyed on `editable === false` and nothing else — the
+  // client reads no posture of its own to decide what to say.
+  const said = view.container.querySelector('[data-readonly-explained="true"]')?.textContent ?? ''
+  expect(said, 'a dev-posture reader gets no explanation').toContain('read-only for you')
+  expect(said).toContain('Editing is real behind a real operator session')
+  expect(said, 'the client re-typed the posture the server named').not.toContain('dev')
+  // And the write surface is absent here too, for the same served reason.
+  for (const sel of ['[data-action="save"]', '[data-action="edit-bounds"]']) {
+    expect(view.container.querySelectorAll(sel), `a dev-posture reader was offered ${sel}`).toHaveLength(0)
+  }
+})
+
+test('an operator sees NO explanation block, and every editor', async () => {
+  // The negative direction, over the committed operator body: the block is keyed
+  // on `editable === false` alone, so a page that can be edited does not carry
+  // an explanation of why it cannot.
+  const { view } = await openSettings()
+  expect((served() as SettingsView).editable, 'the operator fixture is not editable').toBe(true)
+  expect(view.container.querySelector('[data-editable="true"]')?.textContent).toBe(served().editable_reason)
+  expect(
+    view.container.querySelector('[data-readonly-explained="true"]'),
+    'an editable page explains why it is read-only',
+  ).toBeNull()
+  click([...view.container.querySelectorAll('[data-tab]')].find((t) => (t.getAttribute('data-tab') ?? '').startsWith('freshness')))
+  for (const sel of ['[data-save-for="freshness.max_age"]', '[data-action="edit-bounds"]', '[data-action="add-price-row"]']) {
+    expect(view.container.querySelectorAll(sel).length, `the operator lost ${sel}`).toBeGreaterThan(0)
+  }
+})
+
+test('the recorded-results panel TEACHES when it is empty — and teaches nothing while its read is in flight', async () => {
+  const answer = fixtures.evalScores() as unknown as Answer
+  const { view } = await openSettings({
+    'GET /api/events/query/verdicts.eval_scores': { body: { ...answer, rows: [] } },
+  })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('No suite result has been recorded yet.')
+  expect(text, 'the empty state teaches nothing about what puts a row here').toContain('when a suite finishes')
+  expect(text, 'the empty state lets "none" read as a failure').toContain('not the same as a suite having failed')
+
+  // The D1 shape: this panel's OWN read never answers, so nothing may teach.
+  const { view: pending } = await openSettings({
+    'GET /api/events/query/verdicts.eval_scores': { pending: true },
+  })
+  expect(pending.container.textContent, 'a teaching empty rendered over a read that had not answered').not.toContain(
+    'No suite result has been recorded yet.',
+  )
+})
+
+test('the A-2 explanation reads at phone width and pins no pixel width', async () => {
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]|max-w-\[\d+px\]/
+  const { view } = await openSettings({
+    'GET /api/settings': { body: fixtures.settingsMember() },
+    'GET /api/settings/prices': { body: fixtures.pricesMember() },
+  })
+  const nodes = [
+    view.container.querySelector('[data-surface-what]'),
+    view.container.querySelector('[data-readonly-explained="true"]'),
+    view.container.querySelector('[data-editable="false"]'),
+  ]
+  for (const n of nodes) {
+    expect(n, 'a render this leg is about is missing').not.toBeNull()
+    expect(pinned.test((n as HTMLElement).className.toString()), 'a new render pins a pixel width').toBe(false)
+    expect(/\d+px/.test(n?.getAttribute('style') ?? ''), 'a new render pins an inline width').toBe(false)
+  }
+  // Both-way probe on the detector itself.
+  expect(pinned.test('max-w-[520px] text-sm')).toBe(true)
+  expect(pinned.test('max-w-prose text-sm text-muted-foreground')).toBe(false)
+})

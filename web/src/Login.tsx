@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { ApiError, Unreachable, api, type Session, type User } from './api'
+import { SurfaceHead } from './parts'
+import { Button } from './ui'
 
 /**
  * The S01.9 login surface: the user picker, the per-user PIN, the layer-2
@@ -76,8 +78,8 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
   if (users === null) {
     return (
       <section className="panel">
-        <h1>Sign in</h1>
-        <p className="muted">{error === '' ? 'Loading…' : error}</p>
+        <SurfaceHead title="Sign in" what={signInWhat} />
+        <p className="text-sm text-muted-foreground">{error === '' ? 'Loading…' : error}</p>
       </section>
     )
   }
@@ -87,11 +89,14 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
   if (users.length === 0) {
     return (
       <section className="panel">
-        <h1>First run</h1>
-        <p className="muted">
-          No accounts exist yet. The first account is the operator, and this is the only time one can
-          be created without signing in.
-        </p>
+        {/* The bootstrap window's own what-line: it states the window rather
+            than the picker, because that is the page in front of the reader,
+            and it promises no self-service account creation — once this window
+            closes there is none (S01.9). */}
+        <SurfaceHead
+          title="First run"
+          what="No accounts exist yet. The first account is the operator, and this is the only time one can be created without signing in."
+        />
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -116,11 +121,11 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
               required
             />
           </label>
-          <button type="submit" disabled={busy}>
+          <Button type="submit" variant="primary" disabled={busy}>
             Create operator
-          </button>
+          </Button>
         </form>
-        {error !== '' && <p className="error">{error}</p>}
+        {error !== '' && <p className="text-sm text-[var(--red)]">{error}</p>}
       </section>
     )
   }
@@ -129,10 +134,12 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
 
   return (
     <section className="panel">
-      <h1>Sign in</h1>
-      {notice !== '' && <p className="notice">{notice}</p>}
+      <SurfaceHead title="Sign in" what={signInWhat} />
+      {notice !== '' && <p className="text-sm text-[var(--green)]">{notice}</p>}
       {session.hint?.device_login && (
-        <p className="muted">This device is known as {session.hint.device_login}.</p>
+        <p className="text-sm text-muted-foreground">
+          This device is known as <span className="font-mono tabular-nums">{session.hint.device_login}</span>.
+        </p>
       )}
       <form
         onSubmit={(e) => {
@@ -163,11 +170,11 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
             required={!autoLogin}
           />
         </label>
-        <button type="submit" disabled={busy}>
+        <Button type="submit" variant="primary" disabled={busy}>
           Sign in
-        </button>
+        </Button>
         {autoLogin && (
-          <button
+          <Button
             type="button"
             disabled={busy}
             onClick={() =>
@@ -178,13 +185,26 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
             }
           >
             Sign in with this device
-          </button>
+          </Button>
         )}
       </form>
-      {error !== '' && <p className="error">{error}</p>}
+      {error !== '' && <p className="text-sm text-[var(--red)]">{error}</p>}
     </section>
   )
 }
+
+/**
+ * The D8 "what this is" line for the picker (B6 gate §9 A-1).
+ *
+ * It says only what this page does: the accounts are the household's, you pick
+ * yours, and the PIN is checked by the platform. It promises no account
+ * creation — outside the bootstrap window above there is none, and a line
+ * offering one would be a door that is not there. It promises no remembered
+ * sign-in either: a device hint PREFILLS the picker and never signs anybody in,
+ * which stays the server's call on the grant.
+ */
+const signInWhat =
+  "Who is signing in on this device. The accounts are the household's — pick yours and enter your PIN. The PIN is checked by the platform, and this browser keeps no copy of it and no token of its own."
 
 /** describe keeps the server's collapsed failure collapsed: a login-shaped
  *  failure says only that it failed, because the event log carries the precise

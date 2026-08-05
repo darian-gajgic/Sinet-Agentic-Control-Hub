@@ -14,11 +14,11 @@ import {
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive } from './live'
-import { Absent, Empty, Freshness, Owner, Stamp } from './parts'
+import { Absent, Freshness, Owner, Stamp, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { reconcileBadge } from './push'
-import { Button, Panel, Timestamp } from './ui'
+import { Button, Chip, EmptyState, Panel, Timestamp, type Tone } from './ui'
 
 /**
  * The one approval inbox (Spec S15.6; S3.2; 13.5; S06.9; S14.4–S14.7).
@@ -65,15 +65,24 @@ export function Inbox({ stream }: { stream?: EventStream }) {
 
   return (
     <section className="surface inbox">
-      <h1>Inbox</h1>
+      {/* The D8 "what this is" line. Its facts are the four rules above, stated
+          for a reader rather than for a maintainer: the SERVER ranks, this page
+          renders that order, and an answer releases the work that is waiting on
+          it (S15.6). It must not claim this page sorts, groups or filters —
+          nothing here does, and a line that said so would describe a different
+          product than the one that shipped. */}
+      <SurfaceHead
+        title="Inbox"
+        what="Everything waiting on a person, in one queue, ranked by risk by the control plane. This page never re-orders it, and answering a card releases the work that was paused on it."
+      />
       <Freshness stale={live.stale} error={live.error} hasData={live.data !== null} />
-      <p className="muted">
-        Everything waiting on a person, ranked by risk by the control plane. This page never re-orders it.
-      </p>
       <NoFrameNote items={items} />
       <BenchmarkOptIn stream={stream} />
       {live.data && items.length === 0 ? (
-        <Empty what="Nothing is waiting on you." />
+        <EmptyState
+          what="Nothing is waiting on you."
+          why="Cards arrive here on their own: a plan waiting for approval, a question a run cannot answer for itself, an outward effect needing a signature, a watchdog or drift finding to sign off, a blind comparison to judge. Answering one clears it from this queue."
+        />
       ) : (
         <>
           <BatchBar items={items} onAnswered={live.reload} />
@@ -98,7 +107,7 @@ export function Inbox({ stream }: { stream?: EventStream }) {
         </>
       )}
       {live.data?.truncated && (
-        <p className="muted">
+        <p className="max-w-prose text-sm text-muted-foreground">
           This is one page of a longer queue — the control plane bounds what one read returns. Answer some and re-read.
         </p>
       )}
@@ -128,10 +137,19 @@ export function InboxItem({ id, stream }: { id: string; stream?: EventStream }) 
 
   return (
     <section className="surface inbox">
-      <h1>Approval</h1>
-      <p className="muted">
-        <Link to={hrefFor('inbox')}>← the whole queue</Link>
-      </p>
+      {/* The deep-link surface teaches what its URL IS, because that is the one
+          thing this page has and the queue does not: a stable address a push
+          notification's `navigate` field points at (S15.11). It renders the same
+          card the queue renders — one component serves both. */}
+      <SurfaceHead
+        title="Approval"
+        what="One decision, at its own stable address — the link a notification opens. It shows exactly what the queue shows for this card, expanded."
+        aside={
+          <Link to={hrefFor('inbox')} className="text-sm">
+            ← the whole queue
+          </Link>
+        }
+      />
       <Freshness stale={live.stale} error={live.error} hasData={live.data !== null} />
       {live.data && item === null ? (
         <Absent
@@ -198,7 +216,7 @@ function FormsReader({
   })
   return (
     <>
-      {live.error !== '' && <p className="error">{live.error}</p>}
+      {live.error !== '' && <p className="text-sm text-[var(--red)]">{live.error}</p>}
       {children(live.data)}
     </>
   )
@@ -278,7 +296,7 @@ function BenchmarkOptIn({ stream }: { stream?: EventStream }) {
           <>You are not opted in: none of your tasks is picked for comparison.</>
         )}
       </p>
-      {live.error !== '' && <p className="error">{live.error}</p>}
+      {live.error !== '' && <p className="text-sm text-[var(--red)]">{live.error}</p>}
 
       <OptInSwitch reload={live.reload} />
     </Panel>
@@ -364,40 +382,91 @@ function OptInSwitch({ reload }: { reload: () => void }) {
 function NoFrameNote({ items }: { items: ApprovalItem[] }) {
   if (!items.some((i) => i.kind === 'memory_conflict')) return null
   return (
-    <p className="muted" data-note="no-live-frame">
+    <p className="max-w-prose text-sm text-muted-foreground" data-note="no-live-frame">
       Memory-conflict questions are read fresh each time this page loads or anything else here changes — nothing pushes
       them. Answering one twice is safe: the second answer reads the closed question back.
     </p>
   )
 }
 
-// ── the card head: identity, tier, owner, answerability, expiry ────────────
+// ── the card head: the approval-row anatomy ────────────────────────────────
 
+/**
+ * The five-leg anatomy (design proposal §3): what's being approved · the mono
+ * provenance line · what to check first · the jump to the work · then the verbs.
+ *
+ * EVERY LEG IS PRESENTATION OVER A SERVED FIELD. The whole inventory is
+ * `ApprovalItem` (api.ts:512–538); nothing here derives, estimates or infers a
+ * fact the wire did not carry. Legs 1, 2 and 4 render served values; leg 3 is
+ * class-grain teaching copy that names no card fact at all (see `checkFirst`);
+ * leg 5 is the landed served-actions row and lives in `Acts`.
+ */
 function CardHead({ item }: { item: ApprovalItem }) {
   return (
-    <div className="card-head">
-      <Link to={hrefFor('inbox-item', { id: item.id })} className="card-id">
-        {item.id}
-      </Link>
-      <span className={item.tier === 'high' ? 'warn-flag' : 'muted'} data-tier-label={item.tier}>
-        {item.tier}
-      </span>
-      <span className="muted">{displayClass(item)}</span>
-      <Owner id={item.owner} />
-      {item.run_id && <Link to={hrefFor('task', { id: item.run_id })}>{item.run_id}</Link>}
-      {item.answerable ? (
-        <span className="notice">yours to answer</span>
-      ) : (
-        <Absent reason={item.not_answerable_reason ?? 'not yours to answer'} />
-      )}
-      {item.step_up_required && <span className="warn-flag">PIN required</span>}
-      <span className="muted">
-        seen <Timestamp ts={item.observed_ts} variant="live" />
-      </span>
-      <Expiry item={item} />
-      <Staleness item={item} />
-    </div>
+    <header data-anatomy="head">
+      {/* LEG 1 — what's being approved. The display class is the label a reader
+          tells a sign-off from a question by; the tier, answerability and
+          step-up are the served flags that decide what the verbs below will
+          even accept. `.card-head` keeps its landed phone-first wrap. */}
+      <div className="card-head">
+        <span className="text-sm font-medium" data-display-class={displayClass(item)}>
+          {displayClass(item)}
+        </span>
+        <Chip tone={tierTone(item.tier)} data-tier-label={item.tier}>
+          {item.tier}
+        </Chip>
+        {item.answerable ? (
+          <Chip tone="green" data-answerable="true">
+            yours to answer
+          </Chip>
+        ) : (
+          <Absent reason={item.not_answerable_reason ?? 'not yours to answer'} />
+        )}
+        {item.step_up_required && (
+          <Chip tone="orange" data-step-up="true">
+            PIN required
+          </Chip>
+        )}
+        <Staleness item={item} />
+      </div>
+
+      {/* LEG 2 — the mono provenance line. Card id, kind, owner, the instant the
+          platform observed it, and its deadlines: the identity of the thing
+          being decided, in JetBrains Mono with tabular figures (§47), because
+          every one of them is an id, a token or a timestamp. */}
+      <p
+        className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground"
+        data-provenance="card"
+      >
+        <Link to={hrefFor('inbox-item', { id: item.id })} className="card-id">
+          {item.id}
+        </Link>
+        <span data-provenance-field="kind">{item.kind}</span>
+        <Owner id={item.owner} />
+        <span>
+          seen <Timestamp ts={item.observed_ts} variant="live" />
+        </span>
+        <Expiry item={item} />
+      </p>
+
+      {/* LEG 3 — what to check first. */}
+      <CheckFirst item={item} />
+
+      {/* LEG 4 — the jump to the work this card came from. */}
+      <JumpToWork item={item} />
+    </header>
   )
+}
+
+/** The tier's tone, over the S15.6 vocabulary (:90–94): High reaches outward
+ *  and is irreversible, Medium writes the platform's own stores, Low is
+ *  read-only or reversible inside the workspace. A tier this list has never
+ *  seen takes the neutral identity tone rather than a guessed severity. */
+function tierTone(tier: string): Tone {
+  if (tier === 'high') return 'red'
+  if (tier === 'medium') return 'orange'
+  if (tier === 'low') return 'blue'
+  return 'accent'
 }
 
 /**
@@ -430,6 +499,138 @@ function displayClass(item: ApprovalItem): string {
 }
 
 /**
+ * LEG 3 — "what to check first", and it is CLASS-GRAIN, never card-grain.
+ *
+ * No served field carries per-card guidance. The one thing that does is the 13.5
+ * help block, which arrives IN the card, is registry- and pipeline-sourced, and
+ * renders in full and byte-true wherever it is served (`Help` below). It stays
+ * the card-specific authority; this line is orientation, and it is written here
+ * under the D8 mandate exactly as the `SurfaceHead` copy is.
+ *
+ * SO IT NAMES NO CARD FACT. Each line says what to read on a card OF THIS CLASS
+ * and what answering one does — statements that are true of every card in the
+ * class, derived from nothing on the wire. Generating per-card guidance would
+ * fabricate advice the platform never wrote, which the no-fabrication invariant
+ * bars outright.
+ *
+ * A class this file has never seen gets NO line. An unknown kind still renders
+ * its row, its provenance and its served verbs (the forward tolerance §42
+ * requires); what it does not get is guidance nobody could have written for it.
+ */
+function CheckFirst({ item }: { item: ApprovalItem }) {
+  const advice = checkFirst(item)
+  if (advice === '') return null
+  return (
+    <p className="max-w-prose text-sm text-foreground" data-check-first={checkClass(item)}>
+      <span className="text-muted-foreground">What to check first: </span>
+      {advice}
+    </p>
+  )
+}
+
+/**
+ * checkClass reads the class off the card's OWN declarations and nothing else:
+ * the served `kind`, and — for an `ask`, whose four families are one kind on the
+ * wire — the stored snapshot's own family through the landed `answerEnvelope`.
+ *
+ * `displayClass` above is the reader's LABEL and is deliberately coarser: it
+ * calls every `ask` a question, and an S06.9 plan and a decision card need
+ * different things read first. Keying the advice on the label would have made
+ * one of those two lines false.
+ */
+function checkClass(item: ApprovalItem): string {
+  switch (item.kind) {
+    case 'effect':
+      return 'effect'
+    case 'memory_conflict':
+      return 'question'
+    case 'benchmark_verdict':
+      return 'judgement'
+    case 'watchdog_flag':
+    case 'drift_card':
+    case 'conformance_card':
+    case 'benchmark_alarm':
+      return 'sign-off'
+    case 'ask': {
+      const envelope = answerEnvelope(item)
+      if (envelope === 'contest') return 'proposal'
+      if (envelope === 'choice' || envelope === 'answers') return 'question'
+      return ''
+    }
+  }
+  return ''
+}
+
+/**
+ * The five lines. Each is checked against the thing it teaches:
+ *
+ *  - the proposal line points at `ApprovalCard`'s own centerpiece — the
+ *    assumptions and the will-not-do list (S06.9);
+ *  - the question line is true of a decision card, an interview card and the
+ *    ninth kind alike: the options ON the card are the answer vocabulary the
+ *    verbs accept (`composeAnswer`);
+ *  - the sign-off line agrees with the conformance verb, whose acknowledgement
+ *    is served STILL RED — acknowledging records that somebody read it;
+ *  - the judgement line states BENCH-REG §3.3's frozen rule, which `canFire`
+ *    enforces in the form: no verdict without a guess;
+ *  - the effect line is careful in the one direction that matters — where a
+ *    platform-level effect still needs a second signature, approving is NOT the
+ *    outward act, and the co-approval block below says who has signed.
+ *
+ * None re-states a tier's meaning, none tells anybody a card can be answered in
+ * a batch, and none uses the 13.5 block's own three headings.
+ */
+function checkFirst(item: ApprovalItem): string {
+  switch (checkClass(item)) {
+    case 'proposal':
+      return 'the assumptions this plan rests on, and the list of what it will NOT do. Those are where a plan goes wrong, and the verbs below answer the plan as it is written here.'
+    case 'question':
+      return 'the question itself and the options listed on this card. Those options are the whole of the answer — nothing outside this card is part of it.'
+    case 'sign-off':
+      return "the row's own fields below, which are what the platform recorded. Signing it off records that a person has read it; it does not undo it and does not make it go away."
+    case 'judgement':
+      return 'both responses, without knowing which is which, and then say which one you think the platform produced. The guess travels with the vote — it is part of the answer rather than an extra.'
+    case 'effect':
+      return 'what this would do outside the platform, and who has already signed. Where both the owner and the operator are required, it is not approved until both of them are in.'
+  }
+  return ''
+}
+
+/**
+ * LEG 4 — the jump to the work, and it renders ONLY what the wire carries.
+ *
+ * `run_id` is the one work reference an approval card serves (api.ts:512–538);
+ * there is no task id and no deliverable id on any card, so no deliverable jump
+ * exists to render and none is improvised. A card with no `run_id` — a blind
+ * pair, a memory conflict — gets no leg at all rather than a door to nowhere.
+ *
+ * ⚠ REPORTED, and the reason this leg names the reference rather than its
+ * destination. The landed link hands the served RUN id to the TASK route
+ * (`hrefFor('task')`), whose handler resolves that parameter against the tasks
+ * table's own id (internal/api/reads.go:813–815). Those are different id
+ * spaces: not one of the
+ * eight `run_id` values the golden approvals bodies serve appears among the ten
+ * task ids in the same fixture world, so for every card that carries one the
+ * page it opens answers with its own not-found. The TARGET is landed behaviour
+ * and is byte-preserved here — repointing it needs either a served task ref on
+ * the card or a run→task resolving read, both beyond this packet's freeze — so
+ * what this leg does NOT do is put an inviting label on it. It says which run
+ * the card came from, which is exactly what is on the wire. Recorded in
+ * CONVENTIONS §52 with its evidence.
+ */
+function JumpToWork({ item }: { item: ApprovalItem }) {
+  if (!item.run_id) return null
+  return (
+    <p className="text-sm" data-jump="run">
+      <span className="text-muted-foreground">the run this came from: </span>
+      <Link to={hrefFor('task', { id: item.run_id })} className="font-mono tabular-nums">
+        {item.run_id}
+      </Link>
+    </p>
+  )
+}
+
+/**
  * The expiry line. `expiry_at` is a served INSTANT; the remaining span is a
  * display derivation of it, taken at render and never on a timer — the view
  * re-reads on frames, so the figure moves when the data does. Absent expiry
@@ -442,12 +643,12 @@ function Expiry({ item }: { item: ApprovalItem }) {
   return (
     <span className="expiry" data-expiry={item.expiry_at}>
       expires <Timestamp ts={item.expiry_at} variant="live" />
-      <span className={remaining <= 0 ? 'warn-flag' : 'muted'}>
+      <span className={remaining <= 0 ? 'text-[var(--red)]' : 'text-muted-foreground'}>
         {' '}
         {remaining <= 0 ? '(past)' : `(in ${describeSpan(remaining)})`}
       </span>
       {item.engine_expiry_ts && (
-        <span className="muted">
+        <span className="text-muted-foreground">
           {' '}
           · the engine's own deadline: <Timestamp ts={item.engine_expiry_ts} variant="live" />
         </span>
@@ -476,10 +677,10 @@ function Staleness({ item }: { item: ApprovalItem }) {
   if (!item.stale) return null
   const reasons = item.stale_reasons ?? []
   return (
-    <span className="warn-flag" data-stale-flag="true">
+    <Chip tone="yellow" data-stale-flag="true" className="normal-case tracking-normal">
       assumptions may be stale
-      {reasons.length > 0 && <span className="muted"> — {reasons.join('; ')}</span>}
-    </span>
+      {reasons.length > 0 && <span className="opacity-80"> — {reasons.join('; ')}</span>}
+    </Chip>
   )
 }
 
@@ -502,9 +703,12 @@ function CardBody({
   // an answer given for a card that has moved.
   const shown = current ?? item
   return (
-    <div className="card-body">
+    <div className="mt-2">
       {current && (
-        <p className="warn-flag" data-changed="stale-payload">
+        <p
+          className="my-2 rounded-(--radius-sm) border border-[color-mix(in_srgb,var(--yellow)_25%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_9%,transparent)] px-2 py-1 text-sm text-[var(--yellow)]"
+          data-changed="stale-payload"
+        >
           This card changed while you were reading it. What you see now is the current card, and your answer was not
           applied — read it again before deciding.
         </p>
@@ -568,7 +772,7 @@ function RowCard({ card }: { card: unknown }) {
     <dl className="card-face">
       {entries.map(([key, value]) => (
         <div key={key} data-field={key}>
-          <dt>{key}</dt>
+          <dt className="font-mono text-[11px] tabular-nums">{key}</dt>
           <dd>{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
         </div>
       ))}
@@ -636,7 +840,7 @@ function ApprovalCard({ snap, expanded }: { snap: AskSnapshot; expanded: boolean
   const l2 = snap.approval?.layer2 ?? {}
   return (
     <div className="ask-card" data-card-kind={snap.kind ?? 'approval'}>
-      <p className="restatement">{l1.restatement ?? <Absent reason="the card records no restatement" />}</p>
+      <p className="restatement wrap-anywhere">{l1.restatement ?? <Absent reason="the card records no restatement" />}</p>
       <Bullets title="What you get" items={l1.deliverable} />
       <Bullets title="What I will do" items={l1.steps} ordered />
       <Bullets title="What I will NOT do" items={l1.will_not_do} />
@@ -647,7 +851,7 @@ function ApprovalCard({ snap, expanded }: { snap: AskSnapshot; expanded: boolean
       ) : (
         <ul className="assumptions">
           {(l1.assumptions ?? []).map((a) => (
-            <li key={a.text} data-assumption={a.text}>
+            <li key={a.text} className="wrap-anywhere" data-assumption={a.text}>
               {a.text}
               {a.origin && <span className="muted"> ({a.origin})</span>}
             </li>
@@ -723,8 +927,8 @@ function DeltaCard({ snap }: { snap: AskSnapshot }) {
       <p className="muted">what changed · {d.origin ?? 'origin not recorded'}</p>
       <ul className="delta-items">
         {(d.items ?? []).map((it) => (
-          <li key={`${it.kind}:${it.target}`} data-delta={it.kind}>
-            <span className="delta-kind">{it.kind}</span> <span className="delta-target">{it.target}</span>
+          <li key={`${it.kind}:${it.target}`} className="wrap-anywhere" data-delta={it.kind}>
+            <span className="font-mono tabular-nums text-(--accent)">{it.kind}</span> <span className="delta-target">{it.target}</span>
             {it.old && <span className="muted"> — was: {it.old}</span>}
             {it.new && <span> — now: {it.new}</span>}
           </li>
@@ -742,7 +946,7 @@ function DecisionCard({ snap }: { snap: AskSnapshot }) {
   const d = snap.decision ?? {}
   return (
     <div className="ask-card" data-card-kind={snap.kind ?? 'decision'}>
-      <p className="restatement">{d.summary ?? <Absent reason="the card records no summary" />}</p>
+      <p className="restatement wrap-anywhere">{d.summary ?? <Absent reason="the card records no summary" />}</p>
       <Bullets title="What this is about" items={d.detail} />
       <Help help={d.help} />
     </div>
@@ -755,7 +959,7 @@ function InterviewCard({ snap }: { snap: AskSnapshot }) {
     <div className="ask-card" data-card-kind={snap.kind ?? 'interview'}>
       <ol className="questions">
         {(snap.questions ?? []).map((q) => (
-          <li key={q.id} data-question={q.id}>
+          <li key={q.id} className="wrap-anywhere" data-question={q.id}>
             {q.text}
           </li>
         ))}
@@ -771,19 +975,19 @@ function Help({ help }: { help?: HelpBlock }) {
     return <Absent reason="this card carries no help block" />
   }
   return (
-    <dl className="help-block" data-help="13.5">
-      <div>
-        <dt>What this means</dt>
-        <dd>{help.what}</dd>
-      </div>
-      <div>
-        <dt>What could go wrong</dt>
-        <dd>{help.wrong}</dd>
-      </div>
-      <div>
-        <dt>What I recommend</dt>
-        <dd>{help.recommend}</dd>
-      </div>
+    <dl className="border-s-[3px] border-(--accent) ps-3" data-help="13.5">
+      {(
+        [
+          ['What this means', help.what],
+          ['What could go wrong', help.wrong],
+          ['What I recommend', help.recommend],
+        ] as [string, string | undefined][]
+      ).map(([label, text]) => (
+        <div key={label}>
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="wrap-anywhere">{text}</dd>
+        </div>
+      ))}
     </dl>
   )
 }
@@ -804,7 +1008,7 @@ function Bullets({ title, items, ordered }: { title: string; items?: string[]; o
 function Expandable({ title, open, children }: { title: string; open: boolean; children: ReactNode }) {
   return (
     <details className="layer2" open={open}>
-      <summary>{title}</summary>
+      <summary className="cursor-pointer text-sm text-muted-foreground">{title}</summary>
       {children}
     </details>
   )
@@ -823,28 +1027,45 @@ function EffectContent({ item }: { item: ApprovalItem }) {
       <RowCard card={item.card} />
       {appr && (
         <dl className="co-approval" data-platform-level={appr.platform_level ? 'true' : 'false'}>
-          <div>
-            <dt>owner</dt>
-            <dd data-signed={appr.owner_approved ? 'true' : 'false'}>
-              {appr.owner_approved ? `signed by ${appr.owner_approved_by ?? 'the owner'}` : 'not signed'}
-            </dd>
-          </div>
+          <Signer role="owner" signed={appr.owner_approved} by={appr.owner_approved_by} fallback="the owner" />
           {appr.platform_level && (
-            <div>
-              <dt>operator</dt>
-              <dd data-signed={appr.operator_approved ? 'true' : 'false'}>
-                {appr.operator_approved ? `signed by ${appr.operator_approved_by ?? 'the operator'}` : 'not signed'}
-              </dd>
-            </div>
+            <Signer role="operator" signed={appr.operator_approved} by={appr.operator_approved_by} fallback="the operator" />
           )}
         </dl>
       )}
       {appr?.platform_level === true && (
-        <p className="muted">
+        <p className="max-w-prose text-sm text-muted-foreground">
           This effect belongs to no single run, so it needs both the owner&apos;s and the operator&apos;s approval before
           it is approved.
         </p>
       )}
+    </div>
+  )
+}
+
+/** One approver's state, from the served block. An unsigned limb takes the
+ *  warning tone: the missing signature is the reason the effect has not fired,
+ *  and it has to read differently from the one that is in. */
+function Signer({
+  role,
+  signed,
+  by,
+  fallback,
+}: {
+  role: string
+  signed: boolean
+  by?: string
+  fallback: string
+}) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{role}</dt>
+      <dd
+        className={signed ? 'text-sm' : 'text-sm text-[var(--yellow)]'}
+        data-signed={signed ? 'true' : 'false'}
+      >
+        {signed ? `signed by ${by ?? fallback}` : 'not signed'}
+      </dd>
     </div>
   )
 }
@@ -855,7 +1076,7 @@ function ConflictContent({ card }: { card: MemoryConflict | undefined }) {
   if (!card) return <Absent reason="this card carries no stored body" />
   return (
     <div className="conflict-card">
-      <p className="restatement">{card.question}</p>
+      <p className="restatement wrap-anywhere">{card.question}</p>
       <p className="muted">
         {card.topic_key && <>topic {card.topic_key} · </>}
         <Link to={hrefFor('inbox-item', { id: `memory_conflict:${String(card.conflict_id)}` })}>
@@ -904,11 +1125,11 @@ function PairRenders({ pair }: { pair: PendingPair }) {
     <div className="pair">
       {(['a', 'b'] as const).map((side) => (
         <div key={side} className="pair-side" data-side={side}>
-          <h4>Response {side.toUpperCase()}</h4>
-          <p className="muted">
+          <h4 className="text-sm">Response {side.toUpperCase()}</h4>
+          <p className="font-mono text-xs tabular-nums text-muted-foreground">
             {String(side === 'a' ? pair.length_a : pair.length_b)} characters — reported, never corrected
           </p>
-          <pre className="render">{side === 'a' ? pair.render_a : pair.render_b}</pre>
+          <pre className="render text-xs">{side === 'a' ? pair.render_a : pair.render_b}</pre>
         </div>
       ))}
     </div>
@@ -1055,9 +1276,10 @@ function Acts({
 
       <div className="buttons">
         {actions.map((action) => (
-          <button
+          <Button
             key={action}
-            type="button"
+            size="sm"
+            variant={action === 'approve' ? 'primary' : 'secondary'}
             data-action={action}
             disabled={state.busy || !canFire(item, action, { verdict, guess })}
             onClick={() => {
@@ -1074,14 +1296,17 @@ function Acts({
             }}
           >
             {action}
-          </button>
+          </Button>
         ))}
       </div>
 
       {state.note !== '' && (
-        <p className={state.failed ? 'error' : 'notice'} data-outcome={state.failed ? 'failed' : 'applied'}>
+        <p
+          className={state.failed ? 'text-sm text-[var(--red)]' : 'text-sm text-[var(--green)]'}
+          data-outcome={state.failed ? 'failed' : 'applied'}
+        >
           {state.note}
-          {state.detail !== '' && <span className="muted"> — {state.detail}</span>}
+          {state.detail !== '' && <span className="text-muted-foreground"> — {state.detail}</span>}
         </p>
       )}
       {state.reveal && <Reveal reveal={state.reveal} />}
@@ -1333,8 +1558,8 @@ function CriteriaPicker({
   const detail = asSnapshot(item.card).decision?.detail ?? []
   if (detail.length === 0) return null
   return (
-    <fieldset className="criteria">
-      <legend>Which of these (where the choice needs one)</legend>
+    <fieldset className="criteria border-0 p-0">
+      <legend className="text-sm text-muted-foreground">Which of these (where the choice needs one)</legend>
       {detail.map((d) => (
         <label key={d}>
           <input
@@ -1374,9 +1599,9 @@ function VerdictPicker({
     return <Absent reason="the verdict vocabulary has not been served, so this form offers no buttons of its own" />
   }
   return (
-    <div className="verdict-form">
-      <fieldset data-form="verdict">
-        <legend>Which response is better</legend>
+    <div className="verdict-form flex flex-col gap-2">
+      <fieldset className="border-0 p-0" data-form="verdict">
+        <legend className="text-sm text-muted-foreground">Which response is better</legend>
         {choices.map((c) => (
           <label key={c}>
             <input
@@ -1392,8 +1617,10 @@ function VerdictPicker({
           </label>
         ))}
       </fieldset>
-      <fieldset data-form="guess">
-        <legend>Which one do you think was the platform&apos;s? (required — every vote carries a guess)</legend>
+      <fieldset className="border-0 p-0" data-form="guess">
+        <legend className="text-sm text-muted-foreground">
+          Which one do you think was the platform&apos;s? (required — every vote carries a guess)
+        </legend>
         {sides.map((s) => (
           <label key={s}>
             <input
@@ -1432,9 +1659,9 @@ function DispositionPicker({
     return <Absent reason="the disposition vocabulary has not been served, so this form offers no buttons of its own" />
   }
   return (
-    <div className="disposition-form">
-      <fieldset data-form="disposition">
-        <legend>How you are disposing of this alarm</legend>
+    <div className="disposition-form flex flex-col gap-2">
+      <fieldset className="border-0 p-0" data-form="disposition">
+        <legend className="text-sm text-muted-foreground">How you are disposing of this alarm</legend>
         {dispositions.map((d) => (
           <label key={d}>
             <input
@@ -1509,9 +1736,9 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
 
   return (
     <div className="batch-bar" data-batchable={String(batchable.length)}>
-      <p className="muted">
-        {String(batchable.length)} low-risk card(s) can be answered together. Pick the one action first — a batch
-        answers cards that all accept it, and nothing else.
+      <p className="max-w-prose text-sm text-muted-foreground">
+        <span className="font-mono tabular-nums">{String(batchable.length)}</span> low-risk card(s) can be answered
+        together. Pick the one action first — a batch answers cards that all accept it, and nothing else.
       </p>
       <label>
         <span>Action</span>
@@ -1536,7 +1763,7 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
         <ul className="batch-candidates">
           {eligible.map((i) => (
             <li key={i.id}>
-              <label>
+              <label className="font-mono text-xs tabular-nums">
                 <input
                   type="checkbox"
                   data-batch-pick={i.id}
@@ -1552,8 +1779,9 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
         </ul>
       )}
       {action !== '' && (
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           data-action="answer-batch"
           disabled={selected.length === 0}
           onClick={() => {
@@ -1561,17 +1789,24 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
           }}
         >
           {action} {String(selected.length)} card(s)
-        </button>
+        </Button>
       )}
-      {failure !== '' && <p className="error">{failure}</p>}
+      {failure !== '' && <p className="text-sm text-[var(--red)]">{failure}</p>}
       {outcomes && (
         <ul className="batch-outcomes">
           {outcomes.map((o) => (
-            <li key={o.id} data-outcome-id={o.id} data-outcome-status={String(o.status)}>
-              {o.id} — {String(o.status)}
-              {o.code && <span className="warn-flag"> {o.code}</span>}
-              {o.detail && <span className="muted"> {o.detail}</span>}
-              {o.result && <span className="muted"> {o.result.detail}</span>}
+            <li
+              key={o.id}
+              className="wrap-anywhere text-sm"
+              data-outcome-id={o.id}
+              data-outcome-status={String(o.status)}
+            >
+              <span className="font-mono tabular-nums">
+                {o.id} — {String(o.status)}
+              </span>
+              {o.code && <span className="text-[var(--yellow)]"> {o.code}</span>}
+              {o.detail && <span className="text-muted-foreground"> {o.detail}</span>}
+              {o.result && <span className="text-muted-foreground"> {o.result.detail}</span>}
             </li>
           ))}
         </ul>

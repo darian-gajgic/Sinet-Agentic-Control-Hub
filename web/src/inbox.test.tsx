@@ -1277,3 +1277,269 @@ test('the engine deadline and the conflict notice are live too, and the verdict 
   ).not.toMatch(/\bago\b|\bin \d/)
   view.unmount()
 })
+
+// ── D8 pass II: the surface header, the teaching empty, the row anatomy ────
+
+test('the inbox says what it is, and does not claim a power this page does not have', async () => {
+  const { view } = await open('/inbox', mine())
+  const what = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+
+  // The facts, and each is one of the four rules the file is built on.
+  expect(what, 'the line does not say what arrives here').toContain('waiting on a person')
+  expect(what, 'the line drops the one-queue fact').toContain('one queue')
+  expect(what, 'the line drops WHO ranks').toContain('ranked by risk by the control plane')
+  expect(what, 'the line drops the never-re-orders rule').toContain('never re-orders')
+  expect(what, 'the line does not say what answering does').toContain('releases the work')
+
+  // The overclaims. The client ranks nothing, groups nothing and filters
+  // nothing (Inbox.tsx's four rules), so the line may not say it does.
+  for (const claim of ['sorted', 'sorts', 'grouped', 'groups', 'filter', 'hides', 'most important first']) {
+    expect(what.toLowerCase(), `the header claims this page ${claim}`).not.toContain(claim)
+  }
+  // …and it invents no tier meaning beyond S15.6's own.
+  for (const word of ['low-risk', 'safe', 'urgent']) {
+    expect(what.toLowerCase(), `the header re-defines a tier (${word})`).not.toContain(word)
+  }
+})
+
+test('the deep-link surface says what its URL is, and still points back at the queue', async () => {
+  const served = mine()
+  const { view } = await open(`/inbox/${encodeURIComponent('ask:ask-ship')}`, served)
+  const what = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+  expect(what).toContain('stable address')
+  expect(what, 'the deep-link line does not say a notification opens it').toContain('notification')
+  // It promises no MORE than the queue shows, because one component serves both.
+  expect(what).toContain('exactly what the queue shows')
+  expect(view.container.querySelector('a[href="/inbox"]'), 'the whole-queue door left with the restyle').not.toBeNull()
+})
+
+test('an empty queue TEACHES what arrives here — and teaches nothing while the read is in flight', async () => {
+  // The far side first: a SERVED empty queue is where the teaching state belongs.
+  const { view } = await open('/inbox', { items: [], cursor: 4, truncated: false })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('Nothing is waiting on you.')
+  expect(text, 'the empty state teaches nothing about what will appear').toContain('Cards arrive here')
+  expect(text, 'the teaching does not say what clears a card').toContain('Answering one clears it')
+
+  // The R2(a) rule, driven the way §51 drain D1 says it must be: the surface's
+  // OWN read never answers, so it really is mounted, really has asked, and is
+  // really waiting. Nothing may teach over that window — `Freshness` owns it.
+  const { view: pending } = await open(
+    '/inbox',
+    { items: [], cursor: 4, truncated: false },
+    { 'GET /api/approvals': { pending: true } },
+  )
+  const waiting = pending.container.textContent ?? ''
+  expect(waiting, 'a teaching empty rendered over a read that had not answered').not.toContain(
+    'Nothing is waiting on you.',
+  )
+  expect(waiting, 'the pending window taught what arrives here').not.toContain('Cards arrive here')
+})
+
+test('the row anatomy renders five legs, and every fact in them is one the wire carried', async () => {
+  const served = mine()
+  const item = card(served, 'ask:ask-ship')
+  const { view } = await open('/inbox', served)
+  const node = row(view, item.id)
+
+  // (1) what's being approved — the display class, and the served flags that
+  // decide what the verbs will accept.
+  expect(node.querySelector('[data-display-class]')?.getAttribute('data-display-class')).toBe('question')
+  expect(node.querySelector('[data-tier-label]')?.getAttribute('data-tier-label')).toBe(item.tier)
+  expect(node.querySelector('[data-answerable="true"]'), 'an answerable card does not say so').not.toBeNull()
+
+  // (2) the mono provenance line — id, kind, owner and the observed instant,
+  // all served, all in the mono/tabular treatment §47 fixes for ids and stamps.
+  const prov = node.querySelector('[data-provenance="card"]') as HTMLElement
+  expect(prov, 'the card has no provenance line').not.toBeNull()
+  expect(prov.className, 'the provenance line is not mono').toContain('font-mono')
+  expect(prov.className, 'the provenance line has no tabular figures').toContain('tabular-nums')
+  expect(prov.querySelector('a.card-id')?.textContent).toBe(item.id)
+  expect(prov.querySelector('[data-provenance-field="kind"]')?.textContent).toBe(item.kind)
+  expect(prov.textContent).toContain(item.owner)
+  expect(prov.querySelector('time')?.getAttribute('dateTime')).toBe(item.observed_ts)
+
+  // (3) what to check first, and (4) the jump — both below.
+  expect(node.querySelector('[data-check-first]'), 'the check-first leg is missing').not.toBeNull()
+  expect(node.querySelector('[data-jump="run"]'), 'a card with a served run ref has no jump leg').not.toBeNull()
+
+  // (5) the verbs, still the card's OWN served vocabulary and nothing else.
+  expect([...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(
+    item.actions,
+  )
+})
+
+test('an unknown kind still gets a row under its SERVED name — anatomy included', async () => {
+  // Forward tolerance (§42), through the anatomy: a kind this file has never
+  // heard of keeps its row, its provenance and its served verbs. What it does
+  // NOT get is guidance nobody wrote for it.
+  const served = mine()
+  const invented: ApprovalList = {
+    ...served,
+    items: [
+      { ...card(served, 'ask:ask-ship'), id: 'quorum_vote:qv-1', kind: 'quorum_vote', card: { note: 'a new kind' }, actions: ['ratify'] },
+    ],
+  }
+  const { view } = await open('/inbox', invented)
+  const node = row(view, 'quorum_vote:qv-1')
+  expect(node, 'an unknown kind lost its row').not.toBeNull()
+  expect(node.querySelector('[data-display-class]')?.textContent, 'the served kind was not used as its own label').toBe(
+    'quorum_vote',
+  )
+  expect(node.querySelector('[data-provenance="card"]')?.textContent).toContain('quorum_vote')
+  expect([...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(['ratify'])
+  expect(node.querySelector('[data-check-first]'), 'guidance was invented for a class nobody has written one for')
+    .toBeNull()
+})
+
+test('the jump leg is the SERVED run ref, and a card with none grows no door', async () => {
+  const served = mine()
+  const { view } = await open('/inbox', served)
+
+  const withRun = card(served, 'ask:ask-ship')
+  expect(withRun.run_id, 'the fixture card serves no run ref').toBeTruthy()
+  const jump = row(view, withRun.id).querySelector('[data-jump="run"]')!
+  expect(jump.textContent).toContain(withRun.run_id ?? '')
+  expect(jump.querySelector('a')?.getAttribute('href')).toBe(`/tasks/${String(withRun.run_id)}`)
+
+  // A card with no run ref renders no jump at all — absence invents nothing.
+  const bare = served.items.find((i) => !i.run_id)
+  expect(bare, 'every fixture card carries a run ref, so the absence arm is undriven').toBeTruthy()
+  expect(row(view, bare?.id ?? '').querySelector('[data-jump]'), 'a jump was invented for a card with no work ref')
+    .toBeNull()
+
+  // AND NO DELIVERABLE JUMP EXISTS, because no card serves a deliverable ref.
+  // The proposal's "jump-to-deliverable" is answered by the one work reference
+  // the wire actually carries; a deliverable link would be a fact off the wire.
+  for (const i of served.items) {
+    for (const field of ['deliverable', 'deliverable_id', 'task_id', 'artifact_id']) {
+      expect(Object.keys(i), `a card serves ${field} after all — the jump leg should carry it`).not.toContain(field)
+    }
+  }
+  expect(view.container.querySelector('a[href^="/deliverables/"]'), 'the inbox invented a deliverable link').toBeNull()
+})
+
+/** checkFirstOf reads one card's class-grain guidance line off the rendered row. */
+const checkFirstOf = (view: { container: HTMLElement }, id: string) => {
+  const node = row(view, id).querySelector('[data-check-first]')
+  return { klass: node?.getAttribute('data-check-first') ?? '', text: node?.textContent ?? '' }
+}
+
+test('"what to check first" is CLASS-grain: one line per class, keyed off the card\'s own declarations', async () => {
+  const { view } = await open('/inbox', mine())
+  const { view: ops } = await open('/inbox', all())
+
+  // A plan card points at the S06.9 centerpiece — the assumptions and the
+  // will-NOT-do list — which is what the card itself puts first.
+  const proposal = checkFirstOf(view, 'ask:ask-ship')
+  expect(proposal.klass).toBe('proposal')
+  expect(proposal.text).toContain('assumptions')
+  expect(proposal.text).toContain('will NOT do')
+
+  // A decision card and the ninth kind are both questions, and the line is true
+  // of both: the options ON the card are the answer vocabulary the verbs accept.
+  for (const id of ['ask:ask-coverage', 'memory_conflict:1']) {
+    const q = checkFirstOf(view, id)
+    expect(q.klass, `${id} is not classed as a question`).toBe('question')
+    expect(q.text).toContain('options listed on this card')
+    expect(q.text).toContain('nothing outside this card')
+  }
+
+  // A sign-off agrees with the conformance verb, whose acknowledgement comes
+  // back STILL RED: signing off records that somebody read it.
+  const signoff = checkFirstOf(ops, 'conformance_card:api-read-surface')
+  expect(signoff.klass).toBe('sign-off')
+  expect(signoff.text).toContain('does not undo it')
+  expect(signoff.text, 'the sign-off line promises a clearance the verb does not give').not.toContain('clears')
+
+  // A judgement states BENCH-REG §3.3's frozen rule, which `canFire` enforces.
+  const judgement = checkFirstOf(view, 'benchmark_verdict:bp-notes')
+  expect(judgement.klass).toBe('judgement')
+  expect(judgement.text).toContain('without knowing which is which')
+  expect(judgement.text).toContain('part of the answer')
+
+  // An effect names what it would do and who has signed.
+  const effect = checkFirstOf(view, 'effect:e-notify')
+  expect(effect.klass).toBe('effect')
+  expect(effect.text).toContain('outside the platform')
+  expect(effect.text).toContain('who has already signed')
+})
+
+test('the guidance contradicts nothing it teaches — the overclaims, asserted absent', async () => {
+  const { view } = await open('/inbox', mine())
+  const { view: ops } = await open('/inbox', all())
+  const lines = [...view.container.querySelectorAll('[data-check-first]'), ...ops.container.querySelectorAll('[data-check-first]')].map(
+    (n) => (n.textContent ?? '').toLowerCase(),
+  )
+  expect(lines.length, 'no guidance rendered at all, so the negatives assert nothing').toBeGreaterThan(4)
+
+  for (const line of lines) {
+    // It never tells anybody a card can be answered in a batch: batching is the
+    // SERVED `batchable` flag's business and is Low-tier only.
+    for (const word of ['batch', 'together', 'all at once']) {
+      expect(line, `guidance offers batching: ${line}`).not.toContain(word)
+    }
+    // It never re-defines a tier. S15.6 :90–94 owns those words.
+    for (const word of ['low tier', 'medium tier', 'high tier', 'low risk', 'high risk', 'reversible']) {
+      expect(line, `guidance re-defines a tier: ${line}`).not.toContain(word)
+    }
+    // It never wears the 13.5 block's own headings: that block is the CARD's
+    // authority and this line is orientation beside it, never a second copy.
+    for (const heading of ['what this means', 'what could go wrong', 'what i recommend']) {
+      expect(line, `guidance re-drafts the 13.5 help: ${line}`).not.toContain(heading)
+    }
+  }
+
+  // The one that matters most: a platform-level effect is NOT approved by one
+  // signature, and the co-approval block below says so. The line may not
+  // promise that approving fires the outward act.
+  const effect = checkFirstOf(view, 'effect:e-notify').text
+  expect(effect).toContain('not approved until both')
+  for (const claim of ['approving fires', 'takes effect immediately', 'will fire it', 'happens as soon as you approve']) {
+    expect(effect.toLowerCase(), `the effect line promises an outward act one signature does not cause`).not.toContain(claim)
+  }
+})
+
+test('the served 13.5 help stays the card-specific authority, beside the class line and byte-true', async () => {
+  const served = mine()
+  const { view } = await open('/inbox', served)
+  const node = row(view, 'ask:ask-ship')
+  const help = (card(served, 'ask:ask-ship').card as { approval: { layer1: { help: { what: string; wrong: string; recommend: string } } } })
+    .approval.layer1.help
+
+  // BOTH render: the class line is orientation, the served block is the card's
+  // own authority, and this packet writes none of the block's three sentences.
+  const line = node.querySelector('[data-check-first]')?.textContent ?? ''
+  const block = node.querySelector('[data-help="13.5"]')?.textContent ?? ''
+  expect(line, 'the class line vanished where a help block is served').not.toBe('')
+  for (const sentence of [help.what, help.wrong, help.recommend]) {
+    expect(block, 'a served help sentence was dropped or re-drafted').toContain(sentence)
+    expect(line, 'the class line re-typed a sentence the card served').not.toContain(sentence)
+  }
+})
+
+// ── R6: the new renders at 375px ──────────────────────────────────────────
+
+test('the anatomy is readable at phone width: nothing new pins a pixel width', async () => {
+  // jsdom has no layout engine, so what is checkable is the STRUCTURE (§41-B):
+  // a fixed pixel width on a new container is what forces a 375px screen to
+  // scroll sideways, and the row's landed containers are asserted in the
+  // stylesheet by responsive.test.ts. These are the renders this packet added.
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]|max-w-\[\d+px\]/
+  const { view } = await open('/inbox', mine())
+  const nodes = [
+    ...view.container.querySelectorAll('[data-surface-what]'),
+    ...view.container.querySelectorAll('[data-provenance="card"]'),
+    ...view.container.querySelectorAll('[data-check-first]'),
+    ...view.container.querySelectorAll('[data-jump]'),
+  ]
+  expect(nodes.length, 'the walk found none of the new renders').toBeGreaterThan(4)
+  for (const n of nodes) {
+    expect(pinned.test((n as HTMLElement).className.toString()), `${n.getAttribute('data-check-first') ?? n.tagName} pins a pixel width`).toBe(false)
+    expect(/\d+px/.test(n.getAttribute('style') ?? ''), 'a new render pins an inline width').toBe(false)
+  }
+  // Both-way probe: the detector really matches what it forbids, and really
+  // passes the form these renders use.
+  expect(pinned.test('flex w-[520px]')).toBe(true)
+  expect(pinned.test('max-w-prose text-sm')).toBe(false)
+})

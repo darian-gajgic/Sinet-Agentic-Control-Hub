@@ -847,33 +847,6 @@ td {
   overflow-wrap: anywhere;
 }
 
-.card-body {
-  margin-block-start: 0.5rem;
-}
-
-.restatement,
-.assumptions li,
-.delta-items li,
-.questions li,
-.help-block dd {
-  overflow-wrap: anywhere;
-}
-
-.help-block {
-  border-inline-start: 3px solid var(--accent);
-  padding-inline-start: 0.75rem;
-  margin: 0.75rem 0;
-}
-
-.help-block dt {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.help-block dd {
-  margin: 0 0 0.5rem;
-}
-
 .acts {
   margin-block-start: 0.75rem;
   display: flex;
@@ -885,18 +858,6 @@ td {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-
-.acts label,
-.batch-bar label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.acts input[type='text'],
-.acts input[type='password'] {
-  max-width: 100%;
 }
 
 .criteria label,
@@ -925,18 +886,6 @@ td {
   padding: 0;
 }
 
-.batch-outcomes li {
-  overflow-wrap: anywhere;
-}
-
-.co-approval dt {
-  color: var(--muted);
-}
-
-.co-approval dd[data-signed='false'] {
-  color: var(--warn);
-}
-
 .pair {
   display: flex;
   flex-direction: column;
@@ -955,16 +904,6 @@ td {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: 0;
-}
-
-.delta-kind {
-  font-family: ui-monospace, monospace;
-  color: var(--accent);
-}
-
-.layer2 summary {
-  cursor: pointer;
-  color: var(--muted);
 }
 
 
@@ -1006,10 +945,6 @@ td {
   border-block-end: 1px solid var(--line);
   padding-block-end: 0.75rem;
   max-width: 100%;
-}
-
-.setting-label {
-  font-weight: 600;
 }
 
 .setting-help,
@@ -1062,19 +997,6 @@ td {
   max-width: 100%;
 }
 
-.audit-rows,
-.per-user-values,
-.deferred {
-  padding-inline-start: 1.25rem;
-}
-
-.registered dt {
-  color: var(--muted);
-}
-
-.unit-price {
-  white-space: nowrap;
-}
 
 /* ── the assistant (Spec S15.7; S1.10 phone-complete) ────────────────────────
    Three regions — the conversation rail, the thread, the exchange sidebar — that
@@ -1753,15 +1675,7 @@ td {
   max-width: 24rem;
 }
 
-.push-device input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
 .push-devices {
   margin-top: 0.75rem;
 }
 
-.push-devices .items li {
-  overflow-wrap: anywhere;
-}
