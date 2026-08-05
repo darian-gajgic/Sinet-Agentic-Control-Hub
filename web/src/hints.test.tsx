@@ -122,10 +122,6 @@ test('the count stays small, and every hint sits on a surface this packet may op
     expect(src, `a hint was placed on the byte-frozen ${name}`).not.toContain('<Hint ')
   }
 
-  // The probe: the scan can fail. A third placement would break the cap.
-  const planted = [...placed, 'planted-third']
-  expect(planted.length).toBeGreaterThan(2)
-
   // ...and both really render, which is what makes the count a fact about the
   // shipped page rather than about two string literals.
   const { view } = await openChat()

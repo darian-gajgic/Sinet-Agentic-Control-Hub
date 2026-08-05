@@ -255,9 +255,6 @@ test('the overlay PASSES CLICKS THROUGH: the root is inert and only the card is 
   const ring = view.container.querySelector('[data-tour-ring]')
   if (ring !== null) expect(ring.className).toContain('pointer-events-none')
 
-  // The probe: the pin can fail. A root without the utility is the shipped
-  // defect, and a card without it is the same defect one level in.
-  expect('fixed inset-0 z-40'.includes('pointer-events-none')).toBe(false)
   view.unmount()
 })
 
