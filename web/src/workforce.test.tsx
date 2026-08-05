@@ -863,3 +863,64 @@ test("a served verdicts_truncated renders, and a row served without it does not"
   }
   view.unmount()
 })
+
+// ── the D8 layer on the map (P3-UI-5) ─────────────────────────────────────
+
+test('the map teaches what it is, and says out loud that it is view-only', async () => {
+  const { view } = await open()
+  const line = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+  expect(line, 'the workforce map carries no "what this is" line').not.toBe('')
+  for (const fact of ['worker', 'equipped', 'outcomes']) {
+    expect(line.toLowerCase(), `the header line drops "${fact}"`).toContain(fact)
+  }
+  // S15.10 parks editing to 15.5. A reader who cannot find an edit control
+  // should be told there is none rather than left hunting for one.
+  expect(line.toLowerCase(), 'the header line does not say the map is view-only').toContain('view-only')
+  view.unmount()
+})
+
+test('the no-workers state teaches, keeps the S08.6 sentence, and offers no act', async () => {
+  const { view } = await open({
+    workers: [],
+    roster_scope: 'your own personal workers plus the household roster (S15.10)',
+    outcome_scope: 'your own runs only',
+    truncated: false,
+    outcomes_truncated: false,
+    cursor: 89,
+  })
+  const text = view.container.textContent ?? ''
+  // The landed compose-when-earned prose is KEPT word for word — it was already
+  // the best teaching copy in the tree, and rewriting it would have been change
+  // without a decision behind it.
+  expect(text).toContain('Nothing has been composed yet')
+  expect(text).toContain(
+    'Sinet does not pre-staff a formation: a worker is built when recurring work earns one, and until then the ' +
+      'coordinator does the work with knowledge injected for the task.',
+  )
+  // WALL: no `action` prop on this surface's empty states. The zero-mutation
+  // rule does not get an exception for the one screen with nothing on it.
+  const root = view.container.querySelector('.workforce')!
+  for (const sel of ['button', 'form', 'input', 'select', 'textarea']) {
+    expect([...root.querySelectorAll(sel)], `the empty map renders a ${sel}`).toEqual([])
+  }
+  expect([...root.querySelectorAll('a')], 'the empty map links somewhere to act').toEqual([])
+  view.unmount()
+})
+
+test('the restyled map reads at 375px and pins no pixel width', async () => {
+  const { view } = await open()
+  const root = view.container.querySelector('.workforce')!
+  const scope = [root, ...root.querySelectorAll('*')]
+  expect(scope.length, 'the phone leg reached nothing').toBeGreaterThan(20)
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  const fixed = scope.filter(
+    (n) => pinned.test(n.className.toString()) || /\d+px/.test(n.getAttribute('style') ?? ''),
+  )
+  expect(fixed.map((n) => n.className.toString()), 'the map pins a pixel width a phone cannot fit').toEqual([])
+  // Every responsive leg on this surface widens UP: the phone is the base.
+  for (const n of scope) {
+    expect(n.className.toString(), 'a max-width variant entered the map').not.toMatch(/\bmax-(sm|md|lg):/)
+  }
+  expect(pinned.test('grid min-w-[640px]'), 'the detector does not match what it forbids').toBe(true)
+  view.unmount()
+})

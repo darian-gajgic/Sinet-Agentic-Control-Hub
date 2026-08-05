@@ -774,7 +774,6 @@ td {
 
 .acs,
 .steps,
-.stages,
 .decisions,
 .parks {
   padding-inline-start: 1.25rem;
@@ -782,18 +781,9 @@ td {
 
 .acs li,
 .steps li,
-.stages li,
 .decisions li {
   margin-block: 0.3rem;
   overflow-wrap: anywhere;
-}
-
-.decision {
-  color: var(--ok);
-}
-
-.stage-outcome {
-  color: var(--ok);
 }
 
 .ac-key,
@@ -802,16 +792,9 @@ td {
   font-variant-numeric: tabular-nums;
 }
 
-.receipt {
-  margin-block: 0.5rem;
-}
-
-/* The registered done-directly label and the S10.6 mode note are printed as
-   served; nothing here re-states either string. */
-.direct-use-label {
-  color: var(--fg);
-}
-
+/* The S10.6 mode note is printed as served; nothing here re-states it. It keeps
+   its own rule because the note is somebody else's prose and must wrap rather
+   than widen a phone (`responsive.test.ts`). */
 .mode-note {
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -819,20 +802,6 @@ td {
 
 .lineage {
   margin-block: 0.75rem;
-}
-
-.activity-line {
-  overflow-wrap: anywhere;
-}
-
-.counters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  list-style: none;
-  margin: 0.25rem 0;
-  padding: 0;
-  color: var(--muted);
 }
 
 .revisions {
@@ -1458,7 +1427,12 @@ td {
 /* ── the S15.10 workforce map (B6-8 part B) ─────────────────────────────────
    Owned rendering, as the TBD-P3 resolution requires: semantic grouping by
    domain, one card per worker, and no layout library. Phone-first — the grid is
-   one column until there is room for two (§41 structural responsiveness). */
+   one column until there is room for two (§41 structural responsiveness).
+
+   PARTIALLY SHED 2026-08-05 (P3-UI-5, §51 — moved here from UI-7 by the STATE
+   queue cut). The worker card's material and the equipment chips' spacing moved
+   onto the kit and utilities; the GROUPING and the phone-first grid stay,
+   because they are the owned rendering the TBD-P3 resolution is about. */
 
 .worker-grid {
   display: flex;
@@ -1467,9 +1441,6 @@ td {
 }
 
 .worker {
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -1529,12 +1500,6 @@ td {
 .grants dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.worker-equipment .chip,
-.worker-chain .chip,
-.grants .chip {
-  margin-right: 0.25rem;
 }
 
 .grants {

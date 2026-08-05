@@ -6,6 +6,7 @@ import { ReceiptView } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
 import { EventStream } from './events'
+import detailSource from './TaskDetail.tsx?raw'
 import { click, flush, mount } from './testing'
 
 /**
@@ -993,5 +994,321 @@ test('opened, last activity and each stage boundary all render relative beside v
   expect(decision, 'the decision record lost its stamp').not.toBeNull()
   expect(decision!.textContent, 'an audit record dropped its verbatim instant').toBe(decision!.getAttribute('dateTime'))
   expect(decision!.parentElement!.textContent, 'an audit record grew a relative label').not.toMatch(/\bago\b|\bin \d/)
+  view.unmount()
+})
+
+// ── the timeline rail (P3-UI-5) ───────────────────────────────────────────
+
+/**
+ * The rail's node classes over HAND-SCRIPTED bodies, each transcribed from the
+ * Go producer that mints it.
+ *
+ * The golden world carries one `stage.started` with no outcome, no park history
+ * and no wedged run, so these arms cannot be driven from it — and DRIVING them
+ * would mint events and move the golden `cursor`, which is out of this packet's
+ * scope. The §49 error-contract precedent applies: hand-scripted, with the
+ * producer cited beside each value.
+ *
+ * The vocabulary is CLOSED and is the platform's own: `stage.finished` carries
+ * `outcome ∈ {completed, split, error}` (internal/stage/stageevents.go:35–47,
+ * registered at internal/eventlog/contract.go:431). `wedged` is the run card's
+ * `run.wedged` / watchdog pause-and-flag projection (contract.go:427, served at
+ * api.ts:462). Park intervals are the receipt's own `park_history` rows.
+ */
+function railBody(over: Partial<Detail> = {}): Detail {
+  return { ...(fixtures.taskDetail() as unknown as Detail), ...over }
+}
+
+const stageRow = (over: Record<string, unknown> = {}) => ({
+  run_id: 'r-ship',
+  seq: 10,
+  type: 'stage.finished',
+  stage: 'execute',
+  kind: 'execute-step',
+  ts: '2026-07-20T09:02:00Z',
+  ...over,
+})
+
+const nodesOf = (view: { container: HTMLElement }, kind: string) => [
+  ...view.container.querySelectorAll(`.stages [data-node="${kind}"]`),
+]
+
+test('the rail places every served node class, and an ordinary step acquires none of their markings', async () => {
+  const body = railBody({
+    stage_progress: [
+      stageRow({ seq: 9, type: 'stage.started', ts: '2026-07-20T09:01:00Z' }),
+      stageRow({ seq: 10, outcome: 'completed', ts: '2026-07-20T09:02:00Z' }),
+      stageRow({ seq: 11, outcome: 'split', ts: '2026-07-20T09:03:00Z' }),
+      stageRow({ seq: 12, outcome: 'error', ts: '2026-07-20T09:05:00Z' }),
+    ] as Detail['stage_progress'],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+
+  // Each distinct treatment renders exactly where its outcome was served…
+  expect(nodesOf(view, 'error')).toHaveLength(1)
+  expect(nodesOf(view, 'split')).toHaveLength(1)
+  expect(nodesOf(view, 'error')[0].textContent).toContain('error')
+  expect(nodesOf(view, 'split')[0].textContent).toContain('split')
+  // …and the two OTHER direction: the started row and the completed row are
+  // plain steps, so the marking cannot be leaking onto ordinary boundaries.
+  const plain = nodesOf(view, 'step')
+  expect(plain.length, 'the unmarked boundaries lost their nodes').toBe(2)
+  for (const node of plain) {
+    expect(node.textContent, 'an ordinary step acquired a failure marking').not.toContain('ended short')
+    expect(node.textContent, 'an ordinary step acquired a recovery marking').not.toContain('split at a checkpoint')
+  }
+  // The recovery and failure nodes say what they MEAN, not just their token.
+  expect(nodesOf(view, 'error')[0].textContent).toContain('ended short of completing')
+  expect(nodesOf(view, 'split')[0].textContent).toContain('carried on in a successor session')
+  view.unmount()
+})
+
+test('the rail runs in served-instant order, and every stage fact still renders', async () => {
+  const body = railBody({
+    // Deliberately out of chronological order in the served array: the rail is
+    // ordered by the instants the platform recorded, never by array position.
+    stage_progress: [
+      stageRow({ seq: 12, stage: 'verify', ts: '2026-07-20T09:05:00Z', outcome: 'completed' }),
+      stageRow({ seq: 9, stage: 'plan', type: 'stage.started', ts: '2026-07-20T09:01:00Z' }),
+    ] as Detail['stage_progress'],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+  const stages = [...view.container.querySelectorAll('.stages [data-stage]')].map((n) => n.getAttribute('data-stage'))
+  expect(stages, 'the rail did not order by the served instants').toEqual(['plan', 'verify'])
+
+  // Every landed fact of a stage row is still on the node: name, type, kind,
+  // outcome and the instant — through the timestamp primitive, never formatted.
+  const verify = [...view.container.querySelectorAll('.stages [data-stage="verify"]')][0]
+  const text = verify.textContent ?? ''
+  for (const fact of ['verify', 'stage.finished', 'execute-step', 'completed']) {
+    expect(text, `the rail dropped the served ${fact}`).toContain(fact)
+  }
+  expect(verify.querySelector('time')?.getAttribute('dateTime')).toBe('2026-07-20T09:05:00Z')
+  view.unmount()
+})
+
+test('an unnamed stage renders its absence, and an unrecognized outcome renders plainly rather than vanishing', async () => {
+  const body = railBody({
+    stage_progress: [
+      stageRow({ seq: 9, stage: '', ts: '2026-07-20T09:01:00Z' }),
+      // A value the closed vocabulary has never carried. The client owns no
+      // vocabulary here, so a later addition must stay on the story.
+      stageRow({ seq: 10, stage: 'compose', outcome: 'abandoned', ts: '2026-07-20T09:02:00Z' }),
+    ] as Detail['stage_progress'],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+  expect(view.container.querySelector('.stages')?.textContent).toContain('unnamed stage')
+  const unknown = [...view.container.querySelectorAll('.stages [data-stage="compose"]')][0]
+  expect(unknown, 'a row with an unrecognized outcome vanished from the rail').toBeDefined()
+  expect(unknown.getAttribute('data-node'), 'an unrecognized outcome was forced into a known class').toBe('step')
+  expect(unknown.textContent, 'the served outcome was dropped').toContain('abandoned')
+  view.unmount()
+})
+
+test('a park interval is a stop node with its reason, its served duration and the inbox door', async () => {
+  const served = fixtures.taskDetail() as unknown as Detail
+  const receipt = { ...(served.runs[0].receipt as Receipt) }
+  receipt.park_history = [
+    // A CLOSED interval renders the SERVED duration — nothing is derived here.
+    {
+      parked_at: '2026-07-20T09:06:00Z',
+      resumed_at: '2026-07-20T09:08:00Z',
+      duration_seconds: 120,
+      park_reason: 'weekly quota reached',
+      resume_cause: 'window rolled',
+    },
+    // An OPEN one says it is still parked and carries the door.
+    { parked_at: '2026-07-20T09:09:00Z', park_reason: 'waiting on the price table', ongoing: true },
+  ]
+  const body = railBody({ runs: [{ ...served.runs[0], receipt }] })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+
+  const parks = nodesOf(view, 'park')
+  expect(parks, 'the rail carries no park node').toHaveLength(2)
+  expect(parks[0].textContent).toContain('weekly quota reached')
+  expect(parks[0].textContent, 'the served duration was not rendered').toContain('120 s')
+  expect(parks[0].textContent).toContain('window rolled')
+  expect(parks[1].textContent, 'an open interval does not say it is still parked').toContain('still parked')
+  // The door POINTS: the release is `api.resumeRun` and its one call site is the
+  // inbox, where the card holding the run lives (§48 OQ2).
+  const door = parks[1].querySelector('a')!
+  expect(door?.getAttribute('href')).toBe('/inbox')
+  expect(parks[1].querySelector('button'), 'a park node offers a verb of its own').toBeNull()
+  // The other direction: the CLOSED interval is not dressed as something
+  // waiting for a person.
+  expect(parks[0].querySelector('a'), 'a resumed park still offers a release door').toBeNull()
+  // And the receipt below is unchanged — the rail is the chronology, the receipt
+  // is the record, and both read the same served array.
+  expect(view.container.querySelector('.parks')?.textContent).toContain('weekly quota reached')
+  view.unmount()
+})
+
+test('a wedged run gets its stop node on the live lane, in plain words, pointing at the inbox', async () => {
+  const served = fixtures.runDetail() as unknown as RunDetail
+  const { view, log } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': { body: { ...served, card: { ...served.card, wedged: true } } },
+  })
+  const banner = view.container.querySelector('.activity + [data-stall="wedged"], [data-stall="wedged"]')!
+  expect(banner, 'a wedged run wears only a terse flag').not.toBeNull()
+  expect(banner.textContent).toContain('Flagged and paused')
+  expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  // NO NEW VERB fires from this surface: the two cancels are the landed
+  // controls and a banner is a door.
+  expect(log.calls.filter((c) => c.method !== 'GET'), 'a stop node fired a verb').toEqual([])
+  view.unmount()
+
+  // The other direction: a run that is NOT wedged carries no wedge node.
+  const { view: calm } = await task('t-ship', detailRoutes())
+  expect(calm.container.querySelector('[data-stall="wedged"]'), 'an unwedged run was marked wedged').toBeNull()
+  calm.unmount()
+})
+
+test('a blocked run says what unblocks it — and an unblocked one says nothing', async () => {
+  const served = fixtures.runDetail() as unknown as RunDetail
+  const { view } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': { body: { ...served, card: { ...served.card, waiting_on_human: true } } },
+  })
+  const banner = view.container.querySelector('[data-stall="blocked"]')!
+  expect(banner, 'a run waiting on a person stalls silently').not.toBeNull()
+  expect(banner.textContent).toContain('nothing restarts on its own')
+  expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  view.unmount()
+
+  const { view: calm } = await task('t-ship', detailRoutes())
+  expect(calm.container.querySelector('[data-stall="blocked"]')).toBeNull()
+  calm.unmount()
+})
+
+test('the rail invents no node class for a history the platform never records', async () => {
+  // HAZARD #2, checked as a property of the source rather than of one render:
+  // `tool.called` is registered DECLARE-ONLY with no producer at all
+  // (internal/eventlog/contract.go:626), and no landed read on this surface
+  // serves a per-tool-call history. A rail node for one would be a story about
+  // events that do not exist.
+  // Comments out, code in: this file's own rail doc EXPLAINS why neither type
+  // is read, which is the record the next packet needs in front of it.
+  const code = detailSource.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1')
+  expect(code, 'the rail reads a per-tool-call history').not.toContain('tool.called')
+  expect(code, 'the rail reads a tool-completion history').not.toContain('tool.completed')
+  // Non-vacuous: the stripper left the code it is supposed to scan.
+  expect(code, 'the comment stripper ate the file').toContain('railNodes')
+  // Every node class the rail can emit, read off the CLOSED union that bounds
+  // them — so a new class cannot be added without this list being reconsidered,
+  // and each one below traces to a row or field of the two landed reads:
+  // step/error/split ← stage_progress + the stage.finished outcome vocabulary,
+  // decision ← decisions[], park ← receipt.park_history[], terminal ←
+  // runs[].state. There is no class for anything else.
+  const union = /kind: ((?:'[a-z]+'(?: \| )?)+)$/m.exec(code)
+  expect(union, 'the rail’s node union moved — this list no longer bounds anything').not.toBeNull()
+  const classes = [...union![1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]).sort()
+  expect(classes, 'the rail grew a node class').toEqual([
+    'decision',
+    'error',
+    'park',
+    'split',
+    'step',
+    'terminal',
+  ])
+  // What IS served is the CURRENT tool — one name and one args digest on the
+  // run card (api.ts:445) — and it renders as exactly that: a current value,
+  // never a list of past calls. Hand-scripted, because the golden card serves
+  // `tool: null`, which is itself the other direction.
+  const served = fixtures.runDetail() as unknown as RunDetail
+  expect(served.card.tool, 'the golden card now carries a tool — the null arm below is no longer driven').toBeNull()
+  const { view } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': {
+      body: { ...served, card: { ...served.card, tool: { name: 'read_file', args_digest: 'sha256:abcd' } } },
+    },
+  })
+  const activity = view.container.querySelector('.activity')!
+  expect(activity.textContent, 'the served current tool did not render').toContain('read_file')
+  // ONE tool line, not a list: a second would be a history the read never sent.
+  expect((activity.textContent ?? '').match(/read_file/g)).toHaveLength(1)
+  view.unmount()
+
+  // And with nothing served, nothing is rendered — no placeholder history.
+  const { view: none } = await task('t-ship', detailRoutes())
+  expect(none.container.querySelector('.activity')?.textContent, 'a tool line appeared over a served null').not.toContain(
+    'tool ',
+  )
+  none.unmount()
+})
+
+test('no ticker was added with the rail — elapsed and durations are served figures', () => {
+  // §32, at the one place a timeline would be tempted to tick. The tree-wide
+  // scans pass unmodified; what is checked here is this file in particular,
+  // because a rail is exactly where a "running for…" clock would appear.
+  for (const banned of ['setInterval(', 'setTimeout(', 'requestIdleCallback(']) {
+    expect(detailSource, `the rail started a ${banned} currency source`).not.toContain(banned)
+  }
+  // The rail renders its instants through the primitives and formats none: the
+  // <time> file pin is exactly two files and this is not one of them.
+  expect(detailSource, 'a rail node renders its own <time> element').not.toContain('<time')
+  for (const formatter of ['toLocaleString(', 'toLocaleDateString(', 'toLocaleTimeString(', 'Intl.DateTimeFormat']) {
+    expect(detailSource, `the rail formats a date with ${formatter}`).not.toContain(formatter)
+  }
+  // Probe: the matchers really discriminate.
+  expect('const t = setInterval(fn, 1000)').toContain('setInterval(')
+})
+
+// ── the D8 layer on the task detail (P3-UI-5) ─────────────────────────────
+
+test('the task detail teaches what it is, and the line calls no draft confirmed', async () => {
+  const { view } = await task('t-ship', detailRoutes())
+  const line = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+  expect(line, 'the task detail carries no "what this is" line').not.toBe('')
+  for (const fact of ['stage', 'decision', 'deliverables', 'receipts']) {
+    expect(line.toLowerCase(), `the header line drops "${fact}"`).toContain(fact)
+  }
+  // THE TRUTH CONSTRAINT (§38 ruling (a)): the header must claim nothing about
+  // the approval status of what it holds — that is StatusLine's job, per
+  // artifact, from the served status.
+  for (const overclaim of ['confirmed', 'approved', 'signed off']) {
+    expect(line.toLowerCase(), `the header line overclaims: ${overclaim}`).not.toContain(overclaim)
+  }
+  view.unmount()
+})
+
+test('the task detail’s empty arms teach, and none renders over a read that has not landed', async () => {
+  // A task with nothing recorded on it at all: no stage boundary, no decision,
+  // no run. The bare fixture DOES carry an intake row and a queued run, so
+  // asserting the empty rail over it would have asserted nothing.
+  const bare = fixtures.taskDetailBare() as unknown as Detail
+  const empty = { ...bare, stage_progress: [], decisions: [], runs: [] }
+  const { view } = await task('t-archive', { ...detailRoutes(), 'GET /api/tasks/t-archive': { body: empty } })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('No stage boundary has been recorded yet.')
+  expect(text, 'the empty rail does not teach what fills it').toContain('The rail fills in as the platform')
+  expect(text).toContain('Nobody has had to decide anything on this task yet.')
+  expect(text, 'the empty decisions block does not teach what fills it').toContain('every time a person approves')
+  view.unmount()
+
+  scriptedFetch({})
+  window.history.replaceState(null, '', '/tasks/t-ship')
+  const loading = mount(<App stream={inertStream()} />)
+  expect(loading.container.textContent, 'a teaching empty rendered over a read that had not landed').not.toContain(
+    'No stage boundary has been recorded yet.',
+  )
+  loading.unmount()
+})
+
+test('the rail reads at 375px: no pinned width, and every responsive leg widens UP', async () => {
+  const { view } = await task('t-ship', detailRoutes())
+  const rail = view.container.querySelector('.stages')!
+  const scope = [rail, ...rail.querySelectorAll('*')]
+  expect(scope.length, 'the phone leg reached nothing').toBeGreaterThan(4)
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  const fixed = scope.filter(
+    (n) => pinned.test(n.className.toString()) || /\d+px/.test(n.getAttribute('style') ?? ''),
+  )
+  expect(fixed.map((n) => n.className.toString()), 'a rail node pins a pixel width a phone cannot fit').toEqual([])
+  expect(rail.className, 'a max-width query entered the rail').not.toMatch(/\bmax-(sm|md|lg):/)
+  // The node content wraps rather than pushing the page sideways — a stage name
+  // and a served instant on one line is wider than 375px.
+  expect(rail.querySelector('[data-node]')?.querySelector('div')?.className).toContain('flex-wrap')
+  expect(pinned.test('flex w-[420px]'), 'the detector does not match what it forbids').toBe(true)
   view.unmount()
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import {
   api,
@@ -15,10 +15,10 @@ import {
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { activityEventTypes, boardEventTypes, useLive } from './live'
-import { Absent, Empty, Freshness, Money, Owner, Section, Stamp } from './parts'
+import { Absent, Freshness, Money, Owner, Section, StallBanner, Stamp, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Button, Timestamp } from './ui'
+import { Button, Chip, EmptyState, StatusDot, Timestamp, type Tone } from './ui'
 
 /**
  * Task detail (Spec S15.5 ¶3; 9.2; S2.2; S2.4; G2 D2.8).
@@ -57,7 +57,13 @@ export function TaskDetail({ id, stream }: { id: string; stream?: EventStream })
 
   return (
     <section className="surface">
-      <h1>{data ? data.title : 'Task'}</h1>
+      {/* The header line says what this surface HOLDS and claims nothing about
+          the status of what it holds: a specification is labelled with the
+          approval status it actually has, one block down (§38 ruling (a)). */}
+      <SurfaceHead
+        title={data ? data.title : 'Task'}
+        what="The whole story of one task — what was asked for and how it was planned, every stage the work passed through, what is happening right now, each decision a person made, the deliverables and the receipts."
+      />
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && (
         <>
@@ -392,13 +398,44 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {card && (
         <div className="activity" data-run={card.run_id}>
-          <p>
-            <span className="run-state">{card.state}</span>{' '}
-            {card.stage !== '' ? <span className="stage-name">{card.stage}</span> : <Absent reason="no stage marker" />}
+          <p className="flex flex-wrap items-center gap-2">
+            <StatusDot tone={card.wedged ? 'red' : 'green'} live={!card.wedged} />
+            <Chip className="run-state" tone={card.wedged ? 'red' : 'green'}>
+              {card.state}
+            </Chip>{' '}
+            {card.stage !== '' ? (
+              <span className="stage-name font-mono text-xs tracking-wide uppercase">{card.stage}</span>
+            ) : (
+              <Absent reason="no stage marker" />
+            )}
             {card.wedged && <span className="warn-flag"> wedged</span>}
             {card.waiting_on_human && <span className="waiting-human"> waiting on a person</span>}
           </p>
-          <p className="activity-line">
+          {/* The rail's STOP nodes on the live lane. Both are served facts of
+              this card — `wedged` is the run.wedged / watchdog pause-and-flag
+              projection (api.ts:462; internal/eventlog/contract.go:427) and
+              `waiting_on_human` is the open-ask flag — and both point at the
+              inbox, where the card holding the run lives. Neither fires
+              anything: the release verb is the card's own (§48 OQ2). */}
+          {card.wedged && (
+            <StallBanner
+              kind="wedged"
+              tone="red"
+              what="Flagged and paused. The platform stopped this run rather than let it keep going, and it now waits for a person to look."
+            >
+              <Link to={hrefFor('inbox')}>Its card is in the inbox</Link>
+            </StallBanner>
+          )}
+          {card.waiting_on_human && (
+            <StallBanner
+              kind="blocked"
+              tone="orange"
+              what="Stopped on an open question. It moves again once somebody answers — nothing restarts on its own, and nothing is thrown away while it waits."
+            >
+              <Link to={hrefFor('inbox')}>Answer it in the inbox</Link>
+            </StallBanner>
+          )}
+          <p className="activity-line break-words">
             {card.last_activity ? (
               <>
                 <span className="muted">{card.last_activity.type}</span> {card.last_activity.line}{' '}
@@ -413,7 +450,7 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
               tool {card.tool.name} · args {card.tool.args_digest === '' ? 'not digested' : card.tool.args_digest}
             </p>
           )}
-          <ul className="counters">
+          <ul className="counters m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-muted-foreground">
             <li>{String(card.counters.steps)} steps</li>
             <li>{String(card.counters.tokens)} tokens</li>
             <li>{String(card.counters.elapsed_s)} s elapsed</li>
@@ -434,31 +471,208 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
   )
 }
 
-/** R11: the stage story. Counters are monotonic
- *  facts; nothing here is turned into "how far along". */
+/**
+ * THE TIMELINE RAIL (design proposal §3's dot-on-rail idea, at the grain this
+ * platform actually serves).
+ *
+ * THE GRAIN IS STAGE / LIFECYCLE / DECISION, and that is a finding rather than
+ * a preference. The Odysseus idea is a TOOL-CALL timeline; no landed read on
+ * this surface serves one. The run card carries the CURRENT tool name and args
+ * digest and a one-line last activity (api.ts:445, :461); `tool.called` is
+ * registered DECLARE-ONLY with no producer at all
+ * (internal/eventlog/contract.go:626); and `tool.completed` frames are triggers
+ * rather than data, because REST is the truth (§42). So every node below traces
+ * to a row or a field of the two reads this surface already makes, and a node
+ * class for a history the platform never records is exactly what this must not
+ * invent.
+ *
+ * THE ORDER IS THE SERVED INSTANTS' OWN. Nodes are sorted by the instant the
+ * platform recorded, with served order as the tie-break; a node whose instant
+ * this client could not read keeps its served position rather than being moved
+ * to one nobody recorded.
+ *
+ * The rail is the CHRONOLOGY. The blocks below it are the RECORDS — the
+ * decisions list carries every field of every decision, and the receipt carries
+ * each park interval byte-for-byte. Both readings come off the same served
+ * arrays, so they cannot disagree, and neither is a summary standing in for the
+ * other.
+ */
+type RailNode = {
+  key: string
+  /** The served instant, verbatim. It is what the node is placed by, and it is
+   *  rendered through the timestamp primitives and never formatted here. */
+  at: string
+  kind: 'step' | 'error' | 'split' | 'decision' | 'park' | 'terminal'
+  tone: Tone
+  stage?: string
+  head: ReactNode
+  note?: ReactNode
+  /** Stopped states carry the door to where they are answered. */
+  door?: string
+}
+
+/**
+ * The `stage.finished` outcome vocabulary, which is CLOSED and the platform's
+ * own: completed, split, error (internal/stage/stageevents.go:35–47, and the
+ * registered payload at internal/eventlog/contract.go:431).
+ *
+ * An outcome this list has never seen renders as a plain step with its served
+ * value shown — the client owns no vocabulary here, so a later addition must
+ * not vanish from the story (§42 forward tolerance).
+ */
+function stepNode(s: Detail['stage_progress'][number]): RailNode {
+  const kind = s.outcome === 'error' ? 'error' : s.outcome === 'split' ? 'split' : 'step'
+  return {
+    key: `stage/${s.run_id}/${String(s.seq)}`,
+    at: s.ts,
+    kind,
+    tone: kind === 'error' ? 'red' : kind === 'split' ? 'blue' : 'green',
+    stage: s.stage,
+    head: (
+      <>
+        <span className="stage-name font-mono text-xs tracking-wide uppercase">
+          {s.stage === '' ? <Absent reason="unnamed stage" /> : s.stage}
+        </span>
+        <span className="muted text-xs"> {s.type}</span>
+        {s.kind !== '' && <span className="muted text-xs"> · {s.kind}</span>}
+        {s.outcome && <span className="stage-outcome text-xs text-[var(--ok)]"> · {s.outcome}</span>}
+      </>
+    ),
+    note:
+      kind === 'error' ? (
+        'This stage session ended short of completing — parked on an ask, a ceiling reached, or the engine stopping.'
+      ) : kind === 'split' ? (
+        'The stage was split at a checkpoint boundary and carried on in a successor session. Not a completion, and not a failure.'
+      ) : undefined,
+  }
+}
+
+function decisionNode(d: TaskDecision): RailNode {
+  return {
+    key: `decision/${String(d.seq)}`,
+    at: d.decided_at ?? d.ts,
+    kind: 'decision',
+    tone: 'accent',
+    head: (
+      <>
+        <Owner id={d.actor} />
+        {d.actor_is_operator && <span className="muted"> (as operator)</span>}{' '}
+        <span className="decision">{d.decision}</span>{' '}
+        <span className="muted text-xs">{d.card_type}</span>
+      </>
+    ),
+  }
+}
+
+function parkNode(runID: string, p: NonNullable<Receipt['park_history']>[number], at: number): RailNode {
+  return {
+    key: `park/${runID}/${String(at)}`,
+    at: p.parked_at,
+    kind: 'park',
+    tone: 'yellow',
+    head: (
+      <>
+        <span className="font-mono text-xs tracking-wide uppercase">parked</span>
+        {p.ongoing ? (
+          <span className="warn-flag"> still parked</span>
+        ) : (
+          <span className="muted text-xs">
+            {' '}
+            · resumed{p.duration_seconds === undefined ? '' : ` after ${String(p.duration_seconds)} s`}
+          </span>
+        )}
+        {p.park_reason && <span className="muted text-xs"> — {p.park_reason}</span>}
+        {p.resume_cause && <span className="muted text-xs"> · resumed on {p.resume_cause}</span>}
+      </>
+    ),
+    note: p.ongoing ? 'It waits. Nothing parked is thrown away, and it goes again from the card holding it.' : undefined,
+    door: p.ongoing ? 'A parked run is released from its own card' : undefined,
+  }
+}
+
+/** The run's own ending, from the served state string and nothing else: the
+ *  client owns no state vocabulary, so a value it has never seen renders
+ *  plainly rather than being hidden or renamed (§42/§48). */
+function terminalNode(r: TaskRunView): RailNode {
+  return {
+    key: `run/${r.run_id}`,
+    at: r.created_ts,
+    kind: 'terminal',
+    tone: terminalStates.includes(r.state) ? 'accent' : 'green',
+    head: (
+      <>
+        <span className="run-id font-mono text-xs">{r.run_id}</span>{' '}
+        <span className="muted text-xs">stands at</span> <Chip tone="accent">{r.state}</Chip>
+      </>
+    ),
+  }
+}
+
+export function railNodes(detail: Detail): RailNode[] {
+  const nodes: RailNode[] = detail.stage_progress.map(stepNode)
+  for (const d of detail.decisions) nodes.push(decisionNode(d))
+  for (const r of detail.runs) {
+    for (const [at, p] of (r.receipt?.park_history ?? []).entries()) nodes.push(parkNode(r.run_id, p, at))
+  }
+
+  const placed = nodes.map((node, servedAt) => ({ node, servedAt }))
+  placed.sort((a, b) => {
+    const ta = Date.parse(a.node.at)
+    const tb = Date.parse(b.node.at)
+    if (Number.isNaN(ta) || Number.isNaN(tb) || ta === tb) return a.servedAt - b.servedAt
+    return ta - tb
+  })
+  // The run-standing nodes close the rail in served order: a run's state
+  // carries no instant of its own on this read, so placing it among the timed
+  // nodes would be putting it at a moment nobody recorded.
+  return [...placed.map((p) => p.node), ...detail.runs.map(terminalNode)]
+}
+
+/** R11: the stage story, as the rail. Counters are monotonic facts; nothing
+ *  here is turned into "how far along". */
 function StageBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
+  const nodes = railNodes(detail)
   return (
     <Section title="Progress by stage" stale={stale}>
-      {detail.stage_progress.length === 0 ? (
-        <Empty what="No stage boundary has been recorded yet." />
+      {nodes.length === 0 ? (
+        <EmptyState
+          what="No stage boundary has been recorded yet."
+          why="The rail fills in as the platform opens and closes stage sessions, records a person's decision, and parks or ends a run. An empty rail means none of that has happened yet."
+        />
       ) : (
-        <ol className="stages">
-          {detail.stage_progress.map((s) => (
-            <li key={`${s.run_id}/${s.seq}`} data-stage={s.stage}>
-              <span className="stage-name">{s.stage === '' ? <Absent reason="unnamed stage" /> : s.stage}</span>
-              <span className="muted"> {s.type}</span>
-              {s.kind !== '' && <span className="muted"> · {s.kind}</span>}
-              {s.outcome && <span className="stage-outcome"> · {s.outcome}</span>}
-              <span className="muted">
-                {' '}
-                <Timestamp ts={s.ts} variant="live" />
-              </span>
-            </li>
+        <ol className="stages rail relative m-0 list-none border-s border-border ps-0">
+          {nodes.map((n) => (
+            <RailStep key={n.key} node={n} />
           ))}
         </ol>
       )}
       <ProjectLineage detail={detail} />
     </Section>
+  )
+}
+
+/** One node on the rail: a toned dot, what happened, and — where the thing is
+ *  STOPPED — the plain words and the door to where it is answered. */
+function RailStep({ node }: { node: RailNode }) {
+  return (
+    <li
+      className="relative py-1.5 ps-4"
+      data-node={node.kind}
+      {...(node.stage === undefined ? {} : { 'data-stage': node.stage })}
+    >
+      <StatusDot tone={node.tone} className="absolute start-0 top-3 -translate-x-1/2" />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {node.head}
+        <span className="muted ms-auto text-xs">
+          <Timestamp ts={node.at} variant="live" />
+        </span>
+      </div>
+      {node.note !== undefined && (
+        <StallBanner kind={node.kind} tone={node.tone} what={node.note}>
+          {node.door !== undefined && <Link to={hrefFor('inbox')}>{node.door} in the inbox</Link>}
+        </StallBanner>
+      )}
+    </li>
   )
 }
 
@@ -507,14 +721,18 @@ function DecisionsBlock({ decisions, stale }: { decisions: TaskDecision[]; stale
   return (
     <Section title="Human decisions" stale={stale}>
       {decisions.length === 0 ? (
-        <Empty what="Nobody has had to decide anything on this task yet." />
+        <EmptyState
+          what="Nobody has had to decide anything on this task yet."
+          why="A row appears here every time a person approves, rejects, accepts or otherwise answers a card on this task. The rail above shows where each one fell in the story."
+        />
       ) : (
         <ul className="decisions">
           {decisions.map((d) => (
             <li key={d.seq} data-card-type={d.card_type}>
               <Owner id={d.actor} />
               {d.actor_is_operator && <span className="muted"> (as operator)</span>}{' '}
-              <span className="decision">{d.decision}</span> <span className="muted">{d.card_id}</span>{' '}
+              <span className="decision text-[var(--ok)]">{d.decision}</span>{' '}
+              <span className="muted">{d.card_id}</span>{' '}
               <Stamp ts={d.decided_at ?? d.ts} />
               {d.reason && <span className="muted"> — {d.reason}</span>}
             </li>
@@ -552,7 +770,10 @@ function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventS
     <Section title="Deliverables" stale={stale}>
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && data.length === 0 ? (
-        <Empty what="This task has produced no deliverables yet." />
+        <EmptyState
+          what="This task has produced no deliverables yet."
+          why="A deliverable appears when a worker produces one, with every revision kept as its own immutable record — the numbers are records rather than a count."
+        />
       ) : (
         (data ?? []).map((d) => (
           <div className="deliverable" key={d.deliverable.id} data-deliverable={d.deliverable.id}>
@@ -586,7 +807,10 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
   return (
     <Section title="Receipts" stale={stale}>
       {runs.length === 0 ? (
-        <Empty what="This task has no runs yet." />
+        <EmptyState
+          what="This task has no runs yet."
+          why="A run is one attempt at the work, and each carries its own receipt of what it consumed. Nothing has been started for this task."
+        />
       ) : (
         runs.map((r) => (
           <div className="run-receipt" key={r.run_id} data-run={r.run_id}>
@@ -613,7 +837,7 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
 export function ReceiptView({ receipt }: { receipt: Receipt }) {
   const direct = receipt.direct_use
   return (
-    <div className="receipt">
+    <div className="receipt my-2">
       <div className="table-scroll">
         <table className="items">
           <thead>
@@ -677,7 +901,7 @@ export function ReceiptView({ receipt }: { receipt: Receipt }) {
           string is written in this file; the registered text lives in the
           registration and reaches the screen through the data. */}
       <p className="direct-use" data-direct-use-label={direct.label}>
-        <span className="direct-use-label">{direct.label}</span>:{' '}
+        <span className="direct-use-label text-foreground">{direct.label}</span>:{' '}
         {direct.unpriced ? (
           <Absent reason={direct.reason ?? 'unpriced — no dollar figure can be honest here'} />
         ) : (

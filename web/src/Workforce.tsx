@@ -1,7 +1,8 @@
 import { api, type RoutedRun, type WorkerRow, type WorkerVersion, type Workforce as WorkforceData } from './api'
 import type { EventStream } from './events'
 import { useLive, workforceEventTypes } from './live'
-import { Absent, Empty, Freshness, Money, Owner, Section, Stamp } from './parts'
+import { Absent, Freshness, Money, Owner, Section, Stamp, SurfaceHead } from './parts'
+import { Chip as ToneChip, EmptyState } from './ui'
 
 /**
  * The workforce map (Spec S15.10; S08.1/S08.2/S08.4/S08.7/S08.8/S08.9).
@@ -41,7 +42,14 @@ export function Workforce({ stream }: { stream?: EventStream }) {
 
   return (
     <section className="surface workforce">
-      <h1>Workforce</h1>
+      {/* VIEW-ONLY is stated, not merely enforced: the map offers no act at all
+          at v0 (S15.10 parks editing to 15.5), and a reader who cannot find the
+          edit button deserves to be told there is none rather than left
+          hunting. */}
+      <SurfaceHead
+        title="Workforce"
+        what="The machinery: every worker you may see, what each is equipped with, how its steps connect, and the outcomes recorded against each version. View-only at v0 — nothing here can be changed from this screen."
+      />
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data !== null && <Roster data={data} stale={stale} />}
     </section>
@@ -55,10 +63,10 @@ function Roster({ data, stale }: { data: WorkforceData; stale: boolean }) {
       {/* The two scopes are SERVED sentences. A member's roster and the
           operator's are different readings of the registry, and a surface that
           did not say which one it was showing would let one pose as the other. */}
-      <p className="muted scope" data-roster-scope>
+      <p className="muted scope text-xs" data-roster-scope>
         Showing: {data.roster_scope}.
       </p>
-      <p className="muted scope" data-outcome-scope>
+      <p className="muted scope text-xs" data-outcome-scope>
         Run figures below cover: {data.outcome_scope}.
       </p>
       {data.truncated && (
@@ -74,13 +82,14 @@ function Roster({ data, stale }: { data: WorkforceData; stale: boolean }) {
 
       {data.workers.length === 0 ? (
         <Section title="No workers yet" stale={stale}>
-          {/* The S08.6/14.4 no-standing-army state. "Nothing here" is a real
-              answer about this platform and not a loading state, so it says what
-              it means rather than leaving a reader to infer a failure. */}
-          <p>
-            Nothing has been composed yet. Sinet does not pre-staff a formation: a worker is built when recurring work
-            earns one, and until then the coordinator does the work with knowledge injected for the task.
-          </p>
+          {/* The S08.6/14.4 no-standing-army state, moved onto the teaching
+              primitive with its sentence KEPT — it was already the best empty
+              copy in the tree. No `action`: this surface offers none, and an
+              empty state is the last place to invent one (§45-B). */}
+          <EmptyState
+            what="Nothing has been composed yet."
+            why="Sinet does not pre-staff a formation: a worker is built when recurring work earns one, and until then the coordinator does the work with knowledge injected for the task."
+          />
         </Section>
       ) : (
         groups.map(([domain, workers]) => (
@@ -108,7 +117,7 @@ function Roster({ data, stale }: { data: WorkforceData; stale: boolean }) {
 function DomainMarking({ workers }: { workers: WorkerRow[] }) {
   const d = workers[0].domain
   return (
-    <p className="domain-marking" data-maturity={d.maturity}>
+    <p className="domain-marking text-xs" data-maturity={d.maturity}>
       Verification maturity: <strong>{d.maturity === '' ? <Absent reason="not recorded" /> : d.maturity}</strong>
       {d.maturity === 'degraded' && (
         <>
@@ -127,12 +136,20 @@ function WorkerCard({ worker: w }: { worker: WorkerRow }) {
   const active = w.versions.find((v) => v.active) ?? null
   const superseded = w.versions.filter((v) => !v.active)
   return (
-    <article className="worker" data-worker={w.template_id} data-kind={w.kind} data-scope={w.scope}>
+    <article
+      className="worker rounded-(--radius) border border-border bg-(image:--panel-grad) p-(--density-pad)"
+      data-worker={w.template_id}
+      data-kind={w.kind}
+      data-scope={w.scope}
+    >
       <header>
         <h3>{w.name}</h3>
-        <p className="worker-identity">
-          <span data-worker-kind>{w.kind}</span> · <span data-worker-scope>{w.scope}</span> ·{' '}
-          <span data-worker-status>{w.status}</span> · <Owner id={w.owner} />
+        <p className="worker-identity flex flex-wrap items-center gap-2 text-xs">
+          <ToneChip data-worker-kind>{w.kind}</ToneChip> <ToneChip data-worker-scope>{w.scope}</ToneChip>{' '}
+          <ToneChip data-worker-status tone={w.status === 'active' ? 'green' : 'accent'}>
+            {w.status}
+          </ToneChip>{' '}
+          <Owner id={w.owner} />
         </p>
       </header>
 
@@ -632,7 +649,12 @@ function Outcomes({ version: v }: { version: WorkerVersion }) {
         )}
       </p>
       {runs.length === 0 ? (
-        <Empty what={v.outcomes.absent ?? 'no outcomes recorded'} />
+        // The server's own reason where it gave one — this states what the
+        // absence IS and never fills it in.
+        <EmptyState
+          what={v.outcomes.absent ?? 'no outcomes recorded'}
+          why="A row appears here for each run the routing pipeline sent to this version, with the reason it was chosen and what it consumed."
+        />
       ) : (
         <>
           <ul className="routed-runs">
@@ -706,15 +728,17 @@ function RoutedRunRow({ run: r }: { run: RoutedRun }) {
   )
 }
 
-/** Chips renders a served list as text. Every value here is registry content —
- *  a tool name, a topic key, a host — and renders escaped like everything else. */
+/** Chips renders a served list. Every value here is registry content — a tool
+ *  name, a topic key, a host — and renders escaped like everything else. The
+ *  landed `.chip` class stays as the DOM hook it always was; the look now comes
+ *  from the kit's one chip formula. */
 function Chips({ items }: { items: string[] }) {
   return (
     <>
       {items.map((s) => (
-        <span key={s} className="chip">
+        <ToneChip key={s} className="chip me-1 normal-case">
           {s}
-        </span>
+        </ToneChip>
       ))}
     </>
   )
