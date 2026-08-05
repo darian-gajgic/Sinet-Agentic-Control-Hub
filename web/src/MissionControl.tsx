@@ -189,18 +189,21 @@ export function MissionControl({
       {/* Counts of the rows ON SCREEN — presentation over the served lists,
           which the labels say. No tile carries a number no list below carries. */}
       <div className="my-4 grid grid-cols-2 gap-(--density-gap) xl:grid-cols-4" data-tiles="home">
+        {/* Before the read lands the tiles show an absence, not a zero: a 0
+            the platform never served would be a fabricated figure, stale
+            marker or no stale marker. */}
         <StatTile
           label="Running"
           tone="green"
           icon={<Activity size={15} strokeWidth={1.8} aria-hidden="true" />}
-          value={String(bucket('running').runs.length)}
+          value={answered ? String(bucket('running').runs.length) : '—'}
           foot="runs executing now"
         />
         <StatTile
           label="Waiting on you"
           tone="orange"
           icon={<UserCheck size={15} strokeWidth={1.8} aria-hidden="true" />}
-          value={String(bucket('blocked').runs.length)}
+          value={answered ? String(bucket('blocked').runs.length) : '—'}
           foot={
             <>
               answered from the <Link to={hrefFor('inbox')}>Inbox</Link>
@@ -212,8 +215,8 @@ export function MissionControl({
           label="Parked"
           tone="yellow"
           icon={<Clock3 size={15} strokeWidth={1.8} aria-hidden="true" />}
-          value={String(bucket('parked').runs.length)}
-          foot={<ParkedFoot parked={bucket('parked').runs} />}
+          value={answered ? String(bucket('parked').runs.length) : '—'}
+          foot={answered ? <ParkedFoot parked={bucket('parked').runs} /> : 'waiting on a clock'}
         />
         <SpendTile view={meters.data?.per_period} scoped={project !== ''} absentAll={meters.data === null} />
       </div>
@@ -532,33 +535,39 @@ function RosterRow({ run, task }: { run: RunListItem; task?: TaskListItem }) {
             <Absent reason="no task — this run stands alone" />
           </span>
         )}
+        {/* The card-face facts as one quiet line: run · project · stage · lane
+            · effort · cost. A latest-run cost that has no reading says so; an
+            unmarked stage is simply not printed — the task page carries the
+            full story. */}
         <span className="r-under mono">
           {run.run_id}
+          {isLatest && (
+            <>
+              {' · '}
+              {cost !== null ? <Money usd={cost} /> : <span className="absent">no cost reading</span>}
+            </>
+          )}
+          {run.stage !== '' && ` · ${run.stage}`}
+          {` · ${run.lane}`}
+          {effort !== '' && ` · ${effort}`}
           {task !== undefined && task.project !== '' && ` · ${task.project}`}
         </span>
       </span>
       <span className="r-owner">
         <Owner id={run.owner} />
       </span>
-      <span className="r-stage wide-cell">
-        {run.stage !== '' ? run.stage : <Absent reason="no stage yet" />}
-        <span className="r-under mono">{run.lane}</span>
-      </span>
       <span className="r-state">
         <Chip tone={stateTone(run)}>{run.wedged ? 'wedged' : run.state}</Chip>
       </span>
-      <span className="r-cost wide-cell">
-        {cost !== null ? <Money usd={cost} /> : <Absent reason="no meter reading" />}
-        {effort !== '' && <span className="r-under">{effort}</span>}
-      </span>
       <span className="r-when wide-cell">
-        <Timestamp ts={run.last_activity_ts} variant="live" />
+        <Timestamp ts={run.last_activity_ts} variant="live" className="feed-stamp" />
       </span>
       {run.waiting_on_human && <span className="r-flag waiting-human">waiting on a person</span>}
-      {run.state === 'parked' && (
-        // EVERY parked run shows its horizon (or the honest no-horizon line) —
-        // waiting-on-a-person rows included, because a recorded horizon is a
-        // served fact the row must not drop.
+      {run.state === 'parked' && (run.parked_until !== null || !run.waiting_on_human) && (
+        // A recorded horizon is a served fact no row may drop — waiting rows
+        // included. The no-horizon arm renders only where the park is the
+        // story (a clock park); on a waiting row "waiting on a person" IS the
+        // reason, and a second flag saying "no horizon" would be noise.
         <span className="r-flag">
           <ParkedUntil until={run.parked_until} />
         </span>
@@ -735,9 +744,6 @@ function ActivityPanel({
       <ul className="feed-rows">
         {shown.map((it) => (
           <li className="feed-row" key={it.key}>
-            <span className="feed-when">
-              <Timestamp ts={it.ts} variant="live" />
-            </span>
             <StatusDot tone={it.tone} live={it.live === true} className="feed-dot" />
             {it.href !== undefined ? (
               <Link to={it.href} className="feed-text">
@@ -747,6 +753,9 @@ function ActivityPanel({
               <span className="feed-text">{it.text}</span>
             )}
             <Owner id={it.owner} />
+            <span className="feed-when">
+              <Timestamp ts={it.ts} variant="live" className="feed-stamp" />
+            </span>
           </li>
         ))}
       </ul>

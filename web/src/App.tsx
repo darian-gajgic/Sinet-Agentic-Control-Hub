@@ -209,7 +209,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 {pageSub[route.id] !== undefined && <span className="page-sub">{pageSub[route.id]}</span>}
               </div>
               <div className="head-right">
-                {authed && <ProjectSelector route={route.id} stream={stream} />}
+                {authed && <ProjectSelector route={route.id} me={session?.user?.user_id ?? 'dev'} stream={stream} />}
                 {authed && <TourButton onStart={tour.start} />}
                 <ConnectionState status={status} />
                 {authed && (
@@ -326,7 +326,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
               </button>
             </div>
 
-            {authed && <SideNav route={route} dots={dots} stream={stream} status={status} />}
+            {authed && <SideNav route={route} me={session?.user?.user_id ?? 'dev'} dots={dots} stream={stream} status={status} />}
             <SideFooter authed={authed} />
           </aside>
 
@@ -362,17 +362,22 @@ const overseeKinds = ['watchdog_flag', 'drift_card', 'conformance_card', 'benchm
 
 function SideNav({
   route,
+  me,
   dots,
   stream,
   status,
 }: {
   route: RouteDef
+  /** WHOSE reads these are. In the key so a sign-in or sign-out re-reads:
+   *  the served queue is identity-scoped and a count from the previous
+   *  identity must not survive onto the next one's screen. */
+  me: string
   dots: Partial<Record<string, boolean>>
   stream?: EventStream
   status: Status
 }) {
   const asks = useLive({
-    key: '/api/approvals#nav',
+    key: `/api/approvals#nav:${me}`,
     read: () => api.approvals(),
     types: inboxEventTypes,
     stream,
@@ -490,7 +495,7 @@ function SideFooter({ authed }: { authed: boolean }) {
  * already-owner-scoped reads; surfaces without a project dimension say so here
  * instead of pretending.
  */
-function ProjectSelector({ route, stream }: { route: RouteID; stream?: EventStream }) {
+function ProjectSelector({ route, me, stream }: { route: RouteID; me: string; stream?: EventStream }) {
   const { project, setProject } = useProjectScope()
   // JOIN, NEVER OPEN (§45): the topbar sits above <main> in the tree, so its
   // effects would commit before the route view's and this read would become
@@ -518,7 +523,7 @@ function ProjectSelector({ route, stream }: { route: RouteID; stream?: EventStre
         >
           <option value="">All projects</option>
           {joined ? (
-            <ScopeOptions project={project} stream={stream} />
+            <ScopeOptions project={project} me={me} stream={stream} />
           ) : (
             project !== '' && <option value={project}>{project}</option>
           )}
@@ -553,9 +558,10 @@ function ProjectSelector({ route, stream }: { route: RouteID; stream?: EventStre
  * route view opened the stream (see ProjectSelector). The list moves when a
  * task is born — the intake family's frame — not on every run heartbeat.
  */
-function ScopeOptions({ project, stream }: { project: string; stream?: EventStream }) {
+function ScopeOptions({ project, me, stream }: { project: string; me: string; stream?: EventStream }) {
   const tasks = useLive({
-    key: '/api/tasks#projects',
+    // Keyed on the identity like the badges: the task list is owner-scoped.
+    key: `/api/tasks#projects:${me}`,
     read: () => api.tasks(),
     types: ['intake.state'],
     stream,

@@ -416,6 +416,35 @@ a {
   }
 }
 
+/* ── scrollbars (Nexus style.css:669–672) ──────────────────────────────────
+   Default gray scrollbars glare on the near-black base; the thumb is the
+   panel neutral so the chrome reads as the same material. */
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--panel-3);
+  border-radius: 5px;
+  border: 2px solid var(--bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-l);
+}
+
+/* Firefox reads these two instead. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--panel-3) transparent;
+}
+
 /* ── shell ─────────────────────────────────────────────────────────────────
    The Nexus control-room anatomy (real source: app/static/style.css:64–169,
    index.html:15–93), phone-first on this stack. The PHONE base is the Nexus
@@ -791,6 +820,13 @@ a {
   min-width: 0;
 }
 
+/* At phone width the cluster wraps under the title; the connection pill leads
+   the wrapped rows — always visible comes first (S15.12). Reset at the
+   breakpoint, where everything sits on one line. */
+.head-right .conn {
+  order: -1;
+}
+
 /* The signed-in chip (Nexus .user-chip). */
 .who {
   display: flex;
@@ -925,6 +961,14 @@ a {
   white-space: nowrap;
 }
 
+/* The topbar owns the page title now (the Nexus anatomy). Legacy surfaces
+   still render their own SurfaceHead h1 — each sheds it in its own rework
+   step; until then the duplicate is visually demoted here so every page reads
+   one title. The teaching "what" line under it stays visible. */
+.shell-main .surface > header h1 {
+  display: none;
+}
+
 /* ── main ── */
 
 .shell-main {
@@ -1036,8 +1080,9 @@ a {
   background: var(--bad);
 }
 
-/* The detail is for pointers and wide screens; the label always shows, so the
-   state is never invisible on a phone. */
+/* The pill is COMPACT at every width (the Nexus conn-pill): the label always
+   shows, and the detail rides the pill's own title attribute — rendering the
+   sentence inline made the topbar wrap into two rows. */
 .conn-detail {
   display: none;
   color: var(--muted);
@@ -1802,10 +1847,6 @@ td {
 }
 
 @media (min-width: 48rem) {
-  .conn-detail {
-    display: inline;
-  }
-
   /* The sidebar column appears here and only here: on a phone the same markup
      is the off-canvas drawer the menu button opens. */
   .shell {
@@ -1842,6 +1883,10 @@ td {
 
   .head-right {
     gap: 0.9rem;
+  }
+
+  .head-right .conn {
+    order: 0;
   }
 
   .shell-main {
@@ -1939,31 +1984,6 @@ td {
   .frames > * {
     flex: 1 1 0;
     min-width: 0;
-  }
-
-  /* The roster's wide columns: stage · lane, cost · effort and last activity
-     join the row where there is room for them. */
-  .roster-row {
-    grid-template-columns: 18px minmax(0, 2fr) 6rem minmax(0, 1fr) auto 8rem 9rem;
-  }
-
-  .wide-cell {
-    display: block;
-  }
-}
-
-/* The hero's now-strip needs genuine width; below this the tiles and the
-   roster carry the same facts. Min-width only — the phone is the base. */
-@media (min-width: 80rem) {
-  .hero-now {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-inline-start: auto;
-    flex: none;
-    width: 300px;
-    position: relative;
-    z-index: 1;
   }
 }
 
@@ -2243,21 +2263,16 @@ a.r-title:hover {
   font-size: 11.5px;
 }
 
-.r-stage {
-  font-size: 11.5px;
-  color: var(--text-dim);
-  min-width: 0;
-}
-
-.r-cost {
-  font-size: 11.5px;
-  text-align: right;
-}
-
 .r-when {
   font-size: 10.5px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.r-when time {
+  font-size: 9px;
   color: var(--text-faint);
-  text-align: right;
 }
 
 /* The wide-only columns: absent at phone width, where the row keeps its dot,
@@ -2338,7 +2353,7 @@ a.r-title:hover {
 
 .feed-row {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 10px;
   padding: 7px 2px;
   border-bottom: 1px solid var(--border);
@@ -2350,14 +2365,32 @@ a.r-title:hover {
   border-bottom: none;
 }
 
+/* The stamp sits at the row's end, relative label over the small verbatim UTC
+   (D5: the relative is an ADDITION — both stay rendered). */
 .feed-when {
+  margin-inline-start: auto;
   flex: none;
-  font-size: 10px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.feed-stamp {
+  flex-direction: column;
+  row-gap: 0;
+}
+
+.feed-stamp > span {
+  align-self: flex-end;
+  line-height: 1.35;
+}
+
+.feed-when time {
+  font-size: 9px;
   color: var(--text-faint);
 }
 
 .feed-dot {
-  align-self: center;
+  margin-top: 5px;
 }
 
 .feed-text {
@@ -2370,8 +2403,44 @@ a.r-title:hover {
   min-width: 0;
 }
 
+.feed-row .owner {
+  flex: none;
+  font-size: 11px;
+}
+
 a.feed-text:hover {
   color: var(--fg);
+}
+
+/* Home's responsive arms. They live AFTER the base rules above — inside one
+   layer the cascade is source order, so a wide arm written before its base
+   would silently lose (the exact defect this comment replaces). Min-width
+   only; the phone is the base. */
+@media (min-width: 48rem) {
+  /* The last-activity stamp joins the row where there is room for it; the
+     rest of the card face rides the title's own under-line at every width. */
+  .roster-row {
+    grid-template-columns: 18px minmax(0, 1fr) 6rem auto 8.5rem;
+  }
+
+  .wide-cell {
+    display: flex;
+  }
+}
+
+/* The hero's now-strip needs genuine width; below this the tiles and the
+   roster carry the same facts. */
+@media (min-width: 80rem) {
+  .hero-now {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-inline-start: auto;
+    flex: none;
+    width: 300px;
+    position: relative;
+    z-index: 1;
+  }
 }
 
 .step-needs {

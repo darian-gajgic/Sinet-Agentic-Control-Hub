@@ -68,7 +68,7 @@ export const tourSteps: TourStep[] = [
     // `disclosure` means. Only a real route-changing anchor is `nav`.
     cls: 'disclosure',
     title: 'Everything lives in this rail',
-    body: 'The surfaces are grouped by what they are for: Command is the work, Decisions is what needs you, System is configuration, Intelligence is the assistant and what it knows.',
+    body: 'The surfaces are grouped by what they are for: Work is the day-to-day, Results is what came back, Intelligence is the assistant and what the platform knows, System is the machinery and its settings.',
   },
   {
     id: 'connection',
