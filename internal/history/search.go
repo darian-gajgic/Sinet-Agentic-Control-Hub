@@ -76,8 +76,19 @@ const SearchQueryName = "search.history"
 // — run summaries, verdict texts and drift summaries (S14.10 ¶4) — owner-scoped
 // per S01.9.
 //
-// Columns are {event_seq, kind, ref, user_id, excerpt}. The excerpt is bounded
-// and redacted; the REF is what a caller renders the record from.
+// Columns are {rowid, kind, ref, user_id, excerpt}. The excerpt is bounded and
+// redacted; the REF is what a caller renders the record from.
+//
+// CORRECTED 2026-08-05 (P3-UI-4 drain r1, D5 — sanctioned comment-only edit,
+// zero behavior): this line said `event_seq`. The SELECT below takes a bare
+// `rowid` with no alias, so SQLite reports the column name `rowid`, and that is
+// what the handler has always served — proven by the golden body
+// `web/src/fixtures/api/history-search-answer.json`, produced by the real
+// handler when the first surface to consume this layer was built. No landed
+// test asserted either name, which is why the drift survived. The COMMENT moved
+// rather than the query: `rowid AS event_seq` would have changed served bytes
+// mid-batch for no functional gain, and the spec pins no column name for this
+// answer (S14.10 ¶4 names the sources, not the shape).
 func (s *Store) Search(ctx context.Context, question string, scope Scope, limit int) (Answer, error) {
 	a := newAnswer(LayerDeterministic, SearchQueryName)
 	a.Question = question

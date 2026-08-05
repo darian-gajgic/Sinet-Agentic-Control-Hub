@@ -1228,7 +1228,7 @@ test('the engine deadline and the conflict notice are live too, and the verdict 
     ...list,
     items: list.items.map((i) => (i.id === expiring.id ? { ...i, engine_expiry_ts: '2026-07-20T09:06:00Z' } : i)),
   }
-  const { view } = await open('/inbox', engine as unknown as Record<string, unknown>)
+  const { view, log } = await open('/inbox', engine as unknown as Record<string, unknown>)
   const node = row(view, expiring.id)
   const stamps = [...node.querySelectorAll('.expiry time')]
   assertBeside(stamps[1], '2026-07-20T09:06:00Z', 'the engine’s own deadline')
@@ -1237,5 +1237,43 @@ test('the engine deadline and the conflict notice are live too, and the verdict 
   expect(conflict, 'the fixture inbox no longer carries a memory conflict').toBeDefined()
   const cnode = row(view, conflict.id)
   assertBeside(cnode.querySelector('time'), conflict.observed_ts, 'the conflict card’s observed stamp')
+
+  // AND THE VERDICT RECORD IS NOT — the other half of the title, which this
+  // body had promised and never checked. `recorded_ts` on the reveal is one of
+  // the eighteen sites the D5 map deliberately LEAVES on `Stamp`: it is the
+  // instant a §14 record committed, and a record needs the instant alone.
+  const recorded = '2026-07-20T09:05:00Z'
+  const verdictCard = row(view, 'benchmark_verdict:bp-notes')
+  click(verdictCard.querySelector('[data-verdict="A"]'))
+  click(row(view, 'benchmark_verdict:bp-notes').querySelector('[data-guess="B"]'))
+  log.set(`POST ${verb('benchmark_verdict:bp-notes', 'verdict')}`, {
+    body: {
+      pair_id: 'bp-notes',
+      recorded: true,
+      reveal: {
+        pair_id: 'bp-notes',
+        platform_side: 'B',
+        platform_model: 'claude-opus-5',
+        direct_model: 'claude-opus-5-direct',
+        verdict: 'A',
+        platform_guess: 'B',
+        guess_correct: true,
+        epoch_id: 'e1',
+        recorded_ts: recorded,
+      },
+      detail: 'recorded, then revealed',
+    },
+  })
+  click(row(view, 'benchmark_verdict:bp-notes').querySelector('button[data-action="verdict"]'))
+  await flush()
+
+  const stamp = row(view, 'benchmark_verdict:bp-notes').querySelector('[data-reveal="bp-notes"] time')!
+  expect(stamp, 'the reveal rendered no record instant').not.toBeNull()
+  expect(stamp.getAttribute('dateTime')).toBe(recorded)
+  expect(stamp.textContent, 'the record dropped its verbatim instant').toBe(recorded)
+  expect(
+    stamp.parentElement!.textContent,
+    'an audit record grew a relative label — the D5 map leaves this site on Stamp',
+  ).not.toMatch(/\bago\b|\bin \d/)
   view.unmount()
 })

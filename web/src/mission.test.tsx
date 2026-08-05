@@ -525,7 +525,7 @@ test('a redaction marker inside an excerpt renders verbatim, and so does the sec
     row_count: 0,
     truncated: false,
     notes: [
-      'matched against the redacted corpus (codor C2): a query for a secret’s plaintext cannot confirm the secret',
+      "matched against the redacted corpus (codor C2): a query for a secret's plaintext cannot confirm the secret",
       'the question carried a secret-shaped value; it was redacted and contributes no search term',
       'the question carried no searchable term',
     ],

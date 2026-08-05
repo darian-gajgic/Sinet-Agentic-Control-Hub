@@ -436,6 +436,18 @@ test('under the dev fallback the header offers Sign in, never a Sign out that ca
   // never synthesizes a third. The dev identity still browses — deny-by-default
   // is the server's job and it already holds — so the nav is intact.
   expect(view.container.querySelectorAll('.shell-nav a').length).toBeGreaterThan(0)
+
+  // 375px (§41-B): the affordance is the packet's one new piece of header
+  // markup, and a Sign in nobody can reach on a phone is the same defeat C-1
+  // was. jsdom has no layout engine, so what is checkable is the structure —
+  // it pins no pixel width, and it inherits the header the landed responsive
+  // suite already asserts wraps rather than overflowing.
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  expect(pinned.test(signIn.className.toString()), 'the Sign in affordance pins a pixel width').toBe(false)
+  expect(/\d+px/.test(signIn.getAttribute('style') ?? ''), 'the Sign in affordance pins an inline width').toBe(false)
+  expect(pinned.test(who.className.toString()), 'the who-line pins a pixel width around it').toBe(false)
+  // Probe: the detector really matches what it forbids.
+  expect(pinned.test('w-[520px] flex')).toBe(true)
   view.unmount()
 })
 

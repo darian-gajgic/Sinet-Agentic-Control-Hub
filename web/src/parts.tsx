@@ -1,12 +1,20 @@
 import type { ReactNode } from 'react'
 
-// Imported from the MODULE rather than the kit barrel on purpose: the barrel
-// also exports the three primitives that carry `@base-ui/react`, and `parts.tsx`
-// is reached from nearly every surface — pulling the dialog and toast machinery
-// into that graph to render a horizon would be a bundle cost with no consumer.
-// The resulting parts ↔ ui/Timestamp cycle is safe by construction: both modules
-// export hoisted function declarations and neither calls the other at module
-// evaluation time, only at render.
+// Imported from the MODULE rather than the kit barrel on purpose, and the reason
+// is the MODULE-EVALUATION GRAPH rather than the bundle.
+//
+// `ui/Timestamp` imports `Absent` from this file, so either form makes a cycle.
+// Through the module the cycle is exactly two files, both of which export
+// hoisted function declarations and neither of which calls the other at
+// evaluation time — safe by construction. Through the barrel it would become
+// parts ↔ ui/index → every kit module, so every unit test that mounts one
+// primitive, and every surface that touches a `parts.tsx` render, would evaluate
+// the whole kit to get a park horizon.
+//
+// CORRECTED 2026-08-05 (drain r1, D4): this comment first claimed a bundle
+// saving. It is not one — MEASURED both ways, the chunk is 1113.19 kB via the
+// module and 1113.21 via the barrel, because `@base-ui/react` already rides the
+// landed `controls.tsx` → `ui/Modal` path and is in the chunk either way.
 import { Timestamp } from './ui/Timestamp'
 
 /**
