@@ -12,6 +12,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,6 +45,16 @@ type fakeBenchmark struct {
 	optIns   []string
 	// recordErr, when set, refuses the verdict — the guess-less case.
 	recordErr error
+	// optedIn is the STORE's answer to the consent read, and it is MUTABLE so a
+	// test can move it behind the handler's back. A response field hardcoded to
+	// either position cannot follow it, which is the whole point of the probe.
+	optedIn bool
+	// optedInErr, when set, is the read that broke — the absence arm, which must
+	// never degrade into "not opted in".
+	optedInErr error
+	// optedInFor records WHO each consent read asked about. It is what proves
+	// the served block is the caller's own and never widens with the role bit.
+	optedInFor []string
 }
 
 func (f *fakeBenchmark) note(s string) {
@@ -97,8 +108,20 @@ func (f *fakeBenchmark) SetOptIn(_ context.Context, actor, subject string, enabl
 	f.note("optin")
 	f.mu.Lock()
 	f.optIns = append(f.optIns, actor+"/"+subject)
+	f.optedIn = enabled
 	f.mu.Unlock()
 	return nil
+}
+
+func (f *fakeBenchmark) OptedIn(_ context.Context, userID string) (bool, error) {
+	f.note("optedin")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.optedInFor = append(f.optedInFor, userID)
+	if f.optedInErr != nil {
+		return false, f.optedInErr
+	}
+	return f.optedIn, nil
 }
 
 // AnswerVocabulary stands in for the package's registered answer vocabularies.
@@ -274,6 +297,85 @@ func TestPendingListIsRequesterScoped(t *testing.T) {
 	}
 }
 
+// TestServedOptInIsTheCallersOwnInBothPostures: the pair list widens for the
+// operator and the consent block does NOT. Consent is self-only in both
+// directions (§4.2.1), so a role bit that opens every pending pair still opens
+// nobody's consent but the reader's — asserted on WHO the read was asked about,
+// which is the thing a widening would have to change.
+func TestServedOptInIsTheCallersOwnInBothPostures(t *testing.T) {
+	e := newBenchEnv(t)
+	e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", "")
+	e.mustDo(t, "op", "GET", "/api/benchmark/verdicts", "")
+	if len(e.fake.optedInFor) != 2 || e.fake.optedInFor[0] != "alice" || e.fake.optedInFor[1] != "op" {
+		t.Fatalf("consent read for %q — each caller reads their OWN, and the operator's read is not widened", e.fake.optedInFor)
+	}
+}
+
+// TestServedOptInFollowsTheStoreAndNotTheVerb is the probe that a hardcoded
+// field cannot pass: the position is written BEHIND THE HANDLER'S BACK and the
+// next read has to follow it.
+//
+// This is the §48 lesson applied to a second control. A block that only ever
+// reported what the last flip said would be a memory of an act, and the one
+// thing it could never tell you is what is true now — which is precisely what a
+// standing consent has to say.
+func TestServedOptInFollowsTheStoreAndNotTheVerb(t *testing.T) {
+	e := newBenchEnv(t)
+
+	// Nothing has been flipped: the served position is OFF, and it is a
+	// position rather than an absence.
+	var before api.BenchmarkVerdictForms
+	decodeBody(t, e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", ""), &before)
+	if before.OptIn.Enabled == nil || *before.OptIn.Enabled {
+		t.Fatalf("the default consent did not read as an explicit OFF: %+v", before.OptIn)
+	}
+	if before.OptIn.Absent != "" {
+		t.Errorf("a readable position carried an absence too: %q", before.OptIn.Absent)
+	}
+
+	// Moved in the store, with no verb involved.
+	e.fake.mu.Lock()
+	e.fake.optedIn = true
+	e.fake.mu.Unlock()
+
+	var after api.BenchmarkVerdictForms
+	decodeBody(t, e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", ""), &after)
+	if after.OptIn.Enabled == nil || !*after.OptIn.Enabled {
+		t.Fatalf("the served consent did not follow the store: %+v — this block is a READING, not a memory of the last flip", after.OptIn)
+	}
+}
+
+// TestUnreadableOptInIsAnAbsenceAndNeverAnOff: a read that broke must not
+// degrade into "not opted in". Consent nobody gave is the one answer this block
+// may never invent.
+func TestUnreadableOptInIsAnAbsenceAndNeverAnOff(t *testing.T) {
+	e := newBenchEnv(t)
+	e.fake.optedInErr = errors.New("the users table is unreadable")
+
+	var got api.BenchmarkVerdictForms
+	decodeBody(t, e.mustDo(t, "alice", "GET", "/api/benchmark/verdicts", ""), &got)
+	if got.OptIn.Enabled != nil {
+		t.Fatalf("a failed read still served a consent position: %+v", got.OptIn)
+	}
+	if !strings.Contains(got.OptIn.Absent, "the users table is unreadable") {
+		t.Errorf("the absence does not carry the read's own reason: %q", got.OptIn.Absent)
+	}
+	// The rest of the response is unaffected: one member's absence does not take
+	// the pending pairs down with it.
+	if len(got.Pairs) == 0 {
+		t.Error("an unreadable consent suppressed the pairs, which are a different read")
+	}
+}
+
+// decodeBody reads a served response into its own wire type, so an assertion
+// is about the SHAPE production serves rather than about a substring.
+func decodeBody(t *testing.T, raw string, into any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(raw), into); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+}
+
 // TestPendingFormShapeCarriesNoArmIdentity: the served shape is the package's
 // own, so the blindness property travels intact. The scan is over the WIRE.
 func TestPendingFormShapeCarriesNoArmIdentity(t *testing.T) {
@@ -391,8 +493,13 @@ func TestBenchmarkVerbsMintNoTransportDecisionRow(t *testing.T) {
 			after-before)
 	}
 	// The whole route set was exercised, so the assertion above is not vacuous.
-	if got := len(e.fake.order()); got != 7 {
-		t.Fatalf("the audit walk drove %d practice calls, want 7 (record+reveal, decline, dispose, optin, pending+vocabulary)", got)
+	//
+	// MOVED 7 → 8 (P3-UI-3): the verdicts GET makes a THIRD seam call, for the
+	// caller's own standing consent. It is a READ and mints nothing, which is
+	// what the assertion above proves about it — but the walk has to know it
+	// happened, or a read that silently stopped being made would still pass.
+	if got := len(e.fake.order()); got != 8 {
+		t.Fatalf("the audit walk drove %d practice calls, want 8 (record+reveal, decline, dispose, optin, pending+vocabulary+optedin)", got)
 	}
 }
 

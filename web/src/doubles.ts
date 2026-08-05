@@ -33,6 +33,9 @@ import catalogRaw from './fixtures/api/history-catalog.json?raw'
 import queryAnswerRaw from './fixtures/api/history-query-answer.json?raw'
 import viewAnswerRaw from './fixtures/api/history-view-answer.json?raw'
 import viewsRaw from './fixtures/api/history-views.json?raw'
+import memoryRaw from './fixtures/api/memory.json?raw'
+import memoryEntryRaw from './fixtures/api/memory-entry.json?raw'
+import memoryOperatorRaw from './fixtures/api/memory-operator.json?raw'
 import metersRaw from './fixtures/api/meters.json?raw'
 import metersMemberRaw from './fixtures/api/meters-member.json?raw'
 import runsRaw from './fixtures/api/runs.json?raw'
@@ -286,6 +289,43 @@ export const fixtures = {
    */
   workforce: () => parse<Record<string, unknown>>(workforceRaw),
   workforceMember: () => parse<Record<string, unknown>>(workforceMemberRaw),
+  /**
+   * The S09 memory world (P3-UI-3), and these three are different ANSWERS
+   * rather than one body computed per caller:
+   *
+   *   `memory` is ALICE's live set — her two entries, both written through the
+   *   real S09 gate, narrowed to `?status=active` because the rows the gate
+   *   wrote carry crypto/rand ids no committed file can hold.
+   *
+   *   `memoryOperator` is the OPERATOR's, and it is EMPTY. That is the limb
+   *   that leaks if it is wrong: the role bit opens house scope and project
+   *   membership, and neither of those is another person's user-scope store.
+   *
+   *   `memoryEntry` is one entry with the open S09.7 edge its addressee sees,
+   *   question text and all — minted by the real detection, not written here.
+   */
+  memory: () => parse<Record<string, unknown>>(memoryRaw),
+  memoryOperator: () => parse<Record<string, unknown>>(memoryOperatorRaw),
+  memoryEntry: () => parse<Record<string, unknown>>(memoryEntryRaw),
+}
+
+/** The two entry ids the committed memory bodies name. They are SURROGATES
+ *  pinned after the real write ran (internal/api/apifixtures_test.go), because
+ *  migration 0004 makes a knowledge entry's id immutable and the gate mints it
+ *  from crypto/rand. */
+export const memoryEntryID = 'k-fixture-release-notes-a'
+export const memoryOtherEntryID = 'k-fixture-release-notes-b'
+
+/** The reads the S09 memory surfaces make, answered from the committed bodies.
+ *  The unfiltered key is the operator's answer and the `?status=active` key is
+ *  alice's, which is what the two committed bodies are. */
+export function memoryRoutes(): Record<string, Scripted> {
+  return {
+    'GET /api/auth/session': signedIn,
+    'GET /api/memory': { body: fixtures.memoryOperator() },
+    'GET /api/memory?status=active': { body: fixtures.memory() },
+    [`GET /api/memory/${memoryEntryID}`]: { body: fixtures.memoryEntry() },
+  }
 }
 
 /** The routes the B6-5 oversight surfaces read, answered from the fixtures. */

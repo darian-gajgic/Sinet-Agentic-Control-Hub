@@ -17,6 +17,8 @@ test('the URL contract is exactly the recorded set', () => {
     'chat /chat',
     'deliverable /deliverables/:id',
     'workforce /workforce',
+    'memory /memory',
+    'memory-entry /memory/:id',
     'login /login',
   ])
 })
@@ -39,6 +41,12 @@ const built = [
   'chat',
   'deliverable',
   'workforce',
+  // P3-UI-3: the S09 memory family's browse and its entry detail. Both land
+  // BUILT in the same change that publishes them, which is the stronger half of
+  // the two-sided assertion below — the other arm stays for the packet that
+  // publishes a path before it fills it in.
+  'memory',
+  'memory-entry',
 ]
 
 test('every surface is either built or names the packet that will build it', () => {
@@ -72,6 +80,11 @@ test('paths resolve to their route and capture their identity', () => {
   const task = matchRoute('/tasks/t-1')
   expect(task.route.id).toBe('task')
   expect(task.params).toEqual({ id: 't-1' })
+
+  expect(matchRoute('/memory').route.id).toBe('memory')
+  const entry = matchRoute('/memory/mem-1')
+  expect(entry.route.id).toBe('memory-entry')
+  expect(entry.params).toEqual({ id: 'mem-1' })
 })
 
 // /inbox and /inbox/:id are different surfaces; a one-segment path must never
@@ -79,6 +92,9 @@ test('paths resolve to their route and capture their identity', () => {
 test('a deeper path never collapses into a shallower route', () => {
   expect(matchRoute('/inbox/ask-7/extra').route.id).toBe('not-found')
   expect(matchRoute('/deliverables').route.id).toBe('not-found')
+  // The same two-sided check on the family added by P3-UI-3: `/memory` is the
+  // browse and `/memory/:id` is one entry, and a third segment is neither.
+  expect(matchRoute('/memory/mem-1/versions').route.id).toBe('not-found')
 })
 
 test('an unknown path resolves to not-found rather than throwing', () => {

@@ -22,6 +22,8 @@ export type RouteID =
   | 'chat'
   | 'deliverable'
   | 'workforce'
+  | 'memory'
+  | 'memory-entry'
   | 'login'
   | 'not-found'
 
@@ -48,6 +50,15 @@ export const routes: RouteDef[] = [
   { id: 'chat', pattern: '/chat', title: 'Assistant', owner: '', nav: true },
   { id: 'deliverable', pattern: '/deliverables/:id', title: 'Deliverable', owner: '', nav: false },
   { id: 'workforce', pattern: '/workforce', title: 'Workforce', owner: '', nav: true },
+  // ADDED 2026-08-05 (P3-UI-3), the first addition since the table was written.
+  // The ban this file records is on RENAMES — a published path is what a deep
+  // link and a push `navigate` field were written against. An ADDITION publishes
+  // a path nothing pointed at before, and S09.4's v0 activation table requires
+  // one: "Manual L2 — human-direct entries via workspace UI [XREF:S15]". The
+  // entry route exists so a conflict edge naming another entry is navigable,
+  // which is the S15.11 deep-links-always-land ethos on this family.
+  { id: 'memory', pattern: '/memory', title: 'Memory', owner: '', nav: true },
+  { id: 'memory-entry', pattern: '/memory/:id', title: 'Memory entry', owner: '', nav: false },
   { id: 'login', pattern: '/login', title: 'Sign in', owner: '', nav: false },
 ]
 

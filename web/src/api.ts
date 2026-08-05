@@ -656,14 +656,31 @@ export type PendingPair = {
   length_b: number
 }
 
+/**
+ * The CALLER'S OWN standing consent, read from the same users column the opt-in
+ * verb writes (P3-UI-3 OQ1; internal/api/benchmark.go).
+ *
+ * `enabled` is absent when the position could not be read, and `absent` says
+ * why. The two are not collapsed: reporting "not opted in" because a read broke
+ * would put a consent answer in the record that nobody gave — the same rule the
+ * pause switch's absence arm exists for (§48).
+ */
+export type BenchmarkOptInState = { enabled?: boolean; absent?: string }
+
 export type BenchmarkVerdictForms = {
   pairs: PendingPair[] | null
   guess_required: boolean
   choices: string[] | null
   guess_sides: string[] | null
   dispositions: string[] | null
+  /** The caller's own standing opt-in. Self-only in both postures: the operator
+   *  reads every pending PAIR and still only their own consent. */
+  opt_in: BenchmarkOptInState
   detail: string
 }
+
+/** The §4.2.1 consent flip's own answer (benchmark.go:385–389). */
+export type OptInSet = { person: string; enabled: boolean; detail: string }
 
 /**
  * The committed §14 record, read back after the verdict landed — the ONLY place
@@ -717,6 +734,139 @@ export type MemoryConflict = {
 }
 
 export type MemoryConflictResolved = { conflict: MemoryConflict; detail: string }
+
+// ── the S15.2 memory family (P3-UI-3; internal/api/memory.go) ─────────────
+//
+// Every type below is transcribed field-for-field from the Go wire shape at the
+// line noted, snake_case as served. `MemoryConflict` above is REUSED for the
+// edges: it is the same `internal/memory.Conflict` struct on both surfaces, and
+// a second copy would be a second thing to keep in step.
+
+/** The S09.2 rule inputs — registry facts and phrases, never embeddings
+ *  (internal/memory/memory.go:94–99). */
+export type MemorySelectors = {
+  domain?: string
+  project?: string
+  task_type?: string
+  triggers?: string[]
+}
+
+/** Where the entry came from and where it sits in its version chain
+ *  (memory.go:133–141). */
+export type MemoryProvenance = {
+  origin: string
+  origin_ref?: string
+  proposer_model?: string
+  approved_by?: string
+  approved_ts?: string
+  version: number
+  supersedes?: string
+}
+
+/** The S09.8 lifecycle block (memory.go:145–150). A ZERO interval is a real
+ *  answer — an entry carries no re-verify interval unless a human flags one —
+ *  so an absent `reverify_interval_days` is rendered as that sentence and never
+ *  as the number 0. */
+export type MemoryVerification = {
+  verified_by?: string
+  verified_ts?: string
+  reverify_interval_days?: number
+  expires_ts?: string
+}
+
+/** One knowledge row as the family serves it (memory.go:106–129). `content` and
+ *  `file_ref` are exclusive by construction: the row is the selector index and
+ *  the file is the content, with git as its history (S09.2). */
+export type MemoryEntry = {
+  entry_id: string
+  owner: string
+  scope: string
+  scope_ref?: string
+  layer: string
+  kind: string
+  title: string
+  content?: string
+  file_ref?: string
+  file_commit?: string
+  topic_key?: string
+  selectors: MemorySelectors
+  status: string
+  tombstone: boolean
+  tombstone_note?: string
+  provenance: MemoryProvenance
+  verification: MemoryVerification
+  last_injected_ts?: string
+  created_ts: string
+  updated_ts: string
+}
+
+/**
+ * The browse read (memory.go:175–186).
+ *
+ * `visibility` is the SERVED sentence stating the rule that produced this set,
+ * and the surface renders it verbatim: "why is that entry not here?" is a
+ * question a person asks of a memory surface, and the honest answer is the
+ * server's own words rather than this client's paraphrase of them.
+ */
+export type MemoryList = {
+  entries: MemoryEntry[]
+  visibility: string
+  projects: string[]
+  cursor: number
+  truncated: boolean
+}
+
+/** One entry with the open S09.7 edges the READER is the addressee of
+ *  (memory.go:273–279). The same shape answers a create and a new version. */
+export type MemoryEntryDetail = {
+  entry: MemoryEntry
+  conflicts: MemoryConflict[]
+  cursor: number
+}
+
+/**
+ * The write body, NARROWED to what this surface sends (memory.go:328–342).
+ *
+ * `origin` is deliberately absent from this type: omitted means `human_direct`,
+ * which is the S09.4 workspace entry and the only ceremony this surface
+ * performs. `imported` is the operator's N20 house-KB import and gets no UI at
+ * v0, so a field for it here would be a door with nothing behind it.
+ * `file_backed`/`file_name` are absent for the same reason — the workspace
+ * entry is text-first.
+ */
+export type MemoryWriteBody = {
+  scope: string
+  scope_ref?: string
+  kind: string
+  title: string
+  content: string
+  topic_key?: string
+  selectors?: MemorySelectors
+}
+
+/** One run a removed entry was injected into — the S2.9 forward trace
+ *  (internal/memory/store.go:406–409). It carries no task and no deliverable
+ *  ref, so there is no link target for it and none is invented. */
+export type MemoryInfluenceRef = { run_id: string; event_seq: number }
+
+/** The removal outcome with its influence list (memory.go:494–502). */
+export type MemoryRemoved = {
+  entry_id: string
+  status: string
+  influence: MemoryInfluenceRef[]
+  detail: string
+}
+
+/** The true-deletion outcome (memory.go:538–546). `limits` is the S09.5 honest
+ *  limits list SERVED AS DATA — what a purge does not and cannot reach — and it
+ *  renders verbatim rather than being summarised. */
+export type MemoryDeleted = {
+  entry_id: string
+  tombstone: boolean
+  tombstone_note: string
+  detail: string
+  limits: string[]
+}
 
 // ── the S15.9 settings family ─────────────────────────────────────────────
 
@@ -1842,10 +1992,50 @@ export const api = {
     post<AlarmDispositioned>(`/api/approvals/${encodeURIComponent(id)}/dispose`,
       reason ? { disposition, reason } : { disposition }),
 
+  /**
+   * The BENCH-REG §4.2.1 standing consent flip.
+   *
+   * The body carries `enabled` and NOTHING ELSE. The verb accepts an optional
+   * `person`, but only so a delegation ATTEMPT is expressible and therefore
+   * refusable — consent is the requester's own, the operator included — so this
+   * client never sends one and the subject is always the caller.
+   */
+  setBenchmarkOptIn: (enabled: boolean) => post<OptInSet>('/api/benchmark/opt-in', { enabled }),
+
   /** The ninth kind's verb. The path id is the conflict ROW number, which the
    *  card carries; a repeat answers 200 with the already-closed detail. */
   resolveMemoryConflict: (conflict: number) =>
     post<MemoryConflictResolved>(`/api/memory/conflicts/${encodeURIComponent(String(conflict))}/resolve`, {}),
+
+  // ── the S15.2 memory family (P3-UI-3) ────────────────────────────────────
+  //
+  // Six verbs, all landed at B6-3C. The gate is the ONLY write path and every
+  // refusal below arrives carrying the gate's own sentence, which the surface
+  // renders verbatim: this client re-implements no wall and paraphrases no
+  // reason.
+
+  /** The scoped browse. The filters are SERVER parameters over the closed S09.2
+   *  vocabularies — an unknown value is a 400 with the vocabulary named, never a
+   *  silently empty answer — so narrowing happens where the scoping does. */
+  memoryList: (filters: { scope?: string; kind?: string; status?: string } = {}) =>
+    request<MemoryList>(`/api/memory${query(filters)}`),
+  memoryEntry: (entry: string) => request<MemoryEntryDetail>(`/api/memory/${encodeURIComponent(entry)}`),
+  /** The station-3 human write. Tier Medium: no PIN, no batch — the person at
+   *  the surface deciding IS the individual owner approval (S09.4). */
+  memoryCreate: (body: MemoryWriteBody) => post<MemoryEntryDetail>('/api/memory', body),
+  /** The S4.1 correction right. An edit is a NEW VERSION carrying supersedes_id
+   *  and the old row is retired in the same transaction; in-place mutation is
+   *  not offered because it does not exist. */
+  memoryNewVersion: (entry: string, body: MemoryWriteBody) =>
+    post<MemoryEntryDetail>(`/api/memory/${encodeURIComponent(entry)}/new-version`, body),
+  /** Retire. Owner-or-operator, and the answer carries the S2.9 influence
+   *  trace: which runs this entry was injected into before it left. */
+  memoryRemove: (entry: string, reason?: string) =>
+    post<MemoryRemoved>(`/api/memory/${encodeURIComponent(entry)}/remove`, reason ? { reason } : {}),
+  /** True deletion — STRICTLY the owner's, the operator refused. The answer is a
+   *  read-back of the tombstone stub plus the honest limits of what a purge can
+   *  reach. */
+  memoryDelete: (entry: string) => post<MemoryDeleted>(`/api/memory/${encodeURIComponent(entry)}/delete`, {}),
 
   // ── the S15.9 settings family (B6-6 part B) ──────────────────────────────
 

@@ -28,5 +28,8 @@
     "fix-and-continue-accruing",
     "re-register"
   ],
+  "opt_in": {
+    "enabled": true
+  },
   "detail": "each pair is two responses through ONE uniform template, keyed by side. Which arm is which is exactly what the vote must not know, and the verdict form takes the blind pick and the arm-guess in the same act (BENCH-REG §3.2/§3.3)"
 }

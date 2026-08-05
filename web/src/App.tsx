@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  BookMarked,
   Columns3,
   Inbox as InboxIcon,
   LayoutDashboard,
@@ -19,6 +20,7 @@ import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
 import { Inbox, InboxItem } from './Inbox'
+import { Memory, MemoryEntryView } from './Memory'
 import { Settings } from './Settings'
 import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
@@ -45,6 +47,7 @@ const navGroupOf: Partial<Record<RouteID, string>> = {
   settings: 'System',
   chat: 'Intelligence',
   workforce: 'Intelligence',
+  memory: 'Intelligence',
 }
 
 const navIcons: Partial<Record<RouteID, LucideIcon>> = {
@@ -55,6 +58,7 @@ const navIcons: Partial<Record<RouteID, LucideIcon>> = {
   settings: SlidersHorizontal,
   chat: MessagesSquare,
   workforce: Users,
+  memory: BookMarked,
 }
 
 /**
@@ -188,6 +192,26 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
             // may SEE is decided server-side and the read says out loud which
             // reading it returned.
             <Workforce stream={stream} />
+          ) : route.id === 'memory' ? (
+            // The caller's own identity decides which of the four gate verbs
+            // render, and the doors DIFFER: a correction and a retirement are
+            // owner-or-operator, a true deletion is strictly the owner's, and a
+            // house entry is the operator's to write. The role bit here is the
+            // users-row one, because that is what the S09 gate resolves the
+            // actor against — it opens nothing of another person's user-scope
+            // store, which is a content line and not the §30 telemetry one.
+            <Memory
+              me={session.user?.user_id ?? ''}
+              operator={session.user?.role === 'operator'}
+              stream={stream}
+            />
+          ) : route.id === 'memory-entry' ? (
+            <MemoryEntryView
+              id={params.id}
+              me={session.user?.user_id ?? ''}
+              operator={session.user?.role === 'operator'}
+              stream={stream}
+            />
           ) : (
             <Stub route={route} params={params} />
           )}

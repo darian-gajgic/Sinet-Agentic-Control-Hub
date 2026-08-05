@@ -78,6 +78,20 @@ type BenchmarkSurface interface {
 	// package refuses any actor but the subject themselves — the operator
 	// included.
 	SetOptIn(ctx context.Context, actor, subject string, enabled bool) error
+	// OptedIn reads one person's standing consent out of the same users column
+	// SetOptIn writes.
+	//
+	// It exists because until it did, no landed read served the flag anywhere:
+	// a two-position consent control could report what it had just done and
+	// nothing else, which is a memory of an act rather than a reading of a
+	// switch. That is the §48 pause-switch gap exactly, one seam wider — the
+	// value is behind the reverse import wall, so it crosses HERE rather than
+	// through a store read internal/api is not allowed to make.
+	//
+	// It takes a SUBJECT and not an actor because there is no act and nothing to
+	// authorize. The transport hands it the caller and only ever the caller, so
+	// the read is self-only in the same way the write is.
+	OptedIn(ctx context.Context, userID string) (bool, error)
 	// AnswerVocabulary is the registered ANSWER vocabulary of the two benchmark
 	// card kinds: the §3.3 verdict values, the two guess sides, and the §12
 	// alarm dispositions (B6-6 OQ4). It exists because a form has to render
@@ -119,7 +133,46 @@ type BenchmarkVerdictForms struct {
 	// one read a decision surface already makes to render these cards also
 	// tells it which buttons exist (B6-6 OQ4).
 	BenchmarkVocabulary
-	Detail string `json:"detail"`
+	// OptIn is the CALLER'S OWN standing consent (§4.2.1), and it is the one
+	// member of this response a role bit does not widen: the pair list opens to
+	// the whole household for the operator, and the consent block stays the
+	// reader's own in both postures, because consent is self-only in both
+	// directions. It rides this read rather than a route of its own — the
+	// surface that offers the flip is the surface that renders its
+	// consequences, and it already makes this call.
+	OptIn  BenchmarkOptIn `json:"opt_in"`
+	Detail string         `json:"detail"`
+}
+
+// BenchmarkOptIn is one person's standing consent as this read serves it.
+//
+// Enabled is a POINTER because "not opted in" and "no reading" are different
+// facts that must not collapse into one. Answering false because the read broke
+// would put a consent position on screen that nobody ever gave — the one answer
+// a consent control must never invent — so a failed or unwired read is an
+// absence carrying its own reason instead, the shape the meters family's pause
+// switch uses for the same reason (§48).
+type BenchmarkOptIn struct {
+	Enabled *bool  `json:"enabled,omitempty"`
+	Absent  string `json:"absent,omitempty"`
+}
+
+// benchmarkOptIn reads ONE person's consent: the caller's, and nobody else's.
+//
+// The subject is the session's own id — the value the pending-pair scope starts
+// from BEFORE the operator's read widens it — so there is no role limb here to
+// forget to omit, in the same structural way `Store.ListVisible` has no role
+// parameter on the memory family.
+func (s *Server) benchmarkOptIn(ctx context.Context, subject string) BenchmarkOptIn {
+	if strings.TrimSpace(subject) == "" {
+		return BenchmarkOptIn{Absent: "this process has no signed-in person, so there is no standing consent to read (BENCH-REG §4.2.1: the opt-in is a person's own)"}
+	}
+	enabled, err := s.benchmark.OptedIn(ctx, subject)
+	if err != nil {
+		s.logger.Error("benchmark: the standing opt-in could not be read", "subject", subject, "err", err)
+		return BenchmarkOptIn{Absent: "the standing benchmark opt-in could not be read: " + err.Error()}
+	}
+	return BenchmarkOptIn{Enabled: &enabled}
 }
 
 // BenchmarkVocabulary is the closed answer vocabulary of the two benchmark card
@@ -172,6 +225,7 @@ func (s *Server) handleBenchmarkVerdicts(w http.ResponseWriter, r *http.Request)
 	// template is uniform and the platform never edits an arm).
 	s.writeReadJSON(w, BenchmarkVerdictForms{
 		Pairs: pairs, GuessRequired: true, BenchmarkVocabulary: vocab,
+		OptIn:  s.benchmarkOptIn(r.Context(), scope.UserID),
 		Detail: "each pair is two responses through ONE uniform template, keyed by side. Which arm is which is exactly what the vote must not know, and the verdict form takes the blind pick and the arm-guess in the same act (BENCH-REG §3.2/§3.3)",
 	})
 }

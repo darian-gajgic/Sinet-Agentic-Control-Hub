@@ -115,6 +115,18 @@ func (b benchmarkVerbs) SetOptIn(ctx context.Context, actor, subject string, ena
 	return benchmarkStatus(b.bs.Practice.SetOptIn(ctx, actor, subject, enabled))
 }
 
+// OptedIn is the READ half of the consent flip, and it reads the STORE rather
+// than the practice on purpose: the flag lives on the users row that SetOptIn
+// writes, so the position a surface displays and the position the sampler
+// consults are one value, not two that agree by habit.
+func (b benchmarkVerbs) OptedIn(ctx context.Context, userID string) (bool, error) {
+	in, err := b.bs.Store.OptedIn(ctx, userID)
+	if err != nil {
+		return false, benchmarkStatus(err)
+	}
+	return in, nil
+}
+
 // AnswerVocabulary hands the transport the package's OWN registered answer
 // vocabularies (B6-6 OQ4). This adapter is the one place allowed to see both
 // vocabularies, so the conversion from the package's typed values to the wire's

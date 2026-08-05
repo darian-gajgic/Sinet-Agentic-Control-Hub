@@ -971,3 +971,220 @@ test("an automation's station-3 proposal renders through the generic card, and w
     expect(text, `the card does not show ${fact}, so a person cannot tell what they are approving`).toContain(fact)
   }
 })
+
+// ── the BENCH-REG §4.2.1 standing opt-in (P3-UI-3) ─────────────────────────
+
+const optInPanel = (view: { container: HTMLElement }) =>
+  view.container.querySelector('[data-control="benchmark-opt-in"]') as HTMLElement
+
+/** verdicts() overrides the committed benchmark body's consent block, which is
+ *  the only member of it this packet's control reads. */
+const verdicts = (optIn: Record<string, unknown>) => ({ ...fixtures.benchmarkVerdicts(), opt_in: optIn })
+
+test('the standing opt-in renders with NO pending pair — it is what makes somebody a participant', async () => {
+  // An empty queue: no benchmark card exists, so nothing else on this surface
+  // would ask the practice anything. The consent control still has to be here,
+  // because gating it on already taking part is a door only the people already
+  // through it can see (the sweep's own gap sentence).
+  const { view } = await open('/inbox', { items: [], cursor: 4, truncated: false })
+  const panel = optInPanel(view)
+  expect(panel, 'the opt-in is absent from an inbox with no pairs pending').not.toBeNull()
+  expect(panel.querySelector('[data-position]')?.getAttribute('data-position')).toBe('true')
+  expect(panel.textContent).toContain('You are opted in')
+  // Self-only is structural: there is no subject to choose.
+  expect(panel.querySelector('select'), 'the consent control offers a person picker').toBeNull()
+  expect(panel.querySelector('input'), 'the consent control offers a person field').toBeNull()
+})
+
+test('the explanation says what opting in MEANS and quotes no registered figure', async () => {
+  const { view } = await open('/inbox', { items: [], cursor: 4, truncated: false })
+  const said = optInPanel(view).querySelector('[data-explainer="benchmark-opt-in"]')!.textContent ?? ''
+
+  // BENCH-REG §2/§3.1–§3.3/§4.2.1/§4.2.5/§14, in operator words.
+  expect(said, 'sampling').toContain('may be picked out for comparison')
+  expect(said, 'single-shot duplicate on the requester’s own surface').toContain('once more')
+  expect(said).toContain('single shot, with no follow-up turns')
+  expect(said).toContain('your own frontier subscription')
+  expect(said).toContain('the same frozen task statement')
+  expect(said, '§4.2.1 — the duplicate run is paid for by the requester').toContain(
+    'paid for out of your own automation budget',
+  )
+  expect(said, '§3.2/§3.3 — blind, side by side').toContain('without saying which is which')
+  expect(said, '§3.3 — the guess is mandatory').toContain('the guess is')
+  expect(said).toContain('not optional')
+  expect(said, '§4.2.5 — per-pair decline, logged and reported').toContain('turn down any particular pair')
+  expect(said).toContain('recorded and reported beside the results')
+  expect(said, '§14 — keep-forever').toContain('kept for good')
+  expect(said, '§4.2.1 — default OFF and not delegable').toContain('starts off')
+  expect(said).toContain('nobody else can set it for you')
+
+  // §17 — the registered figures have exactly TWO homes, the registration and
+  // internal/benchmark. A rate, an n or a threshold quoted here would be a third,
+  // free to drift from the machinery that decides on them. So: no digits at all.
+  expect(said, 'a registered figure entered the client').not.toMatch(/[0-9]/)
+  expect(said).not.toContain('%')
+  for (const word of ['percent', 'rate of', 'threshold', 'n=']) {
+    expect(said.toLowerCase(), `the explanation quotes a registered value (${word})`).not.toContain(word)
+  }
+})
+
+test('both positions fire, each sending only `enabled` — never a subject', async () => {
+  const { view, log } = await open(
+    '/inbox',
+    { items: [], cursor: 4, truncated: false },
+    {
+      'POST /api/benchmark/opt-in': {
+        body: {
+          person: 'alice',
+          enabled: false,
+          // internal/api/benchmark.go:426–427, byte-exact.
+          detail:
+            'your standing benchmark opt-in is recorded as a human decision with its actor and its timestamp. It defaults OFF and no boot step, migration or administrator turns it on (BENCH-REG §4.2.1)',
+        },
+      },
+    },
+  )
+  // Both acts are offered in both positions: the verb records a decision either
+  // way and has no already-there arm, so this control invents none.
+  const panel = optInPanel(view)
+  expect(panel.querySelector('[data-opt-in="true"]')).not.toBeNull()
+  expect(panel.querySelector('[data-opt-in="false"]')).not.toBeNull()
+
+  click(panel.querySelector('[data-opt-in="false"]'))
+  await flush()
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('none of your tasks is picked out')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const posts = log.calls.filter((c) => c.path === '/api/benchmark/opt-in')
+  expect(posts).toHaveLength(1)
+  expect(posts[0].body).toEqual({ enabled: false })
+  expect(Object.keys(posts[0].body as object), 'a subject was named for somebody’s own consent').not.toContain('person')
+
+  const line = optInPanel(view).querySelector('[data-outcome]')!
+  expect(line.getAttribute('data-outcome')).toBe('applied')
+  expect(line.textContent, 'the served detail was not rendered verbatim').toContain(
+    'It defaults OFF and no boot step, migration or administrator turns it on (BENCH-REG §4.2.1)',
+  )
+
+  // And the opposite position is one act, not a toggle over guessed state.
+  click(optInPanel(view).querySelector('[data-opt-in="true"]'))
+  await flush()
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('paid for out of your own automation budget')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  expect(log.calls.filter((c) => c.path === '/api/benchmark/opt-in')[1].body).toEqual({ enabled: true })
+})
+
+test('a position that could not be read is an absence with its reason, never an OFF', async () => {
+  const { view } = await open(
+    '/inbox',
+    { items: [], cursor: 4, truncated: false },
+    {
+      // internal/api/benchmark.go — the absence arm of the OQ1 read.
+      'GET /api/benchmark/verdicts': {
+        body: verdicts({ absent: 'the standing benchmark opt-in could not be read: the users table is unreadable' }),
+      },
+    },
+  )
+  const panel = optInPanel(view)
+  expect(panel.querySelector('[data-position]')?.getAttribute('data-position')).toBe('unread')
+  expect(panel.querySelector('.absent')?.textContent).toContain('the users table is unreadable')
+  expect(panel.textContent, 'an unread consent was rendered as a decision nobody made').not.toContain(
+    'You are not opted in',
+  )
+  // The control is still offered: not knowing the position is a reason to be
+  // able to state one, not a reason to hide the switch.
+  expect(panel.querySelector('[data-opt-in="true"]')).not.toBeNull()
+})
+
+test('an OFF position reads as one, and the two positions are distinguishable', async () => {
+  const { view } = await open(
+    '/inbox',
+    { items: [], cursor: 4, truncated: false },
+    { 'GET /api/benchmark/verdicts': { body: verdicts({ enabled: false }) } },
+  )
+  const panel = optInPanel(view)
+  expect(panel.querySelector('[data-position]')?.getAttribute('data-position')).toBe('false')
+  expect(panel.textContent).toContain('You are not opted in')
+})
+
+test.each([
+  [
+    503,
+    'not_wired',
+    // internal/api/benchmark.go — benchmarkReady.
+    'the S14.7 benchmark practice is not wired in this process',
+  ],
+  [
+    403,
+    'forbidden',
+    // internal/api/benchmark.go:415–418. This control cannot produce it — it
+    // sends no subject — and the arm is driven anyway, because a refusal that
+    // only renders when a bug exists is a refusal nobody has ever seen.
+    'the benchmark opt-in is the requester’s own consent and is not delegable — nobody sets it for anybody else, the operator included (BENCH-REG §4.2.1)'.replace(
+      /’/g,
+      "'",
+    ),
+  ],
+  [
+    400,
+    'bad_request',
+    // The dev-posture arm: the package refuses a flip for an identity with no
+    // users row (internal/benchmark — ErrBadInput).
+    'benchmark: invalid input: no user "dev"',
+  ],
+])('a refused flip renders the server’s own sentence: %i', async (status, code, detail) => {
+  const { view } = await open(
+    '/inbox',
+    { items: [], cursor: 4, truncated: false },
+    { 'POST /api/benchmark/opt-in': { status, body: { error: code, detail } } },
+  )
+  click(optInPanel(view).querySelector('[data-opt-in="true"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  const line = optInPanel(view).querySelector('[data-outcome]')!
+  expect(line.getAttribute('data-outcome')).toBe('failed')
+  expect(line.textContent).toContain(`refused (${code})`)
+  expect(line.textContent).toContain(detail)
+})
+
+test('the consent position re-reads on the frame the flip itself mints', async () => {
+  const routes: Record<string, Scripted> = {
+    ...oversightRoutes(),
+    'GET /api/approvals': { body: { items: [], cursor: 4, truncated: false } },
+  }
+  const log = scriptedFetch(routes)
+  window.history.replaceState(null, '', '/inbox')
+  const stream = new EventStream({
+    createEventSource: (url) => new FakeSource(url),
+    probeSession: () => Promise.resolve({ authenticated: true }),
+    schedule: () => 0,
+    cancel: () => {},
+  })
+  const view = mount(<App stream={stream} />)
+  await flush()
+  act(() => FakeSource.last().open())
+  await flush()
+
+  const reads = () => log.calls.filter((c) => c.path === '/api/benchmark/verdicts').length
+  const before = reads()
+  // The flip mints a family-5 `decision.recorded` inside its own transaction,
+  // and this queue already subscribes to that type — so the position follows
+  // with no change to the stream layer at all.
+  act(() =>
+    FakeSource.last().send('decision.recorded', {
+      seq: 901,
+      user_id: 'alice',
+      type: 'decision.recorded',
+      schema_version: 1,
+      topics: ['inbox'],
+      payload: {},
+      ts: '2026-07-20T09:11:00Z',
+    }),
+  )
+  await flush()
+  expect(reads(), 'a decision frame did not re-read the standing consent').toBeGreaterThan(before)
+  view.unmount()
+})

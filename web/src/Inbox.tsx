@@ -11,12 +11,14 @@ import {
   type MemoryConflict,
   type PendingPair,
 } from './api'
+import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive } from './live'
 import { Absent, Empty, Freshness, Owner, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { reconcileBadge } from './push'
+import { Button, Panel } from './ui'
 
 /**
  * The one approval inbox (Spec S15.6; S3.2; 13.5; S06.9; S14.4–S14.7).
@@ -69,6 +71,7 @@ export function Inbox({ stream }: { stream?: EventStream }) {
         Everything waiting on a person, ranked by risk by the control plane. This page never re-orders it.
       </p>
       <NoFrameNote items={items} />
+      <BenchmarkOptIn stream={stream} />
       {live.data && items.length === 0 ? (
         <Empty what="Nothing is waiting on you." />
       ) : (
@@ -190,6 +193,155 @@ function FormsReader({
       {live.error !== '' && <p className="error">{live.error}</p>}
       {children(live.data)}
     </>
+  )
+}
+
+/**
+ * The BENCH-REG §4.2.1 standing consent, and it lives HERE because this is where
+ * its consequences arrive: a sampled pair becomes a blind card in this queue.
+ *
+ * IT RENDERS WHETHER OR NOT A PAIR IS PENDING. That is the whole point — this is
+ * the control that MAKES somebody a participant, so gating it on already being
+ * one would be a door only the people already through it can see. It is
+ * therefore its own read of the verdict surface rather than a rider on the one
+ * the cards make, which mount only when a benchmark card is on screen.
+ *
+ * NOBODY ELSE CAN SET IT. There is no person picker here and there is no
+ * `person` in the request: consent is the requester's own, the operator
+ * included, and the verb refuses a delegation at the transport AND inside the
+ * package. So the subject of this control is always the person reading it.
+ */
+function BenchmarkOptIn({ stream }: { stream?: EventStream }) {
+  const live = useLive<BenchmarkVerdictForms>({
+    key: '/api/benchmark/verdicts',
+    read: () => api.benchmarkVerdicts(),
+    // The flip mints a family-5 `decision.recorded` inside its own transaction,
+    // and this queue already subscribes to that type — so the position re-reads
+    // on the landed subscription with no change to the stream layer at all.
+    types: inboxEventTypes,
+    stream,
+  })
+  const optIn = live.data?.opt_in
+  const position = optIn?.enabled
+
+  return (
+    <Panel head={<strong>Comparing the platform against your own subscription</strong>} data-control="benchmark-opt-in">
+      {/* The pre-act explanation (BENCH-REG §2/§3/§4.2), in operator words and
+          carrying NO REGISTERED FIGURE. How often a task is sampled, how many
+          pairs a result needs and where the alarm sits are frozen registered
+          text with exactly two homes — the registration and the package that
+          encodes it — and a third copy here would be free to drift from the
+          machinery that decides on them (§17). What a person needs before
+          consenting is the MECHANISM, and that is what this says. */}
+      <div className="max-w-prose text-sm" data-explainer="benchmark-opt-in">
+        <p>
+          With this turned on, a task of yours in a domain the practice covers may be picked out for comparison. The
+          picked task is run <strong>once more</strong> — a single shot, with no follow-up turns — against your own
+          frontier subscription, from the same frozen task statement and the same attachments.
+        </p>
+        <p className="mt-2">
+          <strong>That extra run is paid for out of your own automation budget</strong>, not the platform&apos;s.
+        </p>
+        <p className="mt-2">
+          When both answers exist, a card arrives in this queue showing them side by side without saying which is which.
+          You pick the better one and, in the same act, you say which one you think the platform produced — the guess is
+          not optional, because it is how the comparison checks that the two were genuinely indistinguishable.
+        </p>
+        <p className="mt-2">
+          You can turn down any particular pair. A decline is recorded and reported beside the results, so choosing not
+          to take part in one comparison is never invisible. The record is kept for good.
+        </p>
+        <p className="mt-2">
+          This switch starts off. Turning it on or off is itself logged as your decision, and{' '}
+          <strong>nobody else can set it for you</strong> — the operator included.
+        </p>
+      </div>
+
+      <p className="mt-3" data-position={position === undefined ? 'unread' : String(position)}>
+        {live.data === null && live.error === '' ? (
+          <span className="muted">Reading your standing decision…</span>
+        ) : optIn === undefined || (optIn.enabled === undefined && (optIn.absent ?? '') === '') ? (
+          <Absent reason="this process served no standing decision" />
+        ) : optIn.enabled === undefined ? (
+          <Absent reason={optIn.absent ?? ''} />
+        ) : optIn.enabled ? (
+          <>You are opted in: your tasks may be picked for comparison.</>
+        ) : (
+          <>You are not opted in: none of your tasks is picked for comparison.</>
+        )}
+      </p>
+      {live.error !== '' && <p className="error">{live.error}</p>}
+
+      <OptInSwitch reload={live.reload} />
+    </Panel>
+  )
+}
+
+/**
+ * Two POSITION acts, never a toggle over a state this client guessed.
+ *
+ * Both are always offered, in both positions: the flip records a human decision
+ * either way and the verb has no already-there arm to report, so this control
+ * invents none. Asking for the position you are already in is a decision you are
+ * allowed to record again.
+ */
+function OptInSwitch({ reload }: { reload: () => void }) {
+  const [asking, setAsking] = useState<boolean | null>(null)
+  const act = useAct()
+  return (
+    <div className="mt-3" data-control="benchmark-opt-in-switch">
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          data-opt-in="true"
+          disabled={act.busy}
+          onClick={() => {
+            act.clear()
+            setAsking(true)
+          }}
+        >
+          Opt in
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          data-opt-in="false"
+          disabled={act.busy}
+          onClick={() => {
+            act.clear()
+            setAsking(false)
+          }}
+        >
+          Opt out
+        </Button>
+      </div>
+      <ActConfirm
+        open={asking !== null}
+        onOpenChange={(open) => setAsking(open ? asking : null)}
+        title={asking === true ? 'Take part in the comparison' : 'Stop taking part'}
+        what={
+          asking === true
+            ? "From now on a task of yours may be picked out and run a second time against your own subscription, paid for out of your own automation budget, and you will be asked to judge the two answers blind. You can turn down any particular pair, and you can turn this off again at any time."
+            : 'From now on none of your tasks is picked out for comparison. Any pair already waiting for your judgement stays in this queue — you can still judge it or turn it down.'
+        }
+        act={asking === true ? 'Opt me in' : 'Opt me out'}
+        variant="primary"
+        busy={act.busy}
+        onConfirm={() => {
+          const enabled = asking === true
+          setAsking(null)
+          act.run(
+            () =>
+              // No `person` is sent, ever: the subject defaults to the caller,
+              // and that is the only subject this consent has.
+              api.setBenchmarkOptIn(enabled).then((res) => outcomeOf(true, `recorded: ${res.enabled ? 'opted in' : 'opted out'}`, res.detail)),
+            reload,
+          )
+        }}
+      />
+      <OutcomeLine outcome={act.outcome} />
+    </div>
   )
 }
 

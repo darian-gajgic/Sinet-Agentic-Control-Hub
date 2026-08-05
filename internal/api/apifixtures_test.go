@@ -348,7 +348,54 @@ func fixtureWorld(t *testing.T) *backend {
 	seedFixtureWorkforce(t, b)
 	seedFixturePushDevices(t, b)
 	driveFixturePause(t, b)
+	driveFixtureMemoryRetire(t, b)
 	return b
+}
+
+// driveFixtureMemoryRetire retires the two entries driveFixtureMemoryConflict
+// wrote through the real gate, so a browse can be committed at all.
+//
+// The problem it solves is the recorded one: `entry_id` is crypto/rand and
+// migration 0004's identity trigger makes it immutable, so a gate-written row
+// can never appear in a committed body. The conflict pair works around it with
+// SURROGATE copies — and those copies are only reachable in a LIST if the real
+// rows they copy are out of the way. Retiring them through the REAL remove verb
+// is how: `?status=active` then answers with exactly the two reproducible rows,
+// and nothing was hidden by a query this surface would not otherwise make.
+//
+// It is driven LAST, after the pause flip, for that flip's own stated reason:
+// two real `knowledge.remove` rows move the head cursor, and appending them here
+// leaves every other committed body's event_seq exactly where it was.
+func driveFixtureMemoryRetire(t *testing.T, b *backend) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := b.db.QueryContext(ctx,
+		`SELECT entry_id FROM knowledge_entries
+		  WHERE user_id = 'alice' AND entry_id NOT IN (?, ?) ORDER BY entry_id`, fxEntryA, fxEntryB)
+	if err != nil {
+		t.Fatalf("read the driven entries: %v", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan driven entry: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) != 2 {
+		t.Fatalf("found %d gate-written entries to retire, want the conflict pair's 2", len(ids))
+	}
+	for _, id := range ids {
+		rr := httptest.NewRecorder()
+		fixtureServer(t, b, "alice").Handler().ServeHTTP(rr,
+			httptest.NewRequest("POST", "/api/memory/"+id+"/remove",
+				strings.NewReader(`{"reason":"superseded by the committed pair"}`)))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("retire %s: %d: %s", id, rr.Code, rr.Body.String())
+		}
+	}
 }
 
 // driveFixturePause flips one person's S10.4 automation switch through the REAL
@@ -1060,16 +1107,24 @@ func driveFixtureMemoryConflict(t *testing.T, b *backend) {
 	c := conflicts[0]
 	for i, id := range []string{fxEntryA, fxEntryB} {
 		real := []string{c.EntryID, c.OtherEntryID}[i]
-		var title, content string
+		var title, content, approvedBy, verifiedBy string
 		if err := b.db.QueryRowContext(ctx,
-			`SELECT title, coalesce(content,'') FROM knowledge_entries WHERE entry_id = ?`, real).
-			Scan(&title, &content); err != nil {
+			`SELECT title, coalesce(content,''), approved_by, verified_by
+			   FROM knowledge_entries WHERE entry_id = ?`, real).
+			Scan(&title, &content, &approvedBy, &verifiedBy); err != nil {
 			t.Fatalf("read seeded entry %s: %v", real, err)
 		}
+		// The S09.5 provenance and the S09.8 verification stamps are copied FROM
+		// the gate's own row rather than typed here (P3-UI-3): the manual write
+		// records its actor as both approver and verifier at that instant, and a
+		// committed body that dropped them would have made the surface's
+		// provenance block a render nobody had checked against a real one. Only
+		// the two wall-clock instants are pinned, for the same reason the id is.
 		exec(t, b, `INSERT INTO knowledge_entries
-		    (entry_id, user_id, scope, layer, kind, title, content, topic_key, status, version, origin, created_ts, updated_ts)
-		    VALUES (?,?,'user','L2','lesson',?,?,'release-notes-style','active',1,'human_direct',?,?)`,
-			id, "alice", title, content, fxT2, fxT2)
+		    (entry_id, user_id, scope, layer, kind, title, content, topic_key, status, version, origin,
+		     approved_by, approved_ts, verified_by, verified_ts, created_ts, updated_ts)
+		    VALUES (?,?,'user','L2','lesson',?,?,'release-notes-style','active',1,'human_direct',?,?,?,?,?,?)`,
+			id, "alice", title, content, approvedBy, fxT2, verifiedBy, fxT2, fxT2, fxT2)
 	}
 	exec(t, b, `UPDATE knowledge_conflicts
 	       SET entry_id = ?, other_entry_id = ?,
@@ -1876,6 +1931,16 @@ func (fixtureBenchmark) SetOptIn(context.Context, string, string, bool) error {
 	return notWiredInFixture()
 }
 
+// OptedIn is a READ and therefore answers, unlike the acts above: the committed
+// verdict body has to carry a real consent position or the surface that renders
+// it would be probed against a shape production never serves. Alice is opted IN
+// because she has a sampled pair — a pending pair is only reachable for somebody
+// whose standing consent is on (BENCH-REG §4.1/§4.2.1), so the alternative would
+// be a world that contradicts itself.
+func (fixtureBenchmark) OptedIn(_ context.Context, userID string) (bool, error) {
+	return userID == "alice", nil
+}
+
 // webAPIFixtures is the covered set: one entry per read a B6-5 view calls.
 // The identity is the operator, because the surfaces this packet builds are
 // read at the household altitude — a member's narrower answer is the same
@@ -1918,6 +1983,20 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// length figures, and the registered answer vocabularies the form's buttons
 	// come from (B6-6 OQ4).
 	{"benchmark-verdicts", "/api/benchmark/verdicts", "alice"},
+	// The S09 memory family, read BOTH ways — and these two are different
+	// ANSWERS rather than one body computed per caller, which is the whole point
+	// of committing both. `memory` is ALICE's live set: her own two entries,
+	// narrowed to `?status=active` because the rows the real gate wrote carry
+	// crypto/rand ids no file can hold (see driveFixtureMemoryRetire).
+	// `memory-operator` is the OPERATOR's, and it is EMPTY — the content line
+	// showing through a served body rather than through a render: the role bit
+	// opens house scope and project membership, and neither of those is another
+	// person's user-scope store.
+	{"memory", "/api/memory?status=active", "alice"},
+	{"memory-operator", "/api/memory", "op"},
+	// One entry with the S09.7 edge the caller is the ADDRESSEE of, both minted
+	// by the real gate: the question text is the detection's own sentence.
+	{"memory-entry", "/api/memory/" + fxEntryA, "alice"},
 	// The S15.9 settings surface, read BOTH ways: the operator's body carries
 	// `editable:true` and every per-user override, a member's carries the served
 	// refusal reason and only their own. The whole write surface renders from

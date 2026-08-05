@@ -160,7 +160,18 @@ export type ActConfirmProps = {
   /** The act button's label. */
   act: string
   variant?: 'danger' | 'primary'
+  /** A request is in flight. It means EXACTLY that and nothing else. */
   busy: boolean
+  /**
+   * The act is held back for a reason the form beside it already STATES.
+   *
+   * It is separate from `busy` on purpose (carried note N7, P3-UI-2 evaluation):
+   * the budget editor passed `busy || invalid` into one prop, so a form that had
+   * simply not been filled in yet was indistinguishable from a request in
+   * flight — and "why can't I press this?" got the wrong answer. A held act
+   * fires nothing and says why at the field; a busy act is one already sent.
+   */
+  disabled?: boolean
   onConfirm: () => void
   children?: ReactNode
 }
@@ -182,6 +193,7 @@ export function ActConfirm({
   act,
   variant = 'danger',
   busy,
+  disabled = false,
   onConfirm,
   children,
 }: ActConfirmProps) {
@@ -196,7 +208,14 @@ export function ActConfirm({
           <Button variant="ghost" size="sm" data-act="dismiss" onClick={() => onOpenChange(false)}>
             Leave it alone
           </Button>
-          <Button variant={variant} size="sm" data-act="confirm" disabled={busy} onClick={onConfirm}>
+          <Button
+            variant={variant}
+            size="sm"
+            data-act="confirm"
+            data-busy={String(busy)}
+            disabled={busy || disabled}
+            onClick={onConfirm}
+          >
             {act}
           </Button>
         </>

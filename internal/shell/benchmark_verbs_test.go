@@ -423,6 +423,67 @@ func raiseAlarm(t *testing.T, e *driverEnv, domain, epoch string) {
 	}
 }
 
+// TestServedOptInIsReadFromTheStoreItIsWrittenTo is the end-to-end half of the
+// P3-UI-3 OQ1 sanction, over the REAL store.
+//
+// A consent control has to be able to say what is TRUE, not what it last did.
+// So the position is driven three ways and the served block has to follow all
+// three: the untouched default, the real verb's flip, and — the one a hardcoded
+// or verb-remembered field cannot survive — a write made BEHIND THE HANDLER'S
+// BACK, straight into the users column the sampler itself reads.
+func TestServedOptInIsReadFromTheStoreItIsWrittenTo(t *testing.T) {
+	e := newDriverEnv(t, &driverEngine{text: driverArmAnswer})
+	e.operator(t, "op")
+	// The pair seeds alice's users row, which is where the consent column lives.
+	e.seedPair(t, "bp-consent", "t-consent", "alice")
+	ctx := context.Background()
+
+	served := func(who string) api.BenchmarkOptIn {
+		t.Helper()
+		var got api.BenchmarkVerdictForms
+		if err := json.Unmarshal([]byte(e.mustDo(t, who, "GET", "/api/benchmark/verdicts", "")), &got); err != nil {
+			t.Fatalf("decode the verdict forms as %s: %v", who, err)
+		}
+		if got.OptIn.Enabled == nil {
+			t.Fatalf("no consent position served for %s: %q", who, got.OptIn.Absent)
+		}
+		return got.OptIn
+	}
+
+	// The default is OFF and no boot step turned it on (§4.2.1).
+	if *served("alice").Enabled {
+		t.Fatal("the standing opt-in did not default OFF")
+	}
+	// The real verb moves it, and the read follows.
+	e.mustDo(t, "alice", "POST", "/api/benchmark/opt-in", `{"enabled":true}`)
+	if !*served("alice").Enabled {
+		t.Fatal("the served position did not follow the requester's own flip")
+	}
+	// Behind the handler's back: no verb, no transport, just the column.
+	if err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE users SET benchmark_opt_in = 0 WHERE user_id = ?`, "alice")
+		return err
+	}); err != nil {
+		t.Fatalf("move the column behind the handler: %v", err)
+	}
+	if *served("alice").Enabled {
+		t.Fatal("the served position is a memory of the last flip rather than a reading of the store")
+	}
+
+	// And the block is SELF-ONLY on the read, exactly as it is on the write: the
+	// operator's pair list widens to the household and their consent does not
+	// become alice's. Alice's is off (just moved); the operator's own is off too
+	// and has never been touched — so the discriminating leg is to turn the
+	// OPERATOR'S on and require alice's read to be unaffected.
+	e.mustDo(t, "op", "POST", "/api/benchmark/opt-in", `{"enabled":true}`)
+	if !*served("op").Enabled {
+		t.Error("the operator's own consent did not read back")
+	}
+	if *served("alice").Enabled {
+		t.Error("one person's consent leaked into another person's read — the block is not self-only")
+	}
+}
+
 // TestOptInIsSelfOnlyIncludingTheOperator: consent is not delegable (§4.2.1).
 // The refusal is stated at the transport AND inside the verb, and neither is the
 // only statement of it.

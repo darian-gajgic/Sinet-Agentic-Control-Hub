@@ -1,0 +1,40 @@
+{
+  "entry": {
+    "entry_id": "k-fixture-release-notes-a",
+    "owner": "alice",
+    "scope": "user",
+    "layer": "L2",
+    "kind": "lesson",
+    "title": "release notes, second thoughts",
+    "content": "group the notes by project, oldest first",
+    "topic_key": "release-notes-style",
+    "selectors": {},
+    "status": "active",
+    "tombstone": false,
+    "provenance": {
+      "origin": "human_direct",
+      "approved_by": "alice",
+      "approved_ts": "2026-07-20T09:02:00Z",
+      "version": 1
+    },
+    "verification": {
+      "verified_by": "alice",
+      "verified_ts": "2026-07-20T09:02:00Z"
+    },
+    "created_ts": "2026-07-20T09:02:00Z",
+    "updated_ts": "2026-07-20T09:02:00Z"
+  },
+  "conflicts": [
+    {
+      "conflict_id": 1,
+      "affected_owner": "alice",
+      "entry_id": "k-fixture-release-notes-a",
+      "other_entry_id": "k-fixture-release-notes-b",
+      "topic_key": "release-notes-style",
+      "question": "New lesson entry \"k-fixture-release-notes-a\" (v1) shares topic \"release-notes-style\" with your entry \"k-fixture-release-notes-b\" — do they conflict? Correct, retire, or keep both.",
+      "status": "open",
+      "detected_ts": "2026-07-20T09:02:00Z"
+    }
+  ],
+  "cursor": 89
+}

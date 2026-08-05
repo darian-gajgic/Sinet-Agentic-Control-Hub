@@ -1,0 +1,7 @@
+{
+  "entries": [],
+  "visibility": "your own entries in every scope you own (S4.1), plus house-scope entries (house defaults address everyone, S4.5), plus project-scope entries of the projects you own or are invited to (S09.6). The operator role bit does not open another person's user-scope entries: memory is personal content, and D10 is authority over the HOUSE scope.",
+  "projects": [],
+  "cursor": 89,
+  "truncated": false
+}

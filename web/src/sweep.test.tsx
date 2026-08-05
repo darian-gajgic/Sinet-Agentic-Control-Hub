@@ -496,26 +496,15 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     why: 'Layer 2 is reached by the assistant’s escalation control, which posts a chat TURN — the server calls this layer, and the guardrail’s audit row is what makes that the right place for it (§44). A client naming it directly would bypass the turn record.',
   },
   // ── REPORTED GAPS: a route exists, a surface does not ───────────────────
-  {
-    method: 'POST',
-    path: '/api/memory',
-    gap: true,
-    why: 'REPORTED GAP \u2014 CREATING a knowledge entry, which is the memory family\u2019s own write verb and its most consequential one: it is how a person tells the platform something it should keep. It is named separately here because counting by SHAPE hid it behind the GET at the same path (drain r1, D6).',
-  },
-  {
-    method: 'GET',
-    path: '/api/memory',
-    gap: true,
-    why: 'REPORTED GAP — the S15.2 `memory` family has NO SPA surface. S15’s own surface list (S15.5–S15.11) names no memory browser, so this is not an omission inside a built view; it is a family row in the S15.2 table whose only consumed edge is the ninth inbox kind’s resolve verb. Carried to the B6 gate.',
-  },
-  { method: 'GET',
-    path: '/api/memory/{}', gap: true, why: 'REPORTED GAP — the same surface-less family: one knowledge entry with its provenance and gate status.' },
-  { method: 'POST',
-    path: '/api/memory/{}/new-version', gap: true, why: 'REPORTED GAP — the same surface-less family: the S09.4 station-3 gated edit, which is where a person would revise what the platform knows.' },
-  { method: 'POST',
-    path: '/api/memory/{}/remove', gap: true, why: 'REPORTED GAP — the same surface-less family: retiring an entry, which is a real act with no control anywhere in the workspace.' },
-  { method: 'POST',
-    path: '/api/memory/{}/delete', gap: true, why: 'REPORTED GAP — the same surface-less family: the owner’s hard delete of their own entry.' },
+  //
+  // CLOSED 2026-08-05 (P3-UI-3), SEVEN entries removed rather than annotated:
+  // the whole S09 memory family — the browse, the entry read, the gated create,
+  // the new-version edit, the retire and the owner's delete — is the `/memory`
+  // surface this packet added to the route table, and the BENCH-REG §4.2.1
+  // consent flip is the standing opt-in panel on the inbox. The stale-entry test
+  // below forced all seven the moment those surfaces called them. CONVENTIONS
+  // §46's gap record carries the dated pointer (§49).
+  //
   // CLOSED 2026-08-05 (P3-UI-2), four entries removed from this list rather
   // than annotated: feature 4.5's two cancel verbs are the task detail's
   // state-computed action bar and per-run control, the S10.4 budget editor and
@@ -528,12 +517,6 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     path: '/api/deliverables/{}/follow-up',
     gap: true,
     why: 'REPORTED GAP — the S13.9 follow-up spawn. The review surface SERVES and RENDERS this door with its route and its `revision` preset, and NOTHING in the SPA calls it. CORRECTED (drain r1, D4): the first characterization said "shown, not pressable", which understated it — the surface shipped a full form with an ENABLED submit button whose handler could only report "The door named no route, pin or answer", because the form was gated on the door\u2019s VERB rather than on what it supplies. The dead control is fixed; the missing capability is what remains, and it is this gap.',
-  },
-  {
-    method: 'POST',
-    path: '/api/benchmark/opt-in',
-    gap: true,
-    why: 'REPORTED GAP — the BENCH-REG §4.2.1 consent flip. The verdict form renders for a participant; nothing offers the opt-in that makes somebody one.',
   },
   {
     method: 'GET',
@@ -598,21 +581,29 @@ describe('the SPA consumes every API built above (S19.5)', () => {
   test('the gaps are LABELLED as gaps rather than hidden among the exemptions', () => {
     const gaps = exceptions.filter((e) => e.gap).map((e) => e.path)
     // Recorded as a count so a later packet closing one has to move this line
-    // deliberately rather than letting the list quietly shrink or grow.
-    // TEN REGISTERED ROUTES over NINE distinct shapes: `/api/memory` is a gap
-    // at both its verbs, and the POST — creating a knowledge entry — is the
-    // family's most consequential one. Counting by shape alone hid it (drain
-    // r1, D6), so all three numbers are pinned rather than one.
+    // deliberately rather than letting the list quietly shrink or grow. All
+    // three numbers are pinned rather than one, because counting by shape alone
+    // once hid a whole verb behind another at the same path (drain r1, D6).
     //
     // MOVED 2026-08-05 (P3-UI-2), 14 → 10 routes over 13 → 9 shapes: the two
     // 4.5 cancel verbs, the S10.4 budget editor and the 3.3 pause switch are
     // consumed by the task detail and the fleet. Four routes, four shapes —
-    // none of them shared a shape with anything else on the list. CONVENTIONS
-    // §46's gap record carries the dated pointer (§48).
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(10)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(9)
+    // none of them shared a shape with anything else on the list.
+    //
+    // MOVED 2026-08-05 (P3-UI-3), 10 → 3 routes over 9 → 3 shapes: the six
+    // memory-family routes are the new `/memory` surface's, and the consent flip
+    // is the inbox's standing opt-in panel. SEVEN routes over SIX shapes — the
+    // two `/api/memory` verbs share one shape, which is exactly the case the
+    // three-number pin exists to keep visible. CONVENTIONS §46's gap record
+    // carries the dated pointer (§49).
+    //
+    // WHAT IS LEFT, and each is a capability rather than a missing screen: the
+    // S13.9 follow-up spawn, and the two S14.10 history layers (the ask layer
+    // and the redact-before-match search) — UI-4's row.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(3)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(3)
     const gapRoutes = inventory.filter((r) => gaps.includes(normalizePath(r.path)))
-    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(10)
+    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(3)
     for (const e of exceptions.filter((x) => x.gap)) {
       expect(e.why, `${e.path} is flagged a gap but does not say so in its reason`).toContain('REPORTED GAP')
     }
@@ -726,8 +717,13 @@ describe('the eight S15.2 resource families each reach a live surface', () => {
     { family: 'events', root: '/api/events', surface: 'mission-control' },
     { family: 'chat', root: '/api/chat', surface: 'chat' },
     { family: 'push', root: '/api/push', surface: 'settings' },
-    // The REPORTED one. Its root is served and no surface reads it.
-    { family: 'memory', root: '/api/memory', surface: null },
+    // CLOSED 2026-08-05 (P3-UI-3): the last surface-less family got its
+    // surface. S15's own list (S15.5–S15.11) still names no memory browser —
+    // what required one is S09.4's v0 activation row, "Manual L2 — human-direct
+    // entries via workspace UI [XREF:S15]", and the route table grew to carry
+    // it. The walk below now covers every family, which is what makes the
+    // orphan assertion an emptied set rather than a dropped row.
+    { family: 'memory', root: '/api/memory', surface: 'memory' },
   ]
 
   test('every family with a surface has a built route AND a consumed root', () => {
@@ -744,9 +740,15 @@ describe('the eight S15.2 resource families each reach a live surface', () => {
     expect(checked, 'the family walk covered nothing').toBeGreaterThan(8)
   })
 
-  test('and the one family with NO surface is stated, not silently dropped', () => {
+  test('and the set of families with NO surface is stated, not silently dropped', () => {
+    // EMPTIED 2026-08-05 (P3-UI-3), and the assertion is kept rather than
+    // deleted: an emptied set is a fact that has to be re-proved on every run,
+    // and the day a new family lands without a surface this is where it appears.
     const orphans = families.filter((f) => f.surface === null).map((f) => f.family)
-    expect(orphans, 'the set of surface-less S15.2 families moved; §46 records it').toEqual(['memory'])
+    expect(orphans, 'the set of surface-less S15.2 families moved; §46 records it').toEqual([])
+    // Non-vacuity: the walk really did look at every family, memory included.
+    expect(families.map((f) => f.family)).toContain('memory')
+    expect(families.length, 'the family list shrank').toBeGreaterThan(9)
   })
 })
 

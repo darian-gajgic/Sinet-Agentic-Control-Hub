@@ -22,5 +22,5 @@
   ],
   "scope": "every device enrolled in this household, as metadata: an endpoint is a capability and is never served",
   "observable": "Push timing and volume reach your browser vendor's push service (Apple or Google). The notification itself is encrypted to this device's own keys, so the relay sees when and how often — never what.",
-  "cursor": 87
+  "cursor": 89
 }
