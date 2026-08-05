@@ -147,6 +147,10 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
 
   const tasks = data?.tasks ?? []
   const queue = ownQueued(tasks, me)
+  // Same rule as every other surface: a teaching empty states what the platform
+  // answered, so it waits for an answer. Until then `Freshness` says the board
+  // is catching up (§42).
+  const answered = data !== null
 
   const onDragEnd = (result: DropResult) => {
     void applyDrag(queue, result).then(
@@ -221,7 +225,7 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                   </Draggable>
                 ))}
                 {dropProvided.placeholder}
-                {queue.length === 0 && (
+                {queue.length === 0 && answered && (
                   <EmptyState
                     what="Nothing of yours is queued."
                     why="Your own tasks appear here while they wait for the scheduler to start them. This lane is the only place a drag does anything."
@@ -247,7 +251,7 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                   value rather than hidden.
                 </p>
               )}
-              {inColumn.length === 0 ? (
+              {inColumn.length === 0 && answered ? (
                 <EmptyState
                   what="No card is here."
                   why={`A card sits under the stage the platform stored for it. It arrives in "${col.label}" when its work reaches that stage — never by being dragged.`}

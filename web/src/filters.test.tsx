@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
 import { filterFromSearch, filters, hrefForFilter, localMidnightISO } from './Filters'
-import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
+import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
 import { EventStream } from './events'
 import { navigate } from './router'
 import { flush, mount } from './testing'
@@ -24,7 +24,7 @@ const inertStream = () =>
     cancel: () => {},
   })
 
-async function open(url: string, extra: Record<string, { body?: unknown; status?: number }> = {}) {
+async function open(url: string, extra: Record<string, Scripted> = {}) {
   const log = scriptedFetch({ ...oversightRoutes(), ...extra })
   window.history.replaceState(null, '', url)
   const view = mount(<App stream={inertStream()} />)
@@ -289,15 +289,18 @@ test('an empty filter teaches what the question was, not only that nothing answe
   )
   view.unmount()
 
-  // And the none-vs-not-loaded line holds: before the read lands there is no
-  // teaching empty at all (`parts.tsx:134–136`).
-  scriptedFetch({})
-  window.history.replaceState(null, '', '/?view=running')
-  const loading = mount(<App stream={inertStream()} />)
-  expect(loading.container.textContent, 'a teaching empty rendered over a read that had not landed').not.toContain(
-    'Nothing matches.',
-  )
-  loading.unmount()
+})
+
+test('NONE-VS-NOT-LOADED: a pending filter read shows the catching-up marker, never a teaching empty', async () => {
+  // The session LANDS and the FILTER's own read never answers, so what is
+  // observed is the surface's own pending window rather than an unmounted shell
+  // (drain r1, D1 — the instrument this replaces failed the session read and
+  // could not see any surface at all).
+  const { view } = await open('/?view=running', { 'GET /api/runs?status=running': { pending: true } })
+  expect(view.container.querySelector('[data-surface-what]'), 'no surface mounted, so this proves nothing').not.toBeNull()
+  expect(view.container.textContent, 'the loading affordance is missing').toContain('Catching up')
+  expect(view.container.textContent, 'a teaching empty rendered over a pending read').not.toContain('Nothing matches.')
+  view.unmount()
 })
 
 test('the what-needs-me empties teach where the work would come from', async () => {

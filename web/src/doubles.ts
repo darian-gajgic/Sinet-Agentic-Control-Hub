@@ -116,7 +116,21 @@ export function frame(seq: number, type: string, topics: string[] = ['board']) {
   return { seq, user_id: 'alice', type, schema_version: 1, topics, payload: {}, ts: '2026-07-20T09:05:00Z' }
 }
 
-export type Scripted = { body?: unknown; status?: number }
+export type Scripted = {
+  body?: unknown
+  status?: number
+  /**
+   * The read never answers, and that is the point (P3-UI-5 drain r1, D1).
+   *
+   * The none-vs-not-loaded rule is a claim about the window between a surface
+   * mounting and its own read landing, and that window cannot be observed by
+   * failing the session read instead — the shell then mounts NO surface at all
+   * and there is no pending state to look at. A route marked `pending` resolves
+   * never, so the surface really is mounted, really has asked, and really is
+   * waiting.
+   */
+  pending?: boolean
+}
 
 export type FetchLog = {
   calls: { method: string; path: string; body: unknown }[]
@@ -159,6 +173,9 @@ export function scriptedFetch(table: Record<string, Scripted>): FetchLog {
     calls.push({ method, path, body: recordBody(init?.body) })
     const route = routes[`${method} ${path}`]
     if (!route) throw new Error(`unscripted request: ${method} ${path}`)
+    // A pending route never settles, so the caller stays in flight for the rest
+    // of the test. Nothing is thrown and nothing resolves.
+    if (route.pending === true) return new Promise<Response>(() => {})
     const status = route.status ?? 200
     return {
       ok: status >= 200 && status < 300,

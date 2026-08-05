@@ -15,7 +15,7 @@ import {
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { activityEventTypes, boardEventTypes, useLive } from './live'
-import { Absent, Freshness, Money, Owner, Section, StallBanner, Stamp, SurfaceHead } from './parts'
+import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Stamp, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { Button, Chip, EmptyState, StatusDot, Timestamp, type Tone } from './ui'
@@ -435,6 +435,22 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
               <Link to={hrefFor('inbox')}>Answer it in the inbox</Link>
             </StallBanner>
           )}
+          {/* R16's horizon limb (drain r1, D4). `parked_until` is SERVED on this
+              same run card (api.ts:443) and had no render on this surface at
+              all, so a parked run said WHY it stopped and never until when. It
+              goes through the landed `ParkedUntil` idiom — relative beside the
+              verbatim UTC, and the "parked, no horizon given" absence byte-kept,
+              because a park the platform gave no horizon for must not acquire
+              one here. */}
+          {card.state === 'parked' && (
+            <StallBanner
+              kind="parked"
+              tone="yellow"
+              what={<ParkedUntil until={card.parked_until} />}
+            >
+              <Link to={hrefFor('inbox')}>It is released from its own card in the inbox</Link>
+            </StallBanner>
+          )}
           <p className="activity-line break-words">
             {card.last_activity ? (
               <>
@@ -502,6 +518,10 @@ type RailNode = {
   /** The served instant, verbatim. It is what the node is placed by, and it is
    *  rendered through the timestamp primitives and never formatted here. */
   at: string
+  /** What that instant IS, where it is not simply "when this happened". Only
+   *  the run-standing node needs one, and it needs one because the read serves
+   *  no instant for a standing state (drain r1, D3). */
+  atLabel?: string
   kind: 'step' | 'error' | 'split' | 'decision' | 'park' | 'terminal'
   tone: Tone
   stage?: string
@@ -520,6 +540,14 @@ type RailNode = {
  * value shown — the client owns no vocabulary here, so a later addition must
  * not vanish from the story (§42 forward tolerance).
  */
+/** The tone one served outcome takes. `completed` is the success hue, `error`
+ *  the failure hue and `split` the recovery hue — the same three the node
+ *  classes use, so the word and the dot beside it cannot disagree. Anything
+ *  else is neutral: this client owns no vocabulary here. */
+function outcomeTone(outcome: string): string {
+  return outcome === 'error' ? 'red' : outcome === 'split' ? 'blue' : outcome === 'completed' ? 'ok' : 'muted'
+}
+
 function stepNode(s: Detail['stage_progress'][number]): RailNode {
   const kind = s.outcome === 'error' ? 'error' : s.outcome === 'split' ? 'split' : 'step'
   return {
@@ -535,7 +563,21 @@ function stepNode(s: Detail['stage_progress'][number]): RailNode {
         </span>
         <span className="muted text-xs"> {s.type}</span>
         {s.kind !== '' && <span className="muted text-xs"> · {s.kind}</span>}
-        {s.outcome && <span className="stage-outcome text-xs text-[var(--ok)]"> · {s.outcome}</span>}
+        {/* The hue follows the OUTCOME (drain r1, D5b). Byte-faithful to the
+            shed `.stage-outcome` rule meant painting an `error` in the success
+            hue, which is the one thing a status colour must not do. The three
+            values are the rail's own closed vocabulary and an unrecognized one
+            takes the neutral treatment rather than a guessed meaning. */}
+        {s.outcome && (
+          <span
+            className="stage-outcome text-xs"
+            data-outcome-tone={outcomeTone(s.outcome)}
+            style={{ color: `var(--${outcomeTone(s.outcome)})` }}
+          >
+            {' '}
+            · {s.outcome}
+          </span>
+        )}
       </>
     ),
     note:
@@ -590,19 +632,31 @@ function parkNode(runID: string, p: NonNullable<Receipt['park_history']>[number]
   }
 }
 
-/** The run's own ending, from the served state string and nothing else: the
- *  client owns no state vocabulary, so a value it has never seen renders
- *  plainly rather than being hidden or renamed (§42/§48). */
+/**
+ * Where the run stands, from the served state string and nothing else: the
+ * client owns no state vocabulary, so a value it has never seen renders plainly
+ * rather than being hidden or renamed (§42/§48).
+ *
+ * THE INSTANT IS LABELLED AS WHAT IT IS (drain r1, D3). This read serves no
+ * instant for a run's standing — that is the same fact the ordering rule below
+ * rests on — so the only stamp available is `created_ts`, when the run was
+ * OPENED. Rendered bare in the slot every sibling node uses for "when this
+ * happened", it would read as the moment the run reached this state. It carries
+ * its own word instead, so the node says one true thing rather than two things
+ * one of which is a coincidence.
+ */
 function terminalNode(r: TaskRunView): RailNode {
   return {
     key: `run/${r.run_id}`,
     at: r.created_ts,
+    atLabel: 'opened',
     kind: 'terminal',
     tone: terminalStates.includes(r.state) ? 'accent' : 'green',
     head: (
       <>
         <span className="run-id font-mono text-xs">{r.run_id}</span>{' '}
-        <span className="muted text-xs">stands at</span> <Chip tone="accent">{r.state}</Chip>
+        <span className="muted text-xs">stands at</span>{' '}
+        <Chip tone={terminalStates.includes(r.state) ? 'accent' : 'green'}>{r.state}</Chip>
       </>
     ),
   }
@@ -664,6 +718,7 @@ function RailStep({ node }: { node: RailNode }) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {node.head}
         <span className="muted ms-auto text-xs">
+          {node.atLabel !== undefined && `${node.atLabel} `}
           <Timestamp ts={node.at} variant="live" />
         </span>
       </div>

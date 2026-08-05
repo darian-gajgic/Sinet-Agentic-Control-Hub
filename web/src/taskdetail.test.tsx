@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { ReceiptView } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
-import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
+import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
 import { EventStream } from './events'
 import detailSource from './TaskDetail.tsx?raw'
 import { click, flush, mount } from './testing'
@@ -23,7 +23,7 @@ const inertStream = () =>
     cancel: () => {},
   })
 
-async function task(id: string, extra: Record<string, { body?: unknown; status?: number }> = {}) {
+async function task(id: string, extra: Record<string, Scripted> = {}) {
   const routes = { ...oversightRoutes(), ...extra }
   const log = scriptedFetch(routes)
   window.history.replaceState(null, '', `/tasks/${id}`)
@@ -1286,13 +1286,17 @@ test('the task detail’s empty arms teach, and none renders over a read that ha
   expect(text, 'the empty decisions block does not teach what fills it').toContain('every time a person approves')
   view.unmount()
 
-  scriptedFetch({})
-  window.history.replaceState(null, '', '/tasks/t-ship')
-  const loading = mount(<App stream={inertStream()} />)
-  expect(loading.container.textContent, 'a teaching empty rendered over a read that had not landed').not.toContain(
+  // NONE-VS-NOT-LOADED, observed on the surface's own pending window: the
+  // session LANDS, the task read never answers, and the rail teaches nothing
+  // over it (drain r1, D1 — the instrument this replaces failed the session
+  // read, so no surface mounted and it asserted about an empty page).
+  const { view: pending } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { pending: true } })
+  expect(pending.container.querySelector('[data-surface-what]'), 'no surface mounted, so this proves nothing').not.toBeNull()
+  expect(pending.container.textContent, 'the loading affordance is missing').toContain('Catching up')
+  expect(pending.container.textContent, 'a teaching empty rendered over a pending read').not.toContain(
     'No stage boundary has been recorded yet.',
   )
-  loading.unmount()
+  pending.unmount()
 })
 
 test('the rail reads at 375px: no pinned width, and every responsive leg widens UP', async () => {
@@ -1311,4 +1315,140 @@ test('the rail reads at 375px: no pinned width, and every responsive leg widens 
   expect(rail.querySelector('[data-node]')?.querySelector('div')?.className).toContain('flex-wrap')
   expect(pinned.test('flex w-[420px]'), 'the detector does not match what it forbids').toBe(true)
   view.unmount()
+})
+
+test('the run-standing node labels its instant as the OPENING, and is marked terminal only when it is', async () => {
+  // Untested until now (drain r1, D3), and misreadable: this read serves NO
+  // instant for a run's standing — the same fact the rail's own ordering rule
+  // rests on — so the only stamp available is `created_ts`. Bare, in the slot
+  // every sibling uses for "when this happened", it read as the moment the run
+  // reached the state beside it.
+  const served = fixtures.taskDetail() as unknown as Detail
+  const body = railBody({
+    stage_progress: [],
+    decisions: [],
+    runs: [
+      { ...served.runs[0], run_id: 'r-done', state: 'completed', created_ts: '2026-07-20T09:00:00Z' },
+      { ...served.runs[0], run_id: 'r-live', state: 'running', created_ts: '2026-07-20T09:01:00Z' },
+    ],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+
+  const nodes = nodesOf(view, 'terminal')
+  expect(nodes, 'the rail carries no run-standing node').toHaveLength(2)
+  for (const node of nodes) {
+    // The instant says WHAT IT IS. Without the word it is a creation time
+    // wearing the position of a state change.
+    expect(node.textContent, 'the instant is unlabelled and reads as the state’s own').toContain('opened')
+    expect(node.querySelector('time')?.getAttribute('dateTime')).toMatch(/^2026-07-20T09:0/)
+  }
+  // Both served states render VERBATIM, and the terminal one is the one marked
+  // terminal — the other direction, so the marking is not simply always on.
+  expect(nodes[0].textContent).toContain('completed')
+  expect(nodes[1].textContent).toContain('running')
+  const steps = nodesOf(view, 'step')
+  expect(steps, 'a step node was rendered, so the negative below is not about nothing').toHaveLength(0)
+  view.unmount()
+
+  // And an ordinary step is NOT marked terminal.
+  const withStep = railBody({
+    stage_progress: [stageRow({ seq: 9, ts: '2026-07-20T09:02:00Z' })] as Detail['stage_progress'],
+    decisions: [],
+    runs: [{ ...served.runs[0], run_id: 'r-live', state: 'running' }],
+  })
+  const { view: mixed } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: withStep } })
+  expect(nodesOf(mixed, 'step'), 'the stage boundary lost its node').toHaveLength(1)
+  expect(nodesOf(mixed, 'step')[0].textContent, 'an ordinary step was marked as a run standing').not.toContain(
+    'stands at',
+  )
+  expect(nodesOf(mixed, 'terminal')).toHaveLength(1)
+  mixed.unmount()
+})
+
+test('a state the client has never seen renders verbatim on the rail, with the landed tolerance', async () => {
+  // The client owns NO state vocabulary (§42/§48): the FSM's values are the
+  // server's, and a state a later version adds must stay on the story rather
+  // than vanish or be renamed. This arm was undriven.
+  const served = fixtures.taskDetail() as unknown as Detail
+  const body = railBody({
+    stage_progress: [],
+    decisions: [],
+    runs: [{ ...served.runs[0], run_id: 'r-odd', state: 'quiesced' }],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+  const node = nodesOf(view, 'terminal')[0]
+  expect(node, 'a run in an unrecognized state vanished from the rail').toBeDefined()
+  expect(node.textContent, 'the served state was not rendered verbatim').toContain('quiesced')
+  // It takes the not-yet-ended treatment, because it is not in the stored
+  // terminal list — the same list `cancellable` reads the other way round, so
+  // there is no second vocabulary to drift.
+  expect(node.querySelector('[data-capacity]'), 'a capacity render leaked onto a rail node').toBeNull()
+  expect(view.container.querySelector('[data-cancel-run="r-odd"]'), 'an unrecognized state was silently uncancellable')
+    .not.toBeNull()
+  view.unmount()
+})
+
+test('a served stage outcome takes ITS OWN hue — an error never renders in the success colour', async () => {
+  // Byte-faithful to the shed `.stage-outcome` rule meant painting every
+  // outcome green, including `error` (drain r1, D5b). The three values are the
+  // rail's own closed vocabulary and the word must agree with the colour.
+  const body = railBody({
+    stage_progress: [
+      stageRow({ seq: 9, stage: 'plan', outcome: 'completed', ts: '2026-07-20T09:01:00Z' }),
+      stageRow({ seq: 10, stage: 'execute', outcome: 'split', ts: '2026-07-20T09:02:00Z' }),
+      stageRow({ seq: 11, stage: 'verify', outcome: 'error', ts: '2026-07-20T09:03:00Z' }),
+      stageRow({ seq: 12, stage: 'compose', outcome: 'abandoned', ts: '2026-07-20T09:04:00Z' }),
+    ] as Detail['stage_progress'],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+  const toneOf = (stage: string) =>
+    view.container.querySelector(`.stages [data-stage="${stage}"] .stage-outcome`)?.getAttribute('data-outcome-tone')
+  expect(toneOf('plan')).toBe('ok')
+  expect(toneOf('execute')).toBe('blue')
+  expect(toneOf('verify'), 'a failed stage renders in the success hue').toBe('red')
+  // An unrecognized outcome takes the neutral treatment rather than a guessed
+  // meaning — the client owns no vocabulary here either.
+  expect(toneOf('compose')).toBe('muted')
+  // The colour really reaches the element, not just the attribute.
+  const failed = view.container.querySelector('.stages [data-stage="verify"] .stage-outcome') as HTMLElement
+  expect(failed.getAttribute('style')).toContain('var(--red)')
+  view.unmount()
+})
+
+test('a parked run on the live lane says until WHEN, and an absent horizon is not invented', async () => {
+  // R16's horizon limb (drain r1, D4). `parked_until` is served on this same run
+  // card (api.ts:443) and had no render on this surface at all, so a parked run
+  // said why it stopped and never until when.
+  const served = fixtures.runDetail() as unknown as RunDetail
+  const { view } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': {
+      body: { ...served, card: { ...served.card, state: 'parked', parked_until: '2026-07-20T12:00:00Z' } },
+    },
+  })
+  const banner = view.container.querySelector('[data-stall="parked"]')!
+  expect(banner, 'a parked run on the live lane carries no horizon').not.toBeNull()
+  expect(banner.textContent).toContain('parked until')
+  // Through the landed idiom: relative BESIDE the verbatim UTC, never instead.
+  const stamp = banner.querySelector('time')!
+  expect(stamp.getAttribute('dateTime')).toBe('2026-07-20T12:00:00Z')
+  expect(stamp.textContent).toBe('2026-07-20T12:00:00Z')
+  expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  view.unmount()
+
+  // The absence arm is BYTE-KEPT: a park the platform gave no horizon for does
+  // not acquire one here.
+  const { view: blank } = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': { body: { ...served, card: { ...served.card, state: 'parked', parked_until: null } } },
+  })
+  const bare = blank.container.querySelector('[data-stall="parked"]')!
+  expect(bare.textContent).toContain('parked, no horizon given')
+  expect(bare.querySelector('time'), 'a horizon was invented for a park that has none').toBeNull()
+  blank.unmount()
+
+  // And a run that is not parked carries no park node on the live lane.
+  const { view: running } = await task('t-ship', detailRoutes())
+  expect(running.container.querySelector('[data-stall="parked"]'), 'an unparked run was marked parked').toBeNull()
+  running.unmount()
 })

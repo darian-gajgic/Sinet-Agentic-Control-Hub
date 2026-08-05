@@ -58,7 +58,13 @@ export type Bucket = { id: string; title: string; runs: RunListItem[] }
  */
 const bucketMeaning: Record<string, { tone: Tone; why: string }> = {
   running: { tone: 'green', why: 'A run the platform is working on right now.' },
-  queued: { tone: 'blue', why: 'Accepted and waiting its turn — the scheduler starts it when the lane has room.' },
+  // The bucket holds `new` AND `queued` (bucketRuns below), and a `new` run has
+  // not been accepted by anything yet — it has been created and not yet
+  // dispatched. "Accepted" was true of only half the rows (drain r1, D5c).
+  queued: {
+    tone: 'blue',
+    why: 'Created or queued and not started yet — waiting for the scheduler to pick it up when its lane has room.',
+  },
   blocked: {
     tone: 'orange',
     why: 'Parked with an open question, so it moves again only once a person answers it in the inbox.',
@@ -72,6 +78,10 @@ const bucketMeaning: Record<string, { tone: Tone; why: string }> = {
 }
 
 const meaningOf = (id: string) => bucketMeaning[id] ?? { tone: 'accent' as Tone, why: '' }
+
+/** The bucket's teaching sentence, exported so a test asserts the copy the
+ *  surface actually renders rather than a second copy of it. */
+export const bucketMeaningFor = (id: string): string => meaningOf(id).why
 
 /**
  * bucketRuns sorts served rows into the five S15.5 buckets, plus an honest
@@ -133,6 +143,11 @@ export function MissionControl({
   // feed says something changed, and a clock of its own would be the one thing
   // §32 rules out.
   const buckets = bucketRuns(work.data?.runs ?? [], Date.now())
+  // A teaching empty is a statement about what the platform ANSWERED, so it
+  // renders only over an answer. Before the read lands `Freshness` owns the
+  // window and says "catching up" — teaching "nothing is running" there would
+  // erase the line between none and not-loaded (§42; parts.tsx:103–113).
+  const answered = work.data !== null
 
   return (
     <section className="surface">
@@ -166,7 +181,7 @@ export function MissionControl({
           </p>
           {b.id === 'blocked' && b.runs.length > 0 && <BlockedDoor />}
           {b.runs.length === 0 ? (
-            <EmptyState what={`Nothing is ${b.title.toLowerCase()}.`} why={meaningOf(b.id).why} />
+            answered && <EmptyState what={`Nothing is ${b.title.toLowerCase()}.`} why={meaningOf(b.id).why} />
           ) : (
             <ul className="rows" data-bucket={b.id}>
               {b.runs.map((r) => (
@@ -349,21 +364,28 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
 
           <ViewBlock title="Burn rate (per person, per observed day)" view={meters.burn_rates} />
           <ViewBlock title="Budget remainders" view={meters.budgets} />
-          {/* Never stall silently: a limit event is the platform having stopped
-              admitting work, and it says so in words with the door to where a
-              stopped run is released. Rendered only when the view really
-              carries rows — a banner over an empty answer would be an alarm
-              about nothing. */}
-          {(meters.limit_events.answer?.rows.length ?? 0) > 0 && (
+          {/* Never stall silently — KEYED ON THE CURRENT SIGNAL, and that is a
+              correction (drain r1, D2). This banner used to fire on the
+              limit-events view carrying any row, but `cost.limit_events` is
+              pure history: `SELECT … FROM limit_event_history … ORDER BY
+              event_seq DESC` (internal/history/catalog.go:554–559), with no
+              filter on `resets_at`. A row stays there after its window has
+              rolled, so one old event would have held a present-tense alarm up
+              forever — an alarm about nothing, which is the opposite of never
+              stalling silently. The lane rows on this same read carry the
+              CURRENT fact, so that is what it says. */}
+          {meters.lanes.some((l) => l.parked_runs > 0) && (
             <StallBanner
-              kind="limit"
+              kind="parked-lanes"
               tone="orange"
-              what="A limit was reached on at least one lane below. New background work stops being started there and running work parks at its next safe boundary — nothing is discarded."
+              what="A lane in this table is holding parked runs right now. New background work is not being started on it and running work parks at its next safe boundary — nothing queued or parked is discarded, and each lane's horizon is in its Parked column."
             >
               <Link to={hrefFor('inbox')}>Parked runs are released from their cards in the inbox</Link>
             </StallBanner>
           )}
-          <ViewBlock title="Limit events" view={meters.limit_events} />
+          {/* Recorded history, and labelled as such: these rows are every limit
+              signal the platform ever stored, most of them long since reset. */}
+          <ViewBlock title="Limit events — recorded history, not a current state" view={meters.limit_events} />
         </>
       )}
     </Section>

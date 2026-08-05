@@ -125,7 +125,9 @@ export function Fleet({
             </tbody>
           </table>
         </div>
-        {shown.length === 0 && (
+        {/* Gated on the served read: "no lane matches" is a statement about an
+            answer, and before one arrives `Freshness` above says so instead. */}
+        {shown.length === 0 && data !== null && (
           <EmptyState
             what="No lane matches this filter."
             why="A lane appears once work has run on it. These selectors narrow what is shown; they never narrow what you were allowed to see."

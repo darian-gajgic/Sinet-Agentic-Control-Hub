@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
 import { AnswerView } from './History'
-import { MetersPanel, bucketRuns } from './MissionControl'
+import { MetersPanel, bucketMeaningFor, bucketRuns } from './MissionControl'
 import type { Answer, MeterLane, Meters, RunList } from './api'
 import {
   FakeSource,
@@ -924,15 +924,48 @@ test('an empty bucket teaches instead of only admitting it is empty — and neve
   expect(text, 'the empty state does not teach what would fill it').toContain('Ended in the last day')
   view.unmount()
 
-  // The none-vs-not-loaded line holds: before the read lands there is no
-  // EmptyState at all, only the catching-up marker (`parts.tsx:134–136`).
-  scriptedFetch({})
+})
+
+test('NONE-VS-NOT-LOADED: a pending read renders the loading affordance and no teaching empty', async () => {
+  // THE INSTRUMENT THIS REPLACES was vacuous (drain r1, D1). It failed the
+  // SESSION read, so the shell mounted no surface at all and the assertion was
+  // looking at an empty <main> — it could not have seen a surface's own pending
+  // state, and it passed for that reason rather than because the gate held.
+  //
+  // Here the session LANDS, mission control really mounts, really asks, and its
+  // read never answers. `Freshness` owns that window (parts.tsx:103–113); a
+  // teaching empty over it would erase the line between "none" and "not loaded".
+  const routes = oversightRoutes()
+  routes['GET /api/runs'] = { pending: true }
+  scriptedFetch(routes)
   window.history.replaceState(null, '', '/')
-  const loading = mount(<App stream={inertStream()} />)
-  expect(loading.container.textContent, 'a teaching empty rendered over a read that had not landed').not.toContain(
-    'Nothing is recently finished.',
-  )
-  loading.unmount()
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  // The surface is genuinely mounted and genuinely waiting — without this the
+  // assertions below would pass over an empty page, which is the defect itself.
+  expect(view.container.querySelector('.surface'), 'no surface mounted, so this proves nothing').not.toBeNull()
+  expect(view.container.querySelector('[data-surface-what]')).not.toBeNull()
+  expect(view.container.querySelector('[data-freshness]')?.getAttribute('data-freshness')).toBe('catching-up')
+  for (const bucket of ['running', 'queued', 'parked', 'blocked on a human', 'recently finished']) {
+    expect(view.container.textContent, `a teaching empty rendered over a pending read: ${bucket}`).not.toContain(
+      `Nothing is ${bucket}.`,
+    )
+  }
+  view.unmount()
+
+  // …and once the read lands EMPTY, the teaching state is exactly what appears.
+  const none = fixtures.runs() as unknown as RunList
+  none.runs = []
+  const served = oversightRoutes()
+  served['GET /api/runs'] = { body: none }
+  scriptedFetch(served)
+  window.history.replaceState(null, '', '/')
+  const landed = mount(<App stream={inertStream()} />)
+  await flush()
+  expect(landed.container.textContent, 'a served empty does not teach').toContain('Nothing is running.')
+  expect(landed.container.textContent).toContain('A run the platform is working on right now.')
+  landed.unmount()
 })
 
 test('a wedged run says what pause-and-flag means and points at the inbox, firing nothing', async () => {
@@ -1005,4 +1038,70 @@ test('the new renders are reachable at 375px: nothing pins a pixel width, and ev
   expect(tiles.className).toContain('lg:grid-cols-6')
   expect(tiles.className, 'a max-width query entered the surface').not.toMatch(/\bmax-(sm|md|lg):/)
   view.unmount()
+})
+
+test('the parked-lane banner speaks about NOW, and pure limit HISTORY raises no alarm', async () => {
+  // THE DEFECT THIS REPLACES (drain r1, D2). The banner fired on the
+  // limit-events view carrying any row, and `cost.limit_events` is
+  // `SELECT … FROM limit_event_history … ORDER BY event_seq DESC LIMIT ?`
+  // (internal/history/catalog.go:554–559) with NO filter on `resets_at` — so a
+  // single event from weeks ago held "new background work stops being started"
+  // on screen forever. An alarm about nothing is the opposite of never stalling
+  // silently.
+
+  // (a) HISTORY ALONE raises nothing: limit rows served, no lane parked.
+  const historyOnly = servedMeters()
+  historyOnly.lanes = historyOnly.lanes.map((l) => ({ ...l, parked_runs: 0, parked_until: null }))
+  historyOnly.limit_events = {
+    answer: {
+      layer: 0,
+      query: 'cost.limit_events',
+      confidence: 'deterministic',
+      columns: ['event_seq', 'ts', 'user_id', 'run_id', 'type', 'limit_class', 'provider_signal', 'resets_at', 'lane'],
+      rows: [[41, '2026-06-01T09:00:00Z', 'alice', 'r-old', 'limit.hit', 'weekly', 'quota', '2026-06-08T09:00:00Z', 'zai']],
+      row_count: 1,
+      truncated: false,
+    },
+  }
+  const past = mount(<MetersPanel meters={historyOnly} stale={false} error="" />)
+  expect(past.container.querySelector('[data-stall]'), 'a recorded limit event raised a present-tense alarm').toBeNull()
+  // The rows still render — they are the record — and are labelled as history.
+  expect(past.container.textContent).toContain('recorded history, not a current state')
+  expect(past.container.textContent, 'the historical row was dropped instead of labelled').toContain('r-old')
+  past.unmount()
+
+  // (b) THE CURRENT SIGNAL raises it: a lane holding parked runs, right now.
+  const nowParked = servedMeters()
+  expect(nowParked.lanes.some((l) => l.parked_runs > 0), 'no served lane is parked — (b) proves nothing').toBe(true)
+  const live = mount(<MetersPanel meters={nowParked} stale={false} error="" />)
+  const banner = live.container.querySelector('[data-stall="parked-lanes"]')!
+  expect(banner, 'a lane holding parked runs stalls silently').not.toBeNull()
+  expect(banner.textContent).toContain('right now')
+  expect(banner.textContent).toContain('nothing queued or parked is discarded')
+  expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  expect(banner.querySelector('button'), 'the banner offers a verb of its own').toBeNull()
+  live.unmount()
+
+  // (c) And with NEITHER, nothing at all.
+  const calm = servedMeters()
+  calm.lanes = calm.lanes.map((l) => ({ ...l, parked_runs: 0, parked_until: null }))
+  const quiet = mount(<MetersPanel meters={calm} stale={false} error="" />)
+  expect(quiet.container.querySelector('[data-stall]')).toBeNull()
+  quiet.unmount()
+})
+
+test('the queued bucket teaches both states it holds, and claims acceptance for neither', () => {
+  // `bucketRuns` puts `new` AND `queued` in one bucket, and a `new` run has not
+  // been accepted by anything — it has been created and not yet dispatched. The
+  // copy said "Accepted", which was true of half the rows (drain r1, D5c).
+  const runs = servedRuns()
+  const queued = bucketRuns(runs, fixtureNow).find((b) => b.id === 'queued')!
+  expect(new Set(queued.runs.map((r) => r.state)).size, 'the bucket holds one state, so this asserts nothing')
+    .toBeGreaterThan(0)
+  const view = mount(<MetersPanel meters={servedMeters()} stale={false} error="" />)
+  view.unmount()
+  const why = bucketMeaningFor('queued')
+  expect(why, 'the queued bucket teaches nothing').not.toBe('')
+  expect(why.toLowerCase(), 'the copy overclaims acceptance for a `new` run').not.toContain('accepted')
+  expect(why.toLowerCase(), 'the copy names neither state it holds').toContain('created or queued')
 })

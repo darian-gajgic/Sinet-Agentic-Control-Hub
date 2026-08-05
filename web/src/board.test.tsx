@@ -523,3 +523,27 @@ test('the drag affordance is on the own-queued lane and nowhere else', async () 
     expect(card.className, 'a card that cannot be reordered looks draggable').not.toContain('cursor-grab')
   }
 })
+
+test('NONE-VS-NOT-LOADED: a pending board read shows the catching-up marker, never a teaching empty', async () => {
+  // The session LANDS and the board's own read never answers, so this observes
+  // the surface's own pending window (drain r1, D1). `Freshness` owns it; a
+  // teaching empty over it would say "you have nothing queued" to somebody
+  // whose queue simply has not arrived yet.
+  const routes = oversightRoutes()
+  routes['GET /api/tasks'] = { pending: true }
+  const { view } = await board(routes)
+  expect(view.container.querySelector('[data-surface-what]'), 'no surface mounted, so this proves nothing').not.toBeNull()
+  expect(view.container.textContent, 'the loading affordance is missing').toContain('Catching up')
+  expect(view.container.textContent, 'the own-queue empty taught over a pending read').not.toContain(
+    'Nothing of yours is queued.',
+  )
+  expect(view.container.textContent, 'a column empty taught over a pending read').not.toContain('No card is here.')
+  view.unmount()
+
+  // …and a served empty board teaches, so the gate is not simply always off.
+  const served = oversightRoutes()
+  served['GET /api/tasks'] = { body: { tasks: [], cursor: 1, truncated: false } }
+  const { view: landed } = await board(served)
+  expect(landed.container.textContent).toContain('Nothing of yours is queued.')
+  landed.unmount()
+})

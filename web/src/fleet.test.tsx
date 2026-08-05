@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
 import type { Meters } from './api'
-import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
+import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
 import { EventStream } from './events'
 import appSource from './App.tsx?raw'
 import fleetSource from './Fleet.tsx?raw'
@@ -30,7 +30,7 @@ const inertStream = () =>
     cancel: () => {},
   })
 
-async function fleet(extra: Record<string, { body?: unknown; status?: number }> = {}) {
+async function fleet(extra: Record<string, Scripted> = {}) {
   scriptedFetch({ ...oversightRoutes(), ...extra })
   window.history.replaceState(null, '', '/fleet')
   const view = mount(<App stream={inertStream()} />)
@@ -893,4 +893,24 @@ test('the fleet’s empty arms teach what would fill them', async () => {
     'declared per person per lane',
   )
   view.unmount()
+})
+
+test('NONE-VS-NOT-LOADED: a pending meters read shows the catching-up marker, never a teaching empty', async () => {
+  // The session LANDS and the fleet's own read never answers (drain r1, D1).
+  // "No lane matches this filter" over a pending read is a statement about the
+  // filter that the platform has not yet had the data to make.
+  const view = await fleet({ 'GET /api/meters': { pending: true } })
+  expect(view.container.querySelector('[data-surface-what]'), 'no surface mounted, so this proves nothing').not.toBeNull()
+  expect(view.container.textContent, 'the loading affordance is missing').toContain('Catching up')
+  expect(view.container.textContent, 'the no-lane-match empty taught over a pending read').not.toContain(
+    'No lane matches this filter.',
+  )
+  view.unmount()
+
+  // …and a served empty lane list teaches, so the gate is not simply always off.
+  const none = fixtures.meters() as unknown as Meters
+  none.lanes = []
+  const landed = await fleet({ 'GET /api/meters': { body: none } })
+  expect(landed.container.textContent).toContain('No lane matches this filter.')
+  landed.unmount()
 })
