@@ -8,6 +8,10 @@ import { resetHints } from './hints'
 import { hrefFor } from './routes'
 import { flush, mount } from './testing'
 import hintsSource from './hints.tsx?raw'
+import chatSource from './Chat.tsx?raw'
+import memorySource from './Memory.tsx?raw'
+import inboxSource from './Inbox.tsx?raw'
+import missionSource from './MissionControl.tsx?raw'
 
 /**
  * One-shot first-use hints and the served-gated teaching empties (P3-UI-7
@@ -94,10 +98,39 @@ test('the hint never covers the control it names, and stores nothing anywhere', 
   view.unmount()
 })
 
-test('the count stays small, and every hint sits on a surface this packet may open', () => {
-  const all = [...hintsSource.matchAll(/data-hint="([^"]+)"/g)].map((m) => m[1])
+test('the count stays small, and every hint sits on a surface this packet may open', async () => {
+  // THE VACUOUS VERSION THIS REPLACES (drain r1 D2). It regexed `data-hint="…"`
+  // over `hints.tsx`, which renders `data-hint={id}` — an expression, not a
+  // literal — so the match list was ALWAYS empty and `length <= 2` could never
+  // fail. It also never checked the placement half of its own name.
+  const placed = [...chatSource.matchAll(/<Hint id="([^"]+)"/g), ...memorySource.matchAll(/<Hint id="([^"]+)"/g)].map(
+    (m) => m[1],
+  )
+  // Non-vacuity first: the scan really found the hints that really ship.
+  expect(placed.sort()).toEqual(['composer-verb', 'memory-filters'])
   // The teaching layer is the tour plus the empty states; hints are seasoning.
-  expect(all.length).toBeLessThanOrEqual(2)
+  expect(placed.length).toBeLessThanOrEqual(2)
+
+  // THE PLACEMENT CLAIM, checked rather than asserted in a test name: every
+  // hint sits on a surface this packet may open. `Inbox.tsx` and
+  // `MissionControl.tsx` are byte-frozen, so a hint on either would have been a
+  // wall break rather than a feature.
+  for (const [name, src] of [
+    ['Inbox.tsx', inboxSource],
+    ['MissionControl.tsx', missionSource],
+  ] as const) {
+    expect(src, `a hint was placed on the byte-frozen ${name}`).not.toContain('<Hint ')
+  }
+
+  // The probe: the scan can fail. A third placement would break the cap.
+  const planted = [...placed, 'planted-third']
+  expect(planted.length).toBeGreaterThan(2)
+
+  // ...and both really render, which is what makes the count a fact about the
+  // shipped page rather than about two string literals.
+  const { view } = await openChat()
+  expect(view.container.querySelector('[data-hint="composer-verb"]')).not.toBeNull()
+  view.unmount()
 })
 
 // ── R12: the teaching empties are SERVED-GATED ────────────────────────────

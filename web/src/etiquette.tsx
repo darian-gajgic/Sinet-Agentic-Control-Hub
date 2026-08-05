@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { type EventStream, sharedStream } from './events'
 import { navigate } from './router'
@@ -78,9 +78,14 @@ export const etiquetteTypes = [...chatDotTypes, ...inboxDotTypes]
 
 export type NavDots = Partial<Record<RouteID, boolean>>
 
-/** One completion toast waiting to be shown. `id` is monotonic so the sink can
- *  tell what it has already fired without the hook having to clear anything. */
-export type ToastRequest = { id: number; settled: boolean }
+/**
+ * One completion toast waiting to be shown. `id` is monotonic so the sink can
+ * tell what it has already fired without the hook having to clear anything.
+ *
+ * `earlier` counts the requests this entry ABSORBED when the queue overflowed.
+ * It is 0 for an ordinary entry.
+ */
+export type ToastRequest = { id: number; settled: boolean; earlier: number }
 
 /**
  * The most requests kept at once.
@@ -89,6 +94,14 @@ export type ToastRequest = { id: number; settled: boolean }
  * the kit's stack shows four, so keeping a handful more than that is enough for
  * the sink to drain a burst and few enough that the list cannot grow without
  * bound on a long-lived tab.
+ *
+ * NOTHING IS SILENTLY DROPPED WHEN IT IS REACHED (drain r1 D4). The first
+ * shape used `slice(-keptRequests)`, which discarded the OLDEST undrained
+ * requests with no marker at all — a silent cap, which is the one thing this
+ * platform's no-silent-caps invariant forbids, and the kit's own stack already
+ * models the right answer one layer down (`data-limited`: hidden, never
+ * dropped). The overflow now COLLAPSES into the oldest surviving entry, which
+ * carries the count and says so in its own words.
  */
 const keptRequests = 8
 
@@ -108,7 +121,7 @@ export function useEtiquette(
   routeID: RouteID,
   authed: boolean,
   injected?: EventStream,
-): { dots: NavDots; requests: ToastRequest[] } {
+): { dots: NavDots; requests: ToastRequest[]; drain: (upto: number) => void } {
   const [dots, setDots] = useState<NavDots>({})
   const [requests, setRequests] = useState<ToastRequest[]>([])
   const routeRef = useRef(routeID)
@@ -153,7 +166,18 @@ export function useEtiquette(
         // settle in place, and a toast over the thing it describes is noise.
         if (routeRef.current === 'chat') return
         const id = ++nextID.current
-        setRequests((prev) => [...prev, { id, settled: e.type === 'chat.turn_settled' }].slice(-keptRequests))
+        setRequests((prev) => {
+          const next = [...prev, { id, settled: e.type === 'chat.turn_settled', earlier: 0 }]
+          if (next.length <= keptRequests) return next
+          // Fold everything past the cap into the oldest SURVIVING entry rather
+          // than discarding it: the count of what was absorbed rides along, and
+          // the sink says it out loud.
+          const overflow = next.length - keptRequests
+          const kept = next.slice(overflow)
+          const absorbed = next.slice(0, overflow).reduce((n, r) => n + r.earlier + 1, 0)
+          kept[0] = { ...kept[0], earlier: kept[0].earlier + absorbed }
+          return kept
+        })
       },
       onResnapshot: (_reason, done) => {
         // This subscriber holds no snapshot to re-read, so it is immediately
@@ -167,7 +191,16 @@ export function useEtiquette(
     return unsubscribe
   }, [authed, injected])
 
-  return { dots, requests }
+  // The sink REMOVES what it has shown. Without this the queue would keep every
+  // request forever and the overflow below would "absorb" entries that had
+  // already been on screen — a count that over-reports is worse than none. With
+  // it, the queue holds only what has NOT been shown, so the overflow figure is
+  // exactly the number of completions nobody ever saw.
+  const drain = useCallback((upto: number) => {
+    setRequests((prev) => prev.filter((r) => r.id > upto))
+  }, [])
+
+  return { dots, requests, drain }
 }
 
 /**
@@ -195,7 +228,7 @@ export function useEtiquette(
  * after every surface has opened it. This component only drains what that hook
  * has already decided to say.
  */
-export function TurnToasts({ requests }: { requests: ToastRequest[] }) {
+export function TurnToasts({ requests, drain }: { requests: ToastRequest[]; drain: (upto: number) => void }) {
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
@@ -204,15 +237,23 @@ export function TurnToasts({ requests }: { requests: ToastRequest[] }) {
   const fired = useRef(0)
 
   useEffect(() => {
+    if (requests.length === 0) return
+    let last = fired.current
     for (const r of requests) {
       if (r.id <= fired.current) continue
-      fired.current = r.id
+      last = r.id
       toastRef.current.add({
         type: r.settled ? 'success' : 'info',
         // The TYPE NAME is the whole fact, so the title is that type in
         // operator words and the copy adds nothing the frame does not state.
         title: r.settled ? 'A conversation turn settled' : 'A conversation turn was abandoned',
-        description: 'It finished while you were on another surface.',
+        // Each type gets its OWN honest word. The shared "finished" overstated
+        // an abandonment, which is a turn that STOPPED rather than one that
+        // completed (drain r1 D6a). The title already carries the fact; this
+        // line only says where you were, plus anything the queue absorbed.
+        description:
+          (r.settled ? 'It finished while you were on another surface.' : 'It stopped while you were on another surface.') +
+          (r.earlier > 0 ? ` ${String(r.earlier)} earlier completion${r.earlier === 1 ? '' : 's'} are not shown separately.` : ''),
         // The door rides the kit's own `Toast.Action` slot (ui/Toast.tsx,
         // byte-frozen) and hands the route change to the ROUTER — §48 OQ2's
         // rule: cross-link, never re-implement.
@@ -224,7 +265,11 @@ export function TurnToasts({ requests }: { requests: ToastRequest[] }) {
         },
       })
     }
-  }, [requests])
+    if (last > fired.current) {
+      fired.current = last
+      drain(last)
+    }
+  }, [requests, drain])
 
   // The toasts render in the kit's portal; this component draws nothing itself.
   return null

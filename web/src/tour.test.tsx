@@ -234,6 +234,53 @@ test('a step whose target is absent SKIPS VISIBLY rather than ringing nothing', 
   throw new Error('no step was ever absent, so the visible-skip path was never exercised')
 })
 
+test('the overlay PASSES CLICKS THROUGH: the root is inert and only the card is interactive', async () => {
+  // THE DEFECT THIS PINS (drain r1 D1, HIGH). The overlay root is
+  // `fixed inset-0`, which covers the viewport and defaults to
+  // `pointer-events: auto`. Only the scrim and the ring carried `none`, so in a
+  // REAL browser hit-testing landed every click outside the card on the root:
+  // the spotlit control could never be pressed, click-to-advance could never
+  // fire, and a nav step could never navigate. Every jsdom test passed over it
+  // because jsdom does no hit-testing — it dispatches straight at the target.
+  // The pass-through precedent in this tree is the aurora field.
+  const { view } = await openAt('mission-control')
+  await startTour(view)
+
+  const root = view.container.querySelector('[data-tour-overlay]') as HTMLElement
+  const card = view.container.querySelector('[data-tour-card]') as HTMLElement
+  expect(root.className, 'the overlay root would swallow every click on the page').toContain('pointer-events-none')
+  expect(card.className, 'the tour card itself is unclickable').toContain('pointer-events-auto')
+
+  // The ring must not intercept either — it sits ON TOP of the spotlit control.
+  const ring = view.container.querySelector('[data-tour-ring]')
+  if (ring !== null) expect(ring.className).toContain('pointer-events-none')
+
+  // The probe: the pin can fail. A root without the utility is the shipped
+  // defect, and a card without it is the same defect one level in.
+  expect('fixed inset-0 z-40'.includes('pointer-events-none')).toBe(false)
+  view.unmount()
+})
+
+test('the tour ends with the session, so it never renders over /login', async () => {
+  // A mid-tour session expiry forces /login, and a spotlight over a PIN field
+  // points at a control the tour never registered (drain r1 D5).
+  const { view, log } = await openAt('mission-control')
+  await startTour(view)
+  expect(view.container.querySelector('[data-tour-overlay]')).not.toBeNull()
+
+  log.set('GET /api/auth/session', { body: { authenticated: false } })
+  click(view.container.querySelector('[data-auth="sign-out"]'))
+  await flush(6)
+
+  expect(window.location.pathname, 'the session loss did not force the login route').toBe(hrefFor('login'))
+  expect(
+    view.container.querySelector('[data-tour-overlay]'),
+    'the tour survived the session and is ringing the login form',
+  ).toBeNull()
+  expect(view.container.querySelector('[data-tour-start]'), 'the tour can be started pre-session').toBeNull()
+  view.unmount()
+})
+
 // ── the standing bans ─────────────────────────────────────────────────────
 
 test('the tour holds no timer, no storage, no registry key and no library', () => {

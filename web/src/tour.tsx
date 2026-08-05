@@ -142,8 +142,15 @@ type TourState = { running: boolean; index: number }
  * mean a step that renders nothing at all, which is the silent case this tour
  * must not have.
  */
-export function useTour() {
+export function useTour(authed: boolean) {
   const [{ running, index }, set] = useState<TourState>({ running: false, index: 0 })
+
+  // A mid-tour session expiry forces /login, and a spotlight ring over a PIN
+  // field points at a control the tour never registered and has nothing true to
+  // say about. The tour ends with the session (drain r1 D5).
+  useEffect(() => {
+    if (!authed) set({ running: false, index: 0 })
+  }, [authed])
 
   const stop = useCallback(() => {
     set({ running: false, index: 0 })
@@ -214,18 +221,27 @@ export function TourOverlay({
   }, [step, onNext])
 
   return (
-    <div className="fixed inset-0 z-40" data-tour-overlay data-tour-step={step.id}>
-      {/* The scrim never swallows the control it is teaching: pointer events are
-          off, so the real click lands on the real element underneath. */}
-      <div className="absolute inset-0 bg-black/45" aria-hidden="true" style={{ pointerEvents: 'none' }} />
+    // POINTER EVENTS ARE OFF ON THE ROOT, and this is the whole reason the
+    // tour can be clicked through at all (drain r1 D1). A `fixed inset-0`
+    // element defaults to `pointer-events: auto` and covers the viewport, so
+    // hit-testing lands EVERY click outside the card on this div: the spotlit
+    // control could never be pressed, click-to-advance could never fire, and a
+    // nav step could never navigate. jsdom does no hit-testing, so all eight
+    // tour tests passed over that defect — the §52-B class exactly. The
+    // pass-through chrome precedent is the aurora field (index.css).
+    <div
+      className="pointer-events-none fixed inset-0 z-40"
+      data-tour-overlay
+      data-tour-step={step.id}
+    >
+      <div className="absolute inset-0 bg-black/45" aria-hidden="true" />
 
       {box !== null && (
         <div
           aria-hidden="true"
           data-tour-ring
-          className="absolute rounded-(--radius-sm) ring-2 ring-(--accent) motion-safe:transition-[top,left,width,height]"
+          className="pointer-events-none absolute rounded-(--radius-sm) ring-2 ring-(--accent) motion-safe:transition-[top,left,width,height]"
           style={{
-            pointerEvents: 'none',
             top: box.top - 4,
             left: box.left - 4,
             width: box.width + 8,
@@ -238,7 +254,7 @@ export function TourOverlay({
         role="dialog"
         aria-label="Guided tour"
         data-tour-card
-        className="absolute right-4 bottom-4 left-4 mx-auto max-w-sm rounded-(--radius) border border-border bg-popover/95 p-4 shadow-(--shadow) backdrop-blur-[var(--blur-overlay)]"
+        className="pointer-events-auto absolute right-4 bottom-4 left-4 mx-auto max-w-sm rounded-(--radius) border border-border bg-popover/95 p-4 shadow-(--shadow) backdrop-blur-[var(--blur-overlay)]"
       >
         <p className="m-0 text-xs tracking-wide text-muted-foreground uppercase">
           Step {String(index + 1)} of {String(total)}

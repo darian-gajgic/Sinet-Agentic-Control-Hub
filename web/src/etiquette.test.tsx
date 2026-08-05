@@ -10,7 +10,7 @@ import {
 } from './etiquette'
 import { FakeSource, frame, oversightRoutes, scriptedFetch } from './doubles'
 import { EventStream } from './events'
-import { inboxEventTypes, missionEventTypes } from './live'
+import { chatTurnEventTypes, inboxEventTypes, missionEventTypes } from './live'
 import { hrefFor, type RouteID } from './routes'
 import { flush, mount } from './testing'
 import etiquetteSource from './etiquette.tsx?raw'
@@ -107,10 +107,19 @@ test('every etiquette type is a type the platform registers, and the inbox set i
     ).not.toContain(closing)
   }
 
-  // The chat pair is the turn lifecycle's two ENDINGS. `chat.turn_started` is
-  // excluded because the person who started it is the person who would be told.
-  expect([...chatDotTypes]).toEqual(['chat.turn_settled', 'chat.turn_abandoned'])
+  // The chat pair is the turn lifecycle's two ENDINGS, checked against the REAL
+  // landed list rather than against string literals (drain r1 D6c) — literals
+  // would keep passing if `live.ts` renamed a type out from under them.
+  for (const t of chatDotTypes) {
+    expect(chatTurnEventTypes as readonly string[], `${t} is not a registered chat turn type`).toContain(t)
+  }
+  expect(chatTurnEventTypes as readonly string[], 'the landed list no longer carries the start type').toContain(
+    'chat.turn_started',
+  )
+  // ...and it is excluded, because the person who started it is the person who
+  // would be told.
   expect(chatDotTypes as readonly string[]).not.toContain('chat.turn_started')
+  expect(chatDotTypes).toHaveLength(2)
 })
 
 test('there is NO memory dot, and the reason is structural rather than a display choice', () => {
@@ -191,6 +200,30 @@ test('the etiquette adds NO read and does not change the connection', async () =
   view.unmount()
 })
 
+test('a feed-down gap neither clears a lit dot nor invents one — the pill owns feed state', async () => {
+  const { view, source } = await openAt('mission-control')
+  await send(source, 'engine.gate_ask')
+  expect(dotOn(view, 'inbox'), 'the setup did not light a dot').toBe(true)
+
+  // THE GAP, driven through the transport's OWN continuity rule rather than a
+  // test-only hook: a frame at or below the last delivered sequence means the
+  // stream is not where we think it is, so it is dropped and every subscriber
+  // is required to re-snapshot (`stream-rewound`, events.ts). The etiquette has
+  // no snapshot to re-read, and after a gap it cannot know what it missed.
+  act(() => {
+    source.send('engine.gate_ask', frame(1, 'engine.gate_ask', ['board']))
+  })
+  await flush()
+
+  // NOT CLEARED: the arrival that lit it really happened, and erasing it would
+  // lose a fact the person has not answered yet.
+  expect(dotOn(view, 'inbox'), 'a feed-down gap erased a real arrival').toBe(true)
+  // NOT INVENTED: nothing lights for a route that saw no frame. A dot after a
+  // gap would announce an arrival that may never have happened.
+  expect(dotOn(view, 'chat'), 'a feed-down gap invented a dot').toBe(false)
+  view.unmount()
+})
+
 // ── R15: the toasts ───────────────────────────────────────────────────────
 
 test('a settled turn toasts when you are elsewhere, with a door to the assistant', async () => {
@@ -234,6 +267,31 @@ test('NO run or deliverable toast exists, per the proposal amendment', async () 
     )
   }
   expect(text).not.toContain('A conversation turn')
+  view.unmount()
+})
+
+test('the request queue never drops a completion silently — the overflow says how many', async () => {
+  // THE DEFECT THIS REPLACES (drain r1 D4). The queue used
+  // `slice(-keptRequests)`, which discarded the OLDEST undrained requests with
+  // no marker — a silent cap, which is the one thing the no-silent-caps
+  // invariant forbids. The kit's own stack models the right answer one layer
+  // down: `data-limited` hides the overflow, it never drops it.
+  const { view, source } = await openAt('mission-control')
+  // The overflow only exists when a BURST lands faster than the sink drains, so
+  // all twelve frames are delivered inside ONE act: React batches the state
+  // updates and the effect runs once, with twelve requests queued behind it.
+  act(() => {
+    for (let i = 0; i < 12; i++) {
+      seq += 1
+      source.send('chat.turn_settled', frame(seq, 'chat.turn_settled', ['board']))
+    }
+  })
+  await flush()
+
+  const text = document.body.textContent ?? ''
+  expect(text, 'the overflow was dropped without saying so').toContain('earlier completion')
+  // The figure is the count really absorbed, not a guess: 12 driven, 8 kept.
+  expect(text).toContain('4 earlier completions are not shown separately.')
   view.unmount()
 })
 

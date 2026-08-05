@@ -85,11 +85,11 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
   // CENSUS HUNK (b) — background-run etiquette (P3-UI-7 R15). It joins the
   // stream `useConnection` already opened; it opens nothing, adds no topic and
   // reads nothing. The dot is cleared by arriving on the route.
-  const { dots, requests } = useEtiquette(route.id, authed, stream)
+  const { dots, requests, drain } = useEtiquette(route.id, authed, stream)
   // CENSUS HUNK (c) — the guided tour (P3-UI-7 R13). It NEVER auto-starts:
   // nothing in this client persists, so a self-starting tour would ambush every
   // load. `TourButton` below is the only thing that can start it.
-  const tour = useTour()
+  const tour = useTour(authed)
 
   // Fail closed, both directions: no session outside /login, and no /login
   // once there is one. `next` survives the round trip so a deep link that
@@ -137,7 +137,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
         <div className="aurora" aria-hidden="true" />
         {/* The toast sink lives inside the provider because `useToast` reads
             its manager. It subscribes to nothing — see `useEtiquette`. */}
-        <TurnToasts requests={requests} />
+        <TurnToasts requests={requests} drain={drain} />
 
       <aside className="shell-side">
         <Link to={hrefFor('mission-control')} className="brand">
