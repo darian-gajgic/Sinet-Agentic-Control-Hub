@@ -17,6 +17,7 @@ import {
   type Scripted,
 } from './doubles'
 import { EventStream } from './events'
+import { hrefFor } from './routes'
 import { click, flush, mount, typeInto } from './testing'
 // The restyle's own pins read the real shipped sources, because the cascade
 // hazard they guard against is a property of the STYLESHEET beside the MARKUP
@@ -1763,12 +1764,31 @@ test('the shed rules are gone and their replacements really compile', async () =
   const { view } = await review()
   // ⚠ SELECTED BY `[data-widget-key]`, NOT by `.diff-widget`, and the reason is a
   // collision this shed surfaced: `diff-widget` is ALSO react-diff-view's own
-  // class for the row it mounts a widget into, so the owned rule was painting
-  // the adopted widget's `<tr>` AND our div inside it — one left rail and one
-  // padding, applied twice. The rule is gone, the presentation now lands once on
-  // our own element, and the adopted stylesheet is left to style its own DOM
-  // (adopt-don't-fork). `.diff-widget` stays as the class it was: the landed
-  // pins select `.diff-widget [data-comment]`, which reaches ours either way.
+  // class for the row it mounts a widget into, so the owned rule (a .35rem/.5rem
+  // padding and a 3px left rail in `currentColor`) MATCHED the adopted widget's
+  // `<tr>` as well as our own div inside it.
+  //
+  // DATED CORRECTION 2026-08-05 (C-2 drain r1, D4): this comment used to say the
+  // rule applied "one left rail and one padding, applied twice", which overstates
+  // it by one property. Only the RAIL ever doubled. react-diff-view's `.diff`
+  // table collapses its borders (its own stylesheet sets that border model to
+  // `collapse`), and under the collapsed model a border set on a table ROW box IS
+  // painted — so the 3px rail really was drawn on the adopted `<tr>` and again on
+  // our div inside it. Padding, by contrast, does not apply to a table row box at
+  // all, so the row's padding never painted and only our div's ever did. Matching
+  // a rule and painting it are not the same thing, and this comment claimed
+  // painting. The defect is a doubled rail, not a doubled pair.
+  //
+  // (Deliberately written WITHOUT the hyphenated CSS property and display-value
+  // literals this paragraph is about. Tailwind scans this file, so such a token
+  // left bare in prose here compiles a real — and permanently dead — rule into the
+  // production sheet. Measured, not guessed: the first draft of this correction
+  // shipped exactly two, and the rebuild is what caught them.)
+  //
+  // The rule is gone, the presentation now lands once on our own element, and the
+  // adopted stylesheet is left to style its own DOM (adopt-don't-fork).
+  // `.diff-widget` stays as the class it was: the landed pins select
+  // `.diff-widget [data-comment]`, which reaches ours either way.
   expect(at(view, '[data-widget-key]')?.className, 'the widget rail did not move to utilities').toContain(
     'border-s-[3px]',
   )
@@ -1804,5 +1824,85 @@ test('⚠ the accept card stopped borrowing the workforce map`s .provenance grid
   // The rule itself is untouched, because its real consumer still renders it.
   expect(cssSource, '.provenance was shed out from under Workforce.tsx').toContain('.provenance {')
   expect(workforceSource, 'Workforce stopped consuming .provenance').toContain('className="provenance"')
+  view.unmount()
+})
+
+// ── seam C-2 drain r1 ───────────────────────────────────────────────────────
+
+test('D3: the POPULATED lineage arms render both directions, and the empty form is unchanged', async () => {
+  // WHY THIS PIN EXISTS AT ALL, written down because its absence was the finding.
+  // `LineageEdges` renders the two edge arrays of `TaskLineage` — `succeeds` and
+  // `succeeded_by`, each a `TaskSuccessor` (api.ts:343–352), reached through
+  // `DeliverableDetail.lineage` (api.ts:1078–1084) — and until this test NOTHING
+  // in the tree pinned their POPULATED form. The golden detail serves
+  // `succeeds: []` / `succeeded_by: []` and the seeded world serves the same, so
+  // the C-2 browser walk could not reach the block either (§53 records that
+  // region NOT WALKED, honestly). Typecheck was the whole of the cover, and
+  // typecheck cannot see this bug: both id fields are `string`, so an arm
+  // pointing at the wrong ROUTE FAMILY compiles perfectly. It rendered correctly
+  // by luck rather than by verification.
+  //
+  // The body is SCRIPTED per test — the §49 error-contract precedent — because no
+  // producer in this world mints a deliverable that both follows from one and has
+  // spawned a follow-up task. Declared derived here rather than at the fixtures.
+  const detail = fixtures.deliverableReview() as { lineage: Record<string, unknown> }
+
+  // The EMPTY arms first, so the populated far side is a real change of state
+  // rather than a shape that was on screen all along.
+  const bare = await review()
+  expect(text(bare.view), 'the landed absent sentence moved').toContain(
+    'No follow-up lineage: this deliverable neither followed from one nor spawned a task.',
+  )
+  expect(at(bare.view, '.lineage'), 'the empty arms mounted the lineage block anyway').toBeNull()
+  expect(all(bare.view, '[data-lineage]'), 'an empty arm rendered an edge').toHaveLength(0)
+  bare.view.unmount()
+
+  const { view } = await review(reviewDeliverableID, {
+    [`GET /api/deliverables/${reviewDeliverableID}`]: {
+      body: {
+        ...detail,
+        lineage: {
+          ...detail.lineage,
+          succeeds: [
+            { task_id: 't-prior77', deliverable_id: 'd-charter', revision_n: 3, created_ts: '2026-07-01T09:00:00Z' },
+          ],
+          succeeded_by: [
+            {
+              task_id: 't-follow42',
+              deliverable_id: reviewDeliverableID,
+              revision_n: 2,
+              created_ts: '2026-07-02T09:00:00Z',
+            },
+          ],
+        },
+      },
+    },
+  })
+
+  expect(at(view, '.lineage'), 'the populated arms never mounted the lineage block').not.toBeNull()
+  expect(text(view), 'the absent sentence survived a populated lineage').not.toContain('No follow-up lineage')
+
+  // BOTH DIRECTIONS, each with its own route family. The families differ on
+  // purpose and the difference is the point: a backward edge names the
+  // DELIVERABLE this one followed from, a forward edge names the TASK it spawned
+  // — which is the same rule TaskDetail renders lineage under — so a copy-pasted
+  // arm would send one of them to a route that cannot serve it.
+  const from = at(view, '[data-lineage="succeeds"]')!
+  expect(from.textContent, 'the backward edge lost its words').toContain('Follows from')
+  expect(from.textContent, 'the backward edge lost its deliverable or its revision').toContain('d-charter r3')
+  const fromHref = from.querySelector('a')?.getAttribute('href')
+  expect(fromHref, 'a backward edge must link the DELIVERABLE it followed from').toBe(
+    hrefFor('deliverable', { id: 'd-charter' }),
+  )
+  expect(fromHref, 'the deliverable route moved out from under the edge').toBe('/deliverables/d-charter')
+
+  const to = at(view, '[data-lineage="succeeded-by"]')!
+  expect(to.textContent, 'the forward edge lost its words').toContain('Followed up by')
+  expect(to.textContent, 'the forward edge lost its task').toContain('t-follow42')
+  const toHref = to.querySelector('a')?.getAttribute('href')
+  expect(toHref, 'a forward edge must link the TASK it spawned, never a deliverable').toBe(
+    hrefFor('task', { id: 't-follow42' }),
+  )
+  expect(toHref, 'the task route moved out from under the edge').toBe('/tasks/t-follow42')
   view.unmount()
 })
