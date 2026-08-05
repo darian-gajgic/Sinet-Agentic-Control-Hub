@@ -1094,12 +1094,13 @@ test('the queued bucket teaches both states it holds, and claims acceptance for 
   // `bucketRuns` puts `new` AND `queued` in one bucket, and a `new` run has not
   // been accepted by anything — it has been created and not yet dispatched. The
   // copy said "Accepted", which was true of half the rows (drain r1, D5c).
-  const runs = servedRuns()
-  const queued = bucketRuns(runs, fixtureNow).find((b) => b.id === 'queued')!
-  expect(new Set(queued.runs.map((r) => r.state)).size, 'the bucket holds one state, so this asserts nothing')
-    .toBeGreaterThan(0)
-  const view = mount(<MetersPanel meters={servedMeters()} stale={false} error="" />)
-  view.unmount()
+  const probe = { ...servedRuns()[0], run_id: 'run-new-probe', state: 'new', waiting_on_human: false }
+  const queued = bucketRuns([...servedRuns(), probe], fixtureNow).find((b) => b.id === 'queued')!
+  const states = new Set(queued.runs.map((r) => r.state))
+  expect(states.has('new'), 'the `new` probe must land in the queued bucket — the copy risk this test polices')
+    .toBe(true)
+  expect(states.has('queued'), 'the served world must hold a queued row, or "both states" is proven for one')
+    .toBe(true)
   const why = bucketMeaningFor('queued')
   expect(why, 'the queued bucket teaches nothing').not.toBe('')
   expect(why.toLowerCase(), 'the copy overclaims acceptance for a `new` run').not.toContain('accepted')
