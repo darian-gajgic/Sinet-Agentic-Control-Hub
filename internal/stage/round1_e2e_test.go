@@ -183,7 +183,7 @@ type registryOver struct{ proj *project.Store }
 func (r registryOver) Match(ctx context.Context, req intake.Request) (intake.RegistrySlice, bool, error) {
 	// Mirrors the shell seam's submitted-pin pass-through (P3-RW-1), refusal
 	// mapping included — the production edge is proven in internal/shell.
-	if pin := strings.TrimSpace(req.Project); pin != "" {
+	if pin := req.Project; pin != "" {
 		e, err := r.proj.PinForIntake(ctx, pin, req.UserID)
 		if err != nil {
 			switch {

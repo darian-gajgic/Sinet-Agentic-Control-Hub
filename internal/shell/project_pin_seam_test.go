@@ -182,6 +182,31 @@ func TestRegistrySeamRefusesInvalidPin(t *testing.T) {
 	}
 }
 
+// TestRegistrySeamPinFieldIsVerbatim (drain r1 F3): the submitted field is
+// consumed as-is. A padded or blank value is a pin attempt that names no
+// project — never a trimmed match, and never a silent fall-back to the text
+// scan. Record and resolution therefore cannot diverge: the durable
+// intake.state payload carries the same bytes the resolution used.
+func TestRegistrySeamPinFieldIsVerbatim(t *testing.T) {
+	r := pinSeam(t)
+	ctx := context.Background()
+
+	for _, pin := range []string{" shop ", "shop ", "   "} {
+		t.Run("pin_"+pin, func(t *testing.T) {
+			// Text that WOULD match by name, to prove no fall-back either.
+			slice, ok, err := r.Match(ctx, intake.Request{
+				UserID: "alice", Text: "fix the shop backend checkout", Project: pin,
+			})
+			if ok {
+				t.Fatalf("pin %q resolved %+v — the field is taken verbatim, and no pin falls back to the scan", pin, slice)
+			}
+			if !errors.Is(err, intake.ErrPinUnknown) {
+				t.Fatalf("pin %q: err = %v, want the unknown-project refusal", pin, err)
+			}
+		})
+	}
+}
+
 // TestRegistrySeamUnpinnedUnchanged: without a pin the seam is exactly today's
 // name-token scan, and a no-match still degrades silently (err == nil) — the
 // pin refusal is the ONLY loud edge (S06.2 degrade posture, CONVENTIONS §14).

@@ -60,7 +60,12 @@ func (r registrySeam) Match(ctx context.Context, req intake.Request) (intake.Reg
 	// the requester owns or belongs to it, and it is ACTIVE — is the project
 	// store's own, so the visibility predicate stays in one package (S15.2:
 	// authorization is enforced server-side, once).
-	if pin := strings.TrimSpace(req.Project); pin != "" {
+	//
+	// The field is taken VERBATIM (drain r1 F3): non-empty as submitted IS a
+	// pin attempt, and a padded or blank value simply names no project. The
+	// durable record marshals the same bytes, so what was recorded and what
+	// was resolved can never diverge.
+	if pin := req.Project; pin != "" {
 		e, err := r.proj.PinForIntake(ctx, pin, req.UserID)
 		if err != nil {
 			return intake.RegistrySlice{}, false, pinRefusal(pin, err)
