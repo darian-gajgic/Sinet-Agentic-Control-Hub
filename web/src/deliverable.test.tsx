@@ -13,6 +13,7 @@ import {
   reviewRoutes,
   reworkDeliverableID,
   scriptedFetch,
+  signedInAsOperator,
   type Scripted,
 } from './doubles'
 import { EventStream } from './events'
@@ -1312,4 +1313,205 @@ test('D14: answerAtDoor refuses a route that escapes the machine surface', async
   // And an ordinary encoded segment still passes — a composite ask id carries a
   // colon, and an encoded one must not become a refusal.
   expect(apiPath('/api/approvals/ask%3Ax/answer'), 'an ordinary encoded segment was refused').toBe(true)
+})
+
+// ── the S13.9 follow-up spawn: the fourteenth D3 control (P3-UI-4) ────────
+
+/** The accepted deliverable, which is where BOTH follow-up limbs are open: the
+ *  plain `follow-up` door with no preset, and the `request-revision` door's
+ *  finished limb carrying the platform's `revision` framing. */
+const spawnRoutes = (over: Record<string, Scripted> = {}) => ({
+  ...reviewRoutes(),
+  'GET /api/deliverables/d-notes': { body: fixtures.deliverableDetail() },
+  ...over,
+})
+
+const spawned = {
+  task_id: 't-followup-1',
+  owner: 'alice',
+  title: 'Follow up on d-notes',
+  deliverable_id: 'd-notes',
+  revision_n: 1,
+  preset: 'revision',
+}
+
+async function accepted(extra: Record<string, Scripted> = {}) {
+  const routes = spawnRoutes(extra)
+  const log = scriptedFetch(routes)
+  window.history.replaceState(null, '', '/deliverables/d-notes')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+  return { view, log }
+}
+
+const spawnControls = (view: { container: HTMLElement }) => all(view, '[data-control="follow-up"]')
+
+test('the control renders on every door that SUPPLIES the spawn, and on no other', async () => {
+  const { view } = await accepted()
+  const served = fixtures.deliverableDetail() as unknown as { doors: { verb: string; route: string }[] }
+  const driveable = served.doors.filter((d) => d.route.endsWith('/follow-up'))
+  expect(driveable.length, 'the served body no longer opens the spawn').toBeGreaterThan(1)
+
+  // Gated on what the door SUPPLIES, not on a verb name — drain r1 D4's rule,
+  // applied to the other verb. Both served limbs reach the same landed route.
+  expect(spawnControls(view)).toHaveLength(driveable.length)
+  for (const d of driveable) {
+    expect(at(view, `[data-door="${d.verb}"] [data-control="follow-up"]`), `${d.verb} supplies the spawn and offers no control`).not.toBeNull()
+  }
+  // And a door that does NOT supply it offers nothing, however available it is.
+  expect(at(view, '[data-door="accept"] [data-control="follow-up"]')).toBeNull()
+  expect(at(view, '[data-door="preview"] [data-control="follow-up"]')).toBeNull()
+  view.unmount()
+})
+
+test('the spawn sends the DOOR’s own preset and the person’s own ask, and nothing composed here', async () => {
+  const { view, log } = await accepted({
+    'POST /api/deliverables/d-notes/follow-up': { body: spawned },
+  })
+  const control = at(view, '[data-door="request-revision"] [data-control="follow-up"]')!
+  typeInto(control.querySelector('[data-field="follow-up-objective"]') as HTMLTextAreaElement, 'Tighten the intro')
+  click(control.querySelector('[data-open="follow-up"]'))
+  await flush()
+
+  // CONFIRM BEFORE FIRE, and it says what a follow-up IS — a new task of your
+  // own — and what it explicitly does not do to the work in front of you.
+  const dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog, 'the spawn fired with no confirm').not.toBeNull()
+  expect(dialog.textContent).toContain('NEW task')
+  expect(dialog.textContent).toContain('revision framing')
+  expect(dialog.textContent, 'the confirm claims the deliverable changes').toContain('changes nothing about this deliverable')
+  // It overclaims nothing: no deletion, no rollback, no replaced revision.
+  for (const word of ['deleted', 'rolled back', 'replaces this', 'undone']) {
+    expect(dialog.textContent, `the confirm claims a "${word}" the verb does not do`).not.toContain(word)
+  }
+  const before = log.calls.length
+  click(dialog.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const sent = log.calls.find((c) => c.path === '/api/deliverables/d-notes/follow-up')!
+  expect(sent, 'the confirm fired nothing').toBeDefined()
+  expect(sent.method).toBe('POST')
+  // The preset is the door's own (`revision`, deliverables.go:350) and NO
+  // revision is sent: the verb defaults to the current one, which is the honest
+  // reading of "follow up on this deliverable".
+  expect(sent.body).toEqual({ preset: 'revision', objective: 'Tighten the intro' })
+  expect(log.calls.length).toBeGreaterThan(before)
+
+  // The answer renders as served: the task it opened, its owner and the revision
+  // it linked to — and the RE-READ fires unconditionally after the act.
+  const outcome = at(view, '[data-door="request-revision"] [data-outcome]')!
+  expect(outcome.getAttribute('data-outcome')).toBe('applied')
+  expect(outcome.textContent).toContain(spawned.task_id)
+  expect(outcome.textContent).toContain(String(spawned.revision_n))
+  expect(outcome.textContent).toContain(spawned.title)
+  expect(log.calls.filter((c) => c.path === '/api/deliverables/d-notes').length, 'the act did not re-read').toBeGreaterThan(1)
+  view.unmount()
+})
+
+test('the plain door sends its own EMPTY preset rather than borrowing the other limb’s', async () => {
+  const { view, log } = await accepted({
+    'POST /api/deliverables/d-notes/follow-up': { body: { ...spawned, preset: '' } },
+  })
+  const control = at(view, '[data-door="follow-up"] [data-control="follow-up"]')!
+  typeInto(control.querySelector('[data-field="follow-up-objective"]') as HTMLTextAreaElement, 'A companion piece')
+  click(control.querySelector('[data-open="follow-up"]'))
+  await flush()
+  // The plain door names no framing, so the confirm claims none either.
+  expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('framing')
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+  // `""` is a landed preset the verb admits (internal/api/actions.go:102–108),
+  // so this is the platform's own plain follow-up rather than an omission.
+  expect(log.calls.find((c) => c.path === '/api/deliverables/d-notes/follow-up')!.body).toEqual({
+    preset: '',
+    objective: 'A companion piece',
+  })
+  view.unmount()
+})
+
+test('a follow-up with no ask is HELD at the form and fires nothing; busy is a different state', async () => {
+  const { view, log } = await accepted({
+    'POST /api/deliverables/d-notes/follow-up': { body: spawned },
+  })
+  const control = at(view, '[data-door="follow-up"] [data-control="follow-up"]')!
+  const button = control.querySelector('[data-open="follow-up"]')!
+  expect(button.hasAttribute('disabled'), 'an empty follow-up offers a fire').toBe(true)
+  // HELD IS NOT BUSY (§49 N7): nothing is in flight and the form says why.
+  expect(button.getAttribute('data-busy')).toBe('false')
+  expect(control.querySelector('[data-held="follow-up"]')?.textContent).toContain('needs its own ask')
+  const before = log.calls.length
+  click(button)
+  await flush()
+  expect(document.querySelector('[role="dialog"]'), 'a held control opened its confirm').toBeNull()
+  expect(log.calls.length, 'a held control reached the control plane').toBe(before)
+  view.unmount()
+})
+
+test('the operator spawns a follow-up on somebody else’s deliverable, and the task is the OPERATOR’s', async () => {
+  // Authority is the verb's own: `authorizeOwner` admits the owner and the
+  // operator for any row (internal/api/reads.go:444–452). The successor belongs
+  // to whoever ASKED (actions.go:206–210), so an operator's follow-up on alice's
+  // deliverable is the operator's own task — asserted from the served answer,
+  // because no client may decide whose work it is.
+  const { view, log } = await accepted({
+    'GET /api/auth/session': signedInAsOperator,
+    'POST /api/deliverables/d-notes/follow-up': { body: { ...spawned, owner: 'op', task_id: 't-op-follow' } },
+  })
+  const control = at(view, '[data-door="follow-up"] [data-control="follow-up"]')!
+  typeInto(control.querySelector('[data-field="follow-up-objective"]') as HTMLTextAreaElement, 'Check the numbers')
+  click(control.querySelector('[data-open="follow-up"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  expect(log.calls.some((c) => c.method === 'POST' && c.path === '/api/deliverables/d-notes/follow-up')).toBe(true)
+  const outcome = at(view, '[data-door="follow-up"] [data-outcome]')!
+  expect(outcome.getAttribute('data-outcome')).toBe('applied')
+  expect(outcome.textContent, 'the spawn claimed the wrong owner').toContain('op')
+  expect(outcome.textContent).toContain('t-op-follow')
+  view.unmount()
+})
+
+test('a refusal renders the server’s own words and is not dressed as anything else', async () => {
+  // The other authority direction. `authorizeOwner`'s 403 is the bare word
+  // `forbidden` (reads.go:444–452) and its 404 is `deliverable not found`,
+  // 404-before-403 so an unknown id cannot become an existence oracle. Both are
+  // transcribed rather than paraphrased.
+  const { view } = await accepted({
+    'POST /api/deliverables/d-notes/follow-up': { status: 403, body: { error: 'forbidden', detail: 'forbidden' } },
+  })
+  const control = at(view, '[data-door="follow-up"] [data-control="follow-up"]')!
+  typeInto(control.querySelector('[data-field="follow-up-objective"]') as HTMLTextAreaElement, 'Not mine to ask')
+  click(control.querySelector('[data-open="follow-up"]'))
+  await flush()
+  click(document.querySelector('[data-act="confirm"]'))
+  await flush()
+
+  const outcome = at(view, '[data-door="follow-up"] [data-outcome]')!
+  expect(outcome.getAttribute('data-outcome')).toBe('failed')
+  expect(outcome.textContent).toContain('forbidden')
+  // A refusal is not a no-op and not a re-read prompt, and it invents no task.
+  expect(outcome.textContent).not.toContain('opened')
+  expect(outcome.textContent).not.toContain('re-read it and decide again')
+  view.unmount()
+})
+
+test('the control is reachable and operable at 375px', async () => {
+  const { view } = await accepted({ 'POST /api/deliverables/d-notes/follow-up': { body: spawned } })
+  const control = at(view, '[data-control="follow-up"]')!
+  typeInto(control.querySelector('[data-field="follow-up-objective"]') as HTMLTextAreaElement, 'x')
+  click(control.querySelector('[data-open="follow-up"]'))
+  await flush()
+  const dialog = document.querySelector('[role="dialog"]')!
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  const scope = [...control.querySelectorAll('*'), control, ...dialog.querySelectorAll('*'), dialog]
+  expect(scope.length, 'the phone-width scan reached almost nothing').toBeGreaterThan(8)
+  const fixed = scope.filter((n) => pinned.test(n.className.toString()) || /\d+px/.test(n.getAttribute('style') ?? ''))
+  expect(fixed.map((n) => n.className.toString()), 'a control pins a pixel width a phone cannot fit').toEqual([])
+  expect(pinned.test('w-[520px] flex')).toBe(true)
+  // And it is genuinely operable from there.
+  click(dialog.querySelector('[data-act="confirm"]'))
+  await flush()
+  expect(at(view, '[data-outcome]')?.getAttribute('data-outcome')).toBe('applied')
+  view.unmount()
 })

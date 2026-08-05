@@ -1054,6 +1054,20 @@ export type Door = {
   preset?: string
 }
 
+/** The S13.9 spawn's answer: the successor task, its owner and the revision it
+ *  linked to. `task` is the pipeline's own task view, nested only where a
+ *  pipeline surface is composed in the process — absent is an absence, not an
+ *  empty task. */
+export type FollowUpSpawned = {
+  task_id: string
+  owner: string
+  title: string
+  deliverable_id: string
+  revision_n: number
+  preset: string
+  task?: unknown
+}
+
 export type DeliverableDetail = {
   deliverable: DeliverableRow
   revisions: Revision[]
@@ -1993,6 +2007,21 @@ export const api = {
     }
     return post<ApprovalAnswerResult>(route, body)
   },
+
+  /**
+   * The S13.9 follow-up spawn: a successor task plus its `task_successor_of`
+   * link in ONE action, then normal intake.
+   *
+   * PATH-ONLY subject, and the body is what the DOOR supplied plus the person's
+   * own ask. No `revision` is sent: the verb defaults to the deliverable's
+   * current revision (internal/api/actions.go:170–174), which is the honest
+   * reading of "follow up on this deliverable", and the answer names the
+   * revision it linked to. The owner of the new task is the AUTHENTICATED
+   * requester's — whoever asks for the follow-up owns the work it creates — so
+   * no owner field exists to send.
+   */
+  spawnFollowUp: (deliverable: string, body: { preset: string; objective: string }) =>
+    post<FollowUpSpawned>(`/api/deliverables/${encodeURIComponent(deliverable)}/follow-up`, body),
 
   suppressFlag: (body: { run_id?: string; anomaly_class: string; reason?: string }) =>
     post<FlagSuppressed>('/api/watchdog/flags/suppress', body),

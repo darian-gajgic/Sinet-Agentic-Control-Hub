@@ -23,9 +23,11 @@ import {
 } from './api'
 import type { EventStream } from './events'
 import { deliverableEventTypes, describeError, useLive } from './live'
+import { ActConfirm, OutcomeLine, useAct } from './controls'
 import { Absent, Empty, Freshness, Owner, Section, Stamp } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { Button } from './ui'
 
 /**
  * The review surface (Spec S15.8; S13.1–S13.4, S13.6, S13.8; FC-v1 §2).
@@ -107,7 +109,7 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
           </p>
           <RevisionsBlock detail={data} stale={stale} />
           <ComparisonBlock detail={detailRefs(data)} me={me} stream={stream} />
-          <DoorsBlock detail={data} />
+          <DoorsBlock detail={data} reload={reload} />
           <TryItBlock detail={data} stream={stream} />
           <AcceptBlock detail={data} me={me} onApplied={reload} />
         </>
@@ -1221,7 +1223,7 @@ function ObjectCards({ cmp }: { cmp: Comparison }) {
  * pin and `revise_with_guidance`, and the finished limb spawns the follow-up under
  * the `revision` preset. Neither is a verb this surface invented.
  */
-function DoorsBlock({ detail }: { detail: DeliverableDetail }) {
+function DoorsBlock({ detail, reload }: { detail: DeliverableDetail; reload: () => void }) {
   return (
     <Section title="What you can do">
       {detail.doors.length === 0 ? (
@@ -1230,7 +1232,7 @@ function DoorsBlock({ detail }: { detail: DeliverableDetail }) {
         <ul className="doors">
           {detail.doors.map((door) => (
             <li key={door.verb} data-door={door.verb} data-available={door.available ? 'true' : 'false'}>
-              <DoorRow door={door} />
+              <DoorRow door={door} detail={detail} reload={reload} />
             </li>
           ))}
         </ul>
@@ -1239,7 +1241,7 @@ function DoorsBlock({ detail }: { detail: DeliverableDetail }) {
   )
 }
 
-function DoorRow({ door }: { door: Door }) {
+function DoorRow({ door, detail, reload }: { door: Door; detail: DeliverableDetail; reload: () => void }) {
   return (
     <>
       <p className="door-head">
@@ -1255,7 +1257,128 @@ function DoorRow({ door }: { door: Door }) {
         </p>
       )}
       {door.available && driveableRevisionDoor(door) && <RequestRevision door={door} />}
+      {driveableFollowUpDoor(door) && <SpawnFollowUp door={door} detail={detail} reload={reload} />}
     </>
+  )
+}
+
+/**
+ * driveableFollowUpDoor answers the same question `driveableRevisionDoor` does,
+ * for the other landed verb: can THIS surface perform this door?
+ *
+ * It is gated on what the door SUPPLIES — an open door, a POST, and a route that
+ * really is the S13.9 spawn — rather than on a verb name, which is the rule
+ * drain r1 D4 wrote after the opposite mistake shipped a form nothing could
+ * send. TWO served doors reach this route and both are honoured: the plain
+ * `follow-up` door, which carries no preset, and the `request-revision` door's
+ * FINISHED limb, which carries `revision` (internal/api/deliverables.go:264–267
+ * and :350). The preset sent is whichever the door named — never one composed
+ * here — so the framing on the wire is the platform's own.
+ */
+function driveableFollowUpDoor(door: Door): boolean {
+  return door.available && door.method === 'POST' && door.route.endsWith('/follow-up')
+}
+
+/**
+ * The S13.9 follow-up spawn — the fourteenth D3 control (P3-UI-4, OQ1(a)).
+ *
+ * A follow-up is a successor TASK, not an answer to a card: no pin, no ask id,
+ * no payload hash, which is exactly why gating it on the `request-revision` verb
+ * shipped a dead form before. What it needs is the door's route and the door's
+ * preset, and the person's own account of what the successor should do.
+ *
+ * NO REVISION PICKER, and that is the design. The verb defaults to the CURRENT
+ * revision when the body names none (internal/api/actions.go:170–174), which is
+ * the honest reading of "follow up on this deliverable", and the answer says
+ * which revision it linked to. A picker here would be this surface inventing a
+ * choice in order to re-answer a question the platform already answers, and the
+ * lineage the successor links to is a fact rather than a preference.
+ */
+function SpawnFollowUp({
+  door,
+  detail,
+  reload,
+}: {
+  door: Door
+  detail: DeliverableDetail
+  reload: () => void
+}) {
+  const [objective, setObjective] = useState('')
+  const [open, setOpen] = useState(false)
+  const act = useAct()
+  const preset = door.preset ?? ''
+  const held = objective.trim() === '' ? 'A follow-up needs its own ask — say what the successor should do.' : ''
+
+  return (
+    <div className="follow-up" data-control="follow-up">
+      <label>
+        What should the follow-up do?
+        <textarea
+          data-field="follow-up-objective"
+          value={objective}
+          onChange={(e) => setObjective(e.currentTarget.value)}
+        />
+      </label>
+      <Button
+        variant="primary"
+        size="sm"
+        data-open="follow-up"
+        data-busy={String(act.busy)}
+        disabled={act.busy || held !== ''}
+        onClick={() => setOpen(true)}
+      >
+        Spawn a follow-up
+      </Button>
+      {held !== '' && (
+        <p className="muted" data-held="follow-up">
+          {held}
+        </p>
+      )}
+      <ActConfirm
+        open={open}
+        onOpenChange={setOpen}
+        title="Spawn a follow-up task"
+        variant="primary"
+        act="Spawn it"
+        busy={act.busy}
+        disabled={held !== ''}
+        what={
+          <>
+            This opens a NEW task of your own, linked to this deliverable&apos;s current revision as its predecessor
+            {preset !== '' ? <> under the platform&apos;s {preset} framing</> : null}. It changes nothing about this
+            deliverable — no revision is replaced, nothing is re-opened, and the accepted work stays accepted. The new
+            task enters intake like any other, so it is planned and approved on its own terms before anything runs.
+          </>
+        }
+        onConfirm={() => {
+          setOpen(false)
+          act.run(
+            () =>
+              api.spawnFollowUp(detail.deliverable.id, { preset, objective }).then((res) => ({
+                kind: 'applied' as const,
+                note: (
+                  <>
+                    opened{' '}
+                    <span className="font-mono tabular-nums" data-spawned={res.task_id}>
+                      {res.task_id}
+                    </span>{' '}
+                    for {res.owner}, linked to revision{' '}
+                    <span className="font-mono tabular-nums">{String(res.revision_n)}</span>
+                  </>
+                ),
+                detail: res.title,
+              })),
+            reload,
+          )
+        }}
+      />
+      <OutcomeLine outcome={act.outcome} />
+      {act.outcome?.kind === 'applied' && (
+        <p className="muted">
+          It is a task now, so it lives on the board and its own detail — this deliverable is unchanged.
+        </p>
+      )}
+    </div>
   )
 }
 
