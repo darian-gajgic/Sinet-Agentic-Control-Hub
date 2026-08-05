@@ -470,3 +470,56 @@ test('a card parked on a CLOCK renders its horizon verbatim with the label besid
   expect(face.querySelectorAll('dt')).toHaveLength(5)
   view.unmount()
 })
+
+// ── the D8 self-teaching layer (P3-UI-5) ──────────────────────────────────
+
+test('the board teaches what it is, and the line never promises the drag more than it does', async () => {
+  const { view } = await board()
+  const line = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+  expect(line, 'the board carries no "what this is" line').not.toBe('')
+  expect(line.toLowerCase()).toContain('live from the feed')
+  // THE TRUTH CONSTRAINT. Stage is FSM state owned by the control plane (S02),
+  // and a hint only breaks ties among your own same-class queued work — so the
+  // line must claim neither a stage move nor a priority change.
+  expect(line.toLowerCase(), 'the header line does not scope the drag to your own queued work').toContain(
+    'your own queued work',
+  )
+  expect(line.toLowerCase(), 'the header line claims the drag moves a stage').toContain('never moves a card to another')
+  for (const overclaim of ['change the priority', 'set the priority', 'move it to', 'reassign']) {
+    expect(line.toLowerCase(), `the header line overclaims: ${overclaim}`).not.toContain(overclaim)
+  }
+  view.unmount()
+})
+
+test('the empty queue lane and an empty column each teach what would fill them', async () => {
+  const routes = oversightRoutes()
+  routes['GET /api/tasks'] = { body: { tasks: [], cursor: 1, truncated: false } }
+  const { view } = await board(routes)
+
+  const lane = view.container.querySelector('.queue-lane')!
+  expect(lane.textContent).toContain('Nothing of yours is queued.')
+  expect(lane.textContent, 'the lane does not teach that it is the one draggable place').toContain(
+    'the only place a drag does anything',
+  )
+  const column = view.container.querySelector('.column')!
+  expect(column.textContent).toContain('No card is here.')
+  // The teaching half says how a card ARRIVES — which is the fact the drag
+  // affordance must never contradict.
+  expect(column.textContent, 'an empty column does not teach how a card reaches it').toContain('never by being dragged')
+  view.unmount()
+})
+
+test('the drag affordance is on the own-queued lane and nowhere else', async () => {
+  // §42: a card that cannot be reordered must not LOOK draggable. The lane's
+  // cards carry the grab cursor and the lift; a stage column's do not.
+  const { view } = await board()
+  const lane = [...view.container.querySelectorAll('.queue-lane .card')]
+  expect(lane.length, 'the own-queued lane is empty, so this asserts nothing').toBeGreaterThan(0)
+  for (const card of lane) expect(card.className, 'a reorderable card has no drag affordance').toContain('cursor-grab')
+
+  const columnCards = [...view.container.querySelectorAll('.column .card')]
+  expect(columnCards.length).toBeGreaterThan(0)
+  for (const card of columnCards) {
+    expect(card.className, 'a card that cannot be reordered looks draggable').not.toContain('cursor-grab')
+  }
+})

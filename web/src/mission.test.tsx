@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { AnswerView } from './History'
 import { MetersPanel, bucketRuns } from './MissionControl'
-import type { Answer, Meters, RunList } from './api'
+import type { Answer, MeterLane, Meters, RunList } from './api'
 import {
   FakeSource,
   fixtures,
@@ -16,6 +16,8 @@ import {
   scriptedFetch,
 } from './doubles'
 import { EventStream } from './events'
+import partsSource from './parts.tsx?raw'
+import scansSource from './scans.test.ts?raw'
 import { flush, mount } from './testing'
 
 /**
@@ -747,5 +749,260 @@ test('a lane with no served horizon says so rather than inventing one to be live
   expect(lane.parked_until ?? null, 'the fixture lane now carries a horizon').toBeNull()
   const cell = [...view.container.querySelectorAll('.meters .absent')].map((n) => n.textContent)
   expect(cell, 'the park-with-no-horizon arm did not survive the migration').toContain('parked, no horizon given')
+  view.unmount()
+})
+
+// ── the capacity ring (P3-UI-5) ───────────────────────────────────────────
+
+/**
+ * A hand-scripted lane, because the fixture world declares no budget and so
+ * serves `pressure_applicable: false` on every row — which is the ABSENCE arm
+ * and cannot exercise the bands. The shape is transcribed field for field from
+ * `MeterLane` (api.ts:182–199), and the two gates are the wire's own: `pressure`
+ * exists only when `pressure_applicable`, because a fabricated denominator is
+ * worse than no number.
+ */
+function laneAt(pressure: number | null, applicable = true): MeterLane {
+  return {
+    owner: 'alice',
+    lane: 'zai',
+    weighted_consumption: 120,
+    cache_read_weight: 0.1,
+    assumed: false,
+    pressure_applicable: applicable,
+    pressure,
+    budget_declared: applicable,
+    budget_remaining: applicable ? 40 : null,
+    total_runs: 3,
+    active_runs: 1,
+    parked_runs: 0,
+    parked_until: null,
+  }
+}
+
+const withLane = (lane: MeterLane): Meters => ({ ...servedMeters(), lanes: [lane] })
+
+test('the ring renders the SERVED pressure in its band, and the figure stays beside it', () => {
+  // All three bands, over the one served ratio. The band edges are display
+  // constants with named reasons (§42): 1 is the declared budget REACHED, which
+  // is a served semantic rather than a policy figure, and 0.75 is the
+  // glance-ahead band.
+  for (const [pressure, band] of [
+    [0.2, 'green'],
+    [0.75, 'orange'],
+    [0.99, 'orange'],
+    [1, 'red'],
+    [1.4, 'red'],
+  ] as const) {
+    const view = mount(<MetersPanel meters={withLane(laneAt(pressure))} stale={false} error="" />)
+    const ring = view.container.querySelector('[data-capacity]')!
+    expect(ring, `pressure ${String(pressure)} rendered no ring`).not.toBeNull()
+    expect(ring.getAttribute('data-capacity'), `pressure ${String(pressure)} is in the wrong band`).toBe(band)
+    // The ring consumes the SERVED ratio and derives nothing — re-computing it
+    // from consumption and the declaration would be a second implementation of
+    // the S10.4 gauge, free to disagree with the one that admits work.
+    expect(ring.getAttribute('data-capacity-ratio')).toBe(String(pressure))
+    // Glanceable REDUNDANCY, never a replacement: the number the platform sent
+    // is still on screen beside it, in the mono/tabular token treatment.
+    const cell = ring.closest('td')!
+    expect(cell.textContent, 'the served figure was replaced by the ring').toContain(String(pressure))
+    expect(cell.querySelector('.font-mono.tabular-nums')?.textContent).toBe(String(pressure))
+    view.unmount()
+  }
+})
+
+test('no ring exists without a served ratio — both gates, each rendering its own reason', () => {
+  // The two landed gates are the whole condition (api.ts:182–191). An honest
+  // absence renders AS an absence: no ring, and the denominator reason in its
+  // place (§42).
+  for (const lane of [laneAt(null, true), laneAt(null, false), laneAt(0.5, false)]) {
+    const view = mount(<MetersPanel meters={withLane(lane)} stale={false} error="" />)
+    expect(view.container.querySelector('[data-capacity]'), 'a ring was drawn over an unserved ratio').toBeNull()
+    expect(view.container.textContent).toContain('no declared budget, so there is no denominator')
+    view.unmount()
+  }
+})
+
+test('the ring says what it is a share OF, and never claims the admission threshold', () => {
+  const view = mount(<MetersPanel meters={withLane(laneAt(0.5))} stale={false} error="" />)
+  const text = view.container.textContent ?? ''
+  // Where background work actually stops being admitted is a ⚙ setting on the
+  // server that no browser can read, so the ring speaks about the DECLARATION.
+  expect(view.container.querySelector('[data-capacity] .sr-only')?.textContent).toContain('of declared budget')
+  expect(view.container.querySelector('[data-ring-legend]')?.textContent).toContain('declared budget')
+  for (const overclaim of ['cutoff', 'cut-off', 'threshold', 'admission']) {
+    expect(text.toLowerCase(), `the ring claims a "${overclaim}" this client cannot read`).not.toContain(overclaim)
+  }
+  view.unmount()
+})
+
+test('the ring is the ONE capacity idiom: nothing else on this surface draws one', () => {
+  // Run counters are monotonic with no denominator (api.ts:435–437) and the
+  // workforce serves no ratio, so neither can carry a ring. A second capacity
+  // render would be a second answer to a question the platform answers once.
+  const view = mount(<MetersPanel meters={withLane(laneAt(0.5))} stale={false} error="" />)
+  expect(view.container.querySelectorAll('[data-capacity]')).toHaveLength(1)
+  view.unmount()
+})
+
+test('the two code scans still bite over the ring — planted probes, both classes', () => {
+  // The ring's geometry must not be money arithmetic and must not name a
+  // progress figure. `scans.test.ts` already runs both over the whole app tree,
+  // `parts.tsx` included; what is checked HERE is that those two predicates are
+  // still the ones it runs, and that they really fire on the shapes the ring
+  // could have been written as. A scan that finds nothing proves nothing until
+  // it is shown able to find something.
+  const moneyWord = /usd|cost|consumption|budget|burn|money|spend/i
+  const arithmetic = /[\w)\]]\s*[*/]\s*[\w(]/
+  const banned = [/percent/i, /\bpct/i, /completion_?fraction/i, /\beta_?(s|seconds)?\b/i, /progress_?bar/i]
+
+  // The copies cannot drift from the scan they cite: the literals are asserted
+  // to still appear in `scans.test.ts` itself (:48–52 and :93).
+  for (const declared of [String(moneyWord), String(arithmetic), ...banned.map(String)]) {
+    expect(scansSource, `${declared} is no longer the predicate scans.test.ts runs`).toContain(declared)
+  }
+  expect(scansSource, 'the money scan no longer reaches the whole app tree').toContain('moneyHits(files)')
+
+  // Planted, both classes — the geometry the ring deliberately does NOT have.
+  const plantedMoney = 'const fill = lane.weighted_consumption / lane.budget_declared'
+  expect(moneyWord.test(plantedMoney) && arithmetic.test(plantedMoney), 'the money scan would miss a re-derived gauge')
+    .toBe(true)
+  expect(banned.some((p) => p.test('const percentFull = ratio'))).toBe(true)
+  expect(banned.some((p) => p.test('const progress_bar = width'))).toBe(true)
+  // And the ring's own geometry line is clean under the same predicate, which
+  // is what makes naming the local `ringSweep` rather than a consumption figure
+  // a checkable decision rather than a preference.
+  const geometry = 'const ringSweep = 2 * Math.PI * ringRadius'
+  expect(moneyWord.test(geometry)).toBe(false)
+  expect(partsSource, 'the ring stopped deriving its sweep from a money-free local').toContain(geometry)
+})
+
+// ── the D8 self-teaching layer + never-stall-silently (P3-UI-5) ───────────
+
+test('the surface teaches what it is, and the line does not contradict S15.5', async () => {
+  const { view } = await mission()
+  const what = view.container.querySelector('[data-surface-what]')!
+  expect(what, 'mission control carries no "what this is" line').not.toBeNull()
+  const line = what.textContent ?? ''
+  // S15.5 ¶1's own five buckets plus the meters beside them — the section this
+  // line teaches, in the platform's own terms.
+  for (const fact of ['running', 'queued', 'parked', 'blocked on a human', 'recently finished', 'meters']) {
+    expect(line.toLowerCase(), `the header line drops "${fact}"`).toContain(fact)
+  }
+  view.unmount()
+})
+
+test('each bucket teaches what puts a run in it — the tile foot, the section, and the empty state agree', async () => {
+  const { view } = await mission()
+  // Every bucket says its own rule, once, in one place. The tiles count the
+  // rows ON SCREEN and say so; a tile carrying a figure no list below it
+  // carries would be inventing one (§45-B R2).
+  const tiles = [...view.container.querySelectorAll('[data-tiles="buckets"] > *')]
+  expect(tiles).toHaveLength(bucketRuns(servedRuns(), fixtureNow).length)
+  for (const b of bucketRuns(servedRuns(), fixtureNow)) {
+    const tile = tiles.find((t) => t.textContent?.includes(b.title))!
+    expect(tile, `${b.id} has no tile`).toBeDefined()
+    expect(tile.textContent, `${b.id}'s tile does not say what it counts`).toContain('runs on screen')
+    expect(tile.textContent, `${b.id}'s tile figure is not the rows on screen`).toContain(String(b.runs.length))
+    const why = view.container.querySelector(`[data-bucket-why="${b.id}"]`)
+    expect(why?.textContent?.length ?? 0, `${b.id} does not teach what puts a run in it`).toBeGreaterThan(30)
+  }
+  view.unmount()
+})
+
+test('an empty bucket teaches instead of only admitting it is empty — and never over a loading state', async () => {
+  // The `other` bucket is the one the fixture world leaves populated and the
+  // finished bucket empties once the window closes, so this drives a real
+  // served empty rather than a hand-built one.
+  const later = fixtureNow + 6 * 24 * 60 * 60 * 1000
+  vi.spyOn(Date, 'now').mockReturnValue(later)
+  const { view } = await mission()
+  const finished = view.container.querySelector('[data-bucket="finished"]')
+  expect(finished, 'the finished bucket still has rows — this asserts nothing').toBeNull()
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('Nothing is recently finished.')
+  expect(text, 'the empty state does not teach what would fill it').toContain('Ended in the last day')
+  view.unmount()
+
+  // The none-vs-not-loaded line holds: before the read lands there is no
+  // EmptyState at all, only the catching-up marker (`parts.tsx:134–136`).
+  scriptedFetch({})
+  window.history.replaceState(null, '', '/')
+  const loading = mount(<App stream={inertStream()} />)
+  expect(loading.container.textContent, 'a teaching empty rendered over a read that had not landed').not.toContain(
+    'Nothing is recently finished.',
+  )
+  loading.unmount()
+})
+
+test('a wedged run says what pause-and-flag means and points at the inbox, firing nothing', async () => {
+  const runs = fixtures.runs() as unknown as RunList
+  runs.runs = [{ ...runs.runs[0], run_id: 'r-wedge', wedged: true }]
+  const routes = oversightRoutes()
+  routes['GET /api/runs'] = { body: runs }
+  const log = scriptedFetch(routes)
+  window.history.replaceState(null, '', '/')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const banner = view.container.querySelector('[data-stall="wedged"]')!
+  expect(banner, 'a wedged run still wears only a terse flag').not.toBeNull()
+  expect(banner.textContent, 'the banner does not say what happened in plain words').toContain('Flagged and paused')
+  // The honest door: a run list serves no card id, so the row points at the
+  // SURFACE where its card is answered rather than at an id it would have had
+  // to guess (§42-B).
+  expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  // NO NEW VERB. The banner is a door, not a control: nothing was posted.
+  expect(log.calls.filter((c) => c.method !== 'GET'), 'a banner fired a verb').toEqual([])
+  expect(view.container.querySelector('[data-stall] button'), 'a stall banner offers a control').toBeNull()
+  view.unmount()
+})
+
+test('the blocked bucket carries its door, and it appears only when the bucket has rows', async () => {
+  const { view } = await mission()
+  const door = view.container.querySelector('[data-stall="blocked"]')!
+  expect(door, 'the blocked bucket does not say how it is unblocked').not.toBeNull()
+  expect(door.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  view.unmount()
+
+  const runs = fixtures.runs() as unknown as RunList
+  runs.runs = runs.runs.filter((r) => !r.waiting_on_human)
+  const routes = oversightRoutes()
+  routes['GET /api/runs'] = { body: runs }
+  scriptedFetch(routes)
+  window.history.replaceState(null, '', '/')
+  const empty = mount(<App stream={inertStream()} />)
+  await flush()
+  expect(
+    empty.container.querySelector('[data-stall="blocked"]'),
+    'a door was offered over a bucket with nothing in it',
+  ).toBeNull()
+  empty.unmount()
+})
+
+test('the new renders are reachable at 375px: nothing pins a pixel width, and every leg widens UP', async () => {
+  // jsdom has no layout engine, so what is checkable is the STRUCTURE that makes
+  // a phone-width surface work (the §41-B method). This covers what THIS packet
+  // added — the header, the tile row, the banners and the ring.
+  const { view } = await mission()
+  const added = [
+    ...view.container.querySelectorAll(
+      '[data-surface-what], [data-tiles="buckets"], [data-tiles="buckets"] *, [data-stall], [data-stall] *, [data-capacity], [data-capacity] *',
+    ),
+  ]
+  expect(added.length, 'the phone leg reached none of the new renders').toBeGreaterThan(8)
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  const fixed = added.filter(
+    (n) => pinned.test(n.className.toString()) || /\d+px/.test(n.getAttribute('style') ?? ''),
+  )
+  expect(fixed.map((n) => n.className.toString()), 'a new render pins a pixel width a phone cannot fit').toEqual([])
+  expect(pinned.test('grid w-[520px]'), 'the detector does not match what it forbids').toBe(true)
+
+  // The tile row is a two-column stack at phone width and only widens at the
+  // breakpoints — the phone is the base, not the exception (S1.10).
+  const tiles = view.container.querySelector('[data-tiles="buckets"]')!
+  expect(tiles.className).toContain('grid-cols-2')
+  expect(tiles.className).toContain('lg:grid-cols-6')
+  expect(tiles.className, 'a max-width query entered the surface').not.toMatch(/\bmax-(sm|md|lg):/)
   view.unmount()
 })

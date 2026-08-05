@@ -1022,6 +1022,59 @@ describe('timestamps render through one primitive, verbatim (B6-9 OQ12)', () => 
 })
 
 
+// ── motion is authored-gated wherever a utility can start it (P3-UI-5) ─────
+
+/**
+ * The kit's motion scan has a BLIND SPOT this packet closed rather than lived
+ * with, and closing it here is a WIDENING: `ui/kit.test.tsx`'s detector globs
+ * `./*.tsx` relative to `web/src/ui/`, so it never reached a surface file. The
+ * D8 restyle authors motion utilities on the SURFACES — a card's hover lift, the
+ * capacity ring's sweep — which is precisely where the rule had no detector.
+ *
+ * `design.test.ts` owns motion the STYLESHEET declares and the kit scan owns the
+ * kit's own; this owns everything else in the shipped tree. The three scopes are
+ * complementary and none is redundant. The global `reduce` kill switch stays the
+ * backstop; this is the AUTHORED gate the proposal asks for, so a reduce reader
+ * gets the static composition rather than an animation clamped to nothing.
+ */
+describe('every motion utility in the shipped tree is authored behind motion-safe', () => {
+  const motionUtility = /(?:^|[\s'"`])((?:motion-safe:)?)((?:transition|animate)-[^\s'"`]+)/g
+
+  const ungated = (files: Record<string, string>): string[] => {
+    const hits: string[] = []
+    for (const [path, text] of Object.entries(files)) {
+      for (const m of stripComments(text).matchAll(motionUtility)) {
+        if (m[1] === '') hits.push(`${path}: ${m[2]}`)
+      }
+    }
+    return hits
+  }
+
+  test('no surface starts motion a reduce reader cannot turn off at the source', () => {
+    const app = appSources()
+    // Non-vacuous: the glob really reaches the surfaces this packet restyled,
+    // which are exactly where the kit's own scan could not see.
+    expect(Object.keys(app).length, 'the scan read no sources — it would pass vacuously').toBeGreaterThan(20)
+    for (const surface of ['./MissionControl.tsx', './Board.tsx', './Fleet.tsx', './TaskDetail.tsx', './parts.tsx']) {
+      expect(Object.keys(app), `${surface} is outside the scan`).toContain(surface)
+    }
+    expect(ungated(app), 'a surface starts motion outside a motion-safe gate').toEqual([])
+    // And the scan really has motion to find: a detector that would pass over an
+    // empty tree proves nothing about a tree with utilities in it.
+    const gated = Object.values(app).join('\n').match(motionUtility) ?? []
+    expect(gated.length, 'the tree declares no motion utilities at all').toBeGreaterThan(0)
+  })
+
+  test('the widened scan fires both ways on planted probes', () => {
+    expect(ungated({ './x.tsx': "className={'transition-[stroke-dasharray] duration-300'}" })).toHaveLength(1)
+    expect(ungated({ './x.tsx': "className={'animate-pulse'}" })).toHaveLength(1)
+    expect(ungated({ './x.tsx': "className={'motion-safe:transition-[stroke-dasharray] duration-300'}" })).toEqual([])
+    expect(ungated({ './x.tsx': "className={'motion-safe:animate-pulse'}" })).toEqual([])
+    // A doc comment is allowed to DISCUSS motion; only a class string starts any.
+    expect(ungated({ './x.tsx': '// this used to be animate-pulse\nconst a = 1' })).toEqual([])
+  })
+})
+
 // ── R10/S01.8: the shipped shell reaches no third party ────────────────────
 
 describe('the installed app fetches nothing from outside this origin', () => {

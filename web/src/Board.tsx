@@ -5,9 +5,10 @@ import { api, type PriorityHint, type TaskListItem } from './api'
 import type { EventStream } from './events'
 import { columnsFor, groupByProject } from './kanban'
 import { boardEventTypes, describeError, useLive } from './live'
-import { Absent, Empty, Freshness, Money, Owner, ParkedUntil, Section } from './parts'
+import { Absent, Freshness, Money, Owner, ParkedUntil, Section, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { Chip, EmptyState } from './ui'
 
 /**
  * The live board (Spec S15.5 ¶2; 9.1; S1.3; FC-v1 §1).
@@ -178,31 +179,41 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
 
   return (
     <section className="surface">
-      <h1>Board</h1>
+      <SurfaceHead
+        title="Board"
+        what="Every task as a card, moving through its stages live from the feed. Dragging re-ranks your own queued work only — it never moves a card to another stage."
+      />
       <Freshness stale={stale} error={error} hasData={data !== null} />
 
       <DragDropContext onDragEnd={onDragEnd}>
         <Section title="Your queue" stale={stale}>
-          <p className="muted">
+          <p className="muted mt-0 max-w-prose text-xs">
             Drag to re-rank your own queued work. A hint breaks ties among your own same-class queued work — it never
             outranks the workload class ladder and never reaches another person&apos;s queue.
           </p>
           {notes.map((n) => (
-            <p key={n.task_id} className={n.applied ? 'notice' : 'muted'} data-hint-applied={String(n.applied)}>
+            <p
+              key={n.task_id}
+              className={`${n.applied ? 'notice' : 'muted'} text-xs`}
+              data-hint-applied={String(n.applied)}
+            >
               {n.detail}
             </p>
           ))}
           <Droppable droppableId={ownQueueDroppableId}>
             {(dropProvided) => (
-              <ul className="queue-lane" ref={dropProvided.innerRef} {...dropProvided.droppableProps}>
+              <ul className="queue-lane min-h-8 list-none p-0" ref={dropProvided.innerRef} {...dropProvided.droppableProps}>
                 {queue.map((t, index) => (
                   <Draggable key={t.task_id} draggableId={t.task_id} index={index}>
                     {(dragProvided) => (
+                      // The lift affordance lives HERE and nowhere else: this is
+                      // the one lane a card can be reordered in, and a card that
+                      // cannot be reordered must not look draggable (§42).
                       <li
                         ref={dragProvided.innerRef}
                         {...dragProvided.draggableProps}
                         {...dragProvided.dragHandleProps}
-                        className="card"
+                        className="card my-1 cursor-grab rounded-(--radius-sm) border border-border bg-(image:--panel-grad) p-2 motion-safe:transition-[border-color,box-shadow] hover:border-[var(--border-l)] hover:shadow-(--shadow-soft) active:cursor-grabbing"
                       >
                         <CardFace task={t} />
                       </li>
@@ -210,7 +221,12 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                   </Draggable>
                 ))}
                 {dropProvided.placeholder}
-                {queue.length === 0 && <Empty what="Nothing of yours is queued." />}
+                {queue.length === 0 && (
+                  <EmptyState
+                    what="Nothing of yours is queued."
+                    why="Your own tasks appear here while they wait for the scheduler to start them. This lane is the only place a drag does anything."
+                  />
+                )}
               </ul>
             )}
           </Droppable>
@@ -222,22 +238,33 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
           const inColumn = tasks.filter((t) => t.kanban_status === col.status)
           return (
             <section className="column" key={col.status} data-status={col.status} data-known={String(col.known)}>
-              <h2>{col.label}</h2>
+              <h2 className="mt-0 mb-2 font-mono text-[9.5px] font-bold tracking-[2px] text-muted-foreground uppercase">
+                {col.label}
+              </h2>
               {!col.known && (
-                <p className="muted">
+                <p className="muted text-xs">
                   This column is a stored status the board does not have a name for. The card is shown under its own
                   value rather than hidden.
                 </p>
               )}
               {inColumn.length === 0 ? (
-                <Empty what="Nothing here." />
+                <EmptyState
+                  what="No card is here."
+                  why={`A card sits under the stage the platform stored for it. It arrives in "${col.label}" when its work reaches that stage — never by being dragged.`}
+                />
               ) : (
                 groupByProject(inColumn).map((group) => (
                   <div className="project-group" key={group.project} data-project={group.project}>
-                    <h3>{group.project}</h3>
-                    <ul className="cards">
+                    <h3 className="mt-3 mb-1 text-[0.85rem] text-muted-foreground">{group.project}</h3>
+                    <ul className="cards list-none p-0">
                       {group.tasks.map((t) => (
-                        <li className="card" key={t.task_id}>
+                        // No drag affordance: this card is not in the one
+                        // reorderable lane, and looking draggable would promise
+                        // a gesture the verb refuses.
+                        <li
+                          className="card my-1 rounded-(--radius-sm) border border-border bg-(image:--panel-grad) p-2"
+                          key={t.task_id}
+                        >
                           <CardFace task={t} />
                         </li>
                       ))}
@@ -265,25 +292,30 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
  */
 export function CardFace({ task }: { task: TaskListItem }) {
   const run = task.latest_run
+  // The left priority rail is TREATMENT, not a field: it takes its tone from
+  // the state the face already renders, so it can say nothing the face does not.
+  const rail = run?.waiting_on_human ? 'orange' : run?.state === 'parked' ? 'yellow' : run?.state === 'running' ? 'green' : 'accent'
   return (
-    <article className="card-face">
-      <h4>
+    <article className="card-face border-s-2 ps-2" style={{ borderInlineStartColor: `var(--${rail})` }}>
+      <h4 className="mt-0 mb-2 text-[0.95rem]">
         <Link to={hrefFor('task', { id: task.task_id })}>{task.title}</Link>
       </h4>
-      <dl>
+      <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[0.85rem]">
         <dt>Whose</dt>
         <dd>
           <Owner id={task.owner} />
         </dd>
 
         <dt>Stage</dt>
-        <dd>{run?.stage ? run.stage : <Absent reason="no stage marker yet" />}</dd>
+        <dd>
+          {run?.stage ? <Chip>{run.stage}</Chip> : <Absent reason="no stage marker yet" />}
+        </dd>
 
         <dt>Effort</dt>
         <dd>
           {run?.effort_mode ? run.effort_mode : <Absent reason="no effort mode recorded" />}
           {run?.downgrade_note ? (
-            <span className="downgrade-note"> — {run.downgrade_note}</span>
+            <span className="downgrade-note text-muted-foreground"> — {run.downgrade_note}</span>
           ) : null}
         </dd>
 
@@ -295,7 +327,7 @@ export function CardFace({ task }: { task: TaskListItem }) {
         <dt>Waiting</dt>
         <dd>
           {run?.waiting_on_human ? (
-            <span className="waiting-human">waiting on a person</span>
+            <span className="waiting-human text-[var(--orange)]">waiting on a person</span>
           ) : run?.state === 'parked' ? (
             <ParkedUntil until={run.parked_until} />
           ) : (

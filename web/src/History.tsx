@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { api, type Answer, type HistoryRegistry } from './api'
 import { describeError } from './live'
-import { Empty } from './parts'
-import { Button } from './ui'
+import { Button, EmptyState } from './ui'
 
 /** The question both free-text controls hold back, mirroring the ONE bound the
  *  transport applies at its own boundary (`historyQuestion`,
@@ -86,13 +85,13 @@ export function HistoryPanel() {
   return (
     <section className="block history" data-live="query-instrument">
       <h2>History</h2>
-      <p className="muted">
+      <p className="muted max-w-prose text-xs">
         Answers here are point-in-time replies to the question you ask, not a live projection — ask again for a fresh
         one.
       </p>
       {failure !== '' && <p className="error">{failure}</p>}
 
-      <div className="history-choices">
+      <div className="history-choices flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end">
         <label>
           Layer 0 — a named view
           <select
@@ -135,7 +134,7 @@ export function HistoryPanel() {
       </div>
 
       {selected && (
-        <div className="history-slots">
+        <div className="history-slots flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end">
           {(selected.slots ?? []).map((s) => (
             <label key={s.name}>
               {s.name}
@@ -146,9 +145,9 @@ export function HistoryPanel() {
               />
             </label>
           ))}
-          <button type="button" onClick={() => ask('query', () => api.historyQuery(selected.name, slots))}>
+          <Button size="sm" onClick={() => ask('query', () => api.historyQuery(selected.name, slots))}>
             Ask
-          </button>
+          </Button>
         </div>
       )}
 
@@ -284,10 +283,16 @@ function QuestionForm({
 export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (query: string) => void }) {
   const lowerConfidence = answer.layer === 2
   return (
-    <div className="answer" data-layer={String(answer.layer)} data-confidence={answer.confidence}>
-      <p className="answer-head">
-        <span className="answer-query">{answer.query}</span>{' '}
-        <span className="answer-layer">layer {answer.layer}</span>{' '}
+    <div
+      className="answer my-2 rounded-(--radius-sm) border border-border p-2"
+      data-layer={String(answer.layer)}
+      data-confidence={answer.confidence}
+    >
+      <p className="answer-head flex flex-wrap items-center gap-2">
+        <span className="answer-query font-mono text-sm">{answer.query}</span>{' '}
+        <span className="answer-layer font-mono text-xs tabular-nums text-muted-foreground">
+          layer {answer.layer}
+        </span>{' '}
         <span className={lowerConfidence ? 'warn-flag' : 'muted'}>confidence: {answer.confidence}</span>
       </p>
       {answer.question && <p className="muted">{answer.question}</p>}
@@ -298,7 +303,7 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
       ))}
 
       {answer.card && (
-        <div className="disambiguation" data-card="disambiguation">
+        <div className="disambiguation my-2 border-s-2 border-[var(--accent)] ps-2" data-card="disambiguation">
           <p>{answer.card.question}</p>
           <p className="muted">{answer.card.reason}</p>
           <ul>
@@ -317,12 +322,17 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
       )}
 
       {answer.audit && (
-        <div className="audit" data-audit="open-sql">
+        <div className="audit my-2 border-s-2 border-[var(--accent)] ps-2" data-audit="open-sql">
           <p>
             outcome: {answer.audit.outcome}
             {answer.audit.refusal ? ` — refused: ${answer.audit.refusal}` : ''}
           </p>
-          {answer.audit.sql_generated && <pre>{answer.audit.sql_generated}</pre>}
+          {/* A generated statement is genuinely wider than a phone, so it
+              scrolls INSIDE its own box and wraps rather than pushing the page
+              sideways (S1.10). */}
+          {answer.audit.sql_generated && (
+            <pre className="overflow-x-auto break-words whitespace-pre-wrap">{answer.audit.sql_generated}</pre>
+          )}
           <p className="muted">
             alias {answer.audit.alias}
             {answer.audit.model ? ` · model ${answer.audit.model}` : ''} · rows {answer.audit.row_count}
@@ -331,7 +341,10 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
       )}
 
       {answer.columns.length === 0 ? (
-        <Empty what="This answer carries no rows." />
+        <EmptyState
+          what="This answer carries no rows."
+          why="The layer answered — it simply matched nothing. A refusal and a disambiguation card are answers too, and each says so above."
+        />
       ) : (
         <div className="table-scroll">
           <table>
@@ -354,7 +367,9 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
           </table>
         </div>
       )}
-      {answer.truncated && <p className="muted">This answer was truncated at the query surface&apos;s own bound.</p>}
+      {answer.truncated && (
+        <p className="muted text-xs">This answer was truncated at the query surface&apos;s own bound.</p>
+      )}
     </div>
   )
 }

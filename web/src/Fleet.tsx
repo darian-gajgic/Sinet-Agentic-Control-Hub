@@ -1,14 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { api, type AutomationState, type MeterLane, type Meters } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
 import { missionEventTypes, useLive } from './live'
 import { MetersPanel, ViewBlock } from './MissionControl'
-import { Absent, Freshness, Owner, ParkedUntil, Section } from './parts'
+import { Absent, Freshness, Owner, ParkedUntil, Section, StallBanner, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Button } from './ui'
+import { Button, EmptyState } from './ui'
 
 /**
  * Fleet overview (Spec S15.5 ¶4; 9.3; S2.5; S3.10; D2).
@@ -26,10 +26,20 @@ import { Button } from './ui'
  * scoped the read; the person/lane filters here are presentation over rows the
  * caller was allowed to see, exactly as S15.2 requires.
  */
-export function Fleet({ stream }: { stream?: EventStream }) {
+export function Fleet({
+  me,
+  operator,
+  stream,
+}: {
+  /** The signed-in person and whether they act as the operator, both handed
+   *  down by the shell from its ONE session read. */
+  me: string
+  operator: boolean
+  stream?: EventStream
+}) {
   const [person, setPerson] = useState('')
   const [lane, setLane] = useState('')
-  const may = useMayAct()
+  const may = (owner: string) => operator || owner === me
   const { data, error, stale, reload } = useLive({
     key: '/api/meters',
     read: () => api.meters(),
@@ -44,7 +54,10 @@ export function Fleet({ stream }: { stream?: EventStream }) {
 
   return (
     <section className="surface">
-      <h1>Fleet</h1>
+      <SurfaceHead
+        title="Fleet"
+        what="What is running on whose account, at what burn rate. Every figure stays with the person whose account it came from and is never added up across people, because each account burns separately."
+      />
       <Freshness stale={stale} error={error} hasData={data !== null} />
 
       <div className="fleet-filters">
@@ -73,6 +86,19 @@ export function Fleet({ stream }: { stream?: EventStream }) {
       </div>
 
       <Section title="Limit status" stale={stale}>
+        {/* Never stall silently: a lane holding parked runs says so above the
+            table, with the horizon in the row and the door to where a parked
+            run is actually released. This points at the inbox; the release verb
+            is the card's own and is not re-implemented here (§48 OQ2). */}
+        {shown.some((l) => l.parked_runs > 0) && (
+          <StallBanner
+            kind="parked"
+            tone="yellow"
+            what="Some of these lanes are holding parked runs. They wait — nothing queued or parked is thrown away — and each one carries its own horizon in the Until column."
+          >
+            <Link to={hrefFor('inbox')}>A parked run is released from its card in the inbox</Link>
+          </StallBanner>
+        )}
         <div className="table-scroll">
           <table className="fleet-lanes">
             <thead>
@@ -99,7 +125,12 @@ export function Fleet({ stream }: { stream?: EventStream }) {
             </tbody>
           </table>
         </div>
-        {shown.length === 0 && <p className="muted">No lane matches this filter.</p>}
+        {shown.length === 0 && (
+          <EmptyState
+            what="No lane matches this filter."
+            why="A lane appears once work has run on it. These selectors narrow what is shown; they never narrow what you were allowed to see."
+          />
+        )}
       </Section>
 
       <AutomationPanel meters={data} may={may} reload={reload} />
@@ -131,38 +162,21 @@ export function Fleet({ stream }: { stream?: EventStream }) {
  * operator limb mirrors the server's own `isOperatorRead`, dev posture included,
  * because that is the predicate the read on the other side of this call used.
  *
- * IDENTITY IS READ HERE RATHER THAN PASSED IN, and that is a deviation with a
- * reason: the shell holds the session and hands `me` to the surfaces that need
- * it, but `App.tsx` is frozen for this packet, so this surface reads the ONE
- * identity source itself (GET /api/auth/session — §41-B: identity comes from
- * there and nowhere else). Hoisting it to the shell's own read belongs to the
- * packet that reopens the shell.
+ * IDENTITY IS HANDED DOWN BY THE SHELL (P3-UI-5; this CLOSES the §48 deviation
+ * that had this surface read `GET /api/auth/session` itself). `App.tsx` holds
+ * the one session read and gives Fleet the same identity it gives Board,
+ * MissionControl and Deliverable — one read, one source (§41-B). The predicate
+ * is byte-preserved from the read it replaces, dev posture included, because
+ * that is the predicate the server's own `isOperatorRead` used on the other
+ * side of these calls. It is deliberately NOT the users-row-role-only flag the
+ * memory surface takes: the S09 gate resolves an actor against that row, and
+ * these two verbs do not.
  *
- * Until the session lands, nothing is actionable: you cannot be offered an act
- * before the platform knows who is asking.
+ * Until the session lands nothing is actionable, and that property did not move
+ * — it is now the shell's own `session === null` arm, which renders no surface
+ * at all rather than a surface with its controls withheld.
  */
-type MayAct = ((owner: string) => boolean) | null
-
-function useMayAct(): MayAct {
-  const [me, setMe] = useState<{ id: string; operator: boolean } | null>(null)
-  useEffect(() => {
-    let live = true
-    void api.session().then(
-      (s) => {
-        if (live) setMe({ id: s.user?.user_id ?? '', operator: s.dev === true || s.user?.role === 'operator' })
-      },
-      () => {
-        // A session that could not be read leaves `me` null, which offers
-        // nothing. The shell is already telling the reader the session is gone.
-      },
-    )
-    return () => {
-      live = false
-    }
-  }, [])
-  if (me === null) return null
-  return (owner: string) => me.operator || owner === me.id
-}
+type MayAct = (owner: string) => boolean
 
 /**
  * The 3.3 pause switch, one per person this read is about (S10.4; §39-B).
@@ -180,7 +194,7 @@ function useMayAct(): MayAct {
  */
 function AutomationPanel({ meters, may, reload }: { meters: Meters | null; may: MayAct; reload: () => void }) {
   const served = meters?.automation.states ?? []
-  const mine = may === null ? [] : served.filter((s) => may(s.owner))
+  const mine = served.filter((s) => may(s.owner))
   const absent = meters?.automation.absent ?? ''
   return (
     <Section title="Automation">
@@ -201,8 +215,11 @@ function AutomationPanel({ meters, may, reload }: { meters: Meters | null; may: 
           ))}
         </ul>
       )}
-      {absent === '' && may !== null && served.length > 0 && mine.length === 0 && (
-        <p className="muted">No automation switch here is yours to flip.</p>
+      {absent === '' && served.length > 0 && mine.length === 0 && (
+        <EmptyState
+          what="No automation switch here is yours to flip."
+          why="A switch belongs to the person whose background work it stops. You are shown everybody you may see, and offered only your own."
+        />
       )}
     </Section>
   )
@@ -278,7 +295,7 @@ function BudgetPanel({
   reload: () => void
 }) {
   if (meters === null) return null
-  const mine = may === null ? [] : lanes.filter((l) => may(l.owner))
+  const mine = lanes.filter((l) => may(l.owner))
   return (
     <Section title="Automation budgets">
       <p className="budget-explainer">
@@ -288,7 +305,10 @@ function BudgetPanel({
         the gauge&apos;s own weighted-consumption units — not money, and not anything this screen converts.
       </p>
       {mine.length === 0 ? (
-        <p className="muted">No lane here is yours to put a budget on.</p>
+        <EmptyState
+          what="No lane here is yours to put a budget on."
+          why="A budget is declared per person per lane, by that person or by the operator. Lanes you can read but not act on stay readable above."
+        />
       ) : (
         <ul className="budget-rows">
           {mine.map((l) => (

@@ -635,7 +635,19 @@ button {
    Phone-first, like the shell: every container below is fluid, the board's
    columns are a single stack until the breakpoint, and anything that cannot
    shrink — a meters table, a history answer — scrolls INSIDE its own box
-   rather than making the page scroll sideways. */
+   rather than making the page scroll sideways.
+
+   PARTIALLY SHED 2026-08-05 (P3-UI-5, §51). The oversight surfaces moved onto
+   the kit and utilities, so the decorative rules left with their markup. What
+   REMAINS here is either (a) still consumed by a surface this packet did not
+   open — `.surface`, `.block`, `.cards`, `.table-scroll`, `.card-face dt/dd`,
+   `.absent`, `.owner`, `.money`, `.muted`, `.error`, `.notice`, `.warn-flag`
+   are rendered by the inbox, the settings tab, the review surface, the memory
+   family and `parts.tsx`'s own primitives — or (b) the phone-first LAYOUT
+   contract `responsive.test.ts` and the S15.12 duty table are written against
+   (`.columns`, `.column`, `.card`, `.filter-bar`, `.fleet-filters`), which is
+   a bespoke piece the proposal leaves in the sheet on purpose. Each remaining
+   rule has a named consumer; nothing was renamed. */
 
 .surface h1 {
   margin-top: 0;
@@ -657,20 +669,12 @@ button {
   padding-inline-start: 0.75rem;
 }
 
-.rows,
-.cards,
-.queue-lane {
+/* `.cards` alone: the inbox still renders it. The board's own lanes and the
+   oversight rows carry their list reset as utilities. */
+.cards {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--line);
 }
 
 /* The board's columns stack on a phone and sit side by side once there is room
@@ -682,46 +686,18 @@ button {
   gap: 1rem;
 }
 
+/* The two board containers keep the property that makes a phone work — they
+   can shrink below their content — and take their material from utilities. */
 .column {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
   min-width: 0;
-}
-
-.column h2 {
-  margin-top: 0;
-}
-
-.project-group h3 {
-  font-size: 0.85rem;
-  color: var(--muted);
-  margin-block: 0.75rem 0.25rem;
 }
 
 .card {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 0.375rem;
-  padding: 0.6rem;
-  margin-block: 0.4rem;
   min-width: 0;
 }
 
-.card-face h4 {
-  margin: 0 0 0.4rem;
-  font-size: 0.95rem;
-}
-
-.card-face dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.15rem 0.6rem;
-  margin: 0;
-  font-size: 0.85rem;
-}
-
+/* `.card-face dt`/`dd` stay: the inbox renders its own card face as a
+   `<dl className="card-face">` (Inbox.tsx:568), so these two are shared. */
 .card-face dt {
   color: var(--muted);
 }
@@ -729,10 +705,6 @@ button {
 .card-face dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.queue-lane {
-  min-height: 2rem;
 }
 
 .absent {
@@ -744,25 +716,20 @@ button {
   color: var(--accent);
 }
 
-.money,
-.run-state,
-.run-stage,
-.run-lane {
+/* `.money` and `.warn-flag` stay: `parts.tsx`'s `Money` and the inbox, the
+   settings tab, the review surface and the push panel all still render them. */
+.money {
   color: var(--fg);
 }
 
-.waiting-human,
 .warn-flag {
   color: var(--warn);
 }
 
-.downgrade-note,
+/* `.assumed` stays: the S10.4 gauge assumption rides every reading it applies
+   to, and it is the one label on the meters table with no tone of its own. */
 .assumed {
   color: var(--muted);
-}
-
-.parked-until {
-  color: var(--warn);
 }
 
 /* Wide content is contained rather than page-widening: the one place a
@@ -786,42 +753,6 @@ td {
   white-space: nowrap;
 }
 
-.history-choices,
-.history-slots {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.answer {
-  border: 1px solid var(--line);
-  border-radius: 0.375rem;
-  padding: 0.6rem;
-  margin-block: 0.5rem;
-}
-
-.answer-layer {
-  color: var(--muted);
-}
-
-.disambiguation,
-.audit {
-  border-inline-start: 2px solid var(--accent);
-  padding-inline-start: 0.6rem;
-  margin-block: 0.5rem;
-}
-
-.audit pre {
-  overflow-x: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.view-block h3 {
-  font-size: 0.9rem;
-  margin-block: 0.75rem 0.25rem;
-}
-
 /* ── task detail, fleet, filters (B6-5 part B) ─────────────────────────── */
 
 /* The filters are first-class views, so their bar reads like navigation and
@@ -833,16 +764,6 @@ td {
   align-items: center;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--line);
-}
-
-.filter-bar a {
-  text-decoration: none;
-  color: var(--muted);
-}
-
-.filter-bar a[aria-current='page'] {
-  color: var(--fg);
-  border-bottom: 2px solid var(--accent);
 }
 
 .fleet-filters {
@@ -867,18 +788,18 @@ td {
   overflow-wrap: anywhere;
 }
 
-.ac-key,
-.step-id {
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-
 .decision {
   color: var(--ok);
 }
 
 .stage-outcome {
   color: var(--ok);
+}
+
+.ac-key,
+.step-id {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
 
 .receipt {
@@ -1751,8 +1672,6 @@ td {
     grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
   }
 
-  .history-choices,
-  .history-slots,
   .fleet-filters {
     flex-direction: row;
     flex-wrap: wrap;

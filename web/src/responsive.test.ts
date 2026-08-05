@@ -10,6 +10,7 @@ import { expect, test } from 'vitest'
  * B6-5..9's, swept at B6-9 and drilled on real devices there.
  */
 import css from './index.css?raw'
+import historySource from './History.tsx?raw'
 
 /** Declarations for one selector block. */
 function block(selector: string): string {
@@ -114,9 +115,23 @@ test('content too wide for a phone scrolls inside its own box, not the page', ()
   // place a horizontal scrollbar is allowed is inside the thing that is too
   // wide — the body itself still cannot scroll sideways (asserted above).
   expect(block('.table-scroll')).toContain('overflow-x: auto')
-  expect(block('.audit pre')).toContain('overflow-x: auto')
   expect(block('.card-face dd'), 'a long model-written title would widen the page').toContain(
     'overflow-wrap: anywhere',
+  )
+
+  // RE-POINTED, not dropped (P3-UI-5): the generated-SQL block's `.audit pre`
+  // rule shed with the history panel's restyle, so the SAME property is now
+  // asserted where it lives — on the element that renders it. A Layer-2 audit
+  // carries a generated statement that is genuinely wider than a phone, and it
+  // still scrolls inside its own box AND wraps rather than widening the page.
+  const auditPre = /<pre className="([^"]*)">\{answer\.audit\.sql_generated\}/.exec(historySource)
+  expect(auditPre, 'the generated-statement block moved — this assertion no longer reaches it').not.toBeNull()
+  expect(auditPre![1], 'a generated statement would push the page sideways').toContain('overflow-x-auto')
+  expect(auditPre![1], 'a generated statement would not wrap').toContain('whitespace-pre-wrap')
+  // Probe: the matcher really discriminates, so "it contains it" is a finding
+  // rather than a pattern that matches anything.
+  expect(/<pre className="([^"]*)">\{answer\.audit\.sql_generated\}/.test('<pre>{answer.audit.sql_generated}')).toBe(
+    false,
   )
 })
 

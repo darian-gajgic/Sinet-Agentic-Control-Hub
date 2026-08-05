@@ -273,3 +273,57 @@ test('an unrecorded instant says so, and an unreadable one renders verbatim with
   expect(stamp.parentElement!.textContent, 'a label was invented for an instant nobody could read').toBe('whenever')
   v2.unmount()
 })
+
+// ── the D8 teaching layer on the personal filters (P3-UI-5) ───────────────
+
+test('an empty filter teaches what the question was, not only that nothing answered it', async () => {
+  const none = fixtures.runs() as unknown as { runs: unknown[] }
+  none.runs = []
+  const { view } = await open('/?view=running', { 'GET /api/runs?status=running': { body: none } })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('Nothing matches.')
+  // The teaching half names the QUESTION the filter asked, which is what makes
+  // an empty answer readable: "running" is a stored state, not "not busy".
+  expect(text, 'the empty state does not say what this filter asks for').toContain(
+    'Runs the platform is working on right now',
+  )
+  view.unmount()
+
+  // And the none-vs-not-loaded line holds: before the read lands there is no
+  // teaching empty at all (`parts.tsx:134–136`).
+  scriptedFetch({})
+  window.history.replaceState(null, '', '/?view=running')
+  const loading = mount(<App stream={inertStream()} />)
+  expect(loading.container.textContent, 'a teaching empty rendered over a read that had not landed').not.toContain(
+    'Nothing matches.',
+  )
+  loading.unmount()
+})
+
+test('the what-needs-me empties teach where the work would come from', async () => {
+  const { view } = await open('/?view=what-needs-me', {
+    'GET /api/approvals': { body: { items: [], cursor: 1 } },
+    'GET /api/deliverables?state=in-review': { body: { deliverables: [], cursor: 1, truncated: false } },
+  })
+  const text = view.container.textContent ?? ''
+  expect(text, 'the decisions empty does not teach what fills it').toContain('the moment a run needs a person')
+  expect(text, 'the review empty does not teach what fills it').toContain('needs a person to look before it goes out')
+  view.unmount()
+})
+
+test('the filter bar stays reachable at 375px and its selection is legible without colour alone', async () => {
+  const { view } = await open('/?view=running')
+  const links = [...view.container.querySelectorAll('.filter-bar a')]
+  expect(links.length).toBe(filters.length)
+  const pinned = /w-\[\d+px\]|min-w-\[\d+px\]/
+  for (const a of links) {
+    expect(pinned.test(a.className.toString()), 'a filter link pins a pixel width').toBe(false)
+    // Every responsive leg widens UP: a max-width variant would make the phone
+    // the exception rather than the base (S1.10).
+    expect(a.className.toString()).not.toMatch(/\bmax-(sm|md|lg):/)
+  }
+  // The selected filter is marked in the DOM as well as in the styling, so the
+  // current view is readable to a screen reader and not by hue alone.
+  expect(view.container.querySelector('.filter-bar a[aria-current="page"]')?.textContent).toBe('Running')
+  view.unmount()
+})

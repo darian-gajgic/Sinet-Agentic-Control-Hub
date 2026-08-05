@@ -1,10 +1,10 @@
 import { api, type ApprovalItem, type Deliverable, type RunListItem } from './api'
 import type { EventStream } from './events'
 import { missionEventTypes, useLive } from './live'
-import { Absent, Empty, Freshness, Owner, ParkedUntil, Section } from './parts'
+import { Absent, Freshness, Owner, ParkedUntil, Section } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
-import { Timestamp } from './ui'
+import { Button, Chip, EmptyState, Timestamp } from './ui'
 
 /**
  * The four personal filters (Spec S15.5 ¶5; S1.4; S1.10).
@@ -67,14 +67,19 @@ export function FilterBar({ active }: { active: FilterID | '' }) {
   return (
     <nav className="filter-bar" aria-label="Personal filters">
       {filters.map((f) => (
-        <Link key={f.id} to={hrefForFilter(f.id)} aria-current={f.id === active ? 'page' : undefined}>
+        <Link
+          key={f.id}
+          to={hrefForFilter(f.id)}
+          aria-current={f.id === active ? 'page' : undefined}
+          className="rounded-(--radius-sm) px-2 py-1 text-sm text-muted-foreground no-underline aria-[current=page]:bg-(image:--grad-soft) aria-[current=page]:text-foreground"
+        >
           {f.label}
         </Link>
       ))}
       {active !== '' && (
-        <button type="button" onClick={() => navigate(hrefFor('mission-control'))}>
+        <Button variant="ghost" size="sm" onClick={() => navigate(hrefFor('mission-control'))}>
           Clear
-        </button>
+        </Button>
       )}
     </nav>
   )
@@ -106,11 +111,14 @@ function WhatNeedsMe({ stream }: { stream?: EventStream }) {
       <Section title="Waiting on a decision" stale={asks.stale}>
         <Freshness stale={asks.stale} error={asks.error} hasData={asks.data !== null} />
         {asks.data && asks.data.items.length === 0 ? (
-          <Empty what="Nothing is waiting on you." />
+          <EmptyState
+            what="Nothing is waiting on you."
+            why="Approvals, gate questions and interview cards land here the moment a run needs a person. They are answered in the inbox."
+          />
         ) : (
           <ul className="rows">
             {(asks.data?.items ?? []).map((item) => (
-              <li className="row" key={item.id}>
+              <li className="row flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border py-2" key={item.id}>
                 <ApprovalLine item={item} />
               </li>
             ))}
@@ -121,11 +129,14 @@ function WhatNeedsMe({ stream }: { stream?: EventStream }) {
       <Section title="Ready to review" stale={review.stale}>
         <Freshness stale={review.stale} error={review.error} hasData={review.data !== null} />
         {review.data && review.data.deliverables.length === 0 ? (
-          <Empty what="Nothing is waiting for a review." />
+          <EmptyState
+            what="Nothing is waiting for a review."
+            why="A deliverable appears here when a worker finishes one and its delivery policy needs a person to look before it goes out."
+          />
         ) : (
           <ul className="rows">
             {(review.data?.deliverables ?? []).map((d) => (
-              <li className="row" key={d.deliverable_id}>
+              <li className="row flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border py-2" key={d.deliverable_id}>
                 <DeliverableLine deliverable={d} />
               </li>
             ))}
@@ -141,18 +152,28 @@ function ApprovalLine({ item }: { item: ApprovalItem }) {
     <>
       {/* The honest door: the card is ANSWERED on the inbox surface, which is
           B6-6's. This filter says it is waiting and takes you there. */}
-      <Link to={hrefFor('inbox-item', { id: item.id })}>{item.id}</Link>
-      <span className="run-state">{item.kind}</span>
-      <span className={item.tier === 'high' ? 'warn-flag' : 'muted'}>{item.tier}</span>
+      <Link to={hrefFor('inbox-item', { id: item.id })} className="font-mono text-sm tabular-nums">
+        {item.id}
+      </Link>
+      <Chip className="run-state">{item.kind}</Chip>
+      <Chip className={item.tier === 'high' ? 'warn-flag' : 'muted'} tone={item.tier === 'high' ? 'red' : 'accent'}>
+        {item.tier}
+      </Chip>
       <Owner id={item.owner} />
       {item.answerable ? (
-        <span className="notice">yours to answer</span>
+        <span className="notice text-xs">yours to answer</span>
       ) : (
         <Absent reason={item.not_answerable_reason ?? 'not yours to answer'} />
       )}
-      {item.step_up_required && <span className="warn-flag">PIN required</span>}
-      {item.stale && <span className="warn-flag">{(item.stale_reasons ?? ['stale']).join('; ')}</span>}
-      <span className="muted">
+      {item.step_up_required && (
+        <Chip className="warn-flag" tone="orange">
+          PIN required
+        </Chip>
+      )}
+      {item.stale && (
+        <span className="warn-flag text-xs">{(item.stale_reasons ?? ['stale']).join('; ')}</span>
+      )}
+      <span className="muted ms-auto text-xs">
         seen <Timestamp ts={item.observed_ts} variant="live" />
       </span>
     </>
@@ -162,17 +183,33 @@ function ApprovalLine({ item }: { item: ApprovalItem }) {
 function DeliverableLine({ deliverable }: { deliverable: Deliverable }) {
   return (
     <>
-      <Link to={hrefFor('deliverable', { id: deliverable.deliverable_id })}>{deliverable.deliverable_id}</Link>
-      <span className="muted">
-        {deliverable.type} · revision {String(deliverable.current_revision)}
+      <Link
+        to={hrefFor('deliverable', { id: deliverable.deliverable_id })}
+        className="font-mono text-sm tabular-nums"
+      >
+        {deliverable.deliverable_id}
+      </Link>
+      <span className="muted text-xs">
+        {deliverable.type} · revision <span className="font-mono tabular-nums">{String(deliverable.current_revision)}</span>
       </span>
       <Owner id={deliverable.owner} />
-      <Link to={hrefFor('task', { id: deliverable.task_id })}>{deliverable.task_id}</Link>
-      <span className="muted">
+      <Link to={hrefFor('task', { id: deliverable.task_id })} className="font-mono text-sm tabular-nums">
+        {deliverable.task_id}
+      </Link>
+      <span className="muted ms-auto text-xs">
         updated <Timestamp ts={deliverable.updated_ts} variant="live" />
       </span>
     </>
   )
+}
+
+/** What each run filter asks for, in the reader's words — so an empty answer
+ *  says what would have filled it rather than only that nothing did. */
+const filterMeaning: Record<FilterID, string> = {
+  'what-needs-me': 'Work that is waiting on a person.',
+  mine: 'Runs the platform recorded under your name. The server answers this one — it is asked as your own rows, not sieved here.',
+  running: 'Runs the platform is working on right now. A queued or parked run is not one of them.',
+  'finished-today': 'Runs that ENDED since midnight where you are. Something that only moved today is not finished.',
 }
 
 /** mine / running / finished-today: three questions over the run list, each a
@@ -202,11 +239,11 @@ function RunFilter({ id, me, stream }: { id: FilterID; me: string; stream?: Even
     <Section title={filters.find((f) => f.id === id)?.label ?? id} stale={stale}>
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && rows.length === 0 ? (
-        <Empty what="Nothing matches." />
+        <EmptyState what="Nothing matches." why={filterMeaning[id]} />
       ) : (
         <ul className="rows" data-filter={id}>
           {rows.map((r) => (
-            <li className="row" key={r.run_id}>
+            <li className="row flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border py-2" key={r.run_id}>
               <FilterRunLine run={r} />
             </li>
           ))}
@@ -222,16 +259,20 @@ function FilterRunLine({ run }: { run: RunListItem }) {
   return (
     <>
       {run.task_id !== '' ? (
-        <Link to={hrefFor('task', { id: run.task_id })}>{run.task_id}</Link>
+        <Link to={hrefFor('task', { id: run.task_id })} className="font-mono text-sm tabular-nums">
+          {run.task_id}
+        </Link>
       ) : (
         <Absent reason="no task — this run stands alone" />
       )}
-      <span className="run-state">{run.state}</span>
+      <Chip className="run-state" tone={run.state === 'running' ? 'green' : 'accent'}>
+        {run.state}
+      </Chip>
       <Owner id={run.owner} />
-      <span className="run-lane">{run.lane}</span>
-      {run.waiting_on_human && <span className="waiting-human">waiting on a person</span>}
+      <span className="run-lane font-mono text-xs text-muted-foreground">{run.lane}</span>
+      {run.waiting_on_human && <span className="waiting-human text-xs text-[var(--orange)]">waiting on a person</span>}
       {run.state === 'parked' && <ParkedUntil until={run.parked_until} />}
-      <span className="muted">
+      <span className="muted ms-auto text-xs">
         <Timestamp ts={run.last_activity_ts} variant="live" />
       </span>
     </>

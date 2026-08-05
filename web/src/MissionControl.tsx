@@ -3,10 +3,19 @@ import type { EventStream } from './events'
 import { FilterBar, FilterView, filterFromSearch } from './Filters'
 import { AnswerView, HistoryPanel } from './History'
 import { missionEventTypes, useLive } from './live'
-import { Absent, Empty, Freshness, Owner, ParkedUntil, Section } from './parts'
+import {
+  Absent,
+  Freshness,
+  Owner,
+  ParkedUntil,
+  Section,
+  StallBanner,
+  SurfaceHead,
+  ThresholdRing,
+} from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Timestamp } from './ui'
+import { Chip, EmptyState, StatTile, StatusDot, Timestamp, type Tone } from './ui'
 
 /**
  * Mission control (Spec S15.5 ¶1; S3.1): one live screen of the household's
@@ -37,6 +46,32 @@ const recentlyFinishedWindowMs = 24 * 60 * 60 * 1000
 const terminalStates = ['completed', 'crashed', 'finalized', 'tombstoned', 'died-at-gate']
 
 export type Bucket = { id: string; title: string; runs: RunListItem[] }
+
+/**
+ * What puts a run in each bucket, in the reader's words — the teaching half of
+ * the D8 pass (B6 gate §9 A-1).
+ *
+ * These are the SAME rules `bucketRuns` sorts by, stated once so a tile's foot,
+ * a section's subtitle and an empty state's "why" cannot drift from each other
+ * or from the sort. Nothing here is a second classification: the sort below is
+ * the only one.
+ */
+const bucketMeaning: Record<string, { tone: Tone; why: string }> = {
+  running: { tone: 'green', why: 'A run the platform is working on right now.' },
+  queued: { tone: 'blue', why: 'Accepted and waiting its turn — the scheduler starts it when the lane has room.' },
+  blocked: {
+    tone: 'orange',
+    why: 'Parked with an open question, so it moves again only once a person answers it in the inbox.',
+  },
+  parked: { tone: 'yellow', why: 'Stopped on a clock rather than on a person — it resumes at its own horizon.' },
+  finished: { tone: 'accent', why: 'Ended in the last day. Older work stays readable from its task and the history below.' },
+  other: {
+    tone: 'pink',
+    why: 'A state these five do not name — mid-dispatch, draining, or one a later version added. It is shown rather than hidden.',
+  },
+}
+
+const meaningOf = (id: string) => bucketMeaning[id] ?? { tone: 'accent' as Tone, why: '' }
 
 /**
  * bucketRuns sorts served rows into the five S15.5 buckets, plus an honest
@@ -101,19 +136,41 @@ export function MissionControl({
 
   return (
     <section className="surface">
-      <h1>Mission control</h1>
+      <SurfaceHead
+        title="Mission control"
+        what="One live screen of the household's work — what is running, queued, parked, blocked on a human and recently finished — with the consumption meters beside it."
+      />
       <FilterBar active={filter} />
       {filter !== '' && <FilterView id={filter} me={me} stream={stream} />}
       <Freshness stale={work.stale} error={work.error} hasData={work.data !== null} />
 
+      {/* A count of the rows ON SCREEN, which is presentation over the served
+          list rather than a figure of its own. The labels say so, and no tile
+          carries a number no list below it carries. */}
+      <div className="my-4 grid grid-cols-2 gap-(--density-gap) sm:grid-cols-3 lg:grid-cols-6" data-tiles="buckets">
+        {buckets.map((b) => (
+          <StatTile
+            key={b.id}
+            label={b.title}
+            tone={meaningOf(b.id).tone}
+            value={String(b.runs.length)}
+            foot="runs on screen"
+          />
+        ))}
+      </div>
+
       {buckets.map((b) => (
         <Section title={b.title} key={b.id} stale={work.stale}>
+          <p className="mt-0 mb-2 max-w-prose text-xs text-muted-foreground" data-bucket-why={b.id}>
+            {meaningOf(b.id).why}
+          </p>
+          {b.id === 'blocked' && b.runs.length > 0 && <BlockedDoor />}
           {b.runs.length === 0 ? (
-            <Empty what="Nothing here." />
+            <EmptyState what={`Nothing is ${b.title.toLowerCase()}.`} why={meaningOf(b.id).why} />
           ) : (
             <ul className="rows" data-bucket={b.id}>
               {b.runs.map((r) => (
-                <li key={r.run_id} className="row">
+                <li key={r.run_id} className="row flex flex-col gap-1 border-b border-border py-2">
                   <RunLine run={r} />
                 </li>
               ))}
@@ -128,26 +185,66 @@ export function MissionControl({
   )
 }
 
+/** The blocked bucket's door. Answering happens on the inbox — this says so and
+ *  fires nothing, because the ask's own verbs live where the card is. */
+function BlockedDoor() {
+  return (
+    <StallBanner
+      kind="blocked"
+      tone="orange"
+      what="These runs are stopped until somebody answers their open question. Nothing here restarts on its own."
+    >
+      <Link to={hrefFor('inbox')}>Answer them in the inbox</Link>
+    </StallBanner>
+  )
+}
+
 /** One work item. Every item drills through to its task detail — built with
- *  `hrefFor` over the URL contract, never a hand-assembled path. */
+ *  `hrefFor` over the URL contract, never a hand-assembled path.
+ *
+ *  A row carries no card id — the run list serves none — so a stopped row's
+ *  door points at the SURFACE where its ask is answered rather than at a card
+ *  this client would have had to guess (§42-B). */
 function RunLine({ run }: { run: RunListItem }) {
   return (
     <>
-      {run.task_id !== '' ? (
-        <Link to={hrefFor('task', { id: run.task_id })}>{run.task_id}</Link>
-      ) : (
-        <Absent reason="no task — this run stands alone" />
-      )}
-      <span className="run-state">{run.state}</span>
-      {run.wedged && <span className="warn-flag">wedged</span>}
-      <Owner id={run.owner} />
-      <span className="run-stage">{run.stage !== '' ? run.stage : <Absent reason="no stage marker yet" />}</span>
-      <span className="run-lane">{run.lane}</span>
-      {run.waiting_on_human && <span className="waiting-human">waiting on a person</span>}
-      {run.state === 'parked' && <ParkedUntil until={run.parked_until} />}
-      <span className="muted">
-        last activity <Timestamp ts={run.last_activity_ts} variant="live" />
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <StatusDot tone={run.wedged ? 'red' : run.state === 'running' ? 'green' : 'accent'} live={run.state === 'running'} />
+        {run.task_id !== '' ? (
+          <Link to={hrefFor('task', { id: run.task_id })} className="font-mono text-sm tabular-nums">
+            {run.task_id}
+          </Link>
+        ) : (
+          <Absent reason="no task — this run stands alone" />
+        )}
+        <Chip className="run-state" tone={run.state === 'running' ? 'green' : 'accent'}>
+          {run.state}
+        </Chip>
+        {run.wedged && (
+          <Chip className="warn-flag" tone="red">
+            wedged
+          </Chip>
+        )}
+        <Owner id={run.owner} />
+        <span className="run-stage text-xs text-muted-foreground">
+          {run.stage !== '' ? run.stage : <Absent reason="no stage marker yet" />}
+        </span>
+        <span className="run-lane font-mono text-xs text-muted-foreground">{run.lane}</span>
+        {run.waiting_on_human && <span className="waiting-human text-xs text-[var(--orange)]">waiting on a person</span>}
+        {run.state === 'parked' && <ParkedUntil until={run.parked_until} />}
+        <span className="muted ms-auto text-xs">
+          last activity <Timestamp ts={run.last_activity_ts} variant="live" />
+        </span>
       </span>
+      {run.wedged && (
+        <StallBanner
+          kind="wedged"
+          tone="red"
+          what="Flagged and paused: the platform stopped this run rather than let it loop, and it waits for a person."
+        >
+          <Link to={hrefFor('inbox')}>Its card is in the inbox</Link>
+        </StallBanner>
+      )}
     </>
   )
 }
@@ -200,8 +297,19 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
                       )}
                     </td>
                     <td>
+                      {/* The ring is the ONE capacity idiom on these surfaces,
+                          and it renders only what the gauge served: the two
+                          landed gates are the whole condition, and the figure
+                          stays beside it because a ring is a glance and a
+                          number is the answer. */}
                       {l.pressure_applicable && l.pressure !== null ? (
-                        String(l.pressure)
+                        <span className="inline-flex items-center gap-2">
+                          <ThresholdRing
+                            ratio={l.pressure}
+                            label={`pressure ${String(l.pressure)} of declared budget — ${l.owner} in ${l.lane}`}
+                          />
+                          <span className="font-mono tabular-nums">{String(l.pressure)}</span>
+                        </span>
                       ) : (
                         <Absent reason="no declared budget, so there is no denominator" />
                       )}
@@ -224,10 +332,37 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
               </tbody>
             </table>
           </div>
-          {meters.lanes.length === 0 && <Empty what="No lane has run anything yet." />}
+          {meters.lanes.length === 0 && (
+            <EmptyState
+              what="No lane has run anything yet."
+              why="A lane appears the first time work runs on it. The meters are readings of what actually ran, so nothing here means nothing has."
+            />
+          )}
+
+          {/* What the ring means, in one line. It is deliberately about the
+              DECLARATION and never about a cutoff: where background work stops
+              being admitted is a server setting no browser can read. */}
+          <p className="mt-2 text-xs text-muted-foreground" data-ring-legend>
+            The ring beside a pressure figure shows that figure as a share of the declared budget for that lane — green
+            below three quarters, orange from there, red once the declared budget is reached.
+          </p>
 
           <ViewBlock title="Burn rate (per person, per observed day)" view={meters.burn_rates} />
           <ViewBlock title="Budget remainders" view={meters.budgets} />
+          {/* Never stall silently: a limit event is the platform having stopped
+              admitting work, and it says so in words with the door to where a
+              stopped run is released. Rendered only when the view really
+              carries rows — a banner over an empty answer would be an alarm
+              about nothing. */}
+          {(meters.limit_events.answer?.rows.length ?? 0) > 0 && (
+            <StallBanner
+              kind="limit"
+              tone="orange"
+              what="A limit was reached on at least one lane below. New background work stops being started there and running work parks at its next safe boundary — nothing is discarded."
+            >
+              <Link to={hrefFor('inbox')}>Parked runs are released from their cards in the inbox</Link>
+            </StallBanner>
+          )}
           <ViewBlock title="Limit events" view={meters.limit_events} />
         </>
       )}
@@ -240,8 +375,10 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
  *  answer. */
 export function ViewBlock({ title, view }: { title: string; view: MeterView }) {
   return (
-    <div className="view-block">
-      <h3>{title}</h3>
+    <div className="view-block mt-3">
+      <h3 className="mt-0 mb-1 font-mono text-[9.5px] font-bold tracking-[2px] text-muted-foreground uppercase">
+        {title}
+      </h3>
       {view.answer ? <AnswerView answer={view.answer} /> : <Absent reason={view.absent ?? 'not available'} />}
     </div>
   )

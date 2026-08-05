@@ -198,7 +198,16 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
             // own queued work" (S15.5).
             <Board me={session.user?.user_id ?? ''} stream={stream} />
           ) : route.id === 'fleet' ? (
-            <Fleet stream={stream} />
+            // The caller's own identity decides which pause switches and budget
+            // editors render. The operator limb is DEV-INCLUSIVE because it
+            // mirrors the server's own `isOperatorRead` — the predicate the read
+            // on the other side of those verbs used — which is deliberately not
+            // the users-row-role-only flag the memory surface takes below.
+            <Fleet
+              me={session.user?.user_id ?? ''}
+              operator={session.dev === true || session.user?.role === 'operator'}
+              stream={stream}
+            />
           ) : route.id === 'task' ? (
             <TaskDetail id={params.id} stream={stream} />
           ) : route.id === 'inbox' ? (

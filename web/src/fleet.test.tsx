@@ -5,7 +5,17 @@ import App from './App'
 import type { Meters } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch } from './doubles'
 import { EventStream } from './events'
+import appSource from './App.tsx?raw'
+import fleetSource from './Fleet.tsx?raw'
 import { click, flush, mount, typeInto } from './testing'
+
+/** The shipped app tree, for the two source-level negatives below: a read the
+ *  render happened not to trigger is invisible to a DOM walk. */
+const appSources = import.meta.glob('./**/*.{ts,tsx}', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
 
 /**
  * Fleet overview (Spec S15.5 ¶4; 9.3; S2.5; S3.10; D2), driven against the
@@ -746,4 +756,141 @@ test('a lane with parked runs and no served horizon says so; one with a horizon 
   expect(beside.endsWith(stamp), 'the instant is not beside its label').toBe(true)
   expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(stamp.length)
   v2.unmount()
+})
+
+// ── the session-read hoist (P3-UI-5; closes the §48 recorded deviation) ────
+
+test('the fleet reads no session of its own — one read, one source', async () => {
+  // THE DEVIATION THIS CLOSES. `useMayAct` used to call `GET /api/auth/session`
+  // from this surface because `App.tsx` was frozen for P3-UI-2. It was a second
+  // READ of one source, never a second source, and the shell now hands the
+  // identity down exactly as it does to Board, MissionControl and Deliverable.
+  const log = scriptedFetch(oversightRoutes())
+  window.history.replaceState(null, '', '/fleet')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const reads = log.calls.filter((c) => c.path === '/api/auth/session')
+  expect(reads.length, 'the fleet route reads the session more than once').toBe(1)
+  // Non-vacuous: the surface really rendered, and it really rendered controls
+  // that DEPEND on the identity — so "one read" is not "the page never loaded".
+  expect(view.container.querySelector('.fleet-lanes'), 'the fleet did not render').not.toBeNull()
+  expect(view.container.querySelector('[data-pause]'), 'no identity-dependent control rendered').not.toBeNull()
+  view.unmount()
+
+  // And the source says so too: the DOM cannot see a read that a render happened
+  // not to trigger, so the file is scanned for the call it no longer makes.
+  expect(fleetSource, 'Fleet.tsx still reads the session itself').not.toMatch(/api\s*\.\s*session\s*\(/)
+  expect(fleetSource, 'the scan does not reach a file that calls the API at all').toMatch(/api\s*\.\s*meters\s*\(/)
+  // Probe: the matcher really discriminates.
+  expect(/api\s*\.\s*session\s*\(/.test('void api.session().then(')).toBe(true)
+})
+
+test('the hoisted operator predicate is dev-inclusive, and is NOT the memory surface’s role-only flag', async () => {
+  // The two predicates DIFFER and must stay different: this one mirrors the
+  // server's own `isOperatorRead` — the predicate the read on the other side of
+  // these verbs used — while the S09 gate resolves its actor against the users
+  // row alone. Collapsing them would invent an authority in one direction and a
+  // refusal in the other (the B6-6 D9 lesson).
+  expect(appSource, 'the fleet arm no longer states the dev-inclusive predicate').toContain(
+    "operator={session.dev === true || session.user?.role === 'operator'}",
+  )
+  expect(appSource, 'the memory arm no longer states the users-row-role-only flag').toContain(
+    "operator={session.user?.role === 'operator'}",
+  )
+
+  // Driven, not only read: under the dev fallback there is no `user` object at
+  // all, so a role-only predicate would offer NOTHING. The dev identity is
+  // offered every switch the read serves, which is byte-equivalent to what the
+  // surface's own read produced before the hoist.
+  const view = await fleet({ 'GET /api/auth/session': { body: { authenticated: true, dev: true } } })
+  const served = (fixtures.meters() as unknown as Meters).automation.states ?? []
+  expect(served.length, 'the served body carries no switch, so this asserts nothing').toBeGreaterThan(1)
+  expect(view.container.querySelectorAll('.automation-switch')).toHaveLength(served.length)
+  view.unmount()
+})
+
+test('a member handed the household body is still offered only their own, through the hoisted props', async () => {
+  // The sabotage direction, re-fired through the new plumbing rather than
+  // merely re-rendered: the served body is the OPERATOR's, and the identity is
+  // a member's.
+  const view = await fleet({ 'GET /api/auth/session': asMember('alice') })
+  const switches = [...view.container.querySelectorAll('.automation-switch')].map((n) => n.getAttribute('data-owner'))
+  expect(switches, 'a member was offered somebody else’s switch').toEqual(['alice'])
+  const budgets = [...view.container.querySelectorAll('.budget-row')].map((n) => n.getAttribute('data-owner'))
+  expect(new Set(budgets), 'a member was offered somebody else’s budget editor').toEqual(new Set(['alice']))
+  // Non-vacuous: the body really carried other people's rows.
+  const served = fixtures.meters() as unknown as Meters
+  expect(new Set((served.automation.states ?? []).map((s) => s.owner)).size).toBeGreaterThan(1)
+  view.unmount()
+})
+
+// ── the D8 layer on the fleet (P3-UI-5) ───────────────────────────────────
+
+test('the fleet teaches what it is, and the line never implies a household total', async () => {
+  const view = await fleet()
+  const line = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
+  expect(line, 'the fleet carries no "what this is" line').not.toBe('')
+  expect(line.toLowerCase()).toContain('whose account')
+  // Accounts are never summed (D2), so the line must not promise one.
+  expect(line.toLowerCase(), 'the header line implies a total this platform never computes').toContain(
+    'never added up across people',
+  )
+  for (const overclaim of ['total spend', 'household total', 'combined']) {
+    expect(line.toLowerCase()).not.toContain(overclaim)
+  }
+  view.unmount()
+})
+
+test('parked lanes say so with the horizon and the inbox door, and the banner fires nothing', async () => {
+  const log = scriptedFetch(oversightRoutes())
+  window.history.replaceState(null, '', '/fleet')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const served = fixtures.meters() as unknown as Meters
+  expect(served.lanes.some((l) => l.parked_runs > 0), 'no served lane is parked — this asserts nothing').toBe(true)
+  const banner = view.container.querySelector('[data-stall="parked"]')!
+  expect(banner, 'a lane holding parked runs stalls silently').not.toBeNull()
+  expect(banner.textContent).toContain('nothing queued or parked is thrown away')
+  // The door POINTS: a parked run's own release is `api.resumeRun`, and its one
+  // call site is the inbox, where the card holding it lives (§48 OQ2).
+  expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
+  expect(banner.querySelector('button'), 'the banner offers a verb of its own').toBeNull()
+  // NO NEW VERB. A door is a link and nothing else: the banner carries no
+  // control of its own, and rendering the whole surface mutated nothing.
+  expect(banner.querySelectorAll('button, input, form, select')).toHaveLength(0)
+  expect(log.calls.filter((c) => c.method !== 'GET'), 'an oversight surface fired a verb on render').toEqual([])
+  view.unmount()
+})
+
+test('api.resumeRun still has exactly one call site, and it is the inbox', () => {
+  // The never-stall doors POINT at the release rather than re-implementing it.
+  // If a second surface ever fires it, the "one verb, one home" claim above
+  // silently stops being true.
+  const callers = Object.entries(appSources)
+    .filter(([p]) => !p.includes('.test.'))
+    .filter(([, src]) => /api\s*\.\s*resumeRun\s*\(/.test(src))
+    .map(([p]) => p)
+    .sort()
+  expect(callers, 'a second surface re-implements the parked-run release').toEqual(['./Inbox.tsx'])
+  // Non-vacuous: the scan really reached the tree and the verb really exists.
+  expect(Object.keys(appSources).length).toBeGreaterThan(20)
+  expect(appSources['./api.ts'], 'the verb is gone — this list would be empty for the wrong reason').toMatch(
+    /resumeRun/,
+  )
+})
+
+test('the fleet’s empty arms teach what would fill them', async () => {
+  const empty = fixtures.meters() as unknown as Meters
+  empty.lanes = []
+  const view = await fleet({ 'GET /api/meters': { body: empty } })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('No lane matches this filter.')
+  expect(text, 'the empty lane state does not teach what fills it').toContain('A lane appears once work has run on it')
+  expect(text).toContain('No lane here is yours to put a budget on.')
+  expect(text, 'the empty budget state does not teach the grain a budget is declared at').toContain(
+    'declared per person per lane',
+  )
+  view.unmount()
 })
