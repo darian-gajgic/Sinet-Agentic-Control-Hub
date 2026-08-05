@@ -262,7 +262,24 @@
    `!important` declarations the layer order is REVERSED (unlayered important is
    the WEAKEST), so moving it in would strengthen a backstop nobody asked to
    strengthen. It clamps motion and competes with no utility, so it is left
-   exactly as it was. */
+   exactly as it was.
+
+   THE §52-B KEPT-FOR-CASCADE RE-AUDIT (2026-08-05, UI-7). Six rules were kept
+   at UI-6 with the reason "the utility form cannot win". This fix dissolves
+   that reason, so each was re-audited against its consumer's real markup. ALL
+   SIX STAY, on a NEW reason: their consumers are bare elements carrying no
+   utility twin at all — `.criteria label` / `.verdict-form label` /
+   `.disposition-form label` (Inbox.tsx:1569, a plain <label>), `.batch-
+   candidates` / `.batch-outcomes` (Inbox.tsx:1768/:1801, plain <ul>),
+   `.cat-tabs button` (settingsForm.tsx:152, plain <button>), `.badges`
+   (settingsForm.tsx:405), `.setting-edit` (settingsForm.tsx:245) and
+   `.push-device label` (PushDevices.tsx:148). UI-6 removed every inert utility
+   it had added, so the frozen markup does not carry the twins, and every one of
+   those five files is byte-frozen for this packet — editing a frozen .tsx to
+   add a utility twin would be a wall break, not a shed. So these owned rules
+   are still the SOLE styling doing the work, and they keep doing it: inside one
+   layer, specificity decides, and `.cat-tabs button` (0,1,1) still beats the
+   global `input,select,button` (0,0,1) exactly as it did unlayered. */
 
 @layer base {
 

@@ -421,13 +421,122 @@ test('the ask layer answers with its disambiguation card, and a card IS an answe
   expect(served.card!.reason).toContain('the local tier is not wired here')
   expect(card.textContent).toContain(served.card!.reason)
   expect(card.textContent).toContain(served.card!.question)
-  // Every served choice reaches the screen with its category and description.
+  // Every served choice reaches the screen with its description.
   const choices = [...card.querySelectorAll('li')]
   expect(choices).toHaveLength(served.card!.choices.length)
   expect(choices.length).toBeGreaterThan(1)
   expect(choices[0].textContent).toContain(served.card!.choices[0].query)
-  expect(choices[0].textContent).toContain(served.card!.choices[0].category)
   expect(choices[0].textContent).toContain(served.card!.choices[0].description)
+
+  // THE CATEGORY IS NOW THE GROUP HEADING (P3-UI-7 R7a), and asserting it on the
+  // <li> would prove nothing: EVERY served choice in this body has category
+  // "cost" and EVERY query starts with "cost.", so `li.textContent` contains the
+  // category whether or not the category ever rendered. That is exactly the
+  // vacuous-predicate shape this batch names first, so the assertion moved to
+  // the element that really carries it, and the coincidence is asserted to still
+  // be a coincidence rather than left implicit.
+  expect(served.card!.choices.every((c) => c.query.includes(c.category))).toBe(true)
+  const groups = [...card.querySelectorAll('[data-choice-group]')]
+  expect(groups.map((g) => g.getAttribute('data-choice-group'))).toEqual(['cost'])
+  expect(groups[0].querySelector('p')?.textContent, 'the served category is not rendered verbatim').toBe(
+    served.card!.choices[0].category,
+  )
+  view.unmount()
+})
+
+test('the card groups its choices by SERVED category, rendering each exactly once in served order', () => {
+  // The served body is single-category, so the discriminating case is scripted:
+  // three categories, one of them EMPTY, and a repeat of an earlier category
+  // LATER in the list. Consecutive runs is the algorithm (App.tsx's navSections
+  // class), so the repeat opens its own second run rather than being gathered
+  // back into the first — grouping is presentation and may not reorder.
+  const card: Answer = {
+    layer: 1,
+    query: 'ask',
+    confidence: 'canned',
+    columns: [],
+    rows: [],
+    row_count: 0,
+    truncated: false,
+    card: {
+      question: 'which one did you mean?',
+      reason: 'the platform’s own account of why',
+      choices: [
+        { query: 'cost.for_run', category: 'cost', description: 'one run' },
+        { query: 'cost.for_task', category: 'cost', description: 'one task' },
+        { query: 'runs.wedged', category: '', description: 'no category at all' },
+        { query: 'people.load', category: 'people', description: 'per person' },
+        { query: 'cost.by_period', category: 'cost', description: 'per day' },
+      ],
+    },
+  }
+  const view = mount(<AnswerView answer={card} />)
+  const node = view.container.querySelector('[data-card="disambiguation"]')!
+
+  // FLATTENED = SERVED, in order and in count. This is the property that makes
+  // grouping presentation: a choice dropped, duplicated or reordered fails here.
+  const rendered = [...node.querySelectorAll('[data-choice]')].map((b) => b.getAttribute('data-choice'))
+  expect(rendered).toEqual(card.card!.choices.map((c) => c.query))
+  expect(rendered).toHaveLength(card.card!.choices.length)
+
+  // Four consecutive runs, the empty category in its own UNLABELLED one.
+  const groups = [...node.querySelectorAll('[data-choice-group]')]
+  expect(groups.map((g) => g.getAttribute('data-choice-group'))).toEqual(['cost', '', 'people', 'cost'])
+  expect(groups.map((g) => g.querySelectorAll('[data-choice]').length)).toEqual([2, 1, 1, 1])
+  expect(groups[1].querySelector('p'), 'an empty category rendered a heading for a name nobody served').toBeNull()
+  expect(groups[0].querySelector('p')?.textContent).toBe('cost')
+  view.unmount()
+})
+
+test('the card speaks in operator words and claims no cause the wire does not state', () => {
+  const card: Answer = {
+    layer: 1,
+    query: 'ask',
+    confidence: 'canned',
+    columns: [],
+    rows: [],
+    row_count: 0,
+    truncated: false,
+    card: {
+      question: 'what did the deployment cost?',
+      reason: 'the local tier is not wired here, so intent cannot be classified',
+      choices: [{ query: 'cost.for_run', category: 'cost', description: 'one run' }],
+    },
+  }
+  const view = mount(<AnswerView answer={card} />)
+  const words = view.container.querySelector('[data-card-words]')!
+  const reason = view.container.querySelector('[data-card-reason]')!
+
+  // The client's own words say what is true of EVERY reason class.
+  expect(words.textContent).toContain('questions the platform can answer')
+  expect(words.textContent).toContain('nothing was run')
+  expect(words.textContent).toContain('you still ask it yourself')
+
+  // THE SERVED REASON IS THE SOLE STATEMENT OF CAUSE, rendered verbatim and in
+  // exactly one place (proposal §7 amendment A1.1).
+  expect(reason.textContent).toBe(card.card!.reason)
+  expect([...view.container.querySelectorAll('[data-card-reason]')]).toHaveLength(1)
+
+  // THE OVERCLAIM NEGATIVES. The wire carries no cause code and the store serves
+  // this card for at least seven reason classes (internal/history/layer1.go), so
+  // the CLIENT copy may not name one — and may not promise a capability the
+  // degraded mode does not have. Checked on the client's words alone: the served
+  // reason legitimately says "not wired" and must not be what makes this pass.
+  const client = words.textContent!.toLowerCase()
+  expect(client).not.toContain('not wired')
+  expect(client).not.toContain('local model')
+  expect(client).not.toContain('local tier')
+  for (const promise of ['i can write', 'generate', 'anything you like', 'in your own words', 'free text']) {
+    expect(client, `the card promised free-form generation: ${promise}`).not.toContain(promise)
+  }
+  // ...and no claim that something DID run. The one sentence about running says
+  // the opposite, so the negative is written against the affirmative forms.
+  for (const ran of ['already ran', 'i ran', 'was executed', 'has run']) {
+    expect(client, `the card claimed something ran: ${ran}`).not.toContain(ran)
+  }
+  // The reason really does carry the cause words, so the negatives above are
+  // discriminating rather than passing over copy that says nothing at all.
+  expect(reason.textContent!.toLowerCase()).toContain('not wired')
   view.unmount()
 })
 

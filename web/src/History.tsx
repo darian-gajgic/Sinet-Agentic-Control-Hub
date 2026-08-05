@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { api, type Answer, type HistoryRegistry } from './api'
+import { api, type Answer, type Disambiguation, type HistoryRegistry } from './api'
 import { describeError } from './live'
 import { Button, EmptyState } from './ui'
 
@@ -277,6 +277,111 @@ function QuestionForm({
   )
 }
 
+/**
+ * The choices of a disambiguation card, cut into the consecutive runs that
+ * share a served `category`.
+ *
+ * Order in, order out — deliberately the same algorithm class as the shell's
+ * `navSections` (App.tsx), and for the same reason: GROUPING IS PRESENTATION.
+ * Every served choice is rendered exactly once, in served order; a choice whose
+ * category is empty gets its own unlabelled run rather than being folded under
+ * the heading of the run beside it. The category is the SERVED string
+ * (api.ts:202–206) and is never rewritten here.
+ */
+type Choice = Disambiguation['choices'][number]
+
+function choiceRuns(choices: Disambiguation['choices']): { category: string; items: Choice[] }[] {
+  const runs: { category: string; items: Choice[] }[] = []
+  for (const c of choices) {
+    const last = runs.at(-1)
+    if (last && last.category === c.category) last.items.push(c)
+    else runs.push({ category: c.category, items: [c] })
+  }
+  return runs
+}
+
+/**
+ * The S14.10 / S15.7 disambiguation card, in operator words (B6 gate record §9
+ * finding A-2, assistant half; design proposal §3 as narrowed by its own §7
+ * amendment A1.1, 2026-08-05).
+ *
+ * WHAT THIS CLIENT MAY NOT SAY, and why. The wire carries NO machine cause code
+ * — a `Disambiguation` is `{question, reason, choices[]}` (api.ts:202–206) —
+ * and the store serves this card for at least seven distinct reason classes
+ * (internal/history/layer1.go: :155 no local tier wired, :178/:190 parse,
+ * :202/:210 below threshold, :232 unknown intent, :256/:264 slot-fill).
+ * Classifying served prose is banned (§38; chatFacts.ts:143–144 records the
+ * rule). So no sentence written here may name WHICH cause produced this card.
+ * The proposal's illustrative "no local model is wired…" cannot ship as
+ * unconditional copy for exactly that reason; the platform's own served
+ * `reason` is the SOLE statement of cause and renders verbatim below.
+ *
+ * What the client words do say is true of EVERY card in every one of those
+ * classes: this is a list rather than an answer, nothing was run, and picking
+ * one selects that question for you to ask. No free-generation is offered,
+ * because by S15.7 / S14.10 design none exists.
+ *
+ * A CHOICE SELECTS AND NEVER FIRES (§50's landed contract): the handler hands
+ * the query up so the picker can be filled with its own empty slots and the
+ * person asks deliberately. The card is not cleared — it is the context the
+ * choice was made in.
+ */
+function DisambiguationCard({
+  card,
+  onChoose,
+}: {
+  card: Disambiguation
+  onChoose?: (query: string) => void
+}) {
+  return (
+    <div
+      className="my-3 rounded-(--radius-sm) border border-border bg-card/40 p-3"
+      data-card="disambiguation"
+    >
+      <p className="mt-0 mb-1 font-medium">{card.question}</p>
+
+      {/* The client's own words. Every clause is true of every reason class,
+          and none of them names a cause. */}
+      <p className="m-0 text-sm text-muted-foreground" data-card-words>
+        These are questions the platform can answer. It could not turn what you asked into one of them, so nothing was
+        run. Pick one and it becomes your question — you still ask it yourself.
+      </p>
+
+      {/* The platform's own statement of cause, verbatim and alone. */}
+      <p className="mt-2 mb-0 text-sm text-muted-foreground" data-card-reason>
+        {card.reason}
+      </p>
+
+      <div className="mt-3 flex flex-col gap-3">
+        {choiceRuns(card.choices).map((run, i) => (
+          <div key={`${run.category}-${String(i)}`} data-choice-group={run.category}>
+            {run.category !== '' && (
+              <p className="m-0 mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                {run.category}
+              </p>
+            )}
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {run.items.map((c) => (
+                <li key={c.query} className="flex flex-wrap items-baseline gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    data-choice={c.query}
+                    onClick={() => onChoose?.(c.query)}
+                  >
+                    {c.query}
+                  </Button>
+                  <span className="text-sm text-muted-foreground">{c.description}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** AnswerView renders one S14.10 answer with its layer, confidence, notes and
  *  audit VERBATIM — the fields are the contract, so they are rendered as
  *  fields rather than folded into prose. */
@@ -302,24 +407,7 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
         </p>
       ))}
 
-      {answer.card && (
-        <div className="disambiguation my-2 border-s-2 border-[var(--accent)] ps-2" data-card="disambiguation">
-          <p>{answer.card.question}</p>
-          <p className="muted">{answer.card.reason}</p>
-          <ul>
-            {answer.card.choices.map((c) => (
-              <li key={c.query}>
-                <button type="button" onClick={() => onChoose?.(c.query)}>
-                  {c.query}
-                </button>{' '}
-                <span className="muted">
-                  {c.category} — {c.description}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {answer.card && <DisambiguationCard card={answer.card} onChoose={onChoose} />}
 
       {answer.audit && (
         <div className="audit my-2 border-s-2 border-[var(--accent)] ps-2" data-audit="open-sql">

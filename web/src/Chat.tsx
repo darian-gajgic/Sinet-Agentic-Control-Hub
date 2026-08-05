@@ -43,7 +43,7 @@ import {
   describeError,
   useLive,
 } from './live'
-import { Absent, Empty, Freshness } from './parts'
+import { Absent, Empty, Freshness, SurfaceHead } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
 import { Timestamp } from './ui'
@@ -114,12 +114,18 @@ export function Chat({ stream, search }: { stream?: EventStream; search: string 
 
   return (
     <section className="chat" data-live="assistant">
+      {/* THE THREE-VERB CONTRACT, in operator words (B6 gate record §9 finding
+          A-2; P3-UI-7 R7c). The landed line named two of the three and left out
+          file exchange, which is a verb this surface really has
+          (`chatRuntime.ts`'s composer set + the upload gestures). What it must
+          NOT say is what the surface cannot do: there is no free-form
+          generation here by S15.7 / S14.10 design, and the assistant edits
+          nothing — it asks, it hands work to intake, and it exchanges files. */}
       <header className="chat-head">
-        <h2>Assistant</h2>
-        <p className="muted">
-          Ask what the platform is doing, run a named view or a catalog question, or start a task. Every conversation
-          lives on the platform, so it is here when you come back — on this device or another.
-        </p>
+        <SurfaceHead
+          title="Assistant"
+          what="Three things happen here: ask about the platform and the work it is doing, hand something over as a task for intake to shape, or exchange files with it. Conversations live on the platform, so they are here when you come back — on this device or another."
+        />
         {failure !== null && <FailureLine failure={failure} />}
       </header>
 

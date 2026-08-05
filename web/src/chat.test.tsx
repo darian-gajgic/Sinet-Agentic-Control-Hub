@@ -145,6 +145,33 @@ test('/chat is live, and it is the surface that answers the URL rather than a st
   view.unmount()
 })
 
+test('the surface head states the THREE-verb contract, and promises nothing this surface cannot do', async () => {
+  // B6 gate record §9 finding A-2 (assistant half): the landed line named two
+  // verbs and left out file exchange, which this surface really has.
+  const { view } = await open(hrefFor('chat'))
+  const what = view.container.querySelector('[data-surface-what]')!
+  expect(what, 'the chat surface carries no what-line at all').not.toBeNull()
+  const line = what.textContent!.toLowerCase()
+
+  // The three verbs, each named.
+  expect(line, 'verb 1 — ask about the platform').toContain('ask about the platform')
+  expect(line, 'verb 2 — hand work over as a task for intake').toContain('task for intake')
+  expect(line, 'verb 3 — exchange files, the one the landed line omitted').toContain('exchange files')
+  // ...and the fact that makes the conversation rail worth having.
+  expect(line).toContain('conversations live on the platform')
+
+  // THE OVERCLAIMS. There is no free-form generation here by S15.7 / S14.10
+  // design, and the assistant edits nothing — a head line that implied either
+  // would be the A-2 defect written larger.
+  for (const promise of ['anything you ask', 'write anything', 'in your own words', 'chat freely', 'generates']) {
+    expect(line, `the head promised free-form generation: ${promise}`).not.toContain(promise)
+  }
+  for (const claim of ['edits', 'changes your', 'rewrites', 'fixes']) {
+    expect(line, `the head claimed the assistant acts on your work: ${claim}`).not.toContain(claim)
+  }
+  view.unmount()
+})
+
 test('the built/unbuilt table moved by exactly one row, and the pattern did not move at all', () => {
   const chat = routes.find((r) => r.id === 'chat')!
   expect(chat.owner, 'the chat row still names an owning packet').toBe('')
