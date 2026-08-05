@@ -3,6 +3,8 @@ package stage_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,15 +181,34 @@ func newProjectHarness(t *testing.T) *projHarness {
 type registryOver struct{ proj *project.Store }
 
 func (r registryOver) Match(ctx context.Context, req intake.Request) (intake.RegistrySlice, bool, error) {
+	// Mirrors the shell seam's submitted-pin pass-through (P3-RW-1), refusal
+	// mapping included — the production edge is proven in internal/shell.
+	if pin := strings.TrimSpace(req.Project); pin != "" {
+		e, err := r.proj.PinForIntake(ctx, pin, req.UserID)
+		if err != nil {
+			switch {
+			case errors.Is(err, project.ErrNotActive):
+				return intake.RegistrySlice{}, false, fmt.Errorf("%w: %q", intake.ErrPinNotActive, pin)
+			case errors.Is(err, project.ErrNotFound):
+				return intake.RegistrySlice{}, false, fmt.Errorf("%w: %q", intake.ErrPinUnknown, pin)
+			}
+			return intake.RegistrySlice{}, false, err
+		}
+		return registrySliceOver(e), true, nil
+	}
 	e, ok, err := r.proj.MatchForIntake(ctx, project.MatchHint{UserID: req.UserID, Title: req.Title, Text: req.Text})
 	if err != nil || !ok {
 		return intake.RegistrySlice{}, false, err
 	}
+	return registrySliceOver(e), true, nil
+}
+
+func registrySliceOver(e project.Entry) intake.RegistrySlice {
 	var zones []intake.DangerZone
 	for _, z := range e.Capture.DangerZones {
 		zones = append(zones, intake.DangerZone{Path: z.Path, Rule: z.Rule, SourceHash: z.SourceHash})
 	}
-	return intake.RegistrySlice{Project: e.ProjectID, Ref: e.ProjectID, DangerZones: zones}, true, nil
+	return intake.RegistrySlice{Project: e.ProjectID, Ref: e.ProjectID, DangerZones: zones}
 }
 
 // gitFixture builds a local git repo to clone during onboarding.

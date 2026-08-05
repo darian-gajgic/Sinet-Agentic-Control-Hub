@@ -147,8 +147,16 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 
 	// Registry match (S1.6): injected so the interview never asks what the
 	// platform already knows; danger zones feed the stakes floor.
+	// A REFUSED pin is the one seam error that does not degrade: the requester
+	// named a specific project, so no task is born believing it got one
+	// (P3-RW-1; S15.2). Nothing durable exists yet at this point — the task,
+	// run and first state event are written below.
 	if p.Registry != nil {
-		if slice, ok, err := p.Registry.Match(ctx, req); err == nil && ok {
+		slice, ok, err := p.Registry.Match(ctx, req)
+		switch {
+		case errors.Is(err, ErrPinRefused):
+			return nil, err
+		case err == nil && ok:
 			st.Registry = &slice
 			if slice.Family != "" {
 				st.Family = slice.Family

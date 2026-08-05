@@ -42,6 +42,15 @@ func mapIntakeErr(err error) error {
 		return nil
 	case errors.Is(err, intake.ErrNotRequester):
 		return surfaceErr(http.StatusForbidden, "not_requester", err)
+	case errors.Is(err, intake.ErrPinUnknown):
+		// A pinned project that does not exist and one the requester may not
+		// see are ONE response: telling them apart would make Submit an
+		// existence oracle for other people's projects (S15.2).
+		return surfaceErr(http.StatusNotFound, "not_found", err)
+	case errors.Is(err, intake.ErrPinNotActive):
+		// Visible but not yet owner-approved: a state the requester may know
+		// honestly, and one that resolves by finishing onboarding (S13.7).
+		return surfaceErr(http.StatusConflict, "project_not_active", err)
 	case errors.Is(err, intake.ErrUnknownAsk), errors.Is(err, sql.ErrNoRows):
 		return surfaceErr(http.StatusNotFound, "not_found", err)
 	case errors.Is(err, intake.ErrBadAnswer), errors.Is(err, intake.ErrMarkersOpen),
@@ -86,6 +95,13 @@ type submitBody struct {
 	// resolves each ref against the requester's OWN exchange manifest — so
 	// nothing here can be handed another person's object.
 	Inputs []intake.Input `json:"inputs,omitempty"`
+	// Project OPTIONALLY pins the request to a registered project by registry
+	// id, ADDITIVE (S15.2; the Inputs precedent above). It is the Projects-tab
+	// door: the picker sends the id, so scoping a request no longer depends on
+	// the requester typing the project's name in the text. The id is validated
+	// server-side at the registry seam — owner-or-member and ACTIVE — and an
+	// invalid pin refuses the submission rather than quietly dropping it.
+	Project string `json:"project,omitempty"`
 }
 
 // Submit implements api.IntakeSurface: Stage-0 triage + task/run birth,
@@ -102,7 +118,8 @@ func (u *Surface) Submit(ctx context.Context, userID string, body json.RawMessag
 	if u.sk.sched == nil {
 		return nil, errors.New("stage: no scheduler bound")
 	}
-	st, err := u.sk.pipe.Start(ctx, intake.Request{UserID: userID, Title: b.Title, Text: b.Text, Inputs: b.Inputs})
+	st, err := u.sk.pipe.Start(ctx, intake.Request{
+		UserID: userID, Title: b.Title, Text: b.Text, Inputs: b.Inputs, Project: b.Project})
 	if err != nil {
 		return nil, mapIntakeErr(err)
 	}

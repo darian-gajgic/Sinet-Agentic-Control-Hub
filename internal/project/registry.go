@@ -336,7 +336,25 @@ func (s *Store) MatchForIntake(ctx context.Context, h MatchHint) (Entry, bool, e
 // another person's project. A VISIBLE entry that is not yet active returns
 // ErrNotActive — the requester may know that honestly.
 func (s *Store) PinForIntake(ctx context.Context, projectID, userID string) (Entry, error) {
-	return Entry{}, errors.New("project: PinForIntake not implemented (P3-RW-1)")
+	e, err := s.Get(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Entry{}, noSuchPin(projectID)
+		}
+		return Entry{}, err
+	}
+	if !visibleTo(e, userID) {
+		return Entry{}, noSuchPin(projectID)
+	}
+	if !e.Active() {
+		return Entry{}, fmt.Errorf("%w: %q", ErrNotActive, projectID)
+	}
+	return e, nil
+}
+
+// noSuchPin is the ONE refusal an unknown id and an invisible entry share.
+func noSuchPin(projectID string) error {
+	return fmt.Errorf("%w: %q", ErrNotFound, projectID)
 }
 
 // visibleTo reports whether user owns or is an invited member of the entry.

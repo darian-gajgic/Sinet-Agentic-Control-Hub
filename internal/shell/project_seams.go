@@ -55,11 +55,38 @@ type projectSeams struct {
 type registrySeam struct{ proj *project.Store }
 
 func (r registrySeam) Match(ctx context.Context, req intake.Request) (intake.RegistrySlice, bool, error) {
+	// A SUBMITTED pin resolves the entry directly and never consults the text
+	// (P3-RW-1; the Projects-tab door hands the registry id). Its validation —
+	// the requester owns or belongs to it, and it is ACTIVE — is the project
+	// store's own, so the visibility predicate stays in one package (S15.2:
+	// authorization is enforced server-side, once).
+	if pin := strings.TrimSpace(req.Project); pin != "" {
+		e, err := r.proj.PinForIntake(ctx, pin, req.UserID)
+		if err != nil {
+			return intake.RegistrySlice{}, false, pinRefusal(pin, err)
+		}
+		return toRegistrySlice(e), true, nil
+	}
 	e, ok, err := r.proj.MatchForIntake(ctx, project.MatchHint{UserID: req.UserID, Title: req.Title, Text: req.Text})
 	if err != nil || !ok {
 		return intake.RegistrySlice{}, false, err
 	}
 	return toRegistrySlice(e), true, nil
+}
+
+// pinRefusal translates the store's refusal into the intake sentinel the
+// pipeline branches on — the ONE registry-seam error Start does not swallow.
+// A store error that is not a refusal (a database failure) stays itself and
+// degrades exactly as any other scan-path error does.
+func pinRefusal(pin string, err error) error {
+	switch {
+	case errors.Is(err, project.ErrNotActive):
+		return fmt.Errorf("%w: %q", intake.ErrPinNotActive, pin)
+	case errors.Is(err, project.ErrNotFound):
+		return fmt.Errorf("%w: %q", intake.ErrPinUnknown, pin)
+	default:
+		return err
+	}
 }
 
 // toRegistrySlice projects an active entry's current capture into the intake
