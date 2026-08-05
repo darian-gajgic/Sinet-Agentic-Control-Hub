@@ -80,9 +80,9 @@ func (r registrySeam) Match(ctx context.Context, req intake.Request) (intake.Reg
 }
 
 // pinRefusal translates the store's refusal into the intake sentinel the
-// pipeline branches on — the ONE registry-seam error Start does not swallow.
-// A store error that is not a refusal (a database failure) stays itself and
-// degrades exactly as any other scan-path error does.
+// pipeline maps to its 4xx. A store error that is not a refusal (a database
+// failure) stays itself; on a pinned request Start propagates it loudly all
+// the same — only the unpinned scan path degrades on seam errors.
 func pinRefusal(pin string, err error) error {
 	switch {
 	case errors.Is(err, project.ErrNotActive):

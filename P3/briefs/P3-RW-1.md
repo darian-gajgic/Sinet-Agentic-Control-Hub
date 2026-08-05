@@ -1,5 +1,7 @@
 # P3-RW-1 brief — intake project pin (the Projects-tab door)
 
+> **EXPIRED at landing 2026-08-05 (amendment D).** Single-use artifact for the P3-RW-1 pipeline run (`1ffa68a`+`a141e1d`+drain `04d56b0`); after drain fixes it no longer matches the code. Later grounding must never read this as truth — code + spec only.
+
 **Packet origin:** `P3/design/product-map.md` §5 (operator-approved 2026-08-05) — the one backend packet the rework queues. §7 build-order step 2 (give-work journey) consumes it.
 **Spec sections read in full at grounding (2026-08-05):** S06.1–S06.10, S13.7 (+S13.8/S13.9 skim), S15.2–S15.3, S00.9. Drafts canonical.
 **Code read at grounding:** `internal/stage/surface.go`, `internal/intake/{intake,pipeline,state}.go`, `internal/project/{registry,project,onboard}.go`, `internal/shell/project_seams.go`, tests `internal/project/registry_test.go`, `internal/stage/{e2e,round1_e2e}_test.go`, `internal/shell/project_seams_test.go`, `internal/api/intake_handlers.go`.
