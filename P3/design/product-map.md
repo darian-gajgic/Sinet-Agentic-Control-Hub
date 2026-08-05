@@ -1,12 +1,12 @@
-# Sinet product map v2 — the rework's checkpoint 1 (2026-08-05)
+# Sinet product map v2.1 — APPROVED (the rework's contract)
 
-**Status: PENDING OPERATOR APPROVAL — nothing gets built before this page is approved** (FRONTEND.md rule 3). v2 after operator feedback on v1: the map now reconciles **the full Nexus tab set** (23 views read from the real `index.html` nav), not just visual patterns. Seeded from `rework-operator-findings.md` + the operator's v1 feedback; every verdict grounded against the live backend (`web/src/api.ts`, `internal/api` routes and projections) and the spec's behavior sections. Visual direction stays as ratified: recreate the Nexus violet-glass look from the real source, reference-over-prose.
+**Status: APPROVED by the operator 2026-08-05** (checkpoint 1 closed; free-text answer: v2 approved; GPU/VRAM seam wiring, CPU/RAM host monitoring and move-task-between-projects **deferred by operator direction**; one requirement added — §5). This page is the binding product contract for the frontend rework under `FRONTEND.md`. Every verdict is grounded against the live backend (`web/src/api.ts`, `internal/api`, `internal/project`, `internal/intake`) and the spec's behavior sections. Visual direction stays as ratified: recreate the Nexus violet-glass look from the real source, reference-over-prose.
 
 ## 1. The jobs this app does for you
 
 1. **Give it work** — "Describe a goal" in plain words; it asks its questions like a form; you trim/approve its plan before it spends anything.
 2. **See what's happening** — one glance: what's running, what's stuck waiting on you, what it costs, who's burning what, how the machine itself is doing.
-3. **Work by project** — tasks live in projects; pick a project and the app shows you that project's world.
+3. **Work by project** — tasks live in projects; a new task in a project builds on the project's prior work (§5); pick a project and the app shows that project's world.
 4. **Decide things** — everything that needs a human sits in one inbox; answering resumes the work in place.
 5. **Judge the work** — see what came back and what the judges said; **run the program it built**; send it back with comments; accept when right.
 6. **Make it smarter** — wins and lessons it reads on future work; memory; specialists and their measured quality.
@@ -32,17 +32,17 @@
 | | Settings | `/settings` | exists |
 | | Manual | `/manual` | **NEW route** |
 
-**Topbar: the global project selector** — the Nexus focus-context chips, carried properly. Pick a project (or "(no project)" — the backend serves it as a real bucket) and every surface whose data carries a project dimension scopes to it: Home, Board, Reviews, History, task lists. Surfaces without that dimension (Fleet is per-person/lane, Settings, Health) say so instead of pretending. **Sidebar footer: the CPU · MEM · GPU · GPU-MEM micro-meters** — see §5, two need backend work.
+**Topbar: the global project selector** — the Nexus focus-context chips, carried properly. Pick a project (or "(no project)" — a real served bucket) and every surface whose data carries a project dimension scopes to it: Home, Board, Reviews, History, task lists. Surfaces without that dimension (Fleet, Settings, Health) say so instead of pretending. **Sidebar footer: CPU · MEM · GPU · GPU-MEM micro-meters render as honest "not wired yet" placeholders at v0** — the wiring is operator-deferred (§6).
 
 All published deep-link routes stay (`/tasks/:id`, `/inbox/:id`, `/deliverables/:id`, `/memory/:id`, `/login`).
 
 ## 3. Surfaces — what you see / what you can do
 
-**Home.** *See:* hero, four stat tiles (running · waiting-on-you · parked-until · spend today), the live roster, per-person burn, a slim recent-activity feed. *Do:* drill anywhere; personal filters (what-needs-me · mine · running · finished-today). The deep history instrument moves to History; Home stays a glance.
+**Home.** *See:* hero, four stat tiles (running · waiting-on-you · parked-until · spend today), the live roster, per-person burn, a slim recent-activity feed. *Do:* drill anywhere; personal filters (what-needs-me · mine · running · finished-today). The deep history instrument lives in History; Home stays a glance.
 
-**Projects.** *See:* every project as a card — active tasks by stage, waiting-on-you count, spend, recent deliverables, follow-up lineage; "(no project)" as its own bucket. *Do:* open one → the global selector scopes the app to it; "Describe a goal" straight into this project; jump to its board/reviews/history pre-filtered. *Honest v0 limits:* a task's project is set at intake (the questionnaire asks; the project registry prefills) and follow-ups inherit it — **there is no move-task-between-projects verb in the backend today** (§6, decision 3).
+**Projects.** *See:* every project as a card — active tasks by stage, waiting-on-you count, spend, recent deliverables, follow-up lineage; "(no project)" as its own bucket. *Do:* open one → the global selector scopes the app to it; **"Describe a goal" straight into this project** (the task is pinned to it and plans on its prior work, §5); jump to its board/reviews/history pre-filtered. *v0 limits:* no move-task-between-projects (operator-deferred, §6).
 
-**Describe a goal.** *See:* one plain ask box (literally the Nexus phrase), then the interview as a **form, not a chat**: cards of up to 4 questions, 2–4 labeled options + free text each; a live Clearance meter; the stakes/size guess. *Do:* answer or force-proceed (open questions become listed assumptions); then the plan card — what I understood · what you'll get · numbered steps · **what I will NOT do** · assumptions front-and-center · cost/time — **Approve / Re-plan / Re-interview / Cancel**. Nexus's "untick optional stages" carries as Re-plan's structured entry: tap the step you're contesting, it comes back re-planned without it. Trivial read-only tasks skip ceremony. *(Reconciliation note: no spec amendment needed — the interview is specified as a questionnaire (S06.5), and `POST /api/intake/requests` already exists server-side; the rejected UI just never called it. Chat remains the secondary door, same interview inline.)*
+**Describe a goal.** *See:* one plain ask box (literally the Nexus phrase), then the interview as a **form, not a chat**: cards of up to 4 questions, 2–4 labeled options + free text each; a live Clearance meter; the stakes/size guess. **Opened from a project, the door says whose world the task will build on, and the interview visibly skips what the project record already answers.** *Do:* answer or force-proceed (open questions become listed assumptions); then the plan card — what I understood · what you'll get · numbered steps · **what I will NOT do** · assumptions front-and-center · cost/time — **Approve / Re-plan / Re-interview / Cancel**. Nexus's "untick optional stages" carries as Re-plan's structured entry: tap the step you're contesting. Trivial read-only tasks skip ceremony. *(No spec amendment anywhere here: the interview is specified as a questionnaire (S06.5) and `POST /api/intake/requests` is already served; the rejected UI never called it. Chat stays the secondary door, same interview inline.)*
 
 **Board.** *See:* a **recognizable Kanban** — stage columns, glowing-dot headers, count pills; cards = what/whose/stage/effort/cost-so-far/waiting-on-human + priority rail; grouped by project when unscoped. *Do:* drag to reorder **your own queued** tasks (priority hint — columns are the machine's state, never writable by drag); per-card cancel; click through.
 
@@ -50,25 +50,25 @@ All published deep-link routes stay (`/tasks/:id`, `/inbox/:id`, `/deliverables/
 
 **Inbox.** *See:* risk-ranked cards — what's being approved · mono provenance line · plain "what to check first" · jump to the thing · expiry countdown; stale plans auto-flag. *Do:* Approve / Deny / Answer / Re-plan; Low tier batchable; High tier re-prompts PIN; answering resumes work in place. Blind-pair benchmark verdict forms arrive here too.
 
-**Reviews.** *See:* deliverables as numbered immutable revisions; diffs side-by-side/inline with line-anchored comments; **the judge's verdict + numbered findings per round**; round-over-round "what changed since I sent it back" as the default rework view; images as a proper visual compare (Side by side · Swipe · Overlay — overlay aligns bitmaps only, never text); binaries as hash + download. *Do:* **Run it** — for a program/site deliverable one click starts it live in the before/after preview (the dual-iframe try-it stack, already served: launch/stop/compare); **every previous revision navigable, previewable, downloadable**; comment at the line; request a bounded revision (that IS the loop); accept in one action; spawn a follow-up task.
+**Reviews.** *See:* deliverables as numbered immutable revisions; diffs side-by-side/inline with line-anchored comments; **the judge's verdict + numbered findings per round**; round-over-round "what changed since I sent it back" as the default rework view; images as a proper visual compare (Side by side · Swipe · Overlay — overlay aligns bitmaps only, never text); binaries as hash + download. *Do:* **Run it** — for a program/site deliverable one click starts it live in the before/after preview (the served dual-iframe try-it stack); **every previous revision navigable, previewable, downloadable**; comment at the line; request a bounded revision (that IS the loop); accept in one action; spawn a follow-up task.
 
-**Wins & Lessons.** *See:* the Nexus feedback ledger, rebuilt on Sinet memory: WINS (measured successes) and LESSONS (flop + its correction) as browsable shelves — memory entries carry `kind`, scope (person/project/house) and provenance, so the shelves are real reads, not decoration. *Do:* log a win/lesson from a task or deliverable (pre-linked to it); browse by project/person; retire. **These feed future work today** — the S09 influence machinery injects matching entries into runs at v0. *Honest v0 limit:* auto-distilled lessons from your rejections arrive with the v1 proposal pipeline (spec-scheduled); at v0 logging is manual, reading is automatic.
+**Wins & Lessons.** *See:* the Nexus feedback ledger on Sinet memory: WINS (measured successes) and LESSONS (flop + its correction) as browsable shelves — real reads over memory entries (`kind`, scope person/project/house, provenance). *Do:* log a win/lesson from a task or deliverable (pre-linked); browse by project/person; retire. **These feed future work today** — the S09 influence machinery injects matching entries into runs at v0. *v0 limit:* auto-distilled lessons from rejections arrive with the v1 proposal pipeline; logging is manual, reading is automatic.
 
-**Assistant.** *See:* persistent sessions, streamed turns, file sidebar (drag-drop up, produced-files chips down), the same intake questionnaire inline when you hand it work. *Do:* ask about the platform and its history (answers through the query layers; open-SQL answers visibly carry their lower-confidence flag); hand over work; exchange files; stop a turn; navigation never kills a running turn. Finding 5's broken plain-ask is reproduced on the seeded world and fixed inside this journey.
+**Assistant.** *See:* persistent sessions, streamed turns, file sidebar (drag-drop up, produced-files chips down), the same intake questionnaire inline when you hand it work. *Do:* ask about the platform and its history (open-SQL answers visibly carry their lower-confidence flag); hand over work; exchange files; stop a turn; navigation never kills a running turn. Finding 5's broken plain-ask is reproduced on the seeded world and fixed inside this journey.
 
-**History.** *See:* the observability instrument, findable at last: the filterable event stream (project/person/task/date), the served query registry (views → canned queries → open SQL), answers with their audit attached; refusals and disambiguations rendered as the honest non-answers they are; marked not-live (a query instrument, not a feed). *Do:* ask, search, drill from any answer to the task/run it names.
+**History.** *See:* the observability instrument, findable at last: the filterable event stream (project/person/task/date), the served query registry (views → canned queries → open SQL), answers with audit attached; refusals and disambiguations rendered as honest non-answers; marked not-live (a query instrument, not a feed). *Do:* ask, search, drill from any answer to the task/run it names.
 
 **Memory.** *See:* every entry scoped person/project/house with provenance, gate status, verification state; conflicts surfaced. *Do:* browse/read/create/new-version/retire/delete-own; resolve conflicts; notes live here as plain entries; promotion to house via operator approval.
 
-**Specialists** (the workforce map, plain-named). *See:* every worker: what it's equipped with (tools, knowledge, permissions, helpers), how multi-stage procedures connect, and **its measured quality/cost per version** — the evals-per-specialist read. *Do:* view-only at v0 (editing parked by spec — said on the surface, no dead controls). *Honest v0 limit:* per-specialist learned-lesson overlays exist in the schema but are dormant until v1 writers arrive.
+**Specialists** (the workforce map, plain-named). *See:* every worker: equipment (tools, knowledge, permissions, helpers), how multi-stage procedures connect, and **measured quality/cost per version**. *Do:* view-only at v0 (editing parked by spec — said on the surface, no dead controls). *v0 limit:* per-specialist learned-lesson overlays exist in the schema but stay dormant until v1 writers arrive.
 
-**Fleet.** *See:* who burns what — per-person/per-lane meters, donut gauges, budget bars with hot state, burn rates, limit events with "parked until…"; accounts always distinguished; local-tier seat states and GPU/VRAM once wired (§5). *Do:* edit own budgets; pause-my-automation; filter.
+**Fleet.** *See:* who burns what — per-person/per-lane meters, donut gauges, budget bars with hot state, burn rates, limit events with "parked until…"; accounts always distinguished. Local-seat/GPU blocks render as honest not-wired placeholders (operator-deferred, §6). *Do:* edit own budgets; pause-my-automation; filter.
 
-**Health & evals.** *See:* alerts-first, Nexus-monitor style: **Known issues** at the top (open watchdog flags, drift records, conformance failures, alarms, parked runs — each with what/why/what-to-do), then benchmark state (your opt-in, blind-pair verdict history, what the numbers mean), canary status (disarmed at v0 — displayed honestly, not hidden), then — after §5 lands — host meters (CPU/RAM/GPU/VRAM). Badge on the nav entry = open issue count. *Do:* suppress a flag (with reason), dismiss drift, acknowledge conformance, dispose an alarm, resume a parked run, set benchmark opt-in — every verb already served.
+**Health & evals.** *See:* alerts-first, Nexus-monitor style: **Known issues** on top (open watchdog flags, drift records, conformance failures, alarms, parked runs — each with what/why/what-to-do), then benchmark state (opt-in, blind-pair verdict history, what the numbers mean), canary status (disarmed at v0 — displayed honestly). Badge = open issue count. Host meters join when the deferred wiring lands (§6). *Do:* suppress a flag (with reason), dismiss drift, acknowledge conformance, dispose an alarm, resume a parked run, set benchmark opt-in — every verb already served.
 
-**Settings.** *See:* every setting with bounds, plain help, per-setting audit history; the price table; push devices; **Household** — the member list with add-member (served: `GET/POST /api/auth/users`), PIN posture, push enrolment per device. *Do:* edit values within clamps (operator edits bounds); onboard a household member end-to-end. The standing "see and change everything incl. today's constants" directive remains queued as its own amendment; the surface is built so those rows slot in.
+**Settings.** *See:* every setting with bounds, plain help, per-setting audit history; the price table; push devices; **Household** — member list with add-member (served: `GET/POST /api/auth/users`), PIN posture, push enrolment. *Do:* edit values within clamps (operator edits bounds); onboard a household member end-to-end. The standing "see and change everything incl. today's constants" directive remains queued as its own amendment; the surface is built so those rows slot in.
 
-**Manual.** *See:* the Nexus manual carried: a plain-words page per surface — what it's for, how to use it, what the words mean — plus the first-run tour launcher. Frontend-only, no backend. *Do:* start any surface's guided tour (rebuilt so the spotlight never swallows clicks).
+**Manual.** *See:* the Nexus manual carried: a plain-words page per surface — what it's for, how to use it, what the words mean — plus the first-run tour launcher. Frontend-only. *Do:* start any surface's guided tour (rebuilt so the spotlight never swallows clicks).
 
 **Login.** Tailnet + PIN, unchanged behavior, styled with the rest.
 
@@ -79,50 +79,62 @@ All published deep-link routes stay (`/tasks/:id`, `/inbox/:id`, `/deliverables/
 | Nexus tab | Verdict | Where it lands in Sinet |
 |---|---|---|
 | dashboard | **CARRY** | Home (hero → tiles → gauges/roster → feed hierarchy) |
-| projects (+ Describe a goal) | **CARRY/ADAPT** | Projects tab + `/new` door; assignment at intake, follow-ups inherit (§6-3) |
+| projects (+ Describe a goal) | **CARRY/ADAPT** | Projects tab + `/new` door pinned to the project (§5) |
 | workflows (pipeline stages) | **ADAPT** | The plan inside each task (numbered steps + done-when); big goals = follow-up lineage under one project — no separate pipelines object at v0 |
 | kanban | **CARRY/ADAPT** | Board; drag = own-queue priority hint only, columns are FSM truth |
 | deliverables | **CARRY** | Reviews (+ Run-it previews, revision history) |
-| meetings | **DROP** | No backend concept; its job (watch agents work) is served by live per-stage progress on task detail |
+| meetings | **DROP** | No backend concept; its job (watch agents work) is task detail's live progress |
 | agents (live roster) | **CARRY** | Home roster + Fleet |
 | decisions | **CARRY** | Inbox (one queue for everything needing a human) |
 | agentic (approvals) | **CARRY** | Inbox — row anatomy carried ~1:1 (what · provenance · check-first · jump · verbs) |
 | specialists | **CARRY/ADAPT** | Specialists (`/workforce`); view-only v0, learning overlays dormant until v1 |
 | memory | **CARRY** | Memory (scoped entries, provenance, conflicts) |
 | skills | **ADAPT** | Inside a specialist's detail: its equipment (tools/knowledge/permissions/helpers) |
-| monitor (CPU/MEM/GPU/VRAM) | **ADAPT — needs backend** | Health & evals + sidebar micro-meters; §5: VRAM/seats = named seam, CPU/RAM = amendment |
-| tools | **ADAPT** | Specialist equipment view (same data home as skills) |
+| monitor (CPU/MEM/GPU/VRAM) | **DEFERRED** | Health & evals + sidebar meters render honest placeholders; wiring/amendment operator-deferred (§6) |
+| tools | **ADAPT** | Specialist equipment view (same home as skills) |
 | programs | **ADAPT** | Reviews' Run-it previews — a "program" is a deliverable you can run |
-| guardian | **ADAPT** | Health & evals (watchdogs, canaries, drift, conformance — the Sinet guardians) |
+| guardian | **ADAPT** | Health & evals (watchdogs, canaries, drift, conformance) |
 | usage | **CARRY** | Fleet + per-task receipts |
 | observability | **CARRY** | History (event stream + query layers with audit) |
-| issues (known issues) | **ADAPT** | Health & evals' Known-issues section + nav badge; platform-detected issues (flags/drift/conformance/alarms) — no user-filed tracker at v0 |
+| issues (known issues) | **ADAPT** | Health & evals' Known-issues section + nav badge; platform-detected issues — no user-filed tracker at v0 |
 | notes | **ADAPT** | Memory entries (person scope) |
 | settings | **CARRY** | Settings (registry-generated, every setting + bounds + audit) |
 | manual | **CARRY** | Manual tab + per-surface tours |
-| jarvis (assistant) | **CARRY/ADAPT** | Assistant (persistent sessions, files, intake handoff); voice/avatar stays parked v1+ by spec |
+| jarvis (assistant) | **CARRY/ADAPT** | Assistant (persistent sessions, files, intake handoff); voice/avatar parked v1+ by spec |
 | — global focus context (topbar) | **CARRY** | The global project selector (§2) |
-| — sidebar CPU/MEM/GPU/GPU-MEM footer | **CARRY — needs §5** | Sidebar micro-meters |
-| — wins & lessons ledger (inside memory view) | **CARRY** | Its own nav entry, Wins & Lessons, on memory kinds |
+| — sidebar CPU/MEM/GPU/GPU-MEM footer | **DEFERRED** | Placeholder at v0 (§6) |
+| — wins & lessons ledger | **CARRY** | Its own nav entry on memory kinds |
 
 Visual-pattern verdicts from map v1 all stand (glass tokens, stat tiles, approval anatomy, diff viewer, gauges, empty states, tours, toasts/drawer/modal/skeleton carried; Chart.js, hand-drawn icon set, 3D avatar/galaxy, cross-column drag dropped).
 
-## 5. Backend work this map needs (runs under the FOUR-STAGE pipeline, not the frontend rework)
+## 5. Approved requirement: a new task in a project builds on the project's prior work
 
-1. **Wire the declared fleet seams (no amendment needed):** `FleetSnapshot` already declares `gpu {vram_used, vram_total}` and `local_seats[]` as honest-empty v0 seams (`internal/api/projection.go`), and the B4-6 VRAM admitter already does live sysfs/nvidia-smi reads. One small packet connects them so Fleet, Health and the sidebar GPU/GPU-MEM meters read truth.
-2. **CPU/RAM host monitoring — needs an S00.9 amendment:** no host-resource read exists anywhere in the spec or backend. Proposal: a minimal read-only host block (CPU %, RAM used/total, load) on the fleet snapshot, same honest-seam pattern. Small, read-only, no new dependency expected. **Your call (§6-2).**
+Operator requirement (2026-08-05, approved with v2): *"a new task needs to be able to be generated depending on the previous work done in the project… since the specs, planning and work on a new task depend on the work done in the project."*
 
-## 6. Decisions I need from you (free text, as always)
+**The spec already mandates this and the backend already does most of it** — four built mechanisms:
 
-1. **Approve map v2** as the rework's contract (or mark up anything — names, groupings, verdicts).
-2. **CPU/RAM amendment (§5-2):** recommend YES — without it the machine-health story stays GPU-only.
-3. **Move-task-between-projects:** not served by the backend today; v0 = project set at intake + follow-ups inherit + "(no project)" bucket. Recommend accepting for v0 and amending later only if it actually hurts. Say the word if you want the reassign verb now (that's an amendment + backend packet too).
-4. **Naming taste:** "Specialists" vs "Workforce", "Describe a goal" vs "New task", "Health & evals" vs "Monitor" — defaults are as written; override freely.
+1. **Registry injection (S06.2/S13.7, built):** a matched project's registry entry — conventions, commands, danger zones, task family — is injected at triage, and registry-supplied facts **resolve interview slots** so the questionnaire never asks what the project record already knows (`RegistrySlice.ResolvedSlots`, live in `internal/intake`).
+2. **Planning reads the project itself (S06.6, built):** the Stage-1 planning session runs at C1 over a **read-only snapshot of the project** — the accumulated code/work of every accepted task is literally what the planner plans against.
+3. **Project memory influences the work (S09, built):** project-scoped memory entries — including the Wins & Lessons shelves — are injected into matching runs; plans may cite project-truth entries, and a citation that can't resolve blocks approval.
+4. **Lineage and freshness (S1.2/S06.9, built):** follow-ups carry their source deliverable into intake; a sibling task accepted in the same project auto-flags pending plan approvals "assumptions may be stale".
+
+**The one gap — and the one backend packet this map queues (P3-RW-1):** the registry match is a deterministic *name-token* scan of the request text (`MatchForIntake`). Typing "…in the shop backend" pins the project; **the Projects-tab door must not depend on the user typing the project's name.** Fix: an **optional `project` field on the intake Submit body** (`internal/stage/surface.go` `submitBody` + `intake.Request`) — when present and the requester owns/belongs to the ACTIVE entry, it pins the registry slice directly; the text match stays for unpinned submissions. This is additive-first API evolution inside the S15.2 tasks-family contract (exact precedent: the `Inputs` field, added additively at B6-7) — **a small four-stage backend packet, no S00.9 amendment**. Go-only paths; the frontend consumes it in the give-work journey.
+
+## 6. Operator decisions — the record (2026-08-05)
+
+| Decision | Answer |
+|---|---|
+| Map v2 | **APPROVED** |
+| GPU/VRAM + local-seat fleet-seam wiring | **DEFERRED** by operator ("don't do the backend work yet") — surfaces render honest placeholders |
+| CPU/RAM host monitoring (S00.9 amendment) | **DEFERRED** by operator — not proposed further until asked |
+| Move-task-between-projects verb | **DEFERRED** by operator — v0: project set at intake, follow-ups inherit |
+| Project-context intake (§5) | **REQUIRED** — mechanisms 1–4 surface in the UI; packet P3-RW-1 queued as the enabler of the in-project door |
+| Naming | Defaults stand (Specialists · Describe a goal · Health & evals) — no overrides given |
 
 ## 7. Build order (journey-sliced; checkpoint 2 = rendered screenshots after step 1)
 
-1. Shell (nav, project selector, footer meters with honest placeholders) + Home
-2. Give-work: Describe a goal → interview → plan approval (+ its inbox card)
+1. Shell (nav, project selector, footer meters as honest placeholders) + Home
+2. Give-work: Describe a goal → interview → plan approval (+ its inbox card); consumes P3-RW-1's project pin
 3. Projects + Board + task detail
 4. Decide: Inbox
 5. Judge: Reviews + Run-it previews
