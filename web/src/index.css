@@ -230,6 +230,42 @@
   }
 }
 
+/* ── the cascade layer ─────────────────────────────────────────────────────
+   EVERYTHING BELOW THIS LINE IS OWNED CSS, AND IT LIVES IN A CASCADE LAYER.
+
+   `@import 'tailwindcss'` puts utilities in `@layer utilities`, and in the CSS
+   cascade an UNLAYERED rule beats a layered one from the same origin
+   regardless of specificity. Until UI-7 every owned rule here was unlayered, so
+   the bare element rules below — `input,select,button`, `label`, `ul,ol`, the
+   heading and paragraph rhythm — beat every utility the kit authored. That
+   silently suppressed the kit Button's border, background gradient, colour,
+   font and padding and imposed `width:100%` on it across eleven surfaces
+   (CONVENTIONS §52-B, reported at UI-6 and dispositioned to this row).
+
+   `base` is Tailwind's own second layer (`theme, base, components, utilities`),
+   so this block needs no order statement: `base` is already ordered before
+   `utilities`, and these rules still beat Tailwind's preflight because they sit
+   later in source order inside the same layer. Kit utilities now win as
+   authored; owned element rules still style every control that no utility
+   competes for. Guarded in the SHIPPED sheet by
+   internal/webui/cascade_test.go, which asserts the ordinal relationship
+   because jsdom computes no cascade and can never see this.
+
+   THE CONTENTS ARE DELIBERATELY NOT RE-INDENTED. `design.test.ts:17`,
+   `responsive.test.ts:17` and `sweep.test.tsx:798` locate rules with
+   `css.indexOf('\n<selector> {')` — line-start anchored — so indenting this
+   block by two spaces would silently re-point every one of those landed
+   predicates. The fix must not move a landed test; a landed test that moves on
+   a pure-cascade commit is itself a finding.
+
+   The reduced-motion kill switch above stays UNLAYERED on purpose: for
+   `!important` declarations the layer order is REVERSED (unlayered important is
+   the WEAKEST), so moving it in would strengthen a backstop nobody asked to
+   strengthen. It clamps motion and competes with no utility, so it is left
+   exactly as it was. */
+
+@layer base {
+
 * {
   box-sizing: border-box;
 }
@@ -1678,4 +1714,6 @@ td {
 .push-devices {
   margin-top: 0.75rem;
 }
+
+} /* @layer base — the owned sheet ends here */
 
