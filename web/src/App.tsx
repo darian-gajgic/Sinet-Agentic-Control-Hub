@@ -13,7 +13,6 @@ import {
   PackageCheck,
   Server,
   SlidersHorizontal,
-  Sparkles,
   Trophy,
   Users,
   X,
@@ -64,7 +63,6 @@ import { Workforce } from './Workforce'
 const navGroupOf: Partial<Record<RouteID, string>> = {
   'mission-control': 'Work',
   projects: 'Work',
-  new: 'Work',
   board: 'Work',
   inbox: 'Work',
   reviews: 'Results',
@@ -82,7 +80,6 @@ const navGroupOf: Partial<Record<RouteID, string>> = {
 const navIcons: Partial<Record<RouteID, LucideIcon>> = {
   'mission-control': LayoutDashboard,
   projects: FolderOpen,
-  new: Sparkles,
   board: Columns3,
   inbox: InboxIcon,
   reviews: PackageCheck,

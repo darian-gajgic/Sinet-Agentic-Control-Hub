@@ -590,7 +590,7 @@ a {
   letter-spacing: 2.2px;
   text-transform: uppercase;
   color: var(--text-faint);
-  padding: 14px 12px 6px;
+  padding: 11px 12px 5px;
 }
 
 .shell-nav a {
@@ -598,7 +598,7 @@ a {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   margin-bottom: 2px;
   text-decoration: none;
   color: var(--text-dim);
@@ -690,7 +690,7 @@ a {
 /* ── sidebar: footer (Nexus .sidebar-footer / .sys-mini) ── */
 
 .side-foot {
-  padding: 14px 18px 16px;
+  padding: 11px 18px 12px;
   border-top: 1px solid var(--sidebar-border);
 }
 
@@ -740,12 +740,49 @@ a {
 }
 
 .side-version {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   text-align: center;
   font-size: 9px;
   letter-spacing: 2px;
   color: var(--text-faint);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ── nav density (rework step 2) ────────────────────────────────────────────
+   The whole 14-entry nav must fit WITHOUT internal scrolling at ~900px
+   viewport heights (checkpoint-2: Manual sat below the fold). The base
+   paddings above already fit ~900px; this arm buys the same guarantee down
+   to ~800px by tightening the vertical rhythm only — type sizes stay. */
+
+@media (max-height: 880px) {
+  .brand-row {
+    padding: 12px 16px 10px 20px;
+  }
+
+  .shell-nav {
+    padding-top: 6px;
+  }
+
+  .shell-nav a {
+    padding: 5px 12px;
+    margin-bottom: 1px;
+  }
+
+  .nav-group-label {
+    padding: 8px 12px 4px;
+  }
+
+  .sys-mini {
+    gap: 4px;
+  }
+
+  .side-foot {
+    padding: 8px 18px 9px;
+  }
+
+  .side-version {
+    margin: 6px 0 0;
+  }
 }
 
 /* ── topbar (Nexus .topbar) ── */
@@ -2130,6 +2167,38 @@ td {
   line-height: 1.5;
   color: var(--text-dim);
   max-width: 56ch;
+}
+
+/* The give-work door's button (▲ v3: a button, never a tab). The identity
+   gradient marks THE primary act of the control room — nothing else on Home
+   carries it, so the one thing a person came to do cannot hide. */
+.hero-cta {
+  margin: 10px 0 0;
+}
+
+.btn-describe {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--grad);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn-describe {
+    transition: box-shadow 0.15s, transform 0.15s;
+  }
+}
+
+.btn-describe:hover {
+  box-shadow: 0 10px 26px var(--accent-glow);
+  transform: translateY(-1px);
 }
 
 /* The now-strip appears only where there is honest room for it. */

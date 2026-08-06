@@ -62,7 +62,10 @@ export type RouteDef = {
 export const routes: RouteDef[] = [
   { id: 'mission-control', pattern: '/', title: 'Home', owner: '', nav: true },
   { id: 'projects', pattern: '/projects', title: 'Projects', owner: '', nav: true },
-  { id: 'new', pattern: '/new', title: 'Describe a goal', owner: '', nav: true },
+  // ▲ v3 (operator, checkpoint 2): "Describe a goal" is a BUTTON, never a nav
+  // tab. The route STAYS — /new is the give-work door's deep-link address —
+  // but it leaves the sidebar; the door opens from Projects, Home and Board.
+  { id: 'new', pattern: '/new', title: 'Describe a goal', owner: '', nav: false },
   { id: 'board', pattern: '/board', title: 'Board', owner: '', nav: true },
   { id: 'task', pattern: '/tasks/:id', title: 'Task', owner: '', nav: false },
   { id: 'inbox', pattern: '/inbox', title: 'Inbox', owner: '', nav: true },

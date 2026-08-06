@@ -1,4 +1,4 @@
-import { Activity, Clock3, Coins, UserCheck } from 'lucide-react'
+import { Activity, Clock3, Coins, Sparkles, UserCheck } from 'lucide-react'
 
 import {
   api,
@@ -285,6 +285,18 @@ function HomeHero({
               .
             </>
           )}
+        </p>
+        {/* ▲ v3: the give-work DOOR opens from a button (never a nav tab).
+            With a project scoped, the door opens into that project's world. */}
+        <p className="hero-cta">
+          <Link
+            to={project === '' || project === '(no project)' ? hrefFor('new') : `${hrefFor('new')}?project=${encodeURIComponent(project)}`}
+            className="btn-describe"
+            data-door="describe-goal"
+          >
+            <Sparkles size={15} strokeWidth={2} aria-hidden="true" />
+            Describe a goal
+          </Link>
         </p>
       </div>
       <div className="hero-now">
