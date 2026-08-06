@@ -220,8 +220,11 @@ func fixtureWorldOn(t *testing.T, b *backend, root string) *backend {
 	}
 	// artifact_claims is the only populated project edge at v0 (§37); the tasks
 	// with no claim resolve to the honest bucket rather than dropping out.
+	// path_globs is JSON — the shape insertClaimTx writes and claimOverlapTx
+	// decodes; a raw glob string here 500s plan approval into this project
+	// (checkpoint-3 builder find, 2026-08-06).
 	exec(t, b, `INSERT INTO artifact_claims (task_id, project, user_id, path_globs, mode, status, created_ts)
-	            VALUES (?,?,?,?,?,?,?)`, "t-ship", "release-notes", "alice", "**", "W", "active", fxT0)
+	            VALUES (?,?,?,?,?,?,?)`, "t-ship", "release-notes", "alice", `["**"]`, "W", "active", fxT0)
 
 	for _, r := range []struct{ id, owner, task, state, lane, created string }{
 		{"r-ship", "alice", "t-ship", "running", "anthropic", fxT0},
