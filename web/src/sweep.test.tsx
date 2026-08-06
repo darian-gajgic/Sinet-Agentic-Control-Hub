@@ -472,20 +472,13 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     path: '/api/auth/grants/revoke',
     why: 'the other half of the same act: revoking a device grant is administration, and it has no ratified UI at v0 either.',
   },
-  {
-    method: 'POST',
-    path: '/api/intake/requests',
-    why: 'the B2-4 walking-skeleton submit. The SPA starts work through the S15.7 assistant’s `task` verb, which reaches intake server-side (§44) — one ingress, not two.',
-  },
+  // POST /api/intake/requests and POST /api/asks/{}/answer LEFT this list
+  // 2026-08-06 (rework step 2): the give-work door consumes both — the
+  // journey the map §3 always intended for them.
   {
     method: 'POST',
     path: '/api/tasks/{}/advance',
     why: 'the B2-4 walking-skeleton stage advance. Stage is FSM state owned by the control plane (S15.5: “stage columns are never writable”), so no surface may drive it.',
-  },
-  {
-    method: 'POST',
-    path: '/api/asks/{}/answer',
-    why: 'the B2-4 walking-skeleton answer, superseded for every surface by the hash-pinned POST /api/approvals/{id}/answer the inbox and the assistant both use.',
   },
   {
     method: 'GET',

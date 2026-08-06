@@ -33,11 +33,8 @@ export const fencedSurfaces: Partial<Record<RouteID, Fence>> = {
       'this page can render a raw internal error string as body text, and durations as raw seconds — both are defect classes the rebuild bans',
     ],
   },
-  board: {
-    step: 2,
-    act: 'the working journey — this becomes a real Kanban (Backlog · Executing · Verifying · Needs attention · Done)',
-    known: ['no real columns or filters, cards wrap at zoom — recorded at checkpoint 2'],
-  },
+  // `board` LEFT the registry 2026-08-06 in the commit that replaced it with
+  // the real Kanban — the fence rule's own clause.
   inbox: {
     step: 3,
     act: 'Decide — the inbox in plain words',

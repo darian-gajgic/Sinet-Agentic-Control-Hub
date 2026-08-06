@@ -38,8 +38,9 @@ export function useProjectScope(): ProjectScope {
 }
 
 /**
- * The routes that scope to the selected project TODAY. Board, Reviews and
- * History join in their own rework steps; listing one before its surface
- * actually narrows would make the chip lie about what the reader is seeing.
+ * The routes that scope to the selected project TODAY. Reviews and History
+ * join in their own rework steps; listing one before its surface actually
+ * narrows would make the chip lie about what the reader is seeing.
+ * Board joined at rework step 2 (the real Kanban narrows to the scope).
  */
-export const scopedRoutes: ReadonlySet<RouteID> = new Set<RouteID>(['mission-control'])
+export const scopedRoutes: ReadonlySet<RouteID> = new Set<RouteID>(['mission-control', 'board'])

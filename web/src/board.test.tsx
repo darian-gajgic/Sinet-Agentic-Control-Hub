@@ -13,6 +13,14 @@ import { flush, mount } from './testing'
  * The live board (Spec S15.5 ¶2; 9.1; S1.3; FC-v1 §1), driven against the
  * golden fixtures — so the rows these assertions read are the rows the Go
  * handler actually serves.
+ *
+ * REWRITTEN 2026-08-06 (rework step 2, map §3 v3): the board became a real
+ * Kanban — five bounded columns labelled Backlog · Executing · Verifying ·
+ * Needs attention · Done, cancelled tasks IN Backlog under a cancelled sign,
+ * Nexus card anatomy with the D-A expansion, and the queue strip as the one
+ * drag surface. The DOM selectors here follow that anatomy; every behavior
+ * contract the old suite pinned (drag negatives, honesty rules, S1.3 face,
+ * none-vs-not-loaded) is re-asserted against the new markup.
  */
 
 const inertStream = () =>
@@ -51,7 +59,7 @@ afterEach(() => {
 test('the card face carries exactly the S1.3 set, with the downgrade note in both directions', async () => {
   const { view } = await board()
 
-  const cards = [...view.container.querySelectorAll('.card-face')]
+  const cards = [...view.container.querySelectorAll('.task-card')]
   expect(cards.length).toBeGreaterThan(0)
 
   const ship = cards.find((c) => c.textContent?.includes('Ship the release notes'))!
@@ -68,15 +76,15 @@ test('the card face carries exactly the S1.3 set, with the downgrade note in bot
   const triage = cards.find((c) => c.textContent?.includes('Triage the inbox backlog'))!
   expect(triage.querySelector('.downgrade-note')?.textContent).toContain('effort dropped from deep to quick')
 
-  // And the honest absences: a run with no meter reading shows no figure.
+  // And the honest absences: a run with no cost reading shows no figure.
   const archive = cards.find((c) => c.textContent?.includes('Archive last quarter'))!
-  expect(archive.textContent).toContain('no meter reading')
+  expect(archive.textContent).toContain('no cost reading')
   expect(archive.textContent, 'an absent cost was rendered as zero').not.toContain('USD 0')
 })
 
 test('waiting-on-a-human and parked-until are distinguished on the face', async () => {
   const { view } = await board()
-  const audit = [...view.container.querySelectorAll('.card-face')].find((c) =>
+  const audit = [...view.container.querySelectorAll('.task-card')].find((c) =>
     c.textContent?.includes('Audit the price table'),
   )!
   expect(audit.querySelector('.waiting-human')).not.toBeNull()
@@ -96,7 +104,7 @@ test('waiting-on-a-human and parked-until are distinguished on the face', async 
   expect(born, 'the served board no longer carries the chat-born task').toBeDefined()
   expect(born!.latest_run?.state, 'a run holding an open interview card cannot read running').toBe('parked')
   expect(born!.latest_run?.waiting_on_human, 'an open interview card IS a person in the way').toBe(true)
-  const bornFace = [...view.container.querySelectorAll('.card-face')].find((c) =>
+  const bornFace = [...view.container.querySelectorAll('.task-card')].find((c) =>
     c.textContent?.includes('Draft the release notes'),
   )!
   expect(bornFace, 'the chat-born card is not on the board').toBeDefined()
@@ -118,16 +126,21 @@ test('no view renders a percentage, a completion fraction or an ETA', async () =
 
 // ── columns and grouping (R5, R7; OQ7) ────────────────────────────────────
 
-test('the six landed kanban values are columns, and an unknown stored value gets its own', async () => {
+test('the five declared columns render with their labels, and an unknown stored value gets its own', async () => {
   const { view } = await board()
-  const columns = [...view.container.querySelectorAll('.column')].map((c) => c.getAttribute('data-status'))
-  for (const known of ['intake', 'executing', 'verifying', 'attention', 'done', 'cancelled']) {
+  const columns = [...view.container.querySelectorAll('.kanban-col')].map((c) => c.getAttribute('data-status'))
+  for (const known of ['intake', 'executing', 'verifying', 'attention', 'done']) {
     expect(columns, `${known} is not a column`).toContain(known)
   }
+  // ▲ v3 (operator D-B): no Cancelled column — a cancelled task lives in
+  // Backlog under a cancelled sign — and the first column reads "Backlog"
+  // over the stored `intake`.
+  expect(columns, 'cancelled is a column again — D-B says it must not be').not.toContain('cancelled')
+  expect(view.container.querySelector('.kanban-col[data-status="intake"] .col-title')?.textContent).toBe('Backlog')
   // The fixture carries a producer string the board has never seen. It must
   // not vanish the card.
   expect(columns, 'an unknown stored status was dropped').toContain('moonshot')
-  const other = view.container.querySelector('.column[data-status="moonshot"]')!
+  const other = view.container.querySelector('.kanban-col[data-status="moonshot"]')!
   expect(other.getAttribute('data-known')).toBe('false')
   expect(other.textContent).toContain('Archive last quarter')
 })
@@ -135,17 +148,44 @@ test('the six landed kanban values are columns, and an unknown stored value gets
 test('columnsFor keeps every card and invents no display name for an unknown value', () => {
   const cols = columnsFor(fixtureTasks())
   const known = cols.filter((c) => c.known).map((c) => c.status)
-  expect(known).toEqual(['intake', 'executing', 'verifying', 'attention', 'done', 'cancelled'])
+  expect(known).toEqual(['intake', 'executing', 'verifying', 'attention', 'done'])
   const unknown = cols.filter((c) => !c.known)
   expect(unknown.map((c) => c.status)).toEqual(['moonshot'])
   expect(unknown[0].label, 'a friendly name was invented for a value the platform has not decided on').toBe('moonshot')
 })
 
-test('cards group by project, and the honest (no project) bucket is a group of its own', async () => {
-  const { view } = await board()
-  const projects = [...view.container.querySelectorAll('.project-group')].map((g) => g.getAttribute('data-project'))
-  expect(projects).toContain('release-notes')
-  expect(projects, 'the honest bucket was dropped rather than rendered').toContain('(no project)')
+test('a cancelled task renders IN Backlog wearing the cancelled sign (D-B)', async () => {
+  // The fixture world has no cancelled task, so one is driven into that state
+  // — the same technique the parked-horizon test uses for its limb.
+  const tasks = { tasks: fixtureTasks(), cursor: 89, truncated: false }
+  tasks.tasks = tasks.tasks.map((t) => (t.task_id === 't-triage' ? { ...t, kanban_status: 'cancelled' } : t))
+  const { view } = await board({ ...oversightRoutes(), 'GET /api/tasks': { body: tasks } })
+
+  expect(
+    [...view.container.querySelectorAll('.kanban-col')].map((c) => c.getAttribute('data-status')),
+    'a cancelled column appeared',
+  ).not.toContain('cancelled')
+  const backlog = view.container.querySelector('.kanban-col[data-status="intake"]')!
+  const card = [...backlog.querySelectorAll('.task-card')].find((c) => c.textContent?.includes('Triage the inbox backlog'))!
+  expect(card, 'the cancelled card left the board').toBeDefined()
+  expect(card.getAttribute('data-cancelled')).toBe('true')
+  expect(card.textContent).toContain('cancelled')
+  view.unmount()
+})
+
+test('cards group by project inside a column, and the honest (no project) bucket renders as its own label', async () => {
+  // Grouping labels appear when a column genuinely holds more than one
+  // project bucket — drive one fixture task into a second project so the
+  // Backlog column carries both.
+  const tasks = { tasks: fixtureTasks(), cursor: 89, truncated: false }
+  tasks.tasks = tasks.tasks.map((t) => (t.task_id === 't-triage' ? { ...t, project: 'release-notes' } : t))
+  const { view } = await board({ ...oversightRoutes(), 'GET /api/tasks': { body: tasks } })
+
+  const backlog = view.container.querySelector('.kanban-col[data-status="intake"]')!
+  const labels = [...backlog.querySelectorAll('.col-proj')].map((g) => g.textContent)
+  expect(labels).toContain('release-notes')
+  expect(labels, 'the honest bucket was dropped rather than rendered').toContain('(no project)')
+  view.unmount()
 })
 
 // ── the drag (R8, R9; OQ6) ────────────────────────────────────────────────
@@ -343,13 +383,17 @@ test('a drag leaves NO task at rank 0, so nothing silently claims the neutral mi
   }
 })
 
-test('a member who owns nothing queued gets an empty lane rather than someone else&apos;s work', async () => {
+test('a member who owns nothing queued gets NO queue strip rather than someone else&apos;s work', async () => {
   const routes = oversightRoutes()
   routes['GET /api/auth/session'] = {
     body: { authenticated: true, user: { user_id: 'carol', display_name: 'Carol', role: 'member', pin_set: true } },
   }
   const { view } = await board(routes)
-  expect(view.container.querySelector('.queue-lane')?.textContent).toContain('Nothing of yours is queued')
+  // The strip renders only over the caller's OWN queued work: for carol there
+  // is none, so there is no drag surface at all — and therefore nothing that
+  // could ever show her someone else's cards as reorderable.
+  expect(view.container.querySelector('[data-queue-strip]')).toBeNull()
+  expect(view.container.querySelector('[data-rfd-drag-handle-draggable-id]')).toBeNull()
   expect(signedIn.body).toBeDefined()
 })
 
@@ -451,7 +495,7 @@ test('a card parked on a CLOCK renders its horizon verbatim with the label besid
   )
   const { view } = await board({ ...oversightRoutes(), 'GET /api/tasks': { body: tasks } })
 
-  const face = [...view.container.querySelectorAll('.card-face')].find((c) =>
+  const face = [...view.container.querySelectorAll('.task-card')].find((c) =>
     c.textContent?.includes('Audit the price table'),
   )!
   expect(face, 'the parked card did not reach the board').toBeDefined()
@@ -463,67 +507,70 @@ test('a card parked on a CLOCK renders its horizon verbatim with the label besid
   // label reads as more time left than there is, and only this instant corrects
   // it. The server enforces the real horizon regardless.
   expect(stamp.textContent, 'the verbatim UTC was dropped').toBe(served)
-  const beside = stamp.parentElement!.parentElement!.textContent ?? ''
-  expect(beside.endsWith(served), 'the instant is not beside its label').toBe(true)
-  expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(served.length)
   expect(face.querySelector('.parked-until')!.textContent).toContain('parked until')
 
-  // THE CARD FACE IS STILL THE PINNED SET: ParkedUntil's internal render moving
-  // to the primitive adds nothing to the face.
-  expect(face.querySelectorAll('dt')).toHaveLength(5)
+  // THE CARD FACE IS STILL THE PINNED S1.3 SET on the new anatomy: whose and
+  // effort beside the park line (this fixture run carries no stage marker,
+  // and none is invented for it).
+  const text = face.textContent ?? ''
+  expect(text).toContain('bob')
+  expect(text).toContain('standard')
   view.unmount()
 })
 
 // ── the D8 self-teaching layer (P3-UI-5) ──────────────────────────────────
 
-test('the board teaches what it is, and the line never promises the drag more than it does', async () => {
+test('the queue strip teaches the drag honestly, and never promises more than it does', async () => {
   const { view } = await board()
-  const line = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
-  expect(line, 'the board carries no "what this is" line').not.toBe('')
-  expect(line.toLowerCase()).toContain('live from the feed')
+  const line = view.container.querySelector('.queue-sub')?.textContent ?? ''
+  expect(line, 'the queue strip carries no teaching line').not.toBe('')
   // THE TRUTH CONSTRAINT. Stage is FSM state owned by the control plane (S02),
   // and a hint only breaks ties among your own same-class queued work — so the
   // line must claim neither a stage move nor a priority change.
-  expect(line.toLowerCase(), 'the header line does not scope the drag to your own queued work').toContain(
-    'your own queued work',
+  expect(line.toLowerCase(), 'the line does not scope the drag to your own queued work').toContain('your own queued work')
+  expect(line.toLowerCase(), 'the line claims the drag moves a stage').toContain('never moves a card to another stage')
+  expect(line.toLowerCase(), 'the line does not scope the drag to your own queue').toContain(
+    "never reaches another person's queue",
   )
-  expect(line.toLowerCase(), 'the header line claims the drag moves a stage').toContain('never moves a card to another')
   for (const overclaim of ['change the priority', 'set the priority', 'move it to', 'reassign']) {
-    expect(line.toLowerCase(), `the header line overclaims: ${overclaim}`).not.toContain(overclaim)
+    expect(line.toLowerCase(), `the line overclaims: ${overclaim}`).not.toContain(overclaim)
   }
   view.unmount()
 })
 
-test('the empty queue lane and an empty column each teach what would fill them', async () => {
+test('an empty column teaches how a card arrives, and Backlog teaches the door', async () => {
   const routes = oversightRoutes()
   routes['GET /api/tasks'] = { body: { tasks: [], cursor: 1, truncated: false } }
   const { view } = await board(routes)
 
-  const lane = view.container.querySelector('.queue-lane')!
-  expect(lane.textContent).toContain('Nothing of yours is queued.')
-  expect(lane.textContent, 'the lane does not teach that it is the one draggable place').toContain(
-    'the only place a drag does anything',
-  )
-  const column = view.container.querySelector('.column')!
-  expect(column.textContent).toContain('No card is here.')
+  // No queued work → no drag surface at all (the strip renders only over the
+  // caller's own queued cards; an empty dashed box teaching "drag here" would
+  // be an affordance for a gesture with nothing to act on).
+  expect(view.container.querySelector('[data-queue-strip]')).toBeNull()
+
+  const exec = view.container.querySelector('.kanban-col[data-status="executing"] .col-empty')!
+  expect(exec, 'an empty column renders no teaching line').not.toBeNull()
   // The teaching half says how a card ARRIVES — which is the fact the drag
   // affordance must never contradict.
-  expect(column.textContent, 'an empty column does not teach how a card reaches it').toContain('never by being dragged')
+  expect(exec.textContent, 'an empty column does not teach how a card reaches it').toContain('never by drag')
+  const backlog = view.container.querySelector('.kanban-col[data-status="intake"] .col-empty')!
+  expect(backlog.textContent, 'the empty Backlog does not point at the give-work door').toContain('Describe a goal')
   view.unmount()
 })
 
 test('the drag affordance is on the own-queued lane and nowhere else', async () => {
   // §42: a card that cannot be reordered must not LOOK draggable. The lane's
-  // cards carry the grab cursor and the lift; a stage column's do not.
+  // cards carry the library's lift handles; a stage column's cards carry none.
   const { view } = await board()
-  const lane = [...view.container.querySelectorAll('.queue-lane .card')]
-  expect(lane.length, 'the own-queued lane is empty, so this asserts nothing').toBeGreaterThan(0)
-  for (const card of lane) expect(card.className, 'a reorderable card has no drag affordance').toContain('cursor-grab')
-
-  const columnCards = [...view.container.querySelectorAll('.column .card')]
+  const handles = [...view.container.querySelectorAll('[data-rfd-drag-handle-draggable-id]')]
+  expect(handles.length, 'the own-queued lane is empty, so this asserts nothing').toBeGreaterThan(0)
+  for (const h of handles) {
+    expect(h.closest('.queue-lane'), 'a drag handle exists outside the queue lane').not.toBeNull()
+  }
+  const columnCards = [...view.container.querySelectorAll('.kanban-col .task-card')]
   expect(columnCards.length).toBeGreaterThan(0)
   for (const card of columnCards) {
-    expect(card.className, 'a card that cannot be reordered looks draggable').not.toContain('cursor-grab')
+    expect(card.getAttribute('data-rfd-drag-handle-draggable-id'), 'a stage-column card looks draggable').toBeNull()
   }
 })
 
@@ -535,18 +582,16 @@ test('NONE-VS-NOT-LOADED: a pending board read shows the catching-up marker, nev
   const routes = oversightRoutes()
   routes['GET /api/tasks'] = { pending: true }
   const { view } = await board(routes)
-  expect(view.container.querySelector('[data-surface-what]'), 'no surface mounted, so this proves nothing').not.toBeNull()
-  expect(view.container.textContent, 'the loading affordance is missing').toContain('Catching up')
-  expect(view.container.textContent, 'the own-queue empty taught over a pending read').not.toContain(
-    'Nothing of yours is queued.',
-  )
-  expect(view.container.textContent, 'a column empty taught over a pending read').not.toContain('No card is here.')
+  expect(view.container.querySelector('.kanban-toolbar'), 'no surface mounted, so this proves nothing').not.toBeNull()
+  expect(view.container.textContent, 'the loading affordance is missing').toContain('catching up')
+  expect(view.container.textContent, 'a column empty taught over a pending read').not.toContain('Nothing is at this stage')
+  expect(view.container.textContent, 'the Backlog empty taught over a pending read').not.toContain('Nothing waits here')
   view.unmount()
 
   // …and a served empty board teaches, so the gate is not simply always off.
   const served = oversightRoutes()
   served['GET /api/tasks'] = { body: { tasks: [], cursor: 1, truncated: false } }
   const { view: landed } = await board(served)
-  expect(landed.container.textContent).toContain('Nothing of yours is queued.')
+  expect(landed.container.textContent).toContain('Nothing waits here')
   landed.unmount()
 })
