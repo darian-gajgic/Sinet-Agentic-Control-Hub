@@ -643,6 +643,22 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /api/push/subscriptions", s.handlePushEnrol)
 	protected("POST /api/push/subscriptions/remove", s.handlePushRemove)
 
+	// The S13.7 projects family (P3-RW-2: projects.go) — the registry's own
+	// content family, added additive-first under its own root like /api/chat and
+	// /api/push. The read pair is scoped server-side to the projects the caller
+	// owns or was invited to (404 before 403, and no operator limb: a captured
+	// convention is project content, the §40-C line); the create door starts the
+	// S13.7 onboarding TASK over the landed seam and mints nothing itself.
+	//
+	// There is no activation verb here and no rescan, member or delete verb at
+	// any shape: onboarding is approved on the landed POST /api/asks/{ask}/answer
+	// path (D10), and a second door onto that act would be the double-mint shape
+	// in transport form. No route here performs an outward effect — registering a
+	// project releases nothing (D7).
+	protected("GET /api/projects", s.handleProjectList)
+	protected("POST /api/projects", s.handleProjectCreate)
+	protected("GET /api/projects/{project}", s.handleProjectDetail)
+
 	protected("GET /api/memory", s.handleMemoryList)
 	protected("POST /api/memory", s.handleMemoryCreate)
 	protected("POST /api/memory/conflicts/{conflict}/resolve", s.handleMemoryConflictResolve)

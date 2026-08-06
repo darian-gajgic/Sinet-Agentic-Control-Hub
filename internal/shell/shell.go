@@ -242,6 +242,11 @@ func Run(ctx context.Context, opts Options) error {
 	var sched *scheduler.Scheduler
 	var intakeSurface api.IntakeSurface
 	var cancelSurface api.CancelSurface
+	// onboardSurface is the S13.7 create door behind POST /api/projects
+	// (P3-RW-2), composed over the registry store and the run substrate below.
+	// nil under injected admission, which leaves that ONE route at 503 rather
+	// than pretending a process with no run substrate can perform a task.
+	var onboardSurface api.OnboardSurface
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
 	// reviewStore is the S13.1–S13.4 store (B4-1): the stage pipeline mints and
@@ -583,6 +588,11 @@ func Run(ctx context.Context, opts Options) error {
 		admission = sched
 		surface := sk.Surface()
 		intakeSurface = surface
+		// The S13.7 onboarding door (P3-RW-2): the registry half over
+		// internal/project, the run half over the skeleton's landed
+		// StartOnboarding. internal/api holds it as a narrow interface and
+		// imports neither package (§40-B).
+		onboardSurface = onboardDoor{proj: proj, sk: sk}
 		// The S15.6 cancel choreography (4.5, B6-2A) rides the same surface:
 		// one composition, two seams. Human-driven only — the HTTP verbs are
 		// its sole callers (NO AUTO-KILL, S14.4 / G1 D1.3).
@@ -817,8 +827,9 @@ func Run(ctx context.Context, opts Options) error {
 		HealthFn: healthFn(st, maint, log),
 		Stopping: st.stopping,
 		Intake:   intakeSurface,
-		Cancel:   cancelSurface, // S15.6 / 4.5 cancel verbs (B6-2A)
-		Effects:  effects,       // S02.7 journal behind the S15.6 effect approvals
+		Onboard:  onboardSurface, // S13.7 projects family: the create door (P3-RW-2)
+		Cancel:   cancelSurface,  // S15.6 / 4.5 cancel verbs (B6-2A)
+		Effects:  effects,        // S02.7 journal behind the S15.6 effect approvals
 		// The B6-2B decision-plane seams: the S10.4 meters mutations, the S15.5
 		// board drag, and the two oversight verbs over landed internals. wd is
 		// nil under injected admission, which leaves the suppress route at 503

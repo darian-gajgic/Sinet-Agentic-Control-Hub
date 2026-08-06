@@ -742,47 +742,29 @@ func (s *Server) memoryVisible(ctx context.Context, e memory.Entry, viewer strin
 	return s.memory.Visible(ctx, e.ID, viewer, projects)
 }
 
-// visibleProjects reads the S13.7 registry for the projects a person owns or is
-// an invited member of.
+// visibleProjects names the S13.7 projects a person owns or is an invited
+// member of — the scope-membership input to the project-scope limb above.
 //
-// The registry row is read as one bounded SELECT rather than through
-// internal/project, which internal/api does not import in either direction (the
-// accept's protected-ref read is the landed precedent, §40-B): the two columns
-// this needs are the owner and the members list, and importing the git topology
-// to read them would widen the one wall that keeps the outward path single.
+// It DELEGATES to the projects family's registry read (projects.go), which is
+// the same bounded SELECT this function used to hold plus the columns that
+// family serves, and — the point of the delegation — the same single expression
+// of who may see a project. Two copies of that rule in one package is one copy
+// too many: a list and a scope check that disagree is a leak, and the way to
+// make them agree is to have one of them (P3-RW-2 R2, the drain-D3 rule).
+//
+// The registry row is still read as bounded SQL rather than through
+// internal/project, which internal/api imports in neither direction (the
+// accept's protected-ref read is the landed precedent, §40-B).
 func (s *Server) visibleProjects(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.proj.db.QueryContext(ctx,
-		`SELECT project_id, user_id, members FROM repo_registry ORDER BY project_id LIMIT ?`, projectRegistryCap)
+	rows, err := s.visibleProjectRows(ctx, userID, "")
 	if err != nil {
-		return nil, fmt.Errorf("read project registry: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 	var out []string
-	for rows.Next() {
-		var id, owner, members string
-		if err := rows.Scan(&id, &owner, &members); err != nil {
-			return nil, fmt.Errorf("scan project registry: %w", err)
-		}
-		if owner == userID {
-			out = append(out, id)
-			continue
-		}
-		var invited []string
-		if err := json.Unmarshal([]byte(members), &invited); err != nil {
-			// A registry row this transport cannot read is not a reason to widen
-			// what the caller sees: an unreadable membership list means NOT a
-			// member, and the ops log carries the corruption.
-			s.logger.Error("memory: project registry members do not decode", "project", id, "err", err)
-			continue
-		}
-		for _, m := range invited {
-			if m == userID {
-				out = append(out, id)
-				break
-			}
-		}
+	for _, row := range rows {
+		out = append(out, row.entry.ProjectID)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // memoryErr maps the gate's and the store's refusals to statuses ON THE ERROR'S

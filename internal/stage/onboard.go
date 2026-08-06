@@ -44,6 +44,15 @@ const roleOnboard role = "onboard"
 // IsOnboardAskID reports whether an ask routes to the onboarding answer path.
 func IsOnboardAskID(askID string) bool { return strings.HasPrefix(askID, onboardAskPrefix) }
 
+// OnboardTaskID and OnboardAskID name a project's onboarding task and its
+// durable owner-approval ask (Spec S13.7). They are exported and USED BELOW
+// because a transport has to name those references in its answer — the S15.2
+// create door reports where the approval card will arrive — and a second
+// composition of the same id scheme in another package is how two layers come
+// to disagree about what one thing is called.
+func OnboardTaskID(projectID string) string { return onboardTaskPrefix + projectID }
+func OnboardAskID(projectID string) string  { return onboardAskPrefix + projectID }
+
 // errOnboardNotOwner is D10: only the entry's owner approves onboarding (a
 // non-owner answer is refused). The Surface maps it to 403.
 var errOnboardNotOwner = errors.New("stage: only the project owner may approve onboarding (D10)")
@@ -92,7 +101,7 @@ func (s *Skeleton) StartOnboarding(ctx context.Context, owner, projectID, name, 
 	if _, err := s.cfg.OnboardStart(ctx, projectID, owner, name, source); err != nil {
 		return "", fmt.Errorf("stage: onboarding scan/draft: %w", err)
 	}
-	taskID := onboardTaskPrefix + projectID
+	taskID := OnboardTaskID(projectID)
 	runID := taskID + RunSuffixOnboard
 	now := s.now().UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 	err := s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
@@ -144,7 +153,7 @@ func (s *Skeleton) dispatchOnboard(ctx context.Context, r run.Run) error {
 	if err != nil {
 		return err
 	}
-	askID := onboardAskPrefix + projectID
+	askID := OnboardAskID(projectID)
 	return s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts)

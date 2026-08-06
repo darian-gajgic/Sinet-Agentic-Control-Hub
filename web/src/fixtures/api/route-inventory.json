@@ -393,6 +393,21 @@
     },
     {
       "method": "GET",
+      "path": "/api/projects",
+      "session_required": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects",
+      "session_required": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project}",
+      "session_required": true
+    },
+    {
+      "method": "GET",
       "path": "/api/memory",
       "session_required": true
     },

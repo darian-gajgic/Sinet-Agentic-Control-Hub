@@ -772,3 +772,48 @@ func TestProjectsVisibilitySweepHTTP(t *testing.T) {
 		t.Fatalf("the sweep covered %d requester×entry cells over two routes; the table is not exhaustive", seen)
 	}
 }
+
+// TestOnboardStartMintsNothingOfItsOwn — R9 / §39 OQ8: the create door records
+// nothing ON TOP of what the layers below already record. After a POST the log
+// carries the registry's OWN two events and nothing else: no api-minted
+// `registry.*`, and zero `decision.recorded`, which is what a transport
+// co-minting somebody else's act looks like. (In production the run substrate
+// adds its own run-lifecycle rows for the same reason — they are its record of
+// its own act, not this door's.)
+func TestOnboardStartMintsNothingOfItsOwn(t *testing.T) {
+	e := newProjEnv(t)
+	head := e.count(t, `SELECT COALESCE(MAX(event_seq), 0) FROM run_events`)
+	if code, out := e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-new","name":"New Proj"}`); code != http.StatusOK {
+		t.Fatalf("POST: %d %s", code, out)
+	}
+	rows, err := e.b.db.QueryContext(e.ctx,
+		`SELECT type, COUNT(*) FROM run_events WHERE event_seq > ? GROUP BY type ORDER BY type`, head)
+	if err != nil {
+		t.Fatalf("walk the log: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]int{}
+	for rows.Next() {
+		var typ string
+		var n int
+		if err := rows.Scan(&typ, &n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[typ] = n
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("walk the log: %v", err)
+	}
+	want := map[string]int{"registry.registered": 1, "registry.captured": 1}
+	if len(got) != len(want) {
+		t.Errorf("the POST minted %v — the registry's own rows ARE the audit and nothing is added to them", got)
+	}
+	for typ, n := range want {
+		if got[typ] != n {
+			t.Errorf("%s: %d rows, want %d", typ, got[typ], n)
+		}
+	}
+	if got["decision.recorded"] != 0 {
+		t.Errorf("%d decision.recorded rows — the create door co-minted a decision (§39 OQ8)", got["decision.recorded"])
+	}
+}

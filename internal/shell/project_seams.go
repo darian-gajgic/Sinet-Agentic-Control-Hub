@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
@@ -89,6 +91,70 @@ func pinRefusal(pin string, err error) error {
 		return fmt.Errorf("%w: %q", intake.ErrPinNotActive, pin)
 	case errors.Is(err, project.ErrNotFound):
 		return fmt.Errorf("%w: %q", intake.ErrPinUnknown, pin)
+	default:
+		return err
+	}
+}
+
+// onboardDoor is the api-facing S13.7 onboarding seam (api.OnboardSurface,
+// P3-RW-2): the HTTP create door reaches the onboarding task through it.
+//
+// It is composed HERE, at the root that already holds both organs, rather than
+// on *stage.Surface, because the door records one field the landed stage seam
+// has no parameter for: the entry's REMOTE URL, which S13.7 stores as data and
+// which nothing ever dials (§23). Widening Config.OnboardStart /
+// Skeleton.StartOnboarding to carry it would change landed signatures other
+// compositions consume, for a value the run substrate does not use — and this
+// file is already where the registry↔consumer translation lives (pinRefusal).
+//
+// THE TWO CALLS ARE ONE ONBOARDING. project.OnboardStart returns the pending
+// entry's EXISTING draft rather than re-cloning when the entry is already
+// registered — the same idempotent re-dispatch path the onboarding run itself
+// takes (S13.7/F1) — so register → init → scan → draft happens exactly once and
+// the skeleton's own call is a read.
+type onboardDoor struct {
+	proj *project.Store
+	sk   *stage.Skeleton
+}
+
+var _ api.OnboardSurface = onboardDoor{}
+
+// OnboardRefs names the onboarding of a project without performing anything, so
+// a retried create can answer with the references of the one already running.
+func (d onboardDoor) OnboardRefs(projectID string) api.OnboardRefs {
+	return api.OnboardRefs{TaskID: stage.OnboardTaskID(projectID), AskRef: stage.OnboardAskID(projectID)}
+}
+
+// StartOnboarding registers and drafts the entry (with its stored remote), then
+// launches the onboarding task whose durable ask carries the draft to its owner.
+func (d onboardDoor) StartOnboarding(ctx context.Context, owner, projectID, name, remoteURL string) (api.OnboardRefs, error) {
+	if _, err := d.proj.OnboardStart(ctx, project.OnboardInput{
+		ProjectID: projectID, Owner: owner, Name: name, RemoteURL: remoteURL,
+	}); err != nil {
+		return api.OnboardRefs{}, onboardRefusal(err)
+	}
+	// Source stays EMPTY: over HTTP a clone source is a host-filesystem read
+	// primitive, so the door cannot express one (P3-RW-2 OQ5) and every
+	// onboarding started here initializes a fresh store.
+	taskID, err := d.sk.StartOnboarding(ctx, owner, projectID, name, "")
+	if err != nil {
+		return api.OnboardRefs{}, err
+	}
+	return api.OnboardRefs{TaskID: taskID, AskRef: stage.OnboardAskID(projectID)}, nil
+}
+
+// onboardRefusal translates the project store's refusals into transport errors
+// on the SENTINEL, never on the message text (§38's ban) — pinRefusal's
+// discipline one seam over. Anything unmarked stays itself and answers 500 with
+// the cause in the ops log: a platform fault is not the caller's fault.
+func onboardRefusal(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, project.ErrAlreadyRegistered):
+		return &api.SurfaceError{Status: http.StatusConflict, Code: "already_registered", Msg: err.Error()}
+	case errors.Is(err, project.ErrBadInput):
+		return &api.SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: err.Error()}
 	default:
 		return err
 	}
