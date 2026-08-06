@@ -130,6 +130,19 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
   const { route, params } = useRoute()
   const { session, reload, failure } = useSession()
   const authed = session?.authenticated === true
+
+  // ▲ v3 (operator, checkpoint 2): a task opens as a structured OVERLAY over
+  // the surface it was opened from, never a full-page swap. The shell
+  // remembers the last non-task view; while /tasks/:id is the address, that
+  // view stays mounted underneath and the card floats over it. A COLD deep
+  // link has no underlay — the card renders standalone and closing it lands
+  // on the board.
+  const underRef = useRef<{ route: RouteDef; params: Record<string, string> } | null>(null)
+  const overlayOpen = route.id === 'task'
+  if (!overlayOpen) underRef.current = { route, params }
+  const shown = overlayOpen ? underRef.current : { route, params }
+  const v = shown?.route.id
+  const vp = shown?.params ?? {}
   const status = useConnection(authed, stream)
   const { dots, requests, drain } = useEtiquette(route.id, authed, stream)
   // The guided tour (P3-UI-7 R13). It NEVER auto-starts: nothing in this client
@@ -242,67 +255,84 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
             </header>
 
             <main className="shell-main">
-              <div className="view-in" key={`${route.id}:${params.id ?? ''}`}>
+              <div className="view-in" key={`${v ?? 'none'}:${vp.id ?? ''}`}>
                 {/* The fence rule (P1): every not-yet-reworked OLD surface
-                    declares itself before its own content renders. */}
-                {authed && <OldFence route={route.id} />}
+                    declares itself before its own content renders. The fence
+                    follows the SHOWN surface — the one under the overlay. */}
+                {authed && v !== undefined && <OldFence route={v} />}
                 {session === null ? (
                   <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
-                ) : route.id === 'login' ? (
+                ) : v === undefined ? (
+                  // A cold /tasks/:id deep link: nothing underneath — the
+                  // card renders standalone over the room itself.
+                  null
+                ) : v === 'login' ? (
                   <Login session={session} onSignedIn={reload} />
-                ) : route.id === 'not-found' ? (
+                ) : v === 'not-found' ? (
                   <NotFound pathname={window.location.pathname} />
-                ) : route.id === 'mission-control' ? (
+                ) : v === 'mission-control' ? (
                   <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
-                ) : route.id === 'new' ? (
+                ) : v === 'new' ? (
                   <DescribeGoal search={window.location.search} stream={stream} />
-                ) : route.id === 'projects' ? (
+                ) : v === 'projects' ? (
                   <Projects me={session.user?.user_id ?? ''} stream={stream} />
-                ) : route.id === 'board' ? (
+                ) : v === 'board' ? (
                   <Board me={session.user?.user_id ?? ''} stream={stream} />
-                ) : route.id === 'fleet' ? (
+                ) : v === 'fleet' ? (
                   <Fleet
                     me={session.user?.user_id ?? ''}
                     operator={session.dev === true || session.user?.role === 'operator'}
                     stream={stream}
                   />
-                ) : route.id === 'task' ? (
-                  <TaskDetail id={params.id} stream={stream} />
-                ) : route.id === 'inbox' ? (
+                ) : v === 'inbox' ? (
                   <Inbox stream={stream} />
-                ) : route.id === 'inbox-item' ? (
-                  <InboxItem id={params.id} stream={stream} />
-                ) : route.id === 'settings' ? (
+                ) : v === 'inbox-item' ? (
+                  <InboxItem id={vp.id} stream={stream} />
+                ) : v === 'settings' ? (
                   <Settings stream={stream} />
-                ) : route.id === 'chat' ? (
+                ) : v === 'chat' ? (
                   <Chat stream={stream} search={window.location.search} />
-                ) : route.id === 'deliverable' ? (
-                  <Deliverable id={params.id} me={session.user?.user_id ?? ''} stream={stream} />
-                ) : route.id === 'workforce' ? (
+                ) : v === 'deliverable' ? (
+                  <Deliverable id={vp.id} me={session.user?.user_id ?? ''} stream={stream} />
+                ) : v === 'workforce' ? (
                   <Workforce stream={stream} />
-                ) : route.id === 'memory' ? (
+                ) : v === 'memory' ? (
                   <Memory
                     me={session.user?.user_id ?? ''}
                     operator={session.user?.role === 'operator'}
                     stream={stream}
                   />
-                ) : route.id === 'memory-entry' ? (
+                ) : v === 'memory-entry' ? (
                   <MemoryEntryView
-                    id={params.id}
+                    id={vp.id}
                     me={session.user?.user_id ?? ''}
                     operator={session.user?.role === 'operator'}
                     stream={stream}
                   />
-                ) : route.id === 'history' ? (
+                ) : v === 'history' ? (
                   <HistorySurface />
-                ) : route.id === 'manual' ? (
+                ) : v === 'manual' ? (
                   <ComingSurface id="manual" onStartTour={tour.start} />
                 ) : (
-                  // projects · reviews · lessons · health — the map's
-                  // published-ahead placeholders, each an honest surface.
-                  <ComingSurface id={route.id} />
+                  // reviews · lessons · health — the map's published-ahead
+                  // placeholders, each an honest surface.
+                  <ComingSurface id={v} />
                 )}
               </div>
+
+              {/* The task card, floating over whatever surface it was opened
+                  from. Closing returns there (history.back over the push that
+                  opened it); a cold load closes to the board. */}
+              {overlayOpen && authed && session !== null && (
+                <TaskDetail
+                  id={params.id}
+                  stream={stream}
+                  onClose={() => {
+                    if (underRef.current !== null) window.history.back()
+                    else navigate(hrefFor('board'))
+                  }}
+                />
+              )}
             </main>
           </div>
 

@@ -2,7 +2,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
-import { ReceiptView } from './TaskDetail'
+import { ReceiptView, fmtDuration } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
 import { EventStream } from './events'
@@ -13,7 +13,21 @@ import { click, flush, mount } from './testing'
  * Task detail (Spec S15.5 ¶3; 9.2; S2.2; S2.4; §38 ruling (a); G2 D2.8),
  * driven against the golden fixtures — including BOTH artifact states, because
  * "a draft is labelled a draft" cannot be tested with only approved data.
+ *
+ * REWRITTEN IN PART 2026-08-06 (rework step 2, map §3 v3): the surface became
+ * a structured OVERLAY WINDOW (itself role="dialog"), so the cancel-confirm
+ * queries take the LAST dialog in the document — the kit portal appends after
+ * the window; durations now render human-readable through `fmtDuration` (the
+ * checkpoint-2 C2-13 ban on raw seconds), and the artifacts absence renders
+ * plain words, never the pipeline's internal reason string. Every behavior
+ * contract stands.
  */
+
+/** The kit confirm's popup: the LAST dialog — the window itself is one. */
+function confirmDialog(): Element {
+  const all = document.querySelectorAll('[role="dialog"]')
+  return all[all.length - 1]
+}
 
 const inertStream = () =>
   new EventStream({
@@ -78,12 +92,20 @@ test('a DRAFT pair is labelled a draft and never presented as the confirmed spec
   expect(text, 'a draft was presented as confirmed').not.toContain('confirmed')
 })
 
-test('a task with no drafted pair renders the served reason, not an error', async () => {
+test('a task with no drafted pair renders a plain-words absence, never the internal reason string', async () => {
+  // REWRITTEN 2026-08-06 (C2-13): the served `artifacts_absent` is the
+  // pipeline's own internal reason ("intake: invalid artifact: …") and the
+  // old page rendered it as body text — the banned defect class. The card
+  // renders plain words instead, and the raw string must NOT appear.
   const { view } = await task('t-archive', detailRoutes())
   const bare = fixtures.taskDetailBare() as unknown as Detail
   expect(bare.spec, 'the fixture is not actually the artifacts-absent case').toBeNull()
   expect(bare.artifacts_absent).not.toBe('')
-  expect(view.container.textContent).toContain(bare.artifacts_absent ?? '')
+  expect(view.container.textContent).toContain('no confirmed spec and plan are stored yet')
+  expect(
+    view.container.textContent,
+    'the internal reason string rendered as body text (C2-13)',
+  ).not.toContain(bare.artifacts_absent ?? '§never§')
   // The task itself still reads.
   expect(view.container.textContent).toContain('Archive last quarter')
 })
@@ -225,7 +247,10 @@ test('the task detail renders the active run&apos;s live activity, not just stag
   // The last-activity line and the monotonic counters, as served.
   expect(text).toContain(served.card.last_activity?.type ?? '')
   expect(text).toContain(`${String(served.card.counters.tokens)} tokens`)
-  expect(text).toContain(`${String(served.card.counters.elapsed_s)} s elapsed`)
+  // Human-readable elapsed (C2-13): the monotonic counter renders through
+  // fmtDuration, and the raw-seconds form is the banned class.
+  expect(text).toContain(`${fmtDuration(served.card.counters.elapsed_s)} elapsed`)
+  expect(text, 'raw seconds rendered (C2-13)').not.toContain(`${String(served.card.counters.elapsed_s)} s elapsed`)
   expect(text).toContain('USD 1.42')
   // Monotonic counters, never a denominator.
   expect(text.toLowerCase()).not.toContain('%')
@@ -477,7 +502,7 @@ test('nothing fires until the confirm is pressed, and then exactly once', async 
   await flush()
   // The dialog is open and says, in the platform's words, what cancelling a
   // RUNNING run does — and still nothing has fired.
-  const dialog = document.querySelector('[role="dialog"]')!
+  const dialog = confirmDialog()
   expect(dialog.textContent).toContain('It stops now')
   expect(dialog.textContent).toContain('shutdown ladder')
   expect(log.calls.filter((c) => c.method === 'POST').length, 'opening a confirm fired the verb').toBe(before)
@@ -554,7 +579,7 @@ test('the parked and queued edges render their own served sentences', async () =
     click(view.container.querySelector(`[data-cancel-run="${run}"]`))
     await flush()
     // The confirm says what THIS state's cancel does, not a generic sentence.
-    const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+    const said = confirmDialog().textContent ?? ''
     expect(said).toContain(leg.state === 'parked' ? 'question card on it closes with it' : 'withdrawn before it starts')
     click(document.querySelector('[data-act="confirm"]'))
     await flush()
@@ -688,7 +713,7 @@ test('a task cancel itemizes every run, and claims the board only when something
   click(view.container.querySelector('[data-cancel="task"]'))
   await flush()
   // The confirm counts what it is about to act on, from served state.
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('1 right now')
+  expect(confirmDialog().textContent).toContain('1 right now')
   click(document.querySelector('[data-act="confirm"]'))
   await flush()
 
@@ -852,7 +877,7 @@ test('the cancel controls are reachable and operable at phone width', async () =
   expect(view.container.querySelector('[data-cancel-run="r-ship"]')).not.toBeNull()
   click(view.container.querySelector('[data-cancel-run="r-ship"]'))
   await flush()
-  const dialog = document.querySelector('[role="dialog"]')!
+  const dialog = confirmDialog()
   expect(dialog.querySelector('[data-act="confirm"]')).not.toBeNull()
 
   // The §41-B method: jsdom has no layout, so the checkable property is that
@@ -874,7 +899,7 @@ test('the task confirm does not promise an atomicity the backend does not have',
   const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
   click(view.container.querySelector('[data-cancel="task"]'))
   await flush()
-  const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+  const said = confirmDialog().textContent ?? ''
   // `stage.CancelTask` walks its runs and each cancel COMMITS ON ITS OWN
   // (cancel.go:221–233), so a mid-dispatch refusal stops the walk with
   // everything already cancelled still cancelled.
@@ -925,7 +950,7 @@ test('the mid-dispatch and unrecognized-state confirms each say their own truth'
     const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
     click(view.container.querySelector(`[data-cancel-run="r-${leg.state}-0"]`))
     await flush()
-    const said = document.querySelector('[role="dialog"]')!.textContent ?? ''
+    const said = confirmDialog().textContent ?? ''
     expect(said, `the ${leg.state} confirm does not say what a cancel does to it`).toContain(leg.says)
     // Nothing invented: no deletion, no rollback, on any arm.
     expect(said.toLowerCase()).not.toContain('delete')
@@ -981,7 +1006,7 @@ test('opened, last activity and each stage boundary all render relative beside v
   const run = fixtures.runDetail() as unknown as RunDetail
   const { view } = await task('t-ship', detailRoutes())
 
-  const opened = [...view.container.querySelectorAll('p.muted')].find((p) => p.textContent?.includes('opened'))!
+  const opened = [...view.container.querySelectorAll('p')].find((p) => p.textContent?.includes('opened'))!
   expect(opened, 'the opened line did not render').toBeDefined()
   assertBeside(opened.querySelector('time'), served.created_ts, 'the opened stamp')
   assertBeside(view.container.querySelector('.activity-line time'), run.card!.last_activity!.ts, 'the activity stamp')
@@ -1128,7 +1153,10 @@ test('a park interval is a stop node with its reason, its served duration and th
   const parks = nodesOf(view, 'park')
   expect(parks, 'the rail carries no park node').toHaveLength(2)
   expect(parks[0].textContent).toContain('weekly quota reached')
-  expect(parks[0].textContent, 'the served duration was not rendered').toContain('120 s')
+  // The served duration renders through fmtDuration (C2-13): 120 s reads as
+  // its human form — a deterministic rendering of the served figure, nothing
+  // derived.
+  expect(parks[0].textContent, 'the served duration was not rendered').toContain(fmtDuration(120))
   expect(parks[0].textContent).toContain('window rolled')
   expect(parks[1].textContent, 'an open interval does not say it is still parked').toContain('still parked')
   // The door POINTS: the release is `api.resumeRun` and its one call site is the

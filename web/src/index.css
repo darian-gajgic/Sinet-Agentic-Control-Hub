@@ -2522,6 +2522,166 @@ td {
   }
 }
 
+/* ── the task card (rework step 2; the Nexus modal anatomy) ─────────────────
+   A structured window OVER the surface it was opened from — never a page
+   swap. Fixed overlay, blurred scrim, the window scrolls inside itself.
+   Phone-first: the window fills the screen edge-to-edge below the
+   breakpoint and becomes the centred card above it. */
+
+.win-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 4, 10, 0.66);
+  backdrop-filter: blur(8px);
+  padding: 0;
+}
+
+.win {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100dvh;
+  background: linear-gradient(160deg, #171724, #101019);
+  border: 1px solid var(--border-l);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .win {
+    animation: win-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1.15) both;
+  }
+}
+
+@keyframes win-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  .win-overlay {
+    padding: 24px;
+  }
+
+  .win {
+    width: 920px;
+    max-width: 94vw;
+    height: auto;
+    max-height: 90vh;
+    border-radius: 16px;
+  }
+}
+
+.win-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px 13px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.win-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.win-title h2 {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.win-under {
+  margin: 3px 0 0;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.win-head .chip {
+  flex: none;
+  margin-top: 2px;
+}
+
+.win-close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(20, 20, 32, 0.55);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.win-close:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 35%, transparent);
+}
+
+.win-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 20px 22px;
+}
+
+.win-what {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  max-width: 70ch;
+}
+
+.win-body .block {
+  margin-block: 1.1rem;
+  padding: 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-grad);
+}
+
+.win-body .block h2 {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.win-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.win-acts .task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ── projects (rework step 2; Nexus card-grid anatomy) ──────────────────────
    One card per project bucket over the caller's own rows; the create door is
    the kit modal. Phone-first: one column, then the auto-fill grid. */

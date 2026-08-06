@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { ArrowUpRight, X } from 'lucide-react'
 
 import {
   api,
@@ -14,40 +15,53 @@ import {
 } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
-import { activityEventTypes, boardEventTypes, useLive } from './live'
-import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Stamp, SurfaceHead } from './parts'
-import { Link } from './router'
+import { activityEventTypes, boardEventTypes, inboxEventTypes, useLive } from './live'
+import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Stamp } from './parts'
+import { Link, navigate } from './router'
 import { hrefFor } from './routes'
 import { Button, Chip, EmptyState, StatusDot, Timestamp, type Tone } from './ui'
 
 /**
- * Task detail (Spec S15.5 ¶3; 9.2; S2.2; S2.4; G2 D2.8).
+ * The task card (map §3 v3; Spec S15.5 ¶3; 9.2; S2.2; S2.4; G2 D2.8) — a
+ * STRUCTURED OVERLAY WINDOW over the surface it was opened from, never a
+ * full-page swap (operator, checkpoint 2). The task route stays its
+ * deep-link address and renders the same window standalone.
  *
  * The whole story of one task: the specification with its numbered acceptance
- * criteria, the plan, the per-stage progress and live activity, every human
- * decision along the way, the deliverable revisions, and the receipt.
+ * criteria, the plan with per-step done-when, live activity and the stage
+ * rail, every human decision, the deliverables with doors into review, the
+ * receipts, and the lineage — under a state-computed action bar that offers
+ * only what this task's state allows.
  *
- * TWO RULES SHAPE EVERY BLOCK BELOW.
+ * TWO RULES SHAPE EVERY BLOCK, unchanged from the landed surface:
  *
  * The §38 ruling-(a) display contract: a pre-approval task serves its DRAFT
- * pair with its status on it, so this view labels a draft a draft. S15.5 calls
- * this surface "the confirmed specification", which is the APPROVED view — and
- * presenting an unapproved draft under that heading would be the one way this
- * page could mislead about something a person is about to sign off.
+ * pair with its status on it, so this view labels a draft a draft and never
+ * presents it as the confirmed specification.
  *
- * Render-verbatim-as-served for the receipt labels: the done-directly label is
- * REGISTERED text (BENCH-REG §13) that the platform already puts on every
- * receipt. This file declares no label string of its own — it prints
- * `direct_use.label`, whatever it says. A scan proves the literals appear in no
- * view file, so the UI can never drift from the registration by re-typing it.
+ * Render-verbatim-as-served for the receipt labels: the done-directly label
+ * is REGISTERED text the platform puts on every receipt; this file declares
+ * no label string of its own.
+ *
+ * TWO DEFECT CLASSES ARE BANNED HERE BY NAME (checkpoint-2 C2-13):
+ *  - a raw internal error string must NEVER render as body text — absences
+ *    and failures get plain words;
+ *  - durations render human-readable through `fmtDuration`, never as raw
+ *    seconds.
  */
-export function TaskDetail({ id, stream }: { id: string; stream?: EventStream }) {
+export function TaskDetail({
+  id,
+  stream,
+  onClose,
+}: {
+  id: string
+  stream?: EventStream
+  /** Closing the window returns to the surface it covered. */
+  onClose?: () => void
+}) {
   // Deliberately UNNARROWED: every frame of the declared types re-reads this
   // resource. Filtering to "frames whose run_id is one of this task's runs"
-  // looks like the obvious saving and is wrong — a `run.created` for a run this
-  // task does not have YET is exactly the frame that would be dropped, and the
-  // new run would never appear until something else happened to trigger a read.
-  // One page is open at a time; correctness is worth more than the saving.
+  // would drop the `run.created` frame for a run this task does not have YET.
   const { data, error, stale, reload } = useLive<Detail>({
     key: `/api/tasks/${id}`,
     read: () => api.task(id),
@@ -55,33 +69,151 @@ export function TaskDetail({ id, stream }: { id: string; stream?: EventStream })
     stream,
   })
 
+  const close = onClose ?? (() => { navigate(hrefFor('board')) })
+
+  // Esc closes — the window behaves like the Nexus card it recreates.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', h)
+    return () => {
+      window.removeEventListener('keydown', h)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
-    <section className="surface">
-      {/* The header line says what this surface HOLDS and claims nothing about
-          the status of what it holds: a specification is labelled with the
-          approval status it actually has, one block down (§38 ruling (a)). */}
-      <SurfaceHead
-        title={data ? data.title : 'Task'}
-        what="The whole story of one task — what was asked for and how it was planned, every stage the work passed through, what is happening right now, each decision a person made, the deliverables and the receipts."
-      />
-      <Freshness stale={stale} error={error} hasData={data !== null} />
-      {data && (
-        <>
-          <p className="muted">
-            <Owner id={data.owner} /> · {data.kanban_status} · opened <Timestamp ts={data.created_ts} variant="live" />
+    <div
+      className="win-overlay"
+      data-task-overlay={id}
+      onClick={close}
+      role="presentation"
+    >
+      <section
+        className="win surface"
+        role="dialog"
+        aria-modal="true"
+        aria-label={data ? data.title : 'Task'}
+        onClick={(e) => {
+          e.stopPropagation()
+        }}
+      >
+        <header className="win-head">
+          <div className="win-title">
+            <h2 className="m-0">{data ? (data.title !== '' ? data.title : data.task_id) : 'Task'}</h2>
+            {data && (
+              <p className="win-under mono">
+                {data.task_id} · <Owner id={data.owner} /> · opened <Timestamp ts={data.created_ts} variant="live" />
+              </p>
+            )}
+          </div>
+          {data && <Chip tone={statusTone(data.kanban_status)}>{statusWord(data.kanban_status)}</Chip>}
+          <button type="button" className="win-close" aria-label="Close the task card" onClick={close}>
+            <X size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="win-body">
+          {/* The D8 teaching line, carried onto the window: what this card
+              holds — claiming nothing about approval status (§38: that is
+              StatusLine's job, per artifact, from the served status). */}
+          <p className="win-what" data-surface-what>
+            The whole story of one task — what was asked for and how it was planned, every stage the work passed
+            through, what is happening right now, each decision a person made, the deliverables and the receipts.
           </p>
-          <CancelTask taskID={id} runs={data.runs} reload={reload} />
-          <SpecBlock detail={data} stale={stale} />
-          <StageBlock detail={data} stale={stale} />
-          <LiveActivity run={activeRun(data)} stream={stream} />
-          <DecisionsBlock decisions={data.decisions} stale={stale} />
-          <DeliverablesBlock taskID={id} stream={stream} />
-          <ReceiptsBlock runs={data.runs} stale={stale} reload={reload} />
-        </>
-      )}
-    </section>
+          <Freshness stale={stale} error={error} hasData={data !== null} />
+          {data === null && error === '' && <p className="muted">Reading the task…</p>}
+          {data && (
+            <>
+              <ActionBar detail={data} reload={reload} stream={stream} />
+              <SpecBlock detail={data} stale={stale} />
+              <StageBlock detail={data} stale={stale} />
+              <LiveActivity run={activeRun(data)} stream={stream} />
+              <DecisionsBlock decisions={data.decisions} stale={stale} />
+              <DeliverablesBlock taskID={id} stream={stream} />
+              <ReceiptsBlock runs={data.runs} stale={stale} reload={reload} />
+            </>
+          )}
+        </div>
+      </section>
+    </div>
   )
 }
+
+/** The board's own display words for a stored status (kanban.ts vocabulary):
+ *  the card and the column must not disagree. */
+function statusWord(status: string): string {
+  return status === 'intake' ? 'Backlog' : status === 'attention' ? 'Needs attention' : status
+}
+
+function statusTone(status: string): Tone {
+  switch (status) {
+    case 'executing':
+      return 'green'
+    case 'verifying':
+      return 'blue'
+    case 'attention':
+      return 'orange'
+    case 'cancelled':
+      return 'red'
+    case 'done':
+      return 'accent'
+    default:
+      return 'blue'
+  }
+}
+
+/** fmtDuration: seconds → human words. Raw seconds never render (C2-13). */
+export function fmtDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 60) return `${String(s)} s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${String(m)} min${s % 60 !== 0 ? ` ${String(s % 60)} s` : ''}`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${String(h)} h${m % 60 !== 0 ? ` ${String(m % 60)} min` : ''}`
+  const d = Math.floor(h / 24)
+  return `${String(d)} d${h % 24 !== 0 ? ` ${String(h % 24)} h` : ''}`
+}
+
+/* ── the state-computed action bar ───────────────────────────────────────── */
+
+/**
+ * Only what this state allows (map §3): cancel while something can be
+ * cancelled; the open card's door while one is open; the review door while a
+ * deliverable exists. Every verb here is a door or a landed verb — nothing is
+ * invented, and a state that allows nothing renders no dead controls.
+ */
+function ActionBar({ detail, reload, stream }: { detail: Detail; reload: () => void; stream?: EventStream }) {
+  const asks = useLive({
+    key: `/api/approvals#task:${detail.task_id}`,
+    read: () => api.approvals(),
+    types: inboxEventTypes,
+    stream,
+  })
+  const openAsk = (asks.data?.items ?? []).find((i) => i.task_id === detail.task_id)
+
+  return (
+    <div className="win-acts">
+      {openAsk !== undefined && (
+        <Button
+          variant="primary"
+          size="sm"
+          data-act="answer"
+          onClick={() => {
+            navigate(hrefFor('inbox-item', { id: openAsk.id }))
+          }}
+        >
+          <ArrowUpRight size={13} strokeWidth={2} aria-hidden="true" />
+          Answer its open card
+        </Button>
+      )}
+      <CancelTask taskID={detail.task_id} runs={detail.runs} reload={reload} />
+    </div>
+  )
+}
+
+/* ── the spec + plan ─────────────────────────────────────────────────────── */
 
 /** R10: the spec with its numbered ACs and the plan, each labelled with the
  *  approval status it actually has. */
@@ -90,7 +222,9 @@ function SpecBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
   return (
     <Section title="Specification and plan" stale={stale}>
       {!spec || !plan ? (
-        <Absent reason={detail.artifacts_absent ?? 'no spec/plan pair is stored for this task'} />
+        // Plain words for the absence (C2-13: the served internal reason
+        // string is a fact about the pipeline, not a sentence for a person).
+        <Absent reason="no confirmed spec and plan are stored yet — the interview and planning produce them, and they appear here the moment they exist" />
       ) : (
         <>
           <StatusLine what="Specification" status={spec.status} version={spec.version} />
@@ -141,8 +275,8 @@ function SpecBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
 
 /**
  * StatusLine is the §38 ruling-(a) honesty, in one place so it cannot be
- * forgotten on one of the two artifacts: an approved pair reads as confirmed, a
- * draft reads as a draft and says what that means.
+ * forgotten on one of the two artifacts: an approved pair reads as confirmed,
+ * a draft reads as a draft and says what that means.
  */
 function StatusLine({ what, status, version }: { what: string; status: string; version: number }) {
   const approved = status === 'approved'
@@ -182,6 +316,8 @@ function SpecLists({ spec }: { spec: Spec }) {
   )
 }
 
+/* ── cancel (R3, both grains — landed choreography unchanged) ────────────── */
+
 /**
  * activeRun is the run the live feed is about: the task's latest run that has
  * not reached a terminal state, or — when everything has finished — the last
@@ -195,14 +331,10 @@ export function activeRun(detail: Detail): TaskRunView | null {
 }
 
 /**
- * cancellable is ONE list, read the other way round: a run that has not reached
- * a terminal state is one the 4.5 verb has an edge for.
- *
- * A state this list has never seen is offered rather than hidden — the same
- * forward-tolerance the kanban vocabulary takes (§42): the client owns no state
- * vocabulary of its own, and the verb refuses what it cannot cancel. Hiding a
- * control on an unrecognized state would make a new server state silently
- * uncancellable from every surface.
+ * cancellable is ONE list, read the other way round: a run that has not
+ * reached a terminal state is one the 4.5 verb has an edge for. A state this
+ * list has never seen is offered rather than hidden (§42) — the client owns
+ * no state vocabulary, and the verb refuses what it cannot cancel.
  */
 function cancellable(state: string): boolean {
   return !terminalStates.includes(state)
@@ -211,11 +343,6 @@ function cancellable(state: string): boolean {
 /**
  * The plain words for what a cancel DOES to a run in the state it is in
  * (S02.3 through internal/stage/cancel.go's ratified mapping; §39).
- *
- * Every sentence is a promise about a landed edge and asserts nothing beyond
- * it: no deletion, no rollback, no "stopping" a run that is only queued. The
- * unknown-state arm says what is actually true — the platform decides — rather
- * than describing an edge nobody has ratified.
  */
 function cancelConsequence(state: string): string {
   switch (state) {
@@ -244,10 +371,7 @@ function runOutcomeNote(res: CancelOutcome): string {
 
 /**
  * R3's task half: one control over every run of the task that has not ended.
- *
- * It renders only while there IS such a run — a task whose work is over offers
- * no cancel, because there is nothing to cancel and a control that can only
- * report "nothing happened" is a control that should not be there.
+ * It renders only while there IS such a run.
  */
 function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunView[]; reload: () => void }) {
   const [open, setOpen] = useState(false)
@@ -275,11 +399,7 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
         onOpenChange={setOpen}
         title="Cancel this task?"
         // The truth about this verb, and it is not atomic: `stage.CancelTask`
-        // walks the task's runs in order and each cancel COMMITS ON ITS OWN, so
-        // a run that turns out to be mid-dispatch stops the walk with everything
-        // already cancelled still cancelled (internal/stage/cancel.go:221–233).
-        // Saying "nothing is cancelled" here would be a promise the platform
-        // does not keep, on the one screen where that matters most.
+        // walks the task's runs in order and each cancel COMMITS ON ITS OWN.
         what={`Every run of this task that has not ended is cancelled — ${String(live.length)} right now — each under the rule for the state it is in. If one of them turns out to be mid-dispatch the request stops there: the runs already cancelled stay cancelled, and this page re-reads so you can see how far it got before trying the rest.`}
         act="Cancel every unfinished run"
         busy={act.busy}
@@ -360,27 +480,18 @@ function CancelRun({ run, reload }: { run: TaskRunView; reload: () => void }) {
   )
 }
 
+/* ── live activity ───────────────────────────────────────────────────────── */
+
 /**
- * R11's other half: the LIVE ACTIVITY FEED (Spec S15.5; S2.2).
- *
- * Stage boundaries alone say a stage started and ended — which is exactly the
- * "started and ended" S2.2 says is not enough to watch work happen. This reads
- * the run card: the last-activity line, the current stage and tool, and the
- * monotonic counters, seeded from the REST snapshot and re-read on this run's
- * own frames.
- *
- * The counters are rendered as the monotonic values they are. There is no
- * denominator on the wire and none is invented here — no percentage, no
- * fraction, no estimate of what is left.
+ * R11's other half: the LIVE ACTIVITY FEED (Spec S15.5; S2.2), reading the
+ * run card: the last-activity line, the current stage and tool, and the
+ * monotonic counters — no denominator exists and none is invented.
  */
 export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?: EventStream }) {
   const { data, error, stale } = useLive<RunDetail>({
     key: run ? `/api/runs/${run.run_id}` : '',
     read: () => (run ? api.run(run.run_id) : Promise.reject(new Error('no run'))),
     types: activityEventTypes,
-    // Only this run's frames matter here — a sibling run moving is not this
-    // panel's business, and unlike the task resource above, a frame for a run
-    // that does not exist yet cannot change what THIS run is doing.
     applies: (e) => e.run_id === undefined || e.run_id === run?.run_id,
     stream,
   })
@@ -411,12 +522,6 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
             {card.wedged && <span className="warn-flag"> wedged</span>}
             {card.waiting_on_human && <span className="waiting-human"> waiting on a person</span>}
           </p>
-          {/* The rail's STOP nodes on the live lane. Both are served facts of
-              this card — `wedged` is the run.wedged / watchdog pause-and-flag
-              projection (api.ts:462; internal/eventlog/contract.go:427) and
-              `waiting_on_human` is the open-ask flag — and both point at the
-              inbox, where the card holding the run lives. Neither fires
-              anything: the release verb is the card's own (§48 OQ2). */}
           {card.wedged && (
             <StallBanner
               kind="wedged"
@@ -435,13 +540,6 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
               <Link to={hrefFor('inbox')}>Answer it in the inbox</Link>
             </StallBanner>
           )}
-          {/* R16's horizon limb (drain r1, D4). `parked_until` is SERVED on this
-              same run card (api.ts:443) and had no render on this surface at
-              all, so a parked run said WHY it stopped and never until when. It
-              goes through the landed `ParkedUntil` idiom — relative beside the
-              verbatim UTC, and the "parked, no horizon given" absence byte-kept,
-              because a park the platform gave no horizon for must not acquire
-              one here. */}
           {card.state === 'parked' && (
             <StallBanner
               kind="parked"
@@ -469,13 +567,11 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
           <ul className="counters m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-muted-foreground">
             <li>{String(card.counters.steps)} steps</li>
             <li>{String(card.counters.tokens)} tokens</li>
-            <li>{String(card.counters.elapsed_s)} s elapsed</li>
+            {/* Human-readable, never raw seconds (C2-13: "1500991 s elapsed"
+                is the banned class). The counter stays monotonic fact. */}
+            <li>{fmtDuration(card.counters.elapsed_s)} elapsed</li>
             <li className="run-cost">
               <Money usd={card.counters.api_equiv_cost_usd} />
-              {/* The subscription lane prices UNPRICED, so the figure beside it
-                  is 0 — and a bare "USD 0" says the run was free when what is
-                  true is that nobody priced it. The served marking is what makes
-                  the number readable, exactly as on the workforce map. */}
               {card.counters.unpriced === true && (
                 <> · subscription lane, so this is the API-equivalent figure</>
               )}
@@ -487,40 +583,13 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
   )
 }
 
-/**
- * THE TIMELINE RAIL (design proposal §3's dot-on-rail idea, at the grain this
- * platform actually serves).
- *
- * THE GRAIN IS STAGE / LIFECYCLE / DECISION, and that is a finding rather than
- * a preference. The Odysseus idea is a TOOL-CALL timeline; no landed read on
- * this surface serves one. The run card carries the CURRENT tool name and args
- * digest and a one-line last activity (api.ts:445, :461); `tool.called` is
- * registered DECLARE-ONLY with no producer at all
- * (internal/eventlog/contract.go:626); and `tool.completed` frames are triggers
- * rather than data, because REST is the truth (§42). So every node below traces
- * to a row or a field of the two reads this surface already makes, and a node
- * class for a history the platform never records is exactly what this must not
- * invent.
- *
- * THE ORDER IS THE SERVED INSTANTS' OWN. Nodes are sorted by the instant the
- * platform recorded, with served order as the tie-break; a node whose instant
- * this client could not read keeps its served position rather than being moved
- * to one nobody recorded.
- *
- * The rail is the CHRONOLOGY. The blocks below it are the RECORDS — the
- * decisions list carries every field of every decision, and the receipt carries
- * each park interval byte-for-byte. Both readings come off the same served
- * arrays, so they cannot disagree, and neither is a summary standing in for the
- * other.
- */
+/* ── the stage rail ──────────────────────────────────────────────────────── */
+
 type RailNode = {
   key: string
-  /** The served instant, verbatim. It is what the node is placed by, and it is
-   *  rendered through the timestamp primitives and never formatted here. */
+  /** The served instant, verbatim — what the node is placed by. */
   at: string
-  /** What that instant IS, where it is not simply "when this happened". Only
-   *  the run-standing node needs one, and it needs one because the read serves
-   *  no instant for a standing state (drain r1, D3). */
+  /** What that instant IS, where it is not simply "when this happened". */
   atLabel?: string
   kind: 'step' | 'error' | 'split' | 'decision' | 'park' | 'terminal'
   tone: Tone
@@ -531,19 +600,8 @@ type RailNode = {
   door?: string
 }
 
-/**
- * The `stage.finished` outcome vocabulary, which is CLOSED and the platform's
- * own: completed, split, error (internal/stage/stageevents.go:35–47, and the
- * registered payload at internal/eventlog/contract.go:431).
- *
- * An outcome this list has never seen renders as a plain step with its served
- * value shown — the client owns no vocabulary here, so a later addition must
- * not vanish from the story (§42 forward tolerance).
- */
-/** The tone one served outcome takes. `completed` is the success hue, `error`
- *  the failure hue and `split` the recovery hue — the same three the node
- *  classes use, so the word and the dot beside it cannot disagree. Anything
- *  else is neutral: this client owns no vocabulary here. */
+/** The tone one served outcome takes; anything unrecognized is neutral —
+ *  this client owns no vocabulary here (§42). */
 function outcomeTone(outcome: string): string {
   return outcome === 'error' ? 'red' : outcome === 'split' ? 'blue' : outcome === 'completed' ? 'ok' : 'muted'
 }
@@ -563,11 +621,6 @@ function stepNode(s: Detail['stage_progress'][number]): RailNode {
         </span>
         <span className="muted text-xs"> {s.type}</span>
         {s.kind !== '' && <span className="muted text-xs"> · {s.kind}</span>}
-        {/* The hue follows the OUTCOME (drain r1, D5b). Byte-faithful to the
-            shed `.stage-outcome` rule meant painting an `error` in the success
-            hue, which is the one thing a status colour must not do. The three
-            values are the rail's own closed vocabulary and an unrecognized one
-            takes the neutral treatment rather than a guessed meaning. */}
         {s.outcome && (
           <span
             className="stage-outcome text-xs"
@@ -620,7 +673,7 @@ function parkNode(runID: string, p: NonNullable<Receipt['park_history']>[number]
         ) : (
           <span className="muted text-xs">
             {' '}
-            · resumed{p.duration_seconds === undefined ? '' : ` after ${String(p.duration_seconds)} s`}
+            · resumed{p.duration_seconds === undefined ? '' : ` after ${fmtDuration(p.duration_seconds)}`}
           </span>
         )}
         {p.park_reason && <span className="muted text-xs"> — {p.park_reason}</span>}
@@ -633,17 +686,9 @@ function parkNode(runID: string, p: NonNullable<Receipt['park_history']>[number]
 }
 
 /**
- * Where the run stands, from the served state string and nothing else: the
- * client owns no state vocabulary, so a value it has never seen renders plainly
- * rather than being hidden or renamed (§42/§48).
- *
- * THE INSTANT IS LABELLED AS WHAT IT IS (drain r1, D3). This read serves no
- * instant for a run's standing — that is the same fact the ordering rule below
- * rests on — so the only stamp available is `created_ts`, when the run was
- * OPENED. Rendered bare in the slot every sibling node uses for "when this
- * happened", it would read as the moment the run reached this state. It carries
- * its own word instead, so the node says one true thing rather than two things
- * one of which is a coincidence.
+ * Where the run stands, from the served state string and nothing else. THE
+ * INSTANT IS LABELLED AS WHAT IT IS: this read serves no instant for a run's
+ * standing, so `created_ts` renders under its own word, "opened".
  */
 function terminalNode(r: TaskRunView): RailNode {
   return {
@@ -677,8 +722,7 @@ export function railNodes(detail: Detail): RailNode[] {
     return ta - tb
   })
   // The run-standing nodes close the rail in served order: a run's state
-  // carries no instant of its own on this read, so placing it among the timed
-  // nodes would be putting it at a moment nobody recorded.
+  // carries no instant of its own on this read.
   return [...placed.map((p) => p.node), ...detail.runs.map(terminalNode)]
 }
 
@@ -771,6 +815,8 @@ function ProjectLineage({ detail }: { detail: Detail }) {
   )
 }
 
+/* ── decisions ───────────────────────────────────────────────────────────── */
+
 /** R12: every human decision along the way, from served rows only. */
 function DecisionsBlock({ decisions, stale }: { decisions: TaskDecision[]; stale: boolean }) {
   return (
@@ -798,17 +844,12 @@ function DecisionsBlock({ decisions, stale }: { decisions: TaskDecision[]; stale
   )
 }
 
+/* ── deliverables ────────────────────────────────────────────────────────── */
+
 /**
- * R13: the task's REAL deliverables, with their immutable numbered revisions.
- *
- * The first cut rendered `lineage.succeeded_by` here — the follow-up TASKS
- * spawned from a deliverable — which is a different fact wearing the same
- * label, and left the task's actual deliverables unlisted. Lineage renders as
- * lineage, in its own block, and nowhere else.
- *
- * The revisions come from each deliverable's own detail read rather than being
- * counted 1..N from `current_revision`: the numbers are records, and inferring
- * them would be the client asserting a lineage it was never told.
+ * R13: the task's REAL deliverables, with their immutable numbered revisions
+ * and the door into their review. The revisions come from each deliverable's
+ * own detail read — the numbers are records, never counted 1..N here.
  */
 function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventStream }) {
   const { data, error, stale } = useLive<DeliverableDetail[]>({
@@ -856,8 +897,10 @@ function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventS
   )
 }
 
-/** R14: the receipt per run — and, where the run has not ended, the 4.5 cancel
- *  at the grain the person is reading. */
+/* ── receipts ────────────────────────────────────────────────────────────── */
+
+/** R14: the receipt per run — and, where the run has not ended, the 4.5
+ *  cancel at the grain the person is reading. */
 function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: boolean; reload: () => void }) {
   return (
     <Section title="Receipts" stale={stale}>
@@ -882,12 +925,9 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
 }
 
 /**
- * ReceiptView renders one stored receipt.
- *
- * Ceremony is itemized separately from execution because that split is the
- * point of the S10.10 account: it is how a person sees what the platform spent
- * on ITSELF. Unpriced calls are shown as unpriced rather than folded into the
- * priced total — a silent zero would be the one dishonest number on the page.
+ * ReceiptView renders one stored receipt. Ceremony is itemized separately
+ * from execution; unpriced calls are shown as unpriced, never folded into
+ * the priced total.
  */
 export function ReceiptView({ receipt }: { receipt: Receipt }) {
   const direct = receipt.direct_use
