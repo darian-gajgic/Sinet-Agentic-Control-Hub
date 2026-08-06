@@ -36,6 +36,7 @@ import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound } from './Stub'
 import { ComingSurface, HistorySurface } from './Placeholders'
+import { OldFence } from './fence'
 import { ProjectScopeContext, scopedRoutes, useProjectScope } from './project'
 import { Link, navigate, useRoute } from './router'
 import { ToastProvider } from './ui'
@@ -243,6 +244,9 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
 
             <main className="shell-main">
               <div className="view-in" key={`${route.id}:${params.id ?? ''}`}>
+                {/* The fence rule (P1): every not-yet-reworked OLD surface
+                    declares itself before its own content renders. */}
+                {authed && <OldFence route={route.id} />}
                 {session === null ? (
                   <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
                 ) : route.id === 'login' ? (

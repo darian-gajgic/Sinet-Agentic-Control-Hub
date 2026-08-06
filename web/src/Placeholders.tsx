@@ -44,7 +44,7 @@ const coming: Partial<Record<RouteID, Coming>> = {
       { label: 'Scope the app with the project selector in the top bar', to: hrefFor('mission-control') },
       { label: 'See every task on the Board', to: hrefFor('board') },
     ],
-    step: 'build step 3',
+    step: 'build step 2',
   },
   new: {
     icon: Sparkles,
@@ -61,27 +61,27 @@ const coming: Partial<Record<RouteID, Coming>> = {
       { label: 'Each task\'s deliverables open from its task page — start on the Board', to: hrefFor('board') },
       { label: '"What needs me" on Home lists work waiting for review', to: `${hrefFor('mission-control')}?view=what-needs-me` },
     ],
-    step: 'build step 5',
+    step: 'build step 4',
   },
   lessons: {
     icon: Trophy,
     will: 'The feedback ledger as browsable shelves: WINS (measured successes) and LESSONS (a flop and its correction), each scoped to a person, a project or the house, with provenance.',
     why: 'These feed future work today — matching entries are injected into runs — so logging a win or a lesson here makes the platform measurably smarter.',
     today: [{ label: 'The entries live in Memory — browse and create them there', to: hrefFor('memory') }],
-    step: 'build step 6',
+    step: 'build step 5',
   },
   health: {
     icon: HeartPulse,
     will: 'Known issues first: open watchdog flags, drift records, conformance failures, alarms and parked runs — each with what happened, why, and what to do — then benchmark state and canary status, displayed honestly.',
     why: 'The badge on this tab counts open issues. Every disposition verb (suppress, dismiss, acknowledge, resume) is already served and lands here.',
     today: [{ label: 'Issue cards arrive in the Inbox and are dispositioned there', to: hrefFor('inbox') }],
-    step: 'build step 6',
+    step: 'build step 5',
   },
   manual: {
     icon: BookOpen,
     will: 'A plain-words page per surface — what it is for, how to use it, what the words mean — plus the guided tour launcher for every tab.',
     why: 'Written for the household, not for engineers: no jargon survives review.',
-    step: 'build step 7',
+    step: 'build step 6',
   },
 }
 
