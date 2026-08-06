@@ -265,6 +265,13 @@ type Config struct {
 	// "consumes these layers and nothing else" (S14.10) is checkable by
 	// reading one file. nil leaves the chat routes answering 503.
 	Chat *chat.Store
+	// Onboard is the S13.7 onboarding door behind `POST /api/projects`
+	// (projects.go, P3-RW-2), implemented by *stage.Surface at the composition
+	// root. It is a transport seam over the LANDED onboarding capability — the
+	// registry writes stay in internal/project and the run substrate in
+	// internal/stage, which is why internal/api still imports neither. nil
+	// leaves the create door answering 503; the read doors are unaffected.
+	Onboard OnboardSurface
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -336,6 +343,8 @@ type Server struct {
 	// proj is the S14.3 snapshot projector (brief §3); nil when no DB is wired
 	// (the raw tail still serves).
 	proj *projector
+	// onboard is the S13.7 onboarding door behind POST /api/projects (P3-RW-2).
+	onboard OnboardSurface
 	// routes records every pattern Handler registered, in registration order.
 	//
 	// It exists so the S15.12 "the SPA consumes every API" check (B6-9 R17) can
@@ -388,6 +397,7 @@ func New(cfg Config) *Server {
 		logger:     cfg.Logger,
 		nudge:      newBroadcast(),
 		intake:     cfg.Intake,
+		onboard:    cfg.Onboard,
 		review:     cfg.Review,
 		accept:     cfg.Accept,
 		followUp:   cfg.FollowUp,
