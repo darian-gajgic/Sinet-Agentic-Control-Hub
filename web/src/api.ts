@@ -2049,6 +2049,16 @@ export const api = {
   answerAsk: (ask: string, body: { answer: IntakeAnswerBody; pin?: string }) =>
     post<IntakeTaskView>(`/api/asks/${encodeURIComponent(ask)}/answer`, body),
 
+  /**
+   * The S13.7 create/onboard door (P3-RW-2). Registering starts onboarding —
+   * register → clone/fresh store → scan → drafted entry — and ACTIVATION stays
+   * with the owner's approval card in the inbox. The response body is consumed
+   * generically until the packet's exact shapes land; the SURFACE's promises
+   * are only the ones the flow contract states.
+   */
+  createProject: (body: { project_id: string; name: string; remote_url?: string }) =>
+    post<unknown>('/api/projects', body),
+
   tasks: (f: ListFilters = {}) => request<TaskList>(`/api/tasks${query(f)}`),
   runs: (f: ListFilters = {}) => request<RunList>(`/api/runs${query(f)}`),
   meters: (f: { person?: string; lane?: string; limit?: number } = {}) => request<Meters>(`/api/meters${query(f)}`),

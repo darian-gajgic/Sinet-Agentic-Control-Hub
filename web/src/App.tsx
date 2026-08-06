@@ -36,6 +36,7 @@ import { MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound } from './Stub'
 import { ComingSurface, HistorySurface } from './Placeholders'
+import { Projects } from './Projects'
 import { OldFence } from './fence'
 import { ProjectScopeContext, scopedRoutes, useProjectScope } from './project'
 import { Link, navigate, useRoute } from './router'
@@ -255,6 +256,8 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                   <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
                 ) : route.id === 'new' ? (
                   <DescribeGoal search={window.location.search} stream={stream} />
+                ) : route.id === 'projects' ? (
+                  <Projects me={session.user?.user_id ?? ''} stream={stream} />
                 ) : route.id === 'board' ? (
                   <Board me={session.user?.user_id ?? ''} stream={stream} />
                 ) : route.id === 'fleet' ? (

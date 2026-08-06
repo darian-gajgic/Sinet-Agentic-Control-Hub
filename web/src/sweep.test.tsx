@@ -476,6 +476,16 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
   // 2026-08-06 (rework step 2): the give-work door consumes both — the
   // journey the map §3 always intended for them.
   {
+    method: 'GET',
+    path: '/api/projects',
+    why: 'P3-RW-2 is landing mid-flight (2026-08-06): the Projects tab consumes this read the moment the packet finalizes its response shapes — consuming a moving contract would be drift, not integration. POST /api/projects is already consumed by the create door.',
+  },
+  {
+    method: 'GET',
+    path: '/api/projects/{}',
+    why: 'same P3-RW-2 seam, same date: the per-project capture detail joins the project cards when the packet lands its final shapes.',
+  },
+  {
     method: 'POST',
     path: '/api/tasks/{}/advance',
     why: 'the B2-4 walking-skeleton stage advance. Stage is FSM state owned by the control plane (S15.5: “stage columns are never writable”), so no surface may drive it.',
