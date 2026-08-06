@@ -34,6 +34,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -97,6 +98,29 @@ func TestSeedDemoWorld(t *testing.T) {
 	// the pause flip and the history index.
 	fixtureWorldOn(t, b, abs)
 
+	// SEED HYGIENE — the one deliberate difference between the golden-fixture
+	// world and the operator's demo world (checkpoint-2 finding C2-6).
+	//
+	// `fixtureWorldOn` plants `t-archive` at the kanban status `moonshot`, which
+	// is not one of the board's declared columns. That is CORRECT for the
+	// goldens: it is the fixture that proves the board's forward-tolerant
+	// unknown-status column (B6-5 OQ7) gives a producer string the view has
+	// never seen its own column rather than vanishing the card. It is WRONG in
+	// front of the operator, who is walking a product and reads "moonshot" as a
+	// column this platform has, not as a test's proof obligation.
+	//
+	// So the DEMO WORLD ALONE moves the card on, through the same statement the
+	// real producer issues (`Skeleton.setKanban`, internal/stage/skeleton.go),
+	// to `intake` — the value the intake pipeline itself writes, and the honest
+	// one for this row: a queued run (`r-archive`), an `intake.state`/drafting
+	// event, and a coverage card still unanswered. `done` would have been the
+	// louder lie — a finished task with a question still open in the inbox.
+	//
+	// The committed goldens are produced by `fixtureWorld` and never reach this
+	// line, so they are untouched by it.
+	exec(t, b, `UPDATE tasks SET kanban_status = ? WHERE task_id = ?`, "intake", "t-archive")
+	assertNoUndeclaredKanbanStatus(t, b)
+
 	// What the walk needs to know, printed rather than documented elsewhere: a
 	// runbook that drifts from the seed is worse than no runbook.
 	t.Logf("seeded demo world at %s", abs)
@@ -105,6 +129,69 @@ func TestSeedDemoWorld(t *testing.T) {
 	t.Logf("meters and budgets render the REAL stores' honest state — the fixture world's metering and price DOUBLES")
 	t.Logf("cannot reach a throwaway binary, so where the committed bodies show a served figure this world shows the")
 	t.Logf("real store's answer, absences and all. That difference is the honest one and is not a defect to report.")
+}
+
+// assertNoUndeclaredKanbanStatus is the seed-hygiene guarantee, asserted at
+// seed time rather than trusted: NO task in the operator's demo world may sit
+// in a column the board did not declare. A future fixture row planted for a
+// view's forward-tolerance proof would otherwise silently reappear in the
+// operator's walk, which is exactly how "moonshot" got there.
+func assertNoUndeclaredKanbanStatus(t *testing.T, b *backend) {
+	t.Helper()
+	declared := declaredKanbanStatuses(t)
+	rows, err := b.db.QueryContext(context.Background(),
+		`SELECT task_id, kanban_status FROM tasks ORDER BY task_id`)
+	if err != nil {
+		t.Fatalf("read the seeded board: %v", err)
+	}
+	defer rows.Close()
+	var seen int
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			t.Fatalf("scan a seeded task: %v", err)
+		}
+		seen++
+		if !declared[status] {
+			t.Errorf("the demo world shows %s in the raw column %q, which the board never declared — "+
+				"a test artifact in front of the operator (checkpoint-2 C2-6)", id, status)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the seeded board: %v", err)
+	}
+	// Non-vacuity: a world with no tasks would pass the loop above having
+	// proved nothing at all.
+	if seen == 0 {
+		t.Fatalf("the seeded world has no tasks, so the seed-hygiene check proves nothing")
+	}
+	t.Logf("seed hygiene: %d tasks, every one in a declared board column", seen)
+}
+
+// declaredKanbanStatuses reads the column vocabulary from the view that OWNS it
+// (`web/src/kanban.ts`) rather than keeping a Go copy of the same six strings.
+// A second maintained copy of a vocabulary is this package's own §40-C hazard,
+// and a drifted copy would let the check above pass while the operator still
+// saw a raw column.
+func declaredKanbanStatuses(t *testing.T) map[string]bool {
+	t.Helper()
+	const src = "../../web/src/kanban.ts"
+	source, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read the board's column vocabulary (%s): %v", src, err)
+	}
+	out := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\{\s*status:\s*'([^']+)'\s*,\s*label:`).
+		FindAllStringSubmatch(string(source), -1) {
+		out[m[1]] = true
+	}
+	// Non-vacuity again: a parse that found nothing would declare every status
+	// undeclared, and a parse that found ONE would wave most of them through.
+	if len(out) < 6 {
+		t.Fatalf("%s parsed to %d declared statuses (%v), so the seed-hygiene check proves nothing",
+			src, len(out), out)
+	}
+	return out
 }
 
 // TestSeedIsUnreachableFromTheShippedBinary is the compile-boundary negative,
