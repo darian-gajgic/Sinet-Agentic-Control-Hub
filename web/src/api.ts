@@ -1698,6 +1698,74 @@ export type IntakeAnswerBody = {
   contest?: { target: string; note?: string }
 }
 
+// ── the S13.7 projects family's wire shapes (P3-RW-2, 2026-08-06) ─────────
+
+/** The registry row as served: the facts a card needs. `state` is `pending`
+ *  while onboarding awaits the owner's approval, `active` after. */
+export type ProjectEntry = {
+  project_id: string
+  name: string
+  owner: string
+  members: string[]
+  state: string
+  default_branch: string
+  has_remote: boolean
+  capture_version: number
+  created_ts: string
+  updated_ts: string
+}
+
+export type ProjectCommands = { build?: string; test?: string; lint?: string; run?: string; preview?: string }
+
+export type ProjectDangerZone = { path: string; action?: string; rule: string }
+
+/** The CURRENT captured content, whole: what the platform injects into every
+ *  run in the project — members read exactly what it acts on. */
+export type ProjectCapture = {
+  version: number
+  conventions: string[]
+  commands: ProjectCommands
+  danger_zones: ProjectDangerZone[]
+  scan_hash?: string
+  captured_by?: string
+  captured_ts?: string
+}
+
+/** What a LIST row carries of the capture: its size and the one command a
+ *  person recognizes a project by. */
+export type ProjectCaptureSummary = {
+  version: number
+  conventions: number
+  danger_zones: number
+  test_command?: string
+  captured_by?: string
+  captured_ts?: string
+}
+
+export type ProjectListItem = ProjectEntry & { capture: ProjectCaptureSummary }
+
+export type ProjectDetail = ProjectEntry & { protected_refs: string[]; capture: ProjectCapture }
+
+export type ProjectList = {
+  projects: ProjectListItem[]
+  /** The served visibility rule — the honest answer to "why is X not here". */
+  visibility: string
+  cursor: number
+  truncated: boolean
+}
+
+export type ProjectDetailResponse = { project: ProjectDetail; cursor: number }
+
+/** The create door's answer: the drafted entry, the task performing the
+ *  onboarding, the ask its approval arrives on, and an honest sentence. */
+export type ProjectStarted = {
+  project: ProjectDetail
+  task_id: string
+  ask_ref: string
+  detail: string
+  cursor: number
+}
+
 // ── the S15.10 workforce map (B6-8 part B) ────────────────────────────────
 //
 // ONE read serves the whole map, and every absence on it arrives with a reason:
@@ -2049,15 +2117,28 @@ export const api = {
   answerAsk: (ask: string, body: { answer: IntakeAnswerBody; pin?: string }) =>
     post<IntakeTaskView>(`/api/asks/${encodeURIComponent(ask)}/answer`, body),
 
+  // ── the S13.7 projects family (P3-RW-2, landed 2026-08-06) ───────────────
+  //
+  // Types mirror internal/api/projects.go BY NAME. `store_path` is served to
+  // nobody; the remote is presence, never its URL; a caller's own PENDING
+  // onboarding appears honestly in the list.
+  //
+  // NEXT BUILDER: add `projects: () => request<ProjectList>('/api/projects')`
+  // and `project: (id) => request<ProjectDetailResponse>(…)` IN THE SAME
+  // CHANGE that makes Projects.tsx consume them (registry cards + capture
+  // detail) — the §46 dead-verb scan rightly refuses a declared-but-uncalled
+  // member, and the two routes sit on the sweep exception list (dated) until
+  // then.
+
   /**
-   * The S13.7 create/onboard door (P3-RW-2). Registering starts onboarding —
-   * register → clone/fresh store → scan → drafted entry — and ACTIVATION stays
-   * with the owner's approval card in the inbox. The response body is consumed
-   * generically until the packet's exact shapes land; the SURFACE's promises
-   * are only the ones the flow contract states.
+   * The S13.7 create/onboard door. Registering starts the onboarding TASK —
+   * register → store → scan → drafted entry — and ACTIVATION stays with the
+   * owner's approval card (`ask_ref`) in the inbox. A repeat POST of your own
+   * pending entry answers 200 with the existing references; already-active
+   * answers 409 `already_registered`.
    */
   createProject: (body: { project_id: string; name: string; remote_url?: string }) =>
-    post<unknown>('/api/projects', body),
+    post<ProjectStarted>('/api/projects', body),
 
   tasks: (f: ListFilters = {}) => request<TaskList>(`/api/tasks${query(f)}`),
   runs: (f: ListFilters = {}) => request<RunList>(`/api/runs${query(f)}`),
