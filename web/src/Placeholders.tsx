@@ -4,7 +4,6 @@ import {
   HeartPulse,
   History as HistoryIcon,
   PackageCheck,
-  Sparkles,
   Trophy,
   type LucideIcon,
 } from 'lucide-react'
@@ -44,13 +43,6 @@ const coming: Partial<Record<RouteID, Coming>> = {
       { label: 'Scope the app with the project selector in the top bar', to: hrefFor('mission-control') },
       { label: 'See every task on the Board', to: hrefFor('board') },
     ],
-    step: 'build step 2',
-  },
-  new: {
-    icon: Sparkles,
-    will: 'One plain ask box — describe a goal in your own words — then the interview as a form: cards of labelled options, a live clearance meter, and the plan card you approve, re-plan or cancel before anything spends.',
-    why: 'The interview skips what the project record already answers, open questions become listed assumptions, and the plan says what it will NOT do before you approve it.',
-    today: [{ label: 'Hand work to the Assistant — the same interview runs inline there', to: hrefFor('chat') }],
     step: 'build step 2',
   },
   reviews: {

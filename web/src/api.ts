@@ -1555,6 +1555,149 @@ export type ChatUploaded = { file: ChatFile; applied: boolean }
 export type ChatFileDeleted = { file: ChatFile; applied: boolean }
 export type ChatSessionDeleted = { session_id: string; messages: number; turns: number; applied: boolean }
 
+// ── the give-work door (rework step 2; S06 intake through its own routes) ──
+//
+// The intake pipeline's HTTP doors were served since B2-4 and the REJECTED UI
+// never called them (map §3). These types mirror internal/intake/cards.go and
+// internal/stage/surface.go BY NAME: the card is the pipeline's own snapshot,
+// and an answer quotes the card's own vocabulary back — nothing here invents
+// an option, an action or a choice the card did not serve.
+
+/** One card question (interview / clarification / escalation). Options are the
+ *  card's own 2–4 labeled values; free text is always available beside them. */
+export type IntakeQuestion = {
+  id: string
+  text: string
+  options?: { label: string; value: string }[]
+  weight?: number
+}
+
+/** The S06.10 help block: what this decides, what goes wrong, what's advised. */
+export type IntakeHelp = { what?: string; wrong?: string; recommend?: string }
+
+/** One decision card body (coverage / research / spec-doubt): the choices ARE
+ *  the answer vocabulary. */
+export type IntakeDecision = {
+  summary: string
+  detail?: string[]
+  choices: { label: string; value: string }[]
+  help?: IntakeHelp
+}
+
+/** One numbered plan step with its per-step "done when" (Spec S06.6). */
+export type IntakePlanStep = {
+  id: string
+  title: string
+  done_when?: string
+  class?: string
+  write_set?: string[]
+  unbounded?: boolean
+}
+
+/** The size/cost guess. `known:false` is the UNPRICED honesty posture — never
+ *  rendered as $0. */
+export type IntakeEstimate = { size_class?: string; usd?: number; known: boolean; basis?: string }
+
+/** The S08.8 routing block: who will do the work and why, in plain words. */
+export type IntakeRouting = {
+  cause?: string
+  worker_name?: string
+  generalist?: boolean
+  model?: string
+  lane?: string
+  effort?: string
+  plain_reason?: string
+  degraded?: boolean
+  gap_advice?: string
+  compose_earned?: boolean
+}
+
+/** The Stage-4 approval card (Spec S06.9) — the plan card the person approves. */
+export type IntakeApproval = {
+  layer1: {
+    restatement: string
+    deliverable?: string[]
+    steps?: string[]
+    will_not_do?: string[]
+    assumptions?: { text: string; origin?: string }[]
+    risks?: string[]
+    cost_time?: string
+    clearance?: number
+    size_class?: string
+    size_note?: string
+    help?: IntakeHelp
+    uncovered?: string[]
+    open_findings?: string[]
+  }
+  layer2?: {
+    acs?: AC[]
+    steps?: IntakePlanStep[]
+    coverage?: Record<string, string[]>
+    estimate?: IntakeEstimate
+  }
+  routing?: IntakeRouting
+  /** The card's OWN verb vocabulary — a control renders only for a served one. */
+  actions?: string[]
+  stale_flag?: boolean
+  stale_reasons?: string[]
+}
+
+/** The delta-only re-approval card: exactly what changed, nothing else. */
+export type IntakeDelta = {
+  origin?: string
+  items?: { kind: string; target: string; old?: string; new?: string }[]
+  actions?: string[]
+  help?: IntakeHelp
+}
+
+/** One intake ask snapshot. Exactly one body field is set, per `kind`. */
+export type IntakeCard = {
+  kind: string
+  task_id?: string
+  run_id?: string
+  version?: number
+  issued_ts?: string
+  /** The S06.5 clearance measure the platform computed — served, never derived. */
+  clearance?: number
+  tier?: string
+  questions?: IntakeQuestion[]
+  decision?: IntakeDecision
+  approval?: IntakeApproval
+  delta?: IntakeDelta
+}
+
+/** The pipeline's own task view, returned by BOTH intake writes: where the
+ *  task stands and — while a gate is open — the card that opens it. */
+export type IntakeTaskView = {
+  task_id: string
+  title: string
+  kanban_status: string
+  owner: string
+  phase?: string
+  tier?: string
+  family?: string
+  clearance?: number
+  open_ask_id?: string
+  open_card?: IntakeCard
+  runs?: { run_id: string; role: string; state: string; has_receipt: boolean }[]
+}
+
+/**
+ * The uniform answer envelope (internal/intake/cards.go `Answer`): per-kind
+ * fields mirror the card, and every value quotes the card's own vocabulary.
+ */
+export type IntakeAnswerBody = {
+  answers?: { id: string; value: string }[]
+  assume?: { id: string; value: string }[]
+  force_proceed?: boolean
+  text?: string
+  choice?: string
+  criteria?: string[]
+  facts?: { rule_id: string; fact: string }[]
+  action?: string
+  contest?: { target: string; note?: string }
+}
+
 // ── the S15.10 workforce map (B6-8 part B) ────────────────────────────────
 //
 // ONE read serves the whole map, and every absence on it arrives with a reason:
@@ -1888,6 +2031,23 @@ export const api = {
    */
   createFirstOperator: (user_id: string, display_name: string, pin: string) =>
     post<{ user_id: string }>('/api/auth/users', { user_id, display_name, role: 'operator', pin }),
+
+  /**
+   * The give-work door (rework step 2). `project` is the LANDED P3-RW-1 pin:
+   * the registry id VERBATIM — when present, the server validates it at the
+   * registry seam (owner-or-member and ACTIVE) and an invalid pin REFUSES the
+   * submission (404 not_found / 409 project_not_active) rather than quietly
+   * dropping it. The text match stays for unpinned submissions.
+   */
+  submitRequest: (body: { title?: string; text: string; project?: string }) =>
+    post<IntakeTaskView>('/api/intake/requests', body),
+  /**
+   * The intake-native answer verb: one card answer, and the pipeline resumes
+   * in place (4.3). `pin` rides the same request for High-tier approval
+   * answers (S01.9 verify-at-act); the server demands it via `pin_required`.
+   */
+  answerAsk: (ask: string, body: { answer: IntakeAnswerBody; pin?: string }) =>
+    post<IntakeTaskView>(`/api/asks/${encodeURIComponent(ask)}/answer`, body),
 
   tasks: (f: ListFilters = {}) => request<TaskList>(`/api/tasks${query(f)}`),
   runs: (f: ListFilters = {}) => request<RunList>(`/api/runs${query(f)}`),

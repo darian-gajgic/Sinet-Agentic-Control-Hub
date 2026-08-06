@@ -28,6 +28,7 @@ import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
 import { Inbox, InboxItem } from './Inbox'
+import { DescribeGoal } from './Intake'
 import { inboxEventTypes, useLive } from './live'
 import { Memory, MemoryEntryView } from './Memory'
 import { Settings } from './Settings'
@@ -252,6 +253,8 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                   <NotFound pathname={window.location.pathname} />
                 ) : route.id === 'mission-control' ? (
                   <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
+                ) : route.id === 'new' ? (
+                  <DescribeGoal search={window.location.search} stream={stream} />
                 ) : route.id === 'board' ? (
                   <Board me={session.user?.user_id ?? ''} stream={stream} />
                 ) : route.id === 'fleet' ? (
@@ -292,7 +295,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 ) : route.id === 'manual' ? (
                   <ComingSurface id="manual" onStartTour={tour.start} />
                 ) : (
-                  // projects · new · reviews · lessons · health — the map's
+                  // projects · reviews · lessons · health — the map's
                   // published-ahead placeholders, each an honest surface.
                   <ComingSurface id={route.id} />
                 )}
