@@ -94,7 +94,7 @@ var layer0Views = []View{
 	},
 	{
 		Name: ViewCostPerProject, Question: QuestionPerProject, OwnerColumn: viewOwnerColumnOwner,
-		Description: "consumption per registered project, via the intake-resolved artifact_claims linkage; work with no project lands in an explicit '(no project)' bucket",
+		Description: "consumption per registered project, via the task→project edge — the claims declared at plan approval, else the registry pin the intake recorded at triage; work with no project lands in an explicit '(no project)' bucket",
 		Order:       "priced_usd DESC, project_id",
 	},
 	{
@@ -134,7 +134,7 @@ var layer0Views = []View{
 	},
 	{
 		Name: ViewTaskProjectEdge, Question: QuestionLinkage, OwnerColumn: viewOwnerColumnNone,
-		Description: "the task→project edge, isolated so its weakness is stated in one place: runs and tasks carry no project column at v0",
+		Description: "the task→project edge, isolated so its weakness is stated in one place: runs and tasks carry no project column at v0, so the edge is read from the approved claims and, before approval, from the registry pin on the task's latest intake state",
 		Order:       "task_id",
 	},
 }

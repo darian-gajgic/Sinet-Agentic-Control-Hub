@@ -10,15 +10,30 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 )
 
+// moneyViewMigrations are the migrations that create or re-create a Layer-0
+// money view. The no-money-by-generation scan covers every one of them: a view
+// RE-created in a later file is exactly as capable of computing money as the
+// file that first created it. 0022 (P3-RW-3) re-creates cost_per_project over
+// the completed task→project edge.
+var moneyViewMigrations = []string{
+	"0016_queryable_history.sql",
+	"0022_pin_attribution.sql",
+}
+
 // migrationText reads migration 0016 — the views' authority. Tests assert
 // against the SHIPPING text, never a copy of it (the §36 drain r2 R1 lesson: a
 // test asserting a property of an expression that is not the one shipping is
 // how a regression survives).
 func migrationText(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "storage", "migrations", "0016_queryable_history.sql"))
+	return migrationTextOf(t, moneyViewMigrations[0])
+}
+
+func migrationTextOf(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "storage", "migrations", name))
 	if err != nil {
-		t.Fatalf("read migration 0016: %v", err)
+		t.Fatalf("read migration %s: %v", name, err)
 	}
 	return string(b)
 }
@@ -28,8 +43,13 @@ func migrationText(t *testing.T) string {
 // A citation in a comment is the correct place for a citation.
 func migrationSQLOnly(t *testing.T) string {
 	t.Helper()
+	return migrationSQLOnlyOf(t, moneyViewMigrations[0])
+}
+
+func migrationSQLOnlyOf(t *testing.T, name string) string {
+	t.Helper()
 	var b strings.Builder
-	for _, line := range strings.Split(migrationText(t), "\n") {
+	for _, line := range strings.Split(migrationTextOf(t, name), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "--") {
 			continue
 		}
@@ -88,35 +108,37 @@ func TestEveryCostQuestionIsANamedView(t *testing.T) {
 //   - the query layer has no token→currency arithmetic and no rate;
 //   - it does not import internal/metering, so it cannot reach the price table.
 func TestNoMoneyByGeneration(t *testing.T) {
-	// Limb 1: the migration's view text. A money figure may be READ from a
-	// receipt or DIVIDED by a count of days (a rate over time is not a rate per
-	// token); it may never be multiplied by anything, and no price/rate
-	// identifier may appear.
-	sql := migrationSQLOnly(t)
+	// Limb 1: every money view's migration text. A money figure may be READ
+	// from a receipt or DIVIDED by a count of days (a rate over time is not a
+	// rate per token); it may never be multiplied by anything, and no
+	// price/rate identifier may appear.
 	tokenFields := []string{
 		"prompt_tokens", "billed_output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "server_tool_calls", "output_tokens", "input_tokens",
 	}
-	for _, tf := range tokenFields {
-		if strings.Contains(sql, tf) {
-			t.Errorf("migration 0016 reads the token field %q — the query layer selects PRICED figures; pricing lives in internal/metering (S14.10 ¶1)", tf)
-		}
-	}
-	for _, bad := range []string{"per_token", "per_million", "price_per", "rate_usd", "* price", "price *"} {
-		if strings.Contains(strings.ToLower(sql), bad) {
-			t.Errorf("migration 0016 contains %q — no token→currency arithmetic may exist in the query layer", bad)
-		}
-	}
 	// Any `*` in an arithmetic position over a usd column would be the defect.
 	// Restrict the scan to lines mentioning usd so a `SELECT *` never trips it.
 	mult := regexp.MustCompile(`[a-z_0-9)]\s*\*\s*[a-z_0-9(]`)
-	for _, line := range strings.Split(sql, "\n") {
-		l := strings.ToLower(strings.TrimSpace(line))
-		if strings.HasPrefix(l, "--") || !strings.Contains(l, "usd") {
-			continue
+	for _, name := range moneyViewMigrations {
+		sql := migrationSQLOnlyOf(t, name)
+		for _, tf := range tokenFields {
+			if strings.Contains(sql, tf) {
+				t.Errorf("migration %s reads the token field %q — the query layer selects PRICED figures; pricing lives in internal/metering (S14.10 ¶1)", name, tf)
+			}
 		}
-		if mult.MatchString(l) {
-			t.Errorf("migration 0016 multiplies in a money expression — money is READ, never computed:\n  %s", line)
+		for _, bad := range []string{"per_token", "per_million", "price_per", "rate_usd", "* price", "price *"} {
+			if strings.Contains(strings.ToLower(sql), bad) {
+				t.Errorf("migration %s contains %q — no token→currency arithmetic may exist in the query layer", name, bad)
+			}
+		}
+		for _, line := range strings.Split(sql, "\n") {
+			l := strings.ToLower(strings.TrimSpace(line))
+			if strings.HasPrefix(l, "--") || !strings.Contains(l, "usd") {
+				continue
+			}
+			if mult.MatchString(l) {
+				t.Errorf("migration %s multiplies in a money expression — money is READ, never computed:\n  %s", name, line)
+			}
 		}
 	}
 

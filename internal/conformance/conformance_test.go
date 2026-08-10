@@ -110,10 +110,11 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	// 0011 is this packet's, 0012 is B5-5's, 0013 is B5-6A's (the S14.6 watch-row
 	// config store), 0017 is B6-2B's (the S10.4 budgets/pause + the S15.5 hint),
 	// 0018 is B6-2C's (the BENCH-REG §2 direct-arm capture column) and 0019 is
-	// B6-3A's (the S10.3 price table's durable home).
+	// B6-3A's (the S10.3 price table's durable home) and 0022 is P3-RW-3's
+	// (the pre-approval project-attribution view re-create).
 	// A floor would let an unnoticed migration slip in.
-	if v != 21 {
-		t.Fatalf("user_version = %d, want 21 (migrations through 0021 applied contiguously)", v)
+	if v != 22 {
+		t.Fatalf("user_version = %d, want 22 (migrations through 0022 applied contiguously)", v)
 	}
 	var n int
 	if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM conformance_registry`).Scan(&n); err != nil {

@@ -135,6 +135,19 @@ func redactStageProgress(steps []StageStep) {
 	}
 }
 
+// redactTaskLineage applies the same primitive to the one lineage member that
+// is payload-DERIVED. Since migration 0022 the task→project edge resolves from
+// the registry pin on the task's latest `intake.state` payload when no claim
+// has been declared yet, so the served project is no longer always a relational
+// column — and "enumerated by key" is not the same property as "cannot carry a
+// secret" (the D10 reasoning, one field later). The task list rides
+// writeReadRedacted with the rest of its body; the task detail goes out
+// UNWRAPPED, so the value passes the primitive here. The stored row is
+// untouched — store-raw / serve-redacted (R19).
+func redactTaskLineage(lin *TaskLineage) {
+	lin.Project = redact.Redact(lin.Project)
+}
+
 func badRequest(msg string) *SurfaceError {
 	return &SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: msg}
 }
@@ -569,9 +582,13 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The project linkage is the 0016 view, LEFT JOINed so a task with no
-	// registry-resolved project renders in the honest '(no project)' bucket
-	// rather than dropping out of the list (§37).
+	// The project linkage is the task_project view (0016, re-created by 0022
+	// over the completed edge: the claims declared at plan approval, else the
+	// registry pin the intake recorded at triage — so a pinned task is
+	// attributed from birth). LEFT JOINed, so a task with no resolved project
+	// renders in the honest '(no project)' bucket rather than dropping out of
+	// the list (§37). The served column and the `?project=` clause below are
+	// the SAME expression, so they cannot disagree.
 	q := `SELECT t.task_id, t.user_id, t.title, t.kanban_status, t.created_ts,
 	             COALESCE(tp.project_id, ?) AS project
 	        FROM tasks t
@@ -713,9 +730,10 @@ type TaskSuccessor struct {
 	CreatedTS     time.Time `json:"created_ts"`
 }
 
-// TaskLineage is the task's place in the work: its project (via the 0016
-// task_project view over artifact_claims — the only populated relational edge
-// at v0, §37) and its follow-up edges in BOTH directions.
+// TaskLineage is the task's place in the work: its project (via the
+// task_project view — the approved claims, else the intake's registry pin,
+// since runs and tasks carry no project column at v0, §37) and its follow-up
+// edges in BOTH directions.
 type TaskLineage struct {
 	Project string `json:"project"`
 	// ProjectChoices > 1 means the task claimed more than one project: the
@@ -856,6 +874,7 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	// the same property as "cannot carry a secret" (drain D10). They redact at
 	// this serving edge, per R20, before the unwrapped body goes out.
 	redactStageProgress(detail.StageProgress)
+	redactTaskLineage(&detail.Lineage)
 	redactTaskDecisions(detail.Decisions)
 	s.writeReadJSON(w, detail)
 }

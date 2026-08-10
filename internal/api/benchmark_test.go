@@ -650,17 +650,19 @@ func TestPartCCountersArePinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 21 {
-		t.Errorf("user_version = %d, want 21 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's, 0020 is B6-7's, 0021 is B6-9's)", v)
+	if v != 22 {
+		t.Errorf("user_version = %d, want 22 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's, 0020 is B6-7's, 0021 is B6-9's, 0022 is P3-RW-3's)", v)
 	}
 	// 0018 is the ONLY migration this packet adds; 0019 is B6-3A's (the S10.3
-	// price table's durable home) and moves this sentinel in lockstep.
+	// price table's durable home) and moves this sentinel in lockstep, as do
+	// 0020/0021 and P3-RW-3's 0022 (the pre-approval project-attribution view
+	// re-create).
 	sqls, err := filepath.Glob("../storage/migrations/*.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range sqls {
-		if filepath.Base(p) > "0021_zzz" {
+		if filepath.Base(p) > "0022_zzz" {
 			t.Errorf("unexpected migration %q — part C adds exactly 0018, B6-3A exactly 0019 and B6-7 exactly 0020", filepath.Base(p))
 		}
 	}
