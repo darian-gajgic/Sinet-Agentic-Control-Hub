@@ -1,7 +1,15 @@
-import { useMemo, useState } from 'react'
-import { FolderOpen, FolderPlus, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { BookOpen, FolderOpen, FolderPlus, Sparkles } from 'lucide-react'
 
-import { ApiError, api, type Deliverable, type TaskListItem } from './api'
+import {
+  ApiError,
+  api,
+  type Deliverable,
+  type ProjectDetail,
+  type ProjectListItem,
+  type ProjectStarted,
+  type TaskListItem,
+} from './api'
 import type { EventStream } from './events'
 import { columnsFor } from './kanban'
 import { boardEventTypes, describeError, useLive } from './live'
@@ -9,26 +17,37 @@ import { Freshness, Money, Owner } from './parts'
 import { useProjectScope } from './project'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
-import { Button, Chip, EmptyState, Modal, Timestamp } from './ui'
+import { Button, Chip, EmptyState, Modal, Timestamp, type Tone } from './ui'
 
 /**
  * Projects (map §3 v3): work lives in projects — every project as a card,
  * "(no project)" as its own real bucket, the give-work door straight into a
  * project, and the create/onboard door.
  *
- * WHAT THE CARDS ARE MADE OF. Task-derived aggregates over the caller's own
- * served rows (map §5: counts and spend stay client-side): active tasks by
- * stage in the board's own column words, the waiting-on-you count, the spend
- * across the project's latest runs — labelled as exactly that arithmetic —
- * and the recent deliverables. The REGISTRY detail (capture summary,
- * conventions, danger zones, ACTIVE/PENDING state) arrives with the
- * `/api/projects` read doors (packet P3-RW-2, mid-flight); until they land
- * this surface says so rather than inventing a status.
+ * WHAT THE CARDS ARE MADE OF — two reads, merged by project id:
+ *
+ *  - THE REGISTRY (`/api/projects`, P3-RW-2): the S13.7 entry — ACTIVE or
+ *    PENDING, branch, remote PRESENCE (never a URL), and the capture summary
+ *    of what the platform injects into every run in the project. The served
+ *    `visibility` sentence renders verbatim; the full record — conventions,
+ *    commands, danger zones, protected refs — is each card's own door onto
+ *    `/api/projects/{id}`.
+ *  - TASK-DERIVED AGGREGATES over the caller's own served rows (map §5:
+ *    counts and spend stay client-side): active tasks by stage in the board's
+ *    own column words, the waiting-on-you count, the costliest served cost
+ *    reading — labelled as exactly that arithmetic — and recent deliverables.
+ *
+ * A registry entry with no tasks is still a card (a fresh registration is
+ * exactly that), and a task bucket with no visible entry says so rather than
+ * inventing a status. Describe-a-goal pins only into an entry the registry
+ * shows as ACTIVE — a pin into anything else is refused server-side (P3-RW-1),
+ * so no button is rendered that would only exist to fail.
  *
  * THE CREATE DOOR (S13.7 through P3-RW-2's POST): register → clone → scan →
  * draft → the OWNER's approval card in the Inbox → active. The form says the
- * whole journey up front, and a control plane that does not serve the door
- * yet refuses loudly in its own words.
+ * whole journey up front, and the landed answer renders the platform's own
+ * sentence, the onboarding task and the approval ref — not this client's
+ * paraphrase.
  */
 export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
   const tasks = useLive({
@@ -43,22 +62,38 @@ export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
     types: boardEventTypes,
     stream,
   })
+  // The registry moves through the onboarding TASK's own lifecycle — there is
+  // no project.* frame on the wire — so the board's types are the honest
+  // refresh triggers: intake.state and decision.recorded are what carry a
+  // registration and its approval. The create door reloads explicitly too.
+  const registry = useLive({
+    key: `/api/projects#registry:${me}`,
+    read: () => api.projects(),
+    types: boardEventTypes,
+    stream,
+  })
   const [creating, setCreating] = useState(false)
 
   const buckets = useMemo(
     () => projectBuckets(tasks.data?.tasks ?? [], deliverables.data?.deliverables ?? []),
     [tasks.data, deliverables.data],
   )
-  const answered = tasks.data !== null
+  const cards = useMemo(() => mergeCards(buckets, registry.data?.projects ?? []), [buckets, registry.data])
+  const registryAnswered = registry.data !== null
+  const answered = tasks.data !== null && registryAnswered
 
   return (
     <section className="surface">
-      <Freshness stale={tasks.stale} error={tasks.error} hasData={answered} />
+      <Freshness
+        stale={tasks.stale || registry.stale}
+        error={[tasks.error, registry.error].filter((e) => e !== '').join(' ')}
+        hasData={tasks.data !== null || registryAnswered}
+      />
       <div className="proj-head">
         <p className="proj-intro">
           Work lives in projects: a task pinned to one is planned against the project&apos;s accumulated work, its
-          conventions and its memory. Opening a project scopes the whole app to it. The registry detail — capture
-          summary, conventions, danger zones — joins these cards when the projects service door lands.
+          conventions and its memory. Opening a project scopes the whole app to it. Each card carries the project&apos;s
+          registry record — its state and what the platform captured about it — beside the work in flight.
         </p>
         <Button
           variant="primary"
@@ -72,10 +107,10 @@ export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
         </Button>
       </div>
 
-      {answered && buckets.length === 0 && (
+      {answered && cards.length === 0 && (
         <EmptyState
-          what="No project has work yet."
-          why='A project appears here the moment a task lives in it. "New project" registers one; "Describe a goal" starts the first task.'
+          what="No projects yet."
+          why='"New project" registers one with the platform; "Describe a goal" starts work without one.'
           action={
             <Button
               variant="secondary"
@@ -90,12 +125,19 @@ export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
       )}
 
       <div className="proj-grid">
-        {buckets.map((b) => (
-          <ProjectCard key={b.name} bucket={b} />
+        {cards.map((c) => (
+          <ProjectCard key={c.name} card={c} registryAnswered={registryAnswered} />
         ))}
       </div>
 
-      <CreateProject open={creating} onOpenChange={setCreating} />
+      {registry.data !== null && (
+        <p className="proj-visibility">
+          {registry.data.visibility}
+          {registry.data.truncated && <> The list is truncated at the served page — not every entry is shown.</>}
+        </p>
+      )}
+
+      <CreateProject open={creating} onOpenChange={setCreating} onLanded={registry.reload} />
     </section>
   )
 }
@@ -180,22 +222,55 @@ export function projectBuckets(tasks: TaskListItem[], deliverables: Deliverable[
   )
 }
 
+/* ── the merge: registry entry ⋈ task bucket, by project id ──────────────── */
+
+type CardData = {
+  /** The project id — the bucket name and the registry key are the same id space (P3-RW-1's pin). */
+  name: string
+  entry: ProjectListItem | null
+  bucket: Bucket | null
+}
+
+export function mergeCards(buckets: Bucket[], entries: ProjectListItem[]): CardData[] {
+  const byName = new Map<string, CardData>()
+  for (const b of buckets) byName.set(b.name, { name: b.name, entry: null, bucket: b })
+  for (const e of entries) {
+    const found = byName.get(e.project_id)
+    if (found) found.entry = e
+    else byName.set(e.project_id, { name: e.project_id, entry: e, bucket: null })
+  }
+  return [...byName.values()].sort((a, b) =>
+    a.name === '(no project)' ? 1 : b.name === '(no project)' ? -1 : a.name.localeCompare(b.name),
+  )
+}
+
+/** The registry state's chip, forward-tolerant like the board's columns: a
+ *  state this list does not know renders under its own name, never coerced. */
+function stateChip(state: string): { tone: Tone; label: string } {
+  if (state === 'active') return { tone: 'green', label: 'active' }
+  if (state === 'pending') return { tone: 'orange', label: 'pending approval' }
+  return { tone: 'pink', label: state === '' ? '(no state recorded)' : state }
+}
+
 /* ── one card ────────────────────────────────────────────────────────────── */
 
-function ProjectCard({ bucket }: { bucket: Bucket }) {
+function ProjectCard({ card, registryAnswered }: { card: CardData; registryAnswered: boolean }) {
   const { setProject } = useProjectScope()
-  const noProject = bucket.name === '(no project)'
+  const { name, entry, bucket } = card
+  const noProject = name === '(no project)'
+  const [recordOpen, setRecordOpen] = useState(false)
 
   return (
-    <article className="proj-card" data-project={bucket.name}>
+    <article className="proj-card" data-project={name}>
       <header className="proj-card-head">
         <FolderOpen size={17} strokeWidth={1.8} aria-hidden="true" className="proj-ico" />
-        <h3 className="proj-name">{bucket.name}</h3>
-        {bucket.waiting > 0 && (
+        <h3 className="proj-name">{entry !== null && entry.name !== '' ? entry.name : name}</h3>
+        {bucket !== null && bucket.waiting > 0 && (
           <Chip tone="orange" className="waiting-human">
             {String(bucket.waiting)} waiting on you
           </Chip>
         )}
+        {entry !== null && <Chip tone={stateChip(entry.state).tone}>{stateChip(entry.state).label}</Chip>}
       </header>
 
       {noProject && (
@@ -205,8 +280,46 @@ function ProjectCard({ bucket }: { bucket: Bucket }) {
         </p>
       )}
 
+      {entry !== null && (
+        <p className="proj-reg" data-reg={entry.project_id}>
+          <span>
+            id <b className="mono">{entry.project_id}</b>
+          </span>
+          <span>
+            branch <b className="mono">{entry.default_branch === '' ? '(none recorded)' : entry.default_branch}</b>
+          </span>
+          <span>{entry.has_remote ? 'remote attached' : 'no remote — local store only'}</span>
+          <span>
+            <Owner id={entry.owner} />
+            {entry.members.length > 0 && (
+              <span className="proj-quiet">
+                {' '}
+                +{String(entry.members.length)} member{entry.members.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </span>
+          <span>
+            capture v{String(entry.capture.version)} · {String(entry.capture.conventions)} convention
+            {entry.capture.conventions === 1 ? '' : 's'} · {String(entry.capture.danger_zones)} danger zone
+            {entry.capture.danger_zones === 1 ? '' : 's'}
+            {entry.capture.test_command !== undefined && entry.capture.test_command !== '' && (
+              <>
+                {' '}
+                · tests: <b className="mono">{entry.capture.test_command}</b>
+              </>
+            )}
+          </span>
+        </p>
+      )}
+
+      {!noProject && entry === null && registryAnswered && (
+        <p className="proj-sub">
+          Not in your project registry — its record is not visible to you, and new tasks cannot pin to it.
+        </p>
+      )}
+
       <div className="proj-stages">
-        {bucket.byStage.length === 0 ? (
+        {bucket === null || bucket.byStage.length === 0 ? (
           <span className="proj-quiet">no tasks right now</span>
         ) : (
           bucket.byStage.map((s) => (
@@ -218,23 +331,25 @@ function ProjectCard({ bucket }: { bucket: Bucket }) {
         )}
       </div>
 
-      <p className="proj-spend">
-        {bucket.costliest !== null ? (
-          <>
-            <Money usd={bucket.costliest.usd} />{' '}
-            <span className="proj-quiet">
-              the costliest run so far ({bucket.costliest.title}) · {String(bucket.pricedRuns)} run
-              {bucket.pricedRuns === 1 ? '' : 's'} carr{bucket.pricedRuns === 1 ? 'ies' : 'y'} a cost reading
-              {bucket.unreadRuns > 0 && <> · {String(bucket.unreadRuns)} without one</>} — per-run figures are on each
-              card
-            </span>
-          </>
-        ) : (
-          <span className="proj-quiet">no run has a cost reading yet</span>
-        )}
-      </p>
+      {bucket !== null && (
+        <p className="proj-spend">
+          {bucket.costliest !== null ? (
+            <>
+              <Money usd={bucket.costliest.usd} />{' '}
+              <span className="proj-quiet">
+                the costliest run so far ({bucket.costliest.title}) · {String(bucket.pricedRuns)} run
+                {bucket.pricedRuns === 1 ? '' : 's'} carr{bucket.pricedRuns === 1 ? 'ies' : 'y'} a cost reading
+                {bucket.unreadRuns > 0 && <> · {String(bucket.unreadRuns)} without one</>} — per-run figures are on each
+                card
+              </span>
+            </>
+          ) : (
+            <span className="proj-quiet">no run has a cost reading yet</span>
+          )}
+        </p>
+      )}
 
-      {bucket.recent.length > 0 && (
+      {bucket !== null && bucket.recent.length > 0 && (
         <div className="proj-recent">
           <p className="proj-recent-head">Recent deliverables</p>
           {bucket.recent.map((d) => (
@@ -254,41 +369,233 @@ function ProjectCard({ bucket }: { bucket: Bucket }) {
         <Button
           variant="secondary"
           size="sm"
-          data-proj-open={bucket.name}
+          data-proj-open={name}
           onClick={() => {
-            setProject(bucket.name)
+            setProject(name)
             navigate(hrefFor('board'))
           }}
         >
           Open — scope the app to it
         </Button>
-        {!noProject && (
+        {entry !== null && (
+          <Button
+            variant="secondary"
+            size="sm"
+            data-proj-record={entry.project_id}
+            onClick={() => {
+              setRecordOpen(true)
+            }}
+          >
+            <BookOpen size={13} strokeWidth={2} aria-hidden="true" />
+            Project record
+          </Button>
+        )}
+        {entry !== null && entry.state === 'active' && (
           <Button
             variant="primary"
             size="sm"
-            data-proj-describe={bucket.name}
+            data-proj-describe={name}
             onClick={() => {
-              navigate(`${hrefFor('new')}?project=${encodeURIComponent(bucket.name)}`)
+              navigate(`${hrefFor('new')}?project=${encodeURIComponent(name)}`)
             }}
           >
             <Sparkles size={13} strokeWidth={2} aria-hidden="true" />
             Describe a goal
           </Button>
         )}
+        {entry !== null && entry.state === 'pending' && (
+          <span className="proj-quiet">
+            pending — the owner&apos;s approval card in the Inbox activates it; tasks can pin to it once active
+          </span>
+        )}
       </div>
+
+      {entry !== null && <ProjectRecord entry={entry} open={recordOpen} onOpenChange={setRecordOpen} />}
     </article>
+  )
+}
+
+/* ── the project record (the S13.7 capture, whole, via GET /api/projects/{id}) ── */
+
+function ProjectRecord({
+  entry,
+  open,
+  onOpenChange,
+}: {
+  entry: ProjectListItem
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const [detail, setDetail] = useState<ProjectDetail | null>(null)
+  const [refusal, setRefusal] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    let mounted = true
+    setDetail(null)
+    setRefusal('')
+    api.project(entry.project_id).then(
+      (r) => {
+        if (mounted) setDetail(r.project)
+      },
+      (err: unknown) => {
+        if (mounted) setRefusal(describeError(err))
+      },
+    )
+    return () => {
+      mounted = false
+    }
+  }, [open, entry.project_id])
+
+  const cap = detail?.capture
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={entry.name !== '' ? entry.name : entry.project_id}
+      description="The project record: what the platform captured about this project, injected into every run in it."
+      footer={
+        <Button variant="ghost" onClick={() => { onOpenChange(false) }}>
+          Close
+        </Button>
+      }
+    >
+      {refusal !== '' && (
+        <div className="door-refusal" role="alert">
+          <p className="refusal-detail">{refusal}</p>
+        </div>
+      )}
+      {refusal === '' && detail === null && <p className="proj-quiet m-0">Reading the project record…</p>}
+      {detail !== null && cap !== undefined && (
+        <div data-record={detail.project_id}>
+          <div className="rec-sec">
+            <p className="rec-facts">
+              <Chip tone={stateChip(detail.state).tone}>{stateChip(detail.state).label}</Chip>
+              <span>
+                id <b className="mono">{detail.project_id}</b>
+              </span>
+              <span>
+                branch <b className="mono">{detail.default_branch === '' ? '(none recorded)' : detail.default_branch}</b>
+              </span>
+              <span>{detail.has_remote ? 'remote attached' : 'no remote — local store only'}</span>
+              <span>
+                owner <Owner id={detail.owner} />
+              </span>
+              <span>
+                members:{' '}
+                {detail.members.length === 0 ? (
+                  'none besides the owner'
+                ) : (
+                  detail.members.map((m, i) => (
+                    <span key={m}>
+                      {i > 0 && ', '}
+                      <Owner id={m} />
+                    </span>
+                  ))
+                )}
+              </span>
+              <span>
+                registered <Timestamp ts={detail.created_ts} />
+              </span>
+            </p>
+          </div>
+
+          <div className="rec-sec">
+            <p className="rec-head">Protected refs — accepts never push here</p>
+            {detail.protected_refs.length === 0 ? (
+              <p className="proj-quiet m-0">none recorded</p>
+            ) : (
+              <ul className="rec-list">
+                {detail.protected_refs.map((r) => (
+                  <li key={r} className="mono">
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="rec-sec">
+            <p className="rec-head">
+              Capture v{String(cap.version)}
+              {cap.captured_by !== undefined && cap.captured_by !== '' && <> · by {cap.captured_by}</>}
+            </p>
+            {cap.captured_ts !== undefined && cap.captured_ts !== '' && (
+              <p className="proj-quiet m-0 mb-2">
+                captured <Timestamp ts={cap.captured_ts} />
+                {cap.scan_hash !== undefined && cap.scan_hash !== '' && (
+                  <>
+                    {' '}
+                    · scan <span className="mono">{cap.scan_hash}</span>
+                  </>
+                )}
+              </p>
+            )}
+
+            <p className="rec-sub">Conventions — the house rules every run reads</p>
+            {cap.conventions.length === 0 ? (
+              <p className="proj-quiet m-0">the scan recorded no conventions</p>
+            ) : (
+              <ul className="rec-list">
+                {cap.conventions.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            )}
+
+            <p className="rec-sub">Commands</p>
+            {Object.values(cap.commands).every((v) => v === undefined || v === '') ? (
+              <p className="proj-quiet m-0">no commands captured</p>
+            ) : (
+              <dl className="rec-cmd">
+                {(['build', 'test', 'lint', 'run', 'preview'] as const).map((k) =>
+                  cap.commands[k] !== undefined && cap.commands[k] !== '' ? (
+                    <div key={k} className="rec-cmd-row">
+                      <dt>{k}</dt>
+                      <dd className="mono">{cap.commands[k]}</dd>
+                    </div>
+                  ) : null,
+                )}
+              </dl>
+            )}
+
+            <p className="rec-sub">Danger zones — paths the platform treats as hazardous</p>
+            {cap.danger_zones.length === 0 ? (
+              <p className="proj-quiet m-0">no danger zones recorded</p>
+            ) : (
+              cap.danger_zones.map((z) => (
+                <p key={z.path} className="rec-zone">
+                  <b className="mono">{z.path}</b>
+                  {z.action !== undefined && z.action !== '' && <> · {z.action}</>}
+                  <span className="proj-quiet"> — {z.rule}</span>
+                </p>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
   )
 }
 
 /* ── the create/onboard door (S13.7 via P3-RW-2's POST) ──────────────────── */
 
-function CreateProject({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function CreateProject({
+  open,
+  onOpenChange,
+  onLanded,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onLanded?: () => void
+}) {
   const [projectID, setProjectID] = useState('')
   const [name, setName] = useState('')
   const [remote, setRemote] = useState('')
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState('')
-  const [landed, setLanded] = useState(false)
+  const [started, setStarted] = useState<ProjectStarted | null>(null)
 
   const idOk = /^[a-z0-9][a-z0-9-]*$/.test(projectID)
   const ready = projectID !== '' && idOk && name.trim() !== ''
@@ -296,7 +603,7 @@ function CreateProject({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   const close = () => {
     onOpenChange(false)
     setRefusal('')
-    setLanded(false)
+    setStarted(null)
     setBusy(false)
   }
 
@@ -311,18 +618,19 @@ function CreateProject({ open, onOpenChange }: { open: boolean; onOpenChange: (o
         ...(remote.trim() !== '' ? { remote_url: remote.trim() } : {}),
       })
       .then(
-        () => {
+        (r) => {
           setBusy(false)
-          setLanded(true)
+          setStarted(r)
+          onLanded?.()
         },
         (err: unknown) => {
           setBusy(false)
           if (err instanceof ApiError && err.status === 404) {
             setRefusal(
-              'This control plane does not serve the projects door yet — it is landing as its own backend packet. Nothing was registered.',
+              'This control plane does not serve the projects door — it predates the projects service. Nothing was registered.',
             )
           } else if (err instanceof ApiError && err.code === 'already_registered') {
-            setRefusal(`"${projectID}" is already an active project. ${err.message}`)
+            setRefusal(`"${projectID}" is already registered. ${err.message}`)
           } else {
             setRefusal(describeError(err))
           }
@@ -340,7 +648,7 @@ function CreateProject({ open, onOpenChange }: { open: boolean; onOpenChange: (o
       title="New project"
       description="Registering starts onboarding: the platform prepares the project's store, scans what it finds, and drafts the project record. Activation is YOURS — an approval card lands in your Inbox, and the project turns active when you approve it."
       footer={
-        landed ? (
+        started !== null ? (
           <>
             <Button
               variant="primary"
@@ -373,11 +681,18 @@ function CreateProject({ open, onOpenChange }: { open: boolean; onOpenChange: (o
         )
       }
     >
-      {landed ? (
-        <p className="m-0 text-sm" data-created={projectID}>
-          <b>{projectID}</b> is registered and onboarding — its approval card is on its way to your Inbox. Until you
-          approve, the project is pending and tasks cannot pin to it.
-        </p>
+      {started !== null ? (
+        <div data-created={started.project.project_id}>
+          {/* The platform's own sentence — in-flight, freshly started, or healed,
+              it says which; this client does not re-tell it. */}
+          <p className="m-0 text-sm">
+            <b>{started.project.name !== '' ? started.project.name : started.project.project_id}</b> — {started.detail}
+          </p>
+          <p className="proj-quiet m-0 mt-2">
+            onboarding task <b className="mono">{started.task_id}</b> · approval <b className="mono">{started.ask_ref}</b>{' '}
+            · <Chip tone={stateChip(started.project.state).tone}>{stateChip(started.project.state).label}</Chip>
+          </p>
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           <label className="door-field m-0">

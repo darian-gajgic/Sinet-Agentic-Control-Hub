@@ -475,16 +475,12 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
   // POST /api/intake/requests and POST /api/asks/{}/answer LEFT this list
   // 2026-08-06 (rework step 2): the give-work door consumes both — the
   // journey the map §3 always intended for them.
-  {
-    method: 'GET',
-    path: '/api/projects',
-    why: 'P3-RW-2 is landing mid-flight (2026-08-06): the Projects tab consumes this read the moment the packet finalizes its response shapes — consuming a moving contract would be drift, not integration. POST /api/projects is already consumed by the create door.',
-  },
-  {
-    method: 'GET',
-    path: '/api/projects/{}',
-    why: 'same P3-RW-2 seam, same date: the per-project capture detail joins the project cards when the packet lands its final shapes.',
-  },
+  //
+  // GET /api/projects and GET /api/projects/{} LEFT this list 2026-08-11
+  // (rework step 2, P3-RW-2 landed+drained at ef47563): the Projects tab's
+  // registry cards consume the list read, and each card's "Project record"
+  // door consumes the detail. Their entries were dated waits on a mid-flight
+  // contract, never gaps — the whole family is now consumed, POST included.
   {
     method: 'POST',
     path: '/api/tasks/{}/advance',

@@ -2122,13 +2122,21 @@ export const api = {
   // Types mirror internal/api/projects.go BY NAME. `store_path` is served to
   // nobody; the remote is presence, never its URL; a caller's own PENDING
   // onboarding appears honestly in the list.
-  //
-  // NEXT BUILDER: add `projects: () => request<ProjectList>('/api/projects')`
-  // and `project: (id) => request<ProjectDetailResponse>(…)` IN THE SAME
-  // CHANGE that makes Projects.tsx consume them (registry cards + capture
-  // detail) — the §46 dead-verb scan rightly refuses a declared-but-uncalled
-  // member, and the two routes sit on the sweep exception list (dated) until
-  // then.
+
+  /**
+   * The registry read: every entry VISIBLE to this caller (owner or member;
+   * the served `visibility` sentence states the rule), each with its capture
+   * SUMMARY. An entry someone else owns is simply absent here — the list
+   * never says why a particular id is missing, the sentence does.
+   */
+  projects: () => request<ProjectList>('/api/projects'),
+  /**
+   * One entry whole: protected refs plus the CURRENT capture — conventions,
+   * commands, danger zones — exactly what the platform injects into every run
+   * in the project. Unknown id and invisible entry are ONE answer: 404
+   * `not_found` — the route confirms existence to nobody it should not.
+   */
+  project: (id: string) => request<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(id)}`),
 
   /**
    * The S13.7 create/onboard door. Registering starts the onboarding TASK —
