@@ -66,7 +66,13 @@ func (s *Store) Onboard(ctx context.Context, in OnboardInput) (Entry, Draft, err
 	}
 	store := filepath.Join(s.root, "stores", pathComponent(in.ProjectID))
 	if _, err := os.Stat(store); err == nil {
-		return Entry{}, Draft{}, fmt.Errorf("%w: store path %q already exists", ErrBadInput, store)
+		// A store directory without a registry entry is a CONFLICT on the id,
+		// not a malformed request: it is what a half-finished or overlapping
+		// onboarding of the same id leaves behind, and the caller resolves it
+		// by choosing another id. The refusal names the id it was given and
+		// never the host path — a filesystem path has no caller use, and a
+		// refusal is a wire surface like any other (Spec S11 host hygiene).
+		return Entry{}, Draft{}, fmt.Errorf("%w: a store for project id %q already exists", ErrAlreadyRegistered, in.ProjectID)
 	}
 	if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
 		return Entry{}, Draft{}, fmt.Errorf("project: stores dir: %w", err)

@@ -817,3 +817,209 @@ func TestOnboardStartMintsNothingOfItsOwn(t *testing.T) {
 		t.Errorf("%d decision.recorded rows — the create door co-minted a decision (§39 OQ8)", got["decision.recorded"])
 	}
 }
+
+// ── drain round 1 (D1, D2, D4, D5) ──────────────────────────────────────────
+
+// TestOnboardStartHealsATornOnboarding — drain r1 D1: the in-flight 200 is an
+// OBSERVATION, not a claim. The onboarding's registry half and its run half are
+// two commits, so a pending entry whose task was never filed is a state the
+// platform can really be in; answering it "already started" would name a task
+// and a card that resolve to nothing and would strand the project pending
+// forever. The retry instead falls through to the seam, whose idempotence heals
+// it — the task is filed, nothing is re-cloned, and the answer says what
+// actually happened. The genuine in-flight retry is unchanged.
+func TestOnboardStartHealsATornOnboarding(t *testing.T) {
+	e := newProjEnv(t)
+	if code, out := e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-torn","name":"Torn"}`); code != http.StatusOK {
+		t.Fatalf("first POST: %d %s", code, out)
+	}
+	before, err := e.proj.Get(e.ctx, "p-torn")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+
+	// The torn state: the registry half committed, the run half did not.
+	exec(t, e.b, `DELETE FROM runs WHERE task_id = ?`, "onboard-p-torn")
+	exec(t, e.b, `DELETE FROM tasks WHERE task_id = ?`, "onboard-p-torn")
+	if n := e.count(t, `SELECT COUNT(*) FROM tasks WHERE task_id = ?`, "onboard-p-torn"); n != 0 {
+		t.Fatalf("the fixture left %d task rows — the state is not torn and the test proves nothing", n)
+	}
+
+	code, out := e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-torn","name":"Torn"}`)
+	if code != http.StatusOK {
+		t.Fatalf("the retry over a torn onboarding must heal it: %d %s", code, out)
+	}
+	if n := e.count(t, `SELECT COUNT(*) FROM tasks WHERE task_id = ?`, "onboard-p-torn"); n != 1 {
+		t.Errorf("%d onboarding task rows — the retry did not file the task that was missing", n)
+	}
+	if !strings.Contains(out, "p-torn") || !strings.Contains(out, "onboard-p-torn") {
+		t.Errorf("the healed answer omits the entry or its references: %s", out)
+	}
+	// Honest: it may not report an onboarding that was already running, because
+	// there was none, and it may not report that nothing was filed, because the
+	// task was.
+	if strings.Contains(out, "Nothing was cloned, scanned or filed again") {
+		t.Errorf("the healed answer claims an in-flight onboarding that did not exist: %s", out)
+	}
+	// Healing is not re-onboarding: the registry half returns the existing draft.
+	after, err := e.proj.Get(e.ctx, "p-torn")
+	if err != nil {
+		t.Fatalf("read back after the heal: %v", err)
+	}
+	if after.CaptureVersion != before.CaptureVersion || after.UpdatedTS != before.UpdatedTS {
+		t.Errorf("the heal moved the entry: v%d@%s → v%d@%s",
+			before.CaptureVersion, before.UpdatedTS, after.CaptureVersion, after.UpdatedTS)
+	}
+	if n := e.count(t, `SELECT COUNT(*) FROM repo_registry_captures WHERE project_id = ?`, "p-torn"); n != 1 {
+		t.Errorf("%d captures — the heal re-scanned the store", n)
+	}
+
+	// The genuine in-flight retry still never re-enters register/clone/scan.
+	entered := e.onboard.starts
+	if code, out := e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-live","name":"Live"}`); code != http.StatusOK {
+		t.Fatalf("POST p-live: %d %s", code, out)
+	}
+	code, out = e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-live","name":"Live"}`)
+	if code != http.StatusOK {
+		t.Fatalf("the in-flight retry: %d %s", code, out)
+	}
+	if !strings.Contains(out, "Nothing was cloned, scanned or filed again") {
+		t.Errorf("a genuinely in-flight retry must still answer with the already-resolved state: %s", out)
+	}
+	if e.onboard.starts != entered+1 {
+		t.Errorf("the onboarding seam was entered %d times for one live onboarding plus its retry, want %d",
+			e.onboard.starts-entered, 1)
+	}
+}
+
+// TestOnboardStoreConflictNeverServesAHostPath — drain r1 D2: a store directory
+// with no registry entry behind it — the residue of a half-finished or
+// overlapping onboarding of the same id — is refused as the CONFLICT it is, and
+// the refusal carries no host filesystem path. A platform race is not caller
+// fault, and a path the read doors deliberately never serve (brief OQ4) may not
+// escape through the error channel either (S11 host hygiene).
+func TestOnboardStoreConflictNeverServesAHostPath(t *testing.T) {
+	e := newProjEnv(t)
+	if code, out := e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-one","name":"One"}`); code != http.StatusOK {
+		t.Fatalf("POST: %d %s", code, out)
+	}
+	seed, err := e.proj.Get(e.ctx, "p-one")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	stores := filepath.Dir(seed.StorePath)
+	if err := os.MkdirAll(filepath.Join(stores, "p-residue"), 0o700); err != nil {
+		t.Fatalf("stage the residue: %v", err)
+	}
+
+	code, out := e.do(t, "alice", "POST", "/api/projects", `{"project_id":"p-residue","name":"Residue"}`)
+	if code != http.StatusConflict || errorCode(t, out) != "already_registered" {
+		t.Fatalf("a store that already exists is a conflict on the id, not a bad request: %d %s", code, out)
+	}
+	if strings.Contains(out, stores) {
+		t.Errorf("the refusal serves a host filesystem path: %s", out)
+	}
+	if _, err := e.proj.Get(e.ctx, "p-residue"); !errors.Is(err, project.ErrNotFound) {
+		t.Errorf("the refused request registered something: %v", err)
+	}
+}
+
+// TestOnboardStartCreatorDirections — drain r1 D4: the create door's missing
+// R14 directions. A member and the operator are both PEOPLE creating a project
+// of their own, so both start one and own it; neither role bit changes what the
+// door does, and what either creates is theirs alone — invisible to a third
+// person on both routes, exactly like anybody else's (brief OQ3).
+func TestOnboardStartCreatorDirections(t *testing.T) {
+	e := newProjEnv(t)
+	for _, who := range []struct{ role, user, id string }{
+		{"member", "bob", "p-bob"},
+		{"operator", "op", "p-op"},
+	} {
+		t.Run(who.role, func(t *testing.T) {
+			code, out := e.do(t, who.user, "POST", "/api/projects",
+				`{"project_id":"`+who.id+`","name":"`+who.id+`"}`)
+			if code != http.StatusOK {
+				t.Fatalf("%s starting their own project: %d %s", who.role, code, out)
+			}
+			entry, err := e.proj.Get(e.ctx, who.id)
+			if err != nil {
+				t.Fatalf("the door answered 200 but registered nothing: %v", err)
+			}
+			if entry.Owner != who.user {
+				t.Errorf("owner %q — the caller is the owner, from the session (15.6)", entry.Owner)
+			}
+			if entry.State != project.StatePending {
+				t.Errorf("state %q — the entry activates only on the owner's D10 approval", entry.State)
+			}
+			if _, list := e.do(t, who.user, "GET", "/api/projects", ""); !strings.Contains(list, who.id) {
+				t.Errorf("the %s cannot read the project they just started: %s", who.role, list)
+			}
+			if _, list := e.do(t, "carol", "GET", "/api/projects", ""); strings.Contains(list, who.id) {
+				t.Errorf("a third person's list carries the %s's new project: %s", who.role, list)
+			}
+			if code, _ := e.do(t, "carol", "GET", "/api/projects/"+who.id, ""); code != http.StatusNotFound {
+				t.Errorf("a third person's detail read of the %s's new project: %d, want 404", who.role, code)
+			}
+		})
+	}
+}
+
+// TestProjectsShapesNeverPercent — drain r1 D5: the §30 progress-semantics
+// negative and the §38 R8 money line over every shape this family serves. It is
+// vacuously true today, which is the point: it is what keeps a percentage, an
+// ETA or a spend figure from arriving on a project card unnoticed.
+func TestProjectsShapesNeverPercent(t *testing.T) {
+	e := newProjEnv(t)
+	e.seedActive(t, "p-alpha", "alice", []string{"bob"}, project.CaptureInput{
+		Conventions: []string{"tabs, never spaces"},
+		Commands: project.Commands{Build: "go build ./...", Test: "go test ./...",
+			Lint: "go vet ./...", Run: "go run .", Preview: "go run . -preview"},
+		DangerZones: []project.DangerZone{{Path: "deploy/", Action: "never", Rule: "touch deploy"}},
+		ScanHash:    "sha256:alpha",
+	})
+
+	keys := map[string]bool{}
+	for _, w := range []struct{ method, path, body string }{
+		{"GET", "/api/projects", ""},
+		{"GET", "/api/projects/p-alpha", ""},
+		{"POST", "/api/projects", `{"project_id":"p-walk","name":"Walk"}`},
+	} {
+		code, out := e.do(t, "alice", w.method, w.path, w.body)
+		if code != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", w.method, w.path, code, out)
+		}
+		var v any
+		if err := json.Unmarshal([]byte(out), &v); err != nil {
+			t.Fatalf("decode %s: %v", w.path, err)
+		}
+		collectKeys(v, keys)
+	}
+	// The walk must have reached the whole family, list row, capture and create
+	// answer alike — otherwise a clean scan proves only that it looked nowhere.
+	for _, want := range []string{"projects", "capture", "danger_zones", "commands", "task_id", "ask_ref"} {
+		if !keys[want] {
+			t.Fatalf("the walk never reached the %q shape — it must cover every shape this family serves", want)
+		}
+	}
+	forbidden := map[string]bool{
+		"percent": true, "percentage": true, "percent_complete": true,
+		"fraction": true, "complete_fraction": true, "ratio": true,
+		"progress": true, "pct": true, "complete": true, "completion": true,
+		"eta": true, "eta_s": true, "eta_seconds": true,
+		"cost": true, "usd": true, "cost_usd": true, "spend": true,
+	}
+	if !forbidden["percent"] {
+		t.Fatal("the scan cannot detect its own probe")
+	}
+	for k := range keys {
+		lk := strings.ToLower(k)
+		if forbidden[lk] || strings.Contains(lk, "percent") {
+			t.Errorf("key %q has no place on a project shape (§30 R12; §38 R8)", k)
+		}
+		for _, shape := range []string{"_pct", "_ratio", "_fraction", "utiliz", "_usd"} {
+			if strings.Contains(lk, shape) {
+				t.Errorf("key %q is ratio- or money-shaped and undeclared", k)
+			}
+		}
+	}
+}

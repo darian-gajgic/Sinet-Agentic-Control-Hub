@@ -266,8 +266,10 @@ type Config struct {
 	// reading one file. nil leaves the chat routes answering 503.
 	Chat *chat.Store
 	// Onboard is the S13.7 onboarding door behind `POST /api/projects`
-	// (projects.go, P3-RW-2), implemented by *stage.Surface at the composition
-	// root. It is a transport seam over the LANDED onboarding capability — the
+	// (projects.go, P3-RW-2), implemented by the composition root's own
+	// `onboardDoor` rather than by *stage.Surface, because the door records the
+	// entry's remote_url and the landed stage seam has no parameter for it.
+	// It is a transport seam over the LANDED onboarding capability — the
 	// registry writes stay in internal/project and the run substrate in
 	// internal/stage, which is why internal/api still imports neither. nil
 	// leaves the create door answering 503; the read doors are unaffected.

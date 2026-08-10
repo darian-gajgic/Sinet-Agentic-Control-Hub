@@ -234,6 +234,11 @@ const projectsVisibilityRule = "the projects you own, plus the projects you have
 // which has not happened when this response is written. So the answer names the
 // reference the card will carry and says where it will appear; claiming an open
 // card exists would be a surface asserting something it has not observed.
+//
+// The in-flight sentence is the same kind of claim and gets the same treatment
+// (drain r1 D1): it is served only once the onboarding task has been seen. A
+// retry that finds no task is answered with the started sentence instead, which
+// is what actually happened — the seam ran again and filed what was missing.
 const onboardStartedDetail = "onboarding started: the entry is registered, its store initialized and scanned, and its drafted " +
 	"conventions, commands and danger zones are captured as version 1 — pending your approval (D10). The approval card appears in " +
 	"/api/approvals once the onboarding run dispatches; it is not open yet. Answering it there activates the entry, and no other door does."
@@ -251,12 +256,12 @@ var errNoSuchProject = &SurfaceError{Status: http.StatusNotFound, Code: "not_fou
 // one namespace, and an id that is taken cannot be onboarded again whoever
 // holds it.
 //
-// It names no owner, no project name and no content. The taken-and-visible case
-// answers here and the taken-but-invisible case answers with the STORE's own
-// refusal through the seam (§40-C: a refusal carries the words of the layer
-// that made it) — both 409 `already_registered`, and the difference in wording
-// discloses nothing, because a caller can already tell whether an id is one of
-// theirs by reading their own list.
+// It names no owner, no project name and no content, and it is the ONE answer
+// both taken cases get: the caller's own taken id and an id they cannot see
+// answer with this identical object, decided at the handler before the seam is
+// entered. A refusal that read differently depending on who held the id would
+// be an ownership oracle, and a taken-but-invisible id must not so much as
+// reach the onboarding seam.
 var errProjectTaken = &SurfaceError{Status: http.StatusConflict, Code: "already_registered",
 	Msg: "that project id is already registered; if it is yours, read it rather than starting it again"}
 
@@ -577,6 +582,18 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	// still pending answers with the entry that already exists: nothing is
 	// re-cloned, no second task or run is filed, and the drafted capture is left
 	// exactly as it stands.
+	//
+	// The in-flight claim is VERIFIED before it is made (drain r1 D1). The
+	// registry half of an onboarding and its run half are two commits, not one,
+	// so a pending entry whose onboarding task was never filed is a state the
+	// platform can really be in. Answering that state "already started" would
+	// name a task and a card that resolve to nothing, and would strand the
+	// project pending forever: activation needs the ask, the ask needs the run,
+	// and this packet routes no repair verb. So the door asks whether the task
+	// is actually there, and when it is not it falls THROUGH to the seam —
+	// whose own idempotence is the repair, the registry half returning the
+	// existing draft rather than re-cloning while the run half files the task
+	// that is missing.
 	existing, err := s.visibleProjectRows(r.Context(), id.UserID, projectID)
 	if err != nil {
 		s.writeSurface(w, nil, err)
@@ -584,34 +601,45 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(existing) == 1 {
 		row := existing[0]
-		if row.entry.Owner == id.UserID && row.entry.State == projectStatePending {
-			s.writeStarted(w, r, row, s.onboard.OnboardRefs(projectID), onboardInFlightDetail)
+		if row.entry.Owner != id.UserID || row.entry.State != projectStatePending {
+			s.writeSurfaceErr(w, errProjectTaken)
 			return
 		}
-		s.writeSurfaceErr(w, errProjectTaken)
-		return
-	}
-	// A taken id is taken whoever holds it, and the door must say so BEFORE it
-	// starts anything (brief OQ6). The onboarding seam cannot answer this
-	// question for us: project.OnboardStart is idempotent by design — for an
-	// entry that already exists it returns that entry's current draft rather
-	// than re-cloning, which is right for the run's own re-dispatch and would be
-	// wrong here, where it would attach this caller's onboarding task to
-	// somebody else's project.
-	//
-	// It is an EXISTENCE question and nothing more: no row, no column and no
-	// fact about another person's project reaches the answer, which is the same
-	// `already_registered` the caller's own taken id gets. What they learn is
-	// only what they must in order to choose another id — and they can already
-	// tell whether an id is one of theirs by reading their own list.
-	taken, err := s.projectIDTaken(r.Context(), projectID)
-	if err != nil {
-		s.writeSurface(w, nil, err)
-		return
-	}
-	if taken {
-		s.writeSurfaceErr(w, errProjectTaken)
-		return
+		refs := s.onboard.OnboardRefs(projectID)
+		filed, err := s.onboardTaskFiled(r.Context(), refs.TaskID)
+		if err != nil {
+			s.writeSurface(w, nil, err)
+			return
+		}
+		if filed {
+			s.writeStarted(w, r, row, refs, onboardInFlightDetail)
+			return
+		}
+		// Torn, and the caller's OWN: fall through and let the seam heal it.
+	} else {
+		// A taken id is taken whoever holds it, and the door must say so BEFORE
+		// it starts anything (brief OQ6). The onboarding seam cannot answer this
+		// question for us: project.OnboardStart is idempotent by design — for an
+		// entry that already exists it returns that entry's current draft rather
+		// than re-cloning, which is right for the run's own re-dispatch and would
+		// be wrong here, where it would attach this caller's onboarding task to
+		// somebody else's project.
+		//
+		// It is an EXISTENCE question and nothing more: no row, no column and no
+		// fact about another person's project reaches the answer, which is the
+		// same `already_registered` the caller's own taken id gets. What they
+		// learn is only what they must in order to choose another id — and they
+		// can already tell whether an id is one of theirs by reading their own
+		// list. An id they cannot see never reaches the seam at all.
+		taken, err := s.projectIDTaken(r.Context(), projectID)
+		if err != nil {
+			s.writeSurface(w, nil, err)
+			return
+		}
+		if taken {
+			s.writeSurfaceErr(w, errProjectTaken)
+			return
+		}
 	}
 
 	refs, err := s.onboard.StartOnboarding(r.Context(), id.UserID, projectID, name, strings.TrimSpace(body.RemoteURL))
@@ -648,6 +676,26 @@ func (s *Server) writeStarted(w http.ResponseWriter, r *http.Request, row projec
 		Project: row.detail(), TaskID: refs.TaskID, AskRef: refs.AskRef,
 		Detail: detail, Cursor: cursor,
 	})
+}
+
+// onboardTaskFiled answers whether the onboarding task the seam names for this
+// project has actually been filed. It is what turns the create door's in-flight
+// answer from a claim into an observation (drain r1 D1): a `200 already started`
+// naming references that resolve to nothing is worse than starting again.
+//
+// It reads the task row by its id and nothing else — no column, no owner, no
+// title — and it is asked only about the CALLER'S OWN pending entry, so it
+// discloses nothing an owner does not already hold.
+func (s *Server) onboardTaskFiled(ctx context.Context, taskID string) (bool, error) {
+	var one int
+	err := s.proj.db.QueryRowContext(ctx, `SELECT 1 FROM tasks WHERE task_id = ?`, taskID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read onboarding task: %w", err)
+	}
+	return true, nil
 }
 
 // projectIDTaken answers whether a registry id is in use. It reads NO column of
