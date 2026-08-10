@@ -1,5 +1,7 @@
 # P3-RW-3 grounded brief — pre-approval project attribution (the durable intake-time pin reaches the task list)
 
+> **EXPIRED at landing 2026-08-11 (amendment D).** Single-use artifact for the P3-RW-3 pipeline run (red `0b26253` + impl `78e3b64`; evaluation PASS first pass, three nits — N1/N2 coordinator-fixed inline at landing, N3 accepted with note). Known post-landing divergences from this text: FOUR `user_version` pins existed (not two — deviation upheld); `runs_task_idx` was added inside 0022 on EXPLAIN evidence per R14. Later grounding must never read this as truth — code + spec only.
+
 Grounded 2026-08-10 against `Spec/core-architecture-v1.md` (drafts canonical) and the live tree.
 This brief is a SINGLE-USE artifact: it expires when the packet lands. Code + spec are the only truth.
 

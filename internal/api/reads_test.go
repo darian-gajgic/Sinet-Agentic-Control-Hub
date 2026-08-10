@@ -40,8 +40,9 @@ func twoOwners(t *testing.T) *backend {
 	seedRun(t, b, "r-bob", "bob", "t-bob", "parked", "lane-bob")
 	seedAsk(t, b, "ask-bob", "r-bob", "bob", "gate")
 
-	// artifact_claims is the only populated project edge (§37): alice's task
-	// resolves a project, bob's resolves none and lands in the honest bucket.
+	// artifact_claims is this world's populated project edge (§37; since 0022
+	// the intake-time pin is the other, unseeded here): alice's task resolves
+	// a project, bob's resolves none and lands in the honest bucket.
 	exec(t, b, `INSERT INTO artifact_claims (task_id, project, user_id, path_globs, mode, status, created_ts)
 	            VALUES (?,?,?,?,?,?,?)`, "t-alice", "proj-alice", "alice", "**", "W", "active", nowTS())
 

@@ -663,7 +663,7 @@ func TestPartCCountersArePinned(t *testing.T) {
 	}
 	for _, p := range sqls {
 		if filepath.Base(p) > "0022_zzz" {
-			t.Errorf("unexpected migration %q — part C adds exactly 0018, B6-3A exactly 0019 and B6-7 exactly 0020", filepath.Base(p))
+			t.Errorf("unexpected migration %q — part C adds exactly 0018, B6-3A exactly 0019, B6-7 exactly 0020 and P3-RW-3 exactly 0022", filepath.Base(p))
 		}
 	}
 }

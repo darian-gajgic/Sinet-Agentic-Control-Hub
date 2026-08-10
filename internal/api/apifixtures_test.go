@@ -218,8 +218,10 @@ func fixtureWorldOn(t *testing.T, b *backend, root string) *backend {
 		exec(t, b, `INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?,?,?,?,?)`,
 			tk.id, tk.owner, tk.title, tk.kanban, tk.created)
 	}
-	// artifact_claims is the only populated project edge at v0 (§37); the tasks
-	// with no claim resolve to the honest bucket rather than dropping out.
+	// artifact_claims is this world's populated project edge (§37; since 0022 a
+	// durable intake-time pin is the other — the seed's intake.state carries no
+	// registry key, so claims alone attribute here); the tasks with no claim
+	// resolve to the honest bucket rather than dropping out.
 	// path_globs is JSON — the shape insertClaimTx writes and claimOverlapTx
 	// decodes; a raw glob string here 500s plan approval into this project
 	// (checkpoint-3 builder find, 2026-08-06).
