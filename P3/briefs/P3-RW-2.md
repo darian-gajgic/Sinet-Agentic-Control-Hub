@@ -1,5 +1,7 @@
 # P3-RW-2 grounded brief — the projects HTTP family (S13.7 over S15.2)
 
+> **EXPIRED at landing 2026-08-10 (amendment D).** Single-use artifact for the P3-RW-2 pipeline run (`8f2a8f4`+`0fc74d2`+drain `ef47563`); after drain fixes it no longer matches the code (the OQ7 pre-read now verifies-then-falls-through; the store-exists refusal is conflict-shaped and path-free; checklist item 12's "exactly three" was a brief defect — four since B6-7). The evaluation record lives in `P3/briefs/P3-RW-2-eval-report.md` (FAIL → drain r1 → re-check PASS). Later grounding must never read either as truth — code + spec only.
+
 Grounded 2026-08-06 against the live tree (post-P3-RW-1, post-B6/UI batch) and `Spec/drafts/` (canonical).
 Origin: product map v3, `P3/design/product-map.md` §5 (▲ v3 paragraph) + §3 Projects — checkpoint-2 grounding: **no `/api/projects` route exists at all** (re-verified this session: the §2 route table in `internal/api/api.go` `Handler()` registers none, and the three committed red tests below all fail on the mux's own `404 page not found`).
 
