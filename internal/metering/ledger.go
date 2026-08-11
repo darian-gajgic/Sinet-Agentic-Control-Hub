@@ -215,7 +215,7 @@ func (l *Ledger) fold(runID, userID string, rows []checkpointRow) RunConsumption
 // verify run's whole consumption is the verification tax and the per-round
 // itemization lives in the verify.round records.
 func derivePurpose(runID string, _ checkpointRow) PurposeTag {
-	base := stripForkSuffix(runID)
+	base := StripForkSuffix(runID)
 	switch {
 	case strings.HasSuffix(base, RunSuffixIntake):
 		return PurposeCeremony
@@ -231,10 +231,19 @@ func derivePurpose(runID string, _ checkpointRow) PurposeTag {
 	}
 }
 
-// stripForkSuffix removes trailing `.g<n>` recovery-fork segments (Spec
+// StripForkSuffix removes trailing `.g<n>` recovery-fork segments (Spec
 // S02.5: successor run ids are `<parent>.g<newGen>`) so a forked role run
 // keeps its role's purpose.
-func stripForkSuffix(runID string) string {
+//
+// It is EXPORTED because it is the platform's ONE fork-aware suffix matcher
+// (P3-RW-6 OQ5): the run-role router (internal/stage) and the project workspace
+// gate (internal/shell) read run ids for exactly this reason, and while three
+// private implementations existed they disagreed — the workspace gate's raw
+// HasSuffix refused `<task>.execute.g1`, so a recovery fork of a project-backed
+// execution silently lost its worktree lane. This package owns the run-suffix
+// constants both packages already alias, so it owns the strip. A fourth private
+// copy anywhere is a defect.
+func StripForkSuffix(runID string) string {
 	for {
 		i := strings.LastIndex(runID, ".g")
 		if i < 0 || i+2 >= len(runID) {

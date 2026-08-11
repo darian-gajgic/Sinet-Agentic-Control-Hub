@@ -18,6 +18,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
@@ -170,6 +171,17 @@ func New(cfg Config) (*Skeleton, error) {
 	if cfg.Review != nil && cfg.BaseContent != nil {
 		cfg.Review.BaseContent = cfg.BaseContent
 	}
+	// The two S12.4 duty seams whose signatures carry no run id are bound to the
+	// current-identity reader HERE, where the pipeline is born (P3-RW-6 R7):
+	// their $0 D7 rows must ride the run the pipeline is driving, and on a
+	// recovery fork that is the fork. Unbound (a seam built elsewhere and never
+	// passed through this constructor) keeps the birth composition exactly.
+	if u, ok := s.pipe.Utility.(*localUtility); ok {
+		u.currentRun = s.currentIntakeRun
+	}
+	if sc, ok := s.pipe.SpotCheck.(*localSpotCheck); ok {
+		sc.currentRun = s.currentIntakeRun
+	}
 	if s.pipe.Planner == nil {
 		s.pipe.Planner = &EnginePlanner{s: s}
 	}
@@ -204,6 +216,23 @@ func (s *Skeleton) now() time.Time {
 	return time.Now()
 }
 
+// currentIntakeRun resolves a task's CURRENT intake run id — the identity the
+// pipeline state carries right now, which after a recovery-fork rebind is the
+// FORK (Spec S02.5 step 2; P3-RW-6 R7). It is the reader for the seams whose
+// signature admits no run id (the S06.8 Critic; the S12.4 local duties), and it
+// realizes the general rule this packet records: a run id is composed exactly
+// ONCE, at birth — every later consumer reads the run's current identity from
+// state and never re-derives it from the task id (CONVENTIONS §16, extended).
+//
+// No state (a task that never started, a test posture) falls back to the birth
+// composition, which is exactly what the identity was before any fork.
+func (s *Skeleton) currentIntakeRun(ctx context.Context, taskID string) string {
+	if st, err := s.pipe.LoadState(ctx, taskID); err == nil && st.RunID != "" {
+		return st.RunID
+	}
+	return taskID + RunSuffixIntake
+}
+
 // ---- run roles ----
 
 type role string
@@ -222,18 +251,14 @@ func runRole(runID string) (role, bool) {
 	// this, every recovery fork of a pipeline run was unroutable and
 	// crashed at dispatch, burning the ladder to tombstone (found live at
 	// the B2 gate demo, 2026-07-20).
-	id := runID
-	for {
-		i := strings.LastIndexByte(id, '.')
-		if i < 0 {
-			return "", false
-		}
-		if seg := id[i+1:]; len(seg) >= 2 && seg[0] == 'g' && allDigits(seg[1:]) {
-			id = id[:i]
-			continue
-		}
-		break
-	}
+	//
+	// The stripping itself is the ONE shared matcher (P3-RW-6 OQ5): three
+	// private implementations existed and the third — the shell's raw
+	// HasSuffix on the workspace gate — was wrong, so a fork of an execute run
+	// silently lost its worktree. metering owns the suffix constants this
+	// package already aliases, so it owns the strip too; a fourth copy is a
+	// defect.
+	id := metering.StripForkSuffix(runID)
 	switch {
 	case strings.HasSuffix(id, RunSuffixIntake):
 		return roleIntake, true
@@ -252,15 +277,6 @@ func runRole(runID string) (role, bool) {
 		return roleDirect, true
 	}
 	return "", false
-}
-
-func allDigits(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
 }
 
 // ---- scheduler.Dispatcher ----
@@ -332,7 +348,14 @@ func (s *Skeleton) dispatchIntake(ctx context.Context, r run.Run) error {
 	}); err != nil {
 		return err
 	}
-	st, err := s.pipe.Advance(ctx, r.TaskID)
+	// The dispatched run's OWN identity crosses into the pipeline (Spec S02.5
+	// step 2): on a recovery fork the pipeline rebinds its state onto this run
+	// and supersedes the parent. Driving by task id alone left the pipeline
+	// checking the crashed parent's state — ErrNotRunning on every generation,
+	// re-fork, tombstone (the live-world t-80eff lineage). The skeleton hands
+	// over r.ID and nothing else; the rebind and its lineage guard are the
+	// pipeline's own (it owns the state that carries the identity).
+	st, err := s.pipe.AdvanceDispatched(ctx, r.TaskID, r.ID)
 	if err != nil {
 		s.crash(ctx, r.ID, "intake advance: "+err.Error())
 		return fmt.Errorf("stage: intake advance: %w", err)

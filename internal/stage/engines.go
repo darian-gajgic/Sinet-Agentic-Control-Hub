@@ -133,7 +133,7 @@ func (p *EnginePlanner) Draft(ctx context.Context, in intake.DraftInput) (intake
 			"Read the interview record in the %s block above; honor registry-supplied facts and recorded assumptions.\n"+
 			"Emit SPEC version %d and PLAN version %d (plan.spec_version %d).\n%s",
 		in.Request.TaskID, in.Family, in.Tier, itemDraftInput, in.SpecVersion, in.PlanVersion, in.SpecVersion, pairSchema)
-	return p.pairSession(ctx, in.Request.TaskID, in.Request.UserID, in.Tier, extra, markerPlanDraft, instructions,
+	return p.pairSession(ctx, in.RunID, in.Request.TaskID, in.Request.UserID, in.Tier, extra, markerPlanDraft, instructions,
 		in.SpecVersion, in.PlanVersion)
 }
 
@@ -147,15 +147,24 @@ func (p *EnginePlanner) Revise(ctx context.Context, in intake.ReviseInput) (inta
 			"Address EXACTLY the numbered findings/resolutions in the %s block above — criteria do not drift (Spec S06.7(a)/S06.8).\n"+
 			"Emit SPEC version %d and PLAN version %d (plan.spec_version %d).\n%s",
 		in.Pair.Spec.TaskID, in.Reason, itemReviseInput, in.SpecVersion, in.PlanVersion, in.SpecVersion, pairSchema)
-	return p.pairSession(ctx, in.Pair.Spec.TaskID, in.Pair.Spec.Owner, in.Pair.Spec.Tier, extra, markerPlanRevise, instructions,
+	return p.pairSession(ctx, in.RunID, in.Pair.Spec.TaskID, in.Pair.Spec.Owner, in.Pair.Spec.Tier, extra, markerPlanRevise, instructions,
 		in.SpecVersion, in.PlanVersion)
 }
 
-func (p *EnginePlanner) pairSession(ctx context.Context, taskID, owner string, tier intake.Tier,
+// pairSession runs one planning session on the CONSUMING run the pipeline
+// handed us (P3-RW-6 R7). It is never suffix-composed from the task id: on a
+// recovery-fork intake run that composition names the SUPERSEDED PARENT, whose
+// generation the event-log fence rejects and whose crashed state makes a
+// checkpoint unwritable — the judge seam states the same rule (CONVENTIONS §16).
+// An unset run id keeps the birth composition (an unrebound caller, tests).
+func (p *EnginePlanner) pairSession(ctx context.Context, runID, taskID, owner string, tier intake.Tier,
 	extra ledger.Item, kind, instructions string, specV, planV int) (intake.Pair, error) {
+	if runID == "" {
+		runID = taskID + RunSuffixIntake
+	}
 	var pair intake.Pair
 	err := p.s.jsonSession(ctx, SessionInput{
-		RunID:    taskID + RunSuffixIntake,
+		RunID:    runID,
 		Stage:    "plan",
 		Assemble: true,
 		// Knowledge wired at B3-1 (Spec S09.3 house/project/user slices);
@@ -285,9 +294,14 @@ func (c *EngineCritic) session(ctx context.Context, pair intake.Pair, recheck []
 	b.Write(pairJSON)
 	b.WriteString("\n\n" + verdictSchema + "\n")
 
+	// The Critic seam admits nothing but the pair — that signature IS the S06.8
+	// context separation and this packet does not widen it. So the CONSUMING run
+	// is read from the pipeline's current state instead (the engineRevise
+	// LoadState precedent below): after a recovery-fork rebind that is the fork,
+	// never the superseded parent (P3-RW-6 R7; CONVENTIONS §16 run-id rule).
 	var v intake.Verdict
 	err = c.s.jsonSession(ctx, SessionInput{
-		RunID:        pair.Spec.TaskID + RunSuffixIntake,
+		RunID:        c.s.currentIntakeRun(ctx, pair.Spec.TaskID),
 		Stage:        "critique",
 		Assemble:     false, // artifact-only (Spec S06.8)
 		Instructions: b.String(),

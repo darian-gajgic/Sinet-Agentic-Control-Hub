@@ -233,6 +233,15 @@ type EscalationAnswer struct {
 // coverage; the resolutions carry its outcome. Data-bearing hits oblige
 // research nodes by policy — present before any model drafted the plan.
 type DraftInput struct {
+	// RunID is the CONSUMING run — the run the pipeline is driving right now,
+	// which after a recovery-fork rebind is the FORK and never the superseded
+	// parent. It is carried on the seam input rather than re-derived from the
+	// task id, because a run id is composed exactly once, at birth: every later
+	// consumer reads the run's current identity (CONVENTIONS §16 run-id rule,
+	// extended by P3-RW-6 OQ4). Sessions, checkpoints and ledger writes made by
+	// an implementation of this seam ride it.
+	RunID string
+
 	Request     Request
 	Family      Family
 	Tier        Tier
@@ -262,6 +271,9 @@ const (
 // Criteria do not drift: a revision addresses exactly the named findings
 // or resolutions (Spec S06.7(a), S06.8).
 type ReviseInput struct {
+	// RunID is the consuming run (see DraftInput.RunID).
+	RunID string
+
 	Pair        Pair
 	Reason      string
 	Findings    []string
@@ -373,6 +385,11 @@ var (
 	ErrNotRunning = errors.New("intake: run is not running")
 	// ErrNoState is returned for a task with no intake pipeline state.
 	ErrNoState = errors.New("intake: task has no intake state")
+	// ErrLineage refuses a dispatch-entry rebind onto a run that is not a
+	// descendant of the state's current run (Spec S02.5 step 3 lineage,
+	// migration 0002): a rebind MOVES the pipeline's identity, so it is granted
+	// only along a real `runs.parent_run_id` chain within the same task.
+	ErrLineage = errors.New("intake: dispatched run is not a recovery descendant of this task's intake run")
 	// ErrGateOpen rejects advancing while a card waits — gates wait, at
 	// every tier (Spec S06.1); answering resumes the pipeline in place.
 	ErrGateOpen = errors.New("intake: a gate is open and waiting (S06.1: gates wait)")

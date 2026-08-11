@@ -182,9 +182,16 @@ func (s *Skeleton) dispatchOnboard(ctx context.Context, r run.Run) error {
 	askID := OnboardAskID(projectID)
 	return s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
+			// run_id REBINDS on conflict (P3-RW-6 R11): the re-issued ask belongs
+			// to the run that is issuing it. A recovery fork re-dispatches this
+			// leg, and leaving the row pinned to the crashed parent tore the
+			// answer in half — OnboardApprove activated the entry and then the
+			// run transition failed (crashed→running is no edge), leaving the
+			// fork parked forever on a card it could never close.
 			`INSERT INTO asks (ask_id, run_id, user_id, snapshot, status, observed_ts)
 			 VALUES (?, ?, ?, ?, 'open', ?)
-			 ON CONFLICT (ask_id) DO UPDATE SET snapshot = excluded.snapshot, status = 'open'`,
+			 ON CONFLICT (ask_id) DO UPDATE SET
+			     run_id = excluded.run_id, snapshot = excluded.snapshot, status = 'open'`,
 			askID, r.ID, r.UserID, string(snapshot), now); err != nil {
 			return fmt.Errorf("stage: insert onboarding ask: %w", err)
 		}

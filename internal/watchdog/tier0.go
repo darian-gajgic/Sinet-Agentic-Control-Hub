@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
@@ -279,25 +280,10 @@ func classExpectsActivity(r run.Run) bool {
 	return strings.HasSuffix(base, ".execute") || strings.HasSuffix(base, ".verify")
 }
 
-// stripForkSuffix removes trailing `.g<n>` recovery-fork segments so a forked
-// role run keeps its role (mirrors metering.stripForkSuffix; that symbol is
-// package-private to metering, and the wall keeps this read local).
-func stripForkSuffix(runID string) string {
-	for {
-		i := strings.LastIndex(runID, ".g")
-		if i < 0 || i+2 >= len(runID) {
-			return runID
-		}
-		allDigits := true
-		for _, c := range runID[i+2:] {
-			if c < '0' || c > '9' {
-				allDigits = false
-				break
-			}
-		}
-		if !allDigits {
-			return runID
-		}
-		runID = runID[:i]
-	}
-}
+// stripForkSuffix delegates to the platform's ONE fork-aware suffix matcher
+// (P3-RW-6 OQ5). It was a private mirror while metering's symbol was
+// unexported; now that the workspace gate, the run-role router and this reader
+// all need the same reading, they share it — a private copy is how two layers
+// come to disagree about what one run id means. internal/metering is inside the
+// §31 forward import allowlist, so the wall is untouched.
+func stripForkSuffix(runID string) string { return metering.StripForkSuffix(runID) }

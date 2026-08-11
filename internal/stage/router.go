@@ -24,19 +24,26 @@ type skeletonRouter struct{ s *Skeleton }
 var _ intake.Router = (*skeletonRouter)(nil)
 
 func (sr *skeletonRouter) RouteTask(ctx context.Context, q intake.RouteQuery) (intake.RouteBlock, error) {
+	// Intake-time routing: the consuming run of any tie-break D7 write is the
+	// intake run — the one the pipeline is driving NOW (drain F2), which the
+	// query carries. On a recovery fork the suffix composition would name the
+	// superseded parent, whose crashed state makes that D7 row unwritable
+	// (P3-RW-6 R7). An unset id keeps the birth composition (test posture).
+	runID := q.RunID
+	if runID == "" {
+		runID = sr.s.currentIntakeRun(ctx, q.TaskID)
+	}
 	d, err := sr.s.router.Route(ctx, worker.RouteQuery{
 		Requester: q.Requester,
 		TaskID:    q.TaskID,
-		// Intake-time routing: the consuming run of any tie-break D7 write is
-		// the intake run (drain F2).
-		RunID:    q.TaskID + RunSuffixIntake,
-		TaskText: q.TaskText,
-		Family:   q.Family,
-		Domain:   domainFor(intake.Family(q.Family)),
-		Kind:     worker.KindAgentic,
-		Classes:  q.Classes,
-		Tools:    q.Tools,
-		Research: q.Research,
+		RunID:     runID,
+		TaskText:  q.TaskText,
+		Family:    q.Family,
+		Domain:    domainFor(intake.Family(q.Family)),
+		Kind:      worker.KindAgentic,
+		Classes:   q.Classes,
+		Tools:     q.Tools,
+		Research:  q.Research,
 	})
 	if err != nil {
 		return intake.RouteBlock{}, err

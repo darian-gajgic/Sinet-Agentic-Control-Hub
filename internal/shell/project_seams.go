@@ -9,6 +9,7 @@ import (
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
@@ -217,7 +218,13 @@ func (s *projectSeams) projectForTask(ctx context.Context, taskID string) (strin
 // branch, no snapshot. It creates the task's run-branch worktree on first call
 // and records runs.workspace_ref (R14).
 func (s *projectSeams) WorkspaceCwd(ctx context.Context, runID string) (string, bool, error) {
-	if !strings.HasSuffix(runID, stage.RunSuffixExecute) {
+	// The role gate is FORK-AWARE through the platform's one shared suffix
+	// matcher (P3-RW-6 R12/OQ5): a recovery fork `<task>.execute.g1` is the same
+	// execution under a new identity (Spec S02.5 step 3), and the raw suffix test
+	// refused it — the resumed execution silently lost the worktree and snapshot
+	// lane its parent had, writing into the plain run dir instead. The lane
+	// itself is per (project, task), so the fork resolves to the same worktree.
+	if !strings.HasSuffix(metering.StripForkSuffix(runID), stage.RunSuffixExecute) {
 		return "", false, nil
 	}
 	r, err := s.runs.Get(ctx, runID)

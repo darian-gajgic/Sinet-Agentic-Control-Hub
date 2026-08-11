@@ -20,13 +20,18 @@ import (
 
 // RouteQuery carries the plan-declared requirements to the router.
 type RouteQuery struct {
-	Requester string   `json:"requester"`
-	TaskID    string   `json:"task_id"`
-	TaskText  string   `json:"task_text"`
-	Family    string   `json:"family"`
-	Classes   []string `json:"classes,omitempty"`
-	Tools     []string `json:"tools,omitempty"`
-	Research  bool     `json:"research,omitempty"`
+	Requester string `json:"requester"`
+	TaskID    string `json:"task_id"`
+	// RunID is the CONSUMING run of any work the selection performs (the
+	// tie-break's $0 D7 row rides it) — the run the pipeline is driving now,
+	// which after a recovery-fork rebind is the fork, never the superseded
+	// parent (CONVENTIONS §16 run-id rule; the worker.RouteQuery.RunID shape).
+	RunID    string   `json:"run_id,omitempty"`
+	TaskText string   `json:"task_text"`
+	Family   string   `json:"family"`
+	Classes  []string `json:"classes,omitempty"`
+	Tools    []string `json:"tools,omitempty"`
+	Research bool     `json:"research,omitempty"`
 }
 
 // RouteCandidate is one re-route target offered on the card.
@@ -102,9 +107,11 @@ func routeQueryFor(st *State, pair *Pair) RouteQuery {
 	q := RouteQuery{
 		Requester: st.Owner,
 		TaskID:    st.TaskID,
-		TaskText:  st.Req.Title + " " + st.Req.Text,
-		Family:    string(st.Family),
-		Research:  len(pair.Plan.ResearchNodes) > 0,
+		// The consuming run, read from the state — the fork after a rebind (R7).
+		RunID:    st.RunID,
+		TaskText: st.Req.Title + " " + st.Req.Text,
+		Family:   string(st.Family),
+		Research: len(pair.Plan.ResearchNodes) > 0,
 	}
 	seen := map[string]bool{}
 	for _, s := range pair.Plan.Steps {

@@ -83,6 +83,10 @@ func NewLocalClassifierWithRecheck(duty *local.Duty, recheck *local.ReChecker) i
 
 func (c *localClassifier) Classify(ctx context.Context, req intake.Request, reg *intake.RegistrySlice) (intake.TriageProposal, error) {
 	schema := local.TriageSchema(triageFamilies(), triageTiers(), triageSizes)
+	// Start-only duty: triage runs inside Pipeline.Start, where the intake run is
+	// being BORN and the composed id IS its current identity — the one site where
+	// composition is the right reading (P3-RW-6 R7; the birth half of the §16
+	// run-id rule). It can never see a fork.
 	runID := req.TaskID + RunSuffixIntake
 	in := local.DutyRequest{
 		Alias:          local.AliasIntakeTriage,
@@ -171,17 +175,23 @@ func validFamily(f intake.Family) bool {
 
 // ---- Utility (utility alias, drafting) ----
 
-type localUtility struct{ duty *local.Duty }
+type localUtility struct {
+	duty *local.Duty
+	// currentRun resolves the task's CURRENT intake run — bound by stage.New,
+	// where the pipeline is born (see currentRunFor). Nil keeps the birth
+	// composition, which is what an unwired composition always meant.
+	currentRun func(ctx context.Context, taskID string) string
+}
 
 var _ intake.Utility = (*localUtility)(nil)
 
 // NewLocalUtility wraps the duty caller as the intake Utility seam (optional;
 // a caller error degrades to the pipeline's deterministic help text).
-func NewLocalUtility(duty *local.Duty) intake.Utility { return &localUtility{duty} }
+func NewLocalUtility(duty *local.Duty) intake.Utility { return &localUtility{duty: duty} }
 
 func (u *localUtility) Help(ctx context.Context, pair intake.Pair) (intake.HelpBlock, error) {
 	schema := local.HelpSchema()
-	res, err := u.duty.Call(ctx, pair.Spec.TaskID+RunSuffixIntake, local.DutyRequest{
+	res, err := u.duty.Call(ctx, currentRunFor(ctx, u.currentRun, pair.Spec.TaskID), local.DutyRequest{
 		Alias:          local.AliasUtility,
 		System:         "You draft plain-language help for a non-technical reader. Be concrete and brief.",
 		User:           helpPrompt(pair, schema),
@@ -213,19 +223,38 @@ func helpPrompt(pair intake.Pair, schema json.RawMessage) string {
 
 // ---- SpotCheck (utility alias — R20; advisory coverage) ----
 
-type localSpotCheck struct{ duty *local.Duty }
+type localSpotCheck struct {
+	duty       *local.Duty
+	currentRun func(ctx context.Context, taskID string) string
+}
 
 var _ intake.SpotCheck = (*localSpotCheck)(nil)
+
+// currentRunFor names the run a $0 duty call's D7 row rides: the run the intake
+// pipeline is driving RIGHT NOW (§26: the consuming run), which after a
+// recovery-fork rebind is the fork — the superseded parent is crashed, and a
+// duty call naming it would surface a `local.unmetered_defect` instead of
+// metering the work (P3-RW-6 R7). These two seams take only the artifact pair
+// (S06.10 fixes their signatures), so the resolver is bound at composition
+// rather than passed per call; unbound keeps the birth composition.
+func currentRunFor(ctx context.Context, resolve func(context.Context, string) string, taskID string) string {
+	if resolve != nil {
+		if id := resolve(ctx, taskID); id != "" {
+			return id
+		}
+	}
+	return taskID + RunSuffixIntake
+}
 
 // NewLocalSpotCheck wraps the duty caller as the intake SpotCheck seam. It
 // rides the `intake-triage` alias (drain F8): S12.4's registry lists the
 // advisory coverage spot-check in the intake-triage row (the fast seat); the
 // utility row omits it — the spec wins over the brief's R20 mis-citation.
-func NewLocalSpotCheck(duty *local.Duty) intake.SpotCheck { return &localSpotCheck{duty} }
+func NewLocalSpotCheck(duty *local.Duty) intake.SpotCheck { return &localSpotCheck{duty: duty} }
 
 func (s *localSpotCheck) Check(ctx context.Context, pair intake.Pair) ([]string, error) {
 	schema := local.SpotCheckSchema()
-	res, err := s.duty.Call(ctx, pair.Spec.TaskID+RunSuffixIntake, local.DutyRequest{
+	res, err := s.duty.Call(ctx, currentRunFor(ctx, s.currentRun, pair.Spec.TaskID), local.DutyRequest{
 		Alias:          local.AliasIntakeTriage,
 		System:         "You perform an advisory semantic coverage check. Put brief reasoning in the leading \"reason\" field, then list in \"uncovered\" the acceptance-criteria labels the plan appears NOT to cover. Advisory only — never a gate.",
 		User:           spotCheckPrompt(pair, schema),

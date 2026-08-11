@@ -326,6 +326,126 @@ func (p *Pipeline) Advance(ctx context.Context, taskID string) (*State, error) {
 	return p.advanceLoaded(ctx, st)
 }
 
+// AdvanceDispatched is the entry the DISPATCH leg uses: it names the run the
+// scheduler just claimed and drove to running, and the pipeline REBINDS its
+// state onto that run before advancing (Spec S02.5 step 2 — the fork
+// "supersedes" its parent; S02.3 supersession).
+//
+// This exists because the pipeline's state carries the run id it was born with
+// (`<task>.intake`, composed once at birth). A recovery fork is a DIFFERENT run
+// row, so a dispatch that drove the pipeline by task id alone left the pipeline
+// checking, holding the lease of, and completing the CRASHED PARENT — the
+// advance died with ErrNotRunning, the ladder re-forked, and the lineage burned
+// to a tombstone with everything needed to heal already durable (the live-world
+// t-80eff shape). The rebind is the whole of the fix; everything downstream
+// already reads `st.RunID`.
+//
+// The rebind happens BEFORE any advance decision, including the terminal-phase
+// and open-gate early returns — a fork dispatched over an already-approved
+// state must complete ITSELF, and a fork dispatched over an open gate must park
+// on that gate rather than sit running-idle for the ladder to reap again.
+func (p *Pipeline) AdvanceDispatched(ctx context.Context, taskID, runID string) (*State, error) {
+	st, err := p.LoadState(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	rebound, err := p.rebind(ctx, st, runID)
+	if err != nil {
+		return nil, err
+	}
+	if rebound && st.OpenAskID != "" {
+		// S06.1 gates wait: the fork inherited an OPEN gate, so it parks on it
+		// here — the dispatch leg already took the run to running, and a running
+		// run nobody drives is exactly the corpse the ladder reaps next pass.
+		// NOT a kill: the run is ours, it is idle by construction, and parking is
+		// the ratified wait state (NO-AUTO-KILL, S14.4 / G1 D1.3).
+		if _, err := p.Runs.Transition(ctx, st.RunID, run.StateParked, run.TransitionOptions{
+			Reason: fmt.Sprintf("intake gate open on the superseding run: %s — gates wait (S06.1)", st.OpenAskKind),
+			Actor:  run.ActorPlatform,
+		}); err != nil {
+			return nil, err
+		}
+		return st, nil
+	}
+	return p.advanceLoaded(ctx, st)
+}
+
+// rebind moves the pipeline state's identity onto the dispatched run when that
+// run supersedes the state's current one, and reports whether it did.
+//
+// The guard is the S02.5 step-3 LINEAGE, not the id's shape: walking the
+// dispatched run's `parent_run_id` chain (migration 0002) must reach the
+// state's current run, and both must belong to the same task. A same-id
+// dispatch is a no-op (the ordinary, non-forked path performs no write at all —
+// R13). Anything else is refused loudly with ErrLineage: a rebind onto an
+// unrelated run would hand one task's interview to another run's identity, and
+// the dispatch leg's crash path is the right place for that to surface.
+//
+// The multi-hop case is real: if a fork crashed before its own rebind
+// committed, the state still names an ANCESTOR of the run being dispatched.
+func (p *Pipeline) rebind(ctx context.Context, st *State, runID string) (bool, error) {
+	if runID == "" || runID == st.RunID {
+		return false, nil
+	}
+	r, err := p.Runs.Get(ctx, runID)
+	if err != nil {
+		return false, err
+	}
+	if r.TaskID != st.TaskID {
+		return false, fmt.Errorf("%w: run %q belongs to task %q, not %q", ErrLineage, runID, r.TaskID, st.TaskID)
+	}
+	if err := p.lineageReaches(ctx, r, st.RunID); err != nil {
+		return false, err
+	}
+	from := st.RunID
+	st.RunID = runID
+	// ONE transaction: the rebind state event lands on the FORK at the fork's
+	// current generation (appendStateTx reads it in-tx — CONVENTIONS §13:
+	// control-plane acts append at the run's current generation), and an open
+	// ask row re-points to the fork in the same commit so `asks.run_id` never
+	// names a superseded run (recovery's step-5 ask join excludes asks on
+	// terminal runs).
+	err = p.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		if st.OpenAskID != "" {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE asks SET run_id = ? WHERE ask_id = ? AND status = 'open'`,
+				st.RunID, st.OpenAskID); err != nil {
+				return fmt.Errorf("intake: re-point ask %q: %w", st.OpenAskID, err)
+			}
+		}
+		return p.appendStateTx(ctx, tx, st)
+	})
+	if err != nil {
+		st.RunID = from // the in-memory state never outruns the durable record
+		return false, err
+	}
+	return true, nil
+}
+
+// lineageReaches walks the dispatched run's parent chain until it reaches
+// target (Spec S02.5 step 3: a successor's `parent_run_id` names the run it
+// supersedes). Each hop must be a real row; the walk is bounded by
+// ⚙ recovery.max_attempts' worth of generations several times over, so a cyclic
+// or absurd chain refuses rather than spins.
+func (p *Pipeline) lineageReaches(ctx context.Context, from run.Run, target string) error {
+	const maxHops = 64
+	cur := from
+	for hop := 0; hop < maxHops; hop++ {
+		if cur.ParentRunID == "" {
+			return fmt.Errorf("%w: %q has no lineage reaching %q", ErrLineage, from.ID, target)
+		}
+		if cur.ParentRunID == target {
+			return nil
+		}
+		next, err := p.Runs.Get(ctx, cur.ParentRunID)
+		if err != nil {
+			return fmt.Errorf("%w: %q lineage hop %q: %v", ErrLineage, from.ID, cur.ParentRunID, err)
+		}
+		cur = next
+	}
+	return fmt.Errorf("%w: %q lineage exceeds %d hops", ErrLineage, from.ID, maxHops)
+}
+
 func (p *Pipeline) advanceLoaded(ctx context.Context, st *State) (*State, error) {
 	if st.Phase == PhaseApproved || st.Phase == PhaseCancelled {
 		return st, nil
@@ -444,6 +564,9 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 
 	// Draft (Stage-1 emission).
 	in := DraftInput{
+		// The CONSUMING run, read from the state rather than composed from the
+		// task id: after a recovery-fork rebind it is the fork (R7).
+		RunID:   st.RunID,
 		Request: st.Req, Family: st.Family, Tier: st.Tier,
 		Registry: st.Registry, Taxonomy: tax,
 		Resolutions: st.Resolutions, DataHits: st.openDataBearing(),
@@ -481,7 +604,8 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 	if st.PendingRevise != nil {
 		req := *st.PendingRevise
 		in := ReviseInput{
-			Pair: *pair, Reason: req.Reason, Findings: req.Findings,
+			RunID: st.RunID, // the consuming run (R7)
+			Pair:  *pair, Reason: req.Reason, Findings: req.Findings,
 			Resolutions: req.Resolutions, Escalations: st.Escalations,
 			SpecVersion: st.SpecVersion + 1, PlanVersion: st.PlanVersion + 1,
 		}
