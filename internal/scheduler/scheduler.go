@@ -433,6 +433,14 @@ func (s *Scheduler) claimPass(ctx context.Context) (int, error) {
 	if err := s.reconcileQueueRows(ctx); err != nil {
 		return 0, err
 	}
+	// The other half of the same level-triggered reconcile: rows whose run has
+	// ENDED settle here (S10.7 — "'done' is a settled admission"), including the
+	// ones the recovery ladder ended long after the dispatch path stopped
+	// watching. Settling before claiming also means this pass's slot arithmetic
+	// reads a queue that matches the run table.
+	if err := s.settleEndedRows(ctx); err != nil {
+		return 0, err
+	}
 	cands, err := s.candidates(ctx)
 	if err != nil {
 		return 0, err

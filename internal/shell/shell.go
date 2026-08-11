@@ -201,7 +201,17 @@ func Run(ctx context.Context, opts Options) error {
 			// anyway (it is keyed on the parent run id). internal/recovery names
 			// no run class of its own — the convention lives in internal/stage and
 			// is composed here, where both packages are visible.
-			NoFork: stage.IsDirectArmRun,
+			// ...and, structurally, any run id carrying NO skeleton role: its
+			// fork could never dispatch (P3-RW-6 R15). A roleless crashed run
+			// forked into a successor nobody can route, which crashed, which
+			// forked again — a fork loop whose standing production bait is the
+			// S14.4 dead-man canary (`platform.deadman.*` is roleless by
+			// construction, and an orphaned probe ages past ⚙ recovery.dead_after
+			// like anything else). Finalize-with-card is the honest terminal: a
+			// $0 momentary probe has no paid work for a fork to save.
+			NoFork: func(runID string) bool {
+				return stage.IsDirectArmRun(runID) || !stage.Routable(runID)
+			},
 			// Units/Harvest default to the B0 probes: real systemd and
 			// engine-store observation arrive with run units and adapters
 			// (B1, Spec S02.5 step 1, S03).

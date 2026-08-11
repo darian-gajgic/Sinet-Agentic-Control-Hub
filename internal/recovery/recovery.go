@@ -65,12 +65,12 @@ type Config struct {
 	// "every crashed run takes the ordinary ladder" — the pre-B6-2C behavior
 	// exactly.
 	//
-	// The one class at v0 is the BENCH-REG §2 direct arm. §2 is frozen: the arm
-	// runs ONCE, single-shot, "no retries, no follow-up turns, take what comes".
-	// A fork is a SECOND billed engine run on the same frozen statement, and its
-	// output could never be used anyway (the capture is keyed on the parent run
-	// id), so forking one would spend the requester's own budget to produce
-	// nothing while breaking the protocol the spend exists to measure.
+	// The classes at v0 are (a) the BENCH-REG §2 direct arm — §2 is frozen: the
+	// arm runs ONCE, single-shot, "no retries, no follow-up turns, take what
+	// comes", so a fork is a SECOND billed engine run on the same frozen
+	// statement whose output could never be used anyway (the capture is keyed on
+	// the parent run id) — and (b) any run id carrying no dispatchable role,
+	// whose successor no dispatcher could route (P3-RW-6 R15).
 	NoFork func(runID string) bool
 	Logger *slog.Logger
 	Now    func() time.Time
@@ -579,25 +579,33 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 	case l.cfg.NoFork != nil && l.cfg.NoFork(crashed.ID):
 		// PER-EDGE CITATION (crashed→finalized, a ratified S02.3 edge): for a
 		// no-fork run class the class's own contract OUTRANKS the step-3 default
-		// disposition. The v0 class is the BENCH-REG §2 direct arm, whose "run
-		// once, single-shot, no retries" is FROZEN registered text — so a fork
-		// here would not be a recovery, it would be a protocol breach that also
-		// bills the requester a second time for an output nothing can consume.
-		// Finalize-with-card is the honest terminal: the run ended, it ended
-		// badly, and the record says so. Its partial spend is already on the
-		// ledger and the checkpoints, so nothing is lost by not re-running it.
+		// disposition. The predicate covers two grounds, both composed by the
+		// shell — this package still names no run class of its own:
+		//
+		//   - a SINGLE-SHOT class, the BENCH-REG §2 direct arm, whose "run once,
+		//     no retries" is FROZEN registered text: a fork would not be a
+		//     recovery but a protocol breach that also bills the requester a
+		//     second time for an output nothing can consume;
+		//   - a run id carrying NO dispatchable role: its successor could never
+		//     be routed, so forking it produces a run that crashes on dispatch
+		//     and is forked again — a loop that ends at a tombstone having done
+		//     nothing (P3-RW-6 R15).
+		//
+		// Finalize-with-card is the honest terminal either way: the run ended, it
+		// ended badly, and the record says so. Any partial spend is already on
+		// the ledger and the checkpoints, so nothing is lost by not re-running it.
 		detail, err := json.Marshal(struct {
 			InterruptedS int64  `json:"interrupted_s"`
 			Card         string `json:"card"`
 			NoFork       string `json:"no_fork_reason"`
 		}{int64(interrupted.Seconds()),
 			"finalized-with-card: this run class is never forked",
-			"single-shot run class: the class contract outranks the S02.5 step-3 default fork (BENCH-REG §2 for the direct arm)"})
+			"a run class the platform never forks: a single-shot class whose contract outranks the S02.5 step-3 default fork (BENCH-REG §2, the direct arm), or a run id with no dispatchable role, whose fork could never be routed"})
 		if err != nil {
 			return fmt.Errorf("recovery: marshal no-fork finalize detail: %w", err)
 		}
 		if _, err := l.cfg.Runs.TransitionTx(ctx, tx, crashed.ID, run.StateFinalized, run.TransitionOptions{
-			Reason: "recovery: single-shot run class is finalized, never forked (Spec S02.5 step 3; BENCH-REG §2)",
+			Reason: "recovery: this run class is finalized, never forked (Spec S02.5 step 3; BENCH-REG §2 for the single-shot arm)",
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		}); err != nil {

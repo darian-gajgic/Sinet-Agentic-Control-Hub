@@ -144,6 +144,92 @@ func (s *Scheduler) reconcileQueueRows(ctx context.Context) error {
 	return nil
 }
 
+// settleEndedRows settles the queue rows of runs that have ENDED — the
+// level-triggered half of S10.7's queue discipline ("'done' is a settled
+// admission"), run once per claim pass beside reconcileQueueRows.
+//
+// The gap it closes: the post-dispatch settle fires only on the dispatch path
+// and only for `IsTerminal` states, and `IsTerminal(crashed)` is deliberately
+// false (crashed is supersedable). So when the recovery ladder LATER tombstones,
+// finalizes or harvests a crashed run — or forks it, leaving the superseded
+// parent behind — nobody settled the row: recovery never touches the queue (that
+// wall is deliberate, CONVENTIONS §11) and `SettleRun` refuses non-terminals.
+// The rows accumulated forever, and every surface that joins the queue family
+// read a lie about what was still admitted (16 leaked rows in the live world).
+//
+// Level-triggered rather than event-driven, deliberately: it is the kubelet
+// shape the ladder already follows, it heals rows that PREDATE this code, and it
+// keeps the queue family single-owner — no recovery→queue seam is invented.
+//
+// NO-AUTO-KILL (S14.4 / G1 D1.3): this settles QUEUE ROWS of runs that already
+// ended; it never transitions a run, never touches a live claim, and never
+// touches a `parked` run — an open-gate park keeps its claimed row by documented
+// design (skeleton.go's gate comment) and its resume continues under it.
+func (s *Scheduler) settleEndedRows(ctx context.Context) error {
+	type ended struct {
+		queueID int64
+		runID   string
+		state   run.State
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT q.queue_id, q.run_id, r.state
+		  FROM queue q JOIN runs r ON r.run_id = q.run_id
+		 WHERE q.status IN (?, ?)
+		   AND r.state IN (?, ?, ?, ?, ?)
+		 ORDER BY q.queue_id`,
+		queueQueued, queueClaimed,
+		string(run.StateCompleted), string(run.StateCrashed), string(run.StateFinalized),
+		string(run.StateTombstoned), string(run.StateDiedAtGate))
+	if err != nil {
+		return fmt.Errorf("scheduler: find ended queue rows: %w", err)
+	}
+	defer rows.Close()
+	var out []ended
+	for rows.Next() {
+		var e ended
+		var state string
+		if err := rows.Scan(&e.queueID, &e.runID, &state); err != nil {
+			return fmt.Errorf("scheduler: scan ended queue row: %w", err)
+		}
+		e.state = run.State(state)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// One bounded write transaction per row (Spec S02.1 read hygiene: no
+	// long-lived transaction against the WAL).
+	for _, e := range out {
+		err := s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+			res, err := tx.ExecContext(ctx,
+				`UPDATE queue SET status = ? WHERE queue_id = ? AND status IN (?, ?)`,
+				queueDone, e.queueID, queueQueued, queueClaimed)
+			if err != nil {
+				return fmt.Errorf("settle queue row %d: %w", e.queueID, err)
+			}
+			if n, err := res.RowsAffected(); err != nil || n == 0 {
+				return err // already settled by a concurrent pass; nothing else to do
+			}
+			// The receipt is the run-end record (S10.1: receipts per run-end),
+			// materialized through the same idempotent path the dispatch settle
+			// uses. A CRASHED run settles QUEUE-ONLY: its admission is over, but
+			// its lineage is not — the spend so far sits on its checkpoints and
+			// each successor ends with its own receipt, so minting one here would
+			// assert an ending the lineage has not reached (D4).
+			if s.receipts != nil && run.IsTerminal(e.state) {
+				if _, err := s.receipts.MaterializeTx(ctx, tx, e.runID); err != nil {
+					return fmt.Errorf("materialize receipt for %q: %w", e.runID, err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // sortCandidates orders candidates by the S10.7 priority ladder + aging
 // (workload.go priorityLess), highest priority first.
 //

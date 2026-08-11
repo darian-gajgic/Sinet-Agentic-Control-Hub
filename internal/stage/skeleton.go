@@ -279,6 +279,28 @@ func runRole(runID string) (role, bool) {
 	return "", false
 }
 
+// Routable reports whether a run id carries a dispatchable skeleton role — the
+// question `Skeleton.Dispatch` asks, exported so the composition root can ask it
+// too (P3-RW-6 R15).
+//
+// The shell composes the recovery ladder's NoFork predicate from it: a crashed
+// run with NO role must FINALIZE rather than take S02.5 step 3's default fork,
+// because its successor could never dispatch — the fork would crash, the ladder
+// would fork again, and the lineage would burn to a tombstone having done
+// nothing. That is not hypothetical: `platform.deadman.*` canary runs are
+// roleless by construction (S14.4) and an orphaned one ages past
+// ⚙ recovery.dead_after like any other run. Fork policy stays where fork policy
+// lives — this is a predicate the shell composes, so internal/recovery still
+// learns nothing about run classes and the §31 watchdog wall is untouched.
+//
+// It is fork-suffix aware for free (runRole strips through the shared matcher),
+// which is the property the shell's predicate needs: routability cannot flip
+// between generations of one lineage.
+func Routable(runID string) bool {
+	_, ok := runRole(runID)
+	return ok
+}
+
 // ---- scheduler.Dispatcher ----
 
 // Dispatch routes a CAS-claimed run by its role (the walking-skeleton
@@ -287,9 +309,24 @@ func runRole(runID string) (role, bool) {
 func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 	rl, ok := runRole(r.ID)
 	if !ok {
-		return fmt.Errorf("stage: run %q has no skeleton role (want *%s|*%s|*%s|*%s|*%s|*%s)", r.ID,
+		// A dispatch that cannot proceed leaves a CLASSIFIABLE CORPSE, never a
+		// silent zombie (the crash helper's own contract): returning the error
+		// alone left the run `claimed`, holding its cap-1 (user, lane) slot until
+		// a recovery sweep noticed it up to ⚙ recovery.dead_after later — which is
+		// how a handful of unroutable seeds starved every real run in the demo
+		// world. claimed→crashed is the ratified edge for exactly this (run.go,
+		// "implied by S02.5 step 2").
+		//
+		// NO-AUTO-KILL (S14.4 / G1 D1.3) is untouched: this run is ours — we just
+		// claimed it — and it is PROVABLY undispatchable, so nothing live is being
+		// killed. The corpse is what lets the ladder decide (and with the shell's
+		// composed NoFork predicate, a roleless corpse finalizes rather than
+		// forking into another run nobody can route).
+		cause := fmt.Sprintf("run %q has no skeleton role (want *%s|*%s|*%s|*%s|*%s|*%s)", r.ID,
 			RunSuffixIntake, RunSuffixExecute, RunSuffixVerify, RunSuffixCompose, RunSuffixOnboard,
 			RunSuffixDirect)
+		s.crash(ctx, r.ID, cause)
+		return fmt.Errorf("stage: %s", cause)
 	}
 	switch rl {
 	case roleIntake:
