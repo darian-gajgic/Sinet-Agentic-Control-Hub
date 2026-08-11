@@ -111,9 +111,12 @@ function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v:
  * verbatim, validated server-side — an invalid pin refuses the submission
  * loudly (404/409 render below the button, nothing is quietly dropped).
  *
- * The pin choices derive from the caller's own served task rows until the
- * projects read (P3-RW-2, in flight) lands; "(no project)" is not a pin — it
- * is the unpinned submission.
+ * The pin choices are the REGISTRY's ACTIVE entries (P3-RW-2, consumed
+ * 2026-08-11): a pin into a pending or unregistered project is refused
+ * server-side, so no such choice is offered (finding-5's rule — a control
+ * either works or is not rendered). "(no project)" is not a pin — it is the
+ * unpinned submission. A door-carried pin (?project=) always renders so the
+ * refusal, if any, is the server's loud one rather than a silent drop.
  */
 function AskForm({
   pinned,
@@ -130,18 +133,21 @@ function AskForm({
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<{ head: string; detail: string } | null>(null)
 
-  const tasks = useLive({
-    key: '/api/tasks#door',
-    read: () => api.tasks(),
-    types: ['intake.state'],
+  // The registry moves through the onboarding task's own frames (no project.*
+  // event type exists), which the inbox set carries.
+  const registry = useLive({
+    key: '/api/projects#door',
+    read: () => api.projects(),
+    types: inboxEventTypes,
     stream,
   })
   const projects = useMemo(() => {
-    const names = new Set((tasks.data?.tasks ?? []).map((t) => t.project))
-    names.delete('(no project)')
+    const names = new Set(
+      (registry.data?.projects ?? []).filter((p) => p.state === 'active').map((p) => p.project_id),
+    )
     if (project !== '') names.add(project)
     return [...names].sort((a, b) => a.localeCompare(b))
-  }, [tasks.data, project])
+  }, [registry.data, project])
 
   const empty = text.trim() === ''
 
@@ -296,9 +302,15 @@ function Journey({
   onView: (v: IntakeTaskView) => void
   stream?: EventStream
 }) {
-  const card = view.open_card
   const phase = view.phase ?? ''
 
+  // EVERY non-terminal state rides the live follow path (fixed 2026-08-11,
+  // found on the seeded world): the pipeline keeps moving after a write
+  // returns — planning can replace an interview card with a clarification
+  // card seconds later — and a response snapshot rendered as a STANDING card
+  // showed questions the platform had already withdrawn. The snapshot now
+  // only SEEDS the panel (see FollowTask); the caller's own live read is the
+  // one truth for which card is open.
   return (
     <div className="door-journey" data-task={view.task_id}>
       <JourneyHead view={view} />
@@ -306,10 +318,8 @@ function Journey({
         <Landed view={view} />
       ) : phase === 'cancelled' ? (
         <Cancelled view={view} />
-      ) : card === undefined || view.open_ask_id === undefined || view.open_ask_id === '' ? (
-        <FollowTask view={view} onView={onView} stream={stream} />
       ) : (
-        <CardPanel key={`${view.open_ask_id}:${String(card.version ?? 0)}`} view={view} card={card} askID={view.open_ask_id} onView={onView} />
+        <FollowTask view={view} onView={onView} stream={stream} />
       )}
     </div>
   )
@@ -350,6 +360,23 @@ function FollowTask({
         view={{ ...view, open_card: card }}
         card={card}
         askID={askID}
+        onView={onView}
+      />
+    )
+  }
+  // The response snapshot SEEDS the panel until the first live read answers:
+  // the answer verb hands the next card back synchronously, and a round-trip
+  // of nothing before showing what is already in hand would be a lie of its
+  // own. The live read above stays the standing truth — when it lands with
+  // the same card, the key matches and nothing remounts; when the pipeline
+  // has already moved on, the fresh card replaces the withdrawn one.
+  if (asks.data === null && view.open_card !== undefined && view.open_ask_id !== undefined && view.open_ask_id !== '') {
+    return (
+      <CardPanel
+        key={`${view.open_ask_id}:${String(view.open_card.version ?? 0)}`}
+        view={view}
+        card={view.open_card}
+        askID={view.open_ask_id}
         onView={onView}
       />
     )

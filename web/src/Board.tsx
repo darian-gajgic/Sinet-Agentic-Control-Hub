@@ -354,7 +354,10 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                           className="queue-card"
                         >
                           <span className="queue-rank mono">{String(index + 1)}</span>
-                          <span className="queue-name">{t.title}</span>
+                          {/* Same fallback as the cards: a task the platform
+                              has not titled names itself by id, never a blank
+                              pill (found live 2026-08-11). */}
+                          <span className="queue-name">{t.title !== '' ? t.title : t.task_id}</span>
                         </li>
                       )}
                     </Draggable>
