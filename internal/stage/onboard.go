@@ -38,6 +38,17 @@ const onboardAskPrefix = "onboard:"
 // onboardTaskPrefix keys a project's onboarding task.
 const onboardTaskPrefix = "onboard-"
 
+// The board columns the onboarding task occupies, both drawn from the DECLARED
+// vocabulary web/src/kanban.ts owns (map §3 v3, checkpoint-2 decision D-B):
+// `intake` renders as **Backlog** — a record of intent whose execution has not
+// begun — and `done` as **Done**, which stays visible. No new status string
+// enters the vocabulary; the seed-hygiene guard (internal/api's
+// assertNoUndeclaredKanbanStatus) parses that file for exactly this set.
+const (
+	kanbanOnboardBirth    = "intake"
+	kanbanOnboardApproved = "done"
+)
+
 // roleOnboard is the onboarding run role.
 const roleOnboard role = "onboard"
 
@@ -105,10 +116,25 @@ func (s *Skeleton) StartOnboarding(ctx context.Context, owner, projectID, name, 
 	runID := taskID + RunSuffixOnboard
 	now := s.now().UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 	err := s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		// The birth column is written HERE, in the same transaction as the task
+		// and the run (the intake INSERT precedent, internal/intake/pipeline.go;
+		// CONVENTIONS §8: the task exists in the D7 record from its first
+		// instant). Without it the column takes 0001's schema default '' and the
+		// board's forward tolerance renders it as a column of its own titled
+		// "(no status recorded)" — a raw string in front of the operator for a
+		// task that has an honest declared column available to it.
+		// `intake` is the board's Backlog (web/src/kanban.ts): a recorded
+		// intent whose execution has not begun, which is exactly what a drafted
+		// onboarding awaiting its owner is. Waiting-on-the-owner is carried by
+		// the durable ask (waiting_on_human on the list read), never by a
+		// column.
+		//
+		// ON CONFLICT DO NOTHING keeps the crash-relaunch path harmless: a
+		// re-run must not walk an advanced task backwards into its birth column.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO tasks (task_id, user_id, title, created_ts) VALUES (?, ?, ?, ?)
+			`INSERT INTO tasks (task_id, user_id, title, kanban_status, created_ts) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT (task_id) DO NOTHING`,
-			taskID, owner, "Onboard "+name, now); err != nil {
+			taskID, owner, "Onboard "+name, kanbanOnboardBirth, now); err != nil {
 			return err
 		}
 		_, err := s.cfg.Runs.CreateTx(ctx, tx, run.NewRun{
@@ -224,9 +250,20 @@ func (s *Skeleton) AnswerOnboarding(ctx context.Context, userID, askID string, a
 		}); err != nil {
 			return err
 		}
-		_, err := s.cfg.Runs.TransitionTx(ctx, tx, runID, run.StateCompleted, run.TransitionOptions{
+		if _, err := s.cfg.Runs.TransitionTx(ctx, tx, runID, run.StateCompleted, run.TransitionOptions{
 			Reason: "onboarding complete: entry active", Actor: run.ActorPlatform,
-		})
+		}); err != nil {
+			return err
+		}
+		// The board follows in the SAME transaction as the run's completion,
+		// because they are one fact: S13.7 ends the onboarding task's work at
+		// activation. `done` stays VISIBLE (operator-ratified D-B: "I want to
+		// see what is already done"), and the platform has no archived state at
+		// v0 to move it to. The in-tx UPDATE is chosen over the skeleton's
+		// setKanban helper, which opens its own WriteTx and would nest here.
+		_, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET kanban_status = ? WHERE task_id = ?`,
+			kanbanOnboardApproved, OnboardTaskID(card.ProjectID))
 		return err
 	})
 	if err != nil {

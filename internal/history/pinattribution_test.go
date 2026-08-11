@@ -427,8 +427,8 @@ func TestMigrationLedgerAdvances(t *testing.T) {
 	if err := f.db.QueryRowContext(f.ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 22 {
-		t.Errorf("user_version = %d, want 22 (migrations through 0022 applied contiguously)", version)
+	if version != 23 {
+		t.Errorf("user_version = %d, want 23 (migrations through 0023 applied contiguously)", version)
 	}
 	for _, view := range []string{"task_project", "cost_per_project"} {
 		var n int

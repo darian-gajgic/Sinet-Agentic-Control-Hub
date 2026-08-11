@@ -120,9 +120,10 @@ func TestNoNewMigration(t *testing.T) {
 		// S10.3 price table's durable home, `price_rows`) and 0020 by B6-7
 		// (the S15.7 assistant's sessions, transcript, turns and exchange
 		// manifest) and 0022 by P3-RW-3 (the pre-approval project-attribution
-		// view re-create); anything beyond those would be an unexpected
+		// view re-create) and 0023 by P3-RW-7 (the onboarding arm on that same
+		// task→project edge); anything beyond those would be an unexpected
 		// preview-side add.
-		if name >= "0023" {
+		if name >= "0024" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}

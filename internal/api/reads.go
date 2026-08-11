@@ -582,10 +582,12 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The project linkage is the task_project view (0016, re-created by 0022
-	// over the completed edge: the claims declared at plan approval, else the
-	// registry pin the intake recorded at triage — so a pinned task is
-	// attributed from birth). LEFT JOINed, so a task with no resolved project
+	// The project linkage is the task_project view (0016, re-created by 0022 and
+	// again by 0023 over the completed edge: the claims declared at plan
+	// approval, else the registry pin the intake recorded at triage, else — for
+	// an onboarding task, which has neither — the registry entry its own
+	// `onboard-<project>` id names, so an onboarding task is attributed from
+	// birth too). LEFT JOINed, so a task with no resolved project
 	// renders in the honest '(no project)' bucket rather than dropping out of
 	// the list (§37). The served column and the `?project=` clause below are
 	// the SAME expression, so they cannot disagree.
@@ -731,9 +733,10 @@ type TaskSuccessor struct {
 }
 
 // TaskLineage is the task's place in the work: its project (via the
-// task_project view — the approved claims, else the intake's registry pin,
-// since runs and tasks carry no project column at v0, §37) and its follow-up
-// edges in BOTH directions.
+// task_project view — the approved claims, else the intake's registry pin, else
+// the registry entry an onboarding task's own id names, since runs and tasks
+// carry no project column at v0, §37) and its follow-up edges in BOTH
+// directions.
 type TaskLineage struct {
 	Project string `json:"project"`
 	// ProjectChoices > 1 means the task claimed more than one project: the

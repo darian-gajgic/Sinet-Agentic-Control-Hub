@@ -14,10 +14,12 @@ import (
 // money view. The no-money-by-generation scan covers every one of them: a view
 // RE-created in a later file is exactly as capable of computing money as the
 // file that first created it. 0022 (P3-RW-3) re-creates cost_per_project over
-// the completed task→project edge.
+// the completed task→project edge, and 0023 (P3-RW-7) re-creates it again over
+// the same edge widened with the onboarding arm.
 var moneyViewMigrations = []string{
 	"0016_queryable_history.sql",
 	"0022_pin_attribution.sql",
+	"0023_onboarding_attribution.sql",
 }
 
 // migrationText reads migration 0016 — the views' authority. Tests assert

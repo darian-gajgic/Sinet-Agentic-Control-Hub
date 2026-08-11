@@ -134,7 +134,7 @@ var layer0Views = []View{
 	},
 	{
 		Name: ViewTaskProjectEdge, Question: QuestionLinkage, OwnerColumn: viewOwnerColumnNone,
-		Description: "the task→project edge, isolated so its weakness is stated in one place: runs and tasks carry no project column at v0, so the edge is read from the approved claims and, before approval, from the registry pin on the task's latest intake state",
+		Description: "the task→project edge, isolated so its weakness is stated in one place: runs and tasks carry no project column at v0, so the edge is read from the approved claims and, before approval, from the registry pin on the task's latest intake state, and for an onboarding task from the registry entry its own id names",
 		Order:       "task_id",
 	},
 }
