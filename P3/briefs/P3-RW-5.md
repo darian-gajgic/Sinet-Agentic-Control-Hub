@@ -1,5 +1,7 @@
 # P3-RW-5 grounded brief — recovery-lease liveness for in-process pipeline work (the interview-survival fix)
 
+> **EXPIRED at landing 2026-08-11 (amendment D).** Single-use artifact for the P3-RW-5 pipeline run (red `0a37c3a` + impl `8bbcf2b`; evaluation PASS first pass, 2 nits + 2 info). Post-landing divergences from this text: R1's "counted in Report.Alive" holds in the DECIDED band (expired-lease + fresh cursor, T1's pin); the healthy live-lease band deliberately counts Pending — pre-existing pinned semantics ("nothing to decide"), accepted at triage over churning a pre-existing assertion. Four pre-existing ladder fixtures gained precondition-only clock moves (adjudicated legitimate). Later grounding must never read this as truth — code + spec only.
+
 **Packet class:** rework (defect, coordinator-ratified root cause, this session).
 **Binding spec sections (read in full for this brief):** S02.5 (recovery ladder), S02.3 (run FSM), S02.2 (lease block), S10.7/S10.8 (scheduler claim + never-auto-kill), S14.4 (watchdog suite), S18 registry rows for `recovery.*`.
 **The defect, one line:** a live, human-paced interview run was reaped as DEAD by the recovery sweep while it was demonstrably advancing — because the lease is written once at claim time and never renewed, and classification lets the dead lease outrank fresh event-cursor evidence.

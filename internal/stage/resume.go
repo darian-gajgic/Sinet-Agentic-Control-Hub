@@ -94,9 +94,10 @@ func (s *Skeleton) ResumeRun(ctx context.Context, actor, runID string) (ResumeOu
 	// call. The resume must still leave a LIVE lease behind it or the next
 	// recovery sweep meets an un-parked run holding an expired claim lease and
 	// reads it as death (P3-RW-5 R5). One fenced beat at the resumed
-	// generation. If nothing then drives the run, its cursor goes quiet under a
-	// beating lease — the WEDGED reading, which is pause-and-flag and never a
-	// kill (S02.5, D1.3), with the watchdog's silence rule as the containment.
+	// generation buys ⚙ recovery.dead_after of cover. If nothing ever drives
+	// the run, that one lease lapses and the ladder reaps and forks it within
+	// the S02.5 bound — a bounded self-heal through a queued successor, not a
+	// kill of live work (live work renews via its driver's LeaseKeeper).
 	s.leases.Beat(ctx, runID, leaseHolderStage)
 	s.logger().Info("stage: run resumed by a person (S14.4)", "run", runID, "actor", actor,
 		"generation", resumed.Generation)
