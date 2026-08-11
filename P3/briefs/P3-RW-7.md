@@ -1,5 +1,7 @@
 # P3-RW-7 grounded brief — honest board presence for onboarding tasks (kanban status + project attribution)
 
+> **EXPIRED at landing 2026-08-12 (amendment D).** Single-use artifact for the P3-RW-7 pipeline run (red `88c3919` + impl `c881b2e`; evaluation PASS first pass, 2 nits + 1 out-of-range observation). Post-landing divergences: T8's post-approval relaunch framing was unreachable (scheduler refuses re-admission of completed runs) — the landed test exercises the DO-NOTHING property pre-approval; §1.1's "every other task producer writes a status" was overbroad (`intake/followup.go` also omits it — the F2 deferred item). Later grounding must never read this as truth — code + spec only.
+
 **Packet class:** rework (builder-reported on the live demo world, coordinator-verified).
 **Headline:** *an onboarding task renders on the board with an honest declared column and its project's name from the moment it exists, through approval, with no fabricated status anywhere.*
 **Scope:** backend (Go + possibly one migration). `web/src` is reference-only for this packet — the board already renders whatever honest values the backend serves; **no frontend file changes**, and `web/src/kanban.ts` is NEVER moved (a Go seed guard parses it in place — §1.6 below).
