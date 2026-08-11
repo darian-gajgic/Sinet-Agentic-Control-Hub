@@ -185,8 +185,19 @@ func declaredKanbanStatuses(t *testing.T) map[string]bool {
 		FindAllStringSubmatch(string(source), -1) {
 		out[m[1]] = true
 	}
+	// The one ABSORBED status is vocabulary too: the board recognizes a stored
+	// `cancelled` and renders it IN Backlog wearing its cancelled sign (map §3
+	// v3, checkpoint-2 decision D-B — there is no Cancelled column). A demo
+	// world holding a cancelled task is therefore a designed state in front of
+	// the operator, not a test artifact, and this check must not call it one.
+	// Read from the same file that owns it, same as the columns.
+	for _, m := range regexp.MustCompile(`cancelledStatus\s*=\s*'([^']+)'`).
+		FindAllStringSubmatch(string(source), -1) {
+		out[m[1]] = true
+	}
 	// Non-vacuity again: a parse that found nothing would declare every status
 	// undeclared, and a parse that found ONE would wave most of them through.
+	// Six = the five declared columns plus the absorbed `cancelled`.
 	if len(out) < 6 {
 		t.Fatalf("%s parsed to %d declared statuses (%v), so the seed-hygiene check proves nothing",
 			src, len(out), out)
