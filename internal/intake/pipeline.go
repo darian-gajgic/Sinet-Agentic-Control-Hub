@@ -72,10 +72,19 @@ type Pipeline struct {
 	// drift unmeasurable (the stored versions carry forward, no false drift).
 	CitedEntryVersions func(ctx context.Context, keys []string) (map[string]string, error)
 
+	// Leases renews the run's lease while this pipeline drives its advance
+	// (Spec S02.2 lease block at ⚙ recovery.heartbeat; P3-RW-5 R3). Nil is
+	// inert — an unwired pipeline behaves exactly as before.
+	Leases *run.LeaseKeeper
+
 	// Now is the clock seam (tests). Timestamps are recorded, never an
 	// ordering authority (P-T07-4).
 	Now func() time.Time
 }
+
+// leaseHolderIntake names the intake pipeline in the lease block while it is
+// driving a run's advance.
+const leaseHolderIntake = "intake-advance"
 
 func (p *Pipeline) now() time.Time {
 	if p.Now != nil {
@@ -331,6 +340,14 @@ func (p *Pipeline) advanceLoaded(ctx context.Context, st *State) (*State, error)
 	if r.State != run.StateRunning {
 		return nil, fmt.Errorf("%w: run %s is %s", ErrNotRunning, st.RunID, r.State)
 	}
+	// The post-answer advance is the platform driving this run in-process, so
+	// the pipeline HOLDS its lease for the whole drive (Spec S02.2 at ⚙
+	// recovery.heartbeat; P3-RW-5 R3/R5). The hold sits after the resume
+	// transition that got us here, so it beats at the resumed generation, and
+	// it beats immediately — the un-park instant is the moment the incident
+	// killed a live interview. It ends when the advance does: the next gate
+	// parks the run, and nobody drives a parked run.
+	defer p.Leases.Hold(ctx, st.RunID, leaseHolderIntake)()
 
 	var pair *Pair
 	for guard := 0; guard < 64; guard++ {

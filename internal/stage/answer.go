@@ -174,6 +174,11 @@ func (s *Skeleton) answerRevise(ctx context.Context, actor, askID string, card v
 	if err != nil {
 		return err
 	}
+	// The resumed drain runs inline in this request, so the stage layer HOLDS
+	// the run's lease across it (Spec S02.2 at ⚙ recovery.heartbeat; P3-RW-5
+	// R3). Taken after the resume transaction, so it beats at the bumped
+	// generation, and immediately, so the un-park instant is covered (R5).
+	defer s.leases.Hold(ctx, card.RunID, leaseHolderStage)()
 	v, err := s.newVerifier(in.Deliverable.Domain)
 	if err != nil {
 		s.crash(ctx, card.RunID, err.Error())

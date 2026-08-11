@@ -536,6 +536,12 @@ func (p *Pipeline) approve(ctx context.Context, st *State, pair *Pair, approver 
 	if err != nil {
 		return err
 	}
+	// The approval resume hands the run onward rather than driving it inline,
+	// so there is no advance to bracket — but the resume still has to leave a
+	// LIVE lease behind it, or the next sweep meets an un-parked run holding
+	// the expired claim lease and reads it as death (R5). One fenced beat at
+	// the resumed generation does exactly that.
+	p.Leases.Beat(ctx, st.RunID, leaseHolderIntake)
 	if collisionHolder != "" {
 		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "approval",
 			fmt.Sprintf("write-set overlaps active claim of task %s: sequenced behind the holder (S02.8)", collisionHolder),

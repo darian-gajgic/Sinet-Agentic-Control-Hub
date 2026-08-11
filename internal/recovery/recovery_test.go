@@ -104,7 +104,13 @@ func TestDeadForkFromCheckpointAndFencing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
-	l := newLadder(t, s, nil, nil, nil) // B0 defaults: unit gone, nothing to harvest
+	// P3-RW-5 precondition: DEAD is a conjunction — lease dead/absent AND the
+	// event cursor stale past ⚙ recovery.dead_after ("unit gone/failed with
+	// NOTHING NEWER to harvest", Spec S02.5 step 2). The fixture's writes are
+	// seconds old, so the pass runs past the reap bound. Every assertion below
+	// is unchanged.
+	clock := &fakeClock{t: time.Now().Add(10 * time.Minute)}
+	l := newLadder(t, s, clock, nil, nil) // B0 defaults: unit gone, nothing to harvest
 
 	rpt, err := l.ReconcilePass(ctx)
 	if err != nil {
@@ -187,7 +193,11 @@ func TestRepeatOffenderTombstoned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed attempts: %v", err)
 	}
-	l := newLadder(t, s, nil, nil, nil)
+	// P3-RW-5 precondition: past the reap bound (see the fork test above) —
+	// still well inside ⚙ recovery.stale_finalize, so the bound decision is
+	// the repeat-offender tombstone this test asserts.
+	clock := &fakeClock{t: time.Now().Add(10 * time.Minute)}
+	l := newLadder(t, s, clock, nil, nil)
 	rpt, err := l.ReconcilePass(ctx)
 	if err != nil {
 		t.Fatalf("ReconcilePass: %v", err)

@@ -55,7 +55,14 @@ type Skeleton struct {
 	// the S03.1 ladder on (cancel.go). Human-driven ONLY — no automated path
 	// touches it (NO-AUTO-KILL, S14.4 / G1 D1.3).
 	cancels *liveSessions
+	// leases is the S02.2 lease keeper this skeleton composes once and shares
+	// with the driver and the intake pipeline (P3-RW-5 R3/OQ4).
+	leases *run.LeaseKeeper
 }
+
+// leaseHolderStage names the stage layer in the lease block while it drives a
+// resumed drain.
+const leaseHolderStage = "stage-drain"
 
 var _ scheduler.Dispatcher = (*Skeleton)(nil)
 
@@ -109,11 +116,22 @@ func New(cfg Config) (*Skeleton, error) {
 			Pressure: cfg.RoutePressure,
 		}
 	}
+	// The lease keeper of Spec S02.2 (P3-RW-5): ONE helper, shared by every
+	// layer this skeleton composes, so the fence and the ⚙ recovery.heartbeat
+	// cadence exist in exactly one place (internal/run — no new import edges).
+	leases, err := run.NewLeaseKeeper(run.LeaseKeeperConfig{
+		DB: cfg.DB, Runs: cfg.Runs, Settings: cfg.Settings, Logger: cfg.Logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.leases = leases
 	s.driver = &adapters.Driver{
 		Runs:         cfg.Runs,
 		Checkpoints:  cfg.Checkpoints,
 		Log:          cfg.Log,
 		DB:           cfg.DB,
+		Leases:       leases,
 		CopyAsideDir: cfg.CopyAsideDir,
 		// The S02.4(c) ledger-revision block goes LIVE here (B2-1 seam →
 		// B2-4 wiring): every paid-call checkpoint embeds the current
@@ -130,6 +148,7 @@ func New(cfg Config) (*Skeleton, error) {
 		Runs:         cfg.Runs,
 		Ledger:       cfg.Ledger,
 		Settings:     cfg.Settings,
+		Leases:       leases,
 		ArtifactRoot: cfg.ArtifactRoot,
 		Planner:      cfg.Planner,
 		Critic:       cfg.Critic,

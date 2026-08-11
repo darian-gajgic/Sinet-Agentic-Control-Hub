@@ -54,9 +54,20 @@ type Driver struct {
 	// leaves the block empty.
 	LedgerRevision func(ctx context.Context, runID string) (string, error)
 
+	// Leases renews the run's lease while this driver is pumping an engine
+	// session (Spec S02.2 lease block at ⚙ recovery.heartbeat cadence;
+	// P3-RW-5 R3). It is the one holder that covers a LONG QUIET call — a
+	// paid engine turn whose stream says nothing for minutes leaves no cursor
+	// evidence at all, so only holder liveness can speak for it. Nil is inert
+	// (unwired compositions behave exactly as before).
+	Leases *run.LeaseKeeper
+
 	// Now is the clock seam (tests). Nil = time.Now.
 	Now func() time.Time
 }
+
+// leaseHolder names the driver in the lease block while it pumps.
+const leaseHolder = "engine-driver"
 
 // Driver errors.
 var (
@@ -103,6 +114,10 @@ func (d *Driver) Drive(ctx context.Context, a Adapter, req StartRequest) (Outcom
 	if err != nil {
 		return Outcome{}, err
 	}
+	// Held from here: the engine call is the platform's own advance, and the
+	// hold is taken AFTER the transition so it beats at the generation the
+	// events will carry (Spec S02.5 step 4).
+	defer d.Leases.Hold(ctx, r.ID, leaseHolder)()
 	sess, err := a.Start(ctx, req)
 	if err != nil {
 		_, terr := d.Runs.Transition(ctx, req.RunID, run.StateCrashed, run.TransitionOptions{
@@ -148,6 +163,10 @@ func (d *Driver) DriveResume(ctx context.Context, a Adapter, rec ParkRecord, ans
 	if err != nil {
 		return Outcome{}, err
 	}
+	// The resume edge bumped the generation, so the hold is taken after the
+	// transaction commits — and it beats immediately, which is what closes the
+	// un-park window the recovery ladder used to reap through (R5).
+	defer d.Leases.Hold(ctx, r.ID, leaseHolder)()
 	sess, err := a.Resume(ctx, rec, ans)
 	if err != nil {
 		_, terr := d.Runs.Transition(ctx, rec.RunID, run.StateCrashed, run.TransitionOptions{
@@ -184,6 +203,10 @@ func (d *Driver) DriveStage(ctx context.Context, a Adapter, req StartRequest) (O
 	if r.State != run.StateRunning && r.State != run.StateDraining {
 		return Outcome{}, fmt.Errorf("%w: stage session on %q in %s (want running/draining, S02.4)", ErrNotDrivable, r.ID, r.State)
 	}
+	// A stage session is an in-process engine call on an already-running run —
+	// the exact shape (planner, critic, verifier) whose multi-minute quiet
+	// stretches used to outlive the one-shot claim lease.
+	defer d.Leases.Hold(ctx, r.ID, leaseHolder)()
 	sess, err := a.Start(ctx, req)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("adapters: stage session spawn: %w", err)

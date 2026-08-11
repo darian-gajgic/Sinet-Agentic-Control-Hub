@@ -291,6 +291,19 @@ func (l *Ladder) reconcileRun(ctx context.Context, now time.Time, grace, deadAft
 		return err
 	}
 
+	// The two independent liveness observations the ladder weighs. The cursor
+	// is PROGRESS ("cursor advancing" / "nothing newer to harvest", Spec S02.5
+	// step 2; the ⚙ recovery.dead_after row's own help text is cursor silence),
+	// the lease is HOLDER liveness (Spec S02.2, renewed at ⚙ recovery.heartbeat
+	// cadence by whoever drives the advance — internal/run's LeaseKeeper).
+	cursorFresh := now.Sub(lastActivity) <= deadAfter+grace
+	// leaseBeating is strict: a deadline still in the future, i.e. a holder that
+	// demonstrably beat recently. leaseDead is the suspend-aware form — between
+	// them sits the wake grace, where a lease has expired but the platform
+	// cannot yet honestly say whether its holder is gone (P-T07-4), and nothing
+	// is decided at all.
+	leaseBeating := !r.LeaseDeadline.IsZero() && !now.After(r.LeaseDeadline)
+
 	switch {
 	case terminalHarvest || status.State == UnitCorpseExit0:
 		// FINISHED-DURING-OUTAGE → harvest: deliver the produced result
@@ -300,7 +313,7 @@ func (l *Ladder) reconcileRun(ctx context.Context, now time.Time, grace, deadAft
 		}
 		rpt.Harvested++
 
-	case status.State == UnitActive && now.Sub(lastActivity) <= deadAfter+grace:
+	case status.State == UnitActive && cursorFresh:
 		// ALIVE: unit active, cursor advancing → reattach streams and
 		// re-arm watchdogs. Stream reattach is the adapter's (B1, Spec
 		// S03); watchdog arming is Spec S14 (B5).
@@ -318,14 +331,50 @@ func (l *Ladder) reconcileRun(ctx context.Context, now time.Time, grace, deadAft
 		}
 		rpt.Wedged++
 
-	case status.State == UnitCorpseFailed,
-		l.leaseDead(now, grace, r):
-		// DEAD: unit gone/failed with nothing newer to harvest → mark
-		// crashed, then supersede — bounded by step 3.
-		interrupted := now.Sub(lastActivity)
-		if err := l.crashAndBound(ctx, r, interrupted, staleFinalize, maxAttempts, status, rpt); err != nil {
+	case status.State == UnitCorpseFailed:
+		// DEAD on the body alone: a failed corpse is conclusive and OUTRANKS
+		// cursor recency. P-T07-2 makes the run wrapper write its own exit
+		// record as its last act, so a corpse case can show a very recent
+		// append that is death evidence rather than life — which is exactly
+		// why cursor freshness gates DEAD only under an unknowable body.
+		if err := l.crashAndBound(ctx, r, now.Sub(lastActivity), staleFinalize, maxAttempts, status, rpt); err != nil {
 			return err
 		}
+
+	// ── From here the body is unknowable: UnitGone or UnitUnknown. There is
+	// no unit to be "active", so the lease and the cursor are the only
+	// actuals, and each answers a different question.
+
+	case l.leaseDead(now, grace, r) && cursorFresh:
+		// ALIVE. The holder's lease expired — but the run APPENDED something
+		// within ⚙ recovery.dead_after, so S02.5's DEAD ("unit gone/failed
+		// with nothing newer to harvest") is simply false: there is something
+		// newer. This is the P3-RW-5 defect: a human-paced interview advancing
+		// in-process past its one-shot claim lease was crashed and forked
+		// while its checkpoint was seconds old.
+		rpt.Alive++
+
+	case l.leaseDead(now, grace, r):
+		// DEAD, as a conjunction: no holder (lease dead or absent,
+		// suspend-aware) AND no progress within ⚙ recovery.dead_after AND
+		// nothing terminal to harvest → mark crashed, then supersede,
+		// bounded by step 3.
+		if err := l.crashAndBound(ctx, r, now.Sub(lastActivity), staleFinalize, maxAttempts, status, rpt); err != nil {
+			return err
+		}
+
+	case leaseBeating && !cursorFresh:
+		// WEDGED, in its in-process form: the holder is beating (so it is
+		// alive) and progress has stopped. Same disposition as the unit-active
+		// arm — flag once per stall episode, NEVER auto-kill (D1.3, S10.8).
+		// Containment stays the watchdog's silence rule (park + card, S14.4);
+		// this event is the ladder's own observation.
+		if lastType != run.EventWedged {
+			if err := l.flagWedged(ctx, r, now.Sub(lastActivity)); err != nil {
+				return err
+			}
+		}
+		rpt.Wedged++
 
 	default:
 		// Lease still live (suspend-aware) and no proof of death — leave

@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
@@ -240,7 +241,13 @@ func TestKill9MidTransitionInvisible(t *testing.T) {
 
 	// One reconcile pass classifies the run (no unit machinery at B0 →
 	// DEAD) and supersedes it by fork-from-last-checkpoint.
-	l := newLadder(t, s, nil, nil, nil)
+	//
+	// P3-RW-5 precondition: DEAD is a conjunction — lease dead/absent AND the
+	// event cursor stale past ⚙ recovery.dead_after (Spec S02.5 step 2,
+	// "nothing newer to harvest"). The killed child's writes are seconds old,
+	// so the pass runs past the reap bound; the reap is delayed by at most one
+	// dead_after, never skipped. Every assertion below is unchanged.
+	l := newLadder(t, s, &fakeClock{t: time.Now().Add(10 * time.Minute)}, nil, nil)
 	rpt, err := l.ReconcilePass(ctx)
 	if err != nil {
 		t.Fatalf("ReconcilePass: %v", err)
@@ -313,7 +320,9 @@ func TestKill9EffectCrashWindow(t *testing.T) {
 		t.Fatalf("committed checkpoint lost: %v %v", ok, err)
 	}
 
-	l := newLadder(t, s, nil, nil, nil)
+	// P3-RW-5 precondition: past the reap bound, as in the mid-transition case
+	// above — the run itself must still be classified DEAD and superseded.
+	l := newLadder(t, s, &fakeClock{t: time.Now().Add(10 * time.Minute)}, nil, nil)
 	rpt, err := l.ReconcilePass(ctx)
 	if err != nil {
 		t.Fatalf("ReconcilePass: %v", err)

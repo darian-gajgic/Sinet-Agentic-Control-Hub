@@ -59,6 +59,11 @@ const keyBgAdmitStop = "pressure.bg_admit_stop"
 // this is the admitting party).
 const claimHolder = "scheduler"
 
+// dispatchHolder is the lease holder stamped by the heartbeat while the
+// scheduler's dispatch leg is actively driving the run (Spec S02.2 lease block;
+// P3-RW-5 R3 — the renewal duty belongs to whoever drives the advance).
+const dispatchHolder = "scheduler-dispatch"
+
 // defaultPoll is the idle re-poll cadence of the claim loop. Not a ⚙ setting —
 // S18 ratifies no scheduler-poll key (the sseBatchSize precedent); an Enqueue
 // nudges the loop, so the poll is only a backstop.
@@ -189,6 +194,12 @@ type Scheduler struct {
 	inflightMu sync.Mutex
 	inflight   map[string]struct{}
 	wg         sync.WaitGroup
+
+	// leases renews the lease of a run while this scheduler's dispatch leg
+	// drives it (Spec S02.2; P3-RW-5 R3). The helper lives in internal/run so
+	// the fence and cadence exist once and the scheduler ↔ engine seam is
+	// untouched (the scheduler never imports adapters, CONVENTIONS §11).
+	leases *run.LeaseKeeper
 }
 
 // New assembles a Scheduler.
@@ -226,6 +237,17 @@ func New(cfg Config) (*Scheduler, error) {
 	if s.poll <= 0 {
 		s.poll = defaultPoll
 	}
+	// The claim lease is written ONCE, at claim time (claimOne, unchanged per
+	// S10.7). Something has to refresh it while the run is being driven, or
+	// every dispatch longer than ⚙ recovery.dead_after outlives its own lease —
+	// which is exactly what the recovery ladder used to read as death.
+	keeper, err := run.NewLeaseKeeper(run.LeaseKeeperConfig{
+		DB: cfg.DB, Runs: cfg.Runs, Settings: cfg.Settings, Logger: s.logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.leases = keeper
 	return s, nil
 }
 
@@ -556,6 +578,15 @@ func (s *Scheduler) dispatch(ctx context.Context, r run.Run) {
 	go func() {
 		defer s.wg.Done()
 		defer s.untrack(r.ID)
+
+		// The dispatch leg HOLDS the run's lease for as long as it drives it
+		// (Spec S02.2, ⚙ recovery.heartbeat cadence): the first beat lands
+		// before Dispatch is entered, the last when it returns — park,
+		// terminal, or error alike. A dispatch that parks at a gate stops
+		// beating, which is correct: nobody is driving a parked run, and
+		// parked runs are not scanned by the ladder at all (Spec S02.5).
+		release := s.leases.Hold(ctx, r.ID, dispatchHolder)
+		defer release()
 
 		if err := s.dispatcher.Dispatch(ctx, r); err != nil {
 			s.logger.WarnContext(ctx, "scheduler: dispatch", "run", r.ID, "err", err)

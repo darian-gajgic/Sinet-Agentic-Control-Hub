@@ -469,10 +469,52 @@ func (s *Store) SetLeaseTx(ctx context.Context, tx *sql.Tx, runID, holder string
 	return nil
 }
 
-// RenewLeaseTx extends a live holder's lease. INERT in the P3-RW-5 red-tests
-// commit; the fenced implementation lands with the packet.
+// RenewLeaseTx refreshes the lease of a run the platform is actively driving —
+// the ⚙ recovery.heartbeat-cadence write S02.2's lease block was always shaped
+// for and that nothing performed before P3-RW-5. (The lease was set once at
+// claim time and never renewed, so every advance outliving ⚙
+// recovery.dead_after outlived its own lease and the recovery ladder read that
+// dead lease as death.) The renewal extends the wall-clock deadline and stamps
+// the heartbeat cursor with the run's newest event_seq — "the last event_seq
+// the holder asserted" (Spec S02.2) — which makes the lease row
+// self-describing; classification keeps reading run_events directly.
+//
+// It is FENCED (Spec S02.5 step 4, P-T02-3): the renewal carries the holder's
+// generation and applies only at that generation and only while the run is in a
+// state a holder can be driving — claimed, running, draining. Every other case
+// is a SILENT no-op (false, nil): a zombie holder of a superseded generation
+// must not keep a run alive, and refusing it must never fail the healthy path
+// that superseded it. holder == "" keeps the existing holder.
+//
+// Like SetLeaseTx it is a lease-column update, NOT a state change, so it
+// appends no run_events row: the cursor must record progress, never heartbeats,
+// or an idle holder would forge its own liveness.
 func (s *Store) RenewLeaseTx(ctx context.Context, tx *sql.Tx, runID, holder string, deadline time.Time, generation int64) (bool, error) {
-	return false, nil
+	if deadline.IsZero() {
+		return false, fmt.Errorf("run: renew lease %q without a deadline (clearing a lease is SetLeaseTx's)", runID)
+	}
+	var holderArg any
+	if holder != "" {
+		holderArg = holder
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE runs
+		    SET lease_holder = COALESCE(?, lease_holder),
+		        lease_deadline_ts = ?,
+		        heartbeat_event_seq = (SELECT MAX(event_seq) FROM run_events WHERE run_id = ?),
+		        updated_ts = ?
+		  WHERE run_id = ? AND generation = ? AND state IN (?, ?, ?)`,
+		holderArg, deadline.UTC().Format(time.RFC3339Nano), runID, now,
+		runID, generation, string(StateClaimed), string(StateRunning), string(StateDraining))
+	if err != nil {
+		return false, fmt.Errorf("run: renew lease %q: %w", runID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("run: renew lease %q: %w", runID, err)
+	}
+	return n == 1, nil
 }
 
 // BumpGenerationTx bumps the run's fencing counter without a state change —
