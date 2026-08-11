@@ -354,18 +354,7 @@ func (p *Pipeline) AdvanceDispatched(ctx context.Context, taskID, runID string) 
 		return nil, err
 	}
 	if rebound && st.OpenAskID != "" {
-		// S06.1 gates wait: the fork inherited an OPEN gate, so it parks on it
-		// here — the dispatch leg already took the run to running, and a running
-		// run nobody drives is exactly the corpse the ladder reaps next pass.
-		// NOT a kill: the run is ours, it is idle by construction, and parking is
-		// the ratified wait state (NO-AUTO-KILL, S14.4 / G1 D1.3).
-		if _, err := p.Runs.Transition(ctx, st.RunID, run.StateParked, run.TransitionOptions{
-			Reason: fmt.Sprintf("intake gate open on the superseding run: %s — gates wait (S06.1)", st.OpenAskKind),
-			Actor:  run.ActorPlatform,
-		}); err != nil {
-			return nil, err
-		}
-		return st, nil
+		return st, nil // the rebind parked it on the gate it inherited
 	}
 	return p.advanceLoaded(ctx, st)
 }
@@ -399,12 +388,19 @@ func (p *Pipeline) rebind(ctx context.Context, st *State, runID string) (bool, e
 	}
 	from := st.RunID
 	st.RunID = runID
-	// ONE transaction: the rebind state event lands on the FORK at the fork's
-	// current generation (appendStateTx reads it in-tx — CONVENTIONS §13:
-	// control-plane acts append at the run's current generation), and an open
-	// ask row re-points to the fork in the same commit so `asks.run_id` never
-	// names a superseded run (recovery's step-5 ask join excludes asks on
-	// terminal runs).
+	// ONE transaction, because these are ONE fact — the fork takes over: the
+	// rebind state event lands on the FORK at the fork's current generation
+	// (appendStateTx reads it in-tx — CONVENTIONS §13: control-plane acts append
+	// at the run's current generation); an open ask row re-points to the fork in
+	// the same commit so `asks.run_id` never names a superseded run (recovery's
+	// step-5 ask join excludes asks on terminal runs); and, when a gate IS open,
+	// the fork parks on it in the same commit.
+	//
+	// The park is S06.1's "gates wait" applied to a run that inherited a gate:
+	// the dispatch leg already took this run to running, and a running run
+	// nobody drives is exactly the corpse the next sweep reaps. NOT a kill — the
+	// run is ours, it is idle by construction, and parked is the ratified wait
+	// state (NO-AUTO-KILL, S14.4 / G1 D1.3).
 	err = p.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if st.OpenAskID != "" {
 			if _, err := tx.ExecContext(ctx,
@@ -413,7 +409,17 @@ func (p *Pipeline) rebind(ctx context.Context, st *State, runID string) (bool, e
 				return fmt.Errorf("intake: re-point ask %q: %w", st.OpenAskID, err)
 			}
 		}
-		return p.appendStateTx(ctx, tx, st)
+		if err := p.appendStateTx(ctx, tx, st); err != nil {
+			return err
+		}
+		if st.OpenAskID == "" {
+			return nil
+		}
+		_, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateParked, run.TransitionOptions{
+			Reason: fmt.Sprintf("intake gate open on the superseding run: %s — gates wait (S06.1)", st.OpenAskKind),
+			Actor:  run.ActorPlatform,
+		})
+		return err
 	})
 	if err != nil {
 		st.RunID = from // the in-memory state never outruns the durable record
