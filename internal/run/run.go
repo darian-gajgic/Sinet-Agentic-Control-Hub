@@ -469,6 +469,12 @@ func (s *Store) SetLeaseTx(ctx context.Context, tx *sql.Tx, runID, holder string
 	return nil
 }
 
+// RenewLeaseTx extends a live holder's lease. INERT in the P3-RW-5 red-tests
+// commit; the fenced implementation lands with the packet.
+func (s *Store) RenewLeaseTx(ctx context.Context, tx *sql.Tx, runID, holder string, deadline time.Time, generation int64) (bool, error) {
+	return false, nil
+}
+
 // BumpGenerationTx bumps the run's fencing counter without a state change —
 // the takeover fence at fork-from-checkpoint: after the bump, a zombie
 // holder of the previous generation is stale and its appends are rejected
