@@ -233,6 +233,40 @@ func (s *Skeleton) currentIntakeRun(ctx context.Context, taskID string) string {
 	return taskID + RunSuffixIntake
 }
 
+// executeRunID resolves the execute run that ACTUALLY produced the task's
+// deliverable — the current identity of the task's execute lineage, walked
+// forward through `runs.parent_run_id` (Spec S02.5 step 3) from the birth id.
+//
+// Work dirs are per RUN ID (runDirs), so composing `<task>.execute` handed the
+// verification checks the SUPERSEDED PARENT's stale, usually empty cwd whenever
+// a recovery fork produced the deliverable — the same defect as the shell's
+// workspace gate, one layer up (P3-RW-6 R12, drain F1). A suffix strip cannot
+// fix this one: it removes a fork suffix, it cannot reconstruct one from a task
+// id. The lineage row is the honest record and the only durable one available
+// here — the ledger's artifact entry names only the producing STAGE, and the
+// S13 revision row (which does carry a run id) is minted later, by the verify
+// leg itself, so it cannot answer a question asked before it exists.
+//
+// The non-fork path is byte-equivalent: with no successor row the walk returns
+// the birth id it started from, which is also what a task with no execute run
+// at all yields.
+func (s *Skeleton) executeRunID(ctx context.Context, taskID string) string {
+	id := taskID + RunSuffixExecute
+	const maxHops = 64 // a lineage is bounded by ⚙ recovery.max_attempts many times over
+	for hop := 0; hop < maxHops; hop++ {
+		var next string
+		err := s.cfg.DB.QueryRowContext(ctx,
+			`SELECT run_id FROM runs WHERE parent_run_id = ? ORDER BY generation DESC LIMIT 1`, id).Scan(&next)
+		if err != nil || next == "" {
+			return id
+		}
+		id = next
+	}
+	s.logger().Warn("stage: execute lineage exceeds the hop bound; using the newest run found",
+		"task", taskID, "run", id)
+	return id
+}
+
 // ---- run roles ----
 
 type role string
@@ -774,7 +808,7 @@ func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revisi
 	if err != nil {
 		return verify.VerifyInput{}, err
 	}
-	execCwd := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(taskID+RunSuffixExecute), "cwd")
+	execCwd := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(s.executeRunID(ctx, taskID)), "cwd")
 	evidence := filepath.Join(s.cfg.RunRoot, sanitizePathComponent(runID), "evidence")
 	if err := os.MkdirAll(evidence, 0o700); err != nil {
 		return verify.VerifyInput{}, err
