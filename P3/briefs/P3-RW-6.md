@@ -1,5 +1,7 @@
 # P3-RW-6 — recovery-fork integrity: the fork must actually supersede (+ three dispatch-surface production edges)
 
+> **EXPIRED at landing 2026-08-12 (amendment D).** Single-use artifact for the P3-RW-6 pipeline run (A/B split: A red `eb67616` + A impl `5415224` + B red `17e0143` + B impl `073761b` + fixup `e10707a` + drain r1 `b408260`; eval FAIL F1-med/F2-low → drain → re-check PASS). Post-landing divergences: FOUR suffix-matcher copies existed (a fourth in watchdog/tier0.go), all replaced by `metering.StripForkSuffix`; `platform.advisory.*` was additional fork-bait R15 fixed; verifyInput's exec cwd rides `Skeleton.executeRunID` (forward lineage walk); OQ3's optional canary Beat NOT taken (CONVENTIONS §55). Later grounding must never read this as truth — code + spec only.
+
 Grounded 2026-08-11 against tree `278524d` (P3-RW-5 landed: LeaseKeeper/heartbeat machinery is IN these files; every line number below is post-RW-5 and was re-verified at this tree). Spec cites: S02.5, S02.3, S02.2, S10.7, S10.8, S13.7, S14.4. Binding contract `Spec/core-architecture-v1.md` (drafts canonical); process runbook `.claude/skills/p3-implementation/SKILL.md`; `P3/CONVENTIONS.md` §8, §11, §13, §14, §16, §26, §31, §54.
 
 **PROCESS EXCEPTION (standing, coordinator-set):** acceptance-test SPECS live in this brief (§7); the grounding agent committed NO tests and touched NO Go file (a sibling grounding ran concurrently; the battery stays green). The executor materializes §7 as red tests first, per the runbook's tests-first rule.
