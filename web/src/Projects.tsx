@@ -163,6 +163,15 @@ type Bucket = {
   recent: Deliverable[]
 }
 
+/** The bucket a deliverable files under: its project, with BOTH the empty
+ *  string and an absent field degrading to '(no project)'. The list wire
+ *  promises the field, but an older binary omits it when empty — and an
+ *  undefined bucket name would throw in the name sort and take the whole
+ *  surface down with it (operator, 2026-08-12). */
+function bucketOf(d: Deliverable): string {
+  return d.project_id ? d.project_id : '(no project)'
+}
+
 export function projectBuckets(tasks: TaskListItem[], deliverables: Deliverable[]): Bucket[] {
   const names = new Map<string, TaskListItem[]>()
   for (const t of tasks) {
@@ -172,7 +181,7 @@ export function projectBuckets(tasks: TaskListItem[], deliverables: Deliverable[
   }
   // Deliverables can name a project no task currently shows — keep the bucket.
   for (const d of deliverables) {
-    const key = d.project_id === '' ? '(no project)' : d.project_id
+    const key = bucketOf(d)
     if (!names.has(key)) names.set(key, [])
   }
 
@@ -202,7 +211,7 @@ export function projectBuckets(tasks: TaskListItem[], deliverables: Deliverable[
       }
     }
     const recent = deliverables
-      .filter((d) => (d.project_id === '' ? '(no project)' : d.project_id) === name)
+      .filter((d) => bucketOf(d) === name)
       .sort((a, b) => b.updated_ts.localeCompare(a.updated_ts))
       .slice(0, 3)
     buckets.push({

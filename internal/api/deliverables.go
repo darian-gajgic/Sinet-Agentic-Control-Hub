@@ -101,7 +101,7 @@ type DeliverableListItem struct {
 	DeliverableID   string    `json:"deliverable_id"`
 	Owner           string    `json:"owner"`
 	TaskID          string    `json:"task_id"`
-	ProjectID       string    `json:"project_id,omitempty"`
+	ProjectID       string    `json:"project_id"`
 	Type            string    `json:"type"`
 	CurrentRevision int       `json:"current_revision"`
 	State           string    `json:"state"`
