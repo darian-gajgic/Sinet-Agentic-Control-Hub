@@ -1,5 +1,7 @@
 # P3-RW-9 grounded brief — engine-adapter result-text robustness (the planner-strand fix)
 
+> **EXPIRED at landing 2026-08-12 (amendment D).** Single-use artifact for the P3-RW-9 pipeline run (red `8e7f00e` + impl `76d0be8` + drain r1 `4c88129`; eval FAIL F1–F3 → drain → re-check PASS). Post-landing divergences: the corpse cut is STATE-FIRST (classification decides only pre-resume); the continuation legs carry the posture; retention is text-bearing-only; `forkheal_e2e_test.go`'s strand assertion legitimately moved to `crashed` (adjudicated). Known residue on the deferred ledger: the finishIntake LAUNCH flavor (execute Enqueue refusal at approval → run stuck `new`, nudge-healable, raw 500). Later grounding must never read this as truth — code + spec only.
+
 **Packet class:** rework (builder-reported live, flaky 2-of-3 walk sessions; reproduction PARKED in the live world as task `t-59f2a72bab7f8109` — event trail re-verified this session from a DB copy, never the live file).
 **Headline:** *a cleanly-completed engine session never loses its text on the adapter seam (the flaky empty-result shape yields the stream's own final assistant text), and a session whose text is genuinely unrecoverable — or unusable by its consumer — crashes loudly for the ladder: no swallowed 500, no stranded run.*
 **Scope:** backend Go only — `internal/adapters/claudecli` + `internal/stage` (+ tests). No engine change ever (adopt-don't-fork), no migration, no web, no ⚙.
