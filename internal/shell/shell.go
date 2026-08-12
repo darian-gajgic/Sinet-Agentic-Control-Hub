@@ -406,14 +406,25 @@ func Run(ctx context.Context, opts Options) error {
 		// approved (S09.8). It runs AFTER the B2 seeding above, which is what
 		// puts the entry there to supersede. Same D10 deferral.
 		taxGate := newWriteGate(memStore, committer, nil)
-		switch created, superseded, err := taxGate.EnsureRW12TaxonomyGovernance(ctx); {
+		switch res, err := taxGate.EnsureRW12TaxonomyGovernance(ctx); {
 		case errors.Is(err, memory.ErrNoOperator):
 			logger.Info("memory: Deep-Plan taxonomy governance deferred — no operator account yet (Spec S09.10, D10)")
+		case errors.Is(err, memory.ErrSeedDiverged):
+			// Loud, and NOT a boot failure: the in-code question sets have
+			// moved past what this packet's ratification record covers, so
+			// governing them under it would be a false attestation. The next
+			// packet to edit a set mints its own Ensure and provenance.
+			logger.Warn("memory: Deep-Plan taxonomy governance SKIPPED — the in-code seeds no longer match the ratified snapshot; "+
+				"a question-set edit needs its own governance function and provenance record (Spec S09.10)", "err", err)
 		case err != nil:
 			return fmt.Errorf("shell: Deep-Plan taxonomy governance: %w", err)
-		case created > 0 || superseded > 0:
+		case res.Repaired > 0:
+			logger.Warn("memory: governed taxonomy file did not match the content its row was committed with — "+
+				"a write was torn by a crash and has been repaired (Spec S09.8)",
+				"repaired", res.Repaired, "created", res.Created, "superseded", res.Superseded)
+		case res.Created > 0 || res.Superseded > 0:
 			logger.Info("memory: Deep-Plan interview taxonomies under S09.10 governance",
-				"created", created, "superseded", superseded)
+				"created", res.Created, "superseded", res.Superseded)
 		}
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded

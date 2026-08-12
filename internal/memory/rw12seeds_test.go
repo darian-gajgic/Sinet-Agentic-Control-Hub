@@ -5,7 +5,9 @@ package memory_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -30,7 +32,7 @@ func TestTaxonomyGovernanceCreatesAndSupersedes(t *testing.T) {
 	ctx := context.Background()
 
 	// House scope needs its D10 holder; without one the boot skips and retries.
-	if _, _, err := f.gate.EnsureRW12TaxonomyGovernance(ctx); !errors.Is(err, memory.ErrNoOperator) {
+	if _, err := f.gate.EnsureRW12TaxonomyGovernance(ctx); !errors.Is(err, memory.ErrNoOperator) {
 		t.Fatalf("without operator: %v, want ErrNoOperator", err)
 	}
 	f.user("darian", "operator")
@@ -48,15 +50,18 @@ func TestTaxonomyGovernanceCreatesAndSupersedes(t *testing.T) {
 		t.Fatalf("B2 entry provenance = %q", b2Software.OriginRef)
 	}
 
-	created, superseded, err := f.gate.EnsureRW12TaxonomyGovernance(ctx)
+	res, err := f.gate.EnsureRW12TaxonomyGovernance(ctx)
 	if err != nil {
 		t.Fatalf("EnsureRW12TaxonomyGovernance: %v", err)
 	}
-	if created != 4 {
-		t.Errorf("created = %d, want the 4 new family taxonomies", created)
+	if res.Created != 4 {
+		t.Errorf("created = %d, want the 4 new family taxonomies", res.Created)
 	}
-	if superseded != 1 {
-		t.Errorf("superseded = %d, want the software set moved to v2", superseded)
+	if res.Superseded != 1 {
+		t.Errorf("superseded = %d, want the software set moved to v2", res.Superseded)
+	}
+	if res.Repaired != 0 {
+		t.Errorf("repaired = %d on a clean world, want 0", res.Repaired)
 	}
 
 	for _, fam := range rw12Families {
@@ -121,18 +126,18 @@ func TestTaxonomyGovernanceCreatesAndSupersedes(t *testing.T) {
 	}
 
 	// Idempotent across boots: nothing created, nothing superseded twice.
-	created, superseded, err = f.gate.EnsureRW12TaxonomyGovernance(ctx)
-	if err != nil || created != 0 || superseded != 0 {
-		t.Fatalf("second ensure: created=%d superseded=%d err=%v", created, superseded, err)
+	res, err = f.gate.EnsureRW12TaxonomyGovernance(ctx)
+	if err != nil || res.Created != 0 || res.Superseded != 0 || res.Repaired != 0 {
+		t.Fatalf("second ensure: %+v err=%v", res, err)
 	}
 
 	// Governance is real: a removed object stays dead.
 	if _, err := f.gate.Remove(ctx, "darian", "seed-intake-taxonomy-research", "not wanted"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	created, _, err = f.gate.EnsureRW12TaxonomyGovernance(ctx)
-	if err != nil || created != 0 {
-		t.Fatalf("ensure after removal: created=%d err=%v", created, err)
+	res, err = f.gate.EnsureRW12TaxonomyGovernance(ctx)
+	if err != nil || res.Created != 0 {
+		t.Fatalf("ensure after removal: %+v err=%v", res, err)
 	}
 	e, err := f.store.Get(ctx, "seed-intake-taxonomy-research")
 	if err != nil || e.Status != memory.StatusRemoved {
@@ -140,26 +145,108 @@ func TestTaxonomyGovernanceCreatesAndSupersedes(t *testing.T) {
 	}
 }
 
-// TestB2GovernedTaxonomyIsTheRatifiedSnapshot (§11 governance-divergence
-// trap): the B2 entry records what the B2 gate ACTUALLY ratified. A fresh
-// world must not write today's v2 content under the B2 provenance — the
-// ratification record is a snapshot, never a live pointer at whatever the
-// code says now.
-func TestB2GovernedTaxonomyIsTheRatifiedSnapshot(t *testing.T) {
+// TestB2GovernedTaxonomiesAreTheRatifiedSnapshot (§11 governance-divergence
+// trap; drain r1 F3): BOTH B2 taxonomy entries record what the B2 gate
+// ACTUALLY ratified. A fresh world must not write today's content under the B2
+// provenance — the ratification record is a snapshot, never a live pointer at
+// whatever the code says now.
+//
+// The generic half is the one that matters going forward: P3-RW-12 left the
+// generic set unchanged, so the frozen fixture and the live seed agree TODAY.
+// That is exactly why it is pinned here — the packet that eventually edits
+// generic must trip this test and freeze its own snapshot, instead of silently
+// re-dating the B2 gate.
+func TestB2GovernedTaxonomiesAreTheRatifiedSnapshot(t *testing.T) {
 	f := newFix(t)
 	ctx := context.Background()
 	f.user("darian", "operator")
 	if _, err := f.gate.EnsureB2SeedGovernance(ctx); err != nil {
 		t.Fatalf("EnsureB2SeedGovernance: %v", err)
 	}
-	got, err := intake.LoadTaxonomy(filepath.Join(f.root, "house", "intake-taxonomy-software.json"))
+	for _, tc := range []struct {
+		fam      intake.Family
+		version  string
+		slots    int
+		ratified string
+	}{
+		{intake.FamilySoftware, "v1", 10, "the ClarifyCodeBench 10"},
+		{intake.FamilyGeneric, "v1", 8, "the 8-slot generic fallback"},
+	} {
+		got, err := intake.LoadTaxonomy(filepath.Join(f.root, "house", "intake-taxonomy-"+string(tc.fam)+".json"))
+		if err != nil {
+			t.Fatalf("LoadTaxonomy %s: %v", tc.fam, err)
+		}
+		if got.Version != tc.version {
+			t.Errorf("B2-governed %s taxonomy is %q; the B2 gate ratified %s", tc.fam, got.Version, tc.version)
+		}
+		if len(got.Slots) != tc.slots {
+			t.Errorf("B2-governed %s taxonomy carries %d slots; the B2 gate ratified %s", tc.fam, len(got.Slots), tc.ratified)
+		}
+	}
+}
+
+// TestGovernanceDecidesFromTheRowNotTheFile (drain r1 F4): the crash window in
+// writeEntry — file placed, transaction not yet committed — must not become a
+// permanent silent false record.
+//
+// The torn state is simulated exactly: the governed file is overwritten with
+// the NEW bytes while the OLD row stays active, which is precisely what a
+// crash between those two steps leaves behind. A boot that compared the FILE
+// would find it already equal to the in-code seed, skip the supersession, and
+// keep skipping it forever, leaving the active row attesting content it does
+// not have.
+func TestGovernanceDecidesFromTheRowNotTheFile(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+	f.user("darian", "operator")
+	if _, err := f.gate.EnsureB2SeedGovernance(ctx); err != nil {
+		t.Fatalf("EnsureB2SeedGovernance: %v", err)
+	}
+	before, err := f.store.Get(ctx, "seed-intake-taxonomy-software")
 	if err != nil {
-		t.Fatalf("LoadTaxonomy: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
-	if got.Version != "v1" {
-		t.Errorf("B2-governed software taxonomy is %q; the B2 gate ratified v1", got.Version)
+
+	// Tear the write: v2 bytes on disk, v1 row still active.
+	v2, err := json.MarshalIndent(intake.SeedTaxonomies()[intake.FamilySoftware], "", "  ")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(got.Slots) != 10 {
-		t.Errorf("B2-governed software taxonomy carries %d slots; the B2 gate ratified the ClarifyCodeBench 10", len(got.Slots))
+	path := filepath.Join(f.root, "house", "intake-taxonomy-software.json")
+	if err := os.WriteFile(path, append(v2, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := f.gate.EnsureRW12TaxonomyGovernance(ctx)
+	if err != nil {
+		t.Fatalf("EnsureRW12TaxonomyGovernance: %v", err)
+	}
+	if res.Repaired != 1 {
+		t.Errorf("repaired = %d, want 1 — the torn write must be noticed, not absorbed", res.Repaired)
+	}
+	if res.Superseded != 1 {
+		t.Fatalf("superseded = %d, want 1 — deciding from the file would have skipped this forever", res.Superseded)
+	}
+	old, err := f.store.Get(ctx, before.ID)
+	if err != nil {
+		t.Fatalf("Get old version: %v", err)
+	}
+	if old.Status != memory.StatusRetired {
+		t.Errorf("torn-state old version status = %q, want retired", old.Status)
+	}
+	cur, err := f.store.HouseObject(ctx, "intake/taxonomy/software")
+	if err != nil {
+		t.Fatalf("HouseObject: %v", err)
+	}
+	if cur.Supersedes != before.ID || !strings.Contains(cur.OriginRef, "P3-RW-12") {
+		t.Errorf("repaired version = supersedes %q origin %q", cur.Supersedes, cur.OriginRef)
+	}
+	if cur.Content != string(v2)+"\n" {
+		t.Error("the active version's content does not match the file it governs")
+	}
+	// And it settles: a following boot finds nothing to do.
+	if res, err := f.gate.EnsureRW12TaxonomyGovernance(ctx); err != nil ||
+		res.Created != 0 || res.Superseded != 0 || res.Repaired != 0 {
+		t.Fatalf("boot after repair: %+v err=%v", res, err)
 	}
 }

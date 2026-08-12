@@ -51,19 +51,17 @@ type b2Seed struct {
 
 // b2Seeds enumerates the B2-ratified seed objects in governance order.
 //
-// The taxonomy entries record what the B2 gate RATIFIED, which is not always
-// what the code says today: the software set carries its frozen v1 snapshot
-// (b2taxonomy_v1.go) because P3-RW-12 revised the runtime seed to v2, and a
-// provenance line pointing at a gate that never saw v2 would be a false
-// record. Bringing the governed content up to date is a SUPERSESSION under
-// its own provenance — EnsureRW12TaxonomyGovernance — never a quiet rewrite
-// of what a past gate is said to have approved.
+// BOTH taxonomy entries record what the B2 gate RATIFIED, from the frozen
+// snapshots in b2taxonomy_v1.go — never from whatever intake.SeedTaxonomies()
+// returns today. Software needs it because P3-RW-12 revised the runtime seed
+// to v2 and a provenance line pointing at a gate that never saw v2 would be a
+// false record; generic is frozen at the same time even though its content is
+// unchanged, because the trap is the LIVE POINTER, not the divergence, and the
+// moment two things agree is the only cheap moment to pin them. Bringing
+// governed content up to date is a SUPERSESSION under its own provenance
+// (EnsureRW12TaxonomyGovernance), never a quiet rewrite of what a past gate is
+// said to have approved.
 func b2Seeds() ([]b2Seed, error) {
-	taxonomies := intake.SeedTaxonomies()
-	generic, ok := taxonomies[intake.FamilyGeneric]
-	if !ok {
-		return nil, fmt.Errorf("memory: generic taxonomy seed missing")
-	}
 	return []b2Seed{
 		{
 			entryID: "seed-intake-taxonomy-software", kind: KindTaxonomy,
@@ -75,7 +73,7 @@ func b2Seeds() ([]b2Seed, error) {
 			entryID: "seed-intake-taxonomy-generic", kind: KindTaxonomy,
 			title:    "Interview must-know taxonomy — generic fallback family (B2-2 seed)",
 			topicKey: "intake/taxonomy/generic", taskType: "machinery:intake",
-			fileName: "intake-taxonomy-generic.json", object: generic,
+			fileName: "intake-taxonomy-generic.json", object: b2GenericTaxonomyV1(),
 		},
 		{
 			entryID: "seed-intake-p47-triggers", kind: KindTriggerRules,

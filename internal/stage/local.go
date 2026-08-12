@@ -34,9 +34,27 @@ const (
 	spotCheckMaxTokens = 400
 	tieBreakMaxTokens  = 200
 	// phraseMaxTokens sizes one card: up to maxQuestionsPerCard (4) rewordings
-	// plus a short summary plus the leading reason field — the helpMaxTokens
-	// class scaled modestly for the extra fields (P3-RW-12 R7).
-	phraseMaxTokens = 1000
+	// plus a short summary plus the leading reason field (P3-RW-12 R7).
+	//
+	// It budgets the THINK PHASE, not just the JSON, and that is why it is not
+	// the helpMaxTokens class. This is a DRAFTING duty, so Classification is
+	// false and `NoThink` therefore stays off (duty.go: NoThink = Classification)
+	// — the S12.4 duty table wants drafting quality here, and the reasoning
+	// workhorse earns it by thinking first. But the think phase is emitted
+	// BEFORE the constrained region, so a cap sized for the JSON alone is spent
+	// entirely on reasoning and the schema region never starts.
+	//
+	// MEASURED on the ratified stack, not reasoned: at 1000 the call returned
+	// content length 0 every time ("unexpected end of JSON input"); at 4000 the
+	// output is schema-exact with good phrasings (P3-RW-12 drain r1 F1, and the
+	// live leg below is the standing tripwire). 4000 is the measured-working
+	// class, so 4000 is the constant. Flipping NoThink on instead would trade
+	// away the drafting quality the duty row asks for and was NOT measured, so
+	// it is not taken.
+	//
+	// Structural constant beside the others here — S18 declares no key, and it
+	// falls under the standing settings-tab directive (§26, §8 reading 7).
+	phraseMaxTokens = 4000
 )
 
 // triage vocabularies — intake's family/tier vocabularies rendered as the

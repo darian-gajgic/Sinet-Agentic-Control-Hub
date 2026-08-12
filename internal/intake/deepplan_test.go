@@ -335,16 +335,41 @@ func TestUnderstoodAccumulatesAcrossRounds(t *testing.T) {
 }
 
 // TestApprovalCardCarriesUnderstandingRecap (§7 T8; R9): the recap is the
-// platform's own slot record, complete and beside the planner's restatement —
-// a complement, never a replacement, and never a second blocking card.
+// platform's own record — every resolution AND every answered escalation —
+// complete and beside the planner's restatement, a complement rather than a
+// replacement, and never a second blocking card.
+//
+// Drain r1 (F5) edit, declared: the count assertion read
+// `len(Items) == len(st.Resolutions)`, which encodes a resolutions-only recap.
+// R9's own prose says "every resolution … plus answered escalations", so the
+// original assertion contradicted the requirement it was written to test. The
+// bound is now resolutions + escalations, and the walk actually FORCES an
+// escalation so the added leg is exercised rather than merely permitted.
 func TestApprovalCardCarriesUnderstandingRecap(t *testing.T) {
 	f := newFix(t)
+	const escalated = "Deleting the cache changes the write-set — proceed?"
+	asked := false
+	f.planner.draft = func(in intake.DraftInput) (intake.Pair, error) {
+		if !asked {
+			asked = true
+			return intake.Pair{}, &intake.Escalation{Question: escalated}
+		}
+		return basePair(in), nil
+	}
 	st := f.start(stdRequest())
 	f.admit(st.RunID)
 	st = f.advance(st.TaskID)
 	st = f.answerInterviewToFloor("u1", st.RunID)
+	if st.OpenAskKind != intake.CardEscalation {
+		t.Fatalf("card = %q, want the forced escalation", st.OpenAskKind)
+	}
+	askID, _ := f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{Text: "yes, the cache is disposable"})
 	if st.OpenAskKind != intake.CardApproval {
 		t.Fatalf("card = %q, want approval", st.OpenAskKind)
+	}
+	if len(st.Escalations) != 1 {
+		t.Fatalf("state records %d escalations, want 1", len(st.Escalations))
 	}
 	_, card := f.openAsk(st.RunID)
 	l1 := card.Approval.Layer1
@@ -354,15 +379,26 @@ func TestApprovalCardCarriesUnderstandingRecap(t *testing.T) {
 	if l1.Restatement == "" {
 		t.Error("the recap replaced the planner's restatement — it complements it")
 	}
-	if len(l1.Understood.Items) != len(st.Resolutions) {
-		t.Fatalf("recap has %d items, want one per recorded resolution (%d)",
-			len(l1.Understood.Items), len(st.Resolutions))
+	if len(l1.Understood.Items) != len(st.Resolutions)+len(st.Escalations) {
+		t.Fatalf("recap has %d items, want one per resolution (%d) plus one per answered escalation (%d)",
+			len(l1.Understood.Items), len(st.Resolutions), len(st.Escalations))
 	}
 	recorded := map[string]intake.SlotResolution{}
 	for _, r := range st.Resolutions {
 		recorded[r.SlotID] = r
 	}
+	var escalations int
 	for _, it := range l1.Understood.Items {
+		if it.How == intake.UnderstoodEscalation {
+			escalations++
+			if it.Name != escalated {
+				t.Errorf("escalation item names the question %q, want %q", it.Name, escalated)
+			}
+			if it.Value != "yes, the cache is disposable" {
+				t.Errorf("escalation item value = %q — the requester's own answer is the record", it.Value)
+			}
+			continue
+		}
 		r, ok := recorded[it.SlotID]
 		if !ok {
 			t.Errorf("recap names slot %q, which the state never resolved", it.SlotID)
@@ -371,6 +407,9 @@ func TestApprovalCardCarriesUnderstandingRecap(t *testing.T) {
 		if it.How != r.How || it.Value != r.Value || it.Assumption != r.Assumption {
 			t.Errorf("recap item %+v does not match the resolution %+v", it, r)
 		}
+	}
+	if escalations != 1 {
+		t.Errorf("recap carries %d escalation items, want 1 (R9 'plus answered escalations')", escalations)
 	}
 	// No new blocking card anywhere in the walk (S06.4 click discipline).
 	for _, k := range cardKindsIssued(t, f, st.RunID) {

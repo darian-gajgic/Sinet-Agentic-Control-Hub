@@ -713,6 +713,34 @@ func understoodBlock(st *State, tax *Taxonomy) *UnderstoodBlock {
 	return &UnderstoodBlock{Items: items}
 }
 
+// understoodRecap is the approval card's FULL block (P3-RW-12 R9): every
+// resolution, plus every answered 1.7 escalation.
+//
+// The escalations belong here and nowhere earlier. An escalation is a
+// consequential ambiguity raised mid-planning and answered by the requester —
+// it changed what gets built exactly as much as an interview answer did, so a
+// recap that omitted it would under-report what the approval is approving.
+// They carry their own origin label rather than a Resolved* kind, because they
+// resolve no must-know slot and Clearance must keep ignoring them.
+func understoodRecap(st *State, tax *Taxonomy) *UnderstoodBlock {
+	block := understoodBlock(st, tax)
+	if len(st.Escalations) == 0 {
+		return block
+	}
+	if block == nil {
+		block = &UnderstoodBlock{}
+	}
+	for i, e := range st.Escalations {
+		block.Items = append(block.Items, UnderstoodItem{
+			SlotID: fmt.Sprintf("escalation-%d", i+1),
+			Name:   e.Question,
+			How:    UnderstoodEscalation,
+			Value:  e.Answer,
+		})
+	}
+	return block
+}
+
 // buildInterviewCard turns an ALREADY-MADE slot selection into the card the
 // requester sees (Spec S06.5; P3-RW-12 R6).
 //
@@ -1287,13 +1315,14 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 		Help:        help,
 		Uncovered:   st.AcceptedUncovered,
 		OpenFinds:   st.OpenFindings,
-		// The full slot record beside the planner's prose restatement
-		// (P3-RW-12 R9): every resolution, including the band's and
-		// force-proceed's conversions, each labelled with how it got there.
-		// It complements the restatement — one is what the planner
-		// understood, the other is what the platform recorded — and it adds
-		// no card and no click, because approval IS the confirmation (S06.1).
-		Understood: understoodBlock(st, p.taxonomyFor(st.Family)),
+		// The full record beside the planner's prose restatement (P3-RW-12
+		// R9): every resolution — including the band's and force-proceed's
+		// conversions — plus every answered escalation, each labelled with
+		// how it got there. It complements the restatement (one is what the
+		// planner understood, the other is what the platform recorded) and it
+		// adds no card and no click, because approval IS the confirmation
+		// (S06.1).
+		Understood: understoodRecap(st, p.taxonomyFor(st.Family)),
 	}
 	if st.Spine != nil && st.Spine.SizeFinding != "" {
 		l1.SizeNote = st.Spine.SizeDetail // stakes-gated display: non-trivial shows it (2.5)

@@ -325,10 +325,13 @@ func researchSeed() *Taxonomy {
 		Family:  FamilyResearch,
 		Version: "v1",
 		Source: "Deep-Plan must-know set for the research family. Slots and weights are REASONED — no benchmark of research-request " +
-			"ambiguity comparable to ClarifyCodeBench exists, and none is implied here. Ordering rationale: a wrong question or a " +
-			"misread decision context invalidates everything downstream (12/11); sourcing and recency decide whether the answer is " +
-			"true today (9); balance and the requester's own prior belief guard against one-sided answers and false premises (8); " +
-			"form, audience and practical limits shape delivery only (7/6/5). " + rw12Provenance,
+			"ambiguity comparable to ClarifyCodeBench exists, and none is implied here. Ordering rationale, slot by slot: the " +
+			"question itself (12) and the decision it serves (11) lead, because an answer aimed at the wrong question is worthless " +
+			"however well sourced; depth (10) is next, since it is the single biggest lever on what the work costs; sources, " +
+			"recency and the form of the answer share 9 — the first two decide whether the answer is TRUE today, the third is " +
+			"weighted with them because a research result delivered in the wrong shape gets re-done; balance and the requester's " +
+			"own prior belief share 8 as the guards against one-sided answers and against researching a false premise as though it " +
+			"were established; the edges of the question (7), the reader (6) and practical limits (5) shape delivery only. " + rw12Provenance,
 		Slots: []Slot{
 			{
 				ID: "question", Name: "The question", Weight: 12,
@@ -665,11 +668,12 @@ func choreSeed() *Taxonomy {
 		Family:  FamilyChore,
 		Version: "v1",
 		Source: "Deep-Plan must-know set for the chore family. Slots and weights are REASONED, not benchmark-derived. " +
-			"Ordering rationale specific to unattended repetition: with no per-run definition of done no run can be judged (12); " +
-			"the trigger and the inputs that vary decide whether run two does the right thing (11/10/10); the success signal, the " +
-			"failure posture, the notification preference and the touch scope are weighted above their one-off equivalents because " +
-			"an unheard failure and a repeated outward effect are the characteristic chore harms (9/9/8/8); stop condition and " +
-			"record keeping trail (6/5). " + rw12Provenance,
+			"Ordering rationale specific to unattended repetition, slot by slot: with no per-run definition of done, no run can be " +
+			"judged at all (12); the trigger decides when it happens (11); the procedure of one run and the inputs that vary from " +
+			"run to run share 10, because a chore built around values fixed at planning time does the wrong thing quietly from run " +
+			"two onward; the success signal and the failure posture share 9, and the notification preference and the touch scope " +
+			"share 8 — all four weighted above their one-off equivalents, because an unheard failure and an outward effect repeated " +
+			"on a schedule are the characteristic chore harms; the stop condition (6) and what record it keeps (5) trail. " + rw12Provenance,
 		Slots: []Slot{
 			{
 				ID: "done_looks_like", Name: "What done looks like", Weight: 12,

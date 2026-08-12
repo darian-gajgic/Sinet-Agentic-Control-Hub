@@ -71,12 +71,24 @@ type Question struct {
 // is composed by platform code from State.Resolutions — never by a model —
 // so "here is what I understood" can never claim more than the record holds.
 type UnderstoodItem struct {
-	SlotID     string `json:"slot_id"`
-	Name       string `json:"name"` // the taxonomy slot's plain-language name
-	How        string `json:"how"`  // ResolvedRegistry | ResolvedAnswered | ResolvedAssumption
+	SlotID string `json:"slot_id"`
+	// Name is the plain-language name of what was settled: a taxonomy slot's
+	// Name, or — on an escalation item — the question that was asked.
+	Name string `json:"name"`
+	// How is the origin label: ResolvedRegistry | ResolvedAnswered |
+	// ResolvedAssumption for taxonomy slots, UnderstoodEscalation for an
+	// answered 1.7 single-question escalation.
+	How        string `json:"how"`
 	Value      string `json:"value,omitempty"`
 	Assumption string `json:"assumption,omitempty"`
 }
+
+// UnderstoodEscalation labels a recap item that came from an answered 1.7
+// ask-don't-assume escalation rather than from a taxonomy slot (Spec S06.5;
+// P3-RW-12 R9). It is a CARD vocabulary value and deliberately NOT a fourth
+// SlotResolution kind: an escalation settles a consequential ambiguity raised
+// mid-planning, not a must-know slot, so Clearance must keep ignoring it.
+const UnderstoodEscalation = "escalation"
 
 // UnderstoodBlock is the "here is what I understood so far" block carried by
 // interview and clarification cards, and by the approval card's layer 1

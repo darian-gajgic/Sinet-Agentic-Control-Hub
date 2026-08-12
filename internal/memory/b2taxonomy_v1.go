@@ -103,3 +103,72 @@ func b2SoftwareTaxonomyV1() *intake.Taxonomy {
 		},
 	}
 }
+
+// b2GenericTaxonomyV1 returns the B2-ratified generic fallback question set,
+// frozen for the same reason the software one is: b2Seeds() records what the
+// B2 gate approved, and a record that follows the code is not a record. It is
+// byte-identical to the pre-RW-12 seed (verified against 9484ce1 at drain r1,
+// F3). P3-RW-12 reviewed the generic set and changed nothing, so this and the
+// live seed agree TODAY — which is exactly the moment to freeze it, because
+// the next packet to edit generic must not silently re-date the B2 gate.
+func b2GenericTaxonomyV1() *intake.Taxonomy {
+	return &intake.Taxonomy{
+		ID:      "generic",
+		Family:  intake.FamilyGeneric,
+		Version: "v1",
+		Source:  "Generic fallback must-know set; drafted P3-B2-2 per Spec S06.5 TBD-P3; 8.3-gate entry pending S09 (B3)",
+		Slots: []intake.Slot{
+			{
+				ID: "goal", Name: "Goal", Weight: 12,
+				MustKnow: "The outcome that makes the task done is not uniquely determined.",
+				Question: "What outcome makes this done — what will you look at to say it worked?",
+			},
+			{
+				ID: "deliverable", Name: "Deliverable", Weight: 10,
+				MustKnow: "The form the result should take is unspecified.",
+				Question: "What form should the result take?",
+				Options: []intake.Option{
+					{Label: "A document or write-up", Value: "document"},
+					{Label: "A working change (code, config, files)", Value: "change"},
+					{Label: "A recommendation with reasoning", Value: "recommendation"},
+					{Label: "Something else — I'll describe", Value: "other"},
+				},
+			},
+			{
+				ID: "scope", Name: "Scope", Weight: 10,
+				MustKnow: "What is in and out of scope is unstated.",
+				Question: "Where are the edges — what should this explicitly include, and what should it not touch?",
+			},
+			{
+				ID: "inputs", Name: "Inputs & sources", Weight: 8,
+				MustKnow: "Which materials, sources, or prior work the task should build on is unclear.",
+				Question: "What should this be based on — specific files, sources, or prior work?",
+			},
+			{
+				ID: "constraints", Name: "Constraints", Weight: 8,
+				MustKnow: "Hard constraints (tools, style, budget, privacy, compatibility) are unstated.",
+				Question: "Any hard constraints — tools to use or avoid, style, budget, privacy?",
+			},
+			{
+				ID: "audience", Name: "Audience", Weight: 6,
+				MustKnow: "Who the result is for, and where it will be used, is unclear.",
+				Question: "Who is this for, and where will it be used?",
+			},
+			{
+				ID: "quality_bar", Name: "Quality bar", Weight: 6,
+				MustKnow: "The intended thoroughness of the work is unstated.",
+				Question: "How thorough should this be?",
+				Options: []intake.Option{
+					{Label: "Quick and rough is fine", Value: "quick"},
+					{Label: "Solid, normal quality", Value: "normal"},
+					{Label: "As thorough as it takes", Value: "thorough"},
+				},
+			},
+			{
+				ID: "deadline", Name: "Timing", Weight: 4,
+				MustKnow: "Whether timing matters is unstated.",
+				Question: "Is there a deadline or preferred timing?",
+			},
+		},
+	}
+}

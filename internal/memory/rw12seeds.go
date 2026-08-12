@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
@@ -47,6 +49,63 @@ func rw12OriginRef() (string, error) {
 		return "", fmt.Errorf("memory: marshal RW-12 seed provenance: %w", err)
 	}
 	return string(raw), nil
+}
+
+// ErrSeedDiverged is returned when the in-code taxonomy seeds no longer match
+// the content P3-RW-12's provenance record covers. It is not a boot failure:
+// the caller logs it loudly and carries on, because writing content this
+// packet's gate never saw under this packet's originRef is the one outcome
+// worse than an ungoverned entry.
+var ErrSeedDiverged = errors.New("memory: in-code taxonomy seeds diverge from the ratified P3-RW-12 snapshot")
+
+// rw12ContentDigest pins the EXACT governed content the P3-RW-12 originRef
+// attests to: sha256 over each family's governed file bytes.
+//
+// This is the snapshot half of the doctrine b2taxonomy_v1.go states, applied
+// to this packet's own provenance (drain r1, F3). Without it the Ensure below
+// would marshal whatever SeedTaxonomies() returns and write it under a fixed
+// ratification record — so a later packet editing a question set would have
+// its content superseded into governance at the next boot, attributed to a
+// gate that never read it, with nothing anywhere to notice.
+//
+// Digests rather than committed copies of the content, deliberately: five
+// taxonomies are ~550 lines, and a second hand-maintained copy of them would
+// be two things that must agree — the very drift this is meant to prevent —
+// while doubling what the operator must read at the gate. A digest pins the
+// same fact, is derived rather than transcribed, and fails loudly the moment
+// it stops being true. TestRW12DigestsMatchTheShippedSeeds is the build-time
+// tripwire; this map is the runtime one.
+//
+// FOR THE NEXT PACKET THAT EDITS A QUESTION SET: do not update these digests.
+// They record what P3-RW-12's gate ratified. Mint your own Ensure with your
+// own originRef and your own snapshot, exactly as this packet did to B2's.
+var rw12ContentDigest = map[intake.Family]string{
+	intake.FamilySoftware: "533bee92363337244c8f5ad09cb6c61e2e39863b2b20dbc05a20103bc8c912b1",
+	intake.FamilyResearch: "03589fd135aedd7e252aec44ce7172755fa32f5263ff261bbf3d6f1989061c57",
+	intake.FamilyContent:  "e25b39871edfbf1a2cbbe3ed33c42a8777450c5ce95bfda086c542e4d6d44f7f",
+	intake.FamilyData:     "48797cde9c255ea5739fb0b9d88e4f32f04eda9cdbfd27ea650f2ea593de4962",
+	intake.FamilyChore:    "536163f4722e32de37156fe5d4de95d385d7886449068295c55bef5c46903b24",
+	intake.FamilyGeneric:  "491f40d3d8ad58f7bfa84b7e58113dff598c5a14d0cb54ba413f405f1e3af05d",
+}
+
+// verifyRW12Snapshot checks every family this packet governs against the
+// ratified digest, before anything is written.
+func verifyRW12Snapshot() error {
+	for _, fam := range append(append([]intake.Family{}, rw12NewFamilies...), rw12SupersedeFamilies...) {
+		content, err := taxonomyContent(fam)
+		if err != nil {
+			return err
+		}
+		want, ok := rw12ContentDigest[fam]
+		if !ok {
+			return fmt.Errorf("%w: the %s family has no ratified digest", ErrSeedDiverged, fam)
+		}
+		if got := contentHash(content); got != want {
+			return fmt.Errorf("%w: the %s question set has changed since the P3-RW-12 gate (have %s, ratified %s) — "+
+				"a later edit needs its OWN governance function and provenance record, not this one's", ErrSeedDiverged, fam, got, want)
+		}
+	}
+	return nil
 }
 
 // rw12NewFamilies are the families whose question sets P3-RW-12 seeds for the
@@ -106,6 +165,62 @@ func taxonomyDraft(fam intake.Family, content string) Draft {
 	}
 }
 
+// TaxonomyGovernanceResult reports what one governance pass did.
+type TaxonomyGovernanceResult struct {
+	Created    int
+	Superseded int
+	// Repaired counts governed files whose bytes did not match the content
+	// their own row was committed with — the torn write described on
+	// committedContentHash. Non-zero is worth a human's attention: something
+	// died between placing a knowledge file and committing its row.
+	Repaired int
+}
+
+// committedContentHash returns the content hash recorded by the
+// knowledge.write event that committed in the SAME transaction as this
+// version's row.
+//
+// It exists because the FILE cannot be trusted to say what a version holds.
+// writeEntry deliberately places the file BEFORE its transaction, so that a
+// crash leaves an orphan file rather than a row with no content — a good
+// trade, but it leaves a window in which the new bytes are on disk and the OLD
+// row is still active. A boot that decided from the file would find those
+// bytes equal to the in-code seed, skip the supersession, and go on skipping
+// it at every future boot: the active row would attest content it does not
+// have, permanently and silently (P3-RW-12 drain r1, F4). The write event
+// carries the hash and commits inside the row's own transaction, so it is the
+// one record that cannot be torn.
+func (g *Gate) committedContentHash(ctx context.Context, entryID string) (string, bool, error) {
+	var hash string
+	err := g.s.db.QueryRowContext(ctx, `
+		SELECT json_extract(payload, '$.content_hash') FROM run_events
+		 WHERE type = ? AND json_extract(payload, '$.entry_id') = ?
+		 ORDER BY event_seq DESC LIMIT 1`, EventWrite, entryID).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("memory: read committed content hash for %s: %w", entryID, err)
+	}
+	return hash, hash != "", nil
+}
+
+// repairGovernedFile rewrites a governed file to the content its row is
+// committed to. It changes no row and mints no version: the record was already
+// right and the disk was not, so this is not an in-place content edit (which
+// S09.8 and the migration triggers both forbid) — it is making the disk agree
+// with the record.
+func (g *Gate) repairGovernedFile(e Entry, content string) error {
+	dir, err := g.s.scopeDir(e.Scope, e.ScopeRef, e.Owner)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(g.s.root, e.FilePath), []byte(content), 0o600); err != nil {
+		return fmt.Errorf("memory: repair governed file %s (dir %s): %w", e.FilePath, dir, err)
+	}
+	return nil
+}
+
 // EnsureRW12TaxonomyGovernance brings the Deep-Plan interview taxonomies under
 // S09.10 governance, idempotently.
 //
@@ -124,19 +239,28 @@ func taxonomyDraft(fam intake.Family, content string) Draft {
 //
 // It runs AFTER EnsureB2SeedGovernance, which is what puts the software and
 // generic entries there to supersede in the first place.
-func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (created, superseded int, err error) {
+func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (TaxonomyGovernanceResult, error) {
+	var res TaxonomyGovernanceResult
 	var operator string
-	err = g.s.db.QueryRowContext(ctx,
+	err := g.s.db.QueryRowContext(ctx,
 		`SELECT user_id FROM users WHERE role = 'operator' ORDER BY created_ts, user_id LIMIT 1`).Scan(&operator)
 	if err == sql.ErrNoRows {
-		return 0, 0, ErrNoOperator
+		return res, ErrNoOperator
 	}
 	if err != nil {
-		return 0, 0, fmt.Errorf("memory: resolve operator: %w", err)
+		return res, fmt.Errorf("memory: resolve operator: %w", err)
+	}
+	// Nothing is written unless the content still IS what this packet's
+	// provenance record covers. All-or-nothing on purpose: partial governance
+	// under a stale attestation is harder to reason about than none, and the
+	// refusal is the forcing function that sends the next editor to write its
+	// own Ensure.
+	if err := verifyRW12Snapshot(); err != nil {
+		return res, err
 	}
 	originRef, err := rw12OriginRef()
 	if err != nil {
-		return 0, 0, err
+		return res, err
 	}
 
 	for _, fam := range rw12NewFamilies {
@@ -144,21 +268,21 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (created, super
 		var n int
 		if err := g.s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM knowledge_entries WHERE entry_id = ?`, entryID).Scan(&n); err != nil {
-			return created, superseded, fmt.Errorf("memory: taxonomy existence check: %w", err)
+			return res, fmt.Errorf("memory: taxonomy existence check: %w", err)
 		}
 		if n > 0 {
 			continue
 		}
 		content, err := taxonomyContent(fam)
 		if err != nil {
-			return created, superseded, err
+			return res, err
 		}
 		if _, err := g.writeEntry(ctx, operator, taxonomyDraft(fam, content), writeOpts{
 			origin: OriginImported, originRef: originRef, fixedID: entryID,
 		}); err != nil {
-			return created, superseded, fmt.Errorf("memory: govern %s taxonomy: %w", fam, err)
+			return res, fmt.Errorf("memory: govern %s taxonomy: %w", fam, err)
 		}
-		created++
+		res.Created++
 	}
 
 	for _, fam := range rw12SupersedeFamilies {
@@ -170,13 +294,44 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (created, super
 			continue
 		}
 		if err != nil {
-			return created, superseded, err
+			return res, err
 		}
 		content, err := taxonomyContent(fam)
 		if err != nil {
-			return created, superseded, err
+			return res, err
 		}
-		if cur.Content == content {
+		want := contentHash(content)
+
+		// DECIDE FROM THE ROW, NEVER FROM THE FILE (drain r1, F4 — see
+		// committedContentHash). HouseObject fills Content from disk, and disk
+		// is the half of a governed object that a crash can leave ahead of the
+		// record.
+		onDisk := contentHash(cur.Content)
+		committed, haveCommitted, err := g.committedContentHash(ctx, cur.ID)
+		if err != nil {
+			return res, err
+		}
+		decisive := onDisk
+		if haveCommitted {
+			decisive = committed
+			if committed != onDisk {
+				// A torn write: the bytes on disk are not the bytes this row
+				// was committed with. Count it so a boot says so out loud.
+				res.Repaired++
+				if committed == want {
+					// The RECORD is already right and only the disk is wrong,
+					// so there is nothing to supersede — repair the file to
+					// what the row attests and move on.
+					if err := g.repairGovernedFile(cur, content); err != nil {
+						return res, err
+					}
+					continue
+				}
+				// Otherwise the supersession below rewrites the file anyway,
+				// which resolves the divergence and records it as a version.
+			}
+		}
+		if decisive == want {
 			continue
 		}
 		// The new version reuses the canonical file name, so the file at
@@ -188,9 +343,9 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (created, super
 		if _, err := g.writeEntry(ctx, operator, taxonomyDraft(fam, content), writeOpts{
 			origin: OriginImported, originRef: originRef, supersedes: cur.ID,
 		}); err != nil {
-			return created, superseded, fmt.Errorf("memory: supersede %s taxonomy: %w", fam, err)
+			return res, fmt.Errorf("memory: supersede %s taxonomy: %w", fam, err)
 		}
-		superseded++
+		res.Superseded++
 	}
-	return created, superseded, nil
+	return res, nil
 }
