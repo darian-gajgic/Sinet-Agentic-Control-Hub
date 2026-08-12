@@ -399,6 +399,22 @@ func Run(ctx context.Context, opts Options) error {
 		case n > 0:
 			logger.Info("memory: B2 seed objects re-homed under S09.10 governance", "created", n)
 		}
+		// The Deep-Plan interview taxonomies (P3-RW-12): the four new family
+		// question sets enter S09.10 governance, and the software set moves
+		// to its current content by SUPERSESSION under its own provenance —
+		// never an in-place rewrite of what the B2 gate is recorded as having
+		// approved (S09.8). It runs AFTER the B2 seeding above, which is what
+		// puts the entry there to supersede. Same D10 deferral.
+		taxGate := newWriteGate(memStore, committer, nil)
+		switch created, superseded, err := taxGate.EnsureRW12TaxonomyGovernance(ctx); {
+		case errors.Is(err, memory.ErrNoOperator):
+			logger.Info("memory: Deep-Plan taxonomy governance deferred — no operator account yet (Spec S09.10, D10)")
+		case err != nil:
+			return fmt.Errorf("shell: Deep-Plan taxonomy governance: %w", err)
+		case created > 0 || superseded > 0:
+			logger.Info("memory: Deep-Plan interview taxonomies under S09.10 governance",
+				"created", created, "superseded", superseded)
+		}
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded
 		// provenance says so). Same D10 deferral as the B2 seeds.
@@ -500,6 +516,7 @@ func Run(ctx context.Context, opts Options) error {
 			TieBreak:       localSurf.TieBreak,
 			Classifier:     localSurf.Classifier,
 			Utility:        localSurf.Utility,
+			Phraser:        localSurf.Phraser,
 			SpotCheck:      localSurf.SpotCheck,
 			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg)},
 			// The S08.6 composer's policy-input seams: the current approved

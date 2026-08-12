@@ -189,6 +189,10 @@ type Config struct {
 	Classifier intake.Classifier
 	Utility    intake.Utility
 	SpotCheck  intake.SpotCheck
+	// Phraser is the S06.5 phrase-and-summarize seat, the same utility alias
+	// as Utility (P3-RW-12). Nil leaves interview cards carrying the
+	// taxonomy's own words — no clicks added, nothing faked.
+	Phraser intake.Phraser
 
 	// Confiner wraps engine spawns in the composed per-run sandbox (Spec
 	// S11). NIL IS THE SANCTIONED DEV POSTURE (the B1-1 unconfined dev

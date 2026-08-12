@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -590,7 +591,7 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 			}
 			qs = append(qs, Question{ID: s.ID, Text: s.Question, Options: s.Options, Weight: s.Weight})
 		}
-		return true, pair, p.issueCard(ctx, st, &Card{Kind: CardInterview, Questions: qs})
+		return true, pair, p.issueCard(ctx, st, p.buildInterviewCard(ctx, st, tax, qs))
 	}
 
 	// The interview: continues while Clearance is below the tier floor and
@@ -610,7 +611,7 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 				}
 				qs = append(qs, Question{ID: s.ID, Text: s.Question, Options: s.Options, Weight: s.Weight})
 			}
-			return true, pair, p.issueCard(ctx, st, &Card{Kind: CardInterview, Questions: qs})
+			return true, pair, p.issueCard(ctx, st, p.buildInterviewCard(ctx, st, tax, qs))
 		}
 	}
 
@@ -668,6 +669,101 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 	st.NeedsDraft = false
 	st.Phase = PhaseSpine
 	return false, newPair, p.appendState(ctx, st)
+}
+
+// ---- The S06.5 phrase-and-summarize seat (P3-RW-12) ----
+
+// understoodBlock composes the deterministic "here is what I understood so
+// far" items from the state's own record (P3-RW-12 R8/R9). It reads
+// State.Resolutions and nothing else: the block can never claim more than the
+// platform actually holds, and it needs no new state — the resolutions ride
+// every state event already, and the rendered block rides the ask snapshot.
+//
+// Items come in TAXONOMY order rather than answer order, so a requester
+// reading the same list across rounds sees it grow in place instead of
+// reshuffling. A resolution whose slot the ACTIVE set does not carry still
+// appears: a family swap keeps the answers already given (applyFamilyAnswer),
+// and silently dropping them from the summary would misreport the record.
+//
+// Nil when nothing is resolved yet — there is nothing honest to show.
+func understoodBlock(st *State, tax *Taxonomy) *UnderstoodBlock {
+	if len(st.Resolutions) == 0 {
+		return nil
+	}
+	items := make([]UnderstoodItem, 0, len(st.Resolutions))
+	add := func(r SlotResolution, name string) {
+		items = append(items, UnderstoodItem{
+			SlotID: r.SlotID, Name: name, How: r.How,
+			Value: r.Value, Assumption: r.Assumption,
+		})
+	}
+	for _, s := range tax.Slots {
+		for _, r := range st.Resolutions {
+			if r.SlotID == s.ID {
+				add(r, s.Name)
+				break
+			}
+		}
+	}
+	for _, r := range st.Resolutions {
+		if tax.Slot(r.SlotID) == nil {
+			add(r, r.SlotID) // carried over from another family's set
+		}
+	}
+	return &UnderstoodBlock{Items: items}
+}
+
+// buildInterviewCard turns an ALREADY-MADE slot selection into the card the
+// requester sees (Spec S06.5; P3-RW-12 R6).
+//
+// The order is the whole point. The taxonomy decides what must be asked and
+// the pipeline decides which of those slots fit on this card — both before
+// the model is involved. Only then is the finished selection offered to the
+// utility seat, and only the WORDING of it comes back. The result is folded
+// by slot id here, in platform code: an id that was not asked is dropped, an
+// id the seat skipped keeps the taxonomy's words, and the question count,
+// order, ids and options are untouchable by construction. That is why the
+// containment is not a sentence in a prompt — a prompt-level lockout is
+// something a model can be talked out of (R03 §2.1), a fold cannot be.
+//
+// A nil or erroring seat is not an error: the card ships with the taxonomy's
+// own words and no added click (R12).
+func (p *Pipeline) buildInterviewCard(ctx context.Context, st *State, tax *Taxonomy, qs []Question) *Card {
+	card := &Card{Kind: CardInterview, Questions: qs, Understood: understoodBlock(st, tax)}
+	if p.Phraser == nil || len(qs) == 0 {
+		return card
+	}
+	in := PhraseInput{
+		// The CONSUMING run, read from the state: after a recovery-fork
+		// rebind this is the fork, so the seat's ONE $0 D7 row meters on the
+		// run the pipeline is actually driving (§26; the DraftInput.RunID
+		// precedent).
+		RunID:   st.RunID,
+		Request: st.Req, Family: st.Family, Tier: st.Tier,
+		Questions: make([]PhraseQuestion, 0, len(qs)),
+	}
+	for _, q := range qs {
+		in.Questions = append(in.Questions, PhraseQuestion{ID: q.ID, Text: q.Text})
+	}
+	if card.Understood != nil {
+		in.Understood = card.Understood.Items
+	}
+	res, err := p.Phraser.PhraseAndSummarize(ctx, in)
+	if err != nil {
+		return card
+	}
+	for i := range card.Questions {
+		if text, ok := res.Phrasings[card.Questions[i].ID]; ok && strings.TrimSpace(text) != "" {
+			card.Questions[i].Phrased = text
+		}
+	}
+	if summary := strings.TrimSpace(res.Summary); summary != "" {
+		if card.Understood == nil {
+			card.Understood = &UnderstoodBlock{}
+		}
+		card.Understood.Text = summary
+	}
+	return card
 }
 
 // familyGate issues the S06.5 family question when Stage 0 left the family
@@ -817,7 +913,14 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 			}
 			qs = append(qs, Question{ID: fmt.Sprintf("marker-%d", i+1), Text: m})
 		}
-		return true, pair, p.issueCard(ctx, st, &Card{Kind: CardClarification, Questions: qs})
+		// A Stage-1 ask is a Stage-1 ask: the clarification card carries the
+		// same understanding block (P3-RW-12 OQ5). It is NOT phrased — these
+		// questions are the planner's own marker text, not taxonomy wording,
+		// so there is nothing here for the phrasing seat to reword.
+		return true, pair, p.issueCard(ctx, st, &Card{
+			Kind: CardClarification, Questions: qs,
+			Understood: understoodBlock(st, p.taxonomyFor(st.Family)),
+		})
 	}
 
 	if tierRank[st.Tier] >= tierRank[TierStandard] && !st.CritiqueDone {
@@ -1184,6 +1287,13 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 		Help:        help,
 		Uncovered:   st.AcceptedUncovered,
 		OpenFinds:   st.OpenFindings,
+		// The full slot record beside the planner's prose restatement
+		// (P3-RW-12 R9): every resolution, including the band's and
+		// force-proceed's conversions, each labelled with how it got there.
+		// It complements the restatement — one is what the planner
+		// understood, the other is what the platform recorded — and it adds
+		// no card and no click, because approval IS the confirmation (S06.1).
+		Understood: understoodBlock(st, p.taxonomyFor(st.Family)),
 	}
 	if st.Spine != nil && st.Spine.SizeFinding != "" {
 		l1.SizeNote = st.Spine.SizeDetail // stakes-gated display: non-trivial shows it (2.5)

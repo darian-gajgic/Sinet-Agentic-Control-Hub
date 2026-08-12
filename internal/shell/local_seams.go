@@ -56,10 +56,13 @@ type localSurface struct {
 	Classifier intake.Classifier
 	Utility    intake.Utility
 	SpotCheck  intake.SpotCheck
-	TieBreak   worker.TieBreaker
-	DutyMap    worker.DutyMap
-	Available  bool
-	GameMode   *local.GameModeHook
+	// Phraser is the S06.5 phrase-and-summarize duty — the SAME object as
+	// Utility, because S06.10 gives both duties to one seat on one alias.
+	Phraser   intake.Phraser
+	TieBreak  worker.TieBreaker
+	DutyMap   worker.DutyMap
+	Available bool
+	GameMode  *local.GameModeHook
 	// VRAM is the S12.7 admitter (B4-6): the scheduler's GPU-admission policy
 	// hook (nil-safe; wired-but-dormant) AND the live duty pre-flight (OQ2). Nil
 	// when the stack is unconfigured.
@@ -167,11 +170,16 @@ func buildLocalSurface(d localDeps) (*localSurface, error) {
 	screen := newContradictionScreen(duty, meter) // shell-local (needs memory; stage↛memory, §17)
 	checker := stage.NewEntailmentChecker(duty, meter)
 
+	// One utility seat, both of its S06.10 duties (help drafting and card
+	// phrasing/summaries) — one object on one alias, not two that agree.
+	utilitySeat := stage.NewLocalUtilitySeat(duty)
+
 	ls := &localSurface{
 		Duty:          duty,
 		Surface:       surface,
 		Classifier:    stage.NewLocalClassifierWithRecheck(duty, recheck),
-		Utility:       stage.NewLocalUtility(duty),
+		Utility:       utilitySeat,
+		Phraser:       utilitySeat,
 		SpotCheck:     stage.NewLocalSpotCheck(duty),
 		TieBreak:      stage.NewLocalTieBreaker(duty),
 		DutyMap:       dutyMap,

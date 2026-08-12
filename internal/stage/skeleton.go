@@ -159,6 +159,7 @@ func New(cfg Config) (*Skeleton, error) {
 		Classifier: cfg.Classifier,
 		Utility:    cfg.Utility,
 		SpotCheck:  cfg.SpotCheck,
+		Phraser:    cfg.Phraser,
 		// The S13.7 registry feeds intake resolution (S06.2) and the S02.6/
 		// S09.6 approval-staleness fingerprint (B4-2 seams).
 		Registry:           cfg.Registry,

@@ -120,6 +120,35 @@ func HelpSchema() json.RawMessage {
 	}, []string{"what", "wrong", "recommend"})
 }
 
+// PhraseSchema is the S06.5 phrase-and-summarize duty schema (P3-RW-12 R7):
+// `reason` first (F5), then the requester-facing summary, then ONE required
+// string property per question id the caller asked about. DRAFTING, not
+// classification — the HelpSchema posture, no forced-label abstain member (F7
+// ratified); the duty layer sets Classification=false.
+//
+// One property per asked id, with additionalProperties:false, makes the engine
+// itself unable to emit a wording for a question that was never selected. That
+// is a BELT: the authority is the caller's fold-by-id in platform code, because
+// containment that lives only in a schema or a prompt is containment that a
+// clever input can argue with (R03 §2.1).
+func PhraseSchema(questionIDs []string) json.RawMessage {
+	props := []prop{
+		{"reason", strField("brief free-text reasoning — fill this FIRST, before the wordings")},
+		{"summary", strField("one short paragraph addressed to the requester: what is understood about their request so far")},
+	}
+	required := []string{"reason", "summary"}
+	for _, id := range questionIDs {
+		props = append(props, prop{id, strField("a clearer, plainer wording of the question with id " + id + " — the SAME question, never a different one")})
+		required = append(required, id)
+	}
+	return orderedObjectSchema(props, required)
+}
+
+// PhraseReserved are the PhraseSchema property names that are not question
+// ids. Exported so the caller (which owns the ids) can keep a question id from
+// colliding with one of them, and can drop them when reading the result back.
+func PhraseReserved() []string { return []string{"reason", "summary"} }
+
 // LabelField is one classification label the T15 battery drives its generic
 // schema from (brief R6): a field name plus its enum vocabulary (empty Enum =
 // a free string, not a routing label). The battery owns the case data; the
