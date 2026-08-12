@@ -22,6 +22,10 @@ type trigger struct {
 	Counts    map[string]int
 	Detail    string
 	Spend     *SpendEvidence
+	// NoPark raises the card WITHOUT parking the run: the containment park would
+	// contain nothing and would hide the run from the recovery pass (R6; the
+	// silence rule's dead-holder arm is its only user).
+	NoPark bool
 }
 
 // Tail is the event-driven Tier-0 driver (R28): it reads new run_events past

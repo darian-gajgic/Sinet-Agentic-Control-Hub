@@ -193,7 +193,14 @@ func (s *Skeleton) answerRevise(ctx context.Context, actor, askID string, card v
 		s.crash(ctx, card.RunID, "resumed verification drain: "+err.Error())
 		return fmt.Errorf("stage: resumed verify: %w", err)
 	}
-	return s.verifyTerminal(ctx, card.RunID, card.TaskID, out)
+	if err := s.verifyTerminal(ctx, card.RunID, card.TaskID, out); err != nil {
+		// The rework rounds are paid for and their outcome could not be recorded:
+		// the same posture the dead drain takes, so the run stays classifiable
+		// instead of stranding on a verdict nobody landed (P3-RW-10 R5b).
+		s.crash(ctx, card.RunID, "resumed verification terminal record: "+err.Error())
+		return fmt.Errorf("stage: resumed verify terminal: %w", err)
+	}
+	return nil
 }
 
 func noteSuffix(ans verify.Answer) string {

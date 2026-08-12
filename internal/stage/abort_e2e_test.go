@@ -192,52 +192,79 @@ func TestAdvanceAbortMidDriveStillLeavesCorpse(t *testing.T) {
 		t.Fatalf("fork %s is %s, want parked on a fresh gate", forkID, got)
 	}
 
-	// (b) the refusal mapping survives cancellation: advancing a PARKED run with
-	// an ALREADY-dead context answers the same 409 the live-context nudge does,
-	// never a raw 500, and mints no corpse (the cut line is the state, and the
-	// beat never reached the resume commit).
-	live, err := h.sur.Advance(bg, owner, taskID)
-	if err == nil {
-		t.Fatalf("advancing a parked run must refuse (got %s)", live)
-	}
-	se = surfaceError(t, err)
-	if se.Status != http.StatusConflict || se.Code != "conflict" {
-		t.Fatalf("advance-on-parked (live ctx) = %d/%s, want 409/conflict", se.Status, se.Code)
-	}
-	dead, cancelDead := context.WithCancel(bg)
-	cancelDead()
-	_, err = h.sur.Advance(dead, owner, taskID)
-	if err == nil {
-		t.Fatal("advancing a parked run under a dead context must refuse")
-	}
-	se = surfaceError(t, err)
-	if se.Status != http.StatusConflict || se.Code != "conflict" {
-		t.Fatalf("advance-on-parked (canceled ctx) = %d/%s, want 409/conflict — never a raw 500", se.Status, se.Code)
-	}
 	if n := h.crashEvents(forkID); n != 0 {
-		t.Fatalf("%d crash events on the fork — a refused nudge mints no corpse", n)
+		t.Fatalf("%d crash events on the fork — it must take over, not re-die", n)
 	}
 	if n := h.crashEvents(intakeRun); n != 1 {
 		t.Fatalf("%d crash events on %s, want the original 1", n, intakeRun)
+	}
+
+	// (b) the refusal mapping survives cancellation. The fixture is the live
+	// wedge itself: a run parked with NO open card (every ask answered, then the
+	// watchdog's silence park), which the nudge refuses because `pipe.Advance`
+	// demands `running`. Under an ALREADY-dead context it must answer that SAME
+	// 409 — never a raw 500 — and mint no corpse: the beat never reached the
+	// resume commit, so there is nothing to strand.
+	taskB, runB, askB, bodyB := walkToOpenCard(t, h, owner)
+	h.sk.Pipeline().Planner = &abortPlanner{armed: true, failure: func(context.Context) error {
+		return errors.New("planning session died mid-advance")
+	}}
+	if _, err := h.sk.Pipeline().Answer(bg, owner, askB, bodyB); err == nil {
+		t.Fatal("expected the pipeline answer to fail with the dying planning seam")
+	}
+	if _, err := h.runs.Transition(bg, runB, run.StateParked, run.TransitionOptions{
+		Reason: "watchdog:watchdog.silence", Actor: run.ActorPlatform,
+	}); err != nil {
+		t.Fatalf("park %s: %v", runB, err)
+	}
+
+	dead, cancelDead := context.WithCancel(bg)
+	cancelDead()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{{"live context", bg}, {"canceled context", dead}} {
+		t.Run(tc.name, func(t *testing.T) {
+			view, err := h.sur.Advance(tc.ctx, owner, taskB)
+			if err == nil {
+				t.Fatalf("advancing an ask-less parked run must refuse (got %s)", view)
+			}
+			se := surfaceError(t, err)
+			if se.Status != http.StatusConflict || se.Code != "conflict" {
+				t.Fatalf("advance-on-parked = %d/%s, want 409/conflict", se.Status, se.Code)
+			}
+			if got := h.runState(runB); got != run.StateParked {
+				t.Fatalf("run %s is %s, want still parked", runB, got)
+			}
+			if n := h.crashEvents(runB); n != 0 {
+				t.Fatalf("%d crash events — a refused nudge mints no corpse", n)
+			}
+		})
 	}
 }
 
 // ---- T3: the continuation legs ----
 
-// abortingAdmitter is the S16.6 ingress dying WITH ITS CALLER: the compose leg
-// of `afterIntake` reaches it BEFORE the approved run is completed — the one
-// continuation window that can strand a still-running run.
+// abortingAdmitter is the S16.6 ingress refusing, then dying WITH ITS CALLER.
+// Refused first so the composition never launches, which is what leaves the
+// compose leg of `afterIntake` still to do on the approval — and that leg runs
+// BEFORE the approved run is completed, the one continuation window that can
+// strand a still-running run.
 type abortingAdmitter struct {
 	stage.Admitter
 	cancel context.CancelFunc
+	refuse bool
 	armed  bool
 }
 
 func (a *abortingAdmitter) Enqueue(ctx context.Context, runID string, class scheduler.WorkloadClass) error {
-	if a.armed {
+	switch {
+	case a.armed:
 		a.armed = false
 		a.cancel()
 		return fmt.Errorf("admission for %s died with its caller: %w", runID, ctx.Err())
+	case a.refuse:
+		return fmt.Errorf("admission refused for %s (test)", runID)
 	}
 	return a.Admitter.Enqueue(ctx, runID, class)
 }
@@ -260,13 +287,23 @@ func TestContinuationAbortStillLeavesCorpse(t *testing.T) {
 		t.Fatalf("expected a fresh approval card, got %q", approvalAsk)
 	}
 
-	// Approving RESUMES the run; the composition launch then dies with the
-	// request that asked for it, on a run that is RUNNING — the strand.
+	// The compose verb is chosen and its launch is refused: the request is
+	// RECORDED on the state, the card stays open and the run stays parked — so
+	// the composition is still owed when the approval resumes the run.
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
-	admitter := &abortingAdmitter{Admitter: h.sched, cancel: cancel, armed: true}
+	admitter := &abortingAdmitter{Admitter: h.sched, cancel: cancel, refuse: true}
 	h.sk.Bind(admitter)
+	if _, err := h.sur.Answer(bg, owner, approvalAsk, json.RawMessage(`{"action":"compose"}`), true); err == nil {
+		t.Fatal("expected the composition launch to fail under refused admission")
+	}
+	if got := h.runState(intakeRun); got != run.StateParked {
+		t.Fatalf("run %s is %s, want still parked on its approval card", intakeRun, got)
+	}
 
+	// Approving RESUMES the run; the composition launch then dies with the
+	// request that asked for it, on a run that is RUNNING — the strand.
+	admitter.refuse, admitter.armed = false, true
 	_, err := h.sur.Answer(ctx, owner, approvalAsk, json.RawMessage(`{"action":"approve"}`), true)
 	if err == nil {
 		t.Fatal("expected the approved continuation to fail with the aborted request")

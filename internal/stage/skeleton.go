@@ -382,6 +382,15 @@ func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 // spawn-failure precedent: a dispatch leg that cannot proceed leaves a
 // classifiable corpse for the recovery ladder, never a silent zombie.
 func (s *Skeleton) crash(ctx context.Context, runID, cause string) {
+	// THE RECORD OF THE ENDING OUTLIVES THE REQUEST (P3-RW-10 R2). The corpse is
+	// what makes the strand healable, and the commonest reason a leg dies is that
+	// its caller did — a requester's page navigating away mid-answer kills the
+	// request context, the drive with it, and (before this) the posture too: the
+	// state read failed, the transition failed, and the run sat `running` with
+	// nobody driving it. Detaching HERE covers every caller in one move — the
+	// dispatch legs, the intake beats via mapDriveErr, the verify answer sites.
+	// Values (identity, log attribution) are kept; only cancellation is dropped.
+	ctx = context.WithoutCancel(ctx)
 	// The suppression is consulted at the run's CURRENT generation and consumed
 	// on use (drain D1): it silences exactly the one unwind its own cancel
 	// caused. A mark left by a cancel that never committed, or one predating a
@@ -742,7 +751,14 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 		s.crash(ctx, r.ID, "verification drain: "+err.Error())
 		return fmt.Errorf("stage: verify: %w", err)
 	}
-	return s.verifyTerminal(ctx, r.ID, r.TaskID, out)
+	if err := s.verifyTerminal(ctx, r.ID, r.TaskID, out); err != nil {
+		// The drain finished but its terminal record did not land: the run holds
+		// a paid outcome nobody is driving to a state. Leave the ladder a corpse
+		// rather than a strand (P3-RW-10 R5b; CONVENTIONS §16).
+		s.crash(ctx, r.ID, "verification terminal record: "+err.Error())
+		return fmt.Errorf("stage: verify terminal: %w", err)
+	}
+	return nil
 }
 
 // newVerifier assembles the S07 Verifier over the skeleton's seams for one
@@ -847,7 +863,13 @@ func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revisi
 //     place). Parked-on-gate is "blocked, not failed" (Spec S02.6); the
 //     queue row stays claimed until a later answer completes or finalizes
 //     the run (the intake gate pattern).
+//
+// The outcome is an ENDING RECORD and outlives the request that asked for it
+// (P3-RW-10 R5): the drain has already been paid for, so a requester who walked
+// away mid-answer must not cost the platform the verdict (D7 no paid work is
+// lost; S07.7 no finding dies silently).
 func (s *Skeleton) verifyTerminal(ctx context.Context, runID, taskID string, out verify.Outcome) error {
+	ctx = context.WithoutCancel(ctx)
 	switch out.Verdict {
 	case verify.VerdictShip, verify.VerdictShipWithNotes:
 		s.setKanban(ctx, taskID, "done")

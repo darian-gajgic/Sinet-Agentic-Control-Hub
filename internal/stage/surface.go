@@ -61,6 +61,14 @@ func mapIntakeErr(err error) error {
 		return surfaceErr(http.StatusConflict, "conflict", err)
 	case errors.Is(err, intake.ErrNoState):
 		return surfaceErr(http.StatusNotFound, "not_found", err)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The request died under its own beat (a page navigating away, a client
+		// timeout): nothing about the platform is broken, so a raw 500 would be a
+		// lie (S01.3 honest statuses). It is the same "not now, re-read and
+		// retry" the state-based refusals answer with — and it stays a REFUSAL
+		// only because mapDriveErr consults the run's state FIRST, so a beat that
+		// already took its run to `running` gets the corpse instead (R3).
+		return surfaceErr(http.StatusConflict, "conflict", err)
 	default:
 		return err
 	}
@@ -102,10 +110,16 @@ const CodeAdvanceCrashed = "advance_crashed_recovering"
 // This is the posture the dispatch leg (`Skeleton.crash` at dispatchIntake)
 // and the S07.7 verify answer beat (answer.go) already take — CONVENTIONS §16
 // doctrine, extended to the intake beats it had skipped.
+//
+// The whole posture is DETACHED from the request context (P3-RW-10 R1): the
+// commonest way a drive dies is that its caller died, and a posture riding the
+// same dead context read nothing, decided nothing and wrote nothing — the exact
+// strand this exists to end. Values are kept; only cancellation is dropped.
 func (u *Surface) mapDriveErr(ctx context.Context, runID, beat string, err error) error {
 	if runID == "" {
 		return mapIntakeErr(err)
 	}
+	ctx = context.WithoutCancel(ctx)
 	r, gerr := u.sk.cfg.Runs.Get(ctx, runID)
 	if gerr != nil {
 		u.sk.logger().Error("stage: intake "+beat+" failed and its run could not be read",

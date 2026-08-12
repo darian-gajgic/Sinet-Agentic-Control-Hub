@@ -63,6 +63,8 @@ func (w *Watchdog) Sweep(ctx context.Context) error {
 // (drain D3) — a run parked with no resume-time is waiting-on-human (first-class,
 // its card already exists), never silence. Absence is time-based, so it reads
 // the newest event's wall-clock ts (never an ordering authority — display only).
+// WHETHER a trip parks is holderGone's question: a candidate whose driver is
+// demonstrably gone is flagged and left for the recovery pass (R6).
 func (w *Watchdog) sweepSilence(ctx context.Context) error {
 	candidates, err := w.runs.InStates(ctx, silenceWatchStates...)
 	if err != nil {
@@ -73,6 +75,10 @@ func (w *Watchdog) sweepSilence(ctx context.Context) error {
 		return err
 	}
 	seed, err := w.settings.Duration(keyDeadAfter)
+	if err != nil {
+		return err
+	}
+	wakeGrace, err := w.settings.Duration(keyWakeGrace)
 	if err != nil {
 		return err
 	}
@@ -96,11 +102,16 @@ func (w *Watchdog) sweepSilence(ctx context.Context) error {
 		}
 		silent := now.Sub(newest)
 		if silent > budget {
-			if err := w.flag(ctx, r, trigger{
+			trig := trigger{
 				Rule:   RuleSilence,
 				Counts: map[string]int{"silent_seconds": int(silent.Seconds()), "budget_seconds": int(budget.Seconds())},
 				Detail: fmt.Sprintf("no event for %s (run-type %q budget %s)", silent.Round(time.Second), runType(r), budget),
-			}); err != nil {
+			}
+			if holderGone(r, now, silent, seed, wakeGrace) {
+				trig.NoPark = true
+				trig.Detail += "; nothing is driving it and the recovery pass will classify it — the card stands, the run is left where the pass can see it"
+			}
+			if err := w.flag(ctx, r, trig); err != nil {
 				return err
 			}
 		}
@@ -334,6 +345,32 @@ func (w *Watchdog) silenceWatched(ctx context.Context, r run.Run, now time.Time)
 	default:
 		return false
 	}
+}
+
+// holderGone reports whether a silence candidate has demonstrably lost its
+// DRIVER and is past the bound the recovery pass itself reaps at (P3-RW-10 R6).
+// Such a run is not contained by a park: there is no live work to hold back and
+// no next paid call for the scheduler to refuse — the park only hides it from
+// the one component ratified to classify a driver-less run (Spec S02.5 step 2),
+// whose heal is machine-only and bounded, while a park with no resume-time waits
+// on a person forever. So the card is raised and the run is left where the
+// recovery pass can see it.
+//
+// Both halves are required, and they are the SAME two actuals the recovery pass
+// weighs (CONVENTIONS §54): the lease is holder liveness, evaluated suspend-aware
+// with ⚙ recovery.wake_grace — a lease inside the grace decides nothing, and a
+// run with no lease at all cannot re-assert itself — and the event cursor is
+// progress, which must be stale past ⚙ recovery.dead_after (+ that grace) before
+// the pass would take the run. Inside those bounds nothing else would contain
+// it, so containment wins the tie and the ordinary park stands.
+func holderGone(r run.Run, now time.Time, silent, deadAfter, wakeGrace time.Duration) bool {
+	if r.State != run.StateRunning && r.State != run.StateDraining {
+		return false
+	}
+	if silent <= deadAfter+wakeGrace {
+		return false
+	}
+	return r.LeaseDeadline.IsZero() || now.After(r.LeaseDeadline.Add(wakeGrace))
 }
 
 // hasOpenAsk reports whether the run has an unanswered ask — waiting-on-human,

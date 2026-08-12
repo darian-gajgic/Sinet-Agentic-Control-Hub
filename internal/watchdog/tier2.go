@@ -51,7 +51,8 @@ func (w *Watchdog) flag(ctx context.Context, r run.Run, trig trigger) error {
 // edge) and appends watchdog.flagged in the SAME WriteTx (R15/§8). A terminal
 // run (suspicious-completion) or an already-parked run is not re-parked —
 // containment is already structural (a terminal run makes no further calls; a
-// parked run admits none) — and the flag stands alone.
+// parked run admits none) — and the flag stands alone. A trigger that asks for
+// no park (a run whose driver is demonstrably gone) likewise flags alone.
 func (w *Watchdog) parkAndFlag(ctx context.Context, r run.Run, trig trigger, annRef *int64) error {
 	return w.db.WriteTx(ctx, func(tx *sql.Tx) error {
 		cur, err := w.runs.GetTx(ctx, tx, r.ID)
@@ -60,7 +61,7 @@ func (w *Watchdog) parkAndFlag(ctx context.Context, r run.Run, trig trigger, ann
 		}
 		gen := cur.Generation
 		parked := false
-		if run.CanTransition(cur.State, run.StateParked) {
+		if !trig.NoPark && run.CanTransition(cur.State, run.StateParked) {
 			updated, err := w.runs.TransitionTx(ctx, tx, r.ID, run.StateParked, run.TransitionOptions{
 				Reason: "watchdog:" + trig.Rule,
 				Actor:  run.ActorPlatform,
