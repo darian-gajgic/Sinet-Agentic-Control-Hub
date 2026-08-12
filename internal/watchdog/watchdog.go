@@ -101,8 +101,7 @@ const (
 	keySpendArmDays    = "watchdog.spend_arm_days"
 	keyFlagNowTarget   = "watchdog.flag_now_target"
 	keySuppressRetune  = "watchdog.suppress_retune_count"
-	keyDeadAfter       = "recovery.dead_after" // the silence-budget seed (Spec S02)
-	keyWakeGrace       = "recovery.wake_grace" // suspend-aware lease grace (Spec S02.5 step 4)
+	keyDeadAfter       = "recovery.dead_after" // the silence-budget seed + the DEAD cursor bound (Spec S02)
 )
 
 // Structural constants (NOT ⚙ — the sseBatchSize precedent, §7; a knob for any

@@ -78,10 +78,6 @@ func (w *Watchdog) sweepSilence(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	wakeGrace, err := w.settings.Duration(keyWakeGrace)
-	if err != nil {
-		return err
-	}
 	now := time.Now()
 	for _, r := range candidates {
 		if !w.silenceWatched(ctx, r, now) {
@@ -107,7 +103,7 @@ func (w *Watchdog) sweepSilence(ctx context.Context) error {
 				Counts: map[string]int{"silent_seconds": int(silent.Seconds()), "budget_seconds": int(budget.Seconds())},
 				Detail: fmt.Sprintf("no event for %s (run-type %q budget %s)", silent.Round(time.Second), runType(r), budget),
 			}
-			if holderGone(r, now, silent, seed, wakeGrace) {
+			if holderGone(r, now, silent, seed) {
 				trig.NoPark = true
 				trig.Detail += "; nothing is driving it and the recovery pass will classify it — the card stands, the run is left where the pass can see it"
 			}
@@ -348,7 +344,7 @@ func (w *Watchdog) silenceWatched(ctx context.Context, r run.Run, now time.Time)
 }
 
 // holderGone reports whether a silence candidate has demonstrably lost its
-// DRIVER and is past the bound the recovery pass itself reaps at (P3-RW-10 R6).
+// DRIVER and is therefore the recovery pass's to classify (P3-RW-10 R6).
 // Such a run is not contained by a park: there is no live work to hold back and
 // no next paid call for the scheduler to refuse — the park only hides it from
 // the one component ratified to classify a driver-less run (Spec S02.5 step 2),
@@ -356,21 +352,33 @@ func (w *Watchdog) silenceWatched(ctx context.Context, r run.Run, now time.Time)
 // on a person forever. So the card is raised and the run is left where the
 // recovery pass can see it.
 //
-// Both halves are required, and they are the SAME two actuals the recovery pass
-// weighs (CONVENTIONS §54): the lease is holder liveness, evaluated suspend-aware
-// with ⚙ recovery.wake_grace — a lease inside the grace decides nothing, and a
-// run with no lease at all cannot re-assert itself — and the event cursor is
-// progress, which must be stale past ⚙ recovery.dead_after (+ that grace) before
-// the pass would take the run. Inside those bounds nothing else would contain
-// it, so containment wins the tie and the ordinary park stands.
-func holderGone(r run.Run, now time.Time, silent, deadAfter, wakeGrace time.Duration) bool {
+// The rule IS the recovery pass's own DEAD arithmetic in steady state, read from
+// the same two actuals (CONVENTIONS §54): the LEASE is holder liveness, expired
+// when now is past its deadline (a run with no lease at all cannot re-assert
+// itself), and the EVENT CURSOR is progress, stale when the newest append is
+// older than ⚙ recovery.dead_after. Matching that bound EXACTLY is what makes
+// the handoff real — at the instant this abstains the pass would already reap
+// the run, so there is no window where it is neither contained nor collected.
+//
+// NO wake grace is applied, deliberately. The pass's grace is level-triggered
+// and applies ONLY on its first pass after a wake or a clock jump; in steady
+// state it is zero, and steady state is what a 30s sweep meets — adding a grace
+// here would push the abstain past every reachable regime and park the run
+// again. Abstaining INSIDE a wake-grace window is also the right answer: the
+// pass reaps the run once its own grace expires, whereas a park there would
+// re-hide it, which is the wedge this arm exists to end.
+//
+// The cursor conjunct is what preserves containment: a run silent past a SHORT
+// per-run-type ⚙ watchdog.silence_budget whose cursor is still fresh is not the
+// pass's candidate yet, so it parks exactly as before.
+func holderGone(r run.Run, now time.Time, silent, deadAfter time.Duration) bool {
 	if r.State != run.StateRunning && r.State != run.StateDraining {
 		return false
 	}
-	if silent <= deadAfter+wakeGrace {
+	if silent <= deadAfter {
 		return false
 	}
-	return r.LeaseDeadline.IsZero() || now.After(r.LeaseDeadline.Add(wakeGrace))
+	return r.LeaseDeadline.IsZero() || now.After(r.LeaseDeadline)
 }
 
 // hasOpenAsk reports whether the run has an unanswered ask — waiting-on-human,

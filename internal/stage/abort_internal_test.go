@@ -17,6 +17,9 @@ package stage
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
@@ -130,4 +133,97 @@ func TestVerifyTerminalSurvivesCanceledContext(t *testing.T) {
 			t.Fatalf("the terminal write still rides the request context: %v", err)
 		}
 	})
+
+	// The two halves of R5(b) composed on the one state where the FSM lets both
+	// be seen at once: from `claimed` the terminal edges are illegal (so the
+	// write fails for a reason that is not the context) and `crashed` is legal
+	// (so the posture's corpse lands).
+	t.Run("a failed terminal write still admits the corpse", func(t *testing.T) {
+		e := newCancelEnv(t)
+		const runID, taskID = "t-terminal-residual.verify", "t-terminal-residual"
+		e.seedRun(t, runID, taskID, owner, run.StateClaimed)
+
+		err := e.sk.verifyTerminal(context.Background(), runID, taskID, verify.Outcome{
+			Verdict: verify.VerdictShip,
+		})
+		if err == nil {
+			t.Fatal("the terminal write must report a refused transition")
+		}
+		e.sk.crash(context.Background(), runID, "verification terminal record: "+err.Error())
+		if got := e.state(t, runID); got != run.StateCrashed {
+			t.Fatalf("run is %s, want crashed — a run holding an unlanded outcome must stay classifiable", got)
+		}
+	})
+}
+
+// TestVerifyTerminalErrorsTakeTheCrashPostureAtEverySite is the STRUCTURAL half
+// of R5(b), and it exists because behavior cannot reach it: `verifyTerminal`
+// only fails when its transition is refused, and every state that refuses
+// running→completed / running→parked (parked, terminal, tombstoned) refuses
+// running→crashed as well — the sole exception, `claimed`, is unreachable once
+// a dispatch leg has taken the run to running. So the difference a deleted
+// `crash` call makes at the DISPATCH site shows up only under a transient
+// storage failure, which no hermetic fixture produces deterministically.
+//
+// The source is therefore the evidence, as it already is for the NO-AUTO-KILL
+// proof (cancel_internal_test.go) and the watchdog import wall: every
+// verifyTerminal call must have its error checked, and every such check must
+// leave the ladder a corpse. Deleting either crash call, or reverting a site to
+// a bare `return s.verifyTerminal(...)`, fails this test.
+func TestVerifyTerminalErrorsTakeTheCrashPostureAtEverySite(t *testing.T) {
+	const wantSites = 2 // dispatchVerify (the drain leg) + answerRevise (the S07.7 resume leg)
+	fset := token.NewFileSet()
+	sites, guarded := 0, 0
+	for _, path := range []string{"skeleton.go", "answer.go"} {
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.CallExpr:
+				if calleeName(x) == "verifyTerminal" {
+					sites++
+				}
+			case *ast.IfStmt:
+				if x.Init == nil || !callsFunc(x.Init, "verifyTerminal") {
+					return true
+				}
+				guarded++
+				if !callsFunc(x.Body, "crash") {
+					t.Errorf("%s: a verifyTerminal error is handled without crashing the run — a run holding an unlanded outcome would strand exactly as a dead drive does (R5b, CONVENTIONS §16/§56)", path)
+				}
+			}
+			return true
+		})
+	}
+	if sites != wantSites {
+		t.Errorf("found %d verifyTerminal call sites, want %d — a new site owes the same posture", sites, wantSites)
+	}
+	if guarded != sites {
+		t.Errorf("%d of %d verifyTerminal call sites check their error; an unchecked one swallows a lost outcome", guarded, sites)
+	}
+}
+
+// calleeName is the called function's own name (the selector's, for a method).
+func calleeName(call *ast.CallExpr) string {
+	switch fn := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		return fn.Sel.Name
+	case *ast.Ident:
+		return fn.Name
+	}
+	return ""
+}
+
+// callsFunc reports whether the node contains a call to the named function.
+func callsFunc(n ast.Node, name string) bool {
+	found := false
+	ast.Inspect(n, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok && calleeName(call) == name {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
