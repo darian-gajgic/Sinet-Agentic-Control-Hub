@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B6 click-through — operator walkthrough</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #16181d; --muted: #5d6570; --line: #dfe3e8;
+    --card: #f7f8fa; --accent: #1f6feb; --good: #1a7f37; --bad: #b42318;
+    --warn: #8a5a00; --warn-bg: #fff8e6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --fg: #e6e8eb; --muted: #99a1ad; --line: #272b33;
+      --card: #171a20; --accent: #6aa4ff; --good: #4ac26b; --bad: #ff6b5e;
+      --warn: #e8b339; --warn-bg: #221c0d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.25rem 5rem; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.15rem; margin: 2.5rem 0 .75rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .875em; }
+  a { color: var(--accent); }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.15rem; margin: 1rem 0; }
+  .warn { background: var(--warn-bg); border-color: var(--warn); }
+  .warn b { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: .75rem 0; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; }
+  ol.steps > li {
+    counter-increment: s; position: relative; padding: 1rem 0 1rem 3.25rem;
+    border-top: 1px solid var(--line);
+  }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: 0; top: 1rem;
+    width: 2.15rem; height: 2.15rem; border-radius: 50%; background: var(--card);
+    border: 1px solid var(--line); display: grid; place-items: center;
+    font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted);
+  }
+  ol.steps > li.done::before { background: var(--good); border-color: var(--good); color: #fff; }
+  .head { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: baseline; }
+  .head h3 { margin: 0; font-size: 1rem; }
+  .look { margin: .45rem 0 0; }
+  .look li { margin: .2rem 0; }
+  .look .yes::marker { color: var(--good); }
+  .look .no::marker { color: var(--bad); }
+  label.chk { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .85rem; cursor: pointer; margin-left: auto; }
+  .pin { font-size: 1.05rem; }
+  .pin b { font-size: 1.15rem; letter-spacing: .02em; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>B6 click-through — operator walkthrough</h1>
+<p class="sub">
+  Everything you need to run the gate without looking anything up. The throwaway
+  control plane runs at <code id="base">http://127.0.0.1:8483</code> — every link below points there.
+  Production (8481/8482) is untouched throughout.
+</p>
+
+<div class="box pin">
+  <p style="margin:0 0 .5rem"><b>Signing in.</b> Three seeded people, one shared demo PIN:</p>
+  <div class="scroll"><table>
+    <tr><th>User</th><th>Role</th><th>PIN</th><th>Why you would sign in as them</th></tr>
+    <tr><td class="mono">alice</td><td>member</td><td class="mono"><b>hunter2hunter</b></td><td>owns every deliverable and every chat session in the seed</td></tr>
+    <tr><td class="mono">op</td><td>operator</td><td class="mono"><b>hunter2hunter</b></td><td>the operator-tier view of approvals</td></tr>
+    <tr><td class="mono">bob</td><td>member</td><td class="mono"><b>hunter2hunter</b></td><td>a second member, for owner-scoping checks</td></tr>
+  </table></div>
+  <p style="margin:.5rem 0 0; color:var(--muted); font-size:.9rem">
+    You start under the <b>dev fallback</b> — browsable with no PIN, but it is nobody in
+    particular, so <code>/chat</code> is empty until you sign in as alice. That is correct, not a defect.
+    Use <b>Sign in</b> in the header.
+  </p>
+</div>
+
+<h2>The walk — eleven surfaces, in order</h2>
+
+<ol class="steps">
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/">Mission control</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look"><b>0 running and 0 queued — by design.</b> Everything seeded either waits on a person
+    (9 parked runs with open asks — the "waiting on you" count and the inbox link) or is already done (1).
+    Nothing seeded is dispatchable, so a zero here is the honest reading, not a broken feed.</p>
+  <ul class="look">
+    <li class="no">Defect: a meter shows a confident number it cannot know. Absence must read as absence.</li>
+    <li class="no">Defect: anything claiming to be running or executing right now.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/board">The live board</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Ten seeded tasks across five real columns — <b>Backlog · Executing · Verifying ·
+    Needs attention · Done</b> — grouped by project, horizontally scrolling, never wrapping.
+    Every task sits in a declared column; nine carry a <i>waiting on a person</i> chip because their
+    runs are parked on open asks, one is in Done. There is no "moonshot" column any more — that was
+    a test artifact, and it left the demo world.</p>
+  <ul class="look">
+    <li class="yes">Executing/Verifying columns hold parked tasks whose <i>stage</i> is executing/verifying —
+      the chip on the card, not the column, says nothing is actually running.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/tasks/t-ship">Task detail — <span class="mono">t-ship</span></a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">
+    <b>Open this task specifically.</b> Of the ten seeded tasks, only <code>t-ship</code> ("Ship the
+    release notes") and <code>t-brief</code> carry deliverables. Scroll to its <b>Deliverables</b>
+    section — six rows, and that section is the door to step 9.
+  </p>
+  <ul class="look">
+    <li class="yes">On any other task, "This task has produced no deliverables yet" is the correct answer.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/fleet">Fleet</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Per-person and per-model meters, budget remainders.</p>
+  <ul class="look">
+    <li class="yes">These render the <b>real</b> stores' answers here, not the fixture doubles — so figures
+      may be absent where the committed fixture bodies show one. That difference is honest.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/inbox">The approval inbox</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Ranked cards with tier mechanics. The seed includes a conformance card
+    (high tier, answerable) and an effect card that is deliberately <b>not</b> answerable by you —
+    it is its owner's decision, and the card says so.</p>
+  <ul class="look">
+    <li class="no">Defect: a card that looks answerable but has no working answer, or a
+      not-answerable card that fails to say why.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/settings">Settings</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Every setting, generated from the registry: clamp bounds, restart badges, audit history.</p>
+</li>
+
+<li>
+  <div class="head"><h3>Settings → "This device"</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">The push-enrolment panel, on the same settings page.</p>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/chat">Chat</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Empty under the dev fallback. <b>Sign in as alice</b> (PIN above) and the seeded
+    sessions appear. Checking both states is the point of this step.</p>
+</li>
+
+<li>
+  <div class="head"><h3>The review surface — seven deliverables</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">This is the one the gate leans on. Each deliverable proves a different part of it.
+    <b>Start with <span class="mono">d-site</span></b> — it is the side-by-side diff.</p>
+  <div class="scroll"><table>
+    <tr><th>Open</th><th>Type</th><th>What it must show</th></tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-site">d-site</a></td>
+      <td>code</td>
+      <td><b>The real line diff</b> across two revisions of <code>site/release.tsx</code> plus a deleted
+        <code>site/legacy.tsx</code>. The toggle is labelled <b>"Side by side"</b> (the default) and
+        <b>"Inline"</b> — not split/unified. Seven comments carry their placement status across the
+        revision hop: exact line anchors, file-level fallbacks where the line moved, and one that
+        lost its file entirely. One is already consumed by round 2.</td>
+    </tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-hero">d-hero</a></td>
+      <td>image</td><td>The image pair — 2-up first, swipe one click away.</td>
+    </tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-bundle">d-bundle</a></td>
+      <td>binary</td><td>Metadata cards and a hash verdict. No diff is possible, and it must say so
+        rather than show an empty frame.</td>
+    </tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-brief">d-brief</a></td>
+      <td>pdf</td><td>Deliberately not-a-PDF bytes → the <b>labeled extraction-failure degrade</b>.
+        A defined answer, never a refusal or a crash.</td>
+    </tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-notebook">d-notebook</a></td>
+      <td>notebook</td><td>The extracted-text comparison.</td>
+    </tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-notes">d-notes</a></td>
+      <td>text</td><td>Already <b>accepted</b> — so the accept door is closed. That closed state is
+        what this one is for.</td>
+    </tr>
+    <tr>
+      <td><a class="mono" href="http://127.0.0.1:8483/deliverables/d-changelog">d-changelog</a></td>
+      <td>text</td><td><b>One revision only</b>, so there is nothing to diff. Correct, not a defect —
+        but it must explain itself rather than render blank.</td>
+    </tr>
+  </table></div>
+  <p class="look">Also on <span class="mono">d-site</span>: <b>Accept</b> opens the accept card
+    (trailers, content pin, signing posture) and takes the same PIN as above. <b>Spawn a follow-up
+    task</b> is the S13.9 door.</p>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/workforce">Workforce</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">The seed composes three workers, so this has rows here. A worker in <code>draft</code>
+    with no active version must say <i>why</i> nothing is equipped, not render an empty card.</p>
+  <ul class="look">
+    <li class="yes">On a genuinely fresh host this page is <b>empty</b>, and that is also correct —
+      "no standing army": machinery is composed when earned.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3>Phone width — re-walk 1, 5, 6</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Narrow the window to a phone width. Phone-complete is a requirement for mission
+    control, the inbox and settings. Diff review and settings-bulk only need to be
+    desktop-comfortable.</p>
+</li>
+
+</ol>
+
+<div class="box warn">
+  <p style="margin:0 0 .4rem"><b>Known before you start — do not debug these.</b></p>
+  <ul style="margin:0; padding-left:1.1rem">
+    <li><b>"Try it out" errors on the code deliverable.</b> It answers
+      <code>{"error":"internal","detail":"project: git worktree: chdir projects/release-notes.git: no such file or directory"}</code>.
+      The seed mints revisions but never creates the project repository a preview launches from.
+      S13.8 requires every type to answer a <i>defined</i> state (no-preview, requires-container-tier),
+      so a raw internal error leaking a filesystem path is a finding for question C below — already
+      logged, not yours to chase.</li>
+    <li><b>Meters and the price table differ from the committed fixtures.</b> They render the real
+      stores' answers here; the fixture world's doubles cannot reach a throwaway binary. Honest difference.</li>
+    <li><b>The tour and first-use hints are app behaviour, not seed data.</b> "Show me around" in the
+      header starts the tour; hints re-appear on a full reload.</li>
+  </ul>
+</div>
+
+<h2>What the gate needs from you afterwards</h2>
+<div class="box">
+  <p style="margin:0 0 .5rem">In your own words — free text is fine and is authoritative:</p>
+  <ol style="margin:0; padding-left:1.2rem">
+    <li><b>Did anything look wrong, ugly, or confusing?</b> Taste counts. The report specifically asks
+      you to rule on relative-vs-UTC timestamps, and on whether the bundle feels heavy on a phone.</li>
+    <li><b>Did any surface fabricate a number</b> instead of saying it did not know?</li>
+    <li><b>Did any control look pressable but do nothing?</b></li>
+    <li><b>Anything missing</b> you expected to be there?</li>
+  </ol>
+</div>
+
+<footer>
+  <p>Written 2026-08-05 against the seeded world the click-through builds. The IDs above are the
+  seed's own names; <code>P3/gates/B6-clickthrough.sh</code> reads them back out of the running
+  instance and prints the same list, so if the seed ever changes, <b>the script's printout wins</b>.</p>
+  <p>Logs: <code>~/.sinet-b6-clickthrough/control.log</code> · Reset: <code>./P3/gates/B6-clickthrough.sh --clean</code>
+  · Non-default port: set <code>SINET_CLICKTHROUGH_PORT</code> and the links above need the same port.</p>
+</footer>
+
+</main>
+<script>
+  // Tick-boxes survive a reload, because this walk takes longer than one sitting.
+  document.querySelectorAll('ol.steps > li').forEach((li, i) => {
+    const box = li.querySelector('input[type=checkbox]');
+    if (!box) return;
+    const key = 'b6-walk-' + i;
+    const paint = () => li.classList.toggle('done', box.checked);
+    box.checked = localStorage.getItem(key) === '1';
+    paint();
+    box.addEventListener('change', () => { localStorage.setItem(key, box.checked ? '1' : '0'); paint(); });
+  });
+</script>
+</body>
+</html>

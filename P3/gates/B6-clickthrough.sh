@@ -206,8 +206,13 @@ the header starts the tour, and hints re-appear on a full reload.
 
 Walk these eleven, in this order. Every one is a real route.
 
-   1.  /              Mission control — running / queued / parked, meters
-   2.  /board         The live board — stage columns, card faces
+   1.  /              Mission control — 0 running and 0 queued IS the world,
+                      not a broken feed: everything seeded waits on a person
+                      (9 parked runs, each holding an open ask) or is already
+                      done (1). Anything claiming to execute now is a DEFECT.
+   2.  /board         The live board — five real columns (Backlog / Executing /
+                      Verifying / Needs attention / Done), every task in a
+                      declared column, nine wearing "waiting on a person"
    3.  /tasks/:id     (from the board — cards exist now)
    4.  /fleet         Per-person and per-model meters, budget remainders
    5.  /inbox         The approval inbox — ranked, with tier mechanics

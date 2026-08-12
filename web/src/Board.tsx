@@ -456,7 +456,12 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
         <span className="task-title">{task.title !== '' ? task.title : task.task_id}</span>
         <span className="task-under mono">
           <Owner id={task.owner} />
-          {run?.stage !== undefined && run.stage !== '' && <> · {run.stage}</>}
+          {/* The stage token, at card-face altitude: a live intake run serves its
+              internal FSM step id ("intake.state") where seeded stages serve plain
+              words ("execute", "drafting") — the face shows the stage FAMILY (the
+              segment before the dot, verbatim otherwise); the overlay's stage story
+              keeps the full step id. Live-walk finding, 2026-08-12. */}
+          {run?.stage !== undefined && run.stage !== '' && <> · {run.stage.split('.')[0]}</>}
           {run?.effort_mode !== undefined && run.effort_mode !== '' && <> · {run.effort_mode}</>}
           {showProject && task.project !== '' && <> · {task.project}</>}
         </span>
