@@ -1,5 +1,7 @@
 # P3-RW-8 — the onboarding approval verb reaches the operator: the durable card declares its answer vocabulary (+ the operator-language wording of the create door's answer)
 
+> **EXPIRED at landing 2026-08-12 (amendment D).** Single-use artifact for the P3-RW-8 pipeline run (red `e6698cb` + impl `0574b4b` + the coordinator's landing pin `onboard_choicedraft_test.go`; evaluation PASS first pass, 1 nit + 2 pre-existing info). Post-landing divergences: `Approve` is `*bool` (contradiction refused); the choice envelope carrying a draft APPLIES it (pinned at landing); deviation upheld — the project NAME is genuinely not at the producer (summary names the id). Later grounding must never read this as truth — code + spec only.
+
 Grounded 2026-08-12 against tree `1a2f8a1`. Spec cites: S13.7, S15.2, S15.5, S15.6, S06.1, S02.2, S02.5. Binding contract `Spec/core-architecture-v1.md` (drafts canonical); process runbook `.claude/skills/p3-implementation/SKILL.md`; `P3/CONVENTIONS.md` §8, §16, §38, §40-B, §42, §43.
 
 **PROCESS EXCEPTION (standing, coordinator-set):** acceptance-test SPECS live in this brief (§7); the grounding agent committed NO tests and touched NO Go file (the P3-RW-9 sibling grounding ran concurrently; the battery stays green). The executor materializes §7 as red tests first, per the runbook's tests-first rule.
