@@ -85,6 +85,87 @@
   </p>
 </div>
 
+<h2>The give-work journey — walk this first (checkpoint 3)</h2>
+<p class="sub" style="margin-bottom:.75rem">
+  A project born, activated from your Inbox, given work, and the work watched to Done —
+  end-to-end on this seeded world. <b>Sign in as <span class="mono">op</span> first</b> (PIN above):
+  creating a project is a person's act, and the door says exactly that if you skip this.
+</p>
+
+<ol class="steps">
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/projects">Projects → "New project"</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Give it an id and a plain name; leave "Remote to clone" empty — that starts a fresh
+    store. Register, and onboarding runs machine-side (register → store → scan → draft). The dialog
+    names the onboarding task and its approval, and offers <b>"To the Inbox — the approval finishes it"</b>.</p>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/inbox">Inbox → the onboarding card</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">The card says what it is about (the drafted danger zones), what approving records,
+    and why <b>approve</b> is its only verb — there is no decline, because nothing yet undoes a
+    registration; cancelling the onboarding task is the honest way out, and the card says so itself.
+    Press <b>approve</b>.</p>
+  <ul class="look">
+    <li class="no">Defect: an approve that errors, or a card that looks answerable with no working button.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3>See the consequences</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">On <a href="http://127.0.0.1:8483/projects">Projects</a> the card flips to
+    <b>ACTIVE</b> (capture v1 · conventions · danger zones). On the
+    <a href="http://127.0.0.1:8483/board">board</a>, the Done column holds
+    "Onboard …" under the project's own group.</p>
+</li>
+
+<li>
+  <div class="head"><h3>On the project card: "Describe a goal"</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">The door opens pinned to the project and says the task will build on that
+    project's world. Say what you want the way you'd tell a person, and send it.</p>
+</li>
+
+<li>
+  <div class="head"><h3>The interview — a form, not a chat</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">Numbered question cards: answer, pick an option, or skip.
+    <b>"Proceed — turn open questions into assumptions"</b> is legitimate — every skip becomes a
+    LISTED assumption on the plan card, where you can still contest it. The page listens for what
+    comes next; the same card also sits in your Inbox, so leaving the page loses nothing.</p>
+</li>
+
+<li>
+  <div class="head"><h3>The plan card — approve it</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">What I understood · what you'll get · numbered steps each with "done when" ·
+    <b>what I will NOT do</b> · assumptions first · the price. Approve — the <b>PIN step-up</b>
+    takes the PIN above and is never stored. Re-plan, Re-interview and Cancel are the other doors.</p>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/board">Watch it on the board, then open its card</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">The task carries its project from birth and moves Backlog → Executing → Verifying →
+    Done as you watch. Its <b>PLAN</b> expander shows the plan's steps with live recorded progress.
+    Click the card — the structured overlay window holds the whole story: the confirmed spec with
+    acceptance criteria, the stage ledger with every decision you made, the receipts.</p>
+</li>
+
+</ol>
+
+<div class="box warn">
+  <p style="margin:0"><b>If a planner session dies mid-journey</b> (it happened once on the
+  verification walk that wrote this page): nothing is asked of you. The card stays in its column,
+  the recovery ladder forks and re-drives the session at its next sweep, and the plan arrived
+  5 minutes 22 seconds after the crash — machine-only, no button pressed. Seeing that once is the
+  platform keeping its word, not a defect to report.</p>
+</div>
+
 <h2>The walk — eleven surfaces, in order</h2>
 
 <ol class="steps">
@@ -269,9 +350,11 @@
 </div>
 
 <footer>
-  <p>Written 2026-08-05 against the seeded world the click-through builds. The IDs above are the
-  seed's own names; <code>P3/gates/B6-clickthrough.sh</code> reads them back out of the running
-  instance and prints the same list, so if the seed ever changes, <b>the script's printout wins</b>.</p>
+  <p>Written 2026-08-05 against the seeded world the click-through builds; the give-work journey
+  section was added 2026-08-12 from a verified end-to-end walk of that exact journey (crash-heal
+  included). The IDs above are the seed's own names; <code>P3/gates/B6-clickthrough.sh</code> reads
+  them back out of the running instance and prints the same list, so if the seed ever changes,
+  <b>the script's printout wins</b>.</p>
   <p>Logs: <code>~/.sinet-b6-clickthrough/control.log</code> · Reset: <code>./P3/gates/B6-clickthrough.sh --clean</code>
   · Non-default port: set <code>SINET_CLICKTHROUGH_PORT</code> and the links above need the same port.</p>
 </footer>
