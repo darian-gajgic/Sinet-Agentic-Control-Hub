@@ -175,7 +175,15 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 			return nil, err
 		case err == nil && ok:
 			st.Registry = &slice
-			if slice.Family != "" {
+			// VALIDATED AT THE BOUNDARY (P3-RW-11 drain D3). A seam hands over
+			// whatever it has, and a family outside the six-value vocabulary is
+			// not a family — it is a value that would key `taxonomyFor` to
+			// nothing, silently take the generic set, and be ATTRIBUTED to the
+			// registry while it did so. Treating it as unresolved keeps the one
+			// rule this packet rests on: a family the platform cannot stand
+			// behind is asked, never assumed. ValidFamily is false for "" too,
+			// so absence and nonsense take the same honest path.
+			if ValidFamily(slice.Family) {
 				st.Family, st.FamilySource = slice.Family, FamilySourceRegistry
 			}
 		}
@@ -192,11 +200,15 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 			classified = true
 			// PRECEDENCE registry > classifier (P3-RW-11 OQ3): a registered
 			// project's family is its OWNER'S standing declaration about the work
-			// they keep there, and a per-request guess never overrules it. An
-			// empty family is the classifier reporting that it could not resolve
-			// one (an out-of-vocabulary label, R5) — that leaves the question to
-			// the requester rather than falling back to generic.
-			if prop.Family != "" && st.FamilySource != FamilySourceRegistry {
+			// they keep there, and a per-request guess never overrules it.
+			//
+			// VALIDATED HERE TOO (drain D3), for the same reason as the registry
+			// seam above and one more: the adapter maps an out-of-vocabulary
+			// label to "" already, but this is the pipeline's own boundary and a
+			// second Classifier implementation is a seam away. An unresolved
+			// family leaves the question to the requester rather than falling
+			// back to generic.
+			if ValidFamily(prop.Family) && st.FamilySource != FamilySourceRegistry {
 				st.Family, st.FamilySource = prop.Family, FamilySourceClassifier
 			}
 			if ValidTier(prop.Tier) {

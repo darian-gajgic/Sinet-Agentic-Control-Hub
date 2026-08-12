@@ -162,11 +162,21 @@ export SINET_LOCAL_LLAMA_SERVER="$LLAMA_SERVER"
 export SINET_LOCAL_MODEL_CACHE="$MODEL_CACHE"
 export SINET_LOCAL_STATE="$STATE_DIR"
 
-With those set, internal/shell wires the S12.4 duty seams and intake triage
-runs for real: a request classifies its family on the local 4B seat and writes
-its one \$0 D7 row. Without them the seams stay unwired and the interview asks
-the requester what kind of task it is — both are honest, neither is generic by
-default.
+What this does and does not do, plainly:
+
+  DOES   wire the S12.4 duty seams to this stack. The classifier is proven
+         working at the seam on the real 4B model (the tier-R leg in
+         internal/stage classifies "Create a simple webshop" as software and
+         writes its \$0 row).
+
+  NOT YET  classify at intake. Stage-0 triage runs before the task's run
+         exists, and its \$0 D7 row is mandatory on a running run — so the call
+         fails, the platform fails closed, and the interview ASKS the requester
+         what kind of task it is. That is honest, just not zero-touch; the
+         zero-touch path arrives with the Stage-0 triage restructure packet.
+
+So: with or without these exports, the interview asks the family question
+today. Nothing is ever silently filed as "generic".
 
   log:   $LOG_FILE
   stop:  $0 --stop
