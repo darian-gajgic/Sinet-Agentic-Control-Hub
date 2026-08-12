@@ -400,6 +400,7 @@ func (h *forkHarness) walkToCrashWindow(ctx context.Context, owner string) (stri
 	if err != nil {
 		h.t.Fatalf("Task: %v", err)
 	}
+	raw = clearFamilyGate(h.t, ctx, h.sur, owner, raw) // P3-RW-11: the family question comes first
 	v = decodeView(h.t, raw)
 	if v.OpenCard.Kind != "interview" || len(v.OpenCard.Questions) == 0 {
 		h.t.Fatalf("expected an open interview card, got %s", raw)
@@ -495,8 +496,11 @@ func TestIntakeCrashForkHealsEndToEnd(t *testing.T) {
 	}
 
 	// Checklist 1: the NEXT card continues the numbering and belongs to the fork.
+	// Card 1 is the P3-RW-11 family question and card 2 the interview this walk
+	// answered, so the continuing card is 3 — the property under test is that the
+	// numbering CONTINUES across the fork, and it is still asserted exactly.
 	askID := h.openAskID(taskID)
-	if want := fmt.Sprintf("intake:%s:2", taskID); askID != want {
+	if want := fmt.Sprintf("intake:%s:3", taskID); askID != want {
 		t.Fatalf("open ask = %q, want the continuing card %q", askID, want)
 	}
 	if got := h.askRunID(askID); got != forkID {

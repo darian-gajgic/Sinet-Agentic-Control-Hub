@@ -151,7 +151,12 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 		NeedsDraft: true,
 		Tier:       TierHigh, // fail-closed baseline until classified (S06.2)
 		Family:     FamilyGeneric,
-		Guess:      Estimate{Known: false, Basis: "unclassified"},
+		// Nothing has resolved the family yet. This baseline is what the family
+		// question exists to replace on a non-band task (P3-RW-11 R5): "generic,
+		// because nobody said otherwise" is never allowed to reach the interview
+		// disguised as an answer.
+		FamilySource: FamilySourceDefault,
+		Guess:        Estimate{Known: false, Basis: "unclassified"},
 	}
 
 	// Registry match (S1.6): injected so the interview never asks what the
@@ -171,7 +176,7 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 		case err == nil && ok:
 			st.Registry = &slice
 			if slice.Family != "" {
-				st.Family = slice.Family
+				st.Family, st.FamilySource = slice.Family, FamilySourceRegistry
 			}
 		}
 	}
@@ -185,8 +190,14 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 	if p.Classifier != nil {
 		if prop, err := p.Classifier.Classify(ctx, req, st.Registry); err == nil {
 			classified = true
-			if prop.Family != "" {
-				st.Family = prop.Family
+			// PRECEDENCE registry > classifier (P3-RW-11 OQ3): a registered
+			// project's family is its OWNER'S standing declaration about the work
+			// they keep there, and a per-request guess never overrules it. An
+			// empty family is the classifier reporting that it could not resolve
+			// one (an out-of-vocabulary label, R5) — that leaves the question to
+			// the requester rather than falling back to generic.
+			if prop.Family != "" && st.FamilySource != FamilySourceRegistry {
+				st.Family, st.FamilySource = prop.Family, FamilySourceClassifier
 			}
 			if ValidTier(prop.Tier) {
 				st.Tier = prop.Tier
@@ -212,18 +223,10 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 		st.Tier = TierHigh
 	}
 
-	tax := p.taxonomyFor(st.Family)
-	st.TaxonomyID, st.TaxonomyVersion = tax.ID, tax.Version
-
-	// Registry-supplied slots resolve before any question is asked.
-	if st.Registry != nil {
-		for slotID, val := range st.Registry.ResolvedSlots {
-			if tax.Slot(slotID) != nil {
-				st.resolveSlot(SlotResolution{SlotID: slotID, How: ResolvedRegistry, Value: val})
-			}
-		}
-	}
-	st.Clearance = tax.Clearance(st.resolvedSet())
+	// Key the state to its family's question set, apply the registry's
+	// pre-answered slots against THAT set, and recompute clearance. A family
+	// with no seeded set yields the disclosure line recorded below.
+	fallback := p.applyFamilyTaxonomy(st)
 
 	// Intake record — the durable Stage-0 artifact (S06.1 Stage 0).
 	record := map[string]any{
@@ -274,12 +277,57 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 		return nil, err
 	}
 	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "triage",
-		fmt.Sprintf("triage: family=%s tier=%s band=%v data-bearing=%d clearance=%.0f%%",
-			st.Family, st.Tier, st.Band, len(st.DataBearing), st.Clearance),
+		fmt.Sprintf("triage: family=%s (%s) tier=%s band=%v data-bearing=%d clearance=%.0f%%",
+			st.Family, st.FamilySource, st.Tier, st.Band, len(st.DataBearing), st.Clearance),
 		"Stage-0 triage classification (S06.2)", 0); err != nil {
 		return nil, err
 	}
+	if err := p.recordTaxonomyFallback(ctx, st, fallback); err != nil {
+		return nil, err
+	}
 	return st, nil
+}
+
+// applyFamilyTaxonomy keys the state to its family's question set, re-applies
+// the registry's pre-answered slots against THAT set, and recomputes clearance.
+//
+// It is called at Start AND after a family swap, because both are the same act:
+// the registry may have pre-answered slots that only exist in one family's
+// taxonomy, so a swap that did not re-apply them would throw away answers the
+// platform already held and ask the requester for them again.
+//
+// It returns the DISCLOSURE line for a family whose question set is not seeded
+// yet — the generic set stands in while `st.Family` keeps the true family — or
+// "" when the family's own set was used. The fallback is stated, never
+// performed silently (P3-RW-11 R6): the state's TaxonomyID/Family divergence is
+// the durable witness and this line is the readable one.
+func (p *Pipeline) applyFamilyTaxonomy(st *State) string {
+	tax := p.taxonomyFor(st.Family)
+	st.TaxonomyID, st.TaxonomyVersion = tax.ID, tax.Version
+	if st.Registry != nil {
+		for slotID, val := range st.Registry.ResolvedSlots {
+			if tax.Slot(slotID) != nil {
+				st.resolveSlot(SlotResolution{SlotID: slotID, How: ResolvedRegistry, Value: val})
+			}
+		}
+	}
+	st.Clearance = tax.Clearance(st.resolvedSet())
+	if _, seeded := p.taxonomies()[st.Family]; seeded {
+		return ""
+	}
+	return fmt.Sprintf("no question set is seeded for the %s family yet: the interview uses the generic set, "+
+		"while the task's family stays %s for planning and routing (S06.5)", st.Family, st.Family)
+}
+
+// recordTaxonomyFallback writes the disclosure as a platform decision. A no-op
+// for the empty line, so callers need no condition of their own.
+func (p *Pipeline) recordTaxonomyFallback(ctx context.Context, st *State, line string) error {
+	if line == "" {
+		return nil
+	}
+	_, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "triage",
+		line, "question-set fallback disclosed rather than performed silently (S06.5)", 0)
+	return err
 }
 
 func validFloors(in []FloorReason) []FloorReason {
@@ -504,6 +552,14 @@ func (p *Pipeline) advanceLoaded(ctx context.Context, st *State) (*State, error)
 // phaseInterview runs the Stage-1 interview loop and drafting (Spec
 // S06.5–S06.6).
 func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (bool, *Pair, error) {
+	// Before any taxonomy question: if nothing resolved the family, ASK
+	// (P3-RW-11 R4). It has to come first, because a question card drawn from
+	// the wrong question set is the defect this packet exists to remove — and
+	// asking is cheaper than a whole interview aimed at the wrong thing.
+	if blocked, err := p.familyGate(ctx, st); blocked || err != nil {
+		return blocked, pair, err
+	}
+
 	tax := p.taxonomyFor(st.Family)
 	resolved := st.resolvedSet()
 	st.Clearance = tax.Clearance(resolved)
@@ -597,6 +653,42 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 	st.NeedsDraft = false
 	st.Phase = PhaseSpine
 	return false, newPair, p.appendState(ctx, st)
+}
+
+// familyGate issues the S06.5 family question when Stage 0 left the family
+// unresolved, and reports whether the pipeline is now parked on it.
+//
+// It fires on exactly one condition — `FamilySource == "default"`, the marker
+// Start writes when neither a registered project nor the classifier resolved a
+// family — so it cannot fire twice (the answer records "requester"), and a
+// state event written before this packet, which carries no source at all, is
+// left exactly as it was: an interview already in flight in an old world is
+// never interrupted by a new question (R10).
+//
+// THE BAND IS NEVER ASKED. S06.4 makes the zero-interaction band the class of
+// task that never requires a click, and a task worth under the ⚙ cost cap is
+// not worth a question about its shape — it keeps generic with its auto-listed
+// assumptions, and the source on the record says which.
+func (p *Pipeline) familyGate(ctx context.Context, st *State) (bool, error) {
+	if st.Band || st.FamilySource != FamilySourceDefault {
+		return false, nil
+	}
+	return true, p.issueCard(ctx, st, &Card{Kind: CardFamily, Decision: &DecisionBody{
+		Summary: "What kind of task is this?",
+		Detail: []string{
+			"Nothing here says what kind of work this is: it is not filed under a project that declares one, and the platform could not tell from the request itself.",
+			"The answer decides which questions get asked next — the platform asks about different things when it is changing software than when it is looking something up.",
+		},
+		Choices: FamilyChoices(),
+		Help: HelpBlock{
+			What: "Picking one tells the platform which set of questions to ask about this task. It changes nothing else: not what gets built, " +
+				"not what it costs, and not what you approve before anything runs.",
+			Wrong: "Pick the closest one — a rough match still asks better questions than none. If none of them fits, choose \"Something else\" " +
+				"and the platform asks its general questions instead.",
+			Recommend: "Answer from the result you want, not from how the work would be done: \"Build or change software\" if you want something " +
+				"working at the end, \"Find something out\" if you want an answer, \"Write or create content\" if you want a piece of writing or a design.",
+		},
+	}})
 }
 
 // phaseSpine applies pending revisions and runs the Stage-2 deterministic

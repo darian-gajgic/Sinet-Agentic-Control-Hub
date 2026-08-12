@@ -171,6 +171,7 @@ func (h *routedHarness) walkToApproval(ctx context.Context, owner string) (taskI
 	if err != nil {
 		h.t.Fatalf("Task: %v", err)
 	}
+	raw = clearFamilyGate(h.t, ctx, h.sur, owner, raw) // P3-RW-11: the family question comes first
 	v = decodeView(h.t, raw)
 	raw, err = h.sur.Answer(ctx, owner, v.OpenAskID, json.RawMessage(`{"force_proceed":true}`), false)
 	if err != nil {

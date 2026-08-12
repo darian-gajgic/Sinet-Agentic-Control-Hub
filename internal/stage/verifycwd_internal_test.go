@@ -131,6 +131,12 @@ func approvedSkeleton(t *testing.T) (*Skeleton, *run.Store, string, string) {
 	if st.OpenAskID == "" {
 		t.Fatal("expected an open interview card")
 	}
+	// P3-RW-11: the family question comes first when nothing resolved the family.
+	if st.OpenAskKind == intake.CardFamily {
+		if st, err = s.pipe.Answer(ctx, owner, st.OpenAskID, json.RawMessage(`{"choice":"generic"}`)); err != nil {
+			t.Fatalf("Answer(family): %v", err)
+		}
+	}
 	if st, err = s.pipe.Answer(ctx, owner, st.OpenAskID, json.RawMessage(`{"force_proceed":true}`)); err != nil {
 		t.Fatalf("Answer(force_proceed): %v", err)
 	}

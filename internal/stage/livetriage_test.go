@@ -33,6 +33,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/local"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
@@ -148,7 +149,20 @@ func TestLiveIntakeTriageClassifiesWebshop(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start llama-swap: %v", err)
 	}
-	defer func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }()
+	// Teardown UNLOADS BEFORE IT KILLS. llama-swap starts llama-server as a
+	// child, and killing the manager orphans that child still holding its VRAM —
+	// measured here: a leaked backend held ~3.5 GB and the NEXT run of this leg
+	// failed to load at all ("upstream command exited prematurely"). The unload
+	// route is the manager's own teardown verb (the same one the §26 tier-R
+	// contract test asserts), so the model is released by the process that owns
+	// it rather than abandoned.
+	defer func() {
+		if resp, err := http.Post(base+"/api/models/unload", "application/json", nil); err == nil {
+			resp.Body.Close()
+		}
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
 	if !liveWaitReady(base + "/v1/models") {
 		t.Fatal("llama-swap did not accept the generated config / did not become ready")
 	}
@@ -218,6 +232,68 @@ func TestLiveIntakeTriageClassifiesWebshop(t *testing.T) {
 	}
 	if w.Local.Lane != "local" || w.Local.ModelSHA256 == "" || w.Local.EngineBuild == "" {
 		t.Errorf("local marker incomplete: %+v (the $0 row must name the model hash and engine build)", *w.Local)
+	}
+
+	// ── THE WHOLE CHAIN, AND THE GAP IT FOUND ───────────────────────────────
+	//
+	// REPORTED, NOT PAPERED OVER (P3-RW-11 executor flag; the §43
+	// delta-card-vocabulary precedent). The seam above works live. The PIPELINE
+	// call site cannot use it, and this drives the reason so the gap is a
+	// checkable fact rather than a claim:
+	//
+	//   Pipeline.Start runs triage BEFORE it creates the task and the intake run
+	//   (internal/intake/pipeline.go — the classifier call precedes the
+	//   task/run/first-state-event transaction). The $0 D7 row is MANDATORY on
+	//   the consuming run (§26 R18), and gates.Checkpoints.WriteTx requires that
+	//   run to exist AND be running/draining. At Start it does neither — and it
+	//   cannot: admission is the scheduler's and intake never self-admits (S10).
+	//   So Duty.Call surfaces `local.unmetered_defect` and returns an error, and
+	//   Start's `err == nil` guard treats it as a classify failure.
+	//
+	// The consequence is honest, which is why this is a flag and not a fix here:
+	// the pipeline FAILS CLOSED to high (S06.2) and leaves the family
+	// UNRESOLVED, so the requester is ASKED instead of being handed a silent
+	// generic. What is lost is the zero-touch path, not correctness. Making the
+	// live classifier resolve a family end to end needs Stage-0 triage to run
+	// where its run is checkpointable — an S06.2 restructure this packet did not
+	// take on its own authority.
+	pipe := &intake.Pipeline{
+		DB: db, Log: log, Runs: runs, Ledger: ledger.NewStore(db, log), Settings: reg,
+		ArtifactRoot: filepath.Join(t.TempDir(), "artifacts"),
+		Classifier:   stage.NewLocalClassifier(duty),
+	}
+	st, err := pipe.Start(callCtx, intake.Request{
+		TaskID: "t-webshop-live", UserID: "operator",
+		Title: "Create a simple webshop",
+		Text:  "Create a simple webshop with a product list, a cart and a checkout page.",
+	})
+	if err != nil {
+		t.Fatalf("Start with the live classifier: %v", err)
+	}
+	t.Logf("live pipeline triage: family=%q source=%q taxonomy=%q tier=%q",
+		st.Family, st.FamilySource, st.TaxonomyID, st.Tier)
+
+	// The defect is SURFACED, never silent (§26 R18): the platform event names
+	// the call that could not meter.
+	var defects int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM run_events WHERE type = ?`, local.EventLocalUnmeteredDefect).Scan(&defects); err != nil {
+		t.Fatalf("count unmetered-defect events: %v", err)
+	}
+	if defects == 0 {
+		// If this ever fires, the call site was fixed and the two assertions
+		// below are the ones that should move — to software/classifier.
+		t.Fatalf("no %s event: the Start-time triage call metered after all — re-point this leg at the resolved family (family=%q source=%q)",
+			local.EventLocalUnmeteredDefect, st.Family, st.FamilySource)
+	}
+	// Fail-closed, and ASKED rather than assumed (S06.2 + R5): high tier, and a
+	// family the requester will be asked for.
+	if st.Tier != intake.TierHigh {
+		t.Errorf("tier = %q, want high — an unusable classifier fails closed (S06.2)", st.Tier)
+	}
+	if st.FamilySource != intake.FamilySourceDefault {
+		t.Errorf("family source = %q, want %q — nothing resolved it, so the question fires (R4/R5)",
+			st.FamilySource, intake.FamilySourceDefault)
 	}
 }
 

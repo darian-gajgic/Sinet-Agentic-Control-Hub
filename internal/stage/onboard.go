@@ -245,6 +245,10 @@ type onboardDraftShape struct {
 		Action string `json:"action"`
 		Rule   string `json:"rule"`
 	} `json:"danger_zones"`
+	// Family is the owner-declared task family (P3-RW-11 R2). Absent on every
+	// draft written before it existed, which is why the digest omits its line
+	// rather than printing an empty one.
+	Family string `json:"family"`
 }
 
 // onboardDigest states the drafted capture in plain lines, so the rendered card
@@ -262,6 +266,13 @@ func onboardDigest(draft json.RawMessage) []string {
 		}
 	}
 	var lines []string
+	if d.Family != "" {
+		// FIRST, because it is the line that changes what the platform will ASK
+		// the requester of every future task in this project, and it is stated in
+		// consequences rather than in a taxonomy id (D10: the owner approves what
+		// they can see).
+		lines = append(lines, "Task family: "+d.Family+" — tasks in this project get the "+d.Family+" question set at intake")
+	}
 	for _, c := range d.Conventions {
 		lines = append(lines, "Convention: "+c)
 	}

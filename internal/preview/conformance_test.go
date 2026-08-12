@@ -121,9 +121,9 @@ func TestNoNewMigration(t *testing.T) {
 		// (the S15.7 assistant's sessions, transcript, turns and exchange
 		// manifest) and 0022 by P3-RW-3 (the pre-approval project-attribution
 		// view re-create) and 0023 by P3-RW-7 (the onboarding arm on that same
-		// task→project edge); anything beyond those would be an unexpected
-		// preview-side add.
-		if name >= "0024" {
+		// task→project edge) and 0024 by P3-RW-11 (the capture's task family);
+		// anything beyond those would be an unexpected preview-side add.
+		if name >= "0025" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}

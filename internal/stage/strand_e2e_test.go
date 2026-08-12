@@ -63,6 +63,7 @@ func walkToOpenCard(t *testing.T, h *forkHarness, owner string) (taskID, runID, 
 	if err != nil {
 		t.Fatalf("Task: %v", err)
 	}
+	raw = clearFamilyGate(t, ctx, h.sur, owner, raw) // P3-RW-11: the family question comes first
 	v := decodeView(t, raw)
 	if v.OpenCard.Kind != "interview" || len(v.OpenCard.Questions) == 0 {
 		t.Fatalf("expected an open interview card, got %s", raw)

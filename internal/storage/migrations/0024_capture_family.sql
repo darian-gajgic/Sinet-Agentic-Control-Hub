@@ -1,0 +1,60 @@
+-- 0024_capture_family.sql — a registered project declares what KIND of task its
+-- work is, and intake opens that family's question set (P3-RW-11; S13.7, S06.2,
+-- S15.2).
+--
+-- WHAT WAS WRONG. `intake.RegistrySlice.Family` has existed since B2-2 ("the
+-- registered project's task family", internal/intake/intake.go) and the pipeline
+-- has always honoured it — `if slice.Family != "" { st.Family = slice.Family }`.
+-- Nothing ever set it, because nothing anywhere CAPTURED a family: not
+-- project.Draft, not project.Capture, not this table. So every task in every
+-- world took `taxonomyFor(FamilyGeneric)`, and the ratified ClarifyCodeBench
+-- software question set (P3-B2-2) was unreachable code. The operator met this
+-- in checkpoint 3: "Create a simple webshop" got the generic eight-question
+-- interview.
+--
+-- WHAT THIS FILE DOES. `repo_registry_captures` gains one column, `family TEXT
+-- NOT NULL DEFAULT ''`. That is the whole schema change.
+--
+-- WHY THE CAPTURE AND NOT THE ENTRY (the coordinator's OQ1 disposition,
+-- 2026-08-12). The family is CAPTURED CONTENT in exactly S13.7's sense — it is
+-- drafted, shown to the owner on the onboarding card, edited there, approved,
+-- and re-captured — so it belongs beside the conventions, commands and danger
+-- zones that ride the same draft→digest→approve→re-capture machinery. Putting
+-- it on `repo_registry` instead would have made family-as-identity: a second
+-- edit path outside the draft flow, and outside "captured content is versioned",
+-- so an edit would have left no audit trail. Here S13.7's versioning covers
+-- family edits for free — a changed family is a new immutable capture version
+-- with its own captured_by/captured_ts, and the prior version stays readable.
+--
+-- OLD ROWS AND OLD BACKUPS. `DEFAULT ''` is HONEST ABSENCE, not a guess: a
+-- capture written before this migration says nothing about the family, and ""
+-- is how it keeps saying nothing. No data migration runs, nothing is inferred
+-- from a repository's contents (no file in a repo states what kind of work its
+-- tasks are — this is owner-declared data, which is why the re-scan carries it
+-- forward rather than re-deriving it), and a project with no declared family
+-- reaches intake with none, where the requester is ASKED. The `capture-v1` JSON
+-- shape gains one `omitempty` field, so a family-less draft still serializes
+-- byte-identically to a pre-RW-11 one (S15.2 additive evolution).
+--
+-- THE TRIGGERS ARE UNTOUCHED AND STILL BIND. ADD COLUMN is DDL; the three
+-- guards 0008 installed — `repo_registry_captures_immutable` (BEFORE UPDATE),
+-- `repo_registry_captures_no_delete` (BEFORE DELETE), and
+-- `repo_registry_capture_monotone` on the entry's pointer — are not re-created
+-- and are not weakened. A widened table whose immutability guard had quietly
+-- stopped firing would be a silent loss of the audit trail S13.7 exists to
+-- keep, so internal/storage's TestMigration0024Additive drives all three
+-- against the widened table rather than trusting that DDL left them alone.
+--
+-- NO VIEW MOVES. `task_project` and `cost_per_project` are not re-created: this
+-- column is not on the money path and not on the task→project edge (0016/0022/
+-- 0023 own those), so no money view is re-created here and none needs to be
+-- re-scanned. No index is added — `repo_registry_captures` is read by primary
+-- key (project_id, version) and by nothing else.
+--
+-- Applied in one transaction with its PRAGMA user_version bump by the migration
+-- runner (internal/storage/migrate.go, Spec S02.1). 0001–0023 stay
+-- byte-untouched.
+
+ALTER TABLE repo_registry_captures ADD COLUMN family TEXT NOT NULL DEFAULT '';
+
+PRAGMA user_version = 24;

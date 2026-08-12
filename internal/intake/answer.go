@@ -67,6 +67,10 @@ func (p *Pipeline) Answer(ctx context.Context, actor, askID string, raw json.Raw
 		default:
 			st.Phase = PhaseInterview
 		}
+	case CardFamily:
+		if err := p.applyFamilyAnswer(ctx, st, ans); err != nil {
+			return nil, err
+		}
 	case CardCoverage:
 		if err := p.applyCoverageAnswer(ctx, st, ans); err != nil {
 			return nil, err
@@ -193,6 +197,34 @@ func (p *Pipeline) applyClarificationAnswer(st *State, card *Card, ans Answer) e
 	st.PendingRevise = mergeRevise(st.PendingRevise, req)
 	st.Phase = PhaseSpine
 	return nil
+}
+
+// applyFamilyAnswer applies the requester's answer to the S06.5 family question
+// (P3-RW-11 R4). The phase does not move: the SAME advance that follows re-reads
+// taxonomyFor and asks the chosen family's questions, and Clearance counts only
+// slot ids present in the active set, so the swap needs no resolved-slot surgery
+// (nothing has been asked yet — the card is pre-round by construction).
+func (p *Pipeline) applyFamilyAnswer(ctx context.Context, st *State, ans Answer) error {
+	fam := Family(ans.Choice)
+	if !ValidFamily(fam) {
+		// The card's own vocabulary refuses, and names what it takes. Validating
+		// against the PACKAGE's list rather than the answering snapshot's is the
+		// §43 discipline: a card issued before a vocabulary change answers exactly
+		// as a fresh one does, and there is no third behavior to reason about.
+		return fmt.Errorf("%w: task family %q is not one this card offers — it offers %s",
+			ErrBadAnswer, ans.Choice, familyVocabularySentence())
+	}
+	st.Family, st.FamilySource = fam, FamilySourceRequester
+	fallback := p.applyFamilyTaxonomy(st)
+
+	// The choice is the REQUESTER'S, so it is human-authored in the ledger — the
+	// same authorship a dropped criterion or an accepted gap carries (S06.7).
+	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "triage",
+		"requester answered the task family: "+string(fam),
+		"family question (S06.5; 1.7 ask-don't-assume — nothing else resolved it)", 0); err != nil {
+		return err
+	}
+	return p.recordTaxonomyFallback(ctx, st, fallback)
 }
 
 func (p *Pipeline) applyCoverageAnswer(ctx context.Context, st *State, ans Answer) error {

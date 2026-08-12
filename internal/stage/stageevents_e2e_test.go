@@ -79,6 +79,7 @@ func TestStageEventsMintAtEveryStageSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Task: %v", err)
 	}
+	raw = clearFamilyGate(t, ctx, h.sur, owner, raw) // P3-RW-11: the family question comes first
 	v := decodeView(t, raw)
 	if v.OpenAskID == "" {
 		t.Fatalf("no open card after intake: %s", raw)
@@ -183,6 +184,7 @@ func TestStageSplitIsRecordedAsASplit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Task: %v", err)
 	}
+	raw = clearFamilyGate(t, ctx, h.sur, owner, raw) // P3-RW-11: the family question comes first
 	v := decodeView(t, raw)
 	raw, err = h.sur.Answer(ctx, owner, v.OpenAskID, json.RawMessage(`{"force_proceed":true}`), false)
 	if err != nil {

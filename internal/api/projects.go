@@ -102,6 +102,27 @@ type OnboardSurface interface {
 	OnboardRefs(projectID string) OnboardRefs
 }
 
+// OnboardFamilySurface is the ADDITIVE half of the onboarding door (P3-RW-11;
+// S15.2): a door that can also carry the owner-declared task family, which is
+// what makes intake open that family's question set instead of the generic one.
+//
+// It is a SECOND interface rather than a sixth parameter on StartOnboarding
+// because S15.2's additive rule is the point: OnboardSurface is landed and has
+// implementors, and widening it would have broken every one of them for a field
+// they may not carry. A door that does not implement this one keeps working and
+// simply cannot express a family — and the handler REFUSES a family it cannot
+// deliver rather than dropping it silently, because a project onboarded without
+// the family its owner asked for would send every one of its tasks to the wrong
+// question set with nothing anywhere saying why.
+//
+// internal/api declares the FIELD and validates nothing about its VALUE: the
+// vocabulary lives in internal/project, which refuses an unknown one loudly and
+// whose refusal arrives here as the landed ErrBadInput → 400 translation. One
+// list, one reader (CONVENTIONS §43).
+type OnboardFamilySurface interface {
+	StartOnboardingWithFamily(ctx context.Context, owner, projectID, name, remoteURL, family string) (OnboardRefs, error)
+}
+
 // ── the wire shapes ─────────────────────────────────────────────────────────
 
 // ProjectEntry is the registry row as this family serves it: the facts a card
@@ -539,6 +560,12 @@ type projectCreateBody struct {
 	// other stated deliberate absence — it needs the credential broker, which
 	// makes it a brokered packet rather than a parameter.
 	RemoteURL string `json:"remote_url,omitempty"`
+	// Family is the owner-declared task family (P3-RW-11): the kind of work
+	// this project's tasks are, which decides the question set intake opens for
+	// every one of them. Optional — absent means none declared, and a task in a
+	// project with no family is ASKED rather than assumed generic. The value is
+	// checked by the registry, not here (see OnboardFamilySurface).
+	Family string `json:"family,omitempty"`
 }
 
 func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
@@ -648,7 +675,8 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	refs, err := s.onboard.StartOnboarding(r.Context(), id.UserID, projectID, name, strings.TrimSpace(body.RemoteURL))
+	refs, err := s.startOnboarding(r.Context(), id.UserID, projectID, name,
+		strings.TrimSpace(body.RemoteURL), strings.TrimSpace(body.Family))
 	if err != nil {
 		// Statuses come off the seam's TYPED error (§38's ban on matching error
 		// text): the composition root translates the project store's sentinels,
@@ -670,6 +698,23 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeStarted(w, r, rows[0], refs, onboardStartedDetail)
+}
+
+// startOnboarding routes to whichever half of the door the composition wired.
+// A family the composed door cannot carry is REFUSED, not dropped: the caller
+// asked for a project whose tasks get a particular question set, and answering
+// "started" while silently onboarding it without one would be a lie the person
+// only discovers task by task.
+func (s *Server) startOnboarding(ctx context.Context, owner, projectID, name, remoteURL, family string) (OnboardRefs, error) {
+	if family == "" {
+		return s.onboard.StartOnboarding(ctx, owner, projectID, name, remoteURL)
+	}
+	door, ok := s.onboard.(OnboardFamilySurface)
+	if !ok {
+		return OnboardRefs{}, &SurfaceError{Status: http.StatusBadRequest, Code: "family_unsupported",
+			Msg: `"family" is not accepted by this deployment's onboarding door: omit it and the project is registered without one (its tasks are then asked what kind of work they are)`}
+	}
+	return door.StartOnboardingWithFamily(ctx, owner, projectID, name, remoteURL, family)
 }
 
 func (s *Server) writeStarted(w http.ResponseWriter, r *http.Request, row projectRow, refs OnboardRefs, detail string) {

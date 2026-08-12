@@ -195,8 +195,15 @@ func toRegistrySlice(e project.Entry) intake.RegistrySlice {
 		}
 	}
 	return intake.RegistrySlice{
-		Project:     e.ProjectID,
-		Ref:         fmt.Sprintf("%s@capture-v%d", e.ProjectID, e.CaptureVersion),
+		Project: e.ProjectID,
+		Ref:     fmt.Sprintf("%s@capture-v%d", e.ProjectID, e.CaptureVersion),
+		// The captured task family, which is what makes the pipeline's landed
+		// `if slice.Family != "" { st.Family = slice.Family }` fire at all
+		// (P3-RW-11 R1): a project whose owner declared "software" opens the
+		// software question set instead of the generic one. An undeclared family
+		// stays empty — the slice carries none and the interview ASKS, rather
+		// than the platform assuming on the project's behalf.
+		Family:      intake.Family(e.Capture.Family),
 		Conventions: e.Capture.Conventions,
 		Commands:    commands,
 		DangerZones: zones,

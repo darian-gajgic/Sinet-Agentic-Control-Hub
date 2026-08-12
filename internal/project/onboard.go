@@ -70,6 +70,13 @@ func (s *Store) Onboard(ctx context.Context, in OnboardInput) (Entry, Draft, err
 	if in.ProjectID == "" || in.Owner == "" || in.Name == "" {
 		return Entry{}, Draft{}, fmt.Errorf("%w: onboard needs project id, owner and name", ErrBadInput)
 	}
+	// The family is checked BEFORE anything is created: Capture validates it too
+	// (defence in depth for Approve/Rescan), but by then the store directory and
+	// the pending registry row already exist, and a malformed declaration would
+	// leave a half-onboarded project the caller has no verb to clear.
+	if !validFamily(in.Family) {
+		return Entry{}, Draft{}, badFamily(in.Family)
+	}
 	branch := in.DefaultBranch
 	if branch == "" {
 		branch = "main"
@@ -123,10 +130,15 @@ func (s *Store) Onboard(ctx context.Context, in OnboardInput) (Entry, Draft, err
 	if err != nil {
 		return Entry{}, Draft{}, err
 	}
+	// The scan cannot detect a task family — no file in a repository states what
+	// KIND of work its tasks are — so the owner's declaration is joined onto the
+	// scanned draft here, and travels with it to the approval card.
+	draft.Family = in.Family
 	if _, err := s.Capture(ctx, CaptureInput{
 		ProjectID: in.ProjectID, By: in.Owner,
 		Conventions: draft.Conventions, Commands: draft.Commands,
 		DangerZones: draft.DangerZones, ScanHash: draft.ScanHash,
+		Family: draft.Family,
 	}); err != nil {
 		return Entry{}, Draft{}, err
 	}
@@ -154,6 +166,7 @@ func (s *Store) Approve(ctx context.Context, projectID, approver string, edited 
 			ProjectID: projectID, By: approver,
 			Conventions: edited.Conventions, Commands: edited.Commands,
 			DangerZones: edited.DangerZones, ScanHash: edited.ScanHash,
+			Family: edited.Family,
 		}); err != nil {
 			return Entry{}, err
 		}
@@ -206,7 +219,10 @@ func (s *Store) OnboardApprove(ctx context.Context, projectID, approver string, 
 
 // draftOf projects a capture back into a Draft (the onboarding card payload).
 func draftOf(c Capture) Draft {
-	return Draft{Conventions: c.Conventions, Commands: c.Commands, DangerZones: c.DangerZones, ScanHash: c.ScanHash}
+	return Draft{
+		Conventions: c.Conventions, Commands: c.Commands, DangerZones: c.DangerZones,
+		ScanHash: c.ScanHash, Family: c.Family,
+	}
 }
 
 // Rescan re-scans an entry's store and records a NEW capture version (Spec
@@ -221,10 +237,18 @@ func (s *Store) Rescan(ctx context.Context, projectID, by string) (Capture, erro
 	if err != nil {
 		return Capture{}, err
 	}
+	// The family is CARRIED FORWARD, not re-derived: a scan produces conventions,
+	// commands and danger zones from the repository's contents, but the task
+	// family is owner-declared data no scan can observe. Leaving it to the
+	// scan's zero value would make a re-scan silently unset the owner's
+	// declaration and drop every future task in this project back to the generic
+	// question set — a loss with no event and no card behind it. Only an
+	// explicit owner edit at the approval card changes it.
 	return s.Capture(ctx, CaptureInput{
 		ProjectID: projectID, By: by,
 		Conventions: draft.Conventions, Commands: draft.Commands,
 		DangerZones: draft.DangerZones, ScanHash: draft.ScanHash,
+		Family: e.Capture.Family,
 	})
 }
 

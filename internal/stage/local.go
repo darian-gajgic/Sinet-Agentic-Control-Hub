@@ -143,9 +143,18 @@ func parseTriage(content string) (intake.TriageProposal, error) {
 		// The model could not classify — fail closed to high (S06.2).
 		return intake.TriageProposal{}, fmt.Errorf("stage: intake-triage abstained (S12.4); pipeline fails closed to high (S06.2)")
 	}
+	// An INVALID family label leaves the family UNRESOLVED, never a quiet
+	// generic (P3-RW-11 R5). The two readings look alike and are not: mapping a
+	// label the vocabulary does not contain onto `generic` asserts that the
+	// model classified the task as generic, which it did not — it emitted
+	// something the schema should have prevented. Unresolved is the truth, and
+	// the pipeline's answer to an unresolved family is to ASK the requester
+	// (S06.5 + 1.7), so the defect surfaces as one question instead of as the
+	// wrong question set. Stakes keep their own conservative default: a family
+	// defect is not evidence about how consequential the task is.
 	fam := intake.Family(out.Family)
 	if !validFamily(fam) {
-		fam = intake.FamilyGeneric
+		fam = ""
 	}
 	tier := intake.Tier(out.Stakes)
 	if !intake.ValidTier(tier) {

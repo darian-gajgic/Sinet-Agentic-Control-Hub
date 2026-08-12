@@ -115,9 +115,9 @@ func (s *Store) captureAt(ctx context.Context, projectID string, version int) (C
 		zones       string
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT version, conventions, commands, danger_zones, scan_hash, captured_by, captured_ts
+		SELECT version, conventions, commands, danger_zones, scan_hash, family, captured_by, captured_ts
 		FROM repo_registry_captures WHERE project_id = ? AND version = ?`, projectID, version).
-		Scan(&c.Version, &conventions, &commands, &zones, &c.ScanHash, &c.CapturedBy, &c.CapturedTS)
+		Scan(&c.Version, &conventions, &commands, &zones, &c.ScanHash, &c.Family, &c.CapturedBy, &c.CapturedTS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Capture{}, fmt.Errorf("%w: %q capture v%d", ErrNotFound, projectID, version)
 	}
@@ -225,6 +225,9 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 	if in.ProjectID == "" || in.By == "" {
 		return Capture{}, fmt.Errorf("%w: capture needs a project and an actor", ErrBadInput)
 	}
+	if !validFamily(in.Family) {
+		return Capture{}, badFamily(in.Family)
+	}
 	e, err := s.Get(ctx, in.ProjectID)
 	if err != nil {
 		return Capture{}, err
@@ -243,10 +246,10 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO repo_registry_captures (project_id, version, conventions, commands,
-			                                    danger_zones, scan_hash, captured_by, captured_ts)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			                                    danger_zones, scan_hash, family, captured_by, captured_ts)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			in.ProjectID, version, conventions, string(commands), string(zones),
-			in.ScanHash, in.By, now); err != nil {
+			in.ScanHash, in.Family, in.By, now); err != nil {
 			return fmt.Errorf("project: insert capture: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -258,9 +261,10 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 			ProjectID   string `json:"project_id"`
 			Version     int    `json:"version"`
 			ScanHash    string `json:"scan_hash,omitempty"`
+			Family      string `json:"family,omitempty"`
 			Conventions int    `json:"conventions"`
 			DangerZones int    `json:"danger_zones"`
-		}{in.ProjectID, version, in.ScanHash, len(in.Conventions), len(in.DangerZones)})
+		}{in.ProjectID, version, in.ScanHash, in.Family, len(in.Conventions), len(in.DangerZones)})
 		if err != nil {
 			return err
 		}

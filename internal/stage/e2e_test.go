@@ -488,6 +488,7 @@ func TestWalkingSkeletonE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Task: %v", err)
 	}
+	raw = clearFamilyGate(t, ctx, h.sur, owner, raw) // P3-RW-11: the family question comes first
 	v = decodeView(t, raw)
 	if v.OpenAskID == "" || v.OpenCard.Kind != "interview" {
 		t.Fatalf("expected an open interview card, got %s", raw)

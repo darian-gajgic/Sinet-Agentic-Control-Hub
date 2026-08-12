@@ -327,7 +327,8 @@ func TestRegisteredProjectChainAndSnapshot(t *testing.T) {
 	}
 
 	// Force-proceed → approval card; approve (PIN step-up).
-	raw, _ = h.sur.Answer(ctx, owner, decodeView(t, mustTask(t, h, taskID)).OpenAskID, json.RawMessage(`{"force_proceed":true}`), false)
+	raw = clearFamilyGate(t, ctx, h.sur, owner, mustTask(t, h, taskID)) // P3-RW-11: the family question comes first
+	raw, _ = h.sur.Answer(ctx, owner, decodeView(t, raw).OpenAskID, json.RawMessage(`{"force_proceed":true}`), false)
 	if _, err := h.sur.Answer(ctx, owner, decodeView(t, raw).OpenAskID, json.RawMessage(`{"action":"approve"}`), true); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
