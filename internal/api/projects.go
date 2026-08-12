@@ -239,12 +239,18 @@ const projectsVisibilityRule = "the projects you own, plus the projects you have
 // (drain r1 D1): it is served only once the onboarding task has been seen. A
 // retry that finds no task is answered with the started sentence instead, which
 // is what actually happened — the seam ran again and filed what was missing.
+// Both sentences are read by a PERSON, so they name the surface rather than the
+// route: the operator's word for where a card lands is the **Inbox**
+// (web/src/routes.ts), and an API path is not a place anybody goes. The
+// machine-readable reference rides the structured `ask_ref` field beside them,
+// so prose and reference stay cleanly split (S15.5: surfaces speak operator
+// language).
 const onboardStartedDetail = "onboarding started: the entry is registered, its store initialized and scanned, and its drafted " +
-	"conventions, commands and danger zones are captured as version 1 — pending your approval (D10). The approval card appears in " +
-	"/api/approvals once the onboarding run dispatches; it is not open yet. Answering it there activates the entry, and no other door does."
+	"conventions, commands and danger zones are captured as version 1 — pending your approval (D10). The approval card lands in your " +
+	"Inbox once the onboarding run dispatches; it is not open yet. Answering it there activates the entry, and no other door does."
 
 const onboardInFlightDetail = "this onboarding was already started and is still pending your approval: what follows is the entry that " +
-	"exists, not a second onboarding. Nothing was cloned, scanned or filed again (S15.2: a repeated write returns the already-resolved state)."
+	"exists, not a second onboarding. Nothing was cloned, scanned or filed again — a repeated write returns the state that is already there."
 
 // errNoSuchProject is the ONE refusal an unknown id and an entry the caller
 // cannot see SHARE — same status, same body, and no id echoed back. Telling

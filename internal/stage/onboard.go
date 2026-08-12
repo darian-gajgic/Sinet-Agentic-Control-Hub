@@ -83,19 +83,230 @@ func mapOnboardErr(err error) error {
 	}
 }
 
-// onboardCard is the durable ask snapshot surfaced for owner approval.
-type onboardCard struct {
-	Kind      string          `json:"kind"` // "onboard"
-	ProjectID string          `json:"project_id"`
-	Owner     string          `json:"owner"`
-	Draft     json.RawMessage `json:"draft"`
-	IssuedTS  string          `json:"issued_ts"`
+// choiceApproveOnboard is the onboarding card's ONE answer verb (Spec S13.7:
+// "the owner approves the draft (D10)"). It is the single place the value is
+// written: the card DECLARES it (onboardVocabulary) and AnswerOnboarding
+// VALIDATES against it — one list, two readers, the intake DeltaActions
+// precedent (CONVENTIONS §43).
+//
+// THERE IS NO DECLINE VERB, and its absence is deliberate rather than pending.
+// No server behavior exists behind one — AnswerOnboarding refuses a
+// non-approval outright — and S13.7 defines none, so declaring reject/deny
+// would render a button that always fails, which is the same class of defect
+// as the verb-less card. The exit that DOES exist is cancelling the
+// onboarding task (CancelTask finalizes the parked run and closes the open ask
+// as `cancelled` in one transaction); the help block names it in operator
+// language and the choices do not fake it as a verb.
+const choiceApproveOnboard = "approve"
+
+// onboardOption is one labeled option of the S06.7 decision wire shape. It is
+// declared HERE, as a wire struct, because the wire shape is the contract: the
+// inbox derives a card's verbs from `decision.choices[].value` and the browser
+// composes its answer from the same key (the B6-6 finding — the Go field name
+// was fine, the wire key was not). internal/intake's identical `Option` would
+// serve equally; a local struct keeps the vocabulary's home in the package that
+// owns this card (brief OQ4).
+type onboardOption struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
 }
 
-// onboardAnswer is the owner's decision.
+// onboardHelp is the 13.5 help block every S15.6 card carries: what this
+// decision does, what could go wrong, what the platform recommends.
+type onboardHelp struct {
+	What      string `json:"what"`
+	Wrong     string `json:"wrong"`
+	Recommend string `json:"recommend"`
+}
+
+// onboardDecision is the card's declared answer contract plus the content the
+// person deciding reads.
+type onboardDecision struct {
+	Summary string          `json:"summary"`
+	Detail  []string        `json:"detail,omitempty"`
+	Choices []onboardOption `json:"choices"`
+	Help    onboardHelp     `json:"help"`
+}
+
+// onboardVocabulary is the card's answer vocabulary, from the constant the
+// answer path itself reads. One list, two readers.
+func onboardVocabulary() []onboardOption {
+	return []onboardOption{{Label: "Approve — activate this project", Value: choiceApproveOnboard}}
+}
+
+// declaresOnboardChoice reports whether c is a verb this card offers.
+//
+// It validates against the PACKAGE's vocabulary, not against the answering
+// card's stored declaration (brief OQ5): a snapshot written before the
+// vocabulary existed then answers exactly as a fresh one does, the stored
+// declaration stays presentation, and there is no third behavior to reason
+// about. The stored snapshot is still the resume input and the pin source
+// (Spec S02.2/S02.5) — this reads the platform's verb set, which is what the
+// answer path applies.
+func declaresOnboardChoice(c string) bool {
+	for _, o := range onboardVocabulary() {
+		if o.Value == c {
+			return true
+		}
+	}
+	return false
+}
+
+// onboardVocabularySentence names the declared verbs for a refusal, so a
+// refused answer says what this card actually accepts.
+func onboardVocabularySentence() string {
+	quoted := make([]string, 0, len(onboardVocabulary()))
+	for _, o := range onboardVocabulary() {
+		quoted = append(quoted, fmt.Sprintf("%q", o.Value))
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// onboardCard is the durable ask snapshot surfaced for owner approval.
+//
+// The top-level fields are the record: AnswerOnboarding reads project_id off
+// the snapshot to activate, and the full `draft` rides it for the answer path
+// and the audit. The `decision` body is the card's DECLARATION — the verbs it
+// offers and the content the person deciding reads — in the same S06.7 shape
+// every other decision card uses, so the inbox derives its controls from the
+// card instead of the transport naming this pipeline's vocabulary for it
+// (CONVENTIONS §40-B, §43).
+type onboardCard struct {
+	Kind      string           `json:"kind"` // "onboard"
+	ProjectID string           `json:"project_id"`
+	Owner     string           `json:"owner"`
+	Draft     json.RawMessage  `json:"draft"`
+	IssuedTS  string           `json:"issued_ts"`
+	Decision  *onboardDecision `json:"decision,omitempty"`
+}
+
+// onboardAnswer is the owner's decision. TWO envelopes reach it and both are
+// the operator's own: the `{choice}` a surface composes for the family this
+// card declares, and the landed `{approve, draft}` raw door — which stays the
+// ONLY way to approve an edited draft at v0 (a stated absence, S13.7: an inbox
+// draft editor is frontend work this packet does not own).
+//
+// `criteria` — which a decision surface may append from the card's own detail
+// lines — is deliberately NOT a field here. encoding/json ignores keys a
+// struct does not name, which IS the tolerance: declaring a field the answer
+// path never reads would only add a way for a value nothing consumes to fail
+// the parse.
 type onboardAnswer struct {
-	Approve bool            `json:"approve"`
+	// Approve is a POINTER because absent and false are different answers. The
+	// choice envelope carries no `approve` at all, while an explicit
+	// `"approve": false` beside a choice is a contradiction — and a
+	// contradiction is refused, never resolved: picking a winner would apply a
+	// decision the person did not make.
+	Approve *bool           `json:"approve"`
 	Draft   json.RawMessage `json:"draft,omitempty"` // optional edited draft
+	Choice  string          `json:"choice,omitempty"`
+}
+
+// approves reads the answer as this card's declared approval, or says exactly
+// why it is not one.
+func (a onboardAnswer) approves() error {
+	if a.Choice != "" {
+		if !declaresOnboardChoice(a.Choice) {
+			return fmt.Errorf("stage: onboarding answer choice %q is not a verb this card declares — it declares %s "+
+				"(edit-and-approve is the only verb at v0; to not onboard this project, cancel the onboarding task)",
+				a.Choice, onboardVocabularySentence())
+		}
+		if a.Approve != nil && !*a.Approve {
+			return fmt.Errorf("stage: contradictory onboarding answer: choice %q with \"approve\": false — one answer "+
+				"carries one decision, and nothing was applied. Send the choice %s, or {\"approve\": true}",
+				a.Choice, onboardVocabularySentence())
+		}
+		return nil
+	}
+	if a.Approve != nil && *a.Approve {
+		return nil
+	}
+	return fmt.Errorf("stage: onboarding answer must approve — send the choice %s, or {\"approve\": true} "+
+		"(edit-and-approve is the only verb at v0; to not onboard this project, cancel the onboarding task)",
+		onboardVocabularySentence())
+}
+
+// onboardDraftShape is the slice of the drafted capture the card's digest
+// reads. The OnboardStart seam hands the draft over as JSON precisely so this
+// layer never imports internal/project (the wall stated on
+// project.OnboardStart itself), so the digest reads the draft the way every
+// snapshot consumer reads one: off the wire keys.
+type onboardDraftShape struct {
+	Conventions []string `json:"conventions"`
+	Commands    struct {
+		Build   string `json:"build"`
+		Test    string `json:"test"`
+		Lint    string `json:"lint"`
+		Run     string `json:"run"`
+		Preview string `json:"preview"`
+	} `json:"commands"`
+	DangerZones []struct {
+		Path   string `json:"path"`
+		Action string `json:"action"`
+		Rule   string `json:"rule"`
+	} `json:"danger_zones"`
+}
+
+// onboardDigest states the drafted capture in plain lines, so the rendered card
+// SHOWS what is being approved (D10) instead of carrying the draft as an
+// unrendered blob. Platform-drafted and deterministic — no model duty exists
+// here (S13.7 names none; the S06.10 deterministic-fallback posture) — and the
+// full draft still rides the snapshot for the answer path and the audit.
+func onboardDigest(draft json.RawMessage) []string {
+	var d onboardDraftShape
+	if len(draft) > 0 {
+		if err := json.Unmarshal(draft, &d); err != nil {
+			// Honest absence over a fabricated summary: the draft itself still
+			// rides the card and the approval applies it unchanged.
+			return []string{"The drafted capture could not be read back for display. The full draft is on this card and approving applies it unchanged."}
+		}
+	}
+	var lines []string
+	for _, c := range d.Conventions {
+		lines = append(lines, "Convention: "+c)
+	}
+	for _, c := range []struct{ name, command string }{
+		{"Build", d.Commands.Build}, {"Test", d.Commands.Test}, {"Lint", d.Commands.Lint},
+		{"Run", d.Commands.Run}, {"Preview", d.Commands.Preview},
+	} {
+		if c.command != "" {
+			lines = append(lines, c.name+" command: "+c.command)
+		}
+	}
+	for _, z := range d.DangerZones {
+		line := "Danger zone: " + z.Path
+		if z.Action != "" {
+			line += " (" + z.Action + ")"
+		}
+		if z.Rule != "" {
+			line += " — " + z.Rule
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "The scan captured no conventions, commands or danger zones: approving activates the entry with the empty capture it has.")
+	}
+	return lines
+}
+
+// onboardCardBody drafts the card's declaration for one project's draft:
+// what this is, what is in it, the verb, and the 13.5 help block.
+func onboardCardBody(projectID string, draft json.RawMessage) *onboardDecision {
+	return &onboardDecision{
+		Summary: "Onboarding " + projectID + ": approve the drafted conventions, commands and danger zones to activate this project's entry.",
+		Detail:  onboardDigest(draft),
+		Choices: onboardVocabulary(),
+		Help: onboardHelp{
+			What: "Approving records this draft as the project's captured content and activates the entry. From then on the platform " +
+				"reads these conventions and commands when it works on " + projectID + ", keeps away from the danger zones, and the " +
+				"project can be named in a task.",
+			Wrong: "If the draft is wrong, the platform works from wrong instructions until the capture is replaced — a missing danger zone " +
+				"matters most, because danger zones are what keep work away from secrets and protected branches.",
+			Recommend: "Approve if this matches the project. Approving is the only verb this card has: there is no decline, because " +
+				"nothing yet undoes a registration. To not onboard this project, cancel the onboarding task instead — that ends the run " +
+				"and closes this card.",
+		},
+	}
 }
 
 // StartOnboarding launches a project's onboarding task: the deterministic
@@ -174,7 +385,14 @@ func (s *Skeleton) dispatchOnboard(ctx context.Context, r run.Run) error {
 		return err
 	}
 	now := s.now().UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
-	card := onboardCard{Kind: "onboard", ProjectID: projectID, Owner: r.UserID, Draft: draft, IssuedTS: now}
+	// The card declares the verb its own answer path applies (§43: fixed at the
+	// producer). Every dispatch re-marshals, so a re-issued ask carries the
+	// declaration with no migration and no re-issue door; a snapshot written
+	// before it keeps its shape and answers exactly as it did (declaresOnboardChoice).
+	card := onboardCard{
+		Kind: "onboard", ProjectID: projectID, Owner: r.UserID, Draft: draft, IssuedTS: now,
+		Decision: onboardCardBody(projectID, draft),
+	}
 	snapshot, err := json.Marshal(card)
 	if err != nil {
 		return err
@@ -236,8 +454,8 @@ func (s *Skeleton) AnswerOnboarding(ctx context.Context, userID, askID string, a
 	if err := json.Unmarshal(answer, &ans); err != nil {
 		return "", fmt.Errorf("stage: bad onboarding answer: %w", err)
 	}
-	if !ans.Approve {
-		return "", fmt.Errorf("stage: onboarding answer must approve (edit-and-approve is the only verb at v0)")
+	if err := ans.approves(); err != nil {
+		return "", err
 	}
 	// Activate the entry (D10) — outside the run transaction (the project store
 	// verbs compose their own tx; the ledger-never-nests discipline, §13).
