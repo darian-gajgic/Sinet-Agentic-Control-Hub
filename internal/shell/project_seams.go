@@ -129,8 +129,19 @@ func (d onboardDoor) OnboardRefs(projectID string) api.OnboardRefs {
 // StartOnboarding registers and drafts the entry (with its stored remote), then
 // launches the onboarding task whose durable ask carries the draft to its owner.
 func (d onboardDoor) StartOnboarding(ctx context.Context, owner, projectID, name, remoteURL string) (api.OnboardRefs, error) {
+	return d.StartOnboardingWithFamily(ctx, owner, projectID, name, remoteURL, "")
+}
+
+// StartOnboardingWithFamily is the same onboarding with the owner's declared
+// task family (P3-RW-11 R2/R10). It is a SECOND method rather than a widened
+// StartOnboarding because api.OnboardSurface is a landed interface with other
+// implementors, and S15.2's additive rule is what keeps them compiling
+// unchanged: a door that predates the family keeps working and simply carries
+// none. The family is a door-only field — it lands on project.OnboardInput
+// here, at the root, exactly as RemoteURL does, and no stage seam widens (§23).
+func (d onboardDoor) StartOnboardingWithFamily(ctx context.Context, owner, projectID, name, remoteURL, family string) (api.OnboardRefs, error) {
 	if _, err := d.proj.OnboardStart(ctx, project.OnboardInput{
-		ProjectID: projectID, Owner: owner, Name: name, RemoteURL: remoteURL,
+		ProjectID: projectID, Owner: owner, Name: name, RemoteURL: remoteURL, Family: family,
 	}); err != nil {
 		return api.OnboardRefs{}, onboardRefusal(err)
 	}

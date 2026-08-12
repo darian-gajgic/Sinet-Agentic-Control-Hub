@@ -30,6 +30,11 @@ type Draft struct {
 	DangerZones []DangerZone `json:"danger_zones,omitempty"`
 	// ScanHash fingerprints the scanned source (the drift-check baseline).
 	ScanHash string `json:"scan_hash,omitempty"`
+	// Family is the owner-declared task family (P3-RW-11 R2). It rides the
+	// draft so the owner SEES it on the card they approve and can edit it
+	// there, exactly as they edit conventions. omitempty keeps a family-less
+	// draft byte-identical to a pre-RW-11 one.
+	Family string `json:"family,omitempty"`
 }
 
 // OnboardInput drives register → clone/init → scan → draft (Spec S13.7).
@@ -48,6 +53,11 @@ type OnboardInput struct {
 	// DefaultBranch overrides the created/detected default branch (default
 	// "main").
 	DefaultBranch string
+	// Family is the owner-declared task family (P3-RW-11 R2), validated against
+	// the six-value vocabulary or "". It reaches here from the create door at
+	// the composition root — a door-only field, never a widened stage seam (the
+	// RemoteURL precedent, §23).
+	Family string
 }
 
 // Onboard performs the platform's onboarding task up to the owner-approval

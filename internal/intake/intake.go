@@ -70,6 +70,36 @@ const (
 	FamilyGeneric  Family = "generic" // unmatched requests (S06.5 fallback set)
 )
 
+// Families is the six-value family vocabulary in its ratified order. It is the
+// ONE list the family card offers, the answer path accepts, and the
+// composition root pins internal/project's cross-wall duplicate against
+// (CONVENTIONS §43: one list, two readers).
+func Families() []Family {
+	return []Family{FamilySoftware, FamilyResearch, FamilyContent, FamilyData, FamilyChore, FamilyGeneric}
+}
+
+// ValidFamily reports whether f is one of the six ratified families.
+func ValidFamily(f Family) bool {
+	for _, known := range Families() {
+		if f == known {
+			return true
+		}
+	}
+	return false
+}
+
+// FamilySource records WHAT resolved a task's family, so "generic" is always
+// attributable and a silent generic is structurally impossible (P3-RW-11 R5).
+// The precedence is registry > classifier > requester-asked > default, and
+// "default" on a non-band task is precisely the state the family question
+// exists to eliminate.
+const (
+	FamilySourceRegistry   = "registry"   // the registered project's captured family (S13.7)
+	FamilySourceClassifier = "classifier" // the S12.4 intake-triage duty resolved it
+	FamilySourceRequester  = "requester"  // the requester answered the family question (S06.5, 1.7)
+	FamilySourceDefault    = "default"    // nothing resolved it: the fail-closed generic baseline
+)
+
 // Input is one requester-supplied input handed in with the request — a file the
 // person gave the assistant and then handed to the task they started by
 // chatting (Spec S15.7: "files handed to a launched task enter as task inputs

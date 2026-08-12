@@ -67,7 +67,13 @@ type Capture struct {
 	// ScanHash fingerprints the scanned source the capture was derived from —
 	// a drift check compares it against a live re-scan (Spec S13.7 re-scan on
 	// drift).
-	ScanHash   string `json:"scan_hash,omitempty"`
+	ScanHash string `json:"scan_hash,omitempty"`
+	// Family is the owner-declared task family this project's tasks belong to
+	// (P3-RW-11 R2): it is what makes intake open the right question set instead
+	// of the generic one. Owner-declared, never scanned — nothing in a
+	// repository states what KIND of work its tasks are. "" = none declared,
+	// which is what every capture written before migration 0024 reads back.
+	Family     string `json:"family,omitempty"`
 	CapturedBy string `json:"captured_by"`
 	CapturedTS string `json:"captured_ts"`
 }

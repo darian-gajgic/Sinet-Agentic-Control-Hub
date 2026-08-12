@@ -163,6 +163,47 @@ func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	return out, nil
 }
 
+// The owner-declared task family of a registered project (P3-RW-11 R2; Spec
+// S13.7). The six values are internal/intake's `Family` constants duplicated BY
+// VALUE, because the §23 import wall bars this package from importing
+// internal/intake — the two lists are pinned byte-equal at the composition
+// root, which is the one place both are legitimately visible.
+const (
+	FamilySoftware = "software"
+	FamilyResearch = "research"
+	FamilyContent  = "content"
+	FamilyData     = "data"
+	FamilyChore    = "chore"
+	FamilyGeneric  = "generic"
+)
+
+// Families is the vocabulary in its ratified order — the ONE list this package
+// validates against and the root pins.
+func Families() []string {
+	return []string{FamilySoftware, FamilyResearch, FamilyContent, FamilyData, FamilyChore, FamilyGeneric}
+}
+
+// validFamily accepts the six values plus "" — honest absence: a project whose
+// owner declared no family simply has none, and the interview asks (R4).
+func validFamily(f string) bool {
+	if f == "" {
+		return true
+	}
+	for _, known := range Families() {
+		if f == known {
+			return true
+		}
+	}
+	return false
+}
+
+// badFamily is the loud refusal a value outside the vocabulary earns. It names
+// what is accepted, so a caller can fix the request without reading source.
+func badFamily(f string) error {
+	return fmt.Errorf("%w: task family %q is not one of %s (or empty for none)",
+		ErrBadInput, f, strings.Join(Families(), ", "))
+}
+
 // CaptureInput records a captured-content version (Spec S13.7). Every call is
 // a NEW immutable version; the entry's pointer advances. The captured content
 // is never overwritten in place.
@@ -173,6 +214,8 @@ type CaptureInput struct {
 	Commands    Commands
 	DangerZones []DangerZone
 	ScanHash    string
+	// Family is the owner-declared task family (P3-RW-11 R2). "" = none.
+	Family string
 }
 
 // Capture writes a new captured-content version and advances the entry's

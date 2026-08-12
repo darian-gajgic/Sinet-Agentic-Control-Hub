@@ -95,7 +95,11 @@ type State struct {
 	Req    Request `json:"request"`
 
 	// Stage 0 — the intake record (Spec S06.2).
-	Family       Family         `json:"family"`
+	Family Family `json:"family"`
+	// FamilySource names what resolved Family (P3-RW-11 R5) — additive, so a
+	// state event written before this packet reads back "" and is left exactly
+	// as it was. It is an event payload, so it needs no migration.
+	FamilySource string         `json:"family_source,omitempty"`
 	Tier         Tier           `json:"tier"`
 	FloorTier    Tier           `json:"floor_tier,omitempty"` // deterministic floor ("" = none)
 	FloorReasons []FloorReason  `json:"floor_reasons,omitempty"`

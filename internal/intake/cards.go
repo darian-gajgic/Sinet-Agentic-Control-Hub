@@ -3,6 +3,7 @@ package intake
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Intake cards are platform asks: each open gate is one durable `asks` row
@@ -40,6 +41,13 @@ const (
 	// CardDelta is the post-approval delta-only re-approval card (Spec
 	// S06.9).
 	CardDelta CardKind = "approval.delta"
+	// CardFamily is the pre-round family question: when Stage 0 leaves the task
+	// family UNRESOLVED — no registered project declared one and no classifier
+	// answered — the interview ASKS rather than assuming (P3-RW-11 R4; Spec
+	// S06.5 + 1.7 ask-don't-assume). It is a DECISION card, not an interview
+	// question, because six choices exceed S06.5's ratified 2–4 option bound on
+	// questions while decision choices are unbounded (the SPEC-DOUBT precedent).
+	CardFamily CardKind = "decision.family"
 )
 
 // Question is one card question.
@@ -180,6 +188,41 @@ type DeltaBody struct {
 // DeltaActions is the delta card's answer vocabulary, from the constants the
 // answer path itself reads. One list, two readers.
 func DeltaActions() []string { return []string{ChoiceApproveDelta, ChoiceRejectDelta} }
+
+// familyLabels are the plain-language names of the six families, written for a
+// non-programmer: the person answering this card is being asked what KIND of
+// thing they want done, not to pick a taxonomy id.
+var familyLabels = map[Family]string{
+	FamilySoftware: "Build or change software",
+	FamilyResearch: "Find something out",
+	FamilyContent:  "Write or create content",
+	FamilyData:     "Work with data",
+	FamilyChore:    "A routine chore",
+	FamilyGeneric:  "Something else",
+}
+
+// FamilyChoices is the family card's answer vocabulary, built from the SAME
+// Families() list applyFamilyAnswer validates against — so the set the card
+// offers and the set the pipeline accepts are one list rather than two that
+// agree today (CONVENTIONS §43, the DeltaActions precedent).
+func FamilyChoices() []Option {
+	fams := Families()
+	out := make([]Option, 0, len(fams))
+	for _, f := range fams {
+		out = append(out, Option{Label: familyLabels[f], Value: string(f)})
+	}
+	return out
+}
+
+// familyVocabularySentence names the accepted values for a refusal, so a
+// refused answer says what this card actually takes.
+func familyVocabularySentence() string {
+	quoted := make([]string, 0, len(Families()))
+	for _, f := range Families() {
+		quoted = append(quoted, fmt.Sprintf("%q", string(f)))
+	}
+	return strings.Join(quoted, ", ")
+}
 
 // VerdictRecord is one recorded critique outcome.
 type VerdictRecord struct {
