@@ -110,6 +110,16 @@ type parser struct {
 	pendingTools []contentBlock
 	messageIndex int64
 
+	// finalText retains the LAST flushed assistant message's full text —
+	// the engine's final message body as this pump witnessed it. The
+	// flush() event only carries a bounded excerpt (refs-not-blobs,
+	// P-T07-5), so without this the full text was in the adapter's hands
+	// and discarded; it is the fallback source when a clean completion's
+	// terminal envelope carries an EMPTY `result` field (assembleOutcome,
+	// P3-RW-9 R1). It never leaves the process: the retained text rides
+	// only the in-process Outcome.ResultText (R3).
+	finalText string
+
 	// terminal facts.
 	sawResult bool
 	result    streamLine
@@ -249,6 +259,11 @@ func (p *parser) flush() []adapters.Event {
 	m := p.pending
 	text := p.pendingText.String()
 	tools := p.pendingTools
+	// The message being flushed is, so far, the final one: retain its text
+	// (P3-RW-9 R1). Later messages overwrite — the field always names the
+	// LAST assistant message, never a concatenation of earlier turns, which
+	// is what the `result` field it stands in for has always meant.
+	p.finalText = text
 	p.pending = nil
 	p.pendingText.Reset()
 	p.pendingTools = nil

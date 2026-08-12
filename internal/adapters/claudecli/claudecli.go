@@ -128,6 +128,16 @@ func (a *Adapter) logf(format string, args ...any) {
 	l.Info(fmt.Sprintf(format, args...))
 }
 
+// warnf is the LOUD half of the same ops channel: engine behavior the
+// platform absorbed but an operator must be able to see (S01.11 posture).
+func (a *Adapter) warnf(format string, args ...any) {
+	l := a.Log
+	if l == nil {
+		l = slog.Default()
+	}
+	l.Warn(fmt.Sprintf(format, args...))
+}
+
 // Start implements adapters.Adapter (S03.1 start): spawn with a
 // control-plane-chosen session id and fully lowered config.
 func (a *Adapter) Start(ctx context.Context, req adapters.StartRequest) (adapters.Session, error) {
@@ -583,7 +593,7 @@ func (s *session) assembleOutcome(p *parser, waitErr error) (adapters.Outcome, [
 			// Full result text for the in-process caller (stage runners
 			// parse structured output from it); persisted payloads stay
 			// bounded — see adapters.Outcome.ResultText.
-			ResultText: p.result.Result,
+			ResultText: s.resultText(p),
 		}
 		if paused {
 			// Pause raced completion: the engine finished first — the
@@ -617,6 +627,43 @@ func (s *session) assembleOutcome(p *parser, waitErr error) (adapters.Outcome, [
 		}
 		return adapters.Outcome{Kind: adapters.OutcomeCrashed, Detail: detail}, nil
 	}
+}
+
+// resultText picks the terminal result text of a CLEANLY COMPLETED session
+// (P3-RW-9 R1/R2). The precedence never moves: the envelope's `result` field
+// wins whenever it carries anything, so a healthy session behaves exactly as
+// it always has.
+//
+// When that field comes back EMPTY on a clean completion, the stream's own
+// final assistant message stands in. This is our side of the seam absorbing
+// engine drift (S03.1 forward tolerance), not a repair: the empty-result bug
+// class is real and open upstream at the pinned 2.1.218 (CHANGELOG fixes for
+// adjacent shapes landed at 2.1.203/2.1.214, below the pin), the field is
+// documented nowhere as optional OR guaranteed, and the engine is never
+// patched (adopt-don't-fork, S03.2/S16.3). The substituted text is handed on
+// VERBATIM — a truncated or malformed body stays truncated and malformed, and
+// failing its consumer's contract is how that stays visible.
+//
+// The transcript and its copy-aside are deliberately NOT read back: S03.1
+// calls the JSONL transcript a resume optimization only, while the stream is
+// the bytes this adapter itself witnessed. Both are loud, because losing an
+// engine's whole answer silently is the failure mode this exists to end.
+func (s *session) resultText(p *parser) string {
+	if p.result.Result != "" {
+		return p.result.Result
+	}
+	if p.finalText == "" {
+		// Nothing was streamed either: the caller gets no text. The adapter
+		// never fabricates one, and never mints a crash for an outcome the
+		// engine reported as success (D3 honesty) — an unusable result is the
+		// consumer contract's to fail on, loudly.
+		s.a.warnf("claudecli: session %s completed with an EMPTY result field and no assistant text in the stream — the caller gets no text (S03.1)",
+			p.result.SessionID)
+		return ""
+	}
+	s.a.warnf("claudecli: session %s completed with an EMPTY result field; substituting the stream's final assistant message text (%d bytes, verbatim) — upstream empty-result flake at pin %s (S03.1 forward tolerance)",
+		p.result.SessionID, len(p.finalText), Pin)
+	return p.finalText
 }
 
 // parkRecord snapshots the FULL invocation for resume (S03.4 obligation;

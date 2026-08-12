@@ -106,8 +106,10 @@ func TestIntakeAnswerStrandCrashesAndHealsWithoutAHuman(t *testing.T) {
 	taskID, intakeRun, askID, body := walkToOpenCard(t, h, owner)
 
 	// The answer commits (ask closed, parked→running) and THEN the planning
-	// seam dies twice over `jsonWithRetry`'s bounce-once — the live shape.
-	h.planner.failFirst = 2
+	// seam dies on this drive. The seam is the pipeline's WHOLE view of the
+	// planner, so one failure here is the live shape: two plan-draft sessions
+	// bouncing once through `jsonWithRetry` and erroring up to the caller.
+	h.planner.failFirst = 1
 	_, err := h.sur.Answer(ctx, owner, askID, body, false)
 	if err == nil {
 		t.Fatal("the answer's advance must still fail loudly — the request really did fail (R6)")
@@ -215,7 +217,7 @@ func TestAdvanceCrashesMidDriveAndConflictsWhenNotRunning(t *testing.T) {
 	// The window: answer through the PIPELINE (which crashes nothing — the
 	// corpse is the stage layer's act, CONVENTIONS §14/§16 layering), so the
 	// run is left running with no open gate and nobody driving it.
-	h.planner.failFirst = 2
+	h.planner.failFirst = 1
 	if _, err := h.sk.Pipeline().Answer(ctx, owner, askID, body); err == nil {
 		t.Fatal("expected the pipeline answer to fail with the dying planning seam")
 	}
@@ -225,7 +227,7 @@ func TestAdvanceCrashesMidDriveAndConflictsWhenNotRunning(t *testing.T) {
 
 	// (a) the nudge re-drives, dies mid-flight, and leaves the SAME corpse the
 	// answer beat leaves.
-	h.planner.failFirst = 2
+	h.planner.failFirst = 1
 	_, err := h.sur.Advance(ctx, owner, taskID)
 	if err == nil {
 		t.Fatal("expected the advance to fail with the dying planning seam")

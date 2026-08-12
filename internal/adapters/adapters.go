@@ -453,6 +453,18 @@ type Outcome struct {
 	// P-T07-5) — full content durability rides the engine transcript and
 	// its copy-aside, as before; this field is never written to the DB or
 	// an event payload.
+	//
+	// On a CLEAN COMPLETION an adapter fills it in this order, and every
+	// lane owes the same behavior (the claudecli conformance fixtures are
+	// the reference shape): (1) the terminal envelope's own result text
+	// whenever it carries anything — a healthy session is never
+	// second-guessed; (2) otherwise the stream's final assistant message,
+	// VERBATIM — engines do lose this field, and the adapter's own
+	// witnessed bytes are the honest stand-in (S03.1 forward tolerance);
+	// (3) otherwise empty. An adapter never repairs, completes or
+	// fabricates text, and never mints a crash for an outcome the engine
+	// reported as success — unusable text fails its consumer's contract,
+	// loudly, where the run's own recovery posture applies.
 	ResultText string
 
 	// GateFallback reports the S03.4 detection contract: more than one

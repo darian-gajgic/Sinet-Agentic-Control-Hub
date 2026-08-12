@@ -412,15 +412,23 @@ func (h *forkHarness) walkToCrashWindow(ctx context.Context, owner string) (stri
 		h.t.Fatal(err)
 	}
 	// The planning seam dies on this advance: the ask is already closed and the
-	// run already resumed (both committed by closeAndResume), so the run is left
-	// running with no gate — the crash window.
+	// run already resumed (both committed by closeAndResume), so the drive dies
+	// with the run past the resume commit — the crash window.
+	//
+	// P3-RW-9 R4 changed what that window LOOKS like, not that it exists: the
+	// stage surface now leaves the corpse itself instead of returning the error
+	// and stranding the run `running`, driver-less and unscannable. The ladder
+	// still forks it (crashed runs are swept every pass, Spec S02.5 step 3), so
+	// every fork assertion below is unchanged — only the state the window opens
+	// in moved, from "running with nobody driving it" to "crashed with its
+	// cause".
 	h.planner.failFirst = 1
 	if _, err := h.sur.Answer(ctx, owner, v.OpenAskID, body, false); err == nil {
 		h.t.Fatal("expected the answer's advance to fail with the dying planning seam")
 	}
 	intakeRun := taskID + ".intake"
-	if got := h.runState(intakeRun); got != run.StateRunning {
-		h.t.Fatalf("crash window: run %s is %s, want running (the interrupted advance)", intakeRun, got)
+	if got := h.runState(intakeRun); got != run.StateCrashed {
+		h.t.Fatalf("crash window: run %s is %s, want crashed (P3-RW-9 R4: the dead advance leaves a corpse)", intakeRun, got)
 	}
 	return taskID, intakeRun, answered
 }

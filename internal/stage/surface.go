@@ -66,6 +66,64 @@ func mapIntakeErr(err error) error {
 	}
 }
 
+// CodeAdvanceCrashed is the surface code of a drive that died AFTER the run
+// was already running: the request failed (500 stands — nothing is swallowed)
+// but the run is a classifiable corpse the recovery ladder forks within one
+// sweep, so the caller can say "recovering" instead of showing a bare
+// internal error (P3-RW-9 R6).
+const CodeAdvanceCrashed = "advance_crashed_recovering"
+
+// mapDriveErr maps an intake DRIVE error — one from `pipe.Answer` or
+// `pipe.Advance`, the two beats that resume a parked run and then drive it in
+// this request — onto its transport status, minting the S02.3 corpse when the
+// run was left running with nobody driving it.
+//
+// The cut line is the run's own state, which is exactly the resume commit
+// (`closeAndResume`) that produced it:
+//
+//   - a CLASSIFIED refusal (unknown ask, not-requester, bad answer, gate open,
+//     not running) never reached the drive: the run is still parked on its open
+//     ask, so it keeps its 4xx and nothing transitions (R5, S06.1 gates wait);
+//   - anything else, on a run this beat already took to `running`, is the
+//     strand: the pipeline errored up as designed (it owns no run FSM,
+//     CONVENTIONS §14), and returning that error alone left the run running,
+//     driver-less and corpse-less — invisible to the ladder (it scans
+//     claimed/running/draining but reaps only what has no live lease), then
+//     silence-parked by the watchdog, then releasable only by another human
+//     resume. The corpse is what makes the heal machine-only and bounded:
+//     crashed runs are scanned every pass and forked from their last
+//     checkpoint (S02.5 steps 2–3), and the fork's dispatch rebinds and
+//     re-drives (P3-RW-6).
+//
+// This is the posture the dispatch leg (`Skeleton.crash` at dispatchIntake)
+// and the S07.7 verify answer beat (answer.go) already take — CONVENTIONS §16
+// doctrine, extended to the intake beats it had skipped.
+func (u *Surface) mapDriveErr(ctx context.Context, runID, beat string, err error) error {
+	mapped := mapIntakeErr(err)
+	var se *api.SurfaceError
+	if errors.As(mapped, &se) {
+		return mapped
+	}
+	if runID == "" {
+		return mapped
+	}
+	r, gerr := u.sk.cfg.Runs.Get(ctx, runID)
+	if gerr != nil {
+		u.sk.logger().Error("stage: intake "+beat+" failed and its run could not be read",
+			"run", runID, "err", err, "read_err", gerr)
+		return mapped
+	}
+	if r.State != run.StateRunning {
+		// Never taken to running (or already terminal): the run is not
+		// stranded and is not this beat's to transition.
+		return mapped
+	}
+	u.sk.logger().Error("stage: intake "+beat+" died mid-drive; crashing the run for the recovery ladder",
+		"run", runID, "task", r.TaskID, "err", err)
+	u.sk.crash(ctx, runID, "intake "+beat+": "+err.Error())
+	return surfaceErr(http.StatusInternalServerError, CodeAdvanceCrashed, err)
+}
+
 // mapVerifyErr maps the S07.7 answer-path errors onto transport statuses.
 func mapVerifyErr(err error) error {
 	switch {
@@ -159,7 +217,7 @@ func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.
 		}
 		return u.taskView(ctx, taskID)
 	}
-	kind, tier, err := u.askCardMeta(ctx, askID)
+	kind, tier, runID, err := u.askCardMeta(ctx, askID)
 	if err != nil {
 		return nil, mapIntakeErr(err)
 	}
@@ -168,7 +226,9 @@ func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.
 	}
 	st, err := u.sk.pipe.Answer(ctx, userID, askID, answer)
 	if err != nil {
-		return nil, mapIntakeErr(err)
+		// The answer resumed the run and drove it in this request: a drive that
+		// died past the resume commit leaves a corpse, never a stranded run (R4).
+		return nil, u.mapDriveErr(ctx, runID, "answer", err)
 	}
 	// The walking-skeleton continuation: an approved plan completes the
 	// intake run and launches execution (the "what runs next is B2-4's"
@@ -180,25 +240,27 @@ func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.
 }
 
 // askCardMeta reads the durable ask's card kind + tier (asks.snapshot is
-// the full card, Spec S02.2).
-func (u *Surface) askCardMeta(ctx context.Context, askID string) (intake.CardKind, intake.Tier, error) {
-	var snapshot string
+// the full card, Spec S02.2), plus the run the ask is bound to — read here,
+// while the ask is still open, because it is the run the answer is about to
+// resume and drive, and a failed drive has to be able to name it (R4).
+func (u *Surface) askCardMeta(ctx context.Context, askID string) (intake.CardKind, intake.Tier, string, error) {
+	var snapshot, runID string
 	err := u.sk.cfg.DB.QueryRowContext(ctx,
-		`SELECT snapshot FROM asks WHERE ask_id = ? AND status = 'open'`, askID).Scan(&snapshot)
+		`SELECT snapshot, run_id FROM asks WHERE ask_id = ? AND status = 'open'`, askID).Scan(&snapshot, &runID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", intake.ErrUnknownAsk
+		return "", "", "", intake.ErrUnknownAsk
 	}
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var card struct {
 		Kind intake.CardKind `json:"kind"`
 		Tier intake.Tier     `json:"tier"`
 	}
 	if err := json.Unmarshal([]byte(snapshot), &card); err != nil {
-		return "", "", fmt.Errorf("stage: decode ask snapshot: %w", err)
+		return "", "", "", fmt.Errorf("stage: decode ask snapshot: %w", err)
 	}
-	return card.Kind, card.Tier, nil
+	return card.Kind, card.Tier, runID, nil
 }
 
 // Task implements api.IntakeSurface.
@@ -234,9 +296,14 @@ func (u *Surface) Advance(ctx context.Context, userID, taskID string) (json.RawM
 	if st.Owner != userID {
 		return nil, surfaceErr(http.StatusForbidden, "not_requester", intake.ErrNotRequester)
 	}
+	// The run this nudge is about to drive, captured BEFORE the drive: a failed
+	// Advance returns a nil state, and a corpse has to be able to name its run.
+	runID := st.RunID
 	st, err = u.sk.pipe.Advance(ctx, taskID)
 	if err != nil {
-		return nil, mapIntakeErr(err)
+		// Same posture as the answer beat: the nudge drives a RUNNING run, and a
+		// drive that dies mid-flight leaves the ladder something to fork (R4).
+		return nil, u.mapDriveErr(ctx, runID, "advance", err)
 	}
 	if err := u.sk.afterIntake(ctx, st); err != nil {
 		return nil, err
