@@ -52,10 +52,43 @@ const (
 
 // Question is one card question.
 type Question struct {
-	ID      string   `json:"id"` // slot id, or "marker-<n>" on clarification cards
-	Text    string   `json:"text"`
+	ID   string `json:"id"` // slot id, or "marker-<n>" on clarification cards
+	Text string `json:"text"`
+	// Phrased is the utility model's per-request rewording of Text (Spec
+	// S06.5: the seat "phrases and summarizes but does not decide what must
+	// be asked"; S06.10 duty row). Additive and OPTIONAL: Text stays the
+	// canonical taxonomy question and remains the durable record, so an
+	// absent or erroring phrase seam leaves the card byte-identical to the
+	// taxonomy's own words (P3-RW-12 R6/R12). A surface renders Phrased when
+	// present and Text otherwise.
+	Phrased string   `json:"phrased,omitempty"`
 	Options []Option `json:"options,omitempty"` // 2–4 labeled options; free text always available
 	Weight  int      `json:"weight,omitempty"`
+}
+
+// UnderstoodItem is one resolved must-know slot, rendered back to the
+// requester as part of the per-round understanding block (P3-RW-12 R8). It
+// is composed by platform code from State.Resolutions — never by a model —
+// so "here is what I understood" can never claim more than the record holds.
+type UnderstoodItem struct {
+	SlotID     string `json:"slot_id"`
+	Name       string `json:"name"` // the taxonomy slot's plain-language name
+	How        string `json:"how"`  // ResolvedRegistry | ResolvedAnswered | ResolvedAssumption
+	Value      string `json:"value,omitempty"`
+	Assumption string `json:"assumption,omitempty"`
+}
+
+// UnderstoodBlock is the "here is what I understood so far" block carried by
+// interview and clarification cards, and by the approval card's layer 1
+// beside the planner's restatement (Spec S06.5 "summarizes"; S06.1's 1.3
+// restate-and-confirm realization). Items are DETERMINISTIC — the platform's
+// own record of every resolved slot. Text is the optional utility-phrased
+// prose; empty whenever no phrase seam answered, and never synthesized from
+// the items (the §26 honest-degradation rule: deterministic items are never
+// presented as model prose).
+type UnderstoodBlock struct {
+	Items []UnderstoodItem `json:"items,omitempty"`
+	Text  string           `json:"text,omitempty"`
 }
 
 // maxQuestionsPerCard is spec-structural, not ⚙: Spec S06.5 fixes "up to 4
@@ -76,6 +109,13 @@ type Card struct {
 	Decision  *DecisionBody `json:"decision,omitempty"`  // coverage / research / spec_doubt
 	Approval  *ApprovalBody `json:"approval,omitempty"`
 	Delta     *DeltaBody    `json:"delta,omitempty"`
+
+	// Understood is the per-round understanding block on interview and
+	// clarification cards (P3-RW-12 R8, OQ5). Escalation and family cards
+	// carry none: a single mid-planning question and a pre-round
+	// nothing-is-known question have nothing to summarize. Nil before the
+	// first slot resolves and before any phrase seam answers.
+	Understood *UnderstoodBlock `json:"understood,omitempty"`
 }
 
 // DecisionBody carries a decision card: what happened, the enumerated
@@ -123,6 +163,13 @@ type ApprovalLayer1 struct {
 	Help        HelpBlock    `json:"help"`                // the 13.5 block
 	Uncovered   []string     `json:"uncovered,omitempty"` // requester-accepted coverage gaps
 	OpenFinds   []string     `json:"open_findings,omitempty"`
+	// Understood is the FULL slot-by-slot recap — every resolution including
+	// band and force-proceed conversions, each origin-labeled — beside the
+	// planner's prose Restatement (P3-RW-12 R9). It complements the
+	// restatement rather than replacing it: the restatement is what the
+	// planner understood, this is what the platform recorded. It adds no
+	// card and no click; approval is still the confirmation (Spec S06.1).
+	Understood *UnderstoodBlock `json:"understood,omitempty"`
 }
 
 // ApprovalLayer2 is the expandable layer.

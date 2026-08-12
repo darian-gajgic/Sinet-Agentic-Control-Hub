@@ -47,6 +47,9 @@ type Pipeline struct {
 	Registry   Registry
 	Utility    Utility
 	SpotCheck  SpotCheck
+	// Phraser is the S06.5 phrase-and-summarize seat (P3-RW-12 R6/R7).
+	// Optional: nil leaves every card carrying the taxonomy's own words.
+	Phraser Phraser
 
 	// Router is the S08.8 selection seam (B3-3): the approval card carries
 	// the selected worker + plain-language reason PRE-execution, with

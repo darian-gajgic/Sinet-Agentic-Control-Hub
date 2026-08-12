@@ -364,6 +364,62 @@ type Utility interface {
 	Help(ctx context.Context, pair Pair) (HelpBlock, error)
 }
 
+// PhraseQuestion is one ALREADY-SELECTED interview question offered to the
+// phrase seam: the slot id it belongs to and the taxonomy's canonical text.
+// Options are deliberately absent — labels are authored plain-language
+// content and their values are canonical vocabulary, so v0 phrases the
+// question text and nothing else (P3-RW-12 OQ4).
+type PhraseQuestion struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// PhraseInput is one card's phrase-and-summarize request (Spec S06.5, the
+// S06.10 utility duty row). The pipeline has ALREADY chosen the questions
+// from the taxonomy when this is built: the seat receives that selection and
+// may only reword it — it never learns which slots were passed over, and its
+// answer cannot add, drop, or merge a question (the fold is by slot id, in
+// platform code; R03 §2.1 forbids prompt-level containment).
+type PhraseInput struct {
+	// RunID is the CONSUMING run — the run the pipeline is driving right
+	// now, which after a recovery-fork rebind is the FORK (the
+	// DraftInput.RunID precedent, CONVENTIONS §16 + §26): the ONE $0 D7 row
+	// an implementation writes rides it.
+	RunID string
+
+	Request   Request
+	Family    Family
+	Tier      Tier
+	Questions []PhraseQuestion
+	// Understood is what the platform has already resolved — the material
+	// the summary is drawn from. Deterministic and platform-composed; the
+	// seat renders it as prose, it does not decide its contents.
+	Understood []UnderstoodItem
+}
+
+// PhraseResult is the seat's answer: rewordings keyed by slot id, plus the
+// one-paragraph "here is what I understood so far" summary. A missing id
+// leaves that question's canonical text standing; an id that was not asked
+// is dropped by the fold.
+type PhraseResult struct {
+	Phrasings map[string]string `json:"phrasings,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
+}
+
+// Phraser is the S06.5 phrase-and-summarize seat (Spec S06.10: "question/card
+// phrasing, 13.5 help drafting, summaries → utility model"). It is separate
+// from Utility rather than a second method on it because Help is pair-bound
+// and phrasing runs before any pair exists — and because a landed seam
+// contract stays byte-stable (P3-RW-12 OQ1). The one utility alias holds both
+// duties: the local adapter implements both interfaces on one type.
+//
+// OPTIONAL: a nil Phraser, or any error from it, leaves the card carrying the
+// taxonomy's verbatim questions with zero added clicks — never a faked
+// rewording (CONVENTIONS §14/§26 degradation rule).
+type Phraser interface {
+	PhraseAndSummarize(ctx context.Context, in PhraseInput) (PhraseResult, error)
+}
+
 // SpotCheck is the advisory local-model semantic coverage check of Spec
 // S06.7(a) — advisory-only, never a gate. Optional.
 type SpotCheck interface {

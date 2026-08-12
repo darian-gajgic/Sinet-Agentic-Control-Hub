@@ -14,6 +14,15 @@ import (
 // Spec S09 lands (B3); until then the seed ships here and its content is a
 // B2-gate ratification item (TBD-P3 seed, Spec S06.5 + S19.5).
 
+// plannerChoosesValue is the canonical option value for "you choose for me
+// and show me what you picked" — the default the platform offers wherever a
+// question asks for a technical or aesthetic decision the requester may have
+// no opinion about (P3-RW-12 R1). It resolves the slot like any other answer,
+// and the choice the planner actually made comes back on the S06.9 approval
+// card's restatement and steps, where Re-plan can contest it. Nothing new is
+// needed to make that work: an answered slot is an answered slot.
+const plannerChoosesValue = "planner_chooses"
+
 // Option is one labeled answer option of an interview question (Spec
 // S06.5: 2–4 labeled options plus free text; free text is always
 // available and is not an Option).

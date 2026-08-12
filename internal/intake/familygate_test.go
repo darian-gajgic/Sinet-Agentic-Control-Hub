@@ -284,10 +284,19 @@ func TestFamilyCardChoiceGenericExplicit(t *testing.T) {
 		}
 	})
 
+	// P3-RW-12 retarget: every vocabulary family now ships its own seeded set,
+	// so this subtest's original premise — a family the seeds do not cover —
+	// no longer exists in the shipping map. The DISCLOSED-fallback machinery
+	// it guards has not gone anywhere: it is exercised against a custom
+	// Taxonomies map missing a family, which is exactly the case it exists for
+	// (an operator-supplied override set, or a family seeded later).
 	t.Run("unseeded family keeps the true family and discloses the fallback", func(t *testing.T) {
 		f := newFix(t)
 		f.p.Classifier = nil
 		f.p.Registry = nil
+		custom := intake.SeedTaxonomies()
+		delete(custom, intake.FamilyResearch)
+		f.p.Taxonomies = custom
 		st := f.start(stdRequest())
 		f.admit(st.RunID)
 		st = f.advance(st.TaskID)
@@ -298,7 +307,7 @@ func TestFamilyCardChoiceGenericExplicit(t *testing.T) {
 			t.Errorf("family = %q, want research (the TRUE family stays durable, R6)", st.Family)
 		}
 		if st.TaxonomyID != "generic" {
-			t.Errorf("taxonomy = %q, want generic (research has no seeded set yet)", st.TaxonomyID)
+			t.Errorf("taxonomy = %q, want generic (this map seeds no research set)", st.TaxonomyID)
 		}
 		var disclosed bool
 		for _, txt := range platformDecisionTexts(t, f, st.TaskID) {

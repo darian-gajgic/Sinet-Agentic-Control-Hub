@@ -192,7 +192,10 @@ type localUtility struct {
 	currentRun func(ctx context.Context, taskID string) string
 }
 
-var _ intake.Utility = (*localUtility)(nil)
+var (
+	_ intake.Utility = (*localUtility)(nil)
+	_ intake.Phraser = (*localUtility)(nil)
+)
 
 // NewLocalUtility wraps the duty caller as the intake Utility seam (optional;
 // a caller error degrades to the pipeline's deterministic help text).
@@ -217,6 +220,14 @@ func (u *localUtility) Help(ctx context.Context, pair intake.Pair) (intake.HelpB
 		return intake.HelpBlock{}, fmt.Errorf("stage: decode utility help output: %w", err)
 	}
 	return intake.HelpBlock{What: out.What, Wrong: out.Wrong, Recommend: out.Recommend}, nil
+}
+
+// PhraseAndSummarize holds the S06.5 phrase-and-summarize duty on the SAME
+// utility alias as Help (S06.10's duty row names phrasing, help drafting and
+// summaries together), so one seat carries the whole duty row (P3-RW-12
+// R7/OQ1).
+func (u *localUtility) PhraseAndSummarize(ctx context.Context, in intake.PhraseInput) (intake.PhraseResult, error) {
+	return intake.PhraseResult{}, fmt.Errorf("stage: phrase-and-summarize seat not implemented")
 }
 
 func helpPrompt(pair intake.Pair, schema json.RawMessage) string {
