@@ -73,50 +73,47 @@ func mapIntakeErr(err error) error {
 // internal error (P3-RW-9 R6).
 const CodeAdvanceCrashed = "advance_crashed_recovering"
 
-// mapDriveErr maps an intake DRIVE error — one from `pipe.Answer` or
-// `pipe.Advance`, the two beats that resume a parked run and then drive it in
-// this request — onto its transport status, minting the S02.3 corpse when the
-// run was left running with nobody driving it.
+// mapDriveErr maps an intake DRIVE error — from `pipe.Answer`, `pipe.Advance`
+// or the continuation that follows either — onto its transport status, minting
+// the S02.3 corpse when the beat would otherwise leave the run running with
+// nobody driving it.
 //
-// The cut line is the run's own state, which is exactly the resume commit
-// (`closeAndResume`) that produced it:
+// The cut is the RESUME COMMIT, and the run's own state is what records it —
+// so the state is consulted FIRST, before any error classification:
 //
-//   - a CLASSIFIED refusal (unknown ask, not-requester, bad answer, gate open,
-//     not running) never reached the drive: the run is still parked on its open
-//     ask, so it keeps its 4xx and nothing transitions (R5, S06.1 gates wait);
-//   - anything else, on a run this beat already took to `running`, is the
-//     strand: the pipeline errored up as designed (it owns no run FSM,
-//     CONVENTIONS §14), and returning that error alone left the run running,
-//     driver-less and corpse-less — invisible to the ladder (it scans
-//     claimed/running/draining but reaps only what has no live lease), then
-//     silence-parked by the watchdog, then releasable only by another human
-//     resume. The corpse is what makes the heal machine-only and bounded:
-//     crashed runs are scanned every pass and forked from their last
-//     checkpoint (S02.5 steps 2–3), and the fork's dispatch rebinds and
-//     re-drives (P3-RW-6).
+//   - a run still PARKED on its open ask never reached the drive: the refusal
+//     (unknown ask, not-requester, bad answer, gate open, not running) keeps
+//     its 4xx and nothing transitions (R5, S06.1 gates wait). Same for a run
+//     already terminal — there is nothing to strand;
+//   - a run this beat already took to `running` gets the corpse WHATEVER the
+//     error looks like. Classification cannot gate this: the drive calls duty
+//     seams (planner, critic, judge, registry) that are free to return an
+//     error wrapping any sentinel, and answering such a drive failure with a
+//     4xx would leave exactly the strand this exists to end — the pipeline
+//     errored up as designed (it owns no run FSM, CONVENTIONS §14), and
+//     returning the error alone leaves the run running, driver-less and
+//     corpse-less: invisible to the ladder (it scans claimed/running/draining
+//     but reaps only what has no live lease), then silence-parked by the
+//     watchdog, then releasable only by another human resume. The corpse is
+//     what makes the heal machine-only and bounded: crashed runs are swept
+//     every pass and forked from their last checkpoint (S02.5 steps 2–3), and
+//     the fork's dispatch rebinds and re-drives (P3-RW-6).
 //
 // This is the posture the dispatch leg (`Skeleton.crash` at dispatchIntake)
 // and the S07.7 verify answer beat (answer.go) already take — CONVENTIONS §16
 // doctrine, extended to the intake beats it had skipped.
 func (u *Surface) mapDriveErr(ctx context.Context, runID, beat string, err error) error {
-	mapped := mapIntakeErr(err)
-	var se *api.SurfaceError
-	if errors.As(mapped, &se) {
-		return mapped
-	}
 	if runID == "" {
-		return mapped
+		return mapIntakeErr(err)
 	}
 	r, gerr := u.sk.cfg.Runs.Get(ctx, runID)
 	if gerr != nil {
 		u.sk.logger().Error("stage: intake "+beat+" failed and its run could not be read",
 			"run", runID, "err", err, "read_err", gerr)
-		return mapped
+		return mapIntakeErr(err)
 	}
 	if r.State != run.StateRunning {
-		// Never taken to running (or already terminal): the run is not
-		// stranded and is not this beat's to transition.
-		return mapped
+		return mapIntakeErr(err)
 	}
 	u.sk.logger().Error("stage: intake "+beat+" died mid-drive; crashing the run for the recovery ladder",
 		"run", runID, "task", r.TaskID, "err", err)
@@ -232,9 +229,11 @@ func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.
 	}
 	// The walking-skeleton continuation: an approved plan completes the
 	// intake run and launches execution (the "what runs next is B2-4's"
-	// edge of Spec S02.3's approval resume).
+	// edge of Spec S02.3's approval resume). It runs on the SAME resumed run,
+	// so it owes the same posture — a continuation that dies before the run
+	// leaves `running` would strand it exactly as a dead drive does (R4).
 	if err := u.sk.afterIntake(ctx, st); err != nil {
-		return nil, err
+		return nil, u.mapDriveErr(ctx, st.RunID, "answer continuation", err)
 	}
 	return u.taskView(ctx, st.TaskID)
 }
@@ -306,7 +305,7 @@ func (u *Surface) Advance(ctx context.Context, userID, taskID string) (json.RawM
 		return nil, u.mapDriveErr(ctx, runID, "advance", err)
 	}
 	if err := u.sk.afterIntake(ctx, st); err != nil {
-		return nil, err
+		return nil, u.mapDriveErr(ctx, st.RunID, "advance continuation", err)
 	}
 	return u.taskView(ctx, taskID)
 }

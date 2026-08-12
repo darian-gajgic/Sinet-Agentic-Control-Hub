@@ -220,3 +220,43 @@ func TestEmptyResultFallbackKeepsPayloadsBounded(t *testing.T) {
 		}
 	}
 }
+
+// ---- P3-RW-9 drain r1, F3 ----
+
+// A tool-using turn's LAST assistant message often carries only tool_use
+// blocks. Retaining "the last flushed message" unconditionally zeroed the
+// text the engine really did stream, and the empty-result path then reported
+// "no assistant text" about a session that had streamed plenty. The retained
+// value is the last TEXT-BEARING message — the headline's "final assistant
+// text", which is what the `result` field it stands in for has always meant.
+func TestEmptyResultFallbackSurvivesAToolOnlyTail(t *testing.T) {
+	s, logs := loggedSession(t)
+	want := fixtureAssistantText(t, "emptyresulttooltail.jsonl")
+	if want == "" {
+		t.Fatal("fixture carries no assistant text")
+	}
+	res := feedFixture(t, "emptyresulttooltail.jsonl")
+	if res.p.result.Result != "" {
+		t.Fatalf("fixture result field = %q, want empty", res.p.result.Result)
+	}
+	out, _ := s.assembleOutcome(res.p, nil)
+	if out.Kind != adapters.OutcomeCompleted {
+		t.Fatalf("outcome = %q, want completed", out.Kind)
+	}
+	if out.ResultText != want {
+		t.Fatalf("ResultText = %q, want the streamed text %q — a tool-only tail must not zero it", out.ResultText, want)
+	}
+	if strings.Contains(logs.String(), "no assistant text") {
+		t.Fatalf("the log claims nothing was streamed, but text WAS streamed: %q", logs.String())
+	}
+	// The tool-only message is still a real flush: its own event still lands.
+	var msgs int
+	for _, ev := range res.events {
+		if ev.Kind == adapters.KindMessage {
+			msgs++
+		}
+	}
+	if msgs != 2 {
+		t.Fatalf("%d engine.message events, want 2 (the retention change must not swallow a flush)", msgs)
+	}
+}

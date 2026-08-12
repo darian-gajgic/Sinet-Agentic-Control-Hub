@@ -27,11 +27,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/scheduler"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
 )
 
 // strandCodeRecovering is the distinct surface code a crashed advance
@@ -255,5 +260,171 @@ func TestAdvanceCrashesMidDriveAndConflictsWhenNotRunning(t *testing.T) {
 	}
 	if n := h.crashEvents(intakeRun); n != 1 {
 		t.Fatalf("%d crash events after the refused nudge, want the original 1", n)
+	}
+}
+
+// ---- P3-RW-9 drain r1, F1: classification never outranks the state ----
+
+// sentinelErrPlanner is the evaluator's probe: a duty seam that fails a DRIVE
+// with an error wrapping a classified intake sentinel. Nothing in tree does
+// this naturally today, but every seam the drive calls is free to — and if
+// classification were consulted before the run's state, such a failure would
+// answer 4xx and leave the run running and driver-less: the very strand R4
+// exists to end.
+type sentinelErrPlanner struct{}
+
+func (sentinelErrPlanner) Draft(context.Context, intake.DraftInput) (intake.Pair, error) {
+	return intake.Pair{}, fmt.Errorf("planning session returned an unusable pair: %w", intake.ErrBadAnswer)
+}
+
+func (sentinelErrPlanner) Revise(_ context.Context, in intake.ReviseInput) (intake.Pair, error) {
+	return in.Pair, nil
+}
+
+func TestPostResumeDriveErrorCrashesEvenWhenItWrapsASentinel(t *testing.T) {
+	h := newForkHarness(t)
+	ctx := context.Background()
+	const owner = "u-sentinel"
+
+	_, intakeRun, askID, body := walkToOpenCard(t, h, owner)
+	h.sk.Pipeline().Planner = sentinelErrPlanner{}
+
+	_, err := h.sur.Answer(ctx, owner, askID, body, false)
+	if err == nil {
+		t.Fatal("the answer's advance must fail with the sentinel-wrapping seam")
+	}
+	se := surfaceError(t, err)
+	if se.Status == http.StatusBadRequest {
+		t.Fatalf("a POST-resume drive failure answered 400/%s — the classification outranked the run's state", se.Code)
+	}
+	if se.Status != http.StatusInternalServerError || se.Code != strandCodeRecovering {
+		t.Fatalf("answer error = %d/%s, want 500/%s", se.Status, se.Code, strandCodeRecovering)
+	}
+	if got := h.runState(intakeRun); got != run.StateCrashed {
+		t.Fatalf("run %s is %s, want crashed — a 4xx must never leave a driver-less running run", intakeRun, got)
+	}
+	if n := h.crashEvents(intakeRun); n != 1 {
+		t.Fatalf("%d crash events, want exactly 1", n)
+	}
+	if got := crashCause(t, h, intakeRun); !strings.Contains(got, "unusable pair") {
+		t.Fatalf("crash cause = %q, want the seam's own error", got)
+	}
+	// The pre-resume window is untouched: the same sentinel, refused before the
+	// resume commit, still answers 400 with the gate standing.
+	taskB, runB, askB, _ := walkToOpenCard(t, h, owner)
+	badSlot, err := json.Marshal(map[string]any{
+		"answers": []map[string]string{{"id": "slot-that-was-never-asked", "value": "x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.sur.Answer(ctx, owner, askB, badSlot, false); err == nil {
+		t.Fatal("bad answer must be refused")
+	} else if se := surfaceError(t, err); se.Status != http.StatusBadRequest || se.Code != "bad_answer" {
+		t.Fatalf("pre-resume refusal = %d/%s, want 400/bad_answer", se.Status, se.Code)
+	}
+	if got := h.runState(runB); got != run.StateParked {
+		t.Fatalf("run %s is %s, want still parked", runB, got)
+	}
+	if got := h.openAskID(taskB); got != askB {
+		t.Fatalf("open ask = %q, want the untouched card %q", got, askB)
+	}
+	if n := h.crashEvents(runB); n != 0 {
+		t.Fatalf("%d crash events on the refused run", n)
+	}
+}
+
+// ---- P3-RW-9 drain r1, F2: the continuation legs owe the same posture ----
+
+// refusingAdmitter is the real scheduler with admission refused: the S16.6
+// ingress failing is an ordinary runtime error, and the compose leg of
+// `afterIntake` hits it BEFORE the approved run is completed — the one
+// continuation window that can strand a still-running run.
+type refusingAdmitter struct {
+	stage.Admitter
+	refuse bool
+}
+
+func (a *refusingAdmitter) Enqueue(ctx context.Context, runID string, class scheduler.WorkloadClass) error {
+	if a.refuse {
+		return fmt.Errorf("admission refused for %s (test)", runID)
+	}
+	return a.Admitter.Enqueue(ctx, runID, class)
+}
+
+// composeEarnedRouter offers the S08.6 compose verb on the approval card, so
+// the composition leg of afterIntake is reachable.
+type composeEarnedRouter struct{}
+
+func (composeEarnedRouter) RouteTask(_ context.Context, _ intake.RouteQuery) (intake.RouteBlock, error) {
+	return intake.RouteBlock{
+		Cause: "no-fit-generalist", Generalist: true, Model: "fake-model", Lane: "anthropic",
+		WindowTokens: 200000, PlainReason: "test posture",
+		GapSignature: "gap-rw9-drain", ComposeEarned: true,
+	}, nil
+}
+
+func TestContinuationLegDeathLeavesACorpseToo(t *testing.T) {
+	h := newForkHarness(t)
+	ctx := context.Background()
+	const owner = "u-continuation"
+
+	h.sk.Pipeline().Router = composeEarnedRouter{}
+	taskID, intakeRun, askID, body := walkToOpenCard(t, h, owner)
+
+	// Answer card 1 for real: the pipeline drafts, critiques and parks on the
+	// approval card, which now offers the compose verb.
+	if _, err := h.sur.Answer(ctx, owner, askID, body, false); err != nil {
+		t.Fatalf("Answer(card 1): %v", err)
+	}
+	approvalAsk := h.openAskID(taskID)
+	if approvalAsk == "" || approvalAsk == askID {
+		t.Fatalf("expected a fresh approval card, got %q", approvalAsk)
+	}
+
+	admitter := &refusingAdmitter{Admitter: h.sched, refuse: true}
+	h.sk.Bind(admitter)
+
+	// (a) the compose verb keeps the card OPEN, so its failing continuation
+	// finds the run parked: refusal, no corpse, gate standing (R5).
+	_, err := h.sur.Answer(ctx, owner, approvalAsk, json.RawMessage(`{"action":"compose"}`), true)
+	if err == nil {
+		t.Fatal("expected the composition launch to fail under refused admission")
+	}
+	var parkedErr *api.SurfaceError
+	if errors.As(err, &parkedErr) && parkedErr.Code == strandCodeRecovering {
+		t.Fatal("a parked run got a corpse — the continuation posture must respect the resume cut too")
+	}
+	if got := h.runState(intakeRun); got != run.StateParked {
+		t.Fatalf("run %s is %s, want still parked on its approval card", intakeRun, got)
+	}
+	if n := h.crashEvents(intakeRun); n != 0 {
+		t.Fatalf("%d crash events on the parked run", n)
+	}
+
+	// (b) approving RESUMES the run, and the same continuation now dies with
+	// the run running — that is the strand, and it gets the corpse.
+	_, err = h.sur.Answer(ctx, owner, approvalAsk, json.RawMessage(`{"action":"approve"}`), true)
+	if err == nil {
+		t.Fatal("expected the approved continuation to fail under refused admission")
+	}
+	se := surfaceError(t, err)
+	if se.Status != http.StatusInternalServerError || se.Code != strandCodeRecovering {
+		t.Fatalf("continuation error = %d/%s, want 500/%s", se.Status, se.Code, strandCodeRecovering)
+	}
+	if got := h.runState(intakeRun); got != run.StateCrashed {
+		t.Fatalf("run %s is %s, want crashed — a dead continuation must not strand a running run", intakeRun, got)
+	}
+	if got := crashCause(t, h, intakeRun); !strings.Contains(got, "continuation") {
+		t.Fatalf("crash cause = %q, want the continuation beat named", got)
+	}
+
+	// And the corpse heals the same way the drive's does.
+	admitter.refuse = false
+	forkID := h.forkOf(intakeRun)
+	if n := h.tick(ctx); n != 1 {
+		t.Fatalf("tick dispatched %d, want the fork", n)
+	}
+	if got := h.runState(forkID); got == run.StateCrashed {
+		t.Fatalf("fork %s re-died instead of taking over", forkID)
 	}
 }

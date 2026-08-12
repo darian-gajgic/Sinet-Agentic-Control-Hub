@@ -379,9 +379,11 @@ func (h *forkHarness) openAskID(taskID string) string {
 }
 
 // walkToCrashWindow submits a request, answers the first interview card with a
-// real answer PLUS force-proceed, and lets the planning seam die once — leaving
-// the intake run RUNNING with no open gate and nobody driving it: the exact
-// window the incident left behind. Returns (taskID, intakeRunID, answeredValue).
+// real answer PLUS force-proceed, and lets the planning seam die once — the
+// exact beat the incident died on. Since P3-RW-9 R4 the surface leaves the
+// corpse itself, so the window opens CRASHED (with its cause) rather than
+// stranded `running`; the ladder forks it either way.
+// Returns (taskID, intakeRunID, answeredValue).
 func (h *forkHarness) walkToCrashWindow(ctx context.Context, owner string) (string, string, string) {
 	h.t.Helper()
 	raw, err := h.sur.Submit(ctx, owner, json.RawMessage(

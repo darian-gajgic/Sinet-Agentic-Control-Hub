@@ -259,11 +259,18 @@ func (p *parser) flush() []adapters.Event {
 	m := p.pending
 	text := p.pendingText.String()
 	tools := p.pendingTools
-	// The message being flushed is, so far, the final one: retain its text
-	// (P3-RW-9 R1). Later messages overwrite — the field always names the
-	// LAST assistant message, never a concatenation of earlier turns, which
-	// is what the `result` field it stands in for has always meant.
-	p.finalText = text
+	// The message being flushed is, so far, the final TEXT-bearing one:
+	// retain its text (P3-RW-9 R1). Later text overwrites — the field always
+	// names the last assistant message that said something, never a
+	// concatenation of earlier turns, which is what the `result` field it
+	// stands in for has always meant. A text-LESS flush (an assistant message
+	// carrying only tool_use blocks, the ordinary tail of a tool-using turn)
+	// leaves it alone: zeroing there would discard the answer the engine
+	// really did stream and then report it as "no assistant text"
+	// (P3-RW-9 drain r1 F3).
+	if text != "" {
+		p.finalText = text
+	}
 	p.pending = nil
 	p.pendingText.Reset()
 	p.pendingTools = nil
