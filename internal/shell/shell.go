@@ -418,13 +418,21 @@ func Run(ctx context.Context, opts Options) error {
 				"a question-set edit needs its own governance function and provenance record (Spec S09.10)", "err", err)
 		case err != nil:
 			return fmt.Errorf("shell: Deep-Plan taxonomy governance: %w", err)
-		case res.Repaired > 0:
-			logger.Warn("memory: governed taxonomy file did not match the content its row was committed with — "+
-				"a write was torn by a crash and has been repaired (Spec S09.8)",
-				"repaired", res.Repaired, "created", res.Created, "superseded", res.Superseded)
-		case res.Created > 0 || res.Superseded > 0:
-			logger.Info("memory: Deep-Plan interview taxonomies under S09.10 governance",
-				"created", res.Created, "superseded", res.Superseded)
+		default:
+			if res.Repaired > 0 {
+				logger.Warn("memory: governed taxonomy file diverged from the committed row — "+
+					"crash-torn write or out-of-band edit; repaired from the row (Spec S09.8)",
+					"repaired", res.Repaired)
+			}
+			if res.Unverifiable > 0 {
+				logger.Warn("memory: governed taxonomy provenance hash unavailable — compacted or pruned; "+
+					"supersession not attempted; divergence check limited this boot (Spec S14.9)",
+					"unverifiable", res.Unverifiable)
+			}
+			if res.Created > 0 || res.Superseded > 0 {
+				logger.Info("memory: Deep-Plan interview taxonomies under S09.10 governance",
+					"created", res.Created, "superseded", res.Superseded)
+			}
 		}
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded

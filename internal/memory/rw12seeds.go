@@ -172,8 +172,15 @@ type TaxonomyGovernanceResult struct {
 	// Repaired counts governed files whose bytes did not match the content
 	// their own row was committed with — the torn write described on
 	// committedContentHash. Non-zero is worth a human's attention: something
-	// died between placing a knowledge file and committing its row.
+	// happened between placing a knowledge file and committing its row.
 	Repaired int
+	// Unverifiable counts governed entries whose committed content hash could
+	// not be read at all — the provenance event's payload was elided by S14.9
+	// compaction, or its row is gone. Those entries are LEFT ALONE: the file
+	// cannot stand in for the record (that is the posture drain r1 removed),
+	// so the equality check and any supersession are skipped and the boot says
+	// so. It is not an error and never fails a boot.
+	Unverifiable int
 }
 
 // committedContentHash returns the content hash recorded by the
@@ -190,19 +197,34 @@ type TaxonomyGovernanceResult struct {
 // have, permanently and silently (P3-RW-12 drain r1, F4). The write event
 // carries the hash and commits inside the row's own transaction, so it is the
 // one record that cannot be torn.
+//
+// ok=false means UNVERIFIABLE, and the caller must treat it as such rather
+// than falling back to the file. Three ways to get there, all expected on a
+// long-lived world: the provenance event's payload was elided by the S14.9
+// compaction pass past ⚙ retention.compaction_horizon (knowledge events are
+// keep:false, retention/keepforever.go — a compacted body carries no
+// `entry_id` either, so the row simply stops matching); the row was pruned;
+// or the hash was never recorded. None of them is an error and none of them
+// may fail a boot — an old healthy world is the normal case here, not a
+// broken one (drain r2, R1).
 func (g *Gate) committedContentHash(ctx context.Context, entryID string) (string, bool, error) {
-	var hash string
+	// NullString, not string: json_extract over an elided payload yields SQL
+	// NULL, and scanning that into a string is an error that would take the
+	// whole boot down with it.
+	var hash sql.NullString
 	err := g.s.db.QueryRowContext(ctx, `
 		SELECT json_extract(payload, '$.content_hash') FROM run_events
 		 WHERE type = ? AND json_extract(payload, '$.entry_id') = ?
 		 ORDER BY event_seq DESC LIMIT 1`, EventWrite, entryID).Scan(&hash)
-	if err == sql.ErrNoRows {
-		return "", false, nil
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil // pruned, or elided so the id no longer matches
+	case err != nil:
 		return "", false, fmt.Errorf("memory: read committed content hash for %s: %w", entryID, err)
+	case !hash.Valid || hash.String == "":
+		return "", false, nil // the row is there; its body is not
 	}
-	return hash, hash != "", nil
+	return hash.String, true, nil
 }
 
 // repairGovernedFile rewrites a governed file to the content its row is
@@ -306,32 +328,38 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (TaxonomyGovern
 		// committedContentHash). HouseObject fills Content from disk, and disk
 		// is the half of a governed object that a crash can leave ahead of the
 		// record.
-		onDisk := contentHash(cur.Content)
-		committed, haveCommitted, err := g.committedContentHash(ctx, cur.ID)
+		committed, verifiable, err := g.committedContentHash(ctx, cur.ID)
 		if err != nil {
 			return res, err
 		}
-		decisive := onDisk
-		if haveCommitted {
-			decisive = committed
-			if committed != onDisk {
-				// A torn write: the bytes on disk are not the bytes this row
-				// was committed with. Count it so a boot says so out loud.
-				res.Repaired++
-				if committed == want {
-					// The RECORD is already right and only the disk is wrong,
-					// so there is nothing to supersede — repair the file to
-					// what the row attests and move on.
-					if err := g.repairGovernedFile(cur, content); err != nil {
-						return res, err
-					}
-					continue
-				}
-				// Otherwise the supersession below rewrites the file anyway,
-				// which resolves the divergence and records it as a version.
-			}
+		if !verifiable {
+			// The record cannot be read, so there is nothing to compare
+			// against. The file is NOT a substitute — trusting it here is
+			// exactly the posture that let a torn write hide forever. Skip
+			// this entry, count it, and let the boot say what happened. A
+			// world old enough to have compacted its provenance events is
+			// healthy, not broken: it simply cannot be checked from here.
+			res.Unverifiable++
+			continue
 		}
-		if decisive == want {
+		onDisk := contentHash(cur.Content)
+		if committed != onDisk {
+			// The bytes on disk are not the bytes this row was committed
+			// with. Count it so a boot says so out loud.
+			res.Repaired++
+			if committed == want {
+				// The RECORD is already right and only the disk is wrong, so
+				// there is nothing to supersede — repair the file to what the
+				// row attests and move on.
+				if err := g.repairGovernedFile(cur, content); err != nil {
+					return res, err
+				}
+				continue
+			}
+			// Otherwise the supersession below rewrites the file anyway,
+			// which resolves the divergence and records it as a version.
+		}
+		if committed == want {
 			continue
 		}
 		// The new version reuses the canonical file name, so the file at

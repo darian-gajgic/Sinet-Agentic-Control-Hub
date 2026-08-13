@@ -5,16 +5,20 @@ package memory_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/retention"
 )
 
 // rw12Families are the four families whose question sets P3-RW-12 seeds.
@@ -248,5 +252,131 @@ func TestGovernanceDecidesFromTheRowNotTheFile(t *testing.T) {
 	if res, err := f.gate.EnsureRW12TaxonomyGovernance(ctx); err != nil ||
 		res.Created != 0 || res.Superseded != 0 || res.Repaired != 0 {
 		t.Fatalf("boot after repair: %+v err=%v", res, err)
+	}
+}
+
+// TestGovernanceSkipsWhenProvenanceIsUnverifiable (drain r2, R1): when the
+// committed content hash cannot be read, the entry is LEFT ALONE — loudly,
+// never by silently trusting the file instead, and never by failing the boot.
+//
+// Both reachable shapes are covered. What is NOT simulated here, because the
+// database structurally refuses it, is the S14.9 compaction UPDATE itself:
+// `run_events.ts` is an identity column (0015 run_events_identity_immutable)
+// so a row cannot be backdated past the trigger's one-month floor, and DELETE
+// is refused outright. Measured alongside: a knowledge.write payload is ~240
+// bytes against retention's 1024-byte BulkPayloadFloorBytes, so the compaction
+// pass does not select these rows today at all. The posture is implemented
+// anyway — that floor is an interim structural constant, and the no-record
+// branch below is reachable regardless of compaction.
+func TestGovernanceSkipsWhenProvenanceIsUnverifiable(t *testing.T) {
+	// A compacted body carries no entry_id, which is WHY elision lands on the
+	// no-matching-row branch rather than on a partial read.
+	if strings.Contains(retention.CompactedPayload, "entry_id") {
+		t.Fatal("the compacted marker now carries an entry_id — re-derive which branch elision reaches")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		tamper func(t *testing.T, f *fix, entryID string)
+	}{
+		{
+			// The provenance row is readable but its body no longer carries
+			// the hash — what an elided/rewritten record leaves behind. This
+			// is the shape that used to scan SQL NULL into a string and take
+			// the whole boot down.
+			"provenance body carries no hash",
+			func(t *testing.T, f *fix, entryID string) {
+				payload := fmt.Sprintf(`{"entry_id":%q,"scope":"house","kind":"taxonomy"}`, entryID)
+				if _, err := f.log.Append(context.Background(), eventlog.Append{
+					UserID: "darian", Type: memory.EventWrite, SchemaVersion: 1,
+					Payload: []byte(payload),
+				}); err != nil {
+					t.Fatalf("append bodiless provenance event: %v", err)
+				}
+			},
+		},
+		{
+			// No provenance event for the ACTIVE version at all — a restored
+			// or imported world, or one whose log no longer holds it. This is
+			// the branch that used to fall back to trusting the file, which is
+			// exactly the posture drain r1 removed.
+			"no provenance event for the active version",
+			func(t *testing.T, f *fix, entryID string) {
+				insertUngovernedVersion(t, f, entryID)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFix(t)
+			ctx := context.Background()
+			f.user("darian", "operator")
+			if _, err := f.gate.EnsureB2SeedGovernance(ctx); err != nil {
+				t.Fatalf("EnsureB2SeedGovernance: %v", err)
+			}
+			before, err := f.store.HouseObject(ctx, "intake/taxonomy/software")
+			if err != nil {
+				t.Fatalf("HouseObject: %v", err)
+			}
+			tc.tamper(t, f, before.ID)
+
+			res, err := f.gate.EnsureRW12TaxonomyGovernance(ctx)
+			if err != nil {
+				t.Fatalf("an unreadable provenance hash must never fail the boot: %v", err)
+			}
+			if res.Unverifiable == 0 {
+				t.Errorf("unverifiable = 0 — an unreadable record must be reported, not absorbed")
+			}
+			if res.Superseded != 0 {
+				t.Errorf("superseded = %d — with no readable record there is nothing to compare against, "+
+					"and the FILE is not a substitute (the posture drain r1 removed)", res.Superseded)
+			}
+			if res.Repaired != 0 {
+				t.Errorf("repaired = %d — nothing may be rewritten on an unverifiable boot", res.Repaired)
+			}
+			if res.Created != 4 {
+				t.Errorf("created = %d, want the 4 new families — they need no prior record", res.Created)
+			}
+			// The governed file is left exactly as the B2 gate wrote it.
+			got, err := intake.LoadTaxonomy(filepath.Join(f.root, "house", "intake-taxonomy-software.json"))
+			if err != nil {
+				t.Fatalf("LoadTaxonomy: %v", err)
+			}
+			if got.Version != "v1" {
+				t.Errorf("governed file = %q; nothing may be rewritten on an unverifiable boot", got.Version)
+			}
+		})
+	}
+}
+
+// insertUngovernedVersion adds a HIGHER-version active row for the same house
+// topic — so HouseObject serves it — carrying no knowledge.write event of its
+// own. It writes a row the gate would have written and nothing else, which is
+// what a restored database or a pruned log leaves behind.
+func insertUngovernedVersion(t *testing.T, f *fix, supersedes string) {
+	t.Helper()
+	execSQL(t, f, `
+		INSERT INTO knowledge_entries (
+			entry_id, user_id, scope, scope_ref, layer, kind, title,
+			content, file_path, topic_key, selectors, status, version,
+			supersedes_id, origin, origin_ref, proposer_model,
+			approved_by, approved_ts, verified_by, verified_ts,
+			reverify_interval_days, created_ts, updated_ts)
+		SELECT 'restored-software-version', user_id, scope, scope_ref, layer, kind, title,
+			content, file_path, topic_key, selectors, 'active', 99,
+			?, origin, origin_ref, proposer_model,
+			approved_by, approved_ts, verified_by, verified_ts,
+			reverify_interval_days, created_ts, updated_ts
+		  FROM knowledge_entries WHERE entry_id = ?`, supersedes, supersedes)
+	execSQL(t, f, `UPDATE knowledge_entries SET status = 'retired' WHERE entry_id = ?`, supersedes)
+}
+
+// execSQL runs one statement through the write path.
+func execSQL(t *testing.T, f *fix, query string, args ...any) {
+	t.Helper()
+	if err := f.db.WriteTx(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(context.Background(), query, args...)
+		return err
+	}); err != nil {
+		t.Fatalf("exec: %v", err)
 	}
 }
