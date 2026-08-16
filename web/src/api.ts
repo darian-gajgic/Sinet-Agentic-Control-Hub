@@ -1507,7 +1507,7 @@ export type ChatIntakeCard = {
   issued_ts?: string
   clearance?: number
   tier?: string
-  questions?: { id: string; text: string; options?: { label: string; value: string }[]; weight?: number }[]
+  questions?: { id: string; text: string; phrased?: string; options?: { label: string; value: string }[]; weight?: number }[]
 }
 
 /**

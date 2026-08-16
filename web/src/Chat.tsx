@@ -860,7 +860,10 @@ function IntakeCardInPlace({
         {questions.map((q) => (
           <li key={q.id} data-question={q.id}>
             <label>
-              {q.text}
+              {/* The utility-phrased wording when the seat answered, the
+                  canonical text otherwise (RW-12 R6) — same rule as the
+                  journey and the inbox. */}
+              {q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text}
               {q.options && q.options.length > 0 ? (
                 <select
                   value={answers[q.id] ?? ''}
