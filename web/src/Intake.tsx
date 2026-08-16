@@ -71,10 +71,14 @@ export function DescribeGoal({ search = '', stream }: { search?: string; stream?
 }
 
 /**
- * Resume after a reload: the task's face comes from the owner-scoped task
- * read, and the open card — if one is open — from the same follow path the
- * live journey uses. No pipeline state is re-derived: what cannot be known
- * from a served read renders as the follow state's honest waiting face.
+ * Resume after a reload: a LOADER, not a renderer. It reads the task once and
+ * hands the resolved view UP to the door, which then renders the SAME Journey
+ * component position the live flow uses — deliberately, because rendering a
+ * second Journey here meant the first answer after a resume REMOUNTED the
+ * journey and reset its in-session memory (the working-face beat counter),
+ * greeting a mid-interview task as newborn (found on the live walk,
+ * 2026-08-16). No pipeline state is re-derived: what cannot be known from a
+ * served read renders as the follow state's honest waiting face.
  */
 function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v: IntakeTaskView) => void; stream?: EventStream }) {
   const detail = useLive({
@@ -83,6 +87,19 @@ function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v:
     types: inboxEventTypes,
     stream,
   })
+  const d = detail.data
+  useEffect(() => {
+    if (d === null) return
+    onView({
+      task_id: d.task_id,
+      title: d.title,
+      kanban_status: d.kanban_status,
+      owner: d.owner,
+      ...(d.kanban_status === 'cancelled' ? { phase: 'cancelled' } : {}),
+    })
+    // One hand-off: the Journey's own live follow owns the truth from here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d === null])
   if (detail.error !== '' && detail.data === null) {
     return (
       <div className="door-refusal" role="alert">
@@ -94,16 +111,7 @@ function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v:
       </div>
     )
   }
-  if (detail.data === null) return <p className="muted">Resuming the journey…</p>
-  const d = detail.data
-  const view: IntakeTaskView = {
-    task_id: d.task_id,
-    title: d.title,
-    kanban_status: d.kanban_status,
-    owner: d.owner,
-    ...(d.kanban_status === 'cancelled' ? { phase: 'cancelled' } : {}),
-  }
-  return <Journey view={view} onView={onView} stream={stream} />
+  return <p className="muted">Resuming the journey…</p>
 }
 
 /* ── the ask box ─────────────────────────────────────────────────────────── */
