@@ -38,7 +38,7 @@ import (
 // high-tier PIN step-up).
 type softwareClassifier struct{}
 
-func (softwareClassifier) Classify(_ context.Context, _ intake.Request, _ *intake.RegistrySlice) (intake.TriageProposal, error) {
+func (softwareClassifier) Classify(_ context.Context, _ intake.TriageInput) (intake.TriageProposal, error) {
 	return intake.TriageProposal{
 		Family: intake.FamilySoftware, Tier: intake.TierStandard,
 		Est: intake.Estimate{SizeClass: "S", Known: false, Basis: "fake"},

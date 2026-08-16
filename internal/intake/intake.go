@@ -220,12 +220,28 @@ type TriageProposal struct {
 	DataHits []TriggerHit
 }
 
+// TriageInput is everything the Stage-0 classification duty receives (Spec
+// S06.2). It is a struct rather than positional arguments for the RunID's
+// sake: see the field.
+type TriageInput struct {
+	// RunID is the CONSUMING run — the run the pipeline is driving right now,
+	// which after a recovery-fork rebind is the FORK (the DraftInput.RunID
+	// precedent, CONVENTIONS §16 + §26). The classification duty's mandatory
+	// $0 D7 row rides it, and that row is only writable while the run exists
+	// and is checkpointable, which is why the pipeline classifies on the
+	// RUNNING intake run rather than at Start (Spec S06.2, S02.3).
+	RunID string
+
+	Request  Request
+	Registry *RegistrySlice
+}
+
 // Classifier is the S06.10 "local duty aliases" seam for family, stakes,
 // size, and data-bearing classification (Spec S12, B4). A nil classifier
 // or a classify error fails closed: the task is treated as high-stakes
 // with an unknown estimate and no band membership (Spec S06.2).
 type Classifier interface {
-	Classify(ctx context.Context, req Request, reg *RegistrySlice) (TriageProposal, error)
+	Classify(ctx context.Context, in TriageInput) (TriageProposal, error)
 }
 
 // Registry is the project-registry match seam (S1.6; registry home Spec

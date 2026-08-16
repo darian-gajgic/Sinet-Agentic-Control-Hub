@@ -325,8 +325,14 @@ func (a artifactStore) critiquePath(taskID string, planV, round int) string {
 	return filepath.Join(a.dir(taskID), fmt.Sprintf("critique-plan-v%d-r%d.md", planV, round))
 }
 
-func (a artifactStore) recordPath(taskID string) string {
-	return filepath.Join(a.dir(taskID), "intake-record.json")
+// recordPath names one VERSION of the Stage-0 intake record. The record is
+// written twice — v1 is the honest pre-classification baseline written at
+// birth, v2 the classified values — and the version rides the filename so the
+// two are distinct immutable files rather than one file overwritten in place
+// (S06.6: a draft artifact never mutates, and the ledger's earlier sha256 must
+// keep resolving).
+func (a artifactStore) recordPath(taskID string, v int) string {
+	return filepath.Join(a.dir(taskID), fmt.Sprintf("intake-record-v%d.json", v))
 }
 
 // write persists one artifact: the markdown of record plus the JSON

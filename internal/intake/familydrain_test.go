@@ -41,6 +41,9 @@ func TestBandNeverAsksFamilyWhenUnresolved(t *testing.T) {
 	f.class.prop = bandProposal("bogus") // classified, but the label is not a family
 
 	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	st = f.advance(st.TaskID)
+
 	if !st.Band {
 		t.Fatalf("task did not enter the band: tier=%q band=%v", st.Tier, st.Band)
 	}
@@ -48,9 +51,6 @@ func TestBandNeverAsksFamilyWhenUnresolved(t *testing.T) {
 		t.Fatalf("family source = %q, want %q — this test only bites when the family is UNRESOLVED",
 			st.FamilySource, intake.FamilySourceDefault)
 	}
-
-	f.admit(st.RunID)
-	st = f.advance(st.TaskID)
 
 	if kinds := cardKindsIssued(t, f, st.RunID); len(kinds) != 0 {
 		t.Errorf("a band task with an unresolved family was asked %v — S06.4: a trivial task never requires a click", kinds)
@@ -88,6 +88,8 @@ func TestOutOfVocabularyFamilyIsUnresolvedAtBothSeams(t *testing.T) {
 			tc.setup(f)
 
 			st := f.start(stdRequest())
+			f.admit(st.RunID)
+			st = f.advance(st.TaskID)
 			if st.FamilySource != intake.FamilySourceDefault {
 				t.Errorf("family source = %q, want %q — an out-of-vocabulary value must not be attributed to the %s",
 					st.FamilySource, intake.FamilySourceDefault, tc.name)
@@ -95,8 +97,6 @@ func TestOutOfVocabularyFamilyIsUnresolvedAtBothSeams(t *testing.T) {
 			if st.Family != intake.FamilyGeneric {
 				t.Errorf("family = %q, want the untouched generic baseline", st.Family)
 			}
-			f.admit(st.RunID)
-			st = f.advance(st.TaskID)
 			if st.OpenAskKind != intake.CardFamily {
 				t.Fatalf("card kind = %q, want %q — an unresolved family is ASKED", st.OpenAskKind, intake.CardFamily)
 			}

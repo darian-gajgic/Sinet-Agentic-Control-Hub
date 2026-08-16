@@ -144,7 +144,7 @@ type fakeClassifier struct {
 	err  error
 }
 
-func (f *fakeClassifier) Classify(context.Context, intake.Request, *intake.RegistrySlice) (intake.TriageProposal, error) {
+func (f *fakeClassifier) Classify(context.Context, intake.TriageInput) (intake.TriageProposal, error) {
 	return f.prop, f.err
 }
 
@@ -365,8 +365,11 @@ func TestStandardFlowEndToEnd(t *testing.T) {
 	req.Text = "Please fix the widget using the latest dependency versions."
 	st := f.start(req)
 
-	if st.Tier != intake.TierStandard || st.Family != intake.FamilySoftware {
-		t.Fatalf("triage: tier=%s family=%s", st.Tier, st.Family)
+	// The deterministic half of Stage 0 runs at Start; classification does not
+	// (its $0 D7 row needs a running consuming run — S06.2 on the RUNNING intake
+	// run), so the state carries the fail-closed baseline here.
+	if st.Tier != intake.TierHigh || st.Family != intake.FamilyGeneric {
+		t.Fatalf("pre-classification baseline: tier=%s family=%s", st.Tier, st.Family)
 	}
 	if len(st.DataBearing) == 0 {
 		t.Fatal("P47-7 cue did not set the data-bearing flag (S06.3)")
@@ -384,8 +387,8 @@ func TestStandardFlowEndToEnd(t *testing.T) {
 	if len(doc.Artifacts) != 1 || doc.Artifacts[0].Kind != "intake-record" || doc.Artifacts[0].ProducingStage != "triage" {
 		t.Fatalf("Stage-0 ledger artifacts: %+v", doc.Artifacts)
 	}
-	if len(doc.Decisions) != 1 || doc.Decisions[0].Author != ledger.AuthorPlatform {
-		t.Fatalf("Stage-0 ledger decisions: %+v", doc.Decisions)
+	if len(doc.Decisions) != 0 {
+		t.Fatalf("Stage-0 ledger decisions before classification: %+v", doc.Decisions)
 	}
 
 	// Stage work refuses to run before admission.
@@ -394,8 +397,22 @@ func TestStandardFlowEndToEnd(t *testing.T) {
 	}
 	f.admit(st.RunID)
 
-	// Interview: standard floor 75, all slots unresolved → card, run parks.
+	// The first advance classifies on the running run, then interviews:
+	// standard floor 75, all slots unresolved → card, run parks.
 	st = f.advance(st.TaskID)
+	if st.Tier != intake.TierStandard || st.Family != intake.FamilySoftware {
+		t.Fatalf("triage: tier=%s family=%s", st.Tier, st.Family)
+	}
+	// Record v2 joins v1 (both immutable), and the triage decision lands where
+	// the classified values became facts.
+	doc = f.ledgerDoc(st.TaskID)
+	if len(doc.Artifacts) != 2 || doc.Artifacts[1].Kind != "intake-record" || doc.Artifacts[1].ProducingStage != "triage" {
+		t.Fatalf("Stage-0 ledger artifacts after classification: %+v", doc.Artifacts)
+	}
+	if len(doc.Decisions) != 1 || doc.Decisions[0].Author != ledger.AuthorPlatform ||
+		!strings.Contains(doc.Decisions[0].Text, "family=software") {
+		t.Fatalf("Stage-0 ledger decisions: %+v", doc.Decisions)
+	}
 	if st.OpenAskKind != intake.CardInterview {
 		t.Fatalf("expected interview card, got %q", st.OpenAskKind)
 	}
@@ -504,20 +521,30 @@ func TestStandardFlowEndToEnd(t *testing.T) {
 }
 
 // TestFailClosedTriage: no classifier, or a failing one, is high stakes
-// (S06.2).
+// (S06.2) — at the classify step, which is where the seam is now called.
 func TestFailClosedTriage(t *testing.T) {
 	f := newFix(t)
 	f.p.Classifier = nil
 	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	st = f.advance(st.TaskID)
 	if st.Tier != intake.TierHigh || st.Band {
 		t.Fatalf("nil classifier: tier=%s band=%v", st.Tier, st.Band)
+	}
+	if st.TriagePending {
+		t.Fatal("the classify marker survived a fail-closed classify — a failed attempt is not a retry loop")
 	}
 
 	f2 := newFix(t)
 	f2.class.err = errors.New("alias down")
 	st = f2.start(stdRequest())
+	f2.admit(st.RunID)
+	st = f2.advance(st.TaskID)
 	if st.Tier != intake.TierHigh {
 		t.Fatalf("failing classifier: tier=%s", st.Tier)
+	}
+	if st.TriagePending {
+		t.Fatal("the classify marker survived a failing classifier — the seam would be re-called every advance")
 	}
 }
 
@@ -531,11 +558,11 @@ func TestZeroInteractionBand(t *testing.T) {
 		Est: intake.Estimate{SizeClass: "XS", USD: 0.10, Known: true, Basis: "fake"},
 	}
 	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	st = f.advance(st.TaskID)
 	if !st.Band || st.Tier != intake.TierTrivial {
 		t.Fatalf("band=%v tier=%s", st.Band, st.Tier)
 	}
-	f.admit(st.RunID)
-	st = f.advance(st.TaskID)
 	if st.Phase != intake.PhaseApproved {
 		t.Fatalf("phase %s", st.Phase)
 	}
@@ -591,6 +618,8 @@ func TestDeterministicFloors(t *testing.T) {
 		Floors: []intake.FloorReason{{Class: intake.FloorOutwardEffect, Source: "classifier", Detail: "sends email"}},
 	}
 	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	st = f.advance(st.TaskID)
 	if st.Tier != intake.TierHigh || st.Band {
 		t.Fatalf("floor: tier=%s band=%v", st.Tier, st.Band)
 	}
@@ -608,6 +637,8 @@ func TestDeterministicFloors(t *testing.T) {
 	req := stdRequest()
 	req.Text = "check the latest widget price"
 	st = f2.start(req)
+	f2.admit(st.RunID)
+	st = f2.advance(st.TaskID)
 	if st.Band || st.Tier != intake.TierLow {
 		t.Fatalf("data-bearing: band=%v tier=%s", st.Band, st.Tier)
 	}
@@ -1264,12 +1295,16 @@ func TestLowerTier(t *testing.T) {
 	f := newFix(t)
 	f.class.prop.Floors = []intake.FloorReason{{Class: intake.FloorNewSpend, Source: "classifier", Detail: "buys credits"}}
 	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID) // the classify step records the classifier's floor
 	if _, err := f.p.LowerTier(context.Background(), "u1", st.TaskID, intake.TierLow); !errors.Is(err, intake.ErrBelowFloor) {
 		t.Fatalf("floor-guarded lowering: %v", err)
 	}
 
 	f2 := newFix(t)
 	st2 := f2.start(stdRequest())
+	f2.admit(st2.RunID)
+	f2.advance(st2.TaskID)
 	got, err := f2.p.LowerTier(context.Background(), "u1", st2.TaskID, intake.TierLow)
 	if err != nil {
 		t.Fatal(err)

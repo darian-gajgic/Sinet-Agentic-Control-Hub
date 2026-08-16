@@ -76,7 +76,10 @@ func TestLocalClassifierMapsTriage(t *testing.T) {
 		InputTokens: 50, OutputTokens: 4,
 	})
 	c := stage.NewLocalClassifier(duty)
-	p, err := c.Classify(ctx, intake.Request{TaskID: "t1", Title: "fix", Text: "fix the parser"}, nil)
+	p, err := c.Classify(ctx, intake.TriageInput{
+		RunID:   "t1" + stage.RunSuffixIntake,
+		Request: intake.Request{TaskID: "t1", Title: "fix", Text: "fix the parser"},
+	})
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -96,7 +99,10 @@ func TestLocalClassifierAbstainFailsClosed(t *testing.T) {
 	duty, fake, _, _ := localSeamEnv(t)
 	fake.SetModelResponse("Qwen3.5-4B", local.FakeResponse{Content: `{"abstain":true}`, InputTokens: 5, OutputTokens: 1})
 	c := stage.NewLocalClassifier(duty)
-	if _, err := c.Classify(ctx, intake.Request{TaskID: "t1", Text: "??"}, nil); err == nil {
+	if _, err := c.Classify(ctx, intake.TriageInput{
+		RunID:   "t1" + stage.RunSuffixIntake,
+		Request: intake.Request{TaskID: "t1", Text: "??"},
+	}); err == nil {
 		t.Error("abstain should error so the pipeline fails closed to high (S06.2)")
 	}
 }

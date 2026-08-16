@@ -356,11 +356,11 @@ func TestClassifierFamilyResolves(t *testing.T) {
 		f.p.Registry = nil
 		f.class.prop = intake.TriageProposal{Family: intake.FamilySoftware, Tier: intake.TierStandard}
 		st := f.start(stdRequest())
+		f.admit(st.RunID)
+		st = f.advance(st.TaskID)
 		if st.Family != intake.FamilySoftware || st.FamilySource != intake.FamilySourceClassifier {
 			t.Errorf("family/source = %q/%q, want software/%q", st.Family, st.FamilySource, intake.FamilySourceClassifier)
 		}
-		f.admit(st.RunID)
-		st = f.advance(st.TaskID)
 		if st.OpenAskKind == intake.CardFamily {
 			t.Error("the family question fired over a family the classifier resolved (OQ3)")
 		}
@@ -371,14 +371,14 @@ func TestClassifierFamilyResolves(t *testing.T) {
 		f.p.Registry = nil
 		f.class.err = errors.New("stack absent")
 		st := f.start(stdRequest())
+		f.admit(st.RunID)
+		st = f.advance(st.TaskID)
 		if st.Tier != intake.TierHigh {
 			t.Errorf("tier = %q, want high (fail closed, S06.2/R7)", st.Tier)
 		}
 		if st.FamilySource != intake.FamilySourceDefault {
 			t.Errorf("family source = %q, want %q", st.FamilySource, intake.FamilySourceDefault)
 		}
-		f.admit(st.RunID)
-		st = f.advance(st.TaskID)
 		if st.OpenAskKind != intake.CardFamily {
 			t.Errorf("card kind = %q, want %q (an unresolved family is ASKED)", st.OpenAskKind, intake.CardFamily)
 		}
@@ -396,6 +396,8 @@ func TestBandNeverAsksFamily(t *testing.T) {
 		Est: intake.Estimate{SizeClass: "XS", USD: 0.10, Known: true, Basis: "fake"},
 	}
 	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	st = f.advance(st.TaskID)
 	if !st.Band {
 		t.Fatalf("task did not enter the zero-interaction band: tier=%q band=%v", st.Tier, st.Band)
 	}
@@ -403,8 +405,6 @@ func TestBandNeverAsksFamily(t *testing.T) {
 		t.Errorf("family source = %q, want %q (the classifier resolved generic explicitly)",
 			st.FamilySource, intake.FamilySourceClassifier)
 	}
-	f.admit(st.RunID)
-	st = f.advance(st.TaskID)
 	if st.Phase != intake.PhaseApproved {
 		t.Fatalf("band phase = %q, want approved", st.Phase)
 	}

@@ -195,11 +195,14 @@ func TestLiveIntakeTriageClassifiesWebshop(t *testing.T) {
 	})
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	prop, err := stage.NewLocalClassifier(duty).Classify(callCtx, intake.Request{
-		TaskID: taskID, UserID: "operator",
-		Title: "Create a simple webshop",
-		Text:  "Create a simple webshop with a product list, a cart and a checkout page.",
-	}, nil)
+	prop, err := stage.NewLocalClassifier(duty).Classify(callCtx, intake.TriageInput{
+		RunID: runID,
+		Request: intake.Request{
+			TaskID: taskID, UserID: "operator",
+			Title: "Create a simple webshop",
+			Text:  "Create a simple webshop with a product list, a cart and a checkout page.",
+		},
+	})
 	if err != nil {
 		t.Fatalf("live Classify: %v", err)
 	}
@@ -234,29 +237,21 @@ func TestLiveIntakeTriageClassifiesWebshop(t *testing.T) {
 		t.Errorf("local marker incomplete: %+v (the $0 row must name the model hash and engine build)", *w.Local)
 	}
 
-	// ── THE WHOLE CHAIN, AND THE GAP IT FOUND ───────────────────────────────
+	// ── THE WHOLE CHAIN, END TO END ─────────────────────────────────────────
 	//
-	// REPORTED, NOT PAPERED OVER (P3-RW-11 executor flag; the §43
-	// delta-card-vocabulary precedent). The seam above works live. The PIPELINE
-	// call site cannot use it, and this drives the reason so the gap is a
-	// checkable fact rather than a claim:
+	// This leg used to document a GAP here (P3-RW-11 executor flag): the seam
+	// above worked live, but the PIPELINE call site could not use it, because
+	// `Pipeline.Start` ran triage BEFORE it created the task and the intake run.
+	// The $0 D7 row is MANDATORY on the consuming run (§26 R18) and
+	// gates.Checkpoints requires that run to exist AND be running/draining, so
+	// every Start-time classify surfaced `local.unmetered_defect`, failed, and
+	// the pipeline fell back to high/unresolved — honest, but the zero-touch path
+	// was structurally unreachable.
 	//
-	//   Pipeline.Start runs triage BEFORE it creates the task and the intake run
-	//   (internal/intake/pipeline.go — the classifier call precedes the
-	//   task/run/first-state-event transaction). The $0 D7 row is MANDATORY on
-	//   the consuming run (§26 R18), and gates.Checkpoints.WriteTx requires that
-	//   run to exist AND be running/draining. At Start it does neither — and it
-	//   cannot: admission is the scheduler's and intake never self-admits (S10).
-	//   So Duty.Call surfaces `local.unmetered_defect` and returns an error, and
-	//   Start's `err == nil` guard treats it as a classify failure.
-	//
-	// The consequence is honest, which is why this is a flag and not a fix here:
-	// the pipeline FAILS CLOSED to high (S06.2) and leaves the family
-	// UNRESOLVED, so the requester is ASKED instead of being handed a silent
-	// generic. What is lost is the zero-touch path, not correctness. Making the
-	// live classifier resolve a family end to end needs Stage-0 triage to run
-	// where its run is checkpointable — an S06.2 restructure this packet did not
-	// take on its own authority.
+	// P3-RW-13 is that S06.2 restructure. Classification now runs at the top of
+	// the FIRST ADVANCE, on the running intake run, so the chain closes: the
+	// duty meters, the family resolves, and the requester is never asked what the
+	// platform could work out for itself.
 	pipe := &intake.Pipeline{
 		DB: db, Log: log, Runs: runs, Ledger: ledger.NewStore(db, log), Settings: reg,
 		ArtifactRoot: filepath.Join(t.TempDir(), "artifacts"),
@@ -270,30 +265,39 @@ func TestLiveIntakeTriageClassifiesWebshop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start with the live classifier: %v", err)
 	}
+	// Admission is the scheduler's (S10); the dev-mode harness walks the ratified
+	// FSM edges so the advance has a RUNNING consuming run to classify on.
+	for _, to := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+		if _, err := runs.Transition(ctx, st.RunID, to, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+			t.Fatalf("admit %s→%s: %v", st.RunID, to, err)
+		}
+	}
+	st, err = pipe.Advance(callCtx, st.TaskID)
+	if err != nil {
+		t.Fatalf("Advance with the live classifier: %v", err)
+	}
 	t.Logf("live pipeline triage: family=%q source=%q taxonomy=%q tier=%q",
 		st.Family, st.FamilySource, st.TaxonomyID, st.Tier)
 
-	// The defect is SURFACED, never silent (§26 R18): the platform event names
-	// the call that could not meter.
+	// NO unmetered-defect event anywhere: the classify call had a checkpointable
+	// consuming run, so its $0 D7 row landed instead (§26 R18).
 	var defects int
 	if err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM run_events WHERE type = ?`, local.EventLocalUnmeteredDefect).Scan(&defects); err != nil {
 		t.Fatalf("count unmetered-defect events: %v", err)
 	}
-	if defects == 0 {
-		// If this ever fires, the call site was fixed and the two assertions
-		// below are the ones that should move — to software/classifier.
-		t.Fatalf("no %s event: the Start-time triage call metered after all — re-point this leg at the resolved family (family=%q source=%q)",
-			local.EventLocalUnmeteredDefect, st.Family, st.FamilySource)
+	if defects != 0 {
+		t.Fatalf("%d %s event(s): the pipeline's triage call still cannot meter (family=%q source=%q)",
+			defects, local.EventLocalUnmeteredDefect, st.Family, st.FamilySource)
 	}
-	// Fail-closed, and ASKED rather than assumed (S06.2 + R5): high tier, and a
-	// family the requester will be asked for.
-	if st.Tier != intake.TierHigh {
-		t.Errorf("tier = %q, want high — an unusable classifier fails closed (S06.2)", st.Tier)
+	// Zero-touch: the live classifier resolved the family, so the requester is
+	// never asked what kind of task this is (S06.2 + R5).
+	if st.Family != intake.FamilySoftware {
+		t.Errorf("family = %q, want software — the live classifier resolves it end to end (R13)", st.Family)
 	}
-	if st.FamilySource != intake.FamilySourceDefault {
-		t.Errorf("family source = %q, want %q — nothing resolved it, so the question fires (R4/R5)",
-			st.FamilySource, intake.FamilySourceDefault)
+	if st.FamilySource != intake.FamilySourceClassifier {
+		t.Errorf("family source = %q, want %q — the classifier resolved it, so no family question fires (R4/R5)",
+			st.FamilySource, intake.FamilySourceClassifier)
 	}
 }
 

@@ -111,6 +111,18 @@ type State struct {
 	BandExited   bool           `json:"band_exited,omitempty"` // exit is one-way
 	BandExitWhy  string         `json:"band_exit_why,omitempty"`
 	RecordRef    *ArtifactRef   `json:"record_ref,omitempty"`
+	// TriagePending marks a state whose classification has not run yet: Start
+	// sets it, and the classify step at the top of the first advance clears it
+	// in EVERY branch — a failed classify is a completed triage attempt, not a
+	// retry loop.
+	//
+	// The polarity is the point. A default-false "classified" flag would read
+	// true-for-nobody on every state event written before this packet, so the
+	// next advance would re-classify tasks already mid-interview and could
+	// overwrite a settled family or tier (Spec S06.4 monotonicity). The zero
+	// value here is "nothing to do", so an old world proceeds exactly as it did
+	// (the family_source/R10 precedent above).
+	TriagePending bool `json:"triage_pending,omitempty"`
 
 	// Stage 1 — interview + drafting (Spec S06.5–S06.6).
 	TaxonomyID      string           `json:"taxonomy_id"`

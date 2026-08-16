@@ -20,7 +20,10 @@ import (
 
 func TestParseTriageInvalidFamilyUnresolved(t *testing.T) {
 	ctx := context.Background()
-	req := intake.Request{TaskID: "t1", Title: "fix", Text: "fix the parser"}
+	in := intake.TriageInput{
+		RunID:   "t1" + stage.RunSuffixIntake,
+		Request: intake.Request{TaskID: "t1", Title: "fix", Text: "fix the parser"},
+	}
 
 	t.Run("invalid label is unresolved, not generic", func(t *testing.T) {
 		duty, fake, _, _ := localSeamEnv(t)
@@ -28,7 +31,7 @@ func TestParseTriageInvalidFamilyUnresolved(t *testing.T) {
 			Content:     `{"family":"bogus","stakes":"low","size":"small","data_bearing":false,"abstain":false}`,
 			InputTokens: 40, OutputTokens: 6,
 		})
-		p, err := stage.NewLocalClassifier(duty).Classify(ctx, req, nil)
+		p, err := stage.NewLocalClassifier(duty).Classify(ctx, in)
 		if err != nil {
 			t.Fatalf("Classify: %v", err)
 		}
@@ -43,7 +46,7 @@ func TestParseTriageInvalidFamilyUnresolved(t *testing.T) {
 	t.Run("abstain still errors", func(t *testing.T) {
 		duty, fake, _, _ := localSeamEnv(t)
 		fake.SetModelResponse("Qwen3.5-4B", local.FakeResponse{Content: `{"abstain":true}`, InputTokens: 5, OutputTokens: 1})
-		if _, err := stage.NewLocalClassifier(duty).Classify(ctx, req, nil); err == nil {
+		if _, err := stage.NewLocalClassifier(duty).Classify(ctx, in); err == nil {
 			t.Error("abstain must still error so the pipeline fails closed to high (S06.2, unchanged)")
 		}
 	})
@@ -54,7 +57,7 @@ func TestParseTriageInvalidFamilyUnresolved(t *testing.T) {
 			Content:     `{"family":"software","stakes":"standard","size":"small","data_bearing":false,"abstain":false}`,
 			InputTokens: 40, OutputTokens: 6,
 		})
-		p, err := stage.NewLocalClassifier(duty).Classify(ctx, req, nil)
+		p, err := stage.NewLocalClassifier(duty).Classify(ctx, in)
 		if err != nil {
 			t.Fatalf("Classify: %v", err)
 		}

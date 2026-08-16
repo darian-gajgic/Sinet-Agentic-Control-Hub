@@ -40,7 +40,7 @@ type probeClassifier struct {
 	observe    func() string
 }
 
-func (p *probeClassifier) Classify(context.Context, intake.Request, *intake.RegistrySlice) (intake.TriageProposal, error) {
+func (p *probeClassifier) Classify(context.Context, intake.TriageInput) (intake.TriageProposal, error) {
 	p.calls++
 	if p.observe != nil {
 		p.callStates = append(p.callStates, p.observe())

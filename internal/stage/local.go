@@ -103,23 +103,22 @@ func NewLocalClassifierWithRecheck(duty *local.Duty, recheck *local.ReChecker) i
 	return &localClassifier{duty: duty, recheck: recheck}
 }
 
-func (c *localClassifier) Classify(ctx context.Context, req intake.Request, reg *intake.RegistrySlice) (intake.TriageProposal, error) {
+func (c *localClassifier) Classify(ctx context.Context, in intake.TriageInput) (intake.TriageProposal, error) {
 	schema := local.TriageSchema(triageFamilies(), triageTiers(), triageSizes)
-	// Start-only duty: triage runs inside Pipeline.Start, where the intake run is
-	// being BORN and the composed id IS its current identity — the one site where
-	// composition is the right reading (P3-RW-6 R7; the birth half of the §16
-	// run-id rule). It can never see a fork.
-	runID := req.TaskID + RunSuffixIntake
-	in := local.DutyRequest{
+	// The consuming run arrives EXPLICITLY on the seam input (§26; the
+	// DraftInput/PhraseInput precedent): triage runs on the RUNNING intake run at
+	// the top of the pipeline's first advance, which after a recovery-fork rebind
+	// is the fork — so the id is read, never composed from the task id here.
+	req := local.DutyRequest{
 		Alias:          local.AliasIntakeTriage,
 		System:         "You are a task triage classifier for a personal automation platform. Output ONLY the JSON matching the schema — put your brief reasoning in the leading \"reason\" field, then the labels (free-text-then-constrained). Set abstain=true if you cannot classify confidently — never guess a label.",
-		User:           triagePrompt(req, reg, schema),
+		User:           triagePrompt(in.Request, in.Registry, schema),
 		Schema:         schema,
 		Name:           "intake-triage",
 		MaxTokens:      triageMaxTokens,
 		Classification: true,
 	}
-	res, err := c.duty.Call(ctx, runID, in)
+	res, err := c.duty.Call(ctx, in.RunID, req)
 	if err != nil {
 		// Fail closed: the pipeline treats a classify error as high-stakes,
 		// unknown estimate, no band membership (S06.2). Never faked.
@@ -129,7 +128,7 @@ func (c *localClassifier) Classify(ctx context.Context, req intake.Request, reg 
 	// ⇒ no gate (the fast answer stands). The re-check never hard-fails the
 	// classification — a failed re-check leaves the fast answer.
 	if c.recheck != nil {
-		if rc, rerr := c.recheck.MarginRecheck(ctx, runID, local.AliasIntakeTriage, in, res, triageLabelFields); rerr == nil {
+		if rc, rerr := c.recheck.MarginRecheck(ctx, in.RunID, local.AliasIntakeTriage, req, res, triageLabelFields); rerr == nil {
 			res = rc.Result
 		}
 	}

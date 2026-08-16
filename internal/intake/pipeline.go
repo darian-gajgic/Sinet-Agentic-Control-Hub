@@ -125,10 +125,17 @@ func (p *Pipeline) taxonomyFor(family Family) *Taxonomy {
 
 // ---- Start: Stage 0 (Spec S06.2) ----
 
-// Start receives a request: it creates the task and its intake run,
-// runs triage (deterministic rules first, local classifier second,
-// fail-closed), persists the intake record, and emits the Stage-0 ledger
-// writes. No paid model runs here.
+// Start receives a request: it creates the task and its intake run, runs the
+// DETERMINISTIC half of triage (registry match, the P47 rule layer, the
+// fail-closed baseline), persists the baseline intake record, and emits the
+// Stage-0 ledger writes. No model runs here at all.
+//
+// The CLASSIFIER half is not Start's (classifyStep): its mandatory $0 D7 row
+// must ride a checkpointable consuming run, and at Start the intake run neither
+// exists nor runs — admission is the scheduler's and intake never self-admits
+// (Spec S10, S02.3). Start therefore leaves the state marked TriagePending and
+// the first advance classifies on the running run. Classification still
+// precedes every paid seam by code order, so S06.2's ordering guarantee holds.
 //
 // Stage-0 floor observation: the spec pins the five floor classes, not a
 // request-text cue lexicon — Stage-0 floors arrive from the registry and
@@ -161,6 +168,8 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 		// disguised as an answer.
 		FamilySource: FamilySourceDefault,
 		Guess:        Estimate{Known: false, Basis: "unclassified"},
+		// The classify step is owed on this task (see classifyStep).
+		TriagePending: true,
 	}
 
 	// Registry match (S1.6): injected so the interview never asks what the
@@ -196,66 +205,15 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 	// Deterministic P47 rule layer FIRST (S06.3).
 	st.addHits(p.triggers().Detect(req.Title + "\n" + req.Text))
 
-	// Local classifier second — proposals only; failure fails closed to
-	// high stakes (S06.2).
-	classified := false
-	if p.Classifier != nil {
-		if prop, err := p.Classifier.Classify(ctx, req, st.Registry); err == nil {
-			classified = true
-			// PRECEDENCE registry > classifier (P3-RW-11 OQ3): a registered
-			// project's family is its OWNER'S standing declaration about the work
-			// they keep there, and a per-request guess never overrules it.
-			//
-			// VALIDATED HERE TOO (drain D3), for the same reason as the registry
-			// seam above and one more: the adapter maps an out-of-vocabulary
-			// label to "" already, but this is the pipeline's own boundary and a
-			// second Classifier implementation is a seam away. An unresolved
-			// family leaves the question to the requester rather than falling
-			// back to generic.
-			if ValidFamily(prop.Family) && st.FamilySource != FamilySourceRegistry {
-				st.Family, st.FamilySource = prop.Family, FamilySourceClassifier
-			}
-			if ValidTier(prop.Tier) {
-				st.Tier = prop.Tier
-			}
-			st.Guess = prop.Est
-			st.addHits(prop.DataHits) // add-only
-			st.addFloors(validFloors(prop.Floors))
-			// Zero-interaction band (S06.4): all four conditions,
-			// evaluated conservatively; the cost bound is per-user ⚙.
-			if st.FloorTier == "" && prop.Tier == TierTrivial && prop.ReadOnly && !prop.NewNeeds && len(st.openDataBearing()) == 0 {
-				if capUSD, err := p.Settings.FloatFor(keyZeroInteractionCost, st.Owner); err == nil && prop.Est.Known && prop.Est.USD < capUSD {
-					st.Band = true
-				}
-			}
-			if prop.Tier == TierTrivial && !st.Band {
-				// Trivial IS the band; a trivial proposal failing the band
-				// conditions lands at low (S06.4).
-				st.Tier = maxTier(TierLow, st.FloorTier)
-			}
-		}
-	}
-	if !classified {
-		st.Tier = TierHigh
-	}
-
 	// Key the state to its family's question set, apply the registry's
 	// pre-answered slots against THAT set, and recompute clearance. A family
 	// with no seeded set yields the disclosure line recorded below.
 	fallback := p.applyFamilyTaxonomy(st)
 
-	// Intake record — the durable Stage-0 artifact (S06.1 Stage 0).
-	record := map[string]any{
-		"family": st.Family, "stakes_tier": st.Tier, "floor_reasons": st.FloorReasons,
-		"size_cost_guess": st.Guess, "data_bearing": st.DataBearing,
-		"registry_slice_ref": registryRef(st.Registry), "band": st.Band,
-		"taxonomy": st.TaxonomyID + "@" + st.TaxonomyVersion, "ts": p.nowRFC3339(),
-	}
-	recordJSON, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("intake: marshal intake record: %w", err)
-	}
-	ref, err := p.store().write(p.store().recordPath(st.TaskID), append(recordJSON, '\n'), nil, 1)
+	// Intake record v1 — the durable Stage-0 artifact (S06.1 Stage 0), carrying
+	// the honest pre-classification baseline and never values the platform does
+	// not hold yet. The classify step writes v2 beside it.
+	ref, err := p.writeRecord(st, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -292,16 +250,139 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 	if _, err := verbs.Artifact(ctx, ref.Path, "intake-record", "Stage-0 intake record (S06.2)", ref.SHA256); err != nil {
 		return nil, err
 	}
-	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "triage",
-		fmt.Sprintf("triage: family=%s (%s) tier=%s band=%v data-bearing=%d clearance=%.0f%%",
-			st.Family, st.FamilySource, st.Tier, st.Band, len(st.DataBearing), st.Clearance),
-		"Stage-0 triage classification (S06.2)", 0); err != nil {
-		return nil, err
-	}
+	// No triage DECISION line here: at Start the honest one would read
+	// "high/generic/default", which states nothing. The decision is recorded
+	// where the facts become facts — in the classify step (S06.1 Stage 0).
 	if err := p.recordTaxonomyFallback(ctx, st, fallback); err != nil {
 		return nil, err
 	}
 	return st, nil
+}
+
+// writeRecord persists one version of the Stage-0 intake record (S06.1 Stage 0)
+// and returns its ref. Both versions carry the same key set: family_source
+// rides it too, so "generic" on the v1 baseline is attributable rather than
+// indistinguishable from a registry-declared generic (P3-RW-11 R5).
+func (p *Pipeline) writeRecord(st *State, version int) (ArtifactRef, error) {
+	record := map[string]any{
+		"family": st.Family, "family_source": st.FamilySource,
+		"stakes_tier": st.Tier, "floor_reasons": st.FloorReasons,
+		"size_cost_guess": st.Guess, "data_bearing": st.DataBearing,
+		"registry_slice_ref": registryRef(st.Registry), "band": st.Band,
+		"taxonomy": st.TaxonomyID + "@" + st.TaxonomyVersion, "ts": p.nowRFC3339(),
+	}
+	raw, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return ArtifactRef{}, fmt.Errorf("intake: marshal intake record: %w", err)
+	}
+	return p.store().write(p.store().recordPath(st.TaskID, version), append(raw, '\n'), nil, version)
+}
+
+// classifyStep is the model half of Stage-0 triage (Spec S06.2 rules 1/3/4 and
+// the S06.4 band), run ONCE at the top of the first advance.
+//
+// WHY HERE. The duty behind this seam must write a $0 D7 row on its consuming
+// run (CONVENTIONS §26 R18), and that row is only writable while the run exists
+// and is checkpointable. `Pipeline.Start` has neither: the intake run is being
+// born there, and admission is the scheduler's (S10, the ErrNotRunning
+// doctrine). The top of an advance is the one site where the pipeline holds a
+// RUNNING consuming run — `st.RunID`, which after an AdvanceDispatched rebind is
+// the fork — and it still precedes every paid seam in the drive, so S06.2's
+// "classification before any paid model runs" holds by code order.
+//
+// The marker clears in EVERY branch: a failed classify is a completed triage
+// attempt, not a per-advance retry loop. A crash between the duty call and the
+// state append below leaves the marker pending, so a redispatch repeats one $0
+// call and re-applies the same deterministic guards — accepted, because the
+// alternative (clearing first) loses a crashed classification with no retry.
+func (p *Pipeline) classifyStep(ctx context.Context, st *State) error {
+	if !st.TriagePending {
+		return nil
+	}
+	st.TriagePending = false
+
+	classified := false
+	if p.Classifier != nil {
+		prop, err := p.Classifier.Classify(ctx, TriageInput{
+			RunID: st.RunID, Request: st.Req, Registry: st.Registry,
+		})
+		if err == nil {
+			classified = true
+			// PRECEDENCE registry > classifier > requester-asked (P3-RW-11 OQ3):
+			// the classifier adopts a family only over the DEFAULT baseline. A
+			// registered project's family is its owner's standing declaration and
+			// a per-request guess never overrules it; and by first-advance time a
+			// requester-answered family can exist too (a re-entrant state), which
+			// this must never overwrite either.
+			//
+			// VALIDATED HERE TOO (P3-RW-11 drain D3): the adapter maps an
+			// out-of-vocabulary label to "" already, but this is the pipeline's own
+			// boundary and a second Classifier implementation is a seam away. An
+			// unresolved family leaves the question to the requester rather than
+			// falling back to generic.
+			if ValidFamily(prop.Family) && st.FamilySource == FamilySourceDefault {
+				st.Family, st.FamilySource = prop.Family, FamilySourceClassifier
+			}
+			if ValidTier(prop.Tier) {
+				st.Tier = prop.Tier
+			}
+			st.Guess = prop.Est
+			st.addHits(prop.DataHits) // add-only
+			st.addFloors(validFloors(prop.Floors))
+			// Zero-interaction band (S06.4): all four conditions,
+			// evaluated conservatively; the cost bound is per-user ⚙.
+			if st.FloorTier == "" && prop.Tier == TierTrivial && prop.ReadOnly && !prop.NewNeeds && len(st.openDataBearing()) == 0 {
+				if capUSD, err := p.Settings.FloatFor(keyZeroInteractionCost, st.Owner); err == nil && prop.Est.Known && prop.Est.USD < capUSD {
+					st.Band = true
+				}
+			}
+			if prop.Tier == TierTrivial && !st.Band {
+				// Trivial IS the band; a trivial proposal failing the band
+				// conditions lands at low (S06.4).
+				st.Tier = maxTier(TierLow, st.FloorTier)
+			}
+		}
+	}
+	if !classified {
+		// nil seam, seam error, abstain, invalid label: high stakes, family left
+		// unresolved for the S06.5 question (S06.2).
+		st.Tier = TierHigh
+	}
+
+	// The family may have moved (generic → software), so the question set is
+	// re-keyed and the registry's pre-answered slots re-applied against THAT set
+	// — otherwise answers the platform already holds would be asked for again.
+	fallback := p.applyFamilyTaxonomy(st)
+
+	// Record v2 carries the classified values: a NEW immutable file beside v1,
+	// never an overwrite (S06.6). File first, then the single state append, then
+	// the ledger — the ledger never nests inside an intake WriteTx (the Start
+	// precedent; single-connection pool).
+	ref, err := p.writeRecord(st, 2)
+	if err != nil {
+		return err
+	}
+	st.RecordRef = &ref
+	if err := p.appendState(ctx, st); err != nil {
+		return err
+	}
+
+	gen, err := p.currentGen(ctx, st.RunID)
+	if err != nil {
+		return err
+	}
+	verbs := p.Ledger.SessionVerbs(st.RunID, "triage", gen)
+	if _, err := verbs.Artifact(ctx, ref.Path, "intake-record",
+		"Stage-0 intake record after classification (S06.2)", ref.SHA256); err != nil {
+		return err
+	}
+	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "triage",
+		fmt.Sprintf("triage: family=%s (%s) tier=%s band=%v data-bearing=%d clearance=%.0f%%",
+			st.Family, st.FamilySource, st.Tier, st.Band, len(st.DataBearing), st.Clearance),
+		"Stage-0 triage classification (S06.2)", 0); err != nil {
+		return err
+	}
+	return p.recordTaxonomyFallback(ctx, st, fallback)
 }
 
 // applyFamilyTaxonomy keys the state to its family's question set, re-applies
@@ -538,6 +619,12 @@ func (p *Pipeline) advanceLoaded(ctx context.Context, st *State) (*State, error)
 	// killed a live interview. It ends when the advance does: the next gate
 	// parks the run, and nobody drives a parked run.
 	defer p.Leases.Hold(ctx, st.RunID, leaseHolderIntake)()
+
+	// Stage-0's classifier half, on the running run and before any paid seam
+	// (S06.2 ordering). Run-once: the marker is durable.
+	if err := p.classifyStep(ctx, st); err != nil {
+		return nil, err
+	}
 
 	var pair *Pair
 	for guard := 0; guard < 64; guard++ {

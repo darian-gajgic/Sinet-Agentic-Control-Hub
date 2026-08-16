@@ -175,7 +175,8 @@ func (p *Pipeline) runSpine(ctx context.Context, st *State, pair *Pair, advisory
 		st.Guess = pair.Plan.Est
 		st.exitBand("size re-check: plan exceeds the Stage-0 guess")
 		if p.Classifier != nil {
-			if prop, cerr := p.Classifier.Classify(ctx, st.Req, st.Registry); cerr == nil && ValidTier(prop.Tier) {
+			in := TriageInput{RunID: st.RunID, Request: st.Req, Registry: st.Registry}
+			if prop, cerr := p.Classifier.Classify(ctx, in); cerr == nil && ValidTier(prop.Tier) {
 				st.Tier = maxTier(st.Tier, prop.Tier)
 			}
 		}
