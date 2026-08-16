@@ -127,23 +127,44 @@
   <div class="head"><h3>On the project card: "Describe a goal"</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">The door opens pinned to the project and says the task will build on that
-    project's world. Say what you want the way you'd tell a person, and send it.</p>
+    project's world. Say what you want the way you'd tell a person, and send it. While it reads
+    your goal the page says so — with its own clock ticking, never a bare spinner. The first
+    card takes about a minute on the local models.</p>
+</li>
+
+<li>
+  <div class="head"><h3>The kind-of-work question — only when it must ask</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">The platform first tries to know what KIND of task this is on its own — the
+    project's record can declare it, and the local classifier reads your goal. Only when neither
+    answers do six plain-language choices appear ("Build or change software" … "Something else"),
+    each with a hint line and the help block underneath. Seeing <i>no</i> such card on a clear goal
+    is the machine working, not a skipped step.</p>
 </li>
 
 <li>
   <div class="head"><h3>The interview — a form, not a chat</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">Numbered question cards: answer, pick an option, or skip.
+  <p class="look">Numbered question cards in plain, non-programmer wording (the local utility model
+    phrases them; when it can't, the canonical question shows — both are correct). From the second
+    round on, a <b>"What it understood so far"</b> recap sits above the questions: every settled
+    point with where it came from — <i>you answered</i>, <i>from the project record</i>, or
+    <i>assumed — out loud</i>. Answer, pick an option, or skip.
     <b>"Proceed — turn open questions into assumptions"</b> is legitimate — every skip becomes a
-    LISTED assumption on the plan card, where you can still contest it. The page listens for what
-    comes next; the same card also sits in your Inbox, so leaving the page loses nothing.</p>
+    LISTED assumption on the plan card, where you can still contest it. Between rounds the page
+    shows what the machine is doing and how long it has been at it; the same card also sits in
+    your Inbox, so leaving the page loses nothing.</p>
 </li>
 
 <li>
   <div class="head"><h3>The plan card — approve it</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">What I understood · what you'll get · numbered steps each with "done when" ·
-    <b>what I will NOT do</b> · assumptions first · the price. Approve — the <b>PIN step-up</b>
+  <p class="look">What I understood — the planner's own words <i>plus</i> the platform's
+    point-by-point record of what was settled and how · what you'll get · numbered steps each with
+    "done when" · <b>what I will NOT do</b> · assumptions first · the price. The full plan is
+    drafted in one piece and can take a few minutes; the page says so while it works, and if the
+    drafting session dies the page says <i>that</i> too — the platform heals it on its own within
+    a few minutes, no button pressed. Approve — the <b>PIN step-up</b>
     takes the PIN above and is never stored. Re-plan, Re-interview and Cancel are the other doors.</p>
 </li>
 
@@ -159,11 +180,18 @@
 </ol>
 
 <div class="box warn">
-  <p style="margin:0"><b>If a planner session dies mid-journey</b> (it happened once on the
-  verification walk that wrote this page): nothing is asked of you. The card stays in its column,
-  the recovery ladder forks and re-drives the session at its next sweep, and the plan arrived
-  5 minutes 22 seconds after the crash — machine-only, no button pressed. Seeing that once is the
-  platform keeping its word, not a defect to report.</p>
+  <p style="margin:0"><b>If a planner session dies mid-journey</b> (it has happened on the
+  verification walks that wrote this page): nothing is asked of you. The journey page itself says
+  "the working session broke — it heals itself", the recovery ladder forks and re-drives the
+  session at its next sweep, and the healed plan arrives minutes later — machine-only, no button
+  pressed. Seeing that once is the platform keeping its word, not a defect to report.</p>
+</div>
+
+<div class="box">
+  <p style="margin:0"><b>If anything on any page ever breaks while drawing itself</b>, you land on
+  a recover card — "this page hit a fault", with the reason and a <b>Try again</b> — never a black
+  screen, and never a dead app. The sidebar keeps working; F5 is never needed. A black screen IS a
+  defect to report.</p>
 </div>
 
 <h2>The walk — eleven surfaces, in order</h2>

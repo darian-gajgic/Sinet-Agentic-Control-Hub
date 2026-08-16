@@ -1588,20 +1588,46 @@ function Cancelled({ view }: { view: IntakeTaskView }) {
  *  local models). */
 function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting: boolean; answered: boolean }) {
   const seconds = useElapsedSeconds(view.tier !== 'trivial')
+  // The one served fact that changes this face's story: the task's own run
+  // states. A CRASHED intake run is not a dead journey — the S02.5 recovery
+  // ladder forks and re-drives it within a sweep, machine-only (it happened
+  // on the very walk that wrote this component: the local planner emitted a
+  // truncated draft, and the healed plan arrived minutes later with no button
+  // pressed). The face tells that truth instead of letting a longer-than-
+  // usual wait read as a stall.
+  const detail = useLive({
+    key: `/api/tasks/${view.task_id}#nocard`,
+    read: () => api.task(view.task_id),
+    types: ['run.state_changed', 'intake.state'],
+  })
+  const runs = detail.data?.runs ?? []
+  const crashed = runs.length > 0 && runs[runs.length - 1].state === 'crashed'
+  // More than one run = the story moved past birth (a healed fork, a later
+  // stage) — a resumed tab must not greet it as newborn.
+  const working = answered || runs.length > 1
   return (
     <div className="door-landed" data-door-result="no-card" data-after-answer={answered ? 'true' : undefined}>
       <h3 className="landed-head">
         {view.tier === 'trivial'
           ? 'It took the work without questions'
-          : answered
-            ? 'Answers recorded — it is working'
-            : 'The task is born — it is reading your goal'}
+          : crashed
+            ? 'The working session broke — it heals itself'
+            : working
+              ? 'Answers recorded — it is working'
+              : 'The task is born — it is reading your goal'}
       </h3>
       <p className="landed-sub">
         {view.tier === 'trivial' ? (
           <>Trivial, read-only asks skip the ceremony on purpose. If a question comes up it lands in your{' '}
           <Link to={hrefFor('inbox')}>Inbox</Link>.</>
-        ) : answered ? (
+        ) : crashed ? (
+          <>
+            The session doing the work died mid-write — that happens, and nothing is asked of you: the platform
+            notices, salvages what was done, and re-drives the work on its own within a few minutes. Your answers are
+            all kept. The next card appears RIGHT HERE when it lands, and in your <Link to={hrefFor('inbox')}>Inbox</Link>{' '}
+            too.
+          </>
+        ) : working ? (
           <>
             It took what you said and moved: it is choosing and phrasing the next questions, or — once it knows
             enough — drafting the full plan. A question round takes about a minute on the local models; the plan is
@@ -1617,8 +1643,8 @@ function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting:
         )}
       </p>
       {view.tier !== 'trivial' && (
-        <p className="composing-clock mono" data-birth-clock>
-          {waiting ? 'listening' : 'catching up'} · {elapsedWords(seconds)}
+        <p className="composing-clock mono" data-birth-clock data-run-crashed={crashed ? 'true' : undefined}>
+          {crashed ? 'healing machine-side' : waiting ? 'listening' : 'catching up'} · {elapsedWords(seconds)}
         </p>
       )}
       <div className="door-acts">
