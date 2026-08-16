@@ -272,7 +272,18 @@ func TestLiveRW14GPUShopRewalk(t *testing.T) {
 	sk, err := stage.New(stage.Config{
 		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led, Settings: reg,
 		Adapters: map[string]adapters.Adapter{
-			adapters.SubstrateClaudeCLI: &claudecli.Adapter{Settings: reg},
+			// HookCmd MUST be set explicitly in a test binary. Its fallback is
+			// os.Executable()+" engine-hook" — correct in production, where the
+			// executable IS sinet, but inside `shell.test` it makes the engine's
+			// gate hook re-execute THE TEST BINARY, whose main ignores the
+			// unknown argument and runs the suite again: a new world, a new
+			// billed engine session, recursively, once per hook invocation.
+			// That is the real mechanism behind this file's stray-world
+			// incident, and it is why every other stage harness pins this
+			// string. An env opt-in cannot prevent it — the child inherits it.
+			adapters.SubstrateClaudeCLI: &claudecli.Adapter{
+				Settings: reg, HookCmd: "/opt/sinet/bin/sinet engine-hook",
+			},
 		},
 		ArtifactRoot: filepath.Join(stateDir, "artifacts"),
 		RunRoot:      filepath.Join(stateDir, "runs"),
