@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { ApiError, Unreachable, api, type Session } from './api'
+import { ErrorBoundary } from './boundary'
 import { Board } from './Board'
 import { Chat } from './Chat'
 import { ConnectionState } from './ConnectionState'
@@ -256,6 +257,10 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
 
             <main className="shell-main">
               <div className="view-in" key={`${v ?? 'none'}:${vp.id ?? ''}`}>
+                {/* The view fence (F1): a crashing surface takes down itself,
+                    never the shell — and the fence resets on navigation, so
+                    leaving a broken page always lands on a live one. */}
+                <ErrorBoundary grain="view" resetKey={`${v ?? 'none'}:${vp.id ?? ''}`}>
                 {/* The fence rule (P1): every not-yet-reworked OLD surface
                     declares itself before its own content renders. The fence
                     follows the SHOWN surface — the one under the overlay. */}
@@ -318,20 +323,31 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                   // placeholders, each an honest surface.
                   <ComingSurface id={v} />
                 )}
+                </ErrorBoundary>
               </div>
 
               {/* The task card, floating over whatever surface it was opened
                   from. Closing returns there (history.back over the push that
-                  opened it); a cold load closes to the board. */}
+                  opened it); a cold load closes to the board. Its own fence
+                  (F1): a crashing card must not kill the surface underneath. */}
               {overlayOpen && authed && session !== null && (
-                <TaskDetail
-                  id={params.id}
-                  stream={stream}
+                <ErrorBoundary
+                  grain="overlay"
+                  resetKey={params.id}
                   onClose={() => {
                     if (underRef.current !== null) window.history.back()
                     else navigate(hrefFor('board'))
                   }}
-                />
+                >
+                  <TaskDetail
+                    id={params.id}
+                    stream={stream}
+                    onClose={() => {
+                      if (underRef.current !== null) window.history.back()
+                      else navigate(hrefFor('board'))
+                    }}
+                  />
+                </ErrorBoundary>
               )}
             </main>
           </div>

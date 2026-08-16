@@ -369,11 +369,17 @@ export type TaskDecision = {
 
 /** The receipt as internal/metering stored it, served verbatim. `items` carries
  *  Go field names because metering.LineItem has no json tags — consumed as
- *  served (renaming a landed read's keys is a contract change). */
+ *  served (renaming a landed read's keys is a contract change).
+ *
+ *  `items` is `| null` because that is the WIRE'S truth: the Go slice has no
+ *  omitempty and a receipt that itemizes nothing — exactly what a cancelled
+ *  run's finalize materializes — marshals `"items": null`. Typing it as a bare
+ *  array is what black-screened the operator's cancel (finding F1,
+ *  2026-08-16): the compiler believed `.map` was safe and the render threw. */
 export type Receipt = {
   run_id: string
   user_id: string
-  items: {
+  items: null | {
     Model: string
     Lane: string
     Purpose: string

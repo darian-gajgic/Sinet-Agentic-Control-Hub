@@ -493,10 +493,10 @@ function ProjectRecord({
               </span>
               <span>
                 members:{' '}
-                {detail.members.length === 0 ? (
+                {(detail.members ?? []).length === 0 ? (
                   'none besides the owner'
                 ) : (
-                  detail.members.map((m, i) => (
+                  (detail.members ?? []).map((m, i) => (
                     <span key={m}>
                       {i > 0 && ', '}
                       <Owner id={m} />
@@ -512,11 +512,11 @@ function ProjectRecord({
 
           <div className="rec-sec">
             <p className="rec-head">Protected refs — accepts never push here</p>
-            {detail.protected_refs.length === 0 ? (
+            {(detail.protected_refs ?? []).length === 0 ? (
               <p className="proj-quiet m-0">none recorded</p>
             ) : (
               <ul className="rec-list">
-                {detail.protected_refs.map((r) => (
+                {(detail.protected_refs ?? []).map((r) => (
                   <li key={r} className="mono">
                     {r}
                   </li>
@@ -543,11 +543,11 @@ function ProjectRecord({
             )}
 
             <p className="rec-sub">Conventions — the house rules every run reads</p>
-            {cap.conventions.length === 0 ? (
+            {(cap.conventions ?? []).length === 0 ? (
               <p className="proj-quiet m-0">the scan recorded no conventions</p>
             ) : (
               <ul className="rec-list">
-                {cap.conventions.map((c) => (
+                {(cap.conventions ?? []).map((c) => (
                   <li key={c}>{c}</li>
                 ))}
               </ul>
@@ -570,10 +570,10 @@ function ProjectRecord({
             )}
 
             <p className="rec-sub">Danger zones — paths the platform treats as hazardous</p>
-            {cap.danger_zones.length === 0 ? (
+            {(cap.danger_zones ?? []).length === 0 ? (
               <p className="proj-quiet m-0">no danger zones recorded</p>
             ) : (
-              cap.danger_zones.map((z) => (
+              (cap.danger_zones ?? []).map((z) => (
                 <p key={z.path} className="rec-zone">
                   <b className="mono">{z.path}</b>
                   {z.action !== undefined && z.action !== '' && <> · {z.action}</>}

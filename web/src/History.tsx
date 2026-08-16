@@ -292,7 +292,7 @@ type Choice = Disambiguation['choices'][number]
 
 function choiceRuns(choices: Disambiguation['choices']): { category: string; items: Choice[] }[] {
   const runs: { category: string; items: Choice[] }[] = []
-  for (const c of choices) {
+  for (const c of choices ?? []) {
     const last = runs.at(-1)
     if (last && last.category === c.category) last.items.push(c)
     else runs.push({ category: c.category, items: [c] })
@@ -428,7 +428,7 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
         </div>
       )}
 
-      {answer.columns.length === 0 ? (
+      {(answer.columns ?? []).length === 0 ? (
         <EmptyState
           what="This answer carries no rows."
           why="The layer answered — it simply matched nothing. A refusal and a disambiguation card are answers too, and each says so above."
@@ -438,15 +438,15 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
           <table>
             <thead>
               <tr>
-                {answer.columns.map((c) => (
+                {(answer.columns ?? []).map((c) => (
                   <th key={c}>{c}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {answer.rows.map((row, i) => (
+              {(answer.rows ?? []).map((row, i) => (
                 <tr key={i}>
-                  {row.map((cell, j) => (
+                  {(row ?? []).map((cell, j) => (
                     <td key={j}>{cell === null || cell === undefined ? '—' : String(cell)}</td>
                   ))}
                 </tr>

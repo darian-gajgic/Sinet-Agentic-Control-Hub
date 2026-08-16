@@ -14,9 +14,15 @@ import '@fontsource/jetbrains-mono/latin-700.css'
 
 import './index.css'
 import App from './App.tsx'
+import { ErrorBoundary } from './boundary.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* The last net (F1): a fault that escapes every inner fence still never
+        black-screens — this one offers the full reload, because app-level
+        state is gone with the crash. */}
+    <ErrorBoundary grain="app">
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

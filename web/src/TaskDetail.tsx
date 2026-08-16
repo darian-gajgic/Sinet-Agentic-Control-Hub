@@ -931,8 +931,18 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
  */
 export function ReceiptView({ receipt }: { receipt: Receipt }) {
   const direct = receipt.direct_use
+  // `items` is null on the wire when the receipt itemizes nothing — a run
+  // cancelled before any model call materializes exactly that (F1's crasher).
+  // Zero line items is a fact worth a sentence, not an empty table.
+  const items = receipt.items ?? []
   return (
     <div className="receipt my-2">
+      {items.length === 0 ? (
+        <p className="muted">
+          Nothing itemized — this receipt records no model calls. A run cancelled or ended before any call was made
+          leaves exactly this.
+        </p>
+      ) : (
       <div className="table-scroll">
         <table className="items">
           <thead>
@@ -946,7 +956,7 @@ export function ReceiptView({ receipt }: { receipt: Receipt }) {
             </tr>
           </thead>
           <tbody>
-            {receipt.items.map((it, i) => (
+            {items.map((it, i) => (
               <tr key={i} data-purpose={it.Purpose}>
                 <td>{it.Purpose}</td>
                 <td>{it.Model}</td>
@@ -961,6 +971,7 @@ export function ReceiptView({ receipt }: { receipt: Receipt }) {
           </tbody>
         </table>
       </div>
+      )}
       <p>
         Total priced <Money usd={receipt.total_priced_usd} /> over {String(receipt.total_calls)} calls
         {receipt.total_unpriced_calls > 0 && (

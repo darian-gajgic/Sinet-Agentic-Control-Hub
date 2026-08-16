@@ -430,7 +430,7 @@ function Connections({ worker: w }: { worker: WorkerRow }) {
           Dialect {def.workflow.dialect}, on one service: {def.workflow.service}. No model is in this loop.
         </p>
         <ol className="chain">
-          {def.workflow.steps.map((s) => (
+          {(def.workflow.steps ?? []).map((s) => (
             <li key={s.id} data-step={s.id} data-approval={String(s.approval)}>
               <span className="step-id">{s.id}</span> <code>{s.verb}</code>
               {s.approval && <span className="step-approval"> — approval node: this step becomes a card, never a call</span>}
@@ -621,7 +621,7 @@ function Records({ version: v }: { version: WorkerVersion }) {
  * because each person's account burns separately (D2).
  */
 function Outcomes({ version: v }: { version: WorkerVersion }) {
-  const runs = v.outcomes.runs
+  const runs = v.outcomes.runs ?? []
   return (
     <div className="version-outcomes" data-outcomes={v.version_id}>
       <h5>Runs routed to this version</h5>
@@ -630,10 +630,10 @@ function Outcomes({ version: v }: { version: WorkerVersion }) {
           {String(v.outcomes.runs_routed)} routed in this reading
         </span>
         {' · '}
-        {v.outcomes.verdict_tally.length === 0 ? (
+        {(v.outcomes.verdict_tally ?? []).length === 0 ? (
           <Absent reason="no verdict recorded against this version" />
         ) : (
-          v.outcomes.verdict_tally.map((t) => (
+          (v.outcomes.verdict_tally ?? []).map((t) => (
             <span key={t.verdict} className="tally" data-tally={t.verdict} data-rounds={String(t.rounds)}>
               {t.verdict}: {String(t.rounds)}{' '}
             </span>
@@ -694,12 +694,12 @@ function RoutedRunRow({ run: r }: { run: RoutedRun }) {
         {r.degraded === true && <> · degraded-marked</>}
         {r.generalist === true && <> · ran as the generalist</>}
       </p>
-      <p className="routed-verdicts" data-verdicts={String(r.verdicts.length)}>
-        {r.verdicts.length === 0 ? (
+      <p className="routed-verdicts" data-verdicts={String((r.verdicts ?? []).length)}>
+        {(r.verdicts ?? []).length === 0 ? (
           <Absent reason={r.verdicts_absent ?? 'no verdict recorded'} />
         ) : (
           <>
-            {r.verdicts.map((v) => (
+            {(r.verdicts ?? []).map((v) => (
               <span key={`${String(v.round)}/${v.ts}`} className="verdict" data-verdict={v.verdict}>
                 round {String(v.round)}: {v.verdict}
                 {v.revision !== undefined && v.revision !== 0 && <> (revision {String(v.revision)})</>}{' '}

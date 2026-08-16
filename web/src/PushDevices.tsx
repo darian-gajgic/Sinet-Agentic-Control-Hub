@@ -196,19 +196,22 @@ function pushStateName(device: DeviceState | null): string {
  * wider one.
  */
 function EnrolledDevices({ view }: { view: PushSubscriptionsView }) {
+  // Null-tolerant on purpose (the F1 class): the wire may serve null where
+  // nothing is enrolled, and absence renders as absence, never as a crash.
+  const subscriptions = view.subscriptions ?? []
   return (
     <div className="push-devices">
       <p className="max-w-prose text-sm text-muted-foreground" data-push-scope={view.scope}>
         {view.scope}
       </p>
-      {view.subscriptions.length === 0 ? (
+      {subscriptions.length === 0 ? (
         <EmptyState
           what="No device is enrolled."
           why="A row appears here when a device is enrolled — this one, through the control above, or another one signed in as somebody this reading covers. Until then nothing is sent anywhere."
         />
       ) : (
         <ul className="items">
-          {view.subscriptions.map((s) => (
+          {subscriptions.map((s) => (
             <li key={s.id} className="wrap-anywhere text-sm" data-subscription={s.endpoint_hash}>
               <strong>{s.label !== '' ? s.label : <Absent reason="no name given" />}</strong>{' '}
               <Owner id={s.owner} />

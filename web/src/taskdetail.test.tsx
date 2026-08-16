@@ -225,6 +225,23 @@ test('an unpriced done-directly figure renders its reason instead of a dollar am
   view.unmount()
 })
 
+test('a receipt whose items are null on the wire renders honest absence, never a crash (F1 2026-08-16)', () => {
+  // THE OPERATOR'S BLACK SCREEN: cancelling a task finalizes its run and
+  // materializes a receipt that itemizes nothing — the Go slice has no
+  // omitempty, so the wire says `"items": null`, and `.map` over it unmounted
+  // the whole React root. The receipt must render the zero-calls fact as a
+  // sentence instead.
+  const receipt = fixtures.receipt() as unknown as Receipt
+  receipt.items = null
+  receipt.total_calls = 0
+  receipt.total_priced_usd = 0
+  const view = mount(<ReceiptView receipt={receipt} />)
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('Nothing itemized')
+  expect(text, 'a null-items receipt must still show its totals line').toContain('over 0 calls')
+  view.unmount()
+})
+
 test('a run with no receipt renders the served reason', async () => {
   const detail = fixtures.taskDetail() as unknown as Detail
   detail.runs = [{ run_id: 'r-new', state: 'queued', created_ts: '2026-07-20T09:10:00Z', receipt_absent: 'no receipt yet' }]
