@@ -541,15 +541,64 @@ func (u *Surface) taskView(ctx context.Context, taskID string) (json.RawMessage,
 // run means the recovery ladder exhausted ⚙ recovery.max_attempts (Spec
 // S02.5 step 3): the task needs eyes NOW, whatever phase the pipeline
 // last recorded — a dead lineage under a green column is a finding dying
-// in a log (Spec S07.7). The rich tombstone-review card remains the
-// recorded B0-4 deferral (B5/B6, Spec S15); this keeps the column honest
-// until then. (Found live at the B2 gate demo, 2026-07-20: a tombstoned
-// verify lineage sat under kanban "verifying" indefinitely.)
+// in a log (Spec S07.7). (Found live at the B2 gate demo, 2026-07-20: a
+// tombstoned verify lineage sat under kanban "verifying" indefinitely.)
+//
+// The overlay speaks only while the door is GENUINELY OPEN (P3-RW-14A drain
+// D1). Since R1 a tombstone writes its own card and stores "attention" in the
+// same transaction, so the overlay's remaining job is the row that predates
+// that build — and left unconditional it now CONTRADICTS the answers its own
+// card accepts: a task cancelled at the card read "attention" forever against
+// a stored `cancelled`, and a retried lineage stayed "attention" while its
+// successor worked and after it finished. Two conditions, both about whether
+// anyone still owes a decision:
+//
+//   - the TASK has not ended. `done` / `cancelled` are decisions already made;
+//     a dead run in the task's history may not re-open them.
+//   - the tombstoned lineage has no SUCCESSOR still being driven. A retry
+//     supersedes the ended lineage (Spec S02.5 step 2 fork lineage), and while
+//     its successor runs the board follows the work. If that successor ends
+//     badly in turn, IT is a tombstone with no successor — and it mints its
+//     own card, so the overlay is right about it.
+//
+// A `crashed` successor counts as still-being-driven: it is terminal-but-
+// SUPERSEDABLE (Spec S02.3), the ladder owns its disposition (S02.5 step 3),
+// and if that disposition ends the lineage the tombstone-review card says so.
 func deriveKanban(stored string, runs []runSummary) string {
+	if stored == kanbanCancelled || stored == kanbanDone {
+		return stored
+	}
 	for _, r := range runs {
-		if r.State == "tombstoned" {
-			return "attention"
+		if r.State != "tombstoned" || supersededByADrivenRun(r.RunID, runs) {
+			continue
 		}
+		return "attention"
 	}
 	return stored
+}
+
+// kanbanDone is the board column a finished task lands in (the verifyTerminal
+// SHIP vocabulary, named here beside kanbanCancelled for the overlay's
+// task-has-ended test).
+const kanbanDone = "done"
+
+// supersededByADrivenRun reports whether a recovery-fork successor of runID is
+// still being driven. Successors carry the parent's id plus `.g<generation>`
+// segments (Spec S02.5 step 2; the runRole strip is built on the same shape).
+func supersededByADrivenRun(runID string, runs []runSummary) bool {
+	if runID == "" {
+		return false
+	}
+	for _, r := range runs {
+		if r.RunID == runID || !strings.HasPrefix(r.RunID, runID+".g") {
+			continue
+		}
+		switch r.State {
+		case "completed", "finalized", "tombstoned", "died-at-gate":
+			// Ended for good; it decides nothing about this tombstone.
+		default:
+			return true // queued/claimed/running/draining/parked, or crashed
+		}
+	}
+	return false
 }

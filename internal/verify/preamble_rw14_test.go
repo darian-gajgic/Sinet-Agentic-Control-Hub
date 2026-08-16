@@ -16,6 +16,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
@@ -157,5 +158,32 @@ func TestRW14InfrastructureCardShapeAndVerbs(t *testing.T) {
 	rework := verify.Card{Category: verify.CatCapHit, Choices: []string{"accept_best_effort", "revise_with_guidance", "cancel"}}
 	if err := verify.ValidateAnswer(rework, verify.Answer{Choice: verify.VerbRetry}); !errors.Is(err, verify.ErrUnsupportedAnswer) {
 		t.Fatalf("retry on a CAP-HIT card answered %v, want ErrUnsupportedAnswer", err)
+	}
+}
+
+// TestRW14ABadPackSurfacingMidDrainCardsRatherThanCrashes — P3-RW-14A drain D3.
+// The composition root validates a pack before handing it over, so today the
+// invalid-pack refusal is caught in the preamble. A pack source that skips that
+// (a future resolver, a hand-written Verifier) would surface the identical
+// deterministic refusal from inside RunV1 — and an unmarked one takes the
+// crash→fork→tombstone backstop instead of the R4 card door. The mark makes the
+// class independent of WHERE the pack was checked.
+func TestRW14ABadPackSurfacingMidDrainCardsRatherThanCrashes(t *testing.T) {
+	ctx := context.Background()
+	f := newFix(t)
+	f.seedTask("t1", "r1")
+
+	// Passes the preamble (a pack IS present, and a runner with it) and fails
+	// its own contract only when V1 executes it.
+	bad := &verify.CheckPack{Domain: verify.DomainSoftware, Version: 1, VerifiedOn: time.Now()}
+	_, err := f.verifier(&fakeJudge{}, &scriptRunner{}, bad).Verify(ctx, input(deliverable("t1", "r1")))
+	if err == nil {
+		t.Fatal("an invalid pack must fail the drain")
+	}
+	if _, ok := verify.AsPreambleRefusal(err); !ok {
+		t.Fatalf("err = %v — an unusable suite is a screen outage wherever it is caught (S07.2), never a crash the ladder re-forks", err)
+	}
+	if !errors.Is(err, verify.ErrBadPack) {
+		t.Fatalf("err = %v, want it to still carry ErrBadPack", err)
 	}
 }

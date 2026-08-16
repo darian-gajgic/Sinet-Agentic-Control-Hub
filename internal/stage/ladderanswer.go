@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,6 +71,17 @@ func (s *Skeleton) AnswerLadderAsk(ctx context.Context, actor, askID string, raw
 func (s *Skeleton) ladderRetry(ctx context.Context, actor, askID string, card recovery.LadderCard, ans verify.Answer, raw json.RawMessage) error {
 	if s.sched == nil {
 		return fmt.Errorf("stage: no scheduler bound, so a retried run could not be admitted (Spec S16.6)")
+	}
+	// A card outlives the lineage it was raised on, so it can be answered after
+	// the TASK itself has ended — a second ladder card on the same task, still
+	// open when the first one was cancelled at (P3-RW-14A drain D2b). Retrying
+	// there would resurrect a cancelled task: a fresh run enqueued, billed, and
+	// the board dragged back out of `cancelled`. The card refuses instead.
+	if column, err := s.taskColumn(ctx, card.TaskID); err != nil {
+		return err
+	} else if column == kanbanCancelled || column == kanbanDone {
+		return fmt.Errorf("%w: task %s is already %s — a fresh attempt would restart work its owner has already ended (cancel this card, or start a new request)",
+			verify.ErrNotResumable, card.TaskID, column)
 	}
 	r, err := s.cfg.Runs.Get(ctx, card.RunID)
 	if err != nil {
@@ -141,12 +153,31 @@ func (s *Skeleton) ladderRetry(ctx context.Context, actor, askID string, card re
 	return nil
 }
 
-// ladderCancel ends the task at the card. The ended run is left exactly as it
-// is: cancel is a decision about the WORK, not a resurrection of a dead run,
-// and rewriting a terminal would falsify the record of how it ended.
+// ladderCancel ends the TASK at the card, through the one cancel machinery
+// (cancel.go, the ratified S02.3 mapping / CONVENTIONS §14 reading 9).
+//
+// Riding the cancel machinery (CancelTaskAtCard, cancel.go) rather than writing
+// `cancelled` on the task row is the
+// whole point (P3-RW-14A drain D2a): a task can hold more than the lineage this
+// card came from, and a column that says "cancelled" over a still-running
+// sibling is a lie that also keeps billing. CancelTask ends every non-terminal
+// run under the ratified mapping and closes the asks parked on them, so no
+// sibling can later land a verdict that flips a cancelled task to `done`.
+//
+// The card's own run is left exactly as it is: it had already ended, and
+// rewriting a terminal would falsify the record of how it ended (CancelTask
+// reports it as "already ended; nothing was cancelled").
 func (s *Skeleton) ladderCancel(ctx context.Context, actor, askID string, card recovery.LadderCard, ans verify.Answer, raw json.RawMessage) error {
 	s.recordLadderDecision(ctx, card, actor, "requester cancelled at the "+card.Card+" card"+noteSuffix(ans),
-		"cancel is always available (4.5); the lineage had already ended, so the task ends with it (S02.3; CONVENTIONS §14 reading 9)")
+		"cancel is always available (4.5); the whole task ends under the ratified S02.3 mapping — every live sibling run with it (CONVENTIONS §14 reading 9)")
+	if card.TaskID != "" {
+		if _, err := s.CancelTaskAtCard(ctx, actor, card.TaskID); err != nil {
+			// The card stays OPEN on a refused cancel (a claimed run mid-dispatch
+			// answers 409-retry): the door must not be consumed by a decision the
+			// platform did not carry out.
+			return err
+		}
+	}
 	err := s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		return closeLadderAskTx(ctx, tx, askID, raw, s.now())
 	})
@@ -154,11 +185,34 @@ func (s *Skeleton) ladderCancel(ctx context.Context, actor, askID string, card r
 		return err
 	}
 	if card.TaskID != "" {
+		// CancelTask moves the column only when it actually cancelled something
+		// (its own drain D4 rule). Here the human's answer IS the decision, and
+		// the commonest shape has nothing live left to cancel — so the column is
+		// set from the answer.
 		s.setKanban(ctx, card.TaskID, kanbanCancelled)
 	}
-	s.logger().Info("stage: ladder-terminal card answered with cancel (4.5)",
+	s.logger().Info("stage: ladder-terminal card answered with cancel — the task ends (4.5)",
 		"run", card.RunID, "task", card.TaskID, "ask", askID)
 	return nil
+}
+
+// taskColumn reads a task's stored kanban column ("" when the card sits on a
+// run with no task — the dead-man canary shape, which has no board and no
+// terminal state to respect).
+func (s *Skeleton) taskColumn(ctx context.Context, taskID string) (string, error) {
+	if taskID == "" {
+		return "", nil
+	}
+	var column string
+	err := s.cfg.DB.QueryRowContext(ctx,
+		`SELECT kanban_status FROM tasks WHERE task_id = ?`, taskID).Scan(&column)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("stage: read task %q column: %w", taskID, err)
+	}
+	return column, nil
 }
 
 // recordLadderDecision files the human decision in the task's ledger. A ladder

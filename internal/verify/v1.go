@@ -390,7 +390,14 @@ func (r *SandboxCheckRunner) RunCheck(ctx context.Context, req CheckRequest) (Ch
 // verdict derivation happens here, platform-side (rule 3).
 func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, steps []intake.Step, now time.Time, settings Settings) (V1Result, error) {
 	if err := pack.Validate(); err != nil {
-		return V1Result{}, err
+		// An invalid pack is a SCREEN THAT CANNOT RUN, wherever it is caught:
+		// re-running it produces the identical refusal, so the ladder could only
+		// fork it to a tombstone. Marked as the preamble refusal class so it takes
+		// the S07.7 decision-card door (P3-RW-14A drain D3), which matters the
+		// moment a pack source appears that this package cannot validate at
+		// resolve time — today the composition root validates before handing one
+		// over, so this is the latent path, not the live one.
+		return V1Result{}, NewPreambleRefusal(err)
 	}
 	if runner == nil {
 		return V1Result{}, fmt.Errorf("%w: V1 without a CheckRunner", ErrSeamMissing)

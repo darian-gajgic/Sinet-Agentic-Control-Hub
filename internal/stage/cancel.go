@@ -15,8 +15,9 @@ import (
 )
 
 // cancel.go is the ratified S02.3 cancel mapping (feature 4.5) behind the
-// S15.6 cancel verbs. S02.3 has NO cancelled state, so a cancel is expressed
-// in the states the FSM already has (CONVENTIONS §14 reading 9, restated §16):
+// S15.6 cancel verbs — and, since P3-RW-14A, the recovery-ladder card's own
+// `cancel` answer through CancelTaskAtCard below. S02.3 has NO cancelled state,
+// so a cancel is expressed in the states the FSM already has (CONVENTIONS §14 reading 9, restated §16):
 //
 //	running / draining → completed, with the cancel reason on the transition
 //	parked            → finalized (finalize-with-card; generation unchanged,
@@ -32,9 +33,11 @@ import (
 // ── NO AUTO-KILL (S14.4 / G1 D1.3; CONVENTIONS §31) ────────────────────────
 //
 // A cancel is a HUMAN act. Every entry point in this file takes an `actor`
-// that is a person resolved from an authenticated session, and the ONLY
-// callers are the two S15.6 HTTP verbs through Surface (surface.go). No
-// watchdog, no recovery pass, no scheduler loop, no benchmark driver and no
+// that is a person resolved from an authenticated session, and the only callers
+// are the two S15.6 HTTP verbs through Surface (surface.go) plus the ladder
+// card's cancel answer, which is reached through the HTTP answer verb by the
+// person the card belongs to (CancelTaskAtCard). No watchdog,
+// no recovery pass, no scheduler loop, no benchmark driver and no
 // engine-side path reaches any of it — the watchdog's import wall and the
 // benchmark package's no-kill wall stay byte-meaningful, and
 // TestCancelIsReachableFromTheHTTPVerbsOnly asserts the caller set directly.
@@ -244,6 +247,24 @@ func (s *Skeleton) CancelTask(ctx context.Context, actor, taskID string) (TaskCa
 // kanbanCancelled is the board column a cancelled task lands in (CONVENTIONS
 // §14 reading 9 / §16: "kanban cancelled").
 const kanbanCancelled = "cancelled"
+
+// CancelTaskAtCard is the recovery-ladder card's `cancel` answer applied to the
+// whole task (P3-RW-14A drain D2a). It lives HERE, in the cancel machinery,
+// for the reason the whole file exists: the S02.3 mapping has exactly one
+// implementation, and an answer path that ended sibling runs its own way would
+// be a second one — the shape that let a "cancelled" column sit over a
+// still-running, still-billing sibling.
+//
+// It is the same HUMAN chain, one link longer: `actor` is the authenticated
+// person answering their own card (D10, enforced by the answer path), and the
+// only route to it is the HTTP answer verb. Nothing automated reaches it — no
+// watchdog tier, no recovery pass, no scheduler loop, no benchmark driver
+// (S14.4 / G1 D1.3; the file-scoped wall in cancel_internal_test.go is what
+// keeps that true, and it is why the call to the mapping is made from this
+// file rather than from the answer path).
+func (s *Skeleton) CancelTaskAtCard(ctx context.Context, actor, taskID string) (TaskCancelOutcome, error) {
+	return s.CancelTask(ctx, actor, taskID)
+}
 
 // cancelOne is the mapping itself.
 func (s *Skeleton) cancelOne(ctx context.Context, actor string, r run.Run) (CancelOutcome, error) {
