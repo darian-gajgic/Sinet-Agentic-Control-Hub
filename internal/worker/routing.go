@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/sandbox"
@@ -314,7 +315,7 @@ func (r *Router) Route(ctx context.Context, q RouteQuery) (Decision, error) {
 		signals = append(signals, "research_nodes=present")
 	}
 
-	candidates, err := r.selectorMatch(ctx, q)
+	candidates, refusedWrite, err := r.selectorMatch(ctx, q)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -325,7 +326,7 @@ func (r *Router) Route(ctx context.Context, q RouteQuery) (Decision, error) {
 	}
 
 	if len(candidates) == 0 {
-		return r.noFit(ctx, q, signals, degraded)
+		return r.noFit(ctx, q, signals, degraded, refusedWrite)
 	}
 
 	// Step 2 — tie-break. A single candidate needs none; multiple go to the
@@ -361,7 +362,7 @@ func (r *Router) Route(ctx context.Context, q RouteQuery) (Decision, error) {
 	if gapAdvice != "" {
 		// The matched worker demands an uncovered model — the gap is a
 		// MODEL, not a worker (2.7): fall to no-fit with the advice leg.
-		d, nerr := r.noFit(ctx, q, append(signals, "model_gap="+gapAdvice), degraded)
+		d, nerr := r.noFit(ctx, q, append(signals, "model_gap="+gapAdvice), degraded, refusedWrite)
 		if nerr != nil {
 			return Decision{}, nerr
 		}
@@ -407,31 +408,36 @@ func mustTemplate(ctx context.Context, s *Store, id string) Template {
 // selectorMatch is step 1: deterministic selector matching plus the FTS5
 // description leg, then the structural filters (status=active via the
 // authoritative row join, kind, domain, grants ⊆ granted, confinement
-// equal-or-tighter).
-func (r *Router) selectorMatch(ctx context.Context, q RouteQuery) ([]Candidate, error) {
+// equal-or-tighter, and — for a plan that declares writes — equipment that
+// can actually write).
+//
+// It returns the surviving candidates and the names of any refused for
+// write-incapability: "nobody could" and "nobody matched" are different
+// answers, and only the first can be explained to a person (R8).
+func (r *Router) selectorMatch(ctx context.Context, q RouteQuery) ([]Candidate, []string, error) {
 	rows, err := r.Store.db.QueryContext(ctx,
 		`SELECT `+templateColumns+` FROM worker_templates WHERE status = 'active' AND kind = ?`, string(q.Kind))
 	if err != nil {
-		return nil, fmt.Errorf("worker: scan active templates: %w", err)
+		return nil, nil, fmt.Errorf("worker: scan active templates: %w", err)
 	}
 	var active []Template
 	for rows.Next() {
 		t, err := scanTemplate(rows)
 		if err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		active = append(active, t)
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	ftsRanks := map[string]float64{}
 	if len(active) > 0 {
 		hits, err := r.Store.searchDescriptions(ctx, q.TaskText)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, h := range hits {
 			ftsRanks[h.TemplateID] = h.Rank
@@ -442,6 +448,7 @@ func (r *Router) selectorMatch(ctx context.Context, q RouteQuery) ([]Candidate, 
 	taskLower := strings.ToLower(q.TaskText)
 
 	var out []Candidate
+	var refusedWrite []string
 	for _, t := range active {
 		if q.Domain != "" && t.Domain != q.Domain {
 			continue
@@ -462,6 +469,17 @@ func (r *Router) selectorMatch(ctx context.Context, q RouteQuery) ([]Candidate, 
 		}
 		// Confinement compatibility: equal or tighter only (S11 ladder).
 		if planClass != "" && !classTighterOrEqual(g.Class, planClass) {
+			continue
+		}
+		// A writing plan needs equipment that can write (Spec S08.8 step 1:
+		// the plan declares REQUIREMENTS and required grants ⊆ granted). The
+		// live defect this closes: a template granted {Read, Grep, Glob} at
+		// class C1 took a plan whose every step declared a write_set, then
+		// spent real money proving it could not do the job. Refused
+		// candidates are named, so the no-fit card can say WHY nobody fit
+		// rather than implying nobody matched (P3-RW-14 R8).
+		if q.Writes && !canWrite(g.Class, g.GrantedTools) {
+			refusedWrite = append(refusedWrite, def.Name)
 			continue
 		}
 
@@ -487,9 +505,12 @@ func (r *Router) selectorMatch(ctx context.Context, q RouteQuery) ([]Candidate, 
 		}
 		if rank, ok := ftsRanks[t.ID]; ok {
 			// bm25 rank is negative-better in SQLite; fold a bounded
-			// contribution so selector hits dominate description echoes.
-			score += 0.5
-			why = append(why, fmt.Sprintf("description match (rank %.2f)", rank))
+			// contribution SCALED BY MAGNITUDE so selector hits dominate
+			// description echoes and a vacuous echo earns nothing (R9).
+			if c := ftsContribution(rank); c > 0 {
+				score += c
+				why = append(why, fmt.Sprintf("description match (rank %.2f)", rank))
+			}
 		}
 		if score == 0 {
 			continue
@@ -509,7 +530,8 @@ func (r *Router) selectorMatch(ctx context.Context, q RouteQuery) ([]Candidate, 
 		}
 		return out[i].TemplateID < out[j].TemplateID
 	})
-	return out, nil
+	sort.Strings(refusedWrite)
+	return out, refusedWrite, nil
 }
 
 // resolveSeat resolves an execution profile against the duty map under
@@ -611,7 +633,7 @@ func (r *Router) modelCovered(model, lane string) bool {
 // (default; degraded-marked where applicable) / compose-a-worker (when
 // earned, S08.6) / subscription gap advice. A gap record is written in
 // EVERY case.
-func (r *Router) noFit(ctx context.Context, q RouteQuery, signals []string, degraded bool) (Decision, error) {
+func (r *Router) noFit(ctx context.Context, q RouteQuery, signals []string, degraded bool, refusedWrite []string) (Decision, error) {
 	seat, effort, seatReason, gapAdvice, err := r.resolveSeat(ctx, q, ExecutionProfile{Duty: DutyExecution})
 	if err != nil {
 		return Decision{}, err
@@ -643,6 +665,14 @@ func (r *Router) noFit(ctx context.Context, q RouteQuery, signals []string, degr
 	reason := "No specialist fits; running as generalist-with-injected-knowledge (the default for one-offs, S08.8)."
 	if degraded {
 		reason = "No specialist fits; running as generalist-with-injected-knowledge, DEGRADED-MARKED — the domain lacks a verified quality check (S08.7)."
+	}
+	if len(refusedWrite) > 0 {
+		// Say WHY first, in the requester's language: these specialists
+		// matched the work and were refused the EQUIPMENT for it, which is a
+		// different — and actionable — fact from nobody matching at all (R8).
+		reason = fmt.Sprintf(
+			"This plan writes files, and %s cannot write it (a read-only workspace, or no editing tool granted). ",
+			humanList(refusedWrite)) + reason
 	}
 	if due {
 		reason += fmt.Sprintf(" This task family has now recurred %d times — composing a specialist is EARNED (S08.6); a composition proposal is open.", rec.Occurrences)
@@ -741,6 +771,91 @@ func loosestClass(classes []string) string {
 		}
 	}
 	return best
+}
+
+// writeInstruments is the set of granted tools that can put bytes on disk —
+// the engine's file-writing verbs. A STRUCTURAL constant, not a ⚙ setting (the
+// §7 sseBatchSize precedent; flagged to the settings tab): it is the platform's
+// own tool vocabulary, and an operator turning a write tool into a non-write
+// tool by editing a number would be a lie, not a preference.
+//
+// Bash is deliberately absent. No v0 toolset grants it (stage's execTools is
+// Read/Write/Edit precisely so outward effects stay structurally unreachable,
+// Spec S02.7/S03.4), so admitting a shell as a "write instrument" would widen
+// this filter on a capability the platform does not hand out.
+var writeInstruments = map[string]bool{
+	"Write":        true,
+	"Edit":         true,
+	"MultiEdit":    true,
+	"NotebookEdit": true,
+}
+
+// canWrite reports whether a worker's GRANTED equipment can write the
+// workspace: it needs both a class whose workspace is mounted read-write and
+// at least one tool that can write a file. Either half missing means the
+// worker structurally cannot do a writing plan (Spec S08.8 step 1; S11.1 —
+// enforcement is the confinement class, consent is only cooperation).
+//
+// Note the two halves are independent: the S11 ladder is ordered by RANK, not
+// by workspace capability (C0 is the tightest and has no filesystem at all),
+// so "can write" is a property of the class, never a rank threshold.
+func canWrite(class string, granted []string) bool {
+	if !sandbox.Class(class).WorkspaceWritable() {
+		return false
+	}
+	for _, tool := range granted {
+		if writeInstruments[tool] {
+			return true
+		}
+	}
+	return false
+}
+
+// ftsMinMagnitude is the bm25 magnitude below which a description hit is
+// NOISE, not evidence. SQLite's bm25 is negative-better and its magnitude
+// carries inverse document frequency: a term appearing in EVERY indexed
+// description has idf ~0 and ranks at ~-0.000001 regardless of corpus size
+// (measured on this driver) — which says "this word distinguishes nobody",
+// the exact opposite of a match. A term that genuinely discriminates ranks
+// -1.2 (5 templates) to -3.4 (30). This floor sits three orders of magnitude
+// above the noise and two below the weakest real signal.
+//
+// The live defect it closes: "release-notes-writer" won a webshop task on a
+// rank of -0.00 — a vacuous echo of the task's own words — because ANY hit
+// scored a flat +0.5. Structural constant, no ⚙ key (settings-tab flagged).
+const ftsMinMagnitude = 0.01
+
+// ftsWeight bounds the description leg's contribution so it can never
+// outweigh a declared selector (family +2, trigger/task-class +1 each):
+// what a worker DECLARES it is for outranks what its prose happens to echo.
+const ftsWeight = 0.5
+
+// ftsContribution folds a bm25 rank into a bounded, magnitude-scaled score in
+// [0, ftsWeight). A ~0-magnitude hit contributes exactly 0, so a candidate
+// with no other signal keeps score 0 and takes the existing skip (R9).
+func ftsContribution(rank float64) float64 {
+	mag := -rank // bm25 is negative-better in SQLite
+	if mag < ftsMinMagnitude {
+		return 0
+	}
+	// Saturating: strictly increasing in magnitude, never reaching ftsWeight.
+	return ftsWeight * mag / (1 + mag)
+}
+
+// humanList renders names as a plain-language list for a requester-facing
+// reason ("a", "a and b", "a, b and c").
+func humanList(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return strconv.Quote(names[0])
+	}
+	quoted := make([]string, 0, len(names))
+	for _, n := range names {
+		quoted = append(quoted, strconv.Quote(n))
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + " and " + quoted[len(quoted)-1]
 }
 
 // classTighterOrEqual: worker class ≤ plan class on the S11 ladder ("equal

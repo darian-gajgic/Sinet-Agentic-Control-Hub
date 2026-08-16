@@ -32,6 +32,11 @@ type RouteQuery struct {
 	Classes  []string `json:"classes,omitempty"`
 	Tools    []string `json:"tools,omitempty"`
 	Research bool     `json:"research,omitempty"`
+	// Writes reports that the plan durably declares it writes the workspace
+	// (any non-empty step write_set, or an unbounded whole-project claim —
+	// the fact the S02.8 W claim is minted from). The plan DECLARES the
+	// requirement; S08.8 selection enforces it (P3-RW-14 R8).
+	Writes bool `json:"writes,omitempty"`
 }
 
 // RouteCandidate is one re-route target offered on the card.
@@ -113,6 +118,12 @@ func routeQueryFor(st *State, pair *Pair) RouteQuery {
 		Family:   string(st.Family),
 		Research: len(pair.Plan.ResearchNodes) > 0,
 	}
+	// The write posture is a REQUIREMENT, exactly like the class and tools
+	// below it: a plan that declares it writes cannot be given to equipment
+	// that cannot write (Spec S08.8 step 1; S02.8 — the claim is the durable
+	// knowledge that the task writes).
+	globs, unbounded := pair.Plan.WriteGlobs()
+	q.Writes = len(globs) > 0 || unbounded
 	seen := map[string]bool{}
 	for _, s := range pair.Plan.Steps {
 		if s.Class != "" && !seen["c:"+s.Class] {

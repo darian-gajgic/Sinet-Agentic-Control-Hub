@@ -862,6 +862,10 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 		Pack:     pack,
 		Runner:   s.cfg.CheckRunner,
 		Review:   sink,
+		// The S13 verification-workspace seam (Spec S07.3 rule 1): V1 checks
+		// run against the revision's stripped content, not the execute leg's
+		// scratch cwd, whenever the task is project-backed (P3-RW-14 R6).
+		Workspace: verifyWorkspaceSeam{s: s},
 		// Research counters stay nil at B2-4: stage sessions exist now,
 		// but the research TOOL substrate (WebSearch/egress) does not —
 		// nodes record UNVERIFIABLE-HERE loudly, never a fake pass
@@ -896,6 +900,22 @@ func (s *Skeleton) checkPack(ctx context.Context, domain, taskID string) (*verif
 	return pack, nil
 }
 
+// verifyWorkspaceSeam adapts the composition-root materializer to verify's
+// S13 WorkspaceProvider. It exists so internal/verify keeps taking an
+// interface and internal/stage keeps taking a func field over
+// internal/project (CONVENTIONS §23) — neither package learns about the other.
+type verifyWorkspaceSeam struct{ s *Skeleton }
+
+// VerificationWorkspace returns the materialized revision, or "" when this
+// task has none to materialize — the honest absence the drain falls back on
+// (the execute leg's own cwd, via the RW-6 forward walk).
+func (w verifyWorkspaceSeam) VerificationWorkspace(ctx context.Context, d verify.Deliverable) (string, func(), error) {
+	if w.s.cfg.VerificationWorkspace == nil {
+		return "", nil, nil
+	}
+	return w.s.cfg.VerificationWorkspace(ctx, d.TaskID, d.Revision)
+}
+
 // verifyInput builds the drain input for one persisted deliverable
 // revision of a task's verify run.
 func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revision int) (verify.VerifyInput, error) {
@@ -912,6 +932,20 @@ func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revisi
 	if err := os.MkdirAll(evidence, 0o700); err != nil {
 		return verify.VerifyInput{}, err
 	}
+	// The S07.2 wrote-nothing inputs (P3-RW-14 R7), all durable PLATFORM
+	// facts: what the plan CLAIMED it would write, and where the tree
+	// actually stands versus the pre-task base. Nothing the engine said
+	// about its own work is admissible here — that report is exactly what
+	// this gate exists to disbelieve.
+	globs, unbounded := pair.Plan.WriteGlobs()
+	var snapshotSHA, baseSHA string
+	if s.cfg.RepoFacts != nil {
+		if snapshotSHA, baseSHA, err = s.cfg.RepoFacts(ctx, taskID); err != nil {
+			// A git read failure is mechanical: it must not become a
+			// wrote-nothing verdict, and it must not silently pass either.
+			return verify.VerifyInput{}, fmt.Errorf("stage: read repo facts for verification: %w", err)
+		}
+	}
 	return verify.VerifyInput{
 		Deliverable: verify.Deliverable{
 			TaskID: taskID,
@@ -919,11 +953,14 @@ func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revisi
 			// THIS run: it is running through the drain (Spec S02.4
 			// checkpoint writability) and its consumption is the
 			// verification tax (Spec S07.11).
-			RunID:    runID,
-			Domain:   domainFor(st.Family),
-			Type:     "markdown",
-			Revision: revision,
-			Content:  content,
+			RunID:        runID,
+			Domain:       domainFor(st.Family),
+			Type:         "markdown",
+			Revision:     revision,
+			Content:      content,
+			SnapshotSHA:  snapshotSHA,
+			BaseSHA:      baseSHA,
+			WriteClaimed: len(globs) > 0 || unbounded,
 		},
 		Spec:          pair.Spec,
 		Steps:         pair.Plan.Steps,

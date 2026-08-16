@@ -853,7 +853,21 @@ func mustInt(s Settings, key string) int64 {
 // else the caller-prepared dev path.
 func (v *Verifier) workspace(ctx context.Context, d Deliverable, devPath string) (string, func(), error) {
 	if v.Workspace != nil {
-		return v.Workspace.VerificationWorkspace(ctx, d)
+		dir, cleanup, err := v.Workspace.VerificationWorkspace(ctx, d)
+		if err != nil {
+			return "", nil, err
+		}
+		if dir != "" {
+			return dir, cleanup, nil
+		}
+		// An empty dir is the seam's HONEST ABSENCE: this deliverable is not
+		// repo-backed, so there is no revision tree to materialize. That is
+		// not a failure and not an empty workspace — the caller-prepared path
+		// (the producing run's own cwd) is the tree under review. A wired
+		// seam that answers "nothing here" must not starve the checks.
+		if cleanup != nil {
+			cleanup()
+		}
 	}
 	if devPath == "" {
 		return "", nil, fmt.Errorf("%w: V1 needs a verification workspace (S13 seam or VerifyInput.Workspace)", ErrBadInput)

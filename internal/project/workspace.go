@@ -303,6 +303,39 @@ func (s *Store) RepoHead(ctx context.Context, projectID string) (string, error) 
 	return s.refSHA(ctx, e.StorePath, "refs/heads/"+e.DefaultBranch)
 }
 
+// SnapshotAndBase reports a pipeline's two durable content facts, READ-ONLY:
+// the snapshot commit its workspace currently stands on, and the attempt's
+// recorded base — the pre-task state revision 1 is presented against (Spec
+// S13.1, S13.5).
+//
+// Read-only is the whole point, and it is why this is not Snapshot(): Snapshot
+// STAGES AND COMMITS, so asking it a question changes the answer. The execute
+// leg already took its stage-close snapshot commit before verify was ever
+// launched, so HEAD here is exactly the tree the work landed on — while
+// committing again at verification time would be the platform manufacturing
+// the evidence it is about to judge.
+//
+// Empty strings are honest absences, never guesses: no worktree (the task is
+// not project-backed, or execute never made one) and no recorded base both
+// answer "". The S07.2 wrote-nothing gate refuses to fire on either.
+func (s *Store) SnapshotAndBase(ctx context.Context, projectID, pipelineID string) (snapshot, base string, err error) {
+	e, err := s.Get(ctx, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	worktree, ok, err := s.ExistingWorkspace(ctx, projectID, pipelineID)
+	if err != nil || !ok {
+		return "", "", err
+	}
+	if snapshot, err = s.headSHA(ctx, worktree); err != nil {
+		return "", "", err
+	}
+	if base, err = s.refSHA(ctx, e.StorePath, baseRef(pipelineID, 1)); err != nil {
+		return "", "", err
+	}
+	return snapshot, base, nil
+}
+
 // ExistingWorkspace returns a pipeline's attempt-1 run-branch worktree PATH
 // when it already exists (created by the execute leg), WITHOUT creating one —
 // the snapshot/mint resolution for legs (intake, verify) that must not

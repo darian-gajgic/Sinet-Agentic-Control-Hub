@@ -103,6 +103,24 @@ func (c Class) isV0() bool { return c == C0 || c == C1 || c == C2 }
 // (never passes a comparison).
 func (c Class) LadderRank() (int, bool) { return c.ladderRank() }
 
+// WorkspaceWritable reports whether this class mounts the workspace
+// read-write — the one class fact the S08.8 selection needs that the ladder
+// RANK cannot answer, because the ladder orders by tightness and the classes
+// are not totally ordered by capability (C0 is rank 0 and has no filesystem at
+// all, while C1 at rank 1 has a read-only workspace). Derived from the class
+// profile, never a second hardcoding of the same table: whatever Profile says
+// the workspace mode is, this answers.
+//
+// The S08.8 consumer: a plan that declares writes may not be given to a worker
+// whose granted class cannot write (P3-RW-14 R8).
+func (c Class) WorkspaceWritable() bool {
+	p, err := Profile(c)
+	if err != nil {
+		return false // an unknown class never passes a capability question
+	}
+	return p.WorkspaceMode == "rw"
+}
+
 // NetMode is the per-class egress posture (Spec S11.6 network column).
 type NetMode string
 

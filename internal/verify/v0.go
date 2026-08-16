@@ -126,6 +126,25 @@ func DefaultPreGates(shapes map[string]ShapeCheck) []PreGate {
 			}
 			return "", nil
 		}},
+		{ID: "wrote-nothing", Check: func(d Deliverable) (string, error) {
+			// The repo-backed sibling of diff-empty (Spec S07.2). The
+			// byte-comparison gate above cannot see this class at all:
+			// revision 1 has no previous revision, so an execute leg that
+			// ran, completed, billed, and moved not one byte of the tree
+			// passed straight through to the paid layers. S13.1 names
+			// revision 1's basis — the pre-task state — and both terms are
+			// durable PLATFORM facts (the snapshot ledger and the attempt's
+			// base ref), never anything the engine reported about itself.
+			//
+			// Guarded on all three: no snapshot pin means not repo-backed,
+			// no base means the basis is unknown (never guess one), and no
+			// write claim means a read-only plan may legitimately move
+			// nothing (Spec S02.8).
+			if d.WriteClaimed && d.SnapshotSHA != "" && d.BaseSHA != "" && d.SnapshotSHA == d.BaseSHA {
+				return "execution wrote nothing to the claimed write set", nil
+			}
+			return "", nil
+		}},
 		{ID: "shape", Check: func(d Deliverable) (string, error) {
 			if chk, ok := shapes[d.Type]; ok {
 				return chk(d)

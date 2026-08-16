@@ -485,6 +485,12 @@ func Run(ctx context.Context, opts Options) error {
 			DB: db, Log: log, Settings: reg,
 			Root: filepath.Join(stateDir, "review"),
 		}
+		// Late-bound seam inputs for the R6 verification workspace: the
+		// revision's content pin comes from the review store, and the
+		// materializations live under a platform-owned scratch root — never
+		// system temp (the §25 preview-clones precedent).
+		pseams.review = reviewStore
+		pseams.scratch = filepath.Join(stateDir, "verify-workspaces")
 
 		// The S12 local-tier surface (B4-5): the duty-alias client, the class-(b)
 		// intake/tie-break seams, the effective DutyMap (with the utility seat)
@@ -567,6 +573,11 @@ func Run(ctx context.Context, opts Options) error {
 			CreateRevisionRef:  pseams.CreateRevisionRef,
 			BaseContent:        pseams,
 			WorkspaceCwd:       pseams.WorkspaceCwd,
+			// V1 checks run against the revision with its VCS history
+			// stripped, and V0 gets the durable repo facts its wrote-nothing
+			// verdict rests on (P3-RW-14 R6/R7).
+			VerificationWorkspace: pseams.VerificationWorkspace,
+			RepoFacts:             pseams.RepoFacts,
 			// The S13.7 onboarding-as-task seams over internal/project (R5).
 			OnboardStart: func(ctx context.Context, projectID, owner, name, source string) (json.RawMessage, error) {
 				return proj.OnboardStart(ctx, project.OnboardInput{ProjectID: projectID, Owner: owner, Name: name, Source: source})

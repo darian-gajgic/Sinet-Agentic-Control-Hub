@@ -245,6 +245,16 @@ type Config struct {
 	// test posture) is that same fallback for every task.
 	VerificationWorkspace func(ctx context.Context, taskID string, revision int) (dir string, cleanup func(), err error)
 
+	// RepoFacts reports a task's durable repo-backed content facts — the
+	// snapshot commit its execute leg landed on, and the attempt's recorded
+	// base ref (Spec S13.1/S13.5). READ-ONLY by contract: they feed the S07.2
+	// wrote-nothing verdict (P3-RW-14 R7), so taking a fresh snapshot here
+	// would be the platform manufacturing the evidence it is about to judge.
+	//
+	// Empty strings are honest absences (no project, no worktree, no recorded
+	// base) and the gate declines to fire on any of them.
+	RepoFacts func(ctx context.Context, taskID string) (snapshotSHA, baseSHA string, err error)
+
 	// Seam overrides (Spec S08 selection arrives at B3; tests and the
 	// bounded live smoke substitute in-process fakes). Nil = the engine-
 	// session implementations of engines.go.

@@ -44,6 +44,7 @@ func (sr *skeletonRouter) RouteTask(ctx context.Context, q intake.RouteQuery) (i
 		Classes:   q.Classes,
 		Tools:     q.Tools,
 		Research:  q.Research,
+		Writes:    q.Writes,
 	})
 	if err != nil {
 		return intake.RouteBlock{}, err

@@ -714,14 +714,21 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 	// them; a floor reached leaves the low-weight tail to the planner's
 	// own listed assumptions (S06.4, S06.5).
 	if st.Band || st.ForceProceeded {
-		origin := "band"
+		// The prose is for the PERSON reading the approval card, so it says
+		// what happened in words, not in the platform's own vocabulary: the
+		// structural origin already rides the artifact's Assumption.Origin
+		// field, and printing an internal token twice told the requester
+		// nothing while making the sentence unreadable (S06.5 disclosed
+		// assumptions; CONVENTIONS §57 drafting rule 1). Each arm names the
+		// reason nobody was asked — the two are genuinely different reasons.
+		because := "this request was small enough to run without an interview, so I assumed a sensible default"
 		if st.ForceProceeded {
-			origin = "force_proceed"
+			because = "you asked me to go ahead without answering, so I assumed a sensible default"
 		}
 		for _, s := range tax.Unresolved(resolved) {
 			st.resolveSlot(SlotResolution{
 				SlotID: s.ID, How: ResolvedAssumption,
-				Assumption: fmt.Sprintf("(%s) %s — assumed: proceeding without an answer", origin, s.Name),
+				Assumption: fmt.Sprintf("%s — %s.", s.Name, because),
 			})
 		}
 		st.Clearance = tax.Clearance(st.resolvedSet())

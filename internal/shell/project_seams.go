@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +16,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/project"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/review"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
@@ -51,6 +56,14 @@ type projectSeams struct {
 	// because that is all a fingerprint needs and nothing here should be able
 	// to price anything.
 	prices interface{ Version() string }
+	// review resolves a deliverable revision's content pin (its snapshot
+	// commit) for the R6 verification-workspace seam. Late-bound: the review
+	// store is composed after these seams are.
+	review *review.Store
+	// scratch is the platform-owned root the R6 materializations are built
+	// under (<state-dir>/verify-workspaces) — never system temp, the §25
+	// preview-clones precedent.
+	scratch string
 }
 
 // registrySeam is the production intake.Registry (S06.2 step 2): match a
@@ -254,6 +267,138 @@ func (s *projectSeams) CheckPackFor(ctx context.Context, domain, taskID string) 
 		return nil, err // a registry read failure is mechanical, never a card
 	}
 	return packFromCapture(domain, e)
+}
+
+// VerificationWorkspace materializes the revision under review for the V1
+// checks, with answer-bearing VCS history STRIPPED (Spec S07.3 rule 1,
+// P-T06-2; P3-RW-14 R6). Substrate is the ratified §25 pair: a LOCKED utility
+// checkout at the revision's own snapshot pin, then a `.git`-less copy of it.
+//
+// Why not hand the checks the worktree, or the checkout itself: with history
+// present, a check (or an engine reading the evidence) can look up the answer
+// instead of deriving it, which is the measured failure mode P-T06-2 names —
+// the pass would score retrieval, not work. And a locked checkout is platform
+// state; the checks get a throwaway copy so nothing they do can dirty it.
+//
+// An empty dir with a nil error is the honest absence the caller falls back
+// on: no project, or no snapshot pin (a non-repo-backed deliverable) means
+// there is no revision tree to materialize — not that verification failed.
+func (s *projectSeams) VerificationWorkspace(ctx context.Context, taskID string, revision int) (string, func(), error) {
+	if s.review == nil {
+		return "", nil, nil
+	}
+	projectID, err := s.projectForTask(ctx, taskID)
+	if err != nil || projectID == "" {
+		return "", nil, err
+	}
+	rev, err := s.review.RevisionAt(ctx, stage.TaskDeliverableID(taskID), revision)
+	if err != nil {
+		return "", nil, err
+	}
+	if rev.SnapshotSHA == "" {
+		return "", nil, nil // content-pin lane: nothing repo-backed to check out
+	}
+
+	checkout, err := s.proj.AddUtilityCheckout(ctx, projectID, rev.SnapshotSHA)
+	if err != nil {
+		return "", nil, err
+	}
+	release := func() {
+		if rerr := s.proj.ReleaseUtilityCheckout(ctx, projectID, checkout.Path); rerr != nil {
+			// A leaked checkout is a defect worth seeing, never a reason to
+			// fail a verification that has already run.
+			log.Printf("shell: release verification checkout %s: %v", checkout.Path, rerr)
+		}
+	}
+	dir, err := strippedCopy(s.scratch, checkout.Path)
+	if err != nil {
+		release()
+		return "", nil, err
+	}
+	return dir, func() {
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			log.Printf("shell: remove verification workspace %s: %v", dir, rerr)
+		}
+		release()
+	}, nil
+}
+
+// strippedCopy copies src into a fresh dir under scratchRoot WITHOUT its VCS
+// history — the §25 copyTree precedent, kept local rather than shared because
+// the two callers answer to different specs (S13.8 zero-mutation previews vs
+// S07.3 rule 1 verification) and a shared helper would couple them.
+//
+// A worktree's `.git` is a FILE pointer, not a directory, so both forms are
+// skipped. Symlinks and devices are dropped: the checks read plain source, and
+// a symlink out of the workspace is exactly the escape this strip exists to
+// prevent.
+func strippedCopy(scratchRoot, src string) (string, error) {
+	if scratchRoot == "" {
+		return "", fmt.Errorf("shell: no scratch root for the verification workspace")
+	}
+	if err := os.MkdirAll(scratchRoot, 0o700); err != nil {
+		return "", fmt.Errorf("shell: verification scratch root: %w", err)
+	}
+	dst, err := os.MkdirTemp(scratchRoot, "verify-")
+	if err != nil {
+		return "", fmt.Errorf("shell: verification workspace dir: %w", err)
+	}
+	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.Name() == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		// Preserve the executable bit: a check that runs ./script needs it.
+		mode := os.FileMode(0o600)
+		if info.Mode()&0o100 != 0 {
+			mode = 0o700
+		}
+		return os.WriteFile(target, data, mode)
+	})
+	if err != nil {
+		_ = os.RemoveAll(dst)
+		return "", err
+	}
+	return dst, nil
+}
+
+// RepoFacts reports the durable repo-backed platform facts for a task's
+// execute leg: the snapshot commit its work landed on, and the attempt's
+// recorded base ref. Both feed the S07.2 wrote-nothing gate (P3-RW-14 R7),
+// which is why this reads and never writes — see project.SnapshotAndBase.
+//
+// Empty strings are honest absences (no project, no worktree, no recorded
+// base), and the gate declines to fire on any of them.
+func (s *projectSeams) RepoFacts(ctx context.Context, taskID string) (snapshot, base string, err error) {
+	projectID, err := s.projectForTask(ctx, taskID)
+	if err != nil || projectID == "" {
+		return "", "", err
+	}
+	return s.proj.SnapshotAndBase(ctx, projectID, taskID)
 }
 
 // packFromCapture is the capture→pack projection, pure over one registry entry.
