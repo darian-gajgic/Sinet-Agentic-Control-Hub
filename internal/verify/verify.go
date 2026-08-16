@@ -153,6 +153,24 @@ type Deliverable struct {
 	// untrusted-content reader (4.7): it never skips V2 and never skips
 	// axis 2, regardless of stakes gating (Spec S07.8).
 	Steered bool `json:"steered,omitempty"`
+
+	// ---- Repo-backed platform facts (Spec S13.1 content pin; S02.8
+	// claims). These are DURABLE platform knowledge — the snapshot ledger and
+	// the approved plan — never an engine-supplied signal, which is what lets
+	// the S07.2 wrote-nothing gate be a $0 structural kill.
+
+	// SnapshotSHA is the revision's content pin: the snapshot commit of a
+	// repo-backed revision (Spec S13.1). Empty when the deliverable is not
+	// repo-backed, and an empty pin gives the wrote-nothing gate no facts.
+	SnapshotSHA string `json:"snapshot_sha,omitempty"`
+	// BaseSHA is the attempt's base ref (refs/sinet/base/<pipeline>) — the
+	// pre-task state that revision 1 is presented against (Spec S13.1).
+	// Empty means unknown, and the gate never guesses a base.
+	BaseSHA string `json:"base_sha,omitempty"`
+	// WriteClaimed is the plan's durable claim that this task writes: an
+	// active W artifact_claims row, or any non-empty step write_set (Spec
+	// S02.8). A plan that claims no writes may legitimately move no tree.
+	WriteClaimed bool `json:"write_claimed,omitempty"`
 }
 
 // SHA256 returns the revision content hash (round records, similarity).

@@ -232,6 +232,19 @@ type Config struct {
 	// CheckRunner executes V1 checks (required when a pack is present).
 	CheckRunner verify.CheckRunner
 
+	// VerificationWorkspace materializes the content of one deliverable
+	// revision for the V1 checks to run against, with answer-bearing VCS
+	// history STRIPPED (Spec S07.3 rule 1, P-T06-2; P3-RW-14 R6). Another
+	// func seam over internal/project (CONVENTIONS §23), wired at the
+	// composition root; the returned cleanup releases the materialization and
+	// is always called when it is non-nil.
+	//
+	// An empty dir with a nil error is an HONEST absence — the task is not
+	// project-backed, so there is no revision to materialize and the checks
+	// fall back to the execute leg's own cwd (the RW-6 forward walk). Nil (the
+	// test posture) is that same fallback for every task.
+	VerificationWorkspace func(ctx context.Context, taskID string, revision int) (dir string, cleanup func(), err error)
+
 	// Seam overrides (Spec S08 selection arrives at B3; tests and the
 	// bounded live smoke substitute in-process fakes). Nil = the engine-
 	// session implementations of engines.go.

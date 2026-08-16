@@ -207,6 +207,13 @@ type RouteQuery struct {
 	Classes []string
 	// Tools are the plan-required tools (required grants ⊆ granted).
 	Tools []string
+	// Writes reports that the plan durably declares it writes the workspace:
+	// any non-empty step write_set, or an unbounded (whole-project) claim —
+	// the same fact the S02.8 W claim is minted from. A writing plan is a
+	// REQUIREMENT like any other (Spec S08.8 step 1: "the plan declares
+	// requirements — confinement class, tools…"), so equipment that cannot
+	// write cannot take it, however well its description matches (P3-RW-14 R8).
+	Writes bool
 	// Research: the plan carries research nodes (step 4 — search-capable
 	// lane).
 	Research bool
