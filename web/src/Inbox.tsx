@@ -8,10 +8,12 @@ import {
   type ApprovalItem,
   type ApprovalList,
   type BenchmarkVerdictForms,
+  type IntakeUnderstood,
   type MemoryConflict,
   type PendingPair,
 } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
+import { UnderstoodPanel } from './Intake'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive } from './live'
 import { Absent, Freshness, Owner, Stamp, SurfaceHead } from './parts'
@@ -794,7 +796,8 @@ type AskSnapshot = {
   task_id?: string
   clearance?: number
   tier?: string
-  questions?: { id: string; text: string; options?: { label: string; value: string }[] }[]
+  understood?: IntakeUnderstood
+  questions?: { id: string; text: string; phrased?: string; options?: { label: string; value: string }[] }[]
   decision?: { summary?: string; detail?: string[]; choices?: { label: string; value: string }[]; help?: HelpBlock }
   approval?: {
     layer1?: {
@@ -811,6 +814,7 @@ type AskSnapshot = {
       help?: HelpBlock
       uncovered?: string[]
       open_findings?: string[]
+      understood?: IntakeUnderstood
     }
     layer2?: {
       acs?: { n: number; plain: string; structured?: string; structured_kind?: string }[]
@@ -846,6 +850,7 @@ function ApprovalCard({ snap, expanded }: { snap: AskSnapshot; expanded: boolean
   return (
     <div className="ask-card" data-card-kind={snap.kind ?? 'approval'}>
       <p className="restatement wrap-anywhere">{l1.restatement ?? <Absent reason="the card records no restatement" />}</p>
+      <UnderstoodPanel understood={l1.understood} heading="Point by point — what was settled, and how" />
       <Bullets title="What you get" items={l1.deliverable} />
       <Bullets title="What I will do" items={l1.steps} ordered />
       <Bullets title="What I will NOT do" items={l1.will_not_do} />
@@ -958,14 +963,20 @@ function DecisionCard({ snap }: { snap: AskSnapshot }) {
   )
 }
 
-/** The S06.5 batched option card. */
+/** The S06.5 batched option card: the phrased wording when the utility seat
+ *  answered (RW-12 R6), the canonical text otherwise, each question's own
+ *  options beside it, and the per-round understanding recap above. */
 function InterviewCard({ snap }: { snap: AskSnapshot }) {
   return (
     <div className="ask-card" data-card-kind={snap.kind ?? 'interview'}>
+      <UnderstoodPanel understood={snap.understood} heading="What it understood so far" />
       <ol className="questions">
         {(snap.questions ?? []).map((q) => (
           <li key={q.id} className="wrap-anywhere" data-question={q.id}>
-            {q.text}
+            {q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text}
+            {(q.options ?? []).length > 0 && (
+              <span className="muted"> — {(q.options ?? []).map((o) => o.label).join(' · ')}</span>
+            )}
           </li>
         ))}
       </ol>
@@ -1244,7 +1255,9 @@ function Acts({
           />
         </label>
       )}
-      {envelope === 'choice' && <CriteriaPicker item={item} picked={criteria} onPick={setCriteria} />}
+      {envelope === 'choice' && takesCriteria(item) && (
+        <CriteriaPicker item={item} picked={criteria} onPick={setCriteria} />
+      )}
       {acceptsReason.includes(item.kind) && (
         <label className="reason">
           <span>Why (recorded with your decision)</span>
@@ -1300,7 +1313,7 @@ function Acts({
               )
             }}
           >
-            {action}
+            {actionLabel(item, action)}
           </Button>
         ))}
       </div>
@@ -1324,6 +1337,46 @@ function Acts({
  *  drift dismissal and a conformance acknowledgement each take one, and the
  *  alarm disposition carries its own beside the disposition it explains. */
 const acceptsReason = ['effect', 'watchdog_flag', 'drift_card', 'conformance_card']
+
+/**
+ * Plain words on the verb buttons (operator finding F3, 2026-08-16: raw
+ * action ids — "approve", "force_proceed", bare family values — read as
+ * "buggy buttons all over the place").
+ *
+ * PRECEDENCE IS THE CARD'S OWN VOCABULARY: a choice-envelope card carries its
+ * choices WITH labels, and the label whose value matches the action id is the
+ * card's own name for the act — the family card's "Build or change software"
+ * comes from there, written by the platform, not by this file. Only the fixed
+ * pipeline verbs, whose ids are frozen constants with no served label, get a
+ * plain-words name here (the D8 mandate, same as `checkFirst`). An id neither
+ * source knows renders as itself — forward tolerance over silence (§42).
+ */
+const plainVerbs: Record<string, string> = {
+  approve: 'Approve',
+  reject: 'Reject',
+  deny: 'Deny',
+  replan: 'Send it back to plan',
+  reinterview: 'Re-open the interview',
+  cancel: 'Cancel the task',
+  compose: 'Compose a specialist',
+  force_proceed: 'Proceed — open questions become assumptions',
+  verdict: 'Record the verdict',
+  decline: 'Decline to judge',
+  resume: 'Resume the run',
+  suppress: 'Suppress the flag',
+  dismiss: 'Dismiss',
+  acknowledge: 'Acknowledge — read and noted',
+  dispose: 'Record the disposition',
+  resolve: 'Resolve',
+}
+
+function actionLabel(item: ApprovalItem, action: string): string {
+  if (answerEnvelope(item) === 'choice') {
+    const choice = (asSnapshot(item.card).decision?.choices ?? []).find((c) => c.value === action)
+    if (choice !== undefined && choice.label !== '') return choice.label
+  }
+  return plainVerbs[action] ?? action
+}
 
 /**
  * The reveal, rendered.
@@ -1546,6 +1599,22 @@ function composeAnswer(item: ApprovalItem, action: string, input: ActInput): unk
     default:
       return null
   }
+}
+
+/**
+ * criteriaChoices — the decision-card choice values whose answer CONSUMES a
+ * criteria list (today: dropping a criterion names which ones). The picker
+ * renders ONLY when the card offers such a choice: on every other decision
+ * card — the onboarding digest, the family question — the detail lines are
+ * context to read, and rendering them as checkboxes made a digest look like a
+ * broken form (operator finding, 2026-08-12: "Which of these" over lines
+ * nothing can pick).
+ */
+const criteriaChoices = ['drop_criterion']
+
+function takesCriteria(item: ApprovalItem): boolean {
+  const choices = asSnapshot(item.card).decision?.choices ?? []
+  return choices.some((c) => criteriaChoices.includes(c.value))
 }
 
 /** CriteriaPicker offers the decision card's OWN listed items. Some choices

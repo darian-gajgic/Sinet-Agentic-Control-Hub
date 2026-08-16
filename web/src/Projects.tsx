@@ -602,6 +602,7 @@ function CreateProject({
   const [projectID, setProjectID] = useState('')
   const [name, setName] = useState('')
   const [remote, setRemote] = useState('')
+  const [family, setFamily] = useState('')
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState('')
   const [started, setStarted] = useState<ProjectStarted | null>(null)
@@ -625,6 +626,7 @@ function CreateProject({
         project_id: projectID,
         name: name.trim(),
         ...(remote.trim() !== '' ? { remote_url: remote.trim() } : {}),
+        ...(family !== '' ? { family } : {}),
       })
       .then(
         (r) => {
@@ -634,7 +636,11 @@ function CreateProject({
         },
         (err: unknown) => {
           setBusy(false)
-          if (err instanceof ApiError && err.status === 404) {
+          if (err instanceof ApiError && err.code === 'dev_identity') {
+            // The server's own refusal cites its spec section; a person mid-task
+            // needs the act, not the citation (2026-08-12 walk, cosmetic 3).
+            setRefusal('sign-in')
+          } else if (err instanceof ApiError && err.status === 404) {
             setRefusal(
               'This control plane does not serve the projects door — it predates the projects service. Nothing was registered.',
             )
@@ -742,11 +748,44 @@ function CreateProject({
               }}
             />
           </label>
-          {refusal !== '' && (
+          <label className="door-field m-0">
+            <span className="door-label">
+              What kind of tasks this project holds <span className="door-optional">optional</span>
+            </span>
+            <select
+              className="door-input door-select"
+              value={family}
+              data-create-family
+              onChange={(e) => {
+                setFamily(e.target.value)
+              }}
+            >
+              <option value="">decide later — each task is classified or asked</option>
+              <option value="software">Build or change software</option>
+              <option value="research">Find something out</option>
+              <option value="content">Write or create content</option>
+              <option value="data">Work with data</option>
+              <option value="chore">A routine chore</option>
+              <option value="generic">Something else</option>
+            </select>
+            <span className="door-optional">
+              Declared here, every task in this project opens the right questions at once — no kind-of-work question,
+              no guessing.
+            </span>
+          </label>
+          {refusal === 'sign-in' ? (
+            <div className="door-refusal" role="alert">
+              <p className="refusal-detail">
+                Creating a project is a person&apos;s act, and you are browsing without being signed in — nothing was
+                registered. <Link to={hrefFor('login')}>Sign in</Link>, then register it again; the project is recorded
+                as yours.
+              </p>
+            </div>
+          ) : refusal !== '' ? (
             <div className="door-refusal" role="alert">
               <p className="refusal-detail">{refusal}</p>
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </Modal>

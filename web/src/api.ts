@@ -1570,12 +1570,37 @@ export type ChatSessionDeleted = { session_id: string; messages: number; turns: 
 // an option, an action or a choice the card did not serve.
 
 /** One card question (interview / clarification / escalation). Options are the
- *  card's own 2–4 labeled values; free text is always available beside them. */
+ *  card's own 2–4 labeled values; free text is always available beside them.
+ *  `phrased` is the utility model's per-request rewording (P3-RW-12 R6):
+ *  additive and optional — a surface renders it when present and the
+ *  canonical `text` otherwise, exactly the producer's own rule. */
 export type IntakeQuestion = {
   id: string
   text: string
+  phrased?: string
   options?: { label: string; value: string }[]
   weight?: number
+}
+
+/** One resolved must-know, as the platform recorded it (P3-RW-12 R8 —
+ *  intake/cards.go UnderstoodItem, mirrored by name). `how` is the origin
+ *  label: registry | answered | assumption, plus "escalation" for an answered
+ *  1.7 single-question ask. */
+export type IntakeUnderstoodItem = {
+  slot_id: string
+  name: string
+  how: string
+  value?: string
+  assumption?: string
+}
+
+/** The "here is what I understood so far" block (P3-RW-12 R8/R9): items are
+ *  DETERMINISTIC — the platform's own record — and `text` is the optional
+ *  utility-phrased prose, empty whenever no phrase seam answered and never
+ *  synthesized from the items (§26 honest degradation). */
+export type IntakeUnderstood = {
+  items?: IntakeUnderstoodItem[]
+  text?: string
 }
 
 /** The S06.10 help block: what this decides, what goes wrong, what's advised. */
@@ -1634,6 +1659,10 @@ export type IntakeApproval = {
     help?: IntakeHelp
     uncovered?: string[]
     open_findings?: string[]
+    /** The FULL slot-by-slot recap beside the planner's prose restatement
+     *  (P3-RW-12 R9): what the PLATFORM recorded, origin-labeled, next to
+     *  what the PLANNER understood. */
+    understood?: IntakeUnderstood
   }
   layer2?: {
     acs?: AC[]
@@ -1670,6 +1699,9 @@ export type IntakeCard = {
   decision?: IntakeDecision
   approval?: IntakeApproval
   delta?: IntakeDelta
+  /** The per-round understanding block on interview and clarification cards
+   *  (P3-RW-12 R8). Escalation and family cards carry none. */
+  understood?: IntakeUnderstood
 }
 
 /** The pipeline's own task view, returned by BOTH intake writes: where the
@@ -2151,7 +2183,11 @@ export const api = {
    * pending entry answers 200 with the existing references; already-active
    * answers 409 `already_registered`.
    */
-  createProject: (body: { project_id: string; name: string; remote_url?: string }) =>
+  /** `family` is the P3-RW-11 owner-declared task family (optional; the six-
+   *  value vocabulary is validated registry-side and a bad value refuses
+   *  loudly). Declared, it decides the question set intake opens for every
+   *  task in the project; absent means each task is classified or asked. */
+  createProject: (body: { project_id: string; name: string; remote_url?: string; family?: string }) =>
     post<ProjectStarted>('/api/projects', body),
 
   tasks: (f: ListFilters = {}) => request<TaskList>(`/api/tasks${query(f)}`),

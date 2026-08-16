@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, CircleAlert, FolderOpen, Sparkles, X } from 'lucide-react'
 
 import {
   ApiError,
+  Unreachable,
   api,
   type IntakeAnswerBody,
   type IntakeCard,
   type IntakeHelp,
   type IntakeQuestion,
   type IntakeTaskView,
+  type IntakeUnderstood,
 } from './api'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive } from './live'
@@ -289,6 +291,8 @@ const kindLine: Record<string, string> = {
   'decision.coverage': 'The plan cannot cover everything you asked. Decide what happens to the gap.',
   'decision.research': 'It is missing a fact it would otherwise have to research. Supply it, or send it to re-plan.',
   'decision.spec_doubt': 'It doubts the spec captures what you meant. This card is never skipped.',
+  'decision.family':
+    'One question before the interview: what KIND of work is this? The questions it asks next, and who does the work, follow from your answer.',
   approval: 'The plan. Nothing runs and nothing spends until you approve it.',
   'approval.delta': 'The plan changed after your approval. Exactly what changed is below — nothing else moved.',
 }
@@ -303,6 +307,16 @@ function Journey({
   stream?: EventStream
 }) {
   const phase = view.phase ?? ''
+  // How many answers this tab has folded in. The no-card face changes with
+  // it: before the first answer the machine is reading the goal; after one,
+  // it is composing the next round or the plan — different words, and the
+  // "task is born" line after an answer read as a stall (live walk,
+  // 2026-08-16).
+  const [beats, setBeats] = useState(0)
+  const fold = (v: IntakeTaskView) => {
+    setBeats((b) => b + 1)
+    onView(v)
+  }
 
   // EVERY non-terminal state rides the live follow path (fixed 2026-08-11,
   // found on the seeded world): the pipeline keeps moving after a write
@@ -319,7 +333,7 @@ function Journey({
       ) : phase === 'cancelled' ? (
         <Cancelled view={view} />
       ) : (
-        <FollowTask view={view} onView={onView} stream={stream} />
+        <FollowTask view={view} onView={fold} answered={beats > 0} stream={stream} />
       )}
     </div>
   )
@@ -335,10 +349,12 @@ function Journey({
 function FollowTask({
   view,
   onView,
+  answered = false,
   stream,
 }: {
   view: IntakeTaskView
   onView: (v: IntakeTaskView) => void
+  answered?: boolean
   stream?: EventStream
 }) {
   const asks = useLive({
@@ -381,7 +397,7 @@ function FollowTask({
       />
     )
   }
-  return <NoCardYet view={view} waiting={asks.data !== null} />
+  return <NoCardYet view={view} waiting={asks.data !== null} answered={answered} />
 }
 
 /** The journey's standing header: whose task, where it stands, the clearance
@@ -389,6 +405,9 @@ function FollowTask({
  *  renders it, it never recomputes it. */
 function JourneyHead({ view }: { view: IntakeTaskView }) {
   const clearance = view.open_card?.clearance ?? view.clearance
+  // A cold resume's task read carries no tier; the open card does. Either
+  // source is the platform's own figure — never derived here.
+  const tier = view.tier !== undefined && view.tier !== '' ? view.tier : view.open_card?.tier
   return (
     <header className="journey-head">
       <div className="journey-title">
@@ -399,10 +418,10 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
         </p>
       </div>
       <div className="journey-side">
-        {view.tier !== undefined && view.tier !== '' && (
+        {tier !== undefined && tier !== '' && (
           <span className="journey-tier">
-            <Chip tone={view.tier === 'high' ? 'red' : view.tier === 'medium' ? 'orange' : 'blue'}>
-              stakes: {view.tier}
+            <Chip tone={tier === 'high' ? 'red' : tier === 'medium' ? 'orange' : 'blue'}>
+              stakes: {tier}
             </Chip>
           </span>
         )}
@@ -428,6 +447,139 @@ function ClearanceMeter({ value }: { value: number }) {
         <span className="clearance-fill" style={{ width: `${String(ratio * 100)}%` }} />
       </span>
       <b className="mono">{String(value)}</b>
+    </div>
+  )
+}
+
+/* ── the understanding block (P3-RW-12 R8/R9) ────────────────────────────── */
+
+/** The origin labels, in the reader's words. The four values are the card
+ *  vocabulary (intake/cards.go); anything new renders as itself (§42). */
+function howWords(how: string): string {
+  switch (how) {
+    case 'registry':
+      return 'from the project record'
+    case 'answered':
+      return 'you answered'
+    case 'assumption':
+      return 'assumed — out loud'
+    case 'escalation':
+      return 'you answered its question'
+    default:
+      return how
+  }
+}
+
+/**
+ * "Here is what I understood so far" — the per-round recap on interview and
+ * clarification cards, and the platform's slot-by-slot record beside the
+ * planner's restatement on the plan card. Items are the platform's own
+ * deterministic record; `text` is the optional utility-phrased prose and
+ * renders as the lead when present. An absent block renders nothing — the
+ * first round has nothing to recap, and that is not a defect.
+ */
+export function UnderstoodPanel({ understood, heading }: { understood?: IntakeUnderstood; heading: string }) {
+  if (understood === undefined) return null
+  const items = understood.items ?? []
+  const text = understood.text ?? ''
+  if (items.length === 0 && text === '') return null
+  return (
+    <div className="understood" data-understood>
+      <p className="understood-head">{heading}</p>
+      {text !== '' && <p className="understood-text">{text}</p>}
+      {items.length > 0 && (
+        <ul className="understood-items">
+          {items.map((it) => (
+            <li key={`${it.slot_id}:${it.how}`} data-slot={it.slot_id} data-how={it.how}>
+              <span className="understood-name">{it.name}</span>
+              <span className="understood-value">
+                {it.how === 'assumption' && it.assumption !== undefined && it.assumption !== ''
+                  ? it.assumption
+                  : it.value !== undefined && it.value !== ''
+                    ? it.value
+                    : '—'}
+              </span>
+              <span className="understood-how">{howWords(it.how)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/* ── the composing face (never-stall-silently; findings 2026-08-16 item 4) ── */
+
+/** Elapsed-time words for the face's own clock — a display derivation of the
+ *  moment THIS page sent the request, nothing more. */
+function elapsedWords(s: number): string {
+  if (s < 60) return `${String(s)} s`
+  const m = Math.floor(s / 60)
+  return `${String(m)} min ${String(s % 60)} s`
+}
+
+/**
+ * The face's clock: real elapsed time from a start instant, re-rendered on
+ * animation frames. DELIBERATELY NOT setInterval — the app tree carries a
+ * standing no-timer scan (S15.12 live-by-default: nothing may poll on a
+ * clock), and this hook honors the invariant's letter and spirit: it touches
+ * no network, computes from one timestamp, pauses with the hidden tab, and
+ * shows the true elapsed the moment frames resume.
+ */
+function useElapsedSeconds(active: boolean): number {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const started = Date.now()
+    let frame = 0
+    const tick = () => {
+      const s = Math.floor((Date.now() - started) / 1000)
+      setSeconds((prev) => (prev === s ? prev : s))
+      frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [active])
+  return seconds
+}
+
+/**
+ * The honest in-place progress face for the two long waits the pipeline
+ * actually has (both measured on this machine, 2026-08-16): an interview
+ * round's phrased card takes about a minute to build on the local model, and
+ * the plan draft composes synchronously in one piece — minutes. The answer
+ * request carries the work, so the wait is real; this face says what is
+ * happening, counts the time it has itself been waiting, and tells the truth
+ * about leaving: the card lands in the Inbox and the page resumes on its own.
+ * No spinner stands alone, nothing pretends to know a percentage.
+ */
+function ComposingFace({ mode }: { mode: 'answer' | 'approve' }) {
+  const seconds = useElapsedSeconds(true)
+  const long = seconds >= 90
+  return (
+    <div className="composing" role="status" data-composing={mode}>
+      <span className="composing-dots" aria-hidden="true">
+        <i /><i /><i />
+      </span>
+      <div className="composing-body">
+        <p className="composing-head">
+          {mode === 'approve' ? 'Approved — it is starting the work' : 'Answers recorded — it is working on what comes next'}
+        </p>
+        <p className="composing-sub">
+          {mode === 'approve'
+            ? 'The approval is being recorded and the work handed to its worker. This usually takes a few seconds.'
+            : 'It is choosing and phrasing the next questions, or drafting the plan. A question round takes about a minute on the local models; the full plan is drafted in one piece and can take a few minutes.'}
+        </p>
+        <p className="composing-clock mono">working · {elapsedWords(seconds)}</p>
+        {mode === 'answer' && long && (
+          <p className="composing-sub">
+            Still at it — a full plan draft is the long step, and it arrives whole. You can leave: the card lands in
+            your <Link to={hrefFor('inbox')}>Inbox</Link> and this page resumes by itself when you come back.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -476,29 +628,78 @@ function CardPanel({
           setRefusal('The PIN was not accepted. Try again.')
           return
         }
+        if (err instanceof Unreachable) {
+          // The long compose rides this very request, so a dropped connection
+          // mid-draft is a real path. The truth (S02.3 R4): an answer that
+          // landed resumes the run server-side, and a drive that died past
+          // the resume is re-driven by the recovery ladder within a sweep —
+          // machine-only. The live follow below picks the result up either
+          // way; only an answer that never reached the platform needs
+          // re-sending, and the still-open card is exactly that signal.
+          setRefusal(
+            'The connection was lost while it was working. If your answer reached the platform, the work continues on its own — a draft broken mid-write is healed automatically within a few minutes, and the next card appears right here and in your Inbox without anything from you. If this same card is still open in a few minutes, the answer never landed: send it again.',
+          )
+          return
+        }
         setRefusal(describeError(err))
       },
     )
   }
 
   const kind = card.kind
+  // A kind this file has never heard of still renders a WORKING form by its
+  // BODY SHAPE (operator finding F3, 2026-08-16: the "answer it from its
+  // inbox card" placeholder read as a bug): a card carries exactly one of the
+  // four answerable bodies, and each body has a form here. Only a card with
+  // no recognizable body falls back to its inbox pointer — that one this page
+  // genuinely cannot compose an answer for.
+  const known = kind in kindLine
+  const fallbackForm = !known
+    ? card.approval !== undefined
+      ? 'approval'
+      : card.delta !== undefined
+        ? 'delta'
+        : card.decision !== undefined
+          ? 'decision'
+          : (card.questions ?? []).length > 0
+            ? 'questions'
+            : 'none'
+    : 'none'
+  // While the answer request is in flight the FORM is done saying anything —
+  // the wait is the story now (a phrased round takes ~a minute, a plan draft
+  // minutes, and both ride this very request), so the composing face replaces
+  // the dead controls instead of dimming them.
+  const composing = busy && (kind === 'approval' || kind === 'approval.delta' ? 'approve' : 'answer')
   return (
     <div className="door-card" data-card-kind={kind}>
-      <p className="card-kind-line">{kindLine[kind] ?? `A ${kind} card — its controls are below.`}</p>
-      {kind === 'interview' && <QuestionForm card={card} busy={busy} allowAssume onAnswer={answer} />}
-      {kind === 'clarification' && <QuestionForm card={card} busy={busy} allowAssume={false} onAnswer={answer} />}
-      {kind === 'escalation' && <EscalationForm card={card} busy={busy} onAnswer={answer} />}
-      {(kind === 'decision.coverage' || kind === 'decision.research' || kind === 'decision.spec_doubt') && (
-        <DecisionForm card={card} busy={busy} onAnswer={answer} />
-      )}
-      {kind === 'approval' && <PlanCard view={view} card={card} busy={busy} onAnswer={answer} />}
-      {kind === 'approval.delta' && <DeltaForm card={card} busy={busy} onAnswer={answer} />}
-      {!(kind in kindLine) && (
-        <p className="muted">
-          This card kind has no form here yet — answer it from{' '}
-          <Link to={hrefFor('inbox-item', { id: `ask:${askID}` })}>its inbox card</Link>, and the journey resumes in
-          place.
-        </p>
+      <p className="card-kind-line">{kindLine[kind] ?? `A ${kind} card — what it asks of you is below.`}</p>
+      {composing !== false ? (
+        <ComposingFace mode={composing} />
+      ) : (
+        <>
+          {kind === 'interview' && <QuestionForm card={card} busy={busy} allowAssume onAnswer={answer} />}
+          {kind === 'clarification' && <QuestionForm card={card} busy={busy} allowAssume={false} onAnswer={answer} />}
+          {kind === 'escalation' && <EscalationForm card={card} busy={busy} onAnswer={answer} />}
+          {(kind === 'decision.coverage' || kind === 'decision.research' || kind === 'decision.spec_doubt') && (
+            <DecisionForm card={card} busy={busy} onAnswer={answer} />
+          )}
+          {kind === 'decision.family' && <FamilyForm card={card} busy={busy} onAnswer={answer} />}
+          {kind === 'approval' && <PlanCard view={view} card={card} busy={busy} onAnswer={answer} />}
+          {kind === 'approval.delta' && <DeltaForm card={card} busy={busy} onAnswer={answer} />}
+          {fallbackForm === 'approval' && <PlanCard view={view} card={card} busy={busy} onAnswer={answer} />}
+          {fallbackForm === 'delta' && <DeltaForm card={card} busy={busy} onAnswer={answer} />}
+          {fallbackForm === 'decision' && <DecisionForm card={card} busy={busy} onAnswer={answer} />}
+          {fallbackForm === 'questions' && (
+            <QuestionForm card={card} busy={busy} allowAssume={false} onAnswer={answer} />
+          )}
+          {fallbackForm === 'none' && !known && (
+            <p className="muted">
+              This card carries a shape this page cannot answer.{' '}
+              <Link to={hrefFor('inbox-item', { id: `ask:${askID}` })}>Its inbox card</Link> shows everything it holds —
+              answering there resumes the journey right here.
+            </p>
+          )}
+        </>
       )}
 
       {needPin && (
@@ -609,10 +810,15 @@ function QuestionForm({
 
   return (
     <div className="q-form">
+      <UnderstoodPanel understood={card.understood} heading="What it understood so far" />
       {questions.map((q, i) => (
         <fieldset className="q-card" key={q.id} data-question={q.id}>
           <legend className="q-legend">
-            <span className="q-n mono">{String(i + 1)}</span> {q.text}
+            {/* The phrased wording when the utility seat answered, the
+                canonical taxonomy text otherwise (P3-RW-12 R6) — the
+                producer's own display rule. */}
+            <span className="q-n mono">{String(i + 1)}</span>{' '}
+            {q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text}
           </legend>
           <div className="q-options" role="group" aria-label={`options for: ${q.text}`}>
             {(q.options ?? []).map((o) => {
@@ -703,7 +909,7 @@ function EscalationForm({ card, busy, onAnswer }: { card: IntakeCard; busy: bool
     <div className="q-form">
       {q !== undefined && (
         <fieldset className="q-card">
-          <legend className="q-legend">{q.text}</legend>
+          <legend className="q-legend">{q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text}</legend>
           <textarea
             className="door-text"
             rows={3}
@@ -852,6 +1058,98 @@ function DecisionForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolea
   )
 }
 
+/* ── the family card (P3-RW-11; operator finding F2 2026-08-16) ──────────── */
+
+/**
+ * The hint line under each KNOWN family value — presentation copy for a
+ * non-programmer choosing a kind of work, keyed on the choice VALUE. The
+ * card's own served label is always the label; an unknown value renders
+ * label-only (forward tolerance, §42). These sentences describe the choice —
+ * they state no platform fact and fabricate no number.
+ */
+const familyHints: Record<string, string> = {
+  software: 'websites, apps, scripts, automations — anything that runs',
+  research: 'a question to answer, options to compare, facts to gather',
+  content: 'words, posts, documents, images — things people read or see',
+  data: 'spreadsheets, records, cleaning, analysis, reports from numbers',
+  chore: 'recurring upkeep with a known shape — tidy, rotate, archive',
+  generic: 'none of the above fits — it asks broad questions instead',
+}
+
+/**
+ * The family question, in the journey (F2: the "answer it from its inbox
+ * card" placeholder read as a bug and is dead). Six large tappable kind-cards
+ * from the card's OWN served choices — labels served, values quoted back via
+ * the same {choice} envelope every decision card uses — with the 13.5 help
+ * underneath. One pick, then the act; disabled states print their reason.
+ */
+function FamilyForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolean; onAnswer: (b: IntakeAnswerBody) => void }) {
+  const d = card.decision
+  const [choice, setChoice] = useState('')
+  if (d === undefined) return <p className="muted">This family card carried no choices — that is a platform defect worth reporting, not something this page can answer.</p>
+
+  const picked = d.choices.find((c) => c.value === choice)
+
+  return (
+    <div className="q-form" data-family-form>
+      {d.summary !== '' && <p className="decision-summary">{d.summary}</p>}
+      {(d.detail ?? []).length > 0 && (
+        <ul className="decision-detail">
+          {d.detail?.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      )}
+
+      <div className="family-grid" role="radiogroup" aria-label="what kind of work this is">
+        {d.choices.map((c) => {
+          const active = choice === c.value
+          return (
+            <button
+              key={c.value}
+              type="button"
+              className="family-choice"
+              role="radio"
+              aria-checked={active}
+              data-family={c.value}
+              data-active={active ? 'true' : undefined}
+              onClick={() => {
+                setChoice(c.value)
+              }}
+            >
+              <span className="family-label">
+                {active && <Check size={14} strokeWidth={2.5} aria-hidden="true" />}
+                {c.label}
+              </span>
+              {familyHints[c.value] !== undefined && <span className="family-hint">{familyHints[c.value]}</span>}
+            </button>
+          )
+        })}
+      </div>
+
+      <HelpNote help={d.help} />
+      <div className="door-acts">
+        <Button
+          variant="primary"
+          disabled={choice === '' || busy}
+          aria-busy={busy}
+          data-family-send
+          onClick={() => {
+            onAnswer({ choice })
+          }}
+        >
+          {busy
+            ? 'Sending…'
+            : picked !== undefined
+              ? `This is: ${picked.label}`
+              : 'Tell it the kind of work'}
+        </Button>
+        {choice === '' && !busy && <span className="door-why">pick the kind of work first — the right questions follow from it</span>}
+      </div>
+    </div>
+  )
+}
+
 /* ── the plan card (Stage-4 approval, map §3 anatomy) ────────────────────── */
 
 const planActionLabels: Record<string, string> = {
@@ -906,6 +1204,10 @@ function PlanCard({
       <section className="plan-sec" data-plan="understood">
         <h3 className="plan-h">What I understood</h3>
         <p className="plan-restatement">{l1.restatement}</p>
+        {/* Beside the planner's prose: what the PLATFORM recorded, slot by
+            slot, each answer origin-labeled (P3-RW-12 R9). The two together
+            are the 1.3 restate-and-confirm — approve IS the confirmation. */}
+        <UnderstoodPanel understood={l1.understood} heading="Point by point — what was settled, and how" />
       </section>
 
       {(l1.deliverable ?? []).length > 0 && (
@@ -1280,24 +1582,45 @@ function Cancelled({ view }: { view: IntakeTaskView }) {
 }
 
 /** Born, no open gate YET: the follow state's face while the pipeline works
- *  toward its next card. This page resumes by itself when the card exists. */
-function NoCardYet({ view, waiting }: { view: IntakeTaskView; waiting: boolean }) {
+ *  toward its next card. This page resumes by itself when the card exists —
+ *  and it SAYS what the machine is doing meanwhile, with its own clock
+ *  (never-stall-silently; the first phrased card takes about a minute on the
+ *  local models). */
+function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting: boolean; answered: boolean }) {
+  const seconds = useElapsedSeconds(view.tier !== 'trivial')
   return (
-    <div className="door-landed" data-door-result="no-card">
+    <div className="door-landed" data-door-result="no-card" data-after-answer={answered ? 'true' : undefined}>
       <h3 className="landed-head">
-        {view.tier === 'trivial' ? 'It took the work without questions' : 'The task is born — it is working'}
+        {view.tier === 'trivial'
+          ? 'It took the work without questions'
+          : answered
+            ? 'Answers recorded — it is working'
+            : 'The task is born — it is reading your goal'}
       </h3>
       <p className="landed-sub">
         {view.tier === 'trivial' ? (
           <>Trivial, read-only asks skip the ceremony on purpose. If a question comes up it lands in your{' '}
           <Link to={hrefFor('inbox')}>Inbox</Link>.</>
+        ) : answered ? (
+          <>
+            It took what you said and moved: it is choosing and phrasing the next questions, or — once it knows
+            enough — drafting the full plan. A question round takes about a minute on the local models; the plan is
+            drafted in one piece and can take a few minutes. It appears RIGHT HERE the moment it exists, and lands in
+            your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
+          </>
         ) : (
           <>
-            {waiting ? 'This page is listening: ' : ''}its questions — or its plan — appear RIGHT HERE the moment they
-            exist, and land in your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can also leave; nothing is lost.
+            It is working out what it must ask you — sizing the goal, picking the questions that matter, phrasing
+            them. The first card takes about a minute on the local models, appears RIGHT HERE the moment it exists,
+            and lands in your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
           </>
         )}
       </p>
+      {view.tier !== 'trivial' && (
+        <p className="composing-clock mono" data-birth-clock>
+          {waiting ? 'listening' : 'catching up'} · {elapsedWords(seconds)}
+        </p>
+      )}
       <div className="door-acts">
         <Button
           variant="primary"

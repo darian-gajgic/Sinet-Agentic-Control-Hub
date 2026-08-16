@@ -1415,8 +1415,22 @@ td {
 .verdict-form label,
 .disposition-form label {
   flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+/* A checkbox or radio is a mark beside its words, never a full-width field —
+   the global `input { width:100% }` was stretching each one across the card
+   and scattering the row (operator finding, 2026-08-12: "misaligned
+   checkboxes"). Scoped wide on purpose: every tick mark in the app. */
+input[type='checkbox'],
+input[type='radio'] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  margin-block-start: 3px;
+  padding: 0;
+  accent-color: var(--accent);
 }
 
 .batch-bar {
@@ -3378,6 +3392,221 @@ td {
 
 .foot-note a {
   color: var(--accent-2);
+}
+
+/* ── the understanding block (RW-12): "here is what I understood so far" ── */
+
+.understood {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 22%, var(--border));
+  border-radius: var(--radius-sm);
+  background: rgba(94, 234, 212, 0.045);
+}
+
+.understood-head {
+  margin: 0 0 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+/* The utility-phrased prose, when the seat answered: the lead voice. */
+.understood-text {
+  margin: 0 0 9px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+
+.understood-items {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.understood-items li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.understood-name {
+  color: var(--text-dim);
+}
+
+.understood-name::after {
+  content: ' —';
+}
+
+.understood-value {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.understood-how {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--panel-3);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.understood-items li[data-how='assumption'] .understood-how {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--yellow);
+}
+
+/* ── the composing face: the honest long-wait state (never-stall-silently) ── */
+
+.composing {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-grad);
+}
+
+.composing-dots {
+  display: inline-flex;
+  gap: 5px;
+  margin-block-start: 6px;
+  flex: 0 0 auto;
+}
+
+.composing-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .composing-dots i {
+    animation: composing-pulse 1.3s ease-in-out infinite;
+  }
+
+  .composing-dots i:nth-child(2) {
+    animation-delay: 0.22s;
+  }
+
+  .composing-dots i:nth-child(3) {
+    animation-delay: 0.44s;
+  }
+}
+
+@keyframes composing-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.composing-body {
+  min-width: 0;
+}
+
+.composing-head {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.composing-sub {
+  margin: 0 0 6px;
+  max-width: 62ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.composing-clock {
+  margin: 0;
+  font-size: 11px;
+  color: var(--accent-2);
+}
+
+.door-landed .composing-clock {
+  margin-block-end: 10px;
+}
+
+/* ── the family card (F2): six kind-of-work choices as tappable cards ── */
+
+.family-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 9px;
+}
+
+.family-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-l);
+  border-radius: var(--radius-sm);
+  background: rgba(20, 20, 32, 0.55);
+  color: var(--text-dim);
+  text-align: start;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .family-choice {
+    transition: border-color 0.12s, background 0.12s, color 0.12s, box-shadow 0.12s;
+  }
+}
+
+.family-choice:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.family-choice[data-active='true'] {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--fg);
+  box-shadow: 0 0 18px rgba(124, 92, 255, 0.14);
+}
+
+.family-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.family-label svg {
+  color: var(--accent-2);
+}
+
+.family-hint {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.family-choice[data-active='true'] .family-hint {
+  color: var(--text-dim);
 }
 
 /* ── the plan card ── */

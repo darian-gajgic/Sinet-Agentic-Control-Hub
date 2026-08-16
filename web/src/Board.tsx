@@ -460,8 +460,14 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
               internal FSM step id ("intake.state") where seeded stages serve plain
               words ("execute", "drafting") — the face shows the stage FAMILY (the
               segment before the dot, verbatim otherwise); the overlay's stage story
-              keeps the full step id. Live-walk finding, 2026-08-12. */}
-          {run?.stage !== undefined && run.stage !== '' && <> · {run.stage.split('.')[0]}</>}
+              keeps the full step id. Live-walk finding, 2026-08-12. A FINISHED or
+              cancelled card shows no stage token at all: the last run's marker
+              ("verify") is where the work WAS, and beside a Done column it read
+              as a contradiction (cosmetic finding 2, 2026-08-12). */}
+          {run?.stage !== undefined &&
+            run.stage !== '' &&
+            task.kanban_status !== 'done' &&
+            !cancelled && <> · {run.stage.split('.')[0]}</>}
           {run?.effort_mode !== undefined && run.effort_mode !== '' && <> · {run.effort_mode}</>}
           {showProject && task.project !== '' && <> · {task.project}</>}
         </span>
