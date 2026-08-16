@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
@@ -14,6 +15,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/stage"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
 // deliverableTaskID derives a task id from THE task deliverable id
@@ -208,6 +210,111 @@ func toRegistrySlice(e project.Entry) intake.RegistrySlice {
 		Commands:    commands,
 		DangerZones: zones,
 	}
+}
+
+// CheckPackFor builds the V1 check pack for one (domain, task) from the S13.7
+// registry capture (P3-RW-14 R5) — the wire that was missing when the whole
+// software family crashed at verify: `stage.Config.CheckPacks` shipped empty,
+// so every launch-domain deliverable hit ErrNoCheckPack, and the ladder forked
+// that deterministic refusal to a tombstone.
+//
+// "The registry feeds … preview commands" (S13.7) and S07.3's ladder rungs are
+// lint/typecheck/build → tests → smoke, so the captured commands ARE the pack:
+// lint and build are the static rung, test the unit rung. `run` and `preview`
+// are deliberately NOT checks — they start something and wait, which is a
+// preview (S13.8), not a verdict.
+//
+// The pack carries the capture's own timestamp as its S07.3 rule-7 verified-on
+// stamp (P-T06-1): a suite is exactly as fresh as the scan it came from, and
+// ⚙ verification.check_audit_interval_days flags the verdict stale from there.
+//
+// Three honest answers, and the drain depends on the difference:
+//
+//   - (nil, nil) — this domain has no pack machinery (non-launch domains keep
+//     the ratified degraded mode, Spec S07.8);
+//   - (pack, nil) — run it;
+//   - an ErrNoCheckPack error NAMING WHAT IS MISSING — the launch domain has no
+//     inventory to verify with. The verify leg turns that into the operator's
+//     decision card and parks (R4). Nothing is invented on the project's behalf
+//     and no launch domain is ever silently degraded (OQ3(i)).
+func (s *projectSeams) CheckPackFor(ctx context.Context, domain, taskID string) (*verify.CheckPack, error) {
+	if !verify.LaunchDomain(domain) {
+		return nil, nil
+	}
+	projectID, err := s.projectForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: this software task is not attached to a registered project, so the platform has no build or test commands to check it with — register the project (Projects tab), attach the task to it, then retry",
+			verify.ErrNoCheckPack)
+	}
+	e, err := s.proj.Get(ctx, projectID)
+	if err != nil {
+		return nil, err // a registry read failure is mechanical, never a card
+	}
+	return packFromCapture(domain, e)
+}
+
+// packFromCapture is the capture→pack projection, pure over one registry entry.
+func packFromCapture(domain string, e project.Entry) (*verify.CheckPack, error) {
+	checks := packChecks(e.Capture.Commands)
+	if len(checks) == 0 {
+		return nil, fmt.Errorf("%w: no build, test or lint commands are captured for project %q, so there is nothing to check this work with — capture them for the project (its Commands), then retry",
+			verify.ErrNoCheckPack, e.Name)
+	}
+	capturedAt, err := time.Parse(time.RFC3339Nano, e.Capture.CapturedTS)
+	if err != nil {
+		return nil, fmt.Errorf("%w: project %q has commands but no readable capture date, so the platform cannot say how fresh its checks are — re-scan the project, then retry",
+			verify.ErrBadPack, e.Name)
+	}
+	pack := &verify.CheckPack{
+		Domain:     domain,
+		Version:    e.Capture.Version,
+		VerifiedOn: capturedAt,
+		Checks:     checks,
+	}
+	if err := pack.Validate(); err != nil {
+		return nil, err // ErrBadPack — the card names it; nothing runs half-checked
+	}
+	return pack, nil
+}
+
+// packChecks maps the captured commands onto the S07.3 ladder rungs. Each
+// check runs as one shell line inside the network-off verification sandbox
+// (the SandboxCheckRunner, class C2 — P-T06-2), and the verdict is the exit
+// status read platform-side, never anything the command says about itself
+// (S07.3 rule 3).
+//
+// None of them is an ACCEPTANCE check: they originate from the project's own
+// conventions, not from the frozen ACs, so they carry no AC key and claim no
+// separate-context provenance (S07.3 rule 4 — a doer-written test never passes
+// by construction here, because these are not passed off as AC evidence).
+func packChecks(c project.Commands) []verify.Check {
+	var checks []verify.Check
+	for _, r := range []struct {
+		id    string
+		stage verify.LadderStage
+		cmd   string
+	}{
+		{"lint", verify.StageStatic, c.Lint},
+		{"build", verify.StageStatic, c.Build},
+		{"test", verify.StageUnit, c.Test},
+	} {
+		if strings.TrimSpace(r.cmd) == "" {
+			continue
+		}
+		checks = append(checks, verify.Check{
+			ID:    r.id,
+			Stage: r.stage,
+			Argv:  []string{"/bin/sh", "-lc", r.cmd},
+			// A failing project check says the work does not meet the bar the
+			// project itself set: an AC-blocker's route (rework round, then a
+			// requester decision card at cap — Spec S07.7).
+			FindingCategory: verify.CatACBlocker,
+		})
+	}
+	return checks
 }
 
 // projectForTask resolves a task's registered project via the durable intake-

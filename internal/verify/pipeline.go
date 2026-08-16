@@ -2,6 +2,7 @@ package verify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -187,24 +188,69 @@ func (v *Verifier) entailmentPosture(domain string) string {
 	return "idle (v0 launch domain is software; activates with web-research at v0.1 behind the TBD-BRINGUP calibration bar)"
 }
 
+// PreambleRefusal marks the DETERMINISTIC verification-infrastructure refusal
+// class: the drain refused to START because a piece of verification
+// infrastructure is absent — no domain check pack for a launch domain, a
+// required seam unwired, an invalid pack, an unvalidated judge seat.
+//
+// The class exists because its disposition differs from every other drain
+// error (P3-RW-14 R4). A missing screen is a SCREEN OUTAGE, and "a screen
+// never blocks on its own failure, a screen outage escalates rather than
+// approves" (Spec S07.2): it terminates in a durable decision card the owner
+// can answer, never in a crash the recovery ladder re-forks into the same
+// refusal until it tombstones the lineage (the live 2026-08-16 wedge). A
+// MECHANICAL failure mid-drain — a DB error, a judge transport error — still
+// crashes for the ladder, because a fork of THAT may well succeed.
+//
+// The marker rides the preamble only, so classification never has to guess
+// from an error's text (CONVENTIONS §38): errors.Is still sees the underlying
+// sentinel, and a mid-drain error wrapping the same sentinel is NOT marked.
+type PreambleRefusal struct{ Err error }
+
+func (e *PreambleRefusal) Error() string { return e.Err.Error() }
+func (e *PreambleRefusal) Unwrap() error { return e.Err }
+
+// NewPreambleRefusal marks err as the preamble refusal class. It is exported
+// for the ONE other site that refuses before the drain can start: the stage
+// layer's judge-construction gate (P-T06-5, Spec S14.8) and its check-pack
+// resolution seam, both of which run before a Verifier exists.
+func NewPreambleRefusal(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &PreambleRefusal{Err: err}
+}
+
+// AsPreambleRefusal reports whether err is a verification-infrastructure
+// refusal, and returns it.
+func AsPreambleRefusal(err error) (*PreambleRefusal, bool) {
+	var ref *PreambleRefusal
+	if errors.As(err, &ref) {
+		return ref, true
+	}
+	return nil, false
+}
+
 // validateInput checks the drain's structural preconditions and resolves
 // the rubric bundle (shared by the fresh entry and the S07.7 resume entry).
+// The three infrastructure absences are marked as the preamble refusal class;
+// a malformed deliverable is NOT — that is a caller defect, not an outage.
 func (v *Verifier) validateInput(d Deliverable) (*RubricBundle, error) {
 	if d.TaskID == "" || d.RunID == "" || d.Domain == "" || d.Revision < 1 {
 		return nil, fmt.Errorf("%w: deliverable requires task, run, domain, revision", ErrBadInput)
 	}
 	if v.Judge == nil {
-		return nil, fmt.Errorf("%w: V2 requires the Judge seam (Spec S07.5)", ErrSeamMissing)
+		return nil, NewPreambleRefusal(fmt.Errorf("%w: V2 requires the Judge seam (Spec S07.5)", ErrSeamMissing))
 	}
 	rubric := v.Rubric
 	if rubric == nil {
 		rubric = SeedSoftwareRubric()
 	}
 	if LaunchDomain(d.Domain) && v.Pack == nil {
-		return nil, ErrNoCheckPack
+		return nil, NewPreambleRefusal(ErrNoCheckPack)
 	}
 	if v.Pack != nil && v.Runner == nil {
-		return nil, fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing)
+		return nil, NewPreambleRefusal(fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing))
 	}
 	return rubric, nil
 }

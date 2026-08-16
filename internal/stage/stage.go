@@ -216,13 +216,19 @@ type Config struct {
 	RunRoot      string
 	CopyAsideDir string
 
-	// CheckPacks maps deliverable domain → V1 check pack (Spec S07.3). The
-	// software pack is per-project registry machinery (Spec S13, B4) — the
-	// map ships EMPTY at B2-4, so software-domain deliverables fail verify
-	// LOUDLY (ErrNoCheckPack) rather than run a silent degraded launch
-	// domain; non-launch domains verify with V1 empty, the ratified
-	// degraded mode (Spec S07.8).
-	CheckPacks map[string]*verify.CheckPack
+	// CheckPackFor resolves the V1 check pack for one (domain, task) — the
+	// software pack is PER PROJECT, built from the S13.7 registry capture's
+	// commands (P3-RW-14 R5). A func seam, not a map, because the answer
+	// depends on the task's registered project, and this package never imports
+	// internal/project (CONVENTIONS §23): the composition root wires it.
+	//
+	// Nil (the test posture) resolves no pack at all. A nil pack with a nil
+	// error is an HONEST absence — non-launch domains verify with V1 empty,
+	// the ratified degraded mode (Spec S07.8). An absence the operator must
+	// act on comes back as an error wrapping verify.ErrNoCheckPack, naming the
+	// exact missing thing; the verify leg turns that into its decision card
+	// and parks, and NEVER runs a silently degraded launch domain.
+	CheckPackFor func(ctx context.Context, domain, taskID string) (*verify.CheckPack, error)
 	// CheckRunner executes V1 checks (required when a pack is present).
 	CheckRunner verify.CheckRunner
 

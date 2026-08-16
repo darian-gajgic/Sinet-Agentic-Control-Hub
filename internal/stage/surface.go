@@ -228,6 +228,17 @@ func (u *Surface) Answer(ctx context.Context, userID, askID string, answer json.
 		}
 		return u.taskView(ctx, taskID)
 	}
+	if IsLadderAskID(askID) {
+		// The recovery ladder's terminal card (P3-RW-14 R3): retry grants the
+		// ended lineage a fresh bounded budget, cancel ends the task. It
+		// releases nothing outward, so no step-up is demanded — the same
+		// reading the verification decision cards take.
+		taskID, err := u.sk.AnswerLadderAsk(ctx, userID, askID, answer)
+		if err != nil {
+			return nil, mapVerifyErr(err)
+		}
+		return u.taskView(ctx, taskID)
+	}
 	kind, tier, runID, err := u.askCardMeta(ctx, askID)
 	if err != nil {
 		return nil, mapIntakeErr(err)

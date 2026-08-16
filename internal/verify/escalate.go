@@ -70,10 +70,17 @@ type Route struct {
 // RouteTable is the S07.7 route table — total over the category enum; a
 // conformance test asserts totality and sink-types-only.
 var RouteTable = map[Category]Route{
-	CatACBlocker:      {Category: CatACBlocker, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "axis 1; rework round (S07.6), at cap → requester decision card"},
-	CatSanityBlocker:  {Category: CatSanityBlocker, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "axis 2, short of spec doubt; rework round, at cap → requester decision card"},
-	CatReopenSpec:     {Category: CatReopenSpec, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "axis 2; → S06.9 delta on accept"},
-	CatCheckIntegrity: {Category: CatCheckIntegrity, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "executor test-challenge; judge–check disagreement; flake quarantine; failed suite audit"},
+	CatACBlocker:     {Category: CatACBlocker, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "axis 1; rework round (S07.6), at cap → requester decision card"},
+	CatSanityBlocker: {Category: CatSanityBlocker, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "axis 2, short of spec doubt; rework round, at cap → requester decision card"},
+	CatReopenSpec:    {Category: CatReopenSpec, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "axis 2; → S06.9 delta on accept"},
+	// CHECK-INTEGRITY's raiser list gains "required check inventory absent"
+	// (P3-RW-14 OQ1, ratified): a launch domain with no check pack is a suite
+	// that cannot be trusted to decide anything — the same class of fact as a
+	// failed suite audit, and its ratified route (decision card + quarantine
+	// pending fix) is exactly the needed behavior. Extending a
+	// [coordinator-draft] raiser list needs no S00.9 amendment; a NEW category
+	// would have.
+	CatCheckIntegrity: {Category: CatCheckIntegrity, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "executor test-challenge; judge–check disagreement; flake quarantine; failed suite audit; required check inventory absent"},
 	CatResearchNotRun: {Category: CatResearchNotRun, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "S07.3 counter check, after its retry"},
 	CatCapHit:         {Category: CatCapHit, Sink: SinkDecisionCard, SLA: SLAApproval, RaisedBy: "S07.6 stop rules; card carries best-effort state + round history"},
 	CatWorkerFlaw:     {Category: CatWorkerFlaw, Sink: SinkFlawTicket, SLA: SLAApproval, RaisedBy: "recurring defect pattern attributable to a worker (detector is S08/S14's)"},
@@ -120,9 +127,28 @@ type Card struct {
 	Canary bool `json:"canary,omitempty"`
 	// TicketRef is the worker-flaw ticket reference (WORKER-FLAW route).
 	TicketRef string `json:"ticket_ref,omitempty"`
+	// Infrastructure marks the VERIFICATION-INFRASTRUCTURE card (P3-RW-14 R4):
+	// the drain could not run at all because a screen is missing. It carries
+	// the CHECK-INTEGRITY route (OQ1) but its own verb set — retry/cancel
+	// (OQ2) — because there is no judged output to accept or revise. The mark
+	// is DURABLE (it rides the snapshot), so the answer surface reads it back
+	// from the row rather than re-deriving it.
+	Infrastructure bool `json:"infrastructure,omitempty"`
 
 	AskID string `json:"ask_id"`
 }
+
+// InfraAskPrefix keys the infrastructure card's ask id. It stays under the
+// `ask-verify-` prefix so the landed answer routing (IsVerifyAskID) reaches it
+// unchanged, and adds its own segment so the kind is legible in a log line.
+const InfraAskPrefix = "ask-verify-infra-"
+
+// infraChoices is the infrastructure card's verb set (P3-RW-14 OQ2, ratified):
+// retry re-enters the drain once the missing thing exists; cancel ends the
+// task. There is deliberately NO accept_best_effort — V1 never ran, and
+// SetVerified stays the only path to verified (Spec S05.1/S07.11), so
+// "accepting" here would be a verdict nobody produced.
+var infraChoices = []string{string(VerbRetry), string(VerbCancel)}
 
 // REOPEN-SPEC card choices (Spec S07.5, ratified): the requester decides;
 // an accepted adjustment lands as an S06.9 delta and re-freezes the ACs.
@@ -179,6 +205,37 @@ type Escalation struct {
 	Quarantined string
 	Flaw        *WorkerFlaw
 	Canary      bool
+	// Infrastructure marks the verification-infrastructure card (see
+	// Card.Infrastructure); InfrastructureEscalation is its one builder.
+	Infrastructure bool
+}
+
+// InfrastructureEscalation builds the escalation for a deterministic
+// verification-infrastructure refusal (P3-RW-14 R4): the drain cannot run, so
+// it ESCALATES rather than approving (Spec S07.2) and rather than crashing
+// into a ladder that can never fix a deterministic refusal (Spec S02.5).
+//
+// The summary carries the cause VERBATIM because the cause is written for the
+// person who can fix it — the pack resolver names the exact missing thing
+// ("no build/test commands captured for project X"), which is the whole point
+// of the door (CONVENTIONS §57 drafting rule 1).
+func InfrastructureEscalation(d Deliverable, owner string, cause error) Escalation {
+	return Escalation{
+		Category:       CatCheckIntegrity,
+		Infrastructure: true,
+		TaskID:         d.TaskID,
+		RunID:          d.RunID,
+		Owner:          owner,
+		Summary:        "verification cannot run — " + cause.Error(),
+		Detail: []string{
+			"The checks that decide whether this work is correct are missing, so the platform stopped instead of guessing (Spec S07.2: a screen outage escalates rather than approves).",
+			"Nothing was marked verified and nothing was delivered — the work waits here until the checks exist (Spec S07.1: the quality gate is never the effects gate).",
+			"Fix what the summary names, then answer `retry` to run verification again; `cancel` ends the task.",
+		},
+		// The suite that cannot decide anything is quarantined pending fix —
+		// the ratified CHECK-INTEGRITY route (Spec S07.7).
+		Quarantined: "domain check pack: " + d.Domain,
+	}
 }
 
 // Escalator routes escalations to their ratified sinks: one write
@@ -246,25 +303,30 @@ func (e *Escalator) Raise(ctx context.Context, esc Escalation) (Card, error) {
 		return Card{}, err
 	}
 	askID := "ask-verify-" + randomHex(8)
-	if esc.Canary {
+	choices := cardChoices[esc.Category]
+	switch {
+	case esc.Canary:
 		askID = "canary-" + randomHex(8)
+	case esc.Infrastructure:
+		askID, choices = InfraAskPrefix+randomHex(8), infraChoices
 	}
 	card := Card{
-		Kind:        route.Sink,
-		Category:    esc.Category,
-		TaskID:      esc.TaskID,
-		RunID:       esc.RunID,
-		IssuedTS:    e.now().UTC().Format(time.RFC3339Nano),
-		SLA:         sla,
-		Summary:     esc.Summary,
-		Detail:      esc.Detail,
-		Choices:     cardChoices[esc.Category],
-		Findings:    esc.Findings,
-		Rounds:      esc.Rounds,
-		BestEffort:  esc.BestEffort,
-		Quarantined: esc.Quarantined,
-		Canary:      esc.Canary,
-		AskID:       askID,
+		Kind:           route.Sink,
+		Category:       esc.Category,
+		TaskID:         esc.TaskID,
+		RunID:          esc.RunID,
+		IssuedTS:       e.now().UTC().Format(time.RFC3339Nano),
+		SLA:            sla,
+		Summary:        esc.Summary,
+		Detail:         esc.Detail,
+		Choices:        choices,
+		Findings:       esc.Findings,
+		Rounds:         esc.Rounds,
+		BestEffort:     esc.BestEffort,
+		Quarantined:    esc.Quarantined,
+		Canary:         esc.Canary,
+		Infrastructure: esc.Infrastructure,
+		AskID:          askID,
 	}
 	err = e.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if route.Sink == SinkFlawTicket {

@@ -249,8 +249,12 @@ func (l *Ladder) ReconcilePass(ctx context.Context) (Report, error) {
 	//     (B1, run units; Spec S02.5 step 7);
 	//   - orphan worktrees flagged, NEVER auto-deleted while they hold
 	//     uncommitted work → workspace machinery (B1, Spec S02.10);
-	//   - engine session files past retention → adapters (B1, Spec S03);
-	//   - tombstone-review cards → operator surfaces (B5/B6, Spec S15).
+	//   - engine session files past retention → adapters (B1, Spec S03).
+	//
+	// The B0-era "tombstone-review cards → operator surfaces (B5/B6)" deferral
+	// is COLLECTED (P3-RW-14 R1): a ladder terminal writes its card as a
+	// durable open ask in the same transaction as the transition
+	// (laddercard.go), so no GC pass owes one.
 
 	l.cfg.Logger.Info("recovery ladder: pass complete (Spec S02.5)",
 		"scanned", rpt.Scanned, "alive", rpt.Alive, "wedged", rpt.Wedged,
@@ -594,13 +598,12 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 		// Finalize-with-card is the honest terminal either way: the run ended, it
 		// ended badly, and the record says so. Any partial spend is already on
 		// the ledger and the checkpoints, so nothing is lost by not re-running it.
+		const noForkGround = "a run class the platform never forks: a single-shot class whose contract outranks the S02.5 step-3 default fork (BENCH-REG §2, the direct arm), or a run id with no dispatchable role, whose fork could never be routed"
 		detail, err := json.Marshal(struct {
 			InterruptedS int64  `json:"interrupted_s"`
-			Card         string `json:"card"`
+			AskID        string `json:"ask_id"`
 			NoFork       string `json:"no_fork_reason"`
-		}{int64(interrupted.Seconds()),
-			"finalized-with-card: this run class is never forked",
-			"a run class the platform never forks: a single-shot class whose contract outranks the S02.5 step-3 default fork (BENCH-REG §2, the direct arm), or a run id with no dispatchable role, whose fork could never be routed"})
+		}{int64(interrupted.Seconds()), LadderAskID(crashed.ID), noForkGround})
 		if err != nil {
 			return fmt.Errorf("recovery: marshal no-fork finalize detail: %w", err)
 		}
@@ -611,6 +614,13 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 		}); err != nil {
 			return err
 		}
+		// The door, in this same transaction (P3-RW-14 R1): finalize-with-card
+		// is a CARD, and until now it was a string in the payload above.
+		if _, err := l.terminalCardTx(ctx, tx, crashed, CardFinalizeWithCard, noForkGround,
+			"This work ended badly, and this kind of run is never retried automatically.",
+			[]string{"Nothing is running for it now."}); err != nil {
+			return err
+		}
 		rpt.Finalized++
 		return nil
 
@@ -619,10 +629,11 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 		// the S02.6 freshness pass precedes any RESUME regardless — here
 		// there is no resume at all). Card surfaces arrive at B5/B6; the
 		// durable substance is the terminal state + its event.
+		const staleGround = "interrupted longer than ⚙ recovery.stale_finalize, so the platform finalized it rather than blindly resuming (Spec S02.5 step 3)"
 		detail, err := json.Marshal(struct {
 			InterruptedS int64  `json:"interrupted_s"`
-			Card         string `json:"card"`
-		}{int64(interrupted.Seconds()), "finalized-with-card: interrupted past ⚙ recovery.stale_finalize"})
+			AskID        string `json:"ask_id"`
+		}{int64(interrupted.Seconds()), LadderAskID(crashed.ID)})
 		if err != nil {
 			return fmt.Errorf("recovery: marshal finalize detail: %w", err)
 		}
@@ -633,16 +644,24 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 		}); err != nil {
 			return err
 		}
+		if _, err := l.terminalCardTx(ctx, tx, crashed, CardFinalizeWithCard, staleGround,
+			"This work was interrupted for too long to pick up again safely, so the platform stopped it instead of guessing.",
+			[]string{fmt.Sprintf("It had been interrupted for about %d hour(s) when the platform noticed.", int64(interrupted.Hours()))}); err != nil {
+			return err
+		}
 		rpt.Finalized++
 		return nil
 
 	case crashed.RecoveryAttempts+1 > maxAttempts:
-		// Repeat offender (Spec S02.5 step 3): tombstone; the review card
-		// is GC/operator-surface material (B5/B6).
+		// Repeat offender (Spec S02.5 step 3): tombstone, WITH its step-7
+		// tombstone-review card — the ladder can never fix a deterministic
+		// failure, so the lineage ends here and a human is the only thing that
+		// can move it (P3-RW-14 R1).
+		const tombstoneGround = "⚙ recovery.max_attempts exhausted: every retry ended the same way, so the platform stopped retrying (Spec S02.5 step 3)"
 		detail, err := json.Marshal(struct {
 			RecoveryAttempts int64  `json:"recovery_attempts"`
-			Card             string `json:"card"`
-		}{crashed.RecoveryAttempts, "tombstone-review: ⚙ recovery.max_attempts exhausted"})
+			AskID            string `json:"ask_id"`
+		}{crashed.RecoveryAttempts, LadderAskID(crashed.ID)})
 		if err != nil {
 			return fmt.Errorf("recovery: marshal tombstone detail: %w", err)
 		}
@@ -651,6 +670,12 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		}); err != nil {
+			return err
+		}
+		if _, err := l.terminalCardTx(ctx, tx, crashed, CardTombstoneReview, tombstoneGround,
+			"This work stopped after repeated failures.",
+			[]string{fmt.Sprintf("The platform retried it %d time(s); each attempt ended the same way, so retrying by itself would not have helped.", crashed.RecoveryAttempts),
+				"Nothing is running for it now."}); err != nil {
 			return err
 		}
 		rpt.Tombstoned++

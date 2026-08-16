@@ -35,6 +35,12 @@ import (
 //   - cancel: the ratified S02.3 mapping (CONVENTIONS §14 reading 9) —
 //     the parked run finalizes with its card; a running run completes with
 //     the cancel reason.
+//
+// The VERIFICATION-INFRASTRUCTURE card (P3-RW-14 R4) is the one card outside
+// that family: the drain never ran, so it answers {retry, cancel} instead —
+// retry re-enters the drain now that the missing screen exists (the stage
+// layer drives it), cancel takes the same S02.3 mapping. Its verbs are
+// validated by validateInfraAnswer below.
 
 // AnswerVerb is one S07.7 card answer verb.
 type AnswerVerb string
@@ -43,6 +49,11 @@ const (
 	VerbAcceptBestEffort   AnswerVerb = "accept_best_effort"
 	VerbReviseWithGuidance AnswerVerb = "revise_with_guidance"
 	VerbCancel             AnswerVerb = "cancel"
+	// VerbRetry is the verification-infrastructure card's verb (P3-RW-14 R4 /
+	// OQ2): the missing screen now exists, so run the drain again. It is a
+	// fresh bounded budget granted by a human — the same reading of an answer
+	// the S07.6 resume takes (CONVENTIONS §16; Spec S06.7(a) precedent).
+	VerbRetry AnswerVerb = "retry"
 )
 
 // answerableCategories is the B2-5 answerable card family: exactly the
@@ -147,6 +158,9 @@ func DecodeAnswer(raw json.RawMessage) (Answer, error) {
 // issued with. revise_with_guidance requires at least one guidance point
 // with text.
 func ValidateAnswer(card Card, ans Answer) error {
+	if card.Infrastructure {
+		return validateInfraAnswer(card, ans)
+	}
 	switch ans.Choice {
 	case VerbAcceptBestEffort, VerbReviseWithGuidance, VerbCancel:
 	case "":
@@ -179,6 +193,28 @@ func ValidateAnswer(card Card, ans Answer) error {
 		}
 	}
 	return nil
+}
+
+// validateInfraAnswer is the verification-infrastructure card's contract
+// (P3-RW-14 R4 / OQ2): exactly {retry, cancel}, and nothing else — in
+// particular NOT accept_best_effort, because V1 never ran and there is no
+// best effort to accept (Spec S05.1/S07.11: SetVerified is the only path to
+// verified).
+func validateInfraAnswer(card Card, ans Answer) error {
+	switch ans.Choice {
+	case VerbRetry, VerbCancel:
+	case "":
+		return fmt.Errorf("%w: missing \"choice\"", ErrBadAnswer)
+	default:
+		return fmt.Errorf("%w: verb %q (a verification-infrastructure card answers retry or cancel)",
+			ErrUnsupportedAnswer, ans.Choice)
+	}
+	for _, c := range card.Choices {
+		if c == string(ans.Choice) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %q is not among the card's choices %v", ErrBadAnswer, ans.Choice, card.Choices)
 }
 
 // BestEffortPin returns the card's best-effort revision pin — the final

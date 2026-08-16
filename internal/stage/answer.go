@@ -60,11 +60,50 @@ func (s *Skeleton) AnswerVerifyAsk(ctx context.Context, actor, askID string, raw
 	switch ans.Choice {
 	case verify.VerbCancel:
 		return card.TaskID, s.answerCancel(ctx, actor, askID, card, ans, raw)
+	case verify.VerbRetry: // infrastructure card only — ValidateAnswer enforces it.
+		return card.TaskID, s.answerInfraRetry(ctx, actor, askID, card, ans, raw)
 	case verify.VerbAcceptBestEffort:
 		return card.TaskID, s.answerAccept(ctx, actor, askID, card, ans, raw)
 	default: // VerbReviseWithGuidance — ValidateAnswer admitted nothing else.
 		return card.TaskID, s.answerRevise(ctx, actor, askID, card, ans, raw)
 	}
+}
+
+// answerInfraRetry applies `retry` on a verification-infrastructure card
+// (P3-RW-14 R4/OQ2): the missing screen now exists, so the drain runs again on
+// the SAME run — resumed in place (parked→running, generation bumped, the one
+// ratified resume edge) and re-entered through the ordinary drain path. If the
+// thing is STILL missing, the drain parks on a fresh card and says so again:
+// the door never closes onto silence.
+func (s *Skeleton) answerInfraRetry(ctx context.Context, actor, askID string, card verify.Card, ans verify.Answer, raw json.RawMessage) error {
+	if _, err := s.cfg.Ledger.RecordDecision(ctx, card.RunID, ledger.AuthorHuman, actor, "verify",
+		"requester retried verification at the infrastructure card"+noteSuffix(ans),
+		"retry (S07.7): an answer is an explicit human grant of a fresh bounded budget; the drain re-runs with the missing screen supplied (S07.2/S02.5)", 0); err != nil {
+		return err
+	}
+	err := s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		if err := verify.CloseAnsweredTx(ctx, tx, askID, raw, s.now()); err != nil {
+			return err
+		}
+		_, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateRunning, run.TransitionOptions{
+			Reason: "infrastructure card answered: verification runs again (4.3; S07.7)", Actor: run.ActorPlatform,
+		})
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	r, err := s.cfg.Runs.Get(ctx, card.RunID)
+	if err != nil {
+		return err
+	}
+	// The re-entered drain runs inline in this request, so the stage layer holds
+	// the run's lease across it (Spec S02.2; P3-RW-5 R3) — taken after the resume
+	// commit so it beats at the bumped generation.
+	defer s.leases.Hold(ctx, card.RunID, leaseHolderStage)()
+	// Revision 1: the infrastructure card means the drain never judged anything,
+	// so there is no later revision to resume from.
+	return s.runVerifyDrain(ctx, r, 1)
 }
 
 // answerCancel applies the ratified cancel mapping (S02.3 via CONVENTIONS
@@ -179,8 +218,13 @@ func (s *Skeleton) answerRevise(ctx context.Context, actor, askID string, card v
 	// R3). Taken after the resume transaction, so it beats at the bumped
 	// generation, and immediately, so the un-park instant is covered (R5).
 	defer s.leases.Hold(ctx, card.RunID, leaseHolderStage)()
-	v, err := s.newVerifier(in.Deliverable.Domain)
+	v, err := s.newVerifier(ctx, in.Deliverable.Domain, card.TaskID)
 	if err != nil {
+		// Including a verification-infrastructure refusal: this leg's card
+		// already exists and was answered, so the honest posture is the landed
+		// one — a corpse for the ladder. A deterministic refusal that survives
+		// the ladder's attempts ends at the tombstone-review card (R1), so the
+		// door is still there either way.
 		s.crash(ctx, card.RunID, err.Error())
 		return err
 	}

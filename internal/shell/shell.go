@@ -574,10 +574,15 @@ func Run(ctx context.Context, opts Options) error {
 			OnboardApprove: func(ctx context.Context, projectID, owner string, edited json.RawMessage) error {
 				return proj.OnboardApprove(ctx, projectID, owner, edited)
 			},
-			// CheckPacks ships empty: the software pack is per-project
-			// registry machinery (Spec S13, B4) — software-domain verifies
-			// fail LOUDLY rather than run a degraded launch domain.
-			CheckRunner: &verify.SandboxCheckRunner{Confiner: composer, WorkDir: filepath.Join(stateDir, "check-work")},
+			// The V1 check pack, per (domain, project), built from the S13.7
+			// registry capture's commands (P3-RW-14 R5) — the wire the B2-4
+			// comment promised and B4 never connected, which is why every
+			// software-family task crashed at verify. A launch domain with no
+			// captured commands still refuses LOUDLY, but the refusal now
+			// lands as the operator's decision card (R4), never as a crash the
+			// ladder forks to a tombstone.
+			CheckPackFor: pseams.CheckPackFor,
+			CheckRunner:  &verify.SandboxCheckRunner{Confiner: composer, WorkDir: filepath.Join(stateDir, "check-work")},
 			// The S10.4 pause read seam (B6-2B): the execute leg consults it
 			// between stage sessions and parks the run when its owner has paused
 			// their automation. A park, never a kill (CONVENTIONS §31).

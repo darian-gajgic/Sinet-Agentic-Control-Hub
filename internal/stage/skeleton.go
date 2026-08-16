@@ -737,20 +737,36 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 	if s.pauseParkPoint(ctx, r, "verify") {
 		return nil
 	}
-	in, err := s.verifyInput(ctx, r.ID, r.TaskID, 1)
+	return s.runVerifyDrain(ctx, r, 1)
+}
+
+// runVerifyDrain runs the S07 drain for a RUNNING verify run and lands its
+// terminal. It is the ONE path both the dispatch leg and the S07.7
+// infrastructure card's `retry` answer take (P3-RW-14 R4: retry re-enters the
+// drain), so the two can never drift apart.
+//
+// Two failure dispositions, and the difference is the packet's point:
+//
+//   - a DETERMINISTIC verification-infrastructure refusal (no check pack for a
+//     launch domain, an unwired seam, an unvalidated judge seat) is a screen
+//     OUTAGE: it escalates to a durable decision card and PARKS (Spec S07.2 "a
+//     screen outage escalates rather than approves"; S07.7 sink-types-only).
+//     Crashing it fed the S02.5 ladder a refusal no fork could ever fix — the
+//     live 2026-08-16 wedge: three identical crashes, a tombstone, and a task
+//     sitting at "verifying" forever with nothing to answer;
+//   - a MECHANICAL failure (the deliverable could not be read, the judge
+//     transport died, a DB error) still CRASHES for the ladder: a fork of that
+//     may well succeed, and a corpse is what makes the heal machine-only
+//     (CONVENTIONS §16/§21).
+func (s *Skeleton) runVerifyDrain(ctx context.Context, r run.Run, revision int) error {
+	in, err := s.verifyInput(ctx, r.ID, r.TaskID, revision)
 	if err != nil {
 		s.crash(ctx, r.ID, err.Error())
 		return err
 	}
-	v, err := s.newVerifier(in.Deliverable.Domain)
+	out, err := s.drainOrCard(ctx, r, in)
 	if err != nil {
-		s.crash(ctx, r.ID, err.Error())
-		return err
-	}
-	out, err := v.Verify(ctx, in)
-	if err != nil {
-		s.crash(ctx, r.ID, "verification drain: "+err.Error())
-		return fmt.Errorf("stage: verify: %w", err)
+		return err // drainOrCard has already left the ladder its corpse
 	}
 	if err := s.verifyTerminal(ctx, r.ID, r.TaskID, out); err != nil {
 		// The drain finished but its terminal record did not land: the run holds
@@ -760,6 +776,39 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 		return fmt.Errorf("stage: verify terminal: %w", err)
 	}
 	return nil
+}
+
+// drainOrCard produces the outcome runVerifyDrain lands: the drain's own, or —
+// for a deterministic verification-infrastructure refusal — an ESCALATE outcome
+// carrying the decision card (P3-RW-14 R4). Anything mechanical crashes the run
+// for the ladder here and returns the error; the outcome then never exists, so
+// there is exactly ONE place a verification outcome reaches the run FSM.
+func (s *Skeleton) drainOrCard(ctx context.Context, r run.Run, in verify.VerifyInput) (verify.Outcome, error) {
+	v, err := s.newVerifier(ctx, in.Deliverable.Domain, r.TaskID)
+	if err == nil {
+		var out verify.Outcome
+		out, err = v.Verify(ctx, in)
+		if err == nil {
+			return out, nil
+		}
+	}
+	if _, outage := verify.AsPreambleRefusal(err); !outage {
+		s.crash(ctx, r.ID, "verification drain: "+err.Error())
+		return verify.Outcome{}, fmt.Errorf("stage: verify: %w", err)
+	}
+	// The ending outlives the request that provoked it (CONVENTIONS §56).
+	ctx = context.WithoutCancel(ctx)
+	esc := &verify.Escalator{DB: s.cfg.DB, Log: s.cfg.Log, Settings: s.cfg.Settings, Now: s.cfg.Now}
+	card, rerr := esc.Raise(ctx, verify.InfrastructureEscalation(in.Deliverable, r.UserID, err))
+	if rerr != nil {
+		// The door itself could not be written: that IS mechanical, so the run
+		// becomes a corpse the ladder can fork rather than a silent wedge.
+		s.crash(ctx, r.ID, "verification infrastructure card: "+rerr.Error())
+		return verify.Outcome{}, fmt.Errorf("stage: verify infrastructure card: %w", rerr)
+	}
+	s.logger().Warn("stage: verification infrastructure outage — escalating to a decision card instead of approving (S07.2/S07.7)",
+		"run", r.ID, "task", r.TaskID, "ask", card.AskID, "cause", err)
+	return verify.Outcome{Verdict: verify.VerdictEscalate, Card: &card}, nil
 }
 
 // newVerifier assembles the S07 Verifier over the skeleton's seams for one
@@ -772,7 +821,7 @@ func (s *Skeleton) dispatchVerify(ctx context.Context, r run.Run) error {
 // actually judge; the S14.8 revalidation runbook owns the re-measurement and
 // the rubric version bump that clears it. Refusing here means no verdict can be
 // minted under an unvalidated judge.
-func (s *Skeleton) newVerifier(domain string) (*verify.Verifier, error) {
+func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*verify.Verifier, error) {
 	// The rubric resolution mirrors the drain's own (a nil Rubric resolves to
 	// the software seed); it is set on the Verifier so the bundle the gate
 	// checks IS the bundle that judges.
@@ -784,8 +833,16 @@ func (s *Skeleton) newVerifier(domain string) (*verify.Verifier, error) {
 		// composition root's own dev/test seam (the nil-Confiner precedent).
 		judge = &EngineJudge{s: s}
 		if err := verify.UnsupervisedJudgingGate(rubric, judge.Meta().Model); err != nil {
-			return nil, err
+			// An unvalidated judge seat is a screen that cannot run — the same
+			// outage class as a missing check pack, and it terminates the same
+			// way: a decision card the operator can answer, never a crash the
+			// ladder re-forks into the identical refusal (P3-RW-14 R4).
+			return nil, verify.NewPreambleRefusal(err)
 		}
+	}
+	pack, err := s.checkPack(ctx, domain, taskID)
+	if err != nil {
+		return nil, err
 	}
 	revise := s.cfg.Revise
 	if revise == nil {
@@ -802,7 +859,7 @@ func (s *Skeleton) newVerifier(domain string) (*verify.Verifier, error) {
 		Settings: s.cfg.Settings,
 		Judge:    judge,
 		Rubric:   rubric,
-		Pack:     s.cfg.CheckPacks[domain],
+		Pack:     pack,
 		Runner:   s.cfg.CheckRunner,
 		Review:   sink,
 		// Research counters stay nil at B2-4: stage sessions exist now,
@@ -812,6 +869,31 @@ func (s *Skeleton) newVerifier(domain string) (*verify.Verifier, error) {
 		Revise: revise,
 		Now:    s.cfg.Now,
 	}, nil
+}
+
+// checkPack resolves the per-(domain, project) V1 check pack through the S13.7
+// registry seam (P3-RW-14 R5). The distinction the drain rests on:
+//
+//   - (nil, nil) — no pack applies here (no seam wired, or a non-launch domain
+//     whose ratified degraded mode is V1 empty, Spec S07.8);
+//   - an error wrapping ErrNoCheckPack / ErrBadPack — the pack the launch
+//     domain REQUIRES is absent or unusable, and the error names exactly what
+//     is missing. That is the preamble refusal class: it becomes the operator's
+//     decision card, never a crash and never a silently degraded launch domain;
+//   - any other error — the registry itself failed. Mechanical: it crashes for
+//     the ladder, because the next sweep may well read the registry fine.
+func (s *Skeleton) checkPack(ctx context.Context, domain, taskID string) (*verify.CheckPack, error) {
+	if s.cfg.CheckPackFor == nil {
+		return nil, nil
+	}
+	pack, err := s.cfg.CheckPackFor(ctx, domain, taskID)
+	if err != nil {
+		if errors.Is(err, verify.ErrNoCheckPack) || errors.Is(err, verify.ErrBadPack) {
+			return nil, verify.NewPreambleRefusal(err)
+		}
+		return nil, fmt.Errorf("stage: resolve the %s check pack: %w", domain, err)
+	}
+	return pack, nil
 }
 
 // verifyInput builds the drain input for one persisted deliverable
