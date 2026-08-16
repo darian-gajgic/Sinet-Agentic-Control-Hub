@@ -25,20 +25,24 @@ export type DrawerProps = {
  * from the side, not a different set of rules about focus and escape.
  */
 export function Drawer({ open, onOpenChange, title, children, className }: DrawerProps) {
+  // Mount-only-while-open + zero declared motion: the Modal's stuck-corpse
+  // finding (2026-08-16) — base-ui 1.7.0's close-unmount never completes on
+  // this stack, so closing is React's unmount, never the library's wait.
+  if (!open) return null
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
+        {/* NO css motion on either element (transition OR keyframe), exit
+            instant — the Modal's stuck-backdrop finding (2026-08-16) applies
+            here identically: any declared motion makes base-ui's close wait
+            forever and leaves an invisible click shield over the page. */}
         <Dialog.Backdrop
-          className={cn(
-            'fixed inset-0 z-40 bg-black/55 backdrop-blur-[var(--blur-overlay)]',
-            'motion-safe:transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
-          )}
+          className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[var(--blur-overlay)]"
         />
         <Dialog.Popup
           className={cn(
             'fixed inset-y-0 right-0 z-50 flex w-full flex-col md:w-[520px]',
             'border-l border-border bg-popover text-popover-foreground shadow-(--shadow)',
-            'motion-safe:transition-transform duration-250 data-[ending-style]:translate-x-full data-[starting-style]:translate-x-full',
             className,
           )}
         >

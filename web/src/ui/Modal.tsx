@@ -25,25 +25,34 @@ export type ModalProps = {
  *
  * The entry overshoots slightly under `no-preference` and is a plain appearance
  * under `reduce`, which the global kill switch guarantees regardless.
+ *
+ * ⚠ THE ROOT MOUNTS ONLY WHILE OPEN, AND NO CSS MOTION MAY BE DECLARED ON
+ * THE POPUP OR BACKDROP (found live 2026-08-16, deterministic on this stack,
+ * four probes deep): @base-ui 1.7.0's own close-unmount NEVER COMPLETES here
+ * — with transition classes, with a one-shot entry keyframe (it restarts at
+ * close and freezes at `currentTime: 0`), and even with zero motion declared,
+ * the closed popup sat in `data-ending-style` forever. The corpse's backdrop
+ * — opacity 0, pointer-events auto — stayed over the whole page as an
+ * INVISIBLE CLICK SHIELD: every press died silently, the operator's "I press
+ * on something and nothing happens" class. So closing is OURS: `open=false`
+ * returns null and React unmounts the whole subtree synchronously; the
+ * library's close-wait machinery is never on the path. Dialogs appear and
+ * vanish instantly — standard, and structurally incapable of stranding a
+ * shield.
  */
 export function Modal({ open, onOpenChange, title, description, children, footer, className }: ModalProps) {
+  if (!open) return null
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Backdrop
-          className={cn(
-            'fixed inset-0 z-40 bg-black/55 backdrop-blur-[var(--blur-overlay)]',
-            'motion-safe:transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
-          )}
+          className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[var(--blur-overlay)]"
         />
         <Dialog.Popup
           className={cn(
             'fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2',
             'rounded-(--radius) border border-border bg-popover text-popover-foreground shadow-(--shadow)',
             'p-(--density-pad)',
-            'motion-safe:transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
-            'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
-            'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
             className,
           )}
         >

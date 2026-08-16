@@ -4321,6 +4321,16 @@ a.feed-text:hover {
   margin-top: 0.75rem;
 }
 
+/* ── overlay motion: NONE, deliberately (2026-08-16) ────────────────────────
+   Dialogs, drawers and toasts appear and vanish INSTANTLY. Found live, three
+   probes deep: with ANY css motion declared on a @base-ui 1.7 popup or
+   backdrop — a transition (ending-style classes or not) OR a one-shot entry
+   keyframe (it restarts at close and freezes at currentTime 0, "running"
+   forever) — the close-wait never completes and the closed element NEVER
+   UNMOUNTS, leaving an invisible, click-swallowing backdrop over the whole
+   page. No `.anim-*` overlay class may be reintroduced until an upgraded
+   primitive proves its close completes with motion declared. */
+
 /* ── the error boundary's fault card (F1, 2026-08-16) ───────────────────────
    The recover face a crash lands on instead of a black screen. Three grains
    share one card; the app grain centres it in the viewport because the shell
