@@ -266,7 +266,7 @@ equipment:
 Write the requested note faithfully.
 `
 	tpl, v, err := h.workers.CreateDraft(ctx, owner, src, worker.RequestedGrants{
-		Tools: []string{"Read", "Write", "Edit"}, Class: "C1", Egress: worker.EgressNone,
+		Tools: []string{"Read", "Write", "Edit"}, Class: "C2", Egress: worker.EgressNone,
 	}, worker.Provenance{AuthorKind: "human", Origin: worker.OriginHumanWritten})
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)

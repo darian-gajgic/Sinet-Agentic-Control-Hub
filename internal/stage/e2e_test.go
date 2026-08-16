@@ -188,7 +188,7 @@ func fakeComposeJSON() string {
 	out := map[string]any{
 		"template": composedTemplateSrc,
 		"grants": map[string]any{
-			"tools": []string{"Read", "Write", "Edit"}, "class": "C1", "egress": "none",
+			"tools": []string{"Read", "Write", "Edit"}, "class": "C2", "egress": "none",
 		},
 		"sample_task": "write a two-line appreciation note about SQLite",
 		"golden_note": "a complete note naming SQLite, two lines, no commentary",
