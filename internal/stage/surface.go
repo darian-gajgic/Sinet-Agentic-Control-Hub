@@ -555,21 +555,23 @@ func (u *Surface) taskView(ctx context.Context, taskID string) (json.RawMessage,
 //
 //   - the TASK has not ended. `done` / `cancelled` are decisions already made;
 //     a dead run in the task's history may not re-open them.
-//   - the tombstoned lineage has no SUCCESSOR still being driven. A retry
-//     supersedes the ended lineage (Spec S02.5 step 2 fork lineage), and while
-//     its successor runs the board follows the work. If that successor ends
-//     badly in turn, IT is a tombstone with no successor — and it mints its
-//     own card, so the overlay is right about it.
+//   - the tombstoned lineage was not SUPERSEDED. A successor exists only
+//     because a human answered the card with `retry` (Spec S02.5 step 2 fork
+//     lineage), so while it runs the board follows the work — and when it
+//     COMPLETES the lineage recovered, which is the one thing a tombstone can
+//     stop being. If a successor ends badly in turn, IT is a tombstone with no
+//     successor of its own — and it mints its own card, so the overlay is
+//     right about it.
 //
-// A `crashed` successor counts as still-being-driven: it is terminal-but-
-// SUPERSEDABLE (Spec S02.3), the ladder owns its disposition (S02.5 step 3),
-// and if that disposition ends the lineage the tombstone-review card says so.
+// A `crashed` successor also suppresses: it is terminal-but-SUPERSEDABLE (Spec
+// S02.3), the ladder owns its disposition (S02.5 step 3), and if that
+// disposition ends the lineage the tombstone-review card says so.
 func deriveKanban(stored string, runs []runSummary) string {
 	if stored == kanbanCancelled || stored == kanbanDone {
 		return stored
 	}
 	for _, r := range runs {
-		if r.State != "tombstoned" || supersededByADrivenRun(r.RunID, runs) {
+		if r.State != "tombstoned" || supersededByALaterAttempt(r.RunID, runs) {
 			continue
 		}
 		return "attention"
@@ -582,10 +584,19 @@ func deriveKanban(stored string, runs []runSummary) string {
 // task-has-ended test).
 const kanbanDone = "done"
 
-// supersededByADrivenRun reports whether a recovery-fork successor of runID is
-// still being driven. Successors carry the parent's id plus `.g<generation>`
-// segments (Spec S02.5 step 2; the runRole strip is built on the same shape).
-func supersededByADrivenRun(runID string, runs []runSummary) bool {
+// supersededByALaterAttempt reports whether a recovery-fork successor of runID
+// took the lineage over — either by finishing its work or by still being
+// driven. Successors carry the parent's id plus `.g<generation>` segments (Spec
+// S02.5 step 2; the runRole strip is built on the same shape).
+//
+// A COMPLETED successor is the load-bearing case (P3-RW-14A drain r2 R-2): the
+// answered retry RECOVERED the lineage, the pipeline moved on to its next leg,
+// and an overlay that still shouted "attention" over the dead parent would
+// contradict a card that has been answered and a phase that is running. Only
+// the states that ended the lineage WITHOUT recovering it — finalized,
+// tombstoned, died-at-gate — leave the parent's tombstone speaking, and a
+// tombstoned successor speaks for itself through its own card.
+func supersededByALaterAttempt(runID string, runs []runSummary) bool {
 	if runID == "" {
 		return false
 	}
@@ -594,10 +605,10 @@ func supersededByADrivenRun(runID string, runs []runSummary) bool {
 			continue
 		}
 		switch r.State {
-		case "completed", "finalized", "tombstoned", "died-at-gate":
-			// Ended for good; it decides nothing about this tombstone.
+		case "finalized", "tombstoned", "died-at-gate":
+			// Ended without recovering; it decides nothing about this tombstone.
 		default:
-			return true // queued/claimed/running/draining/parked, or crashed
+			return true // completed, or still being driven (incl. crashed)
 		}
 	}
 	return false

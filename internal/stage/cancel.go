@@ -259,9 +259,11 @@ const kanbanCancelled = "cancelled"
 // person answering their own card (D10, enforced by the answer path), and the
 // only route to it is the HTTP answer verb. Nothing automated reaches it — no
 // watchdog tier, no recovery pass, no scheduler loop, no benchmark driver
-// (S14.4 / G1 D1.3; the file-scoped wall in cancel_internal_test.go is what
-// keeps that true, and it is why the call to the mapping is made from this
-// file rather than from the answer path).
+// (S14.4 / G1 D1.3), and that is ENFORCED rather than asserted: this method's
+// own name is in the wall's target set and the answer path is in its sanctioned
+// file list (cancel_internal_test.go), so a machine caller added from anywhere
+// else fails the wall. Making the call from this file rather than from the
+// answer path keeps the mapping itself single-implementation.
 func (s *Skeleton) CancelTaskAtCard(ctx context.Context, actor, taskID string) (TaskCancelOutcome, error) {
 	return s.CancelTask(ctx, actor, taskID)
 }

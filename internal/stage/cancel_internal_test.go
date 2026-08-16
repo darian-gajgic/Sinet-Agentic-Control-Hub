@@ -572,19 +572,23 @@ func TestQueuedCancelWithoutASchedulerIsRefusedFailClosed(t *testing.T) {
 // the tree. No watchdog tier, no recovery pass, no scheduler loop and no
 // benchmark driver can reach them.
 func TestCancelIsReachableFromTheHTTPVerbsOnly(t *testing.T) {
-	// The sanctioned callers, by file — exactly three, each a link in the ONE
+	// The sanctioned callers, by file — exactly four, each a link in the ONE
 	// human chain: the HTTP verb handlers (api/actions.go), the
-	// api.CancelSurface adapter they call through (stage/surface.go), and the
-	// machinery itself (stage/cancel.go). Anything else appearing here is an
-	// automated path acquiring a cancel, which is what D1.3 forbids.
+	// api.CancelSurface adapter they call through (stage/surface.go), the
+	// machinery itself (stage/cancel.go), and the recovery-ladder card's
+	// `cancel` answer (stage/ladderanswer.go, reached through the HTTP answer
+	// verb by the person the card belongs to — P3-RW-14A). Anything else
+	// appearing here is an automated path acquiring a cancel, which is what
+	// D1.3 forbids.
 	sanctioned := map[string]bool{
-		filepath.Join("..", "..", "internal", "stage", "cancel.go"):  true,
-		filepath.Join("..", "..", "internal", "stage", "surface.go"): true,
-		filepath.Join("..", "..", "internal", "api", "actions.go"):   true,
+		filepath.Join("..", "..", "internal", "stage", "cancel.go"):       true,
+		filepath.Join("..", "..", "internal", "stage", "surface.go"):      true,
+		filepath.Join("..", "..", "internal", "stage", "ladderanswer.go"): true,
+		filepath.Join("..", "..", "internal", "api", "actions.go"):        true,
 	}
 	targets := map[string]bool{
 		"CancelRun": true, "CancelTask": true, "cancelOne": true,
-		"runLadder": true, "markRequested": true,
+		"runLadder": true, "markRequested": true, "CancelTaskAtCard": true,
 	}
 	// The walk covers the WHOLE tree — internal/ including nested packages, plus
 	// cmd/ and tools/ (drain D5). The tree is clean today; the wall is what
