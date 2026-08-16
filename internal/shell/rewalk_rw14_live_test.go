@@ -415,8 +415,16 @@ func TestLiveRW14GPUShopRewalk(t *testing.T) {
 	if !rd.Generalist {
 		t.Fatalf("a writing plan routed to specialist %q — R8 did not hold live", rd.WorkerName)
 	}
+	// The BY-NAME guarantee (§19 no-fit discipline): the card must say which
+	// specialist was refused and that it could not write. "No specialist fits"
+	// is what the operator saw before this packet, and it is indistinguishable
+	// from "nobody matched" — the one fact that would have explained the live
+	// $1.11 is the culprit's own name.
+	if !strings.Contains(rd.PlainReason, "release-notes-writer") {
+		t.Errorf("the reason never NAMES the refused specialist — an operator cannot act on an anonymous refusal: %q", rd.PlainReason)
+	}
 	if !strings.Contains(strings.ToLower(rd.PlainReason), "write") {
-		t.Errorf("the reason never names the write refusal: %q", rd.PlainReason)
+		t.Errorf("the reason never says the refusal was about writing: %q", rd.PlainReason)
 	}
 
 	// ---- the one paid call ----
@@ -459,11 +467,30 @@ func TestLiveRW14GPUShopRewalk(t *testing.T) {
 	})
 	t.Logf("WORKTREE after execute: %v", landed)
 
+	// ASSERTED, not logged: this is the acceptance question. The seed README
+	// does not count — the engine must have put something NEW on disk, which
+	// is exactly what 7 sessions and $1.11 failed to do in the live world.
+	var written []string
+	for _, f := range landed {
+		if f != "README.md" {
+			written = append(written, f)
+		}
+	}
+	if len(written) == 0 {
+		t.Fatalf("execute completed and billed but wrote NOTHING into the worktree (contents: %v) — the RW-14 defect, live", landed)
+	}
+
 	snapshot, base, err := proj.SnapshotAndBase(ctx, "shop", taskID)
 	if err != nil {
 		t.Fatalf("SnapshotAndBase: %v", err)
 	}
 	t.Logf("snapshot=%s base=%s wrote_nothing=%v", short(snapshot), short(base), snapshot == base)
+	if snapshot == "" || base == "" {
+		t.Fatalf("a repo-backed task produced no snapshot/base pair (snapshot=%q base=%q) — R7 would have no facts", snapshot, base)
+	}
+	if snapshot == base {
+		t.Fatalf("the tree never left the base commit (%s) although files landed — snapshot and worktree disagree", short(base))
+	}
 
 	// ---- verify ----
 	tick("verify")
@@ -473,9 +500,26 @@ func TestLiveRW14GPUShopRewalk(t *testing.T) {
 	}
 	t.Logf("verify run state=%s", vr.State)
 	t.Logf("V1 check workspaces: %v", runner.saw)
+	// The verify leg must REACH a terminal, not wedge — the Cut A invariant
+	// this journey exists to keep: never crashed, never tombstoned.
+	switch vr.State {
+	case run.StateCrashed, run.StateTombstoned:
+		t.Fatalf("verify run is %q — the wedge is back", vr.State)
+	case run.StateCompleted, run.StateParked:
+		// completed = a verdict landed; parked = a card the operator can answer.
+	default:
+		t.Fatalf("verify run is %q — neither a verdict nor an answerable door", vr.State)
+	}
+	// R6, asserted: the checks ran, and they ran in the materialized revision.
+	if len(runner.saw) == 0 {
+		t.Fatal("no V1 check ever ran — the pack never reached the runner, so R6 proved nothing")
+	}
 	for _, dir := range runner.saw {
 		if strings.Contains(dir, filepath.Join("runs", execRun, "cwd")) {
 			t.Errorf("V1 ran in the execute scratch cwd %q — R6 did not hold live", dir)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+			t.Errorf("V1 workspace %q still carries VCS history (err %v) — S07.3 rule 1 did not hold live", dir, err)
 		}
 	}
 
