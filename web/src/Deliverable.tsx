@@ -325,7 +325,20 @@ function RevisionsBlock({ detail, stale }: { detail: DeliverableDetail; stale: b
                 {r.verdict_ref === undefined || r.verdict_ref === 0 ? (
                   <Absent reason="no verification verdict recorded" />
                 ) : (
-                  <span data-verdict-ref={String(r.verdict_ref)}>verdict #{String(r.verdict_ref)}</span>
+                  // W2-8: a bare "verdict #N" was a citation with no door. The
+                  // verdict's numbered findings land in this page's own
+                  // comments block, so the citation walks you there.
+                  <button
+                    type="button"
+                    className="verdict-link"
+                    data-verdict-ref={String(r.verdict_ref)}
+                    title="The verdict's findings land in the comments block on this page"
+                    onClick={() => {
+                      document.querySelector('.comments')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }}
+                  >
+                    verdict #{String(r.verdict_ref)} — findings below
+                  </button>
                 )}
               </span>
               <span className={cn('text-xs text-muted-foreground', figure)}>

@@ -17,6 +17,7 @@ import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Thr
 import { useProjectScope } from './project'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { StageName } from './TaskDetail'
 import { Chip, EmptyState, Panel, StatTile, StatusDot, Timestamp, type Tone } from './ui'
 
 /**
@@ -389,7 +390,23 @@ function SpendTile({ view, scoped, absentAll }: { view?: MeterView; scoped: bool
     }
   }
 
-  return <StatTile label="Spend today" tone="blue" icon={icon} value={value} foot={foot} />
+  // W1-14: the tile looked pressable and was not — so it became a real door.
+  // The full meters live on Fleet; the tile says so and goes there.
+  return (
+    <Link to={hrefFor('fleet')} className="tile-door" data-door="fleet" aria-label="Spend today — open Fleet for the full meters">
+      <StatTile
+        label="Spend today"
+        tone="blue"
+        icon={icon}
+        value={value}
+        foot={
+          <>
+            {foot} · <span className="tile-door-hint">open Fleet for the full meters</span>
+          </>
+        }
+      />
+    </Link>
+  )
 }
 
 /** todayRows reads the served per-period answer BY ITS OWN COLUMNS — the view's
@@ -448,6 +465,12 @@ function RosterPanel({
   const live = buckets.filter((b) => b.id !== 'finished')
   const finished = buckets.find((b) => b.id === 'finished')!
   const liveCount = live.reduce((n, b) => n + b.runs.length, 0)
+  // W2-11: a run without a task is the platform's own housekeeping (checks,
+  // sweeps — "no task, this run stands alone" is its own row label below).
+  // Counting them into one big figure inflated the work story: "106 runs
+  // finished" read as 106 tasks' worth of work. The split names both halves.
+  const finishedTaskWork = finished.runs.filter((r) => r.task_id !== '').length
+  const finishedHousekeeping = finished.runs.length - finishedTaskWork
 
   return (
     <Section title="The roster" stale={stale}>
@@ -498,6 +521,12 @@ function RosterPanel({
             <summary>
               Recently finished — {String(finished.runs.length)} run{finished.runs.length === 1 ? '' : 's'} in the last
               day
+              {finishedHousekeeping > 0 && (
+                <>
+                  {' '}
+                  ({String(finishedTaskWork)} task work · {String(finishedHousekeeping)} platform housekeeping)
+                </>
+              )}
             </summary>
             <ul className="roster-rows">
               {finished.runs.map((r) => (
@@ -551,17 +580,32 @@ function RosterRow({ run, task }: { run: RunListItem; task?: TaskListItem }) {
             · effort · cost. A latest-run cost that has no reading says so; an
             unmarked stage is simply not printed — the task page carries the
             full story. */}
+        {/* Plain words, labeled (W2-9): the old dot-joined confetti
+            ("r-claim · no cost reading · anthropic · quick") made a reader
+            guess which token was which. Each fact now says what it is; the
+            run id stays as the record it is. */}
         <span className="r-under mono">
           {run.run_id}
           {isLatest && (
             <>
               {' · '}
-              {cost !== null ? <Money usd={cost} /> : <span className="absent">no cost reading</span>}
+              {cost !== null ? (
+                <>
+                  spent <Money usd={cost} />
+                </>
+              ) : (
+                <span className="absent">no cost recorded yet</span>
+              )}
             </>
           )}
-          {run.stage !== '' && ` · ${run.stage}`}
-          {` · ${run.lane}`}
-          {effort !== '' && ` · ${effort}`}
+          {run.stage !== '' && (
+            <>
+              {' · '}
+              <StageName stage={run.stage} />
+            </>
+          )}
+          {` · on the ${run.lane} account`}
+          {effort !== '' && ` · ${effort} effort`}
           {task !== undefined && task.project !== '' && ` · ${task.project}`}
         </span>
       </span>
@@ -569,12 +613,19 @@ function RosterRow({ run, task }: { run: RunListItem; task?: TaskListItem }) {
         <Owner id={run.owner} />
       </span>
       <span className="r-state">
-        <Chip tone={stateTone(run)}>{run.wedged ? 'wedged' : run.state}</Chip>
+        {/* The chip distinguishes the two kinds of standing still (W2-9): a
+            run parked ON A PERSON wears "waiting on a person", and "parked"
+            keeps meaning the clock kind — one badge, one meaning. */}
+        <Chip tone={stateTone(run)}>
+          {run.wedged ? 'wedged' : run.state === 'parked' && run.waiting_on_human ? 'waiting on a person' : run.state}
+        </Chip>
       </span>
       <span className="r-when wide-cell">
         <Timestamp ts={run.last_activity_ts} variant="live" className="feed-stamp" />
       </span>
-      {run.waiting_on_human && <span className="r-flag waiting-human">waiting on a person</span>}
+      {run.waiting_on_human && run.state !== 'parked' && (
+        <span className="r-flag waiting-human">waiting on a person</span>
+      )}
       {run.state === 'parked' && (run.parked_until !== null || !run.waiting_on_human) && (
         // A recorded horizon is a served fact no row may drop — waiting rows
         // included. The no-horizon arm renders only where the park is the

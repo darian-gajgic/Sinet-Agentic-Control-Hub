@@ -127,12 +127,13 @@ export function TaskDetail({
           {data && (
             <>
               {data.kanban_status === 'cancelled' && <CancelledBanner decisions={data.decisions} runs={data.runs} />}
+              <StateStory detail={data} />
               <ActionBar detail={data} reload={reload} stream={stream} />
               <SpecBlock detail={data} stale={stale} />
               <StageBlock detail={data} stale={stale} />
               <LiveActivity run={activeRun(data)} stream={stream} />
               <DecisionsBlock decisions={data.decisions} stale={stale} cancelled={data.kanban_status === 'cancelled'} />
-              <DeliverablesBlock taskID={id} stream={stream} />
+              <DeliverablesBlock taskID={id} ended={data.kanban_status === 'done' || data.kanban_status === 'cancelled'} stream={stream} />
               <ReceiptsBlock runs={data.runs} stale={stale} reload={reload} />
             </>
           )}
@@ -146,6 +147,30 @@ export function TaskDetail({
  *  the card and the column must not disagree. */
 function statusWord(status: string): string {
   return status === 'intake' ? 'Backlog' : status === 'attention' ? 'Needs attention' : status
+}
+
+/**
+ * ONE state story (W2-3). The walk saw a task wear EXECUTING, "stands at
+ * parked" and a blocked-on-human mark at once and read three contradicting
+ * states. All three are served facts about DIFFERENT questions — the column
+ * is where the work stands, the run state is how it sits there, the open
+ * card is what it waits for — so the fix is one sentence tying them
+ * together, rendered exactly when the combination would otherwise read as a
+ * contradiction: a paused run under a moving column.
+ */
+function StateStory({ detail }: { detail: Detail }) {
+  if (detail.kanban_status === 'done' || detail.kanban_status === 'cancelled') return null
+  const run = activeRun(detail)
+  if (run === null || run.state !== 'parked') return null
+  const park = (run.receipt?.park_history ?? []).find((p) => p.ongoing)
+  return (
+    <p className="state-story" data-state-story>
+      One story, three words: <b>{statusWord(detail.kanban_status)}</b> is where the work stands · <b>parked</b> is
+      how it sits there{park?.park_reason !== undefined && park.park_reason !== '' && <> ({park.park_reason})</>} ·
+      and it moves again when what parked it clears — a card answered, or a wait passing. Nothing is stuck twice —
+      these are one state, read three ways.
+    </p>
+  )
 }
 
 function statusTone(status: string): Tone {
@@ -961,7 +986,7 @@ function DecisionsBlock({ decisions, stale, cancelled }: { decisions: TaskDecisi
  * and the door into their review. The revisions come from each deliverable's
  * own detail read — the numbers are records, never counted 1..N here.
  */
-function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventStream }) {
+function DeliverablesBlock({ taskID, ended, stream }: { taskID: string; ended?: boolean; stream?: EventStream }) {
   const { data, error, stale } = useLive<DeliverableDetail[]>({
     key: `/api/deliverables?task=${taskID}`,
     read: () =>
@@ -976,10 +1001,20 @@ function DeliverablesBlock({ taskID, stream }: { taskID: string; stream?: EventS
     <Section title="Deliverables" stale={stale}>
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && data.length === 0 ? (
+        ended === true ? (
+          // W2-2: on an ENDED task, "no deliverables YET" promised something
+          // still coming. The ended state picks the honest tense — and names
+          // the one legitimate way a finished task has nothing to show.
+          <EmptyState
+            what="This task is finished, and no deliverable is recorded for it."
+            why="A real run attaches what it produced, and it would be listed here with a door into review. A demo-seeded task can be minted finished with nothing attached — that is the seed's shortcut, not lost work."
+          />
+        ) : (
         <EmptyState
           what="This task has produced no deliverables yet."
           why="A deliverable appears when a worker produces one, with every revision kept as its own immutable record — the numbers are records rather than a count."
         />
+        )
       ) : (
         (data ?? []).map((d) => (
           <div className="deliverable" key={d.deliverable.id} data-deliverable={d.deliverable.id}>
@@ -1045,6 +1080,14 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
                 <CancelRun run={r} reload={reload} />
                 {r.receipt ? (
                   <ReceiptView receipt={r.receipt} modeNoteRepeated={repeated} directUseRepeated={directRepeated} />
+                ) : terminalStates.includes(r.state) ? (
+                  // W2-2 (the walk's worst trust hit): the served absence line
+                  // says receipts arrive "at the run's terminal transition" —
+                  // read on a run that IS terminal, it promised a receipt that
+                  // will never come. The run's own served state picks honest
+                  // words instead; the wire's line stays for live runs, where
+                  // it is true.
+                  <Absent reason="this run ended without a recorded receipt — nothing was itemized for it. A real run leaves its receipt when it ends; a demo-seeded task can be minted finished without one" />
                 ) : (
                   <Absent reason={r.receipt_absent ?? 'no receipt'} />
                 )}
