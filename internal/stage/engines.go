@@ -32,24 +32,221 @@ const (
 
 // parseJSONOutput parses a session's structured output: the final message
 // must be one JSON object (optionally fenced). A parse failure is a seam
-// error the pipeline surfaces — never silently absorbed.
+// error the pipeline surfaces — never silently absorbed. It is the plain
+// form of parseJSONCompleting, for callers with nobody to report a
+// structural completion to.
 func parseJSONOutput(text string, into any) error {
+	_, err := parseJSONCompleting(text, into)
+	return err
+}
+
+// maxJSONCompletionClosers bounds the delimiter-only structural completion
+// (P3-RW-16 R2): a reply missing more than this many closing delimiters is
+// not the proven truncation class, it is a reply that stopped somewhere
+// arbitrary, and it keeps the loud error. Plain constant, not a ⚙ — S03
+// ratifies no parse-repair key (CONVENTIONS §7, the sseBatchSize/
+// cancelGrace precedent).
+const maxJSONCompletionClosers = 8
+
+// parseJSONCompleting is parseJSONOutput plus the report R3's loudness
+// needs: how many closing delimiters the bounded completion had to append
+// (0 = the reply parsed exactly as the engine sent it).
+//
+// The completion exists because the engine side itself truncates: on the
+// drain-r1 walk 6 of 11 plan/critique sessions ended their final assistant
+// text exactly one closing brace short at stop_reason end_turn — the byte
+// never reached the adapter, which handed on what it was given, verbatim
+// and unrepaired (S03.1/RW-9). Trust stays in the platform validation, not
+// in the seam (S06.6): the completion adds NOTHING but computable closing
+// delimiters, and every downstream semantic check still runs on the result.
+func parseJSONCompleting(text string, into any) (int, error) {
 	t := strings.TrimSpace(text)
+	// A ``` inside a JSON string value is CONTENT, not a fence (R4): strip
+	// only when the first fence precedes the first '{' of the reply, i.e.
+	// when it really is the opening fence of a fenced block.
 	if i := strings.Index(t, "```"); i >= 0 {
-		t = t[i+3:]
-		t = strings.TrimPrefix(t, "json")
-		if j := strings.LastIndex(t, "```"); j >= 0 {
-			t = t[:j]
+		if b := strings.IndexByte(t, '{'); b < 0 || i < b {
+			t = t[i+3:]
+			t = strings.TrimPrefix(t, "json")
+			if j := strings.LastIndex(t, "```"); j >= 0 {
+				t = t[:j]
+			}
 		}
 	}
 	t = strings.TrimSpace(t)
 	if i := strings.IndexByte(t, '{'); i > 0 {
 		t = t[i:]
 	}
-	if err := json.Unmarshal([]byte(t), into); err != nil {
-		return fmt.Errorf("stage: session output is not the contracted JSON object: %w", err)
+	raw, closers := []byte(t), 0
+	if !json.Valid(raw) {
+		if c, ok := jsonPrefixClosers(t); ok {
+			if completed := append([]byte(t), c...); json.Valid(completed) {
+				raw, closers = completed, len(c)
+			}
+		}
 	}
-	return nil
+	if err := json.Unmarshal(raw, into); err != nil {
+		return 0, fmt.Errorf("stage: session output is not the contracted JSON object: %w", err)
+	}
+	return closers, nil
+}
+
+// jsonPrefixClosers reports the closing delimiters that finish t — and
+// reports them only when t is a syntactically valid JSON document truncated
+// by nothing but its own trailing delimiters (R2's walls):
+//
+//   - the cut lies OUTSIDE any string (a cut inside one would need a quote
+//     closed, and the platform never closes a quote — the string's content
+//     is model-authored and its end is unknowable);
+//   - the cut lies at a value-complete resting place: immediately after a
+//     complete value or a closed container. Never after a dangling ',' or
+//     ':' (a value would have to be invented), never after an object key
+//     awaiting its ':', and never on a container that was OPENED and holds
+//     nothing yet — closing that recovers no content at all while spending
+//     the bounded re-ask the seam would otherwise get;
+//   - never inside a number literal: a cut number is a DIFFERENT number
+//     (12345 cut to 1), and completing it would change a value that was
+//     present rather than restore one that was missing;
+//   - every open container closes from the bracket stack alone, bounded by
+//     maxJSONCompletionClosers.
+//
+// Empty, whitespace and prose inputs open no container, so they never reach
+// an eligible state and keep today's error.
+func jsonPrefixClosers(t string) (string, bool) {
+	const (
+		atStart = iota // before the document's one value
+		atOpen         // just after '{' or '['
+		atKey          // just after an object key string (awaiting ':')
+		atColon        // just after ':'
+		atValue        // just after a complete value (or a closed container)
+		atComma        // just after ','
+	)
+	var stack []byte
+	state := atStart
+	topIs := func(b byte) bool { return len(stack) > 0 && stack[len(stack)-1] == b }
+	// valueStart reports whether a fresh value may begin at this resting
+	// place: the top-level value, an object member's value, or an array
+	// element.
+	valueStart := func() bool {
+		switch state {
+		case atStart:
+			return len(stack) == 0
+		case atColon:
+			return topIs('{')
+		case atOpen, atComma:
+			return topIs('[')
+		}
+		return false
+	}
+	for i := 0; i < len(t); {
+		switch c := t[i]; {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			i++
+		case c == '{' || c == '[':
+			if !valueStart() {
+				return "", false
+			}
+			stack = append(stack, c)
+			state, i = atOpen, i+1
+		case c == '}' || c == ']':
+			open := byte('{')
+			if c == ']' {
+				open = '['
+			}
+			if !topIs(open) || (state != atOpen && state != atValue) {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+			state, i = atValue, i+1
+		case c == ':':
+			if state != atKey {
+				return "", false
+			}
+			state, i = atColon, i+1
+		case c == ',':
+			if state != atValue || len(stack) == 0 {
+				return "", false
+			}
+			state, i = atComma, i+1
+		case c == '"':
+			end, ok := scanJSONString(t, i)
+			if !ok {
+				return "", false // the cut lies inside a string
+			}
+			key := topIs('{') && (state == atOpen || state == atComma)
+			if !key && !valueStart() {
+				return "", false
+			}
+			if key {
+				state = atKey
+			} else {
+				state = atValue
+			}
+			i = end
+		case c == '-' || (c >= '0' && c <= '9'):
+			if !valueStart() {
+				return "", false
+			}
+			end := i + 1
+			for end < len(t) && isJSONNumberByte(t[end]) {
+				end++
+			}
+			if end == len(t) {
+				return "", false // a cut number is a different number
+			}
+			state, i = atValue, end
+		default:
+			var lit string
+			switch c {
+			case 't':
+				lit = "true"
+			case 'f':
+				lit = "false"
+			case 'n':
+				lit = "null"
+			default:
+				return "", false
+			}
+			if !valueStart() || !strings.HasPrefix(t[i:], lit) {
+				return "", false
+			}
+			state, i = atValue, i+len(lit)
+		}
+	}
+	if len(stack) == 0 || len(stack) > maxJSONCompletionClosers {
+		return "", false // nothing to complete, or not the truncation class
+	}
+	if state != atValue {
+		return "", false
+	}
+	closers := make([]byte, 0, len(stack))
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			closers = append(closers, '}')
+		} else {
+			closers = append(closers, ']')
+		}
+	}
+	return string(closers), true
+}
+
+// scanJSONString returns the index just past the string starting at t[i]
+// (which must be its opening quote), or false when the text ends before the
+// closing quote — including a text ending mid-escape.
+func scanJSONString(t string, i int) (int, bool) {
+	for j := i + 1; j < len(t); j++ {
+		switch t[j] {
+		case '\\':
+			j++ // whatever it escapes is content
+		case '"':
+			return j + 1, true
+		}
+	}
+	return 0, false
+}
+
+func isJSONNumberByte(c byte) bool {
+	return (c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-'
 }
 
 // jsonRetryLimit bounds the re-asks of a JSON-contract session whose
@@ -67,18 +264,35 @@ const jsonRetryNote = "\nYour previous reply was rejected: it was not the contra
 
 // jsonWithRetry drives a JSON-contract session through runSession (called
 // with a retry note to append on re-asks) and parses the reply into
-// `into`, re-asking at most jsonRetryLimit times on parse failure.
+// `into`, re-asking at most jsonRetryLimit times on parse failure. The
+// plain form: a caller that can name the session uses
+// jsonWithRetryReporting so a structural completion stays loud.
 func jsonWithRetry(runSession func(retryNote string) (string, error), into any) error {
+	return jsonWithRetryReporting(runSession, into, nil)
+}
+
+// jsonWithRetryReporting is jsonWithRetry with the R2 completion reported to
+// the caller that knows who the session was (run/stage/kind): a structural
+// completion is never silently absorbed (S06.6), and onCompletion fires once
+// per attempt whose reply had to be completed.
+func jsonWithRetryReporting(runSession func(retryNote string) (string, error), into any, onCompletion func(closers int)) error {
+	parse := func(text string) error {
+		n, err := parseJSONCompleting(text, into)
+		if err == nil && n > 0 && onCompletion != nil {
+			onCompletion(n)
+		}
+		return err
+	}
 	text, err := runSession("")
 	if err != nil {
 		return err
 	}
-	perr := parseJSONOutput(text, into)
+	perr := parse(text)
 	for try := 0; perr != nil && try < jsonRetryLimit; try++ {
 		if text, err = runSession(jsonRetryNote); err != nil {
 			return err
 		}
-		perr = parseJSONOutput(text, into)
+		perr = parse(text)
 	}
 	return perr
 }
@@ -86,7 +300,7 @@ func jsonWithRetry(runSession func(retryNote string) (string, error), into any) 
 // jsonSession runs one stage session under the JSON output contract with
 // the bounded re-ask.
 func (s *Skeleton) jsonSession(ctx context.Context, in SessionInput, into any) error {
-	return jsonWithRetry(func(retryNote string) (string, error) {
+	return jsonWithRetryReporting(func(retryNote string) (string, error) {
 		att := in
 		att.Instructions = in.Instructions + retryNote
 		res, err := s.Session(ctx, att)
@@ -94,7 +308,12 @@ func (s *Skeleton) jsonSession(ctx context.Context, in SessionInput, into any) e
 			return "", err
 		}
 		return res.Text, nil
-	}, into)
+	}, into, func(closers int) {
+		// Counts and platform-authored names only — nothing the model wrote
+		// lands in the log line (S01.11).
+		s.logger().Warn("stage: session reply was truncated mid-delimiter; completed it structurally (P3-RW-16 R2)",
+			"run", in.RunID, "stage", in.Stage, "kind", sessionKind(in), "closers", closers)
+	})
 }
 
 // ---- intake.Planner (Spec S06.10: planning-model duty; wired B2-4) ----

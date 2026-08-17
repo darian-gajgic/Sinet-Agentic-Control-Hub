@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -499,15 +500,29 @@ func (s *session) pump(stdout interface{ Read([]byte) (int, error) }) {
 		s.mu.Unlock()
 	}
 
-	scan := bufio.NewScanner(stdout)
-	scan.Buffer(make([]byte, 64<<10), scanBufCap)
-	for scan.Scan() {
-		for _, ev := range p.feed(scan.Bytes()) {
-			s.events <- ev
+	// An oversized line is one more skipped-line class, never a wedge
+	// (S03.1 forward tolerance): discarded through its newline, logged
+	// loudly with its length, and the read CONTINUES to EOF — so the tail,
+	// including the terminal envelope, still arrives and the child never
+	// blocks on a stdout nobody is draining. (A bufio.Scanner instead
+	// stopped the loop cold on ErrTooLong and cmd.Wait never returned.)
+	br := bufio.NewReaderSize(stdout, 64<<10)
+	for {
+		line, n, skipped, err := readCappedLine(br, scanBufCap)
+		switch {
+		case skipped:
+			s.a.logf("claudecli: skipping oversized stream line: %d bytes exceeds the %d-byte line cap", n, scanBufCap)
+		case len(line) > 0:
+			for _, ev := range p.feed(line) {
+				s.events <- ev
+			}
 		}
-	}
-	if err := scan.Err(); err != nil {
-		s.a.logf("claudecli: stdout read: %v", err)
+		if err != nil {
+			if err != io.EOF {
+				s.a.logf("claudecli: stdout read: %v", err)
+			}
+			break
+		}
 	}
 	waitErr := s.cmd.Wait()
 
@@ -520,6 +535,50 @@ func (s *session) pump(stdout interface{ Read([]byte) (int, error) }) {
 	s.mu.Unlock()
 	close(s.events)
 	close(s.done)
+}
+
+// readCappedLine reads one newline-terminated line (the terminator, and a
+// preceding CR, stripped — bufio.ScanLines semantics), bounded by limit.
+// A line over the limit is consumed and DISCARDED through its newline and
+// reported as skipped with its full byte length; the caller keeps reading.
+// The final unterminated chunk before EOF is returned as a line, alongside
+// io.EOF.
+func readCappedLine(r *bufio.Reader, limit int) (line []byte, n int, skipped bool, err error) {
+	for {
+		chunk, rerr := r.ReadSlice('\n')
+		n += len(chunk)
+		if !skipped {
+			if len(line)+len(chunk) > limit {
+				// Over the cap: drop what we held and keep draining until
+				// this line's newline (or EOF) so the NEXT line is intact.
+				line, skipped = nil, true
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		if rerr == bufio.ErrBufferFull {
+			continue
+		}
+		if rerr != nil {
+			if rerr == io.EOF && n == 0 {
+				return nil, 0, false, io.EOF
+			}
+			return trimLineEnd(line), n, skipped, rerr
+		}
+		return trimLineEnd(line), n, skipped, nil
+	}
+}
+
+// trimLineEnd drops the line terminator bufio.Scanner's ScanLines would
+// have dropped.
+func trimLineEnd(line []byte) []byte {
+	if i := len(line) - 1; i >= 0 && line[i] == '\n' {
+		line = line[:i]
+	}
+	if i := len(line) - 1; i >= 0 && line[i] == '\r' {
+		line = line[:i]
+	}
+	return line
 }
 
 // assembleOutcome maps {terminal envelope, exit, requested pause/cancel,
