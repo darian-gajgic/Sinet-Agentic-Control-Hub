@@ -116,13 +116,12 @@ test('the shell is phone-first and widens at a breakpoint, not the other way rou
   expect(css).not.toContain('@media (max-width:')
 })
 
-test('the body cannot scroll sideways and oversized content is contained', () => {
-  // `clip`, not the old value: both keep the body from scrolling sideways,
-  // but the old value additionally made body a SCROLL CONTAINER and killed
-  // wheel input on whole surfaces — the two-walk bug pinned at the bottom of
-  // this file. The property this test guards ("cannot scroll sideways") is
-  // exactly what clip does, minus the trap.
-  expect(block('body')).toContain('overflow-x: clip')
+test('the page cannot scroll sideways and oversized content is contained', () => {
+  // The sideways clip lives on `.shell`, the app's own outermost box — NOT on
+  // body — so nothing propagates to the viewport (the two-walk scroll bug
+  // pinned at the bottom of this file). The guarded property is unchanged:
+  // content wider than the screen is clipped, never a horizontal page scroll.
+  expect(block('.shell')).toContain('overflow-x: clip')
   expect(css).toMatch(/max-width:\s*100%/)
 })
 
@@ -288,14 +287,19 @@ test('the review surface reads at phone width and nothing widens the page', () =
   expect(block('.frame iframe')).toContain('width: 100%')
 })
 
-test('the body clips sideways overflow WITHOUT becoming a scroll container (W1-13/W2-12/RA)', () => {
+test('the viewport carries NO overflow of its own — the clip lives on .shell (W1-13/W2-12/RA/polish)', () => {
   // Two cold walks reported wheel and PageDown dead while script scrolling
-  // worked; the RA round reproduced it live and bisected it to ONE declaration:
-  // `body { overflow-x: hidden }`. A non-visible overflow on body makes body a
-  // scroll container and is PROPAGATED to the viewport, and Chrome was left
-  // with no scrollable node for wheel input on some surfaces. `clip` clips the
-  // same sideways overflow without creating a scroll container. This pin is
-  // what keeps the one-word regression from ever shipping again.
-  expect(block('body'), 'body must clip sideways overflow, never hide it').toContain('overflow-x: clip')
-  expect(block('body'), 'overflow-x: hidden on body is the two-walk scroll bug').not.toContain('overflow-x: hidden')
+  // worked; the RA round bisected the wheel half to `body { overflow-x:
+  // hidden }` and changed it to `clip` — but css-overflow-3 propagates BODY's
+  // overflow to the viewport whatever the value, and "clip on the viewport is
+  // interpreted as hidden", so keyboard scrolling stayed unreliable. The final
+  // shape this pin guards: body and html declare NO overflow at all (the
+  // viewport keeps its default scroller for wheel, keyboard and touch), and
+  // the sideways clip sits on `.shell`, which clips without propagating.
+  expect(block('body'), 'ANY overflow on body propagates to the viewport — the two-walk scroll bug').not.toContain(
+    'overflow',
+  )
+  expect(block('.shell'), 'the sideways clip must not be lost — it moved here from body').toContain(
+    'overflow-x: clip',
+  )
 })

@@ -247,4 +247,16 @@ test('exactly one surface embeds a browsing context, and it is the review surfac
   const doc = /documentSandbox\s*=\s*'([^']*)'/.exec(preview)
   expect(doc, 'the rendered-document sandbox grant list is gone or was renamed').not.toBeNull()
   expect(doc?.[1], 'the rendered-document frame must be granted NOTHING').toBe('')
+
+  // The MEASURING frame (polish round 2026-08-17): `allow-same-origin` and
+  // nothing else. The origin grant exists so the PARENT can read the hidden
+  // document's height and give the visible frame its exact size (the letterbox
+  // fix); scripts staying withheld is what keeps the framed content inert — a
+  // scriptless document cannot act on the origin it was handed. The exact-match
+  // pin means gaining ANY further token (allow-scripts above all, which
+  // together with allow-same-origin would hand model output this page's
+  // origin) is a build failure, not a drift.
+  const measure = /measureSandbox\s*=\s*'([^']*)'/.exec(preview)
+  expect(measure, 'the measuring-frame sandbox grant list is gone or was renamed').not.toBeNull()
+  expect(measure?.[1], 'the measuring frame is granted allow-same-origin and NOTHING else').toBe('allow-same-origin')
 })

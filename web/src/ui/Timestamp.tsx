@@ -1,3 +1,5 @@
+import { useEffect, useReducer } from 'react'
+
 import { cn } from '../lib/utils'
 import { Absent } from '../parts'
 
@@ -26,6 +28,25 @@ export type TimestampProps = {
 }
 
 export function Timestamp({ ts, variant = 'audit', className }: TimestampProps) {
+  // Re-derive when the person COMES BACK (return-visit item 7): a page left
+  // open on a quiet surface gets no frames, so a relative label froze at
+  // whatever it said when the tab was left — "3h ago" beside an instant that
+  // is a day old by the time anyone reads it again. `focus` and
+  // `visibilitychange` are events the person causes, not a clock — §32's
+  // no-ticker rule holds: between returns the label still ages only when the
+  // feed re-renders the surface, and a dead feed still shows its dead label
+  // with the connection pill saying why.
+  const [, rederive] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    if (variant !== 'live') return
+    window.addEventListener('focus', rederive)
+    document.addEventListener('visibilitychange', rederive)
+    return () => {
+      window.removeEventListener('focus', rederive)
+      document.removeEventListener('visibilitychange', rederive)
+    }
+  }, [variant])
+
   const relative = variant === 'live' ? relativeTo(ts) : ''
 
   if (!ts) return <Absent reason="not recorded" />

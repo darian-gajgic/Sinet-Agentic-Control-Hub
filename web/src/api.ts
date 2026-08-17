@@ -1018,6 +1018,13 @@ export type Revision = {
   run_id?: string
   pin_kind: string
   content_sha256?: string
+  /** The repo snapshot behind this revision (S13.5), absent when the revision
+   *  pins content only. Its presence is what makes a preview LAUNCHABLE — the
+   *  server's own no-preview arm answers "no repo-backed revision" exactly
+   *  when no revision carries one (internal/preview/manager.go), so the try-it
+   *  surface reads this instead of offering a launch it can prove will answer
+   *  nothing. */
+  snapshot_sha?: string
   platform_ref: string
   /** The pinned objects of this revision — a content pin records each file as
    *  one (`type: "text"`), a binary pin records each payload. The bytes behind

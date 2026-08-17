@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Diff, Hunk, getChangeKey, markEdits, parseDiff, tokenize, type ChangeData, type FileData } from 'react-diff-view'
 import 'react-diff-view/style/index.css'
 
@@ -244,10 +244,22 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
           state is served PER ARTIFACT (§38 ruling (a)), so this page never
           calls anything approved or signed off, and it never offers acceptance
           as something it can take back — no un-accept verb exists at any shape.
-          The one accept the SPA has is the owner's own outward push. */}
+          AND THE ACCEPT SENTENCE TELLS THE ARM'S TRUTH (return visit item 2):
+          a deliverable with no project behind it accepts on the PINNED arm —
+          the copy is filed here, nothing is pushed — and this intro must not
+          contradict the card and the door, which already say so. The repo
+          sentence renders only where a project really receives a commit; before
+          the read lands, no push claim is made either way. */}
       <SurfaceHead
         title={data ? data.deliverable.id : 'Deliverable'}
-        what="See the finished work first, download it, and accept it when it is right. Below it: every revision the platform minted, compare any round against any other, comment on a line or on the whole file, and try the built thing live. Accepting makes a revision the official version — a commit pushed under your own credentials — and nothing on this page takes an accept back."
+        what={
+          'See the finished work first, download it, and accept it when it is right. Below it: every revision the platform minted, compare any round against any other, comment on a line or on the whole file, and try the built thing live.' +
+          (data === null
+            ? ''
+            : !data.deliverable.project_id
+              ? ' Accepting makes a revision the official version — the accepted copy is filed right here, recorded as your own decision, and nothing is pushed anywhere — and nothing on this page takes an accept back.'
+              : ' Accepting makes a revision the official version — a commit pushed under your own credentials — and nothing on this page takes an accept back.')
+        }
       />
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && (
@@ -367,6 +379,29 @@ function StateStory({ detail, me }: { detail: DeliverableDetail; me: string }) {
  * grant list empty by name.
  */
 export const documentSandbox = ''
+
+/**
+ * THE MEASURING FRAME'S GRANT LIST — `allow-same-origin` and NOTHING else,
+ * scripts most deliberately absent.
+ *
+ * Why it exists (the return visit's headline friction): a fixed-height frame
+ * over a taller document is a nested scroller, and a nested scroller fights
+ * every input class — wheel chains out at its boundaries ("hard-eject"),
+ * keyboard needs frame focus, and the owner's own lower half ends up
+ * unreachable rendered. The cure is to give the visible frame its content's
+ * EXACT height so no inner scroller exists and the page is the one scroller —
+ * which requires reading the document's height, which an empty sandbox forbids
+ * (opaque origin). So a second, HIDDEN frame loads the same blob URL with its
+ * origin restored, THIS page reads its scrollHeight, and the frame is dropped.
+ *
+ * Why the token is safe HERE and only here: scripts stay withheld, so the
+ * framed document cannot act — no code runs, no forms submit, no top
+ * navigation; the origin grant hands the DOM to the PARENT (this page), not
+ * to the content. The frame is display-suppressed and inert (aria-hidden,
+ * no tab stop), so no person can interact with it. The VISIBLE document frame
+ * keeps its empty grant list, pinned by the escape scan alongside this one.
+ */
+export const measureSandbox = 'allow-same-origin'
 
 /**
  * ResultBlock — the result, FIRST (RA-B1 item 1).
@@ -511,9 +546,35 @@ function ResultBlock({ detail }: { detail: DeliverableDetail }) {
   )
 }
 
-/** The composed result: a document in the sandboxed frame, or plain text. */
+/**
+ * The composed result: a document in the sandboxed frame, or plain text.
+ *
+ * THE FRAME IS AS TALL AS THE DOCUMENT (the return visit's headline friction).
+ * A fixed-height frame over a taller document is a nested scroller, and a
+ * nested scroller fights every input class: the wheel chains out at its
+ * boundaries into a page thousands of pixels tall, the keyboard scrolls it
+ * only when the frame has focus, and the owner's own lower half ends up
+ * unreachable rendered. So the frame takes its content's exact height and the
+ * PAGE is the one scroller — wheel, keyboard and touch all read the document
+ * the way they read everything else, at every viewport height, with nothing
+ * to trap in and nothing to eject from.
+ *
+ * The height is a FACT, not a guess: a hidden, inert measuring frame (see
+ * measureSandbox above) loads the same blob at the same width, this page reads
+ * its scrollHeight, and the measuring frame is dropped. Reflow re-measures —
+ * ResizeObserver is event-driven layout observation, never a clock (§32).
+ * While no measurement exists (first paint, or a browser without the
+ * observer) the frame keeps the bounded fallback height and its own inner
+ * scroll — degraded, never absent.
+ */
 function ComposedView({ composed }: { composed: ComposedResult }) {
   const [src, setSrc] = useState('')
+  const [height, setHeight] = useState(0)
+  const [width, setWidth] = useState(0)
+  /** The width the current height was measured AT — the measuring frame mounts
+   *  only while these disagree, and is dropped the moment they match. */
+  const [measuredAt, setMeasuredAt] = useState(-1)
+  const boxRef = useRef<HTMLDivElement | null>(null)
 
   // The blob URL is minted from the composed document and revoked when the
   // composition changes or the block unmounts. `src` by URL reference is the
@@ -529,6 +590,22 @@ function ComposedView({ composed }: { composed: ComposedResult }) {
     }
   }, [composed])
 
+  // The rendered width drives the measurement: text reflows with the column,
+  // so a height measured at one width is wrong at another. A width change
+  // re-mounts the measuring frame (its key) and the fresh load re-measures.
+  useEffect(() => {
+    const el = boxRef.current
+    if (el === null || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      setWidth(el.clientWidth)
+    })
+    ro.observe(el)
+    setWidth(el.clientWidth)
+    return () => {
+      ro.disconnect()
+    }
+  }, [composed.kind])
+
   if (composed.kind === 'text') {
     return (
       <pre
@@ -540,15 +617,47 @@ function ComposedView({ composed }: { composed: ComposedResult }) {
     )
   }
   return (
-    <div className="result-frame" data-result-kind="document">
+    <div className="result-frame relative" data-result-kind="document" ref={boxRef}>
       {src !== '' && (
         <iframe
           title="The finished work, rendered"
           src={src}
           sandbox={documentSandbox}
           referrerPolicy="no-referrer"
-          className="h-[34rem] w-full rounded-(--radius) border border-border bg-white"
+          className={cn('w-full rounded-(--radius) border border-border bg-white', height === 0 && 'h-[34rem]')}
+          style={height > 0 ? { height: `${String(height)}px` } : undefined}
           data-result-doc="true"
+          data-measured={height > 0 ? 'true' : 'false'}
+        />
+      )}
+      {src !== '' && width > 0 && measuredAt !== width && (
+        // The measuring frame: same document, same width, origin restored so
+        // THIS page can read its height — scripts withheld so the content
+        // cannot act (measureSandbox above). Inert and invisible; dropped the
+        // moment the measurement lands.
+        <iframe
+          key={width}
+          title="measuring the rendered document"
+          src={src}
+          sandbox={measureSandbox}
+          referrerPolicy="no-referrer"
+          aria-hidden="true"
+          tabIndex={-1}
+          className="absolute -left-[9999px] h-2 border-0"
+          style={{ width: `${String(width)}px`, visibility: 'hidden' }}
+          data-result-measure="true"
+          onLoad={(e) => {
+            const doc = e.currentTarget.contentDocument
+            const h = doc?.documentElement?.scrollHeight ?? 0
+            // +1 swallows sub-pixel rounding so an exact fit never grows a
+            // one-pixel inner scrollbar. A read the browser refused (h = 0)
+            // keeps the bounded fallback and keeps the frame mounted, so a
+            // later reflow retries rather than freezing a wrong answer.
+            if (h > 0) {
+              setHeight(h + 1)
+              setMeasuredAt(width)
+            }
+          }}
         />
       )}
       <p className="mt-1 mb-0 text-xs text-muted-foreground">
@@ -630,20 +739,18 @@ function RevisionsBlock({ detail, stale }: { detail: DeliverableDetail; stale: b
                 {r.verdict_ref === undefined || r.verdict_ref === 0 ? (
                   <Absent reason="no verification verdict recorded" />
                 ) : (
-                  // W2-8: a bare "verdict #N" was a citation with no door. The
-                  // verdict's numbered findings land in this page's own
-                  // comments block, so the citation walks you there.
-                  <button
-                    type="button"
-                    className="verdict-link"
-                    data-verdict-ref={String(r.verdict_ref)}
-                    title="The verdict's findings land in the comments block on this page"
-                    onClick={() => {
-                      document.querySelector('.comments')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                    }}
-                  >
-                    verdict #{String(r.verdict_ref)} — findings below
-                  </button>
+                  // W2-8 → return-visit item 4: a bare "verdict #N" was a
+                  // citation with no door, and the scroll-jump that replaced
+                  // it was a dud (the comments block shows the CURRENT
+                  // comparison's revision, not this one's). The citation is
+                  // now its own READER: open it and the findings said about
+                  // THIS revision render right here, from the same served
+                  // comment rows the comments block reads.
+                  <VerdictReader
+                    deliverable={detail.deliverable.id}
+                    revision={r.n}
+                    verdictRef={r.verdict_ref}
+                  />
                 )}
               </span>
               <span className={cn('text-xs text-muted-foreground', figure)}>
@@ -656,6 +763,83 @@ function RevisionsBlock({ detail, stale }: { detail: DeliverableDetail; stale: b
       )}
       <LineageEdges detail={detail} />
     </Section>
+  )
+}
+
+/**
+ * The verdict citation as a reader (return-visit item 4).
+ *
+ * The wire serves no verdict document — the verdict's substance IS the
+ * checker's findings, served as comment rows that carry the revision they were
+ * said about. So the citation opens into exactly those rows, read once on
+ * first open. Served-empty renders the honest line rather than a silent
+ * nothing: the verdict number is a real record even when its findings list
+ * arrives empty here.
+ */
+function VerdictReader({
+  deliverable,
+  revision,
+  verdictRef,
+}: {
+  deliverable: string
+  revision: number
+  verdictRef: number
+}) {
+  const [feed, setFeed] = useState<Comment[] | null>(null)
+  const [failure, setFailure] = useState('')
+  const asked = useRef(false)
+
+  const read = () => {
+    if (asked.current) return
+    asked.current = true
+    api.comments(deliverable, revision).then(
+      (res) => {
+        setFeed(res.comments.filter((c) => c.kind === 'finding' && c.revision_n === revision))
+      },
+      (err: unknown) => {
+        setFailure(describeError(err))
+        asked.current = false
+      },
+    )
+  }
+
+  return (
+    <details
+      className="verdict-fold inline-block align-top"
+      data-verdict-ref={String(verdictRef)}
+      onToggle={(e) => {
+        if (e.currentTarget.open) read()
+      }}
+    >
+      <summary className="verdict-link cursor-pointer">
+        verdict #{String(verdictRef)} — the checker&apos;s findings on this revision
+      </summary>
+      {failure !== '' && <p className="error my-1 text-xs">{failure}</p>}
+      {failure === '' && feed === null && (
+        <p className="my-1 text-xs text-muted-foreground">Reading the findings…</p>
+      )}
+      {feed !== null &&
+        (feed.length === 0 ? (
+          <p className="my-1 text-xs text-muted-foreground" data-verdict-empty="true">
+            The verdict is recorded, but the platform served no findings about revision {String(revision)} here —
+            there is nothing more this page can show for it.
+          </p>
+        ) : (
+          <ul className="verdict-findings my-1 flex list-none flex-col gap-1 ps-0" data-findings={String(feed.length)}>
+            {feed.map((c) => (
+              <li key={c.id} className="text-xs" data-finding={String(c.id)}>
+                <ToneSpan tone={severityTone(c.severity)} className="severity">
+                  {severityMeaning(c.severity)}
+                </ToneSpan>{' '}
+                {c.criterion !== undefined && c.criterion !== '' && (
+                  <span className={cn('text-muted-foreground', figure)}>{c.criterion} · </span>
+                )}
+                <span className="finding-body">{c.body}</span>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </details>
   )
 }
 
@@ -2257,11 +2441,40 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
     run().catch((err: unknown) => setFailure(describeError(err)))
   }
 
+  // A preview launches a BUILD, and a build exists only behind a repo-backed
+  // revision (S13.8; internal/preview/manager.go answers "no repo-backed
+  // revision to preview" otherwise). `snapshot_sha` on a revision is that fact,
+  // served. When no revision carries one, this surface can PROVE what the
+  // launch would answer — so it says so in plain words instead of offering an
+  // enabled button whose only possible outcome is a refusal in spec dialect
+  // (return-visit item 3). Same rule as the request-revision form: gate on
+  // what the door can actually deliver, not on the verb being open.
+  const launchable = detail.revisions.some((r) => r.snapshot_sha !== undefined && r.snapshot_sha !== '')
+
   return (
     <Section title="Try it out" stale={sessions.stale}>
       {previewDoor === undefined ? (
         <Absent reason="the platform named no preview door on this deliverable" />
-      ) : previewDoor.available ? (
+      ) : !previewDoor.available ? (
+        <p className="m-0 text-sm text-muted-foreground" data-closed="preview">
+          {previewDoor.reason}
+        </p>
+      ) : !launchable ? (
+        <div className="m-0 text-sm text-muted-foreground" data-unlaunchable="preview">
+          <p className="m-0">
+            There is nothing to launch here: this work is a finished document, not an app the platform can start —
+            none of its revisions has a runnable build behind it. The rendered view at the top of this page is the way
+            to see it.
+          </p>
+          <details className="door-tech">
+            <summary className="cursor-pointer text-xs">technical detail</summary>
+            <p className={cn('m-0 text-xs', figure)}>
+              the platform&apos;s preview verb would answer &quot;no-preview&quot; — {previewDoor.method}{' '}
+              {previewDoor.route} · {previewDoor.reason}
+            </p>
+          </details>
+        </div>
+      ) : (
         <Button
           variant="secondary"
           size="sm"
@@ -2276,12 +2489,8 @@ function TryItBlock({ detail, stream }: { detail: DeliverableDetail; stream?: Ev
         >
           Launch a preview
         </Button>
-      ) : (
-        <p className="m-0 text-sm text-muted-foreground" data-closed="preview">
-          {previewDoor.reason}
-        </p>
       )}
-      {compareDoor !== undefined && compareDoor.available && (
+      {compareDoor !== undefined && compareDoor.available && launchable && (
         <Button
           variant="secondary"
           size="sm"
@@ -2333,6 +2542,24 @@ function SessionPanel({ session }: { session: PreviewSession }) {
           </p>
           <PortPicker session={session} />
         </>
+      ) : session.state === 'no-preview' ? (
+        // The one answer this surface can put in plain words without guessing:
+        // no-preview is the platform's defined "nothing runs for this type"
+        // state (S13.8), and its served reason is engineering dialect — so the
+        // sentence is a person's and the served text keeps its place one fold
+        // down (return-visit item 3).
+        <div className="text-sm text-muted-foreground" data-no-preview="true">
+          <p className="m-0">
+            Nothing runs for this work — it is not an app the platform can start. If it is a document or a page, the
+            rendered view at the top of this page is the way to see it.
+          </p>
+          {session.reason !== undefined && session.reason !== '' && (
+            <details className="door-tech">
+              <summary className="cursor-pointer text-xs">technical detail</summary>
+              <p className={cn('m-0 text-xs', figure)}>{session.reason}</p>
+            </details>
+          )}
+        </div>
       ) : (
         <Absent
           reason={

@@ -1087,11 +1087,14 @@ test('the surface declares the types it consumes, each against the registry', as
 
 test('an iframe src can only come from a served preview URL or a blob of revision bytes', async () => {
   const src = (await import('./Deliverable.tsx?raw')).default as string
-  // Exactly TWO frames exist since RA-B1, both in this one file: the preview
-  // (src composed from a served session URL + the shell path) and the
-  // rendered-document view (src a blob: URL minted from same-origin revision
-  // bytes, sandbox granted NOTHING — the escape scan pins that grant list).
-  expect(src.match(/<iframe/g), 'a frame beyond the preview and the rendered document exists').toHaveLength(2)
+  // Exactly THREE frames exist since the polish round, all in this one file:
+  // the preview (src composed from a served session URL + the shell path),
+  // the rendered-document view (src a blob: URL minted from same-origin
+  // revision bytes, sandbox granted NOTHING) and the hidden MEASURING frame
+  // (the SAME blob URL, sandbox allow-same-origin only, scripts withheld —
+  // the escape scan pins both grant lists by name).
+  expect(src.match(/<iframe/g), 'a frame beyond the preview, the rendered document and its measurer exists').toHaveLength(3)
+  expect(src, 'the measuring frame must ride the same minted blob URL').toContain('sandbox={measureSandbox}')
   expect(src).toContain('src={frameSrc(side.url, path)}')
   expect(src, 'the document frame must ride the blob URL the composition minted').toContain(
     'URL.createObjectURL(new Blob([composed.html]',
