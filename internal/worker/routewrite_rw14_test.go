@@ -92,17 +92,17 @@ func TestRW14WritingPlanRefusesReadOnlyWorker(t *testing.T) {
 		whyRefuse string
 	}{
 		{
-			name: "the live shape: read-only class, no write instrument",
+			name:  "the live shape: read-only class, no write instrument",
 			class: "C1", tools: "Read, Grep, Glob",
 			whyRefuse: "neither its class nor its tools can write",
 		},
 		{
-			name: "write instruments under a read-only class",
+			name:  "write instruments under a read-only class",
 			class: "C1", tools: "Read, Write, Edit",
 			whyRefuse: "a C1 workspace is mounted read-only however good the tools are",
 		},
 		{
-			name: "a writable class with no write instrument",
+			name:  "a writable class with no write instrument",
 			class: "C2", tools: "Read, Grep, Glob",
 			whyRefuse: "nothing in the granted toolset can put bytes on disk",
 		},
