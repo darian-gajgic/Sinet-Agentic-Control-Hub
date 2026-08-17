@@ -66,4 +66,35 @@ The walker could not find any cancelled thing across Board (14 tasks), Home, Inb
 
 ### W2 delights
 
+Plain-words banners; stage timeline; the checkable contract; live home; itemized receipts; the accept warning; consent; board scroll-position. *(full list retained below)*
+
+---
+
+## Re-walk A — blind journey, photographer persona, fresh world, post-fix build (2026-08-17 18:15–19:01)
+
+**Outcome: the JOURNEY is release-quality — no crash, sign-in-first worked in place, phrased questions "the best I've ever been asked by software", every time promise kept, self-checker caught a real CSS-only-delivery defect and forced the fix, $0 — but the walk BLOCKS on the LAST MILE: the owner cannot view, download, or accept her finished website.** World kept at `~/.sinet-rewalk-a` (alice's in-review website deliverable = the builder's live fixture).
+
+### RA-B1 (BLOCKING) — the deliver-the-result moment fails on every live surface
+
+DONE ends at a markdown deliverable wearing a raw code diff behind "Old version — not the rework" dev banners; "Launch a preview" answers `no-preview — no repo-backed revision to preview (S13.8)` in spec-speak; NO download control exists; the Accept card speaks payload pins/commit trailers/git-ssh-keys; "in-review" has no reviewer path (not in Inbox, Reviews page is an under-construction poster, request-revision CLOSED); machine findings are SIGNED "alice" (fifteen findings in words she never said). **Triage: the step-4 deliverable-surface rebuild is pulled FORWARD by coordinator decision — the walks prove it is the journey's final moment, not a later pass.** Scope: rendered view for markdown/HTML deliverables (the RESULT first, the diff one click away), a download door, the accept card in plain words (the mechanics stay; the language changes), in-review state honesty (who reviews, what happens next, a real door), dev banners retired or reworded for households, findings never signed as a person (attribution = wire gap, REPORT: the drain's findings rows carry the requester's identity as author).
+
+### RA ranked frictions (walker's order, triage)
+
+| # | Finding | Triage |
+|---|---|---|
+| RA-2 | Dev banners on Deliverable/Fleet/Assistant incl. confessions of known-dead controls | rides RA-B1 |
+| RA-3 | The plan's promised "price" reads `UNPRICED — no per-call dollar price exists on the anthropic lane… (2.5)` — breaks the door's "plan with a price" promise | builder: one humane sentence ("included in your subscription — no extra charge"), detail one click down |
+| RA-4 | "DEGRADED-MARKED" + spec citations (S08.7, D5, S13.8, S10.1, EARS) in consumer surfaces | builder sweep + wire-side strings on the G-list |
+| RA-5 | Machine findings signed "alice" | wire gap (attribution) — REPORT + view label ("the platform's checker") |
+| RA-6 | STAKES flips HIGH→LOW→HIGH with no reason given | builder: the badge says why it changed (classification refined) |
+| RA-7 | Money in four costumes + Fleet `Weighted consumption 169378.20000000004` unit-less under "budgets" + Active-5 vs Home 0-running contradiction | builder + G-list |
+| RA-8 | "In-review" with nobody reviewing; expired card "waiting on you" | rides RA-B1 / builder |
+| RA-9 | Board sideways-scroll dead from the card area (the "MORE STAGES" pill is the secret door) | builder: drag/scroll from anywhere |
+| RA-10 | Inbox greets with the opt-in essay before mail (third report) | builder (was W2-10; verify the fix actually landed) |
+| RA-11 | Q1 asked if the website is "an email or message" right under a recap proving it knows better; `t-… · generic` tag at birth | observation: generic round-1 set before classify refines — pairs with the classifier misfiling a WEBSITE goal as CONTENT family (which also made the deliverable markdown-not-repo → fed RA-B1's no-preview). Record for the taxonomy/calibration gate read. |
+
+### RA delights (the journey's proof)
+
+Sign-in unlocked in place exactly as promised; flawless understanding playback with provenance; round-2 questions in her language with "You choose for me and show me what you picked"; honest waits with kept promises; safe skipping priced in words; live step numbers + progress log; the verifier's perfect sentence ("As shipped, a couple cannot view or use the page… or this is not the requested website"); the PIN ceremony. Walker's verdict: "With the asking and the making — yes, more than any software I've used. With the finishing — no."
+
 Plain-words banners ("The honest bucket", "nothing is thrown away while it waits"); the stage timeline in human phrasing; the shipping-note spec as a checkable contract that MATCHED the result; live-updating home; receipts as real itemized tables; the accept warning ("pushes a commit under your own credentials, and nothing on this page takes one back"); consent handled seriously; board scroll-position kept.
