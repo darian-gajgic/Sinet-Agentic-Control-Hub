@@ -1,11 +1,14 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Diff, Hunk, getChangeKey, markEdits, parseDiff, tokenize, type ChangeData, type FileData } from 'react-diff-view'
 import 'react-diff-view/style/index.css'
+
+import { composeResult, humanBytes, resultSizeCap, type ComposedResult, type ResultFile } from './resultDoc'
 
 import {
   ApiError,
   api,
   objectHref,
+  objectText,
   staleAcceptCard,
   type AcceptCard,
   type AcceptOutcome,
@@ -244,7 +247,7 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
           The one accept the SPA has is the owner's own outward push. */}
       <SurfaceHead
         title={data ? data.deliverable.id : 'Deliverable'}
-        what="Review one deliverable end to end: read the revisions the platform minted, compare one round against another, comment on a line or on the whole file, try the built thing in a frame, and accept a revision when it is right. An accept pushes a commit under your own credentials, and nothing on this page takes one back."
+        what="See the finished work first, download it, and accept it when it is right. Below it: every revision the platform minted, compare any round against any other, comment on a line or on the whole file, and try the built thing live. Accepting makes a revision the official version — a commit pushed under your own credentials — and nothing on this page takes an accept back."
       />
       <Freshness stale={stale} error={error} hasData={data !== null} />
       {data && (
@@ -265,6 +268,8 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
             {data.deliverable.project_id ? <> · {data.deliverable.project_id}</> : null}
             {data.deliverable.subject_ref ? <> · {data.deliverable.subject_ref}</> : null}
           </p>
+          <StateStory detail={data} me={me} />
+          <ResultBlock detail={data} />
           <RevisionsBlock detail={data} stale={stale} />
           <ComparisonBlock detail={detailRefs(data)} me={me} stream={stream} />
           <DoorsBlock detail={data} reload={reload} />
@@ -283,6 +288,306 @@ function detailRefs(detail: DeliverableDetail) {
 }
 
 type DetailRefs = ReturnType<typeof detailRefs>
+
+// ── RA-B1: the owner's moment — the result, the download, the honest state ───
+
+/**
+ * StateStory says where this work STANDS, in the owner's language (RA-8/RA-B1
+ * item 4). Every sentence is derivable from served facts alone:
+ *
+ *  - "in-review" work waits on exactly one person — its OWNER. That is D10
+ *    (decisions belong to the decision owner) rendered as a sentence, not a
+ *    guess: the wire serves no separate reviewer because there is none.
+ *  - the next step is on THIS page (accept below, or ask for changes), so the
+ *    story's door is a jump, not an IOU.
+ *
+ * A state this build does not know renders verbatim with no story claimed —
+ * the same forward tolerance every vocabulary map on this surface takes.
+ */
+function StateStory({ detail, me }: { detail: DeliverableDetail; me: string }) {
+  const d = detail.deliverable
+  const mine = me !== '' && me === d.owner
+  const jump = (selector: string) => {
+    document.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  if (d.state === 'in-review') {
+    return (
+      <p className={cn('state-story mb-3 text-sm', reviewPanel)} data-state-story="in-review">
+        {mine ? (
+          <>
+            <strong>This finished work is waiting for you.</strong> Nobody else reviews it — it is yours to judge. When
+            it is right,{' '}
+            <button type="button" className="jump-link" data-jump="accept" onClick={() => jump('.accept-card, .deliverable [data-door="accept"]')}>
+              accept it below
+            </button>{' '}
+            and it becomes the official version. If something is off,{' '}
+            <button type="button" className="jump-link" data-jump="comments" onClick={() => jump('.comments')}>
+              say what to change
+            </button>{' '}
+            and the platform runs another round.
+          </>
+        ) : (
+          <>
+            <strong>This finished work is waiting for {d.owner}&apos;s review</strong> — it is theirs to judge, nobody
+            else&apos;s. They accept it to make it the official version, or ask for changes and the platform runs
+            another round.
+          </>
+        )}
+      </p>
+    )
+  }
+  if (d.state === 'accepted') {
+    return (
+      <p className={cn('state-story mb-3 text-sm', reviewPanel)} data-state-story="accepted">
+        <strong>This work was accepted</strong> — revision {String(d.current_revision)} is the official version.
+      </p>
+    )
+  }
+  if (d.state === 'superseded') {
+    return (
+      <p className={cn('state-story mb-3 text-sm', reviewPanel)} data-state-story="superseded">
+        <strong>A newer accepted version replaced this work</strong> — everything here stays readable as the record it
+        is.
+      </p>
+    )
+  }
+  return null
+}
+
+/**
+ * THE SANDBOX OF THE RENDERED-DOCUMENT FRAME: nothing. No scripts, no forms,
+ * no same-origin, no popups, no navigation — the empty attribute applies every
+ * restriction the platform has.
+ *
+ * This frame is the "sandboxed rendered-document view" S13.3 sanctions by name
+ * (review.EscapeFirst()): the one place a deliverable's own markup renders as
+ * the document it is. It is strictly TIGHTER than the preview frame above it —
+ * a preview is a running app and needs its scripts; a rendered document is a
+ * still image of the work and needs nothing at all. The escape scan pins this
+ * grant list empty by name.
+ */
+export const documentSandbox = ''
+
+/**
+ * ResultBlock — the result, FIRST (RA-B1 item 1).
+ *
+ * The re-walk's blocking finding: the owner's journey ended at a raw diff
+ * behind dev banners, with no way to see, download or accept the website she
+ * ordered. This block is the landing view now: the current revision's content,
+ * rendered as the thing it is — a page as a page, a document as a document,
+ * an image as an image — with the source one click away and the bytes
+ * downloadable. The diff stays below as the comparison it always was.
+ *
+ * WHAT MAY RENDER WHERE is the whole design:
+ *  - composed DOCUMENTS (a shipped page, rendered markdown) go through the
+ *    sandboxed rendered-document frame ONLY — by blob: URL reference, never by
+ *    the inline-document attribute the escape scan bans, sandbox empty (see
+ *    documentSandbox above);
+ *  - plain text renders as escaped text, no frame;
+ *  - binary objects render their metadata cards and download doors — the
+ *    bytes route decides what may show inline (its closed image allowlist),
+ *    and this block learns the answer from the response, never from a
+ *    duplicated rule.
+ */
+function ResultBlock({ detail }: { detail: DeliverableDetail }) {
+  const d = detail.deliverable
+  const rev = detail.revisions.find((r) => r.n === d.current_revision)
+  const refs = rev?.objects ?? []
+  const textRefs = refs.filter((r) => r.type === 'text')
+  const totalTextBytes = textRefs.reduce((sum, r) => sum + r.size, 0)
+  const overCap = totalTextBytes > resultSizeCap
+
+  const [files, setFiles] = useState<ResultFile[] | null>(null)
+  const [failure, setFailure] = useState('')
+  const [mode, setMode] = useState<'result' | 'source'>('result')
+
+  // The bytes are content-addressed and immutable, so this read keys on the
+  // revision: a new revision re-reads, anything else never does.
+  useEffect(() => {
+    if (rev === undefined || textRefs.length === 0 || overCap) return
+    let live = true
+    setFailure('')
+    Promise.all(
+      textRefs.map((ref) => objectText(d.id, ref.sha256).then((text): ResultFile => ({ name: ref.name, text }))),
+    ).then(
+      (all) => {
+        if (live) setFiles(all)
+      },
+      (err: unknown) => {
+        if (live) setFailure(err instanceof Error ? err.message : String(err))
+      },
+    )
+    return () => {
+      live = false
+    }
+    // Keyed by identity + revision on purpose: `textRefs` derives from exactly
+    // those two, and the bytes behind a sha can never change (content-addressed).
+  }, [d.id, rev?.n])
+
+  if (rev === undefined) {
+    return (
+      <Section title="The work">
+        <EmptyState
+          what="Nothing is made yet, so there is nothing to show."
+          why="The result lands here the moment a revision is minted — rendered as the thing it is, with its download beside it."
+        />
+      </Section>
+    )
+  }
+
+  const composed = files !== null ? composeResult(files, d.type) : null
+
+  return (
+    <Section title="The work">
+      <div className="result-head mb-2 flex flex-wrap items-center gap-2" data-result-revision={String(rev.n)}>
+        <span className="text-sm text-muted-foreground">
+          Revision {String(rev.n)}
+          {d.state === 'in-review' ? ' — the newest, not yet accepted' : ''}
+        </span>
+        {textRefs.length > 0 && files !== null && (
+          <span className="result-modes ms-auto flex items-center gap-2">
+            {(['result', 'source'] as const).map((m) => (
+              <label key={m} className={radioRow}>
+                <input
+                  className={radioInput}
+                  type="radio"
+                  name="result-mode"
+                  data-result-mode={m}
+                  checked={mode === m}
+                  onChange={() => setMode(m)}
+                />
+                {m === 'result' ? 'The result' : 'The source'}
+              </label>
+            ))}
+          </span>
+        )}
+      </div>
+
+      {failure !== '' && (
+        <p className="error m-0 text-sm" data-result-failed="true">
+          The result could not be read: {failure}. The download below still serves the exact bytes.
+        </p>
+      )}
+      {overCap && (
+        <p className="m-0 text-sm text-muted-foreground" data-result-overcap="true">
+          This revision&apos;s text runs {humanBytes(totalTextBytes)} — too large to render here. The download below
+          serves the exact bytes.
+        </p>
+      )}
+
+      {composed !== null && mode === 'result' && <ComposedView composed={composed} />}
+      {files !== null && mode === 'source' && (
+        <div className="result-source flex flex-col gap-2" data-result-source="true">
+          {files.map((f) => (
+            <div key={f.name}>
+              <p className={cn('mt-0 mb-1 text-xs text-muted-foreground', figure)}>{f.name}</p>
+              <pre className="suggested rounded-(--radius-sm) border border-border bg-background p-2 text-xs">
+                {f.text}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )}
+      {textRefs.length > 0 && files === null && failure === '' && !overCap && (
+        <p className="m-0 text-sm text-muted-foreground" data-result-loading="true">
+          Reading the work…
+        </p>
+      )}
+
+      {/* An image deliverable's newest revision IS the result: the bytes route
+          serves raster images inline (its own closed allowlist decides), and
+          the comparison trio below stays the place two revisions meet. */}
+      {refs
+        .filter((r) => r.type !== 'text' && (r.type ?? '').startsWith('image/'))
+        .map((r) => (
+          <figure className="image-side m-0" key={r.sha256} data-result-image={r.sha256}>
+            <img src={objectHref(d.id, r.sha256)} alt={`revision ${String(rev.n)}: ${r.name}`} />
+            <figcaption className="mt-1 text-xs text-muted-foreground">{r.name}</figcaption>
+          </figure>
+        ))}
+
+      <DownloadDoor deliverable={d.id} refs={refs} />
+    </Section>
+  )
+}
+
+/** The composed result: a document in the sandboxed frame, or plain text. */
+function ComposedView({ composed }: { composed: ComposedResult }) {
+  const [src, setSrc] = useState('')
+
+  // The blob URL is minted from the composed document and revoked when the
+  // composition changes or the block unmounts. `src` by URL reference is the
+  // sanctioned mechanism; the inline-document attribute is the banned one
+  // (escape scan, by token).
+  useEffect(() => {
+    if (composed.kind !== 'document') return
+    const url = URL.createObjectURL(new Blob([composed.html], { type: 'text/html' }))
+    setSrc(url)
+    return () => {
+      URL.revokeObjectURL(url)
+      setSrc('')
+    }
+  }, [composed])
+
+  if (composed.kind === 'text') {
+    return (
+      <pre
+        className="result-text suggested rounded-(--radius-sm) border border-border bg-background p-2 text-sm"
+        data-result-kind="text"
+      >
+        {composed.text}
+      </pre>
+    )
+  }
+  return (
+    <div className="result-frame" data-result-kind="document">
+      {src !== '' && (
+        <iframe
+          title="The finished work, rendered"
+          src={src}
+          sandbox={documentSandbox}
+          referrerPolicy="no-referrer"
+          className="h-[34rem] w-full rounded-(--radius) border border-border bg-white"
+          data-result-doc="true"
+        />
+      )}
+      <p className="mt-1 mb-0 text-xs text-muted-foreground">
+        Shown: {composed.how}. This is a still view — buttons and links inside it are switched off here; the source is
+        one click up.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * DownloadDoor — the bytes, fetchable (RA-B1 item 2).
+ *
+ * The wire already serves every pinned object of every revision
+ * (GET /api/deliverables/{id}/objects/{sha}, content-addressed, owner-scoped,
+ * attachment-lane for everything but raster images) — the walk's finding was
+ * that no control on the CURRENT revision reached it. These are plain download
+ * links to that route, named and sized.
+ */
+function DownloadDoor({ deliverable, refs }: { deliverable: string; refs: ObjectRef[] }) {
+  if (refs.length === 0) return null
+  return (
+    <p className="result-downloads mt-2 mb-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-result-downloads={String(refs.length)}>
+      <span className="text-muted-foreground">Take it with you:</span>
+      {refs.map((r) => (
+        <a
+          key={r.sha256}
+          href={objectHref(deliverable, r.sha256)}
+          download={r.name.split('/').pop() ?? r.name}
+          data-action="download-result"
+          data-sha={r.sha256}
+        >
+          Download {r.name.split('/').pop() ?? r.name}{' '}
+          <span className={cn('text-xs text-muted-foreground', figure)}>({humanBytes(r.size)})</span>
+        </a>
+      ))}
+    </p>
+  )
+}
 
 /**
  * R2's first half: the lineage 1..N, never compressed.
@@ -1100,7 +1405,22 @@ function CommentCard({ comment, placement }: { comment: Comment; placement?: Pla
       data-placement={placement?.status ?? 'unplaced'}
     >
       <p className="comment-head m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <Owner id={c.owner} />{' '}
+        {/* RA-5: a machine finding is NEVER signed as a person. The drain's
+            findings rows carry the requester's identity as their author — a
+            REPORTED wire gap — so the view is where the honest attribution
+            lives: kind "finding" is the platform's own checker speaking, and
+            it says so instead of wearing the owner's name. */}
+        {c.kind === 'finding' ? (
+          <span
+            className="checker font-semibold"
+            data-author="platform-checker"
+            title="An automated verification finding — written by the platform's checker, not by a person."
+          >
+            the platform&apos;s checker
+          </span>
+        ) : (
+          <Owner id={c.owner} />
+        )}{' '}
         <ToneSpan tone={severityTone(c.severity)} className="severity" data-severity={c.severity}>
           {severityMeaning(c.severity)}
         </ToneSpan>{' '}
@@ -2310,9 +2630,17 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
         <Absent reason="the platform named no accept door on this deliverable" />
       ) : (
         <>
-          <p className="door-reason mt-0 mb-2 text-sm">{door.reason}</p>
+          {/* The owner's sentence first (RA-B1 item 3): what accepting MEANS,
+              in the owner's language. The served door reason stays, as the
+              platform's own precondition line beneath it. */}
+          <p className="accept-plain mt-0 mb-1 text-sm">
+            When this work is right, accepting it makes it <strong>the official version</strong> — filed permanently
+            under {mine ? 'your' : `${owner}'s`} name. Nothing on this page takes an accept back; if something needs
+            fixing later, that is a new round or a follow-up, never an undo.
+          </p>
+          <p className="door-reason mt-0 mb-2 text-xs text-muted-foreground">{door.reason}</p>
           <Button variant="secondary" size="sm" data-action="read-accept-card" onClick={read}>
-            Read the accept card
+            Accept this work…
           </Button>
         </>
       )}
@@ -2328,8 +2656,8 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
           <AcceptCardView card={card} />
           {!mine ? (
             <p className="my-2 text-sm text-muted-foreground" data-authorship="not-mine">
-              This is {owner}&apos;s work to accept. An accept pushes a commit under the accepting person&apos;s own
-              credentials, so only they can do it — reading the card is not the same as being able to act on it.
+              This is {owner}&apos;s work to accept. Accepting files the work under the accepting person&apos;s own
+              name, so only they can do it — reading this is not the same as being able to act on it.
             </p>
           ) : card.acceptable ? (
             <AcceptForm
@@ -2365,83 +2693,111 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
   )
 }
 
-/** Every served field, including the trailers byte-for-byte — the S13.6 step-3
- *  rule is that a person SEES the attribution before it becomes a permanent
- *  commit, not afterwards. */
+/**
+ * The accept card, in the owner's language first (RA-B1 item 3).
+ *
+ * The PLAIN HALF says what accepting does in words the person who ordered the
+ * work uses; the TECHNICAL HALF — every served field, the trailers
+ * byte-for-byte — sits behind one fold, still on this surface BEFORE the
+ * accept. That keeps the S13.6 step-3 rule true (the attribution is seen
+ * before it becomes permanent: the signing statement stays unfolded, and the
+ * exact record is one click, not one page, away) without asking a household
+ * reviewer to read payload pins as a sentence.
+ */
 function AcceptCardView({ card }: { card: AcceptCard }) {
   return (
     <div className={cn('accept-card my-2', reviewPanel)} data-acceptable={card.acceptable ? 'true' : 'false'}>
-      {/* The `dd` wrap that `.accept-card dd` carried moves to a descendant
-          utility on the container, so one string covers every field. */}
-      <dl
-        className={cn(
-          'mt-0 mb-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm',
-          '[&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground',
-          figure,
-        )}
-      >
-        <dt>Revision</dt>
-        <dd>{String(card.revision_n)}</dd>
-        <dt>Content pin</dt>
-        <dd>
-          {card.pin_kind}{' '}
-          {card.content_pin === '' ? <Absent reason="no pin recorded" /> : <code>{card.content_pin}</code>}
-        </dd>
-        <dt>Pushes to</dt>
-        <dd>
-          {card.project_id === '' ? <Absent reason="this deliverable belongs to no project" /> : card.project_id}
-          {card.protected_ref !== undefined && card.protected_ref !== '' ? (
-            <> · {card.protected_ref}</>
-          ) : (
-            <> · <Absent reason="no protected ref is registered for this project" /></>
-          )}
-        </dd>
-        <dt>Tier</dt>
-        <dd data-tier={card.tier}>
-          {card.tier} — {card.tier_statement}
-        </dd>
-        <dt>Payload pin</dt>
-        <dd>
-          <code data-payload-hash={card.payload_hash}>{card.payload_hash}</code>
-        </dd>
-      </dl>
-      <h5 className="mt-0 mb-1">Commit trailers, exactly as they will be written</h5>
-      {card.trailers === '' ? (
-        <Absent
-          reason={
-            card.provenance.absent === undefined || card.provenance.absent === ''
-              ? 'no trailers could be rendered'
-              : card.provenance.absent
-          }
-        />
-      ) : (
-        // `.trailers` KEEPS its rule (the `responsive.test.ts:242` group).
-        <pre className="trailers rounded-(--radius-sm) border border-border bg-background p-2 text-xs" data-trailers="verbatim">
-          {card.trailers}
-        </pre>
-      )}
-      {/* ⚠ THE `provenance` CLASS IS DROPPED HERE, and that is a finding rather
-          than a tidy. `.provenance` is the WORKFORCE map's rule — a `<dl>` laid
-          out as a grid (index.css, the S15.10 section) — and this is a `<p>` of
-          prose, so the accept card was silently taking a grid display, a grid
-          column template and a margin written for somebody else's markup.
-          `Workforce.tsx` is byte-frozen, so the rule stays for its real owner and
-          this line carries its own utilities instead. */}
-      <p className={cn('my-2 text-xs text-muted-foreground', figure)} data-provenance="accept-card">
-        {card.provenance.minting_run_id === undefined || card.provenance.minting_run_id === '' ? (
-          <Absent reason="no minting run recorded" />
+      <p className="mt-0 mb-2 text-sm" data-accept-plain="true">
+        You are accepting <strong>revision {String(card.revision_n)}</strong> — the version this page shows.{' '}
+        {card.project_id === '' ? (
+          <>The accepted copy stays filed here as the official version of this work, recorded as your own decision.</>
         ) : (
           <>
-            from run {card.provenance.minting_run_id} · engine {card.provenance.engine ?? ''} · model{' '}
-            {card.provenance.model ?? ''} · lane {card.provenance.lane ?? ''} · {card.provenance.vendor_noreply ?? ''}
+            The official copy is written into <strong>{card.project_id}</strong>&apos;s permanent record, in your name,
+            as your own decision.
           </>
+        )}{' '}
+        The exact record — pins, attribution, the platform&apos;s signing posture — is under &quot;what happens
+        technically&quot;, worth a look before your first accept.
+      </p>
+      <details className="accept-tech mb-1">
+        <summary className="cursor-pointer text-sm text-muted-foreground">What happens technically</summary>
+        {/* `.signing` KEEPS its rule — it is the LAST selector of the group
+            `responsive.test.ts:245` reads — so no wrap utility competes. The
+            HUMAN half of the attribution ("in your name, as your own
+            decision") is stated in the plain sentence above, unfolded, which
+            is what keeps S13.6 step 3 true; this is the platform's own
+            mechanics statement, verbatim. */}
+        <p className="signing mt-2 mb-2 text-sm" data-signing-structural={card.signing.structural ? 'true' : 'false'}>
+          {card.signing.statement}
+        </p>
+        {/* The `dd` wrap that `.accept-card dd` carried moves to a descendant
+            utility on the container, so one string covers every field. */}
+        <dl
+          className={cn(
+            'mt-2 mb-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm',
+            '[&_dd]:m-0 [&_dd]:wrap-anywhere [&_dt]:text-muted-foreground',
+            figure,
+          )}
+        >
+          <dt>Revision</dt>
+          <dd>{String(card.revision_n)}</dd>
+          <dt>Content pin</dt>
+          <dd>
+            {card.pin_kind}{' '}
+            {card.content_pin === '' ? <Absent reason="no pin recorded" /> : <code>{card.content_pin}</code>}
+          </dd>
+          <dt>Pushes to</dt>
+          <dd>
+            {card.project_id === '' ? <Absent reason="this deliverable belongs to no project" /> : card.project_id}
+            {card.protected_ref !== undefined && card.protected_ref !== '' ? (
+              <> · {card.protected_ref}</>
+            ) : (
+              <> · <Absent reason="no protected ref is registered for this project" /></>
+            )}
+          </dd>
+          <dt>Tier</dt>
+          <dd data-tier={card.tier}>
+            {card.tier} — {card.tier_statement}
+          </dd>
+          <dt>Payload pin</dt>
+          <dd>
+            <code data-payload-hash={card.payload_hash}>{card.payload_hash}</code>
+          </dd>
+        </dl>
+        <h5 className="mt-0 mb-1">Commit trailers, exactly as they will be written</h5>
+        {card.trailers === '' ? (
+          <Absent
+            reason={
+              card.provenance.absent === undefined || card.provenance.absent === ''
+                ? 'no trailers could be rendered'
+                : card.provenance.absent
+            }
+          />
+        ) : (
+          // `.trailers` KEEPS its rule (the `responsive.test.ts:242` group).
+          <pre className="trailers rounded-(--radius-sm) border border-border bg-background p-2 text-xs" data-trailers="verbatim">
+            {card.trailers}
+          </pre>
         )}
-      </p>
-      {/* `.signing` KEEPS its rule — it is the LAST selector of the group
-          `responsive.test.ts:245` reads — so no wrap utility competes. */}
-      <p className="signing m-0 text-sm" data-signing-structural={card.signing.structural ? 'true' : 'false'}>
-        {card.signing.statement}
-      </p>
+        {/* ⚠ THE `provenance` CLASS IS DROPPED HERE, and that is a finding rather
+            than a tidy. `.provenance` is the WORKFORCE map's rule — a `<dl>` laid
+            out as a grid (index.css, the S15.10 section) — and this is a `<p>` of
+            prose, so the accept card was silently taking a grid display, a grid
+            column template and a margin written for somebody else's markup.
+            `Workforce.tsx` is byte-frozen, so the rule stays for its real owner and
+            this line carries its own utilities instead. */}
+        <p className={cn('my-2 text-xs text-muted-foreground', figure)} data-provenance="accept-card">
+          {card.provenance.minting_run_id === undefined || card.provenance.minting_run_id === '' ? (
+            <Absent reason="no minting run recorded" />
+          ) : (
+            <>
+              from run {card.provenance.minting_run_id} · engine {card.provenance.engine ?? ''} · model{' '}
+              {card.provenance.model ?? ''} · lane {card.provenance.lane ?? ''} · {card.provenance.vendor_noreply ?? ''}
+            </>
+          )}
+        </p>
+      </details>
     </div>
   )
 }
@@ -2503,11 +2859,11 @@ function AcceptForm({
       }}
     >
       <label>
-        Commit subject (optional)
+        A title for the record (optional)
         <input data-field="subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
       </label>
       <label>
-        Provenance note (optional)
+        A note about where this came from (optional)
         <input data-field="provenance" value={provenance} onChange={(e) => setProvenance(e.target.value)} />
       </label>
       <label>
@@ -2515,7 +2871,7 @@ function AcceptForm({
         <input type="password" data-field="accept-pin" value={pin} onChange={(e) => setPin(e.target.value)} />
       </label>
       <Button variant="primary" size="sm" type="submit" data-action="accept" disabled={sending}>
-        Accept this revision
+        Accept — make this the official version
       </Button>
     </form>
   )

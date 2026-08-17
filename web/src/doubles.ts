@@ -182,6 +182,10 @@ export function scriptedFetch(table: Record<string, Scripted>): FetchLog {
       status,
       statusText: '',
       json: async () => route.body ?? {},
+      // The object-bytes route serves TEXT, not JSON (RA-B1's result view
+      // reads it): a string body is the bytes themselves, anything else is
+      // its JSON form — the same value either way, never a second fixture.
+      text: async () => (typeof route.body === 'string' ? route.body : JSON.stringify(route.body ?? {})),
     } as Response
   })
   vi.stubGlobal('fetch', impl)
@@ -524,7 +528,31 @@ export function reviewRoutes(): Record<string, Scripted> {
     [`GET /api/deliverables/${notebookDeliverableID}/compare`]: { body: fixtures.compareExtractedText() },
     [`GET /api/deliverables/${notebookDeliverableID}/comments?revision=2`]: { body: fixtures.placedComments() },
     'GET /api/previews': { body: fixtures.previews() },
+    ...resultBytesRoutes(),
   }
+}
+
+/**
+ * The object-bytes reads the RA-B1 result view makes: the CURRENT revision's
+ * text files, by sha, per deliverable. The shas are the golden detail's own
+ * (deliverable-review.json revision 2), and the derived object details reuse
+ * those revisions under their own ids — so each id answers the same two reads.
+ */
+function resultBytesRoutes(): Record<string, Scripted> {
+  const bytes: Record<string, string> = {
+    // site/README.md — 45 bytes in the golden pin; the text is representative.
+    '7a2204ee07c9cdd52a50e41a650ec948327246ebc58517a00f9a753ddfbbe489': '# Release notes site\n\nBuilt by t-ship.\n',
+    // site/release.tsx — revision 2's content.
+    '2e039d8670628185787b173e7c881a1e04e495b93766e6321ec070ee66128821':
+      'export function Release() {\n  return <main>release notes</main>\n}\n',
+  }
+  const out: Record<string, Scripted> = {}
+  for (const id of [reviewDeliverableID, imageDeliverableID, binaryDeliverableID, notebookDeliverableID]) {
+    for (const [sha, text] of Object.entries(bytes)) {
+      out[`GET /api/deliverables/${id}/objects/${sha}`] = { body: text }
+    }
+  }
+  return out
 }
 
 /**

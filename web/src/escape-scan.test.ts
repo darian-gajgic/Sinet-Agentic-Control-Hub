@@ -189,13 +189,22 @@ test('the scan catches a planted violation', () => {
  * THE ONE SANCTIONED RAW-HTML CHANNEL, asserted rather than asserted-in-prose
  * (S15.12 escape-by-default; B6-9 R15).
  *
- * "The only sanctioned raw-HTML channel is S15.8's preview surface" is a
- * statement about the FINAL tree, so it is checked over the final tree: exactly
- * one file mounts an iframe, it composes its `src` from a served preview URL and
- * the shell's own path, and no content — a comparison, a comment, a card, a
- * notification — reaches it.
+ * S13.3 sanctions "the sandboxed rendered-document view", and as of RA-B1 that
+ * channel has TWO instances, both inside the ONE file allowed to embed a
+ * browsing context:
+ *
+ *  - the S15.8 preview frame — a launched app, `src` composed from a SERVED
+ *    session URL plus the shell's own path, sandboxed with top-navigation and
+ *    downloads withheld (the grant list below);
+ *  - the RA-B1 rendered-document frame — the deliverable's own document shown
+ *    as the thing it is, `src` a blob: URL minted from same-origin revision
+ *    bytes, sandbox EMPTY: no scripts, no forms, no same-origin, nothing.
+ *
+ * Both are checked over the final tree: exactly one FILE mounts iframes, the
+ * preview's withheld tokens stay withheld, and the document frame's grant
+ * list stays empty — a still image of the work, never a running one.
  */
-test('exactly one surface embeds a browsing context, and it is the preview', () => {
+test('exactly one surface embeds a browsing context, and it is the review surface', () => {
   const withIframes = Object.entries(sources)
     .filter(([p]) => !p.includes('.test.'))
     .filter(([, text]) => text.includes('<iframe'))
@@ -203,7 +212,7 @@ test('exactly one surface embeds a browsing context, and it is the preview', () 
     .sort()
   expect(
     withIframes,
-    'a second surface embeds a browsing context; S15.12 sanctions exactly one and it is the S15.8 preview',
+    'a second surface embeds a browsing context; S15.12 sanctions exactly one file and it is the review surface',
   ).toEqual(['./Deliverable.tsx'])
 
   // And it is sandboxed with top navigation withheld — the property S13.3 and
@@ -230,4 +239,12 @@ test('exactly one surface embeds a browsing context, and it is the preview', () 
   // The control: the grant list is real and non-empty, so "does not contain"
   // is a statement about what was granted rather than about an empty string.
   expect(tokens).toContain('allow-scripts')
+
+  // The RA-B1 rendered-document frame: its grant list exists and is EMPTY —
+  // every sandbox restriction applies. A document view that gained a token
+  // would be a second preview surface wearing a quieter name, and this pin is
+  // what makes that a build failure instead of a drift.
+  const doc = /documentSandbox\s*=\s*'([^']*)'/.exec(preview)
+  expect(doc, 'the rendered-document sandbox grant list is gone or was renamed').not.toBeNull()
+  expect(doc?.[1], 'the rendered-document frame must be granted NOTHING').toBe('')
 })

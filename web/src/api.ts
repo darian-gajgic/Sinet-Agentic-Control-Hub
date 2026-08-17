@@ -1019,6 +1019,11 @@ export type Revision = {
   pin_kind: string
   content_sha256?: string
   platform_ref: string
+  /** The pinned objects of this revision — a content pin records each file as
+   *  one (`type: "text"`), a binary pin records each payload. The bytes behind
+   *  every ref are served by the objects route, which is what the result view
+   *  and its download door read (RA-B1). */
+  objects?: ObjectRef[]
   verdict_ref?: number
   created_ts: string
 }
@@ -1369,6 +1374,20 @@ export type PreviewStopped = { session: string; stopped: boolean; detail: string
  */
 export function objectHref(deliverable: string, sha: string): string {
   return `/api/deliverables/${encodeURIComponent(deliverable)}/objects/${encodeURIComponent(sha)}`
+}
+
+/**
+ * objectText reads one pinned TEXT object's bytes as a string — the read the
+ * RA-B1 result view composes its rendered document from. It rides the same
+ * route as objectHref (content-addressed, owner-scoped, 404 for a sha this
+ * deliverable does not pin) and is a bare fetch rather than `request<>`
+ * because the answer is bytes, not a JSON surface.
+ */
+export function objectText(deliverable: string, sha: string): Promise<string> {
+  return fetch(objectHref(deliverable, sha)).then((res) => {
+    if (!res.ok) throw new Error(`the platform answered ${String(res.status)} for this object`)
+    return res.text()
+  })
 }
 
 export function staleAcceptCard(err: unknown): AcceptCard | null {

@@ -671,8 +671,13 @@ test('EVERY non-backed disposition renders its reason and NO iframe', async () =
     expect(panel.getAttribute('data-preview-state')).toBe(state)
     expect(panel.getAttribute('data-backed')).toBe('false')
     expect(panel.textContent, `${state} did not render its served reason`).toContain(`the platform says: ${state}`)
-    // The S13.8 failure by name: never a broken iframe.
-    expect(view.container.querySelectorAll('iframe'), `${state} rendered a frame`).toHaveLength(0)
+    // The S13.8 failure by name: never a broken PREVIEW iframe. The RA-B1
+    // rendered-document frame is a different, always-backed channel, so it is
+    // excluded by its own attribute rather than pretended away.
+    expect(
+      view.container.querySelectorAll('iframe:not([data-result-doc])'),
+      `${state} rendered a frame`,
+    ).toHaveLength(0)
     view.unmount()
   }
 })
@@ -1080,13 +1085,20 @@ test('the surface declares the types it consumes, each against the registry', as
 
 // ── R16 / rubric 19: the iframe src composition ─────────────────────────────
 
-test('an iframe src can only come from a served preview URL and the shell path', async () => {
+test('an iframe src can only come from a served preview URL or a blob of revision bytes', async () => {
   const src = (await import('./Deliverable.tsx?raw')).default as string
-  // Exactly one place composes a frame src, and it takes a base and a path.
-  expect(src.match(/<iframe/g), 'more than one iframe element exists in the review view').toHaveLength(1)
+  // Exactly TWO frames exist since RA-B1, both in this one file: the preview
+  // (src composed from a served session URL + the shell path) and the
+  // rendered-document view (src a blob: URL minted from same-origin revision
+  // bytes, sandbox granted NOTHING — the escape scan pins that grant list).
+  expect(src.match(/<iframe/g), 'a frame beyond the preview and the rendered document exists').toHaveLength(2)
   expect(src).toContain('src={frameSrc(side.url, path)}')
-  // Nothing that could carry content reaches a frame: no comment body, no diff
-  // text, no label, no trailer.
+  expect(src, 'the document frame must ride the blob URL the composition minted').toContain(
+    'URL.createObjectURL(new Blob([composed.html]',
+  )
+  expect(src, 'the document frame must carry the empty grant list').toContain('sandbox={documentSandbox}')
+  // Nothing that could carry content reaches the PREVIEW frame: no comment
+  // body, no diff text, no label, no trailer.
   for (const banned of ['frameSrc(cmp', 'frameSrc(comment', 'frameSrc(card', 'frameSrc(detail']) {
     expect(src, `${banned} would put content into a frame src`).not.toContain(banned)
   }
@@ -1919,5 +1931,95 @@ test('D3: the POPULATED lineage arms render both directions, and the empty form 
     hrefFor('task', { id: 't-follow42' }),
   )
   expect(toHref, 'the task route moved out from under the edge').toBe('/tasks/t-follow42')
+  view.unmount()
+})
+
+// ── RA-B1: the owner's moment — result-first, download, honest state, plain
+//    accept, machine findings never signed as a person ───────────────────────
+
+test('RA-B1: the result leads the page, with the source one click away and downloads served', async () => {
+  const { view } = await review()
+
+  // THE ORDER IS THE FINDING: the walk ended at a diff because the diff came
+  // first. "The work" must precede "Revisions" in the document itself.
+  const sections = all(view, '.deliverable h3, .deliverable h2').map((h) => h.textContent ?? '')
+  const workAt = sections.findIndex((t) => t.includes('The work'))
+  const revisionsAt = sections.findIndex((t) => t.includes('Revisions'))
+  expect(workAt, 'no "The work" section exists').toBeGreaterThanOrEqual(0)
+  expect(revisionsAt).toBeGreaterThan(workAt)
+
+  // d-site is a CODE deliverable: its README does not upstage its source. The
+  // composed result is the current revision's text, as text.
+  const composed = at(view, '[data-result-kind="text"]')
+  expect(composed, 'the code deliverable did not render its text result').not.toBeNull()
+  expect(composed?.textContent).toContain('export function Release()')
+
+  // The source mode shows the files by name.
+  click(at(view, '[data-result-mode="source"]'))
+  await flush()
+  expect(at(view, '[data-result-source]')?.textContent).toContain('site/README.md')
+
+  // The download door: one real link per pinned object of the current
+  // revision, riding the objects route with the download attribute.
+  const downloads = all(view, '[data-action="download-result"]')
+  expect(downloads.length, 'the current revision must offer its bytes').toBe(2)
+  for (const a of downloads) {
+    expect(a.getAttribute('href')).toContain('/api/deliverables/d-site/objects/')
+    expect(a.getAttribute('download'), 'a download link must actually download').not.toBeNull()
+  }
+  view.unmount()
+})
+
+test('RA-B1: the in-review story names the reviewer honestly, for the owner and for a visitor', async () => {
+  // The owner (alice) is told the work waits on HER — with real doors.
+  const mine = await review()
+  const story = at(mine.view, '[data-state-story="in-review"]')!
+  expect(story.textContent).toContain('waiting for you')
+  expect(story.querySelector('[data-jump="accept"]'), 'the story must door to the accept').not.toBeNull()
+  mine.view.unmount()
+
+  // Somebody else is told WHOSE review it waits on — never a vague "in review".
+  const theirs = await review(reviewDeliverableID, { 'GET /api/auth/session': asBob })
+  const other = at(theirs.view, '[data-state-story="in-review"]')!
+  expect(other.textContent).toContain("alice's review")
+  theirs.view.unmount()
+})
+
+test('RA-5: a verification finding is signed as the platform’s checker, never as a person', async () => {
+  const { view } = await review()
+  // Fixture comment 7 is kind "finding" and its wire row carries alice as its
+  // author — the REPORTED attribution gap. The view is where the honest label
+  // lives.
+  const finding = at(view, '[data-comment="7"]')!
+  expect(finding.querySelector('[data-author="platform-checker"]')?.textContent).toContain('checker')
+  expect(finding.querySelector('.comment-head')?.textContent).not.toContain('alice')
+  // A HUMAN comment keeps its human.
+  const human = at(view, '[data-comment="1"]')!
+  expect(human.querySelector('[data-author="platform-checker"]')).toBeNull()
+  expect(human.querySelector('.comment-head')?.textContent).toContain('alice')
+  view.unmount()
+})
+
+test('RA-B1: the accept card speaks the owner’s language, mechanics one fold away', async () => {
+  const { view } = await review()
+  click(at(view, '[data-action="read-accept-card"]'))
+  await flush()
+
+  // The plain half: what accepting MEANS, unfolded.
+  const plain = at(view, '[data-accept-plain]')!
+  expect(plain.textContent).toContain('revision 2')
+  expect(plain.textContent).toContain('permanent record')
+  expect(plain.textContent).toContain('your own decision')
+
+  // The mechanics — pins, trailers, provenance, the signing statement — are
+  // ALL still on the surface, inside the one technical fold.
+  const tech = at(view, '.accept-tech')!
+  expect(tech.querySelector('[data-payload-hash]'), 'the payload pin left the surface').not.toBeNull()
+  expect(tech.querySelector('[data-trailers]'), 'the trailers left the surface').not.toBeNull()
+  expect(tech.querySelector('.signing'), 'the signing statement left the surface').not.toBeNull()
+
+  // And the form still drives the same accept, PIN and all.
+  expect(at(view, '[data-action="accept"]')).not.toBeNull()
+  expect(at(view, '[data-field="accept-pin"]')).not.toBeNull()
   view.unmount()
 })
