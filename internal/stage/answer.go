@@ -122,8 +122,15 @@ func (s *Skeleton) answerCancel(ctx context.Context, actor, askID string, card v
 		if err := verify.CloseAnsweredTx(ctx, tx, askID, raw, s.now()); err != nil {
 			return err
 		}
+		// 15.6 attribution: the human who answered the card is the actor of the
+		// transition their answer caused, and the structured detail carries the
+		// same name plus the card it was answered at (P3-RW-18 D1-R1). Before
+		// this the transition said `platform` and carried no detail, so the
+		// only record of who cancelled lived in the ledger entry above and the
+		// task detail could not serve it.
 		_, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateFinalized, run.TransitionOptions{
-			Reason: "verification cancelled at the card (4.5): finalize-with-card", Actor: run.ActorPlatform,
+			Reason: "verification cancelled at the card (4.5): finalize-with-card", Actor: actor,
+			Detail: run.CancelDetail(actor, false, askID),
 		})
 		return err
 	})

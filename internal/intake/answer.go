@@ -116,13 +116,21 @@ func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status 
 		if r.State == run.StateParked {
 			to := run.StateRunning
 			reason := "intake gate answered: pipeline resumes in place (4.3)"
+			opts := run.TransitionOptions{Reason: reason, Actor: run.ActorPlatform}
 			if st.Phase == PhaseCancelled {
+				// 15.6 attribution: a cancel is a human act, so its transition
+				// names the human (the intake's requester — the only principal
+				// intake accepts an answer from) and carries the ONE shared
+				// structured detail, naming the card it was answered at
+				// (P3-RW-18 D1-R1). The resume leg stays platform-attributed:
+				// resuming a pipeline is the platform's act, not a decision.
 				to = run.StateFinalized
-				reason = "intake cancelled (4.5): finalize-with-card"
+				opts = run.TransitionOptions{
+					Reason: "intake cancelled (4.5): finalize-with-card",
+					Actor:  st.Owner, Detail: run.CancelDetail(st.Owner, false, askID),
+				}
 			}
-			if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, to, run.TransitionOptions{
-				Reason: reason, Actor: run.ActorPlatform,
-			}); err != nil {
+			if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, to, opts); err != nil {
 				return err
 			}
 		}
@@ -720,8 +728,13 @@ func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, er
 			return err
 		}
 		if r.State == run.StateRunning {
+			// 15.6 attribution, as in closeAndResume's cancel leg: the requester
+			// who cancelled is the actor, and the shared structured detail is
+			// what the S02.2 reconstruction reads (P3-RW-18 D1-R1). No card was
+			// open on this leg, so no ask id rides along.
 			if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateCompleted, run.TransitionOptions{
-				Reason: "intake cancelled (4.5)", Actor: run.ActorPlatform,
+				Reason: "intake cancelled (4.5)", Actor: st.Owner,
+				Detail: run.CancelDetail(st.Owner, false, ""),
 			}); err != nil {
 				return err
 			}

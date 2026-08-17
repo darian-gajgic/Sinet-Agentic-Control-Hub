@@ -28,7 +28,7 @@ import (
 //     constructor and it takes the name.
 //
 // The classification is TWO grammar-constrained calls, not one: choosing among
-// ~49 named queries and filling a chosen query's typed slots are different
+// ~51 named queries and filling a chosen query's typed slots are different
 // grammars, and a single schema would have to admit every slot of every query
 // — which is precisely the un-typed shape S14.10 ¶2 rules out. Both schemas put
 // the required free-text `reason` FIRST in property order and carry an explicit
@@ -214,6 +214,27 @@ func (s *Store) classify(ctx context.Context, question string) (intent, error) {
 		return in, nil
 	}
 
+	// The lexical no-match floor (P3-RW-18 D4-R2). The picked query must share
+	// at least one content word with the question. It is a STRUCTURAL check on
+	// relatedness, not a second classifier and not a confidence judgement: it
+	// reads no logprob, invents no threshold, and applies whether the seat is
+	// calibrated or not — so it is clean under S12.5, which forbids fabricating
+	// a threshold for an uncalibrated seat, and it delivers S12.4's fixed
+	// failure mode ("never a guess") on the one case a margin cannot catch.
+	//
+	// The walk is why it is lexical: the mismatch that sent "what got cancelled
+	// recently and why?" to cost.budget_remainder came back with margin 8.575 —
+	// HIGH and wrong. A margin floor would have passed it. Sharing a word is a
+	// weak test on purpose; it catches only picks that are about something else
+	// entirely, which is exactly the failure the reader hit.
+	if !sharesQuestionVocabulary(question, q) {
+		card := cardAnswer(question, cardReason(picked.Reason,
+			"no catalog query matches the question's own words — here is what I do have"),
+			choicesForCard(topChoices(question)))
+		in.Card = &card
+		return in, nil
+	}
+
 	// The S12.5 margin gate. `intent-filling@4B` is one of the calibrated
 	// duties, so the threshold is real platform data. UNCALIBRATED is the
 	// honest posture (the internal/local ReChecker precedent): no gate, the
@@ -359,23 +380,81 @@ func cardReason(modelReason, fallback string) string {
 	return fallback
 }
 
+// minContentToken is the shortest run of letters/digits treated as a content
+// word. Structural, not a ⚙ (the §35/§38 precedent): its reason is that runs
+// of three characters or fewer in English questions are overwhelmingly
+// function words ("is", "the", "did", "was"), which match everything and
+// therefore distinguish nothing.
+const minContentToken = 4
+
+// interrogativeStopwords are the question-shaped words long enough to pass
+// minContentToken but carrying no subject matter. Structural, with the same
+// standing as minContentToken: "what" appears in a great many questions and in
+// a few catalog descriptions, so counting it as shared vocabulary would let the
+// no-match floor pass a pick about something else entirely — which is the
+// defect the floor exists to stop. The set is deliberately tiny; every member
+// is a wh-word or an auxiliary, never a topic word.
+var interrogativeStopwords = map[string]bool{
+	"what": true, "when": true, "where": true, "which": true,
+	"whose": true, "does": true, "did": true,
+}
+
+// contentTokens is the deterministic, model-free tokenizer both the shortlist
+// and the no-match floor read a question through: lowercase, runs of [a-z0-9],
+// keeping those at least minContentToken long. ONE definition, so the words the
+// floor judges relatedness by are the same words the card's choices are found
+// by — a card that said "no match" while offering entries matched on different
+// words would be two different answers to one question.
+func contentTokens(question string) map[string]bool {
+	words := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(question), func(r rune) bool {
+		return !('a' <= r && r <= 'z') && !('0' <= r && r <= '9')
+	}) {
+		if len(w) >= minContentToken {
+			words[w] = true
+		}
+	}
+	return words
+}
+
+// queryHay is the text a question's words are matched against: everything the
+// catalog says about an entry in the reader's own language.
+func queryHay(q Query) string {
+	return strings.ToLower(q.Name + " " + string(q.Category) + " " + q.Description)
+}
+
+// sharesQuestionVocabulary reports whether the picked entry has anything to do
+// with the words the asker used — at least one content token, interrogatives
+// excluded, appearing in the entry's name, category or description.
+//
+// A question with no content tokens at all ("why?", "and now?") passes: there
+// is nothing to judge relatedness by, and refusing every pick on a question the
+// floor cannot read would turn a backstop into a gate.
+func sharesQuestionVocabulary(question string, q Query) bool {
+	hay := queryHay(q)
+	judged := false
+	for w := range contentTokens(question) {
+		if interrogativeStopwords[w] {
+			continue
+		}
+		judged = true
+		if strings.Contains(hay, w) {
+			return true
+		}
+	}
+	return !judged
+}
+
 // topChoices picks the catalog entries to offer when nothing resolved. It is a
 // deterministic, model-free shortlist: entries whose name, category or
 // description shares a word with the question, then the first entries of each
 // category so a card is never empty.
 func topChoices(question string) []string {
-	words := map[string]bool{}
-	for _, w := range strings.FieldsFunc(strings.ToLower(question), func(r rune) bool {
-		return !('a' <= r && r <= 'z') && !('0' <= r && r <= '9')
-	}) {
-		if len(w) >= 4 {
-			words[w] = true
-		}
-	}
+	words := contentTokens(question)
 	var hits []string
 	seen := map[string]bool{}
 	for _, q := range Catalog() {
-		hay := strings.ToLower(q.Name + " " + string(q.Category) + " " + q.Description)
+		hay := queryHay(q)
 		for w := range words {
 			if strings.Contains(hay, w) {
 				hits = append(hits, q.Name)

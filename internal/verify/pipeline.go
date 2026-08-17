@@ -674,10 +674,19 @@ func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner strin
 				}
 				rerunNow = append(rerunNow, o.Node)
 			case o.State == ContractUnverifiable:
+				// The note names its RULE as well as its step (P3-RW-18 D3-R2).
+				// A step can carry more than one research node — the walk's plan
+				// put P47-1 and P47-8 both on S-1 — and a text naming only the
+				// step made two different facts byte-identical, which is what
+				// filed the same sentence twice. Two rules were never one fact.
+				// The anchor stays `step:<id>`: it is what the finding Key's
+				// cross-round suppression is computed over (S07 goalpost drift),
+				// and that semantics is untouched here.
 				notes = append(notes, Finding{
 					Severity: SeverityNote, Category: CatResearchNotRun,
 					Anchor: "step:" + o.Node.StepID,
-					Text:   fmt.Sprintf("did-research-actually-run undecidable for %s: %s", o.Node.StepID, o.Detail),
+					Text: fmt.Sprintf("did-research-actually-run undecidable for %s [%s]: %s",
+						o.Node.StepID, o.Node.RuleID, o.Detail),
 				})
 			}
 		}

@@ -109,12 +109,25 @@ func (s *Store) EnsureDeliverable(ctx context.Context, in EnsureInput) (Delivera
 	}
 	now := s.nowRFC3339()
 	err := s.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		// S13.1's row contract names a PROJECT REF, and both mint call sites
+		// (internal/stage/review_sink.go) know the task but not the project —
+		// so the row was born projectless and the accept door then refused a
+		// repo-backed accept with "belongs to no project" (P3-RW-18 D2-R1).
+		// The edge is platform data, not a caller's to carry: task_project is
+		// the migration-owned view (0016, re-created by 0022 and 0023) that
+		// resolves approved claims, else the intake registry pin, else an
+		// onboarding id. Resolving it IN the insert means this row cannot
+		// disagree with the views, because it IS the view — the reads.go §37
+		// "SAME expression" precedent. An explicitly passed project wins; a
+		// task with no registered project stays honestly ''.
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO deliverables (deliverable_id, user_id, task_id, project_id, subject_ref, dtype,
 			                           current_revision, state, created_ts, updated_ts)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+			 VALUES (?, ?, ?,
+			         COALESCE(NULLIF(?, ''), (SELECT project_id FROM task_project WHERE task_id = ?), ''),
+			         ?, ?, 0, ?, ?, ?)
 			 ON CONFLICT (deliverable_id) DO NOTHING`,
-			in.ID, in.Owner, in.TaskID, in.ProjectID, in.SubjectRef, in.Type, StateInReview, now, now)
+			in.ID, in.Owner, in.TaskID, in.ProjectID, in.TaskID, in.SubjectRef, in.Type, StateInReview, now, now)
 		return err
 	})
 	if err != nil {
@@ -123,13 +136,29 @@ func (s *Store) EnsureDeliverable(ctx context.Context, in EnsureInput) (Delivera
 	return s.Deliverable(ctx, in.ID)
 }
 
+// deliverableProject is the serve-time project expression, shared by every
+// read that hands a ProjectID out (P3-RW-18 D2-R2).
+//
+// Rows minted before D2-R1 carry an empty project_id — the live walk's dlv-t-1e211253dfa21c28
+// among them — and the fact they are missing is not lost, only unrecorded on
+// that row: task_project still knows it. Serving through the join heals every
+// consumer (the accept door, the card, the lists) with no data rewrite, which
+// is why this packet adds no migration. It resolves recorded facts only: a
+// task with no registered project still serves an empty project_id, because inventing a linkage
+// would be worse than admitting there is none.
+const deliverableProject = `COALESCE(NULLIF(d.project_id, ''), tp.project_id, '')`
+
+// deliverableProjectJoin is the LEFT JOIN deliverableProject reads through. The
+// join is LEFT so a projectless task keeps its row rather than dropping out.
+const deliverableProjectJoin = ` LEFT JOIN task_project tp ON tp.task_id = d.task_id`
+
 // Deliverable reads one deliverable row.
 func (s *Store) Deliverable(ctx context.Context, id string) (Deliverable, error) {
 	var d Deliverable
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT deliverable_id, user_id, task_id, project_id, subject_ref, dtype,
-		        current_revision, state, created_ts, updated_ts
-		 FROM deliverables WHERE deliverable_id = ?`, id).
+		`SELECT d.deliverable_id, d.user_id, d.task_id, `+deliverableProject+`, d.subject_ref, d.dtype,
+		        d.current_revision, d.state, d.created_ts, d.updated_ts
+		 FROM deliverables d`+deliverableProjectJoin+` WHERE d.deliverable_id = ?`, id).
 		Scan(&d.ID, &d.Owner, &d.TaskID, &d.ProjectID, &d.SubjectRef, &d.Type,
 			&d.CurrentRevision, &d.State, &d.CreatedTS, &d.UpdatedTS)
 	if errors.Is(err, sql.ErrNoRows) {

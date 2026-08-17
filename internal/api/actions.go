@@ -147,8 +147,15 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 	deliverableID := r.PathValue("deliverable")
 	var owner, projectID string
 	var current int
+	// project_id through the task_project join, as everywhere a deliverable's
+	// project is served (P3-RW-18 D2-R2): a follow-up spawned off a row minted
+	// before D2-R1 must land in the same project as its parent, and that row
+	// carries ''.
 	err := s.proj.db.QueryRowContext(r.Context(),
-		`SELECT user_id, project_id, current_revision FROM deliverables WHERE deliverable_id = ?`, deliverableID).
+		`SELECT d.user_id, COALESCE(NULLIF(d.project_id, ''), tp.project_id, ''), d.current_revision
+		   FROM deliverables d
+		   LEFT JOIN task_project tp ON tp.task_id = d.task_id
+		  WHERE d.deliverable_id = ?`, deliverableID).
 		Scan(&owner, &projectID, &current)
 	found := !errors.Is(err, sql.ErrNoRows)
 	if err != nil && found {

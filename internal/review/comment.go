@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
@@ -81,7 +82,10 @@ func (s *Store) AddComment(ctx context.Context, in CommentInput) (Comment, error
 			row.claim = &AnchorRecord{FilePath: in.FileLevel}
 		}
 	}
-	ids, err := s.insertComments(ctx, []commentRow{row})
+	// A person writing a comment means it, even when it repeats one they wrote
+	// before: the mint dedupe is for machine-generated findings, not for a
+	// human's own words.
+	ids, err := s.insertComments(ctx, []commentRow{row}, keepEveryRow)
 	if err != nil {
 		return Comment{}, err
 	}
@@ -159,7 +163,13 @@ func (s *Store) AddFindings(ctx context.Context, deliverableID string, revisionN
 		}
 		rows = append(rows, row)
 	}
-	return s.insertComments(ctx, rows)
+	// Findings dedupe at the MINT (P3-RW-18 D3-R1). Two research nodes on one
+	// step produced byte-identical notes in one batch and the walk's reader saw
+	// the same sentence twice; a render-side dedupe had masked it on one
+	// surface and not the other, which is exactly why the invariant belongs
+	// here. Requester points come through this door too and get the same
+	// guarantee: filing the same fact twice files it once.
+	return s.insertComments(ctx, rows, dedupeIdentical)
 }
 
 // commentRow is the internal insert shape.
@@ -175,13 +185,54 @@ type commentRow struct {
 	birthPlacement        AnchorRecord // validated position for exact/drifted
 }
 
+// identityKey is the BYTE IDENTITY of one recorded finding: every field the
+// row stores, so two rows share a key only when they are the same recorded
+// fact (P3-RW-18 D3-R1). Identity, never similarity — two findings differing
+// in any field are two facts and both file. %q on each field makes the join
+// injective, so no combination of separators can forge a collision.
+func (r commentRow) identityKey() string {
+	return fmt.Sprintf("%q|%q|%q|%q|%q|%q|%q|%q|%q",
+		r.owner, r.runID, r.kind, r.severity, r.category, r.criterion,
+		r.body, r.suggested, r.originAnchor)
+}
+
+// The two insertComments modes. Named rather than a bare bool so the call
+// sites read as the decision they are.
+const (
+	keepEveryRow    = false
+	dedupeIdentical = true
+)
+
 // insertComments writes comment rows + their birth anchor states + one
 // review.comment event in ONE transaction (append-only rows; the event is
 // refs + hashes, P-T07-5).
-func (s *Store) insertComments(ctx context.Context, rows []commentRow) ([]int64, error) {
+//
+// With dedupe set, byte-identical rows collapse to one filing: within the
+// batch, and against rows already filed on the same (deliverable, revision).
+// The check runs INSIDE the transaction, because a check outside it would be a
+// read a concurrent writer can invalidate before the insert lands — and a
+// re-entered drain leg is precisely a second writer of the same batch.
+func (s *Store) insertComments(ctx context.Context, rows []commentRow, dedupe bool) ([]int64, error) {
 	now := s.nowRFC3339()
 	ids := make([]int64, 0, len(rows))
 	err := s.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		// WriteTx may re-enter its closure; the ids of an abandoned attempt are
+		// not this call's answer.
+		ids = ids[:0]
+		rows := rows
+		if dedupe {
+			var derr error
+			if rows, derr = dedupeRowsTx(ctx, tx, rows); derr != nil {
+				return derr
+			}
+			if len(rows) == 0 {
+				// Everything in this batch is already on the record. Nothing was
+				// filed, so no `review.comment` event is appended: an event
+				// claiming a filing that did not happen is the same lie the
+				// duplicate row was.
+				return nil
+			}
+		}
 		type evComment struct {
 			ID       int64  `json:"id"`
 			Kind     string `json:"kind"`
@@ -269,6 +320,58 @@ func (s *Store) insertComments(ctx context.Context, rows []commentRow) ([]int64,
 		return nil, err
 	}
 	return ids, nil
+}
+
+// dedupeRowsTx drops rows whose recorded fact is already on the record — one
+// already filed against the same (deliverable, revision), or an earlier row of
+// this same batch (P3-RW-18 D3-R1).
+//
+// Filed rows are matched in EVERY status, not just `open`. A finding a person
+// already resolved is still the same fact; re-filing it as a fresh open row
+// would undo their answer, which is a worse duplicate than the one this fixes.
+// Rounds do not collide across revisions, because each judged round mints its
+// own revision and the scope of this check is one revision.
+func dedupeRowsTx(ctx context.Context, tx *sql.Tx, rows []commentRow) ([]commentRow, error) {
+	filed := map[string]bool{}
+	scoped := map[string]bool{}
+	for _, r := range rows {
+		scope := r.deliverableID + "\x00" + strconv.Itoa(r.revisionN)
+		if scoped[scope] {
+			continue
+		}
+		scoped[scope] = true
+		q, err := tx.QueryContext(ctx,
+			`SELECT user_id, COALESCE(run_id, ''), kind, severity, COALESCE(category, ''),
+			        COALESCE(criterion, ''), body, COALESCE(suggested_change, ''), COALESCE(origin_anchor, '')
+			   FROM review_comments WHERE deliverable_id = ? AND revision_n = ?`,
+			r.deliverableID, r.revisionN)
+		if err != nil {
+			return nil, fmt.Errorf("review: read filed findings: %w", err)
+		}
+		for q.Next() {
+			var e commentRow
+			if err := q.Scan(&e.owner, &e.runID, &e.kind, &e.severity, &e.category,
+				&e.criterion, &e.body, &e.suggested, &e.originAnchor); err != nil {
+				q.Close()
+				return nil, fmt.Errorf("review: scan filed finding: %w", err)
+			}
+			filed[e.identityKey()] = true
+		}
+		q.Close()
+		if err := q.Err(); err != nil {
+			return nil, fmt.Errorf("review: read filed findings: %w", err)
+		}
+	}
+	out := make([]commentRow, 0, len(rows))
+	for _, r := range rows {
+		k := r.identityKey()
+		if filed[k] {
+			continue
+		}
+		filed[k] = true
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 func insertPlacementTx(ctx context.Context, tx *sql.Tx, p Placement, now string) error {

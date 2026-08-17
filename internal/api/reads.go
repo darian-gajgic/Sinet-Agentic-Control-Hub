@@ -845,18 +845,24 @@ type TaskDetail struct {
 	//     one task, so they render on the surfaces that are about a person.
 	//     Widening this to "everything the owner ever decided" would put
 	//     another task's approvals on this task's page.
-	//   - A CANCEL (drain r1 D3, corrected in drain r2). Cancelling work is a
-	//     human decision in the ordinary sense, but the landed server carries
-	//     it as `run.state_changed` and deliberately does not double-mint a
-	//     decision row for it, so it is not in this family.
+	// WHAT IT ALSO COVERS, since P3-RW-18 D1: the CANCEL. A cold walk proved
+	// the earlier posture wrong for the reader — S15.5 binds this list to
+	// "every human decision along the way", and cancelling the work is the
+	// most consequential one a person takes. The producers still mint no
+	// decision row for it (the approvals-plane rule that cancels are never
+	// double-minted is untouched); this derive RECONSTRUCTS it from the
+	// records they do write (S02.2): the structured `run.state_changed`
+	// detail, and — for runs cancelled before mint parity landed — the
+	// human-authored `ledger.decide` entry. One human act serves as one row.
 	//
-	//     Where it IS visible: `runs[].state` on this response, and the
-	//     `cancelled` kanban column (internal/stage/skeleton.go sets the
-	//     status). NOT in `stage_progress` — that derive reads only
-	//     stage.started/stage.finished/intake.state, and stageOutcome's
-	//     vocabulary is {completed, split, error}, so a cancelled queued run
-	//     appears in no stage row at all. Saying otherwise pointed a reader at
-	//     a surface that would never show it.
+	// WHAT IT STILL MISSES, deliberately: an ordinary lifecycle transition
+	// (scheduler admit, park, stage completion) is run lifecycle, not a
+	// decision, and appears in `runs[].state` alone. Cancels are also visible
+	// in the `cancelled` kanban column (internal/stage/skeleton.go sets it)
+	// but never in `stage_progress` — that derive reads only
+	// stage.started/stage.finished/intake.state, and stageOutcome's
+	// vocabulary is {completed, split, error}, so a cancelled queued run
+	// appears in no stage row at all.
 	Decisions []TaskDecision `json:"decisions"`
 
 	// Pipeline is the intake pipeline's own task view (phase, tier, the open
@@ -1083,18 +1089,46 @@ func (p *projector) taskTriage(ctx context.Context, taskID string) *TaskTriage {
 //     names it as a subject/card-id; `deliverable.accepted` names a
 //     DELIVERABLE, whose own row carries the task linkage.
 //
-// NOT IN THIS FAMILY, and the miss is deliberate: a CANCEL is carried by
-// `run.state_changed` (internal/api/approvals.go — "cancels (carried by
-// run.state_changed) are never double-minted"), which is a run-lifecycle
-// event, not a decision row. It is visible via runs[].state on this response
-// and the `cancelled` kanban column (never in stage_progress — that derive
-// reads only stage.started/stage.finished/intake.state); listing it here
-// would mean this derive reading a lifecycle type as a decision.
+// A CANCEL mints no member of this family and never will — internal/api/
+// approvals.go's rule stands: "cancels (carried by run.state_changed) are
+// never double-minted". It is served all the same, by the fourth read below
+// (cancelDecisions), which RECONSTRUCTS the decision from the durable cancel
+// records rather than asking for a row nobody writes (P3-RW-18 D1; S02.2).
 var (
 	runScopedDecisionTypes  = []string{"intake.delta_decision", "decision.recorded"}
 	platformDecisionTypes   = []string{"decision.recorded", "deliverable.accepted"}
 	deliverableAcceptedType = "deliverable.accepted"
 )
+
+// The cancel-reconstruction literals. Cross-package literals for the same
+// reason every other record set here is one: internal/api imports no producer
+// package. Each has exactly one producer-side definition, cited so drift is
+// findable from either end.
+//
+//   - runStateChangedType / humanCancelCause: internal/run's EventState and
+//     CancelCauseHuman (internal/run/canceldetail.go). All four cancel mint
+//     paths write the cause through run.CancelDetail — the one constructor.
+//   - ledgerUpdateType / ledgerDecideVerb: internal/ledger's EventLedgerUpdate
+//     and VerbDecide (internal/ledger/store.go).
+//   - cancelLedgerPrefixes: the opening words of the three HUMAN-authored
+//     ledger cancel mints — internal/stage/answer.go's answerCancel,
+//     internal/stage/ladderanswer.go's ladderCancel, and internal/intake/
+//     answer.go's Cancel and rethink legs. `ledger.decide` also carries
+//     retries, accepts and revisions, so the entry text is what separates a
+//     cancel from the rest of the family. Each prefix is pinned at its
+//     producer by a mint-side test (canceltext_test.go in stage and intake),
+//     so a reworded mint fails there rather than silently emptying this leg
+//     (P3-RW-18 OQ1; the durable fix is a typed `kind` on ledger decisions,
+//     a ledger schema change left to a future packet).
+const (
+	runStateChangedType = "run.state_changed"
+	humanCancelCause    = "human cancel (4.5)"
+	ledgerUpdateType    = "ledger_update"
+	ledgerDecideVerb    = "ledger.decide"
+	ledgerAuthorHuman   = "human"
+)
+
+var cancelLedgerPrefixes = []string{"requester cancelled", "requester: rethink"}
 
 // TaskDecision is one human decision on this task's way: who decided what,
 // about which card, and when (S2.4 — "actor, card id + type, decision,
@@ -1142,6 +1176,11 @@ func redactTaskDecisions(rows []TaskDecision) {
 //     than a task or a run — so its way back is the deliverables table's own
 //     task linkage. Nothing in its payload names the task, which is why the
 //     first cut of this derive silently returned nothing for every real accept.
+//
+// FOUR now: the cancel, which mints no decision row at all and is reconstructed
+// per run from the records the cancel itself wrote (cancelDecisions below,
+// P3-RW-18 D1). It is the one leg that reads a lifecycle event, and only ever
+// through a discriminator no ordinary transition carries.
 func (p *projector) taskDecisions(ctx context.Context, taskID, owner string, runs []TaskRunView) ([]TaskDecision, error) {
 	out := []TaskDecision{}
 	for _, rv := range runs {
@@ -1165,6 +1204,12 @@ func (p *projector) taskDecisions(ctx context.Context, taskID, owner string, run
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
+
+		cancels, cerr := p.cancelDecisions(ctx, rv.RunID)
+		if cerr != nil {
+			return nil, cerr
+		}
+		out = append(out, cancels...)
 	}
 
 	subjects, err := p.taskSubjects(ctx, taskID, runs)
@@ -1227,6 +1272,173 @@ func (p *projector) appendDecisions(ctx context.Context, out *[]TaskDecision, q 
 		*out = append(*out, d)
 	}
 	return rows.Err()
+}
+
+// cancelDecisions reconstructs one run's human cancel (P3-RW-18 D1-R2/R3/R4).
+//
+// The S02.2 posture: the act is already durably recorded — twice over on some
+// paths — so the decision is DERIVED from those records rather than a producer
+// minting a second row for the reader's benefit. Nothing here writes anything.
+//
+// TWO legs, because the four cancel mint paths leave two record shapes and the
+// walk world holds one of each:
+//
+//	A. the structured transition — a `run.state_changed` whose detail names the
+//	   cause (run.CancelDetail, written by every mint path since D1-R1). Who,
+//	   why and which card all come off the record: detail.actor, the
+//	   transition's own reason, and detail.ask_id where a card was answered.
+//	B. the ledger record — a `ledger.decide` update whose NEWEST entry is
+//	   authored `human` and opens with a cancel's words. This is what serves
+//	   runs cancelled before mint parity landed, the live walk's own
+//	   t-fe5ff6c325967c3e among them, without rewriting a single row of
+//	   history.
+//
+// ONE ACT, ONE ROW: a post-parity card cancel writes BOTH records, so leg B is
+// read only for runs leg A found nothing on. The structured record wins because
+// it names the actor at the transition itself.
+//
+// Neither leg fills card_type. The transition detail records the ask id, not
+// the kind of card it was — and a cancel taken through the verbs was answered
+// at no card at all. Naming a card type here would be this derive inventing
+// one, which is the failure the derive exists to end.
+//
+// The derive is PER RUN, so a task-level cancel that ended three live runs
+// serves three rows, one per run, each naming its run. That is deliberate:
+// each transition is its own record of work that was stopped, and collapsing
+// them would mean this derive deciding which recorded endings the reader may
+// see. "One act, one row" is a rule about the two records of ONE run's cancel,
+// not about the several runs one verb ends.
+func (p *projector) cancelDecisions(ctx context.Context, runID string) ([]TaskDecision, error) {
+	structured, err := p.structuredCancels(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if len(structured) > 0 {
+		return structured, nil
+	}
+	return p.ledgerCancels(ctx, runID)
+}
+
+// structuredCancels is leg A. The discriminator is `$.detail.cause`, a value
+// only run.CancelDetail writes — an ordinary lifecycle transition (admit,
+// claim, park, stage completion) carries no detail.cause at all, so no amount
+// of ordinary run traffic can surface here.
+func (p *projector) structuredCancels(ctx context.Context, runID string) ([]TaskDecision, error) {
+	const q = `SELECT event_seq, ts,
+	                  COALESCE(json_extract(payload, '$.detail.actor'), json_extract(payload, '$.actor'), '') AS actor,
+	                  COALESCE(json_extract(payload, '$.reason'), '')                                        AS reason,
+	                  COALESCE(json_extract(payload, '$.detail.ask_id'), '')                                 AS ask_id
+	             FROM run_events
+	            WHERE run_id = ? AND type = ? AND json_extract(payload, '$.detail.cause') = ?
+	            ORDER BY event_seq LIMIT ?`
+	rows, err := p.db.QueryContext(ctx, q, runID, runStateChangedType, humanCancelCause, runDetailRecordCap)
+	if err != nil {
+		return nil, fmt.Errorf("projection: run cancels %q: %w", runID, err)
+	}
+	defer rows.Close()
+	var out []TaskDecision
+	for rows.Next() {
+		var (
+			d                 TaskDecision
+			ts, actor, reason string
+			askID             string
+		)
+		if err := rows.Scan(&d.Seq, &ts, &actor, &reason, &askID); err != nil {
+			return nil, fmt.Errorf("projection: run cancel scan %q: %w", runID, err)
+		}
+		d.Type, d.TS, d.RunID = runStateChangedType, parseTS(ts), runID
+		d.Actor, d.Reason, d.CardID, d.Decision = actor, reason, askID, "cancel"
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ledgerCancels is leg B: the pre-parity record, and the only place a cancel
+// taken before D1-R1 says who took it.
+//
+// Each `ledger.decide` update carries the whole ledger, so the entry this
+// update ADDED is the last one — the same reading internal/ledger's own
+// current-document read takes. An entry qualifies only when it is authored by
+// a human AND opens with one of the three mints' cancel words; `ledger.decide`
+// is also how retries, accepts and revisions are recorded, and none of those
+// are cancels.
+func (p *projector) ledgerCancels(ctx context.Context, runID string) ([]TaskDecision, error) {
+	const q = `SELECT event_seq, ts, payload FROM run_events
+	            WHERE run_id = ? AND type = ? AND json_extract(payload, '$.change.verb') = ?
+	            ORDER BY event_seq LIMIT ?`
+	rows, err := p.db.QueryContext(ctx, q, runID, ledgerUpdateType, ledgerDecideVerb, runDetailRecordCap)
+	if err != nil {
+		return nil, fmt.Errorf("projection: run ledger cancels %q: %w", runID, err)
+	}
+	defer rows.Close()
+	var out []TaskDecision
+	seen := map[string]bool{}
+	for rows.Next() {
+		var (
+			seq     int64
+			ts, raw string
+		)
+		if err := rows.Scan(&seq, &ts, &raw); err != nil {
+			return nil, fmt.Errorf("projection: run ledger cancel scan %q: %w", runID, err)
+		}
+		var pay struct {
+			Change struct {
+				Actor string `json:"actor"`
+			} `json:"change"`
+			Ledger struct {
+				Decisions []struct {
+					Seq    int64  `json:"seq"`
+					TS     string `json:"ts"`
+					Author string `json:"author"`
+					Text   string `json:"text"`
+					Reason string `json:"reason"`
+				} `json:"decisions"`
+			} `json:"ledger"`
+		}
+		// An undecodable payload is not this derive's to report: the ledger
+		// surfaces own that error, and a task page must not 500 because one
+		// event body is odd. It simply carries no cancel.
+		if err := json.Unmarshal([]byte(raw), &pay); err != nil {
+			continue
+		}
+		if len(pay.Ledger.Decisions) == 0 {
+			continue
+		}
+		e := pay.Ledger.Decisions[len(pay.Ledger.Decisions)-1]
+		if e.Author != ledgerAuthorHuman || !isCancelLedgerText(e.Text) {
+			continue
+		}
+		// The same entry can ride more than one update payload (every later
+		// snapshot carries it too, and a re-answer re-appends). One entry is
+		// one act, keyed by the entry's own append seq.
+		key := fmt.Sprintf("%d|%s|%s", e.Seq, e.TS, e.Text)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		d := TaskDecision{
+			Seq: seq, Type: ledgerUpdateType, RunID: runID,
+			Actor: pay.Change.Actor, Decision: "cancel", Reason: e.Reason,
+		}
+		if d.TS = parseTS(e.TS); d.TS.IsZero() {
+			d.TS = parseTS(ts)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// isCancelLedgerText reports whether a human ledger entry's text is one of the
+// cancel mints (see cancelLedgerPrefixes for the producers and the tests that
+// pin them).
+func isCancelLedgerText(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	for _, p := range cancelLedgerPrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // taskSubjects is everything a decision could name to be ABOUT this task: the

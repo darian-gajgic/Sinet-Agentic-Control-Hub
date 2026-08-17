@@ -379,16 +379,13 @@ func (s *Skeleton) runLadder(ctx context.Context, r run.Run) bool {
 	return true
 }
 
+// cancelDetail is the verb/ladder path's call into the ONE shared constructor
+// (run.CancelDetail, P3-RW-18 D1-R1). It moved out of this file because the
+// verify-card and intake cancels must write the same shape and the same cause
+// literal, and `internal/intake` cannot import `internal/stage`. The verb path
+// has no card, so it passes no ask id.
 func cancelDetail(actor string, ladder bool) json.RawMessage {
-	b, err := json.Marshal(struct {
-		Cause         string `json:"cause"`
-		Actor         string `json:"actor"`
-		LadderInvoked bool   `json:"ladder_invoked"`
-	}{"human cancel (4.5)", actor, ladder})
-	if err != nil {
-		return nil
-	}
-	return b
+	return run.CancelDetail(actor, ladder, "")
 }
 
 // closeOpenAsksTx closes every open ask of a run as cancelled, inside the

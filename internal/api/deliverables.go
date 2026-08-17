@@ -140,34 +140,43 @@ func (s *Server) handleDeliverableList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := `SELECT deliverable_id, user_id, task_id, project_id, dtype, current_revision, state, created_ts, updated_ts
-	        FROM deliverables WHERE 1 = 1`
+	// The project column is served through the task_project join, so a row
+	// minted before P3-RW-18 D2-R1 (project_id '') still shows the project its
+	// task is registered to. The served column and the `?project=` clause below
+	// are the SAME expression, so they cannot disagree — the reads.go §37 rule,
+	// and the reason the join is here rather than a COALESCE on the output only.
+	q := `SELECT d.deliverable_id, d.user_id, d.task_id,
+	             COALESCE(NULLIF(d.project_id, ''), tp.project_id, '') AS project_id,
+	             d.dtype, d.current_revision, d.state, d.created_ts, d.updated_ts
+	        FROM deliverables d
+	        LEFT JOIN task_project tp ON tp.task_id = d.task_id
+	       WHERE 1 = 1`
 	args := []any{}
 	if !scope.Operator {
-		q += ` AND user_id = ?`
+		q += ` AND d.user_id = ?`
 		args = append(args, scope.UserID)
 	}
 	for _, f := range []struct {
 		clause string
 		val    string
 	}{
-		{` AND project_id = ?`, strings.TrimSpace(r.URL.Query().Get("project"))},
-		{` AND state = ?`, state},
-		{` AND dtype = ?`, strings.TrimSpace(r.URL.Query().Get("type"))},
+		{` AND COALESCE(NULLIF(d.project_id, ''), tp.project_id, '') = ?`, strings.TrimSpace(r.URL.Query().Get("project"))},
+		{` AND d.state = ?`, state},
+		{` AND d.dtype = ?`, strings.TrimSpace(r.URL.Query().Get("type"))},
 		// `?task=` is additive (B6-5 drain r1 D5): the S15.5 task detail lists
 		// "every deliverable revision" for ONE task, and without it the surface
 		// had no way to ask that question — the first cut rendered follow-up
 		// LINEAGE edges under the deliverables heading instead, which is a
 		// different fact wearing the same label. Owner scope is untouched: this
 		// narrows an already-scoped read.
-		{` AND task_id = ?`, strings.TrimSpace(r.URL.Query().Get("task"))},
+		{` AND d.task_id = ?`, strings.TrimSpace(r.URL.Query().Get("task"))},
 	} {
 		if f.val != "" {
 			q += f.clause
 			args = append(args, f.val)
 		}
 	}
-	q += ` ORDER BY created_ts DESC, deliverable_id DESC LIMIT ?`
+	q += ` ORDER BY d.created_ts DESC, d.deliverable_id DESC LIMIT ?`
 	args = append(args, limit+1) // one beyond, so Truncated is OBSERVED
 
 	cursor, err := s.head(r.Context())

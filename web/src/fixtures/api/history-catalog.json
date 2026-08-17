@@ -427,6 +427,12 @@
       ]
     },
     {
+      "name": "status.tasks_cancelled",
+      "category": "status",
+      "description": "tasks that were cancelled or stopped — who cancelled each one, why, and when, most recent first",
+      "slots": null
+    },
+    {
       "name": "status.waiting_on_human",
       "category": "status",
       "description": "runs blocked on an unanswered question — the waiting-on-human queue",
@@ -541,6 +547,7 @@
     "status.runs_for_task",
     "status.runs_in_date_range",
     "status.tasks_by_kanban",
+    "status.tasks_cancelled",
     "status.waiting_on_human",
     "verdicts.adverse",
     "verdicts.by_domain",

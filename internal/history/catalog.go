@@ -175,6 +175,42 @@ var catalog = []Query{
 			scoped("user_id") + ` ORDER BY created_ts DESC LIMIT ?`,
 	},
 	{
+		// P3-RW-18 D4-R1. A household reader asked "what got cancelled recently
+		// and why?" and the fifty queries held no cancel vocabulary at all — so
+		// the grammar's only options were fifty wrong answers or an abstain,
+		// and the classifier guessed. The right answer has to EXIST before any
+		// gate can protect it; this is that answer.
+		//
+		// No slots: "recently" is the ORDER BY and the LIMIT, not a filter — and
+		// a slotless entry also means no second model call, so the reliability
+		// floor answers this question with one.
+		//
+		// Two predicate legs, because the record has two shapes. The first is
+		// the D1-R1 discriminator, written by the ONE cancel-detail constructor
+		// (internal/run.CancelCauseHuman, internal/run/canceldetail.go — the
+		// literal is repeated here because the catalog is SQL data, and a test
+		// pins the two spellings together). The second matches the `(4.5)` the
+		// cancel reasons have always carried, so runs cancelled BEFORE mint
+		// parity still list — a history that silently began at a fix is not a
+		// history. `cancelled_by` prefers the structured actor and falls back to
+		// the transition's actor unless that is the platform, which on a
+		// pre-parity row means "who is not recorded here" rather than "the
+		// platform decided".
+		Name: "status.tasks_cancelled", Category: CatStatus,
+		Description: "tasks that were cancelled or stopped — who cancelled each one, why, and when, most recent first",
+		SQL: `SELECT t.task_id, t.user_id, t.title, MAX(e.event_seq) AS event_seq, e.ts AS cancelled_ts,` +
+			` COALESCE(json_extract(e.payload, '$.detail.actor'),` +
+			`          NULLIF(json_extract(e.payload, '$.actor'), 'platform')) AS cancelled_by,` +
+			` json_extract(e.payload, '$.reason') AS reason` +
+			` FROM tasks t` +
+			` JOIN runs r ON r.task_id = t.task_id` +
+			` JOIN run_events e ON e.run_id = r.run_id AND e.type = 'run.state_changed'` +
+			`  AND (json_extract(e.payload, '$.detail.cause') = 'human cancel (4.5)'` +
+			`       OR instr(COALESCE(json_extract(e.payload, '$.reason'), ''), '(4.5)') > 0)` +
+			` WHERE t.kanban_status = 'cancelled'` +
+			scoped("t.user_id") + ` GROUP BY t.task_id ORDER BY event_seq DESC LIMIT ?`,
+	},
+	{
 		Name: "status.waiting_on_human", Category: CatStatus,
 		Description: "runs blocked on an unanswered question — the waiting-on-human queue",
 		SQL: `SELECT a.ask_id, a.run_id, a.user_id, a.status, a.observed_ts, r.state AS run_state` +
