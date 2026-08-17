@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -68,6 +69,17 @@ func fakeEngineMain(fixture string) int {
 	sc := bufio.NewScanner(strings.NewReader(string(raw)))
 	sc.Buffer(make([]byte, 64<<10), 10<<20)
 	for sc.Scan() {
+		// P3-RW-16: the __SINET_BIGLINE__ marker replays as ONE stdout line
+		// larger than the adapter's scanBufCap (size from SINET_FAKE_BIGLINE,
+		// bytes) — the oversized-stream-line probe. Marker lines replay as
+		// nothing when the env knob is absent.
+		if sc.Text() == "__SINET_BIGLINE__" {
+			if n, err := strconv.Atoi(os.Getenv("SINET_FAKE_BIGLINE")); err == nil && n > 0 {
+				fmt.Printf(`{"type":"assistant","message":{"id":"mBig","content":[{"type":"text","text":"%s"}]}}`+"\n",
+					strings.Repeat("x", n))
+			}
+			continue
+		}
 		fmt.Println(sc.Text())
 	}
 	if os.Getenv("SINET_FAKE_STDERR") != "" {

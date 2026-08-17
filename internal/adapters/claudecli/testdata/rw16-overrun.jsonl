@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"rw16-sess","model":"claude-haiku-4-5","permissionMode":"default","cwd":"/tmp","apiKeySource":"none"}
+__SINET_BIGLINE__
+{"type":"assistant","message":{"id":"mA","content":[{"type":"text","text":"tail-ok"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+{"type":"result","subtype":"success","is_error":false,"result":"{\"ok\":true}","stop_reason":"end_turn","num_turns":1,"total_cost_usd":0.01,"usage":{"input_tokens":10,"output_tokens":5}}
