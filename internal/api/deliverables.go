@@ -291,10 +291,25 @@ func followUpReason(ok bool) string {
 	return "closed until a revision is minted:"
 }
 
-// acceptDoor states whether the accept is live. Its two preconditions are
-// exactly the ones internal/accept enforces — in-review, and a current revision
-// with a snapshot commit to push — so the card can never offer a door the
-// orchestration refuses.
+// acceptDoor states whether the accept is live.
+//
+// ⚠ STALE LIMB, DECLARED AND NOT TOUCHED (P3-RW-17). The third limb below —
+// "not repo-backed" — mirrors a precondition `acceptable()` (accept.go) NO
+// LONGER holds: a payload-pinned revision is now acceptable, because 5.8/D10/
+// S13.1 define the accept for every deliverable and only the S13.6 PUSH needs a
+// snapshot commit. The card and the verb agree (both read `acceptable()`); this
+// door does not, so a content-pinned deliverable's detail still says closed
+// while its accept card opens and its accept works. The surface consequence is
+// bounded: the frontend renders the accept FORM from the card
+// (`card.acceptable`, web/src/Deliverable.tsx), and this door's reason renders
+// as the precondition line above it.
+//
+// It is not fixed here because the fix is not code-shaped: unifying this limb
+// with `acceptable()` flips `available` on the fixture world's content-pinned
+// deliverable, which drifts the committed API contract body
+// (`web/src/fixtures/api/deliverable-rework.json`) and the frontend expectations
+// built against it — the builder's lane, outside this packet's walls. Referral
+// line for the coordinator: one door, one regeneration, one frontend re-check.
 func (s *Server) acceptDoor(d review.Deliverable, revs []review.Revision, base string) Door {
 	door := Door{
 		Verb: doorAccept, Method: http.MethodPost, Route: base + "/accept",

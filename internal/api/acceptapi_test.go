@@ -271,6 +271,86 @@ func TestAcceptCardWithoutProvenanceRendersNoTrailers(t *testing.T) {
 	}
 }
 
+// TestPinnedAcceptInAProjectNamesNoPushTarget is the OQ-B shape (P3-RW-17 R4):
+// content-pinned INSIDE a project that has a repo. The act is open — it is the
+// owner's decision either way — and the card names no protected ref, because the
+// ref is where a push GOES and this accept makes none. Materializing the payload
+// into the project's document store at accept is a named follow-up, and the card
+// must not imply it already happens.
+func TestPinnedAcceptInAProjectNamesNoPushTarget(t *testing.T) {
+	e := newDlvEnv(t)
+	e.prepareProject("proj", "alice", map[string]string{"a.txt": "base\n"})
+	e.mkRun("t-doc", "r-doc", "alice")
+	e.mkDeliverable("d-doc", "alice", "t-doc", "r-doc", "proj", "markdown",
+		map[string]string{"notes.md": "# notes\n"}, "")
+	card := readAcceptCard(t, e, "alice", "d-doc")
+	if !card.Acceptable {
+		t.Fatalf("a project does not close the pinned arm: %+v", card)
+	}
+	if card.ProjectID != "proj" {
+		t.Errorf("the card still says which project the work belongs to, got %q", card.ProjectID)
+	}
+	if card.ProtectedRef != "" {
+		t.Errorf("nothing is pushed, so no push target may be named, got %q", card.ProtectedRef)
+	}
+	// The control: the repo-backed deliverable in the SAME project does name it.
+	snap := e.snapshotCandidate("proj", "pipe", "a.txt", "candidate\n")
+	e.mkRun("t-code", "r-code", "alice")
+	e.mkDeliverable("d-code", "alice", "t-code", "r-code", "proj", "markdown",
+		map[string]string{"a.txt": "candidate\n"}, snap)
+	if ref := readAcceptCard(t, e, "alice", "d-code").ProtectedRef; ref != "refs/heads/main" {
+		t.Errorf("the push arm must still name its protected ref, got %q", ref)
+	}
+
+	var out api.AcceptOutcome
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST", "/api/deliverables/d-doc/accept",
+		acceptBody(card.PayloadHash, dlvPIN))), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Applied || out.Commit != "" || len(e.push.reqs) != 0 {
+		t.Fatalf("a pinned accept in a project pushes nothing: %+v (pushes %d)", out, len(e.push.reqs))
+	}
+	// The S02.8 sibling-accept freshness DOES fire: it is project-scoped, and
+	// this deliverable has a project.
+	if len(out.RoutedRuns) != 1 || out.RoutedRuns[0] != "r-sibling" {
+		t.Errorf("the project's active runs must be routed for re-validation, got %v", out.RoutedRuns)
+	}
+}
+
+// TestStalePinRefusesThePinnedArmToo is R5's parity limb: retry-safety is the
+// accept family's, not the push arm's. A card read before a re-mint is stale on
+// both arms, and the refusal carries the FRESH card back with nothing fired.
+func TestStalePinRefusesThePinnedArmToo(t *testing.T) {
+	e := newDlvEnv(t)
+	id := pinnedFixture(t, e)
+	code, body := e.do(t, "alice", "POST", "/api/deliverables/"+id+"/accept",
+		acceptBody("sha256:not-the-card-you-were-shown", dlvPIN))
+	if code != http.StatusConflict {
+		t.Fatalf("a stale pin must be a 409 on the pinned arm too, got %d: %s", code, body)
+	}
+	var refusal struct {
+		Error   string         `json:"error"`
+		Current api.AcceptCard `json:"current"`
+	}
+	if err := json.Unmarshal([]byte(body), &refusal); err != nil {
+		t.Fatalf("decode refusal: %v", err)
+	}
+	if refusal.Error != "stale_payload" || refusal.Current.PayloadHash == "" {
+		t.Fatalf("the refusal must carry the FRESH card back: %+v", refusal)
+	}
+	if e.count(review.EventAccepted) != 0 {
+		t.Error("a stale pin must not move the deliverable")
+	}
+	if d, _ := e.rev.Deliverable(e.ctx, id); d.State != review.StateInReview {
+		t.Errorf("state %q after a refused accept, want in-review", d.State)
+	}
+	// The non-tautological control: the fresh pin the refusal handed back works.
+	if code, out := e.do(t, "alice", "POST", "/api/deliverables/"+id+"/accept",
+		acceptBody(refusal.Current.PayloadHash, dlvPIN)); code != http.StatusOK {
+		t.Fatalf("the fresh pin must be accepted: %d %s", code, out)
+	}
+}
+
 // ── R14: the PIN, the pin, and what fires ───────────────────────────────────
 
 func TestAcceptWithoutAPINDemandsOne(t *testing.T) {

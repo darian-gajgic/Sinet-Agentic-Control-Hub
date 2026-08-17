@@ -148,6 +148,26 @@ func redactTaskLineage(lin *TaskLineage) {
 	lin.Project = redact.Redact(lin.Project)
 }
 
+// redactTaskTriage applies the same primitive to the Stage-0 block, which is
+// entirely payload-DERIVED: every value is lifted by key out of an
+// `intake.state` body, and a floor reason's `detail` is the freest text of the
+// lot — it quotes the plan step or the request phrase that tripped the floor.
+// The stored row is untouched — store-raw / serve-redacted (R19).
+func redactTaskTriage(tri *TaskTriage) {
+	if tri == nil {
+		return
+	}
+	tri.Family = redact.Redact(tri.Family)
+	tri.FamilySource = redact.Redact(tri.FamilySource)
+	tri.Tier = redact.Redact(tri.Tier)
+	tri.FloorTier = redact.Redact(tri.FloorTier)
+	for i := range tri.FloorReasons {
+		tri.FloorReasons[i].Class = redact.Redact(tri.FloorReasons[i].Class)
+		tri.FloorReasons[i].Source = redact.Redact(tri.FloorReasons[i].Source)
+		tri.FloorReasons[i].Detail = redact.Redact(tri.FloorReasons[i].Detail)
+	}
+}
+
 func badRequest(msg string) *SurfaceError {
 	return &SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: msg}
 }
@@ -891,6 +911,7 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		s.writeSurface(w, nil, err)
 		return
 	}
+	detail.Triage = s.proj.taskTriage(r.Context(), taskID)
 	s.fillTaskArtifacts(r.Context(), taskID, &detail)
 
 	// The task detail is NOT wrapped as a whole: SPEC/PLAN artifacts, receipts,
@@ -905,6 +926,7 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	redactStageProgress(detail.StageProgress)
 	redactTaskLineage(&detail.Lineage)
 	redactTaskDecisions(detail.Decisions)
+	redactTaskTriage(detail.Triage)
 	s.writeReadJSON(w, detail)
 }
 
@@ -1004,6 +1026,49 @@ func (p *projector) stageProgress(ctx context.Context, runs []TaskRunView) ([]St
 // stageProgressTypes are the family-1 markers the per-stage story reads: the
 // engine stage boundaries and the intake pipeline's own phases.
 var stageProgressTypes = []string{"stage.started", "stage.finished", "intake.state"}
+
+// taskTriage derives the S06 Stage-0 record from the task's LATEST
+// `intake.state` event (P3-RW-17 R8) — the ordering authority
+// `intake.Pipeline.LoadState` and migration 0022's pin edge both use, for the
+// same reason: the whole State is marshaled onto every state event, so the
+// newest one is the record of what triage resolved.
+//
+// The block is served only when the record HOLDS triage facts. A task whose
+// intake never classified anything, and a state event written before a family or
+// tier existed, get no block at all: an empty one would render a triage that
+// never happened, which is worse than an absence a surface can say nothing
+// about. Nothing here re-decides anything — a tier this read disagreed with
+// would be a second answer to a question S06 already answered.
+func (p *projector) taskTriage(ctx context.Context, taskID string) *TaskTriage {
+	var payload string
+	// No row, or an unreadable one, is an ABSENT block rather than a failed task
+	// read — the landed latestPayload posture for every payload-derived enrichment
+	// on this response: the task itself still reads.
+	if err := p.db.QueryRowContext(ctx, QueryTaskIntakeState, taskID).Scan(&payload); err != nil {
+		return nil
+	}
+	var st struct {
+		Family       string               `json:"family"`
+		FamilySource string               `json:"family_source"`
+		Tier         string               `json:"tier"`
+		FloorTier    string               `json:"floor_tier"`
+		FloorReasons []intake.FloorReason `json:"floor_reasons"`
+	}
+	if err := json.Unmarshal([]byte(payload), &st); err != nil {
+		return nil
+	}
+	if st.Family == "" && st.Tier == "" && st.FloorTier == "" && len(st.FloorReasons) == 0 {
+		return nil
+	}
+	tri := &TaskTriage{
+		Family: st.Family, FamilySource: st.FamilySource, Tier: st.Tier,
+		FloorTier: st.FloorTier, FloorReasons: st.FloorReasons,
+	}
+	if tri.FloorReasons == nil {
+		tri.FloorReasons = []intake.FloorReason{}
+	}
+	return tri
+}
 
 // The S02.2 Human-decision family, split by HOW ITS PRODUCERS ACTUALLY MINT
 // (drain r1 D1/D2/D3 — the first cut assumed one shape and missed two).

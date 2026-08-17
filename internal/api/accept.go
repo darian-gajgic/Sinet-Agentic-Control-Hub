@@ -127,6 +127,9 @@ type AcceptCard struct {
 	ProtectedRef string `json:"protected_ref,omitempty"`
 	// Trailers are the rendered attribution lines, byte-for-byte what the commit
 	// will carry. Their inputs are platform facts (below), never model output.
+	// On the payload-pinned arm no commit is made, so they are the revision's
+	// machine attribution and nothing more — the card's reason and tier statement
+	// both say that nothing is pushed.
 	Trailers      string           `json:"trailers"`
 	Provenance    AcceptProvenance `json:"provenance"`
 	Signing       AcceptSigning    `json:"signing"`
@@ -155,9 +158,23 @@ type AcceptProvenance struct {
 }
 
 // acceptTierStatement is the S15.6 High-tier fact, on the card where the person
-// decides rather than only in a doc.
-const acceptTierStatement = "High tier: this pushes a commit to a shared branch, so it is never batched and your PIN is re-prompted in the same " +
-	"request. No elevation is inherited from an idle session (S15.6; S01.9)."
+// decides rather than only in a doc. Each arm states what ITS act does: the push
+// arm's High tier comes from the outward push, and the pinned arm keeps the same
+// ceremony without one.
+//
+// The pinned arm's tier is a deliberate, conservative sub-choice (P3-RW-17):
+// S13.6 derives High from the push, so a payload-pinned accept could argue for
+// less. It keeps the full ceremony — payload-hash echo plus PIN step-up — for
+// accept-family uniformity: one act, one posture, and an owner who never has to
+// wonder which kind of accept they are making. Relaxing it later is an
+// operator-visible change, which is the right direction for that decision.
+const (
+	acceptTierStatement = "High tier: this pushes a commit to a shared branch, so it is never batched and your PIN is re-prompted in the same " +
+		"request. No elevation is inherited from an idle session (S15.6; S01.9)."
+	acceptPinnedTierStatement = "High tier: your PIN is re-prompted in the same request and this is never batched. Nothing is pushed — this " +
+		"deliverable pins its content, so the accept records your decision against that immutable pin. The accept family keeps one posture " +
+		"whichever way the work lands. No elevation is inherited from an idle session (S15.6; S01.9)."
+)
 
 // acceptPinCore is the canonical accept-card core the payload hash covers.
 type acceptPinCore struct {
@@ -193,7 +210,7 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 		Route: "POST /api/deliverables/" + d.ID + "/accept",
 	}
 	if d.CurrentRevision < 1 {
-		card.Reason = "no revision is minted yet, so there is nothing to accept (S13.1)"
+		card.Reason = acceptNoRevisionReason
 		return card, nil
 	}
 	rev, err := s.review.RevisionAt(ctx, d.ID, d.CurrentRevision)
@@ -201,12 +218,20 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 		return AcceptCard{}, err
 	}
 	card.RevisionN, card.PinKind = rev.N, rev.PinKind
+	if rev.SnapshotSHA == "" {
+		// The pinned arm: the act is a recorded decision, not an outward push, and
+		// the tier statement says which one the person is about to make.
+		card.TierStatement = acceptPinnedTierStatement
+	}
 	card.ContentPin = revisionContentPin(rev)
 	card.Provenance = s.acceptProvenance(ctx, rev)
 	if card.Provenance.Absent == "" {
 		card.Trailers = accept.RenderTrailers(card.Provenance.Engine, card.Provenance.Model, card.Provenance.VendorNoreply)
 	}
-	if d.ProjectID != "" {
+	// The protected ref is where the push GOES, so it is a push-arm fact even
+	// when a payload-pinned deliverable belongs to a project: naming a ref the
+	// accept will not touch would be the card claiming a target it has none of.
+	if rev.SnapshotSHA != "" && d.ProjectID != "" {
 		card.ProtectedRef = s.protectedRef(ctx, d.ProjectID)
 	}
 	hash, err := gates.CanonicalHash(mustMarshal(acceptPinCore{
@@ -222,14 +247,31 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 
 // acceptable is the ONE place the accept's preconditions are expressed, so the
 // card and the verb can never disagree about whether the act is open.
+//
+// THE PIN KIND SELECTS THE ARM; IT IS NEVER A REFUSAL (P3-RW-17). Feature list
+// 5.8, D10, S07.8 and the S13.1 state machine define the accept for every
+// deliverable, and S13.1's pin vocabulary covers non-repo types by name — the
+// payload hash IS the durable pin, so nothing needs inventing to record what was
+// accepted. What the arms differ in is what HAPPENS: the repo arm pushes an
+// attributed commit to a protected ref and therefore needs a project and
+// renderable trailers; the pinned arm records a decision against an immutable
+// content hash and needs neither, because a commit that is never made cannot
+// mis-attribute anybody. Refusing the pinned arm for want of a push target was
+// the defect this shape removes.
 func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov AcceptProvenance) (bool, string) {
 	switch {
 	case !wired:
 		return false, "no accept orchestration is composed in this process"
 	case d.State != review.StateInReview:
 		return false, fmt.Sprintf("this deliverable is %s: only an in-review deliverable is accepted (S13.1/S13.6)", d.State)
-	case rev.SnapshotSHA == "":
-		return false, fmt.Sprintf("revision %d is not repo-backed: it pins content but no snapshot commit, and an accept pushes a commit (S13.1/S13.6)", rev.N)
+	case rev.N < 1:
+		return false, acceptNoRevisionReason
+	}
+	if rev.SnapshotSHA == "" {
+		return true, fmt.Sprintf("open: accept with this payload_hash and your PIN in the same request. Nothing is pushed — revision %d pins "+
+			"its content, so the accept records your decision against that immutable pin and files the work as accepted (S13.1; 5.8)", rev.N)
+	}
+	switch {
 	case d.ProjectID == "":
 		return false, "this deliverable belongs to no project, so there is no protected ref to push to (S13.7)"
 	case prov.Absent != "":
@@ -237,6 +279,11 @@ func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov Acce
 	}
 	return true, "open: accept with this payload_hash and your PIN in the same request"
 }
+
+// acceptNoRevisionReason is the pre-mint answer, shared by the card (which
+// cannot read a revision that does not exist) and by acceptable itself, so the
+// two cannot drift apart.
+const acceptNoRevisionReason = "no revision is minted yet, so there is nothing to accept (S13.1)"
 
 // revisionContentPin is the revision's immutable content pin as ONE string
 // (Spec S13.1: repo-backed types pin a snapshot-commit sha, content types pin
@@ -504,6 +551,14 @@ func acceptOutcome(d review.Deliverable, card AcceptCard, out accept.Outcome) Ac
 	res.Applied, res.State, res.Commit = true, review.StateAccepted, out.Commit
 	res.Detail = "accepted: one attributed commit is on the protected ref through the effect journal and the broker's CAS push, the deliverable is " +
 		"accepted, and the project's active runs were fired for S02.6 re-validation (S13.6; S02.8)."
+	if out.EffectID == "" {
+		// The payload-pinned arm: no effect was proposed because nothing outward
+		// happened. What is durable is the decision itself, against a pin that
+		// cannot change (S13.1).
+		res.Detail = fmt.Sprintf("accepted: your decision is recorded against revision %d's immutable content pin and the deliverable is filed as "+
+			"accepted, owner-attributed in the event log. Nothing was pushed — this deliverable pins content rather than a snapshot commit, so "+
+			"there is no commit and no outward effect to journal (S13.1; 5.8/D10).", card.RevisionN)
+	}
 	return res
 }
 

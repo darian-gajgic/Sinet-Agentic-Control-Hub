@@ -221,10 +221,25 @@ type Outcome struct {
 	Card       *MergeCard
 }
 
-// Accept runs the S13.6 broker-mediated accept.
+// Accept runs the S13.6 accept, on the arm the revision's own pin selects.
+//
+// TWO ARMS, ONE ACT (P3-RW-17). The accept decision is defined for EVERY
+// deliverable — 5.8 "the requester accepts or rejects; nothing self-approves
+// into the world", D10, S07.8, and the S13.1 state machine — while the S13.6
+// commit-push ceremony below is by its own text the outward arm for
+// repo-targeted work: every step of it is defined over current project HEAD, a
+// run branch and a protected ref, and its High tier is "(risk tier High —
+// outward push)". A revision that pins CONTENT rather than a snapshot commit
+// (S13.1: "binary types pin content-addressed object-dir hashes") has no
+// candidate to push and nothing to push it onto, so its accept is what S13.1
+// defines: the owner's decision moving the deliverable to accepted, recorded
+// durably against the revision's immutable content pin and audit-trailed in the
+// event log. The corpus already contains that class — an automation definition
+// approved as a deliverable pushes nowhere, and `review.Store.Accept`'s
+// supersession logic exists for exactly it.
 func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
-	if in.DeliverableID == "" || in.AcceptingUser == "" || in.ProjectID == "" {
-		return Outcome{}, fmt.Errorf("accept: input needs deliverable, accepting user and project")
+	if in.DeliverableID == "" || in.AcceptingUser == "" {
+		return Outcome{}, fmt.Errorf("accept: input needs a deliverable and an accepting user")
 	}
 	// Resolve the candidate: the current revision's snapshot commit (repo-backed).
 	d, err := a.cfg.Review.Deliverable(ctx, in.DeliverableID)
@@ -239,7 +254,12 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 		return Outcome{}, err
 	}
 	if rev.SnapshotSHA == "" {
-		return Outcome{}, fmt.Errorf("accept: deliverable %q revision %d is not repo-backed (no snapshot commit to push)", in.DeliverableID, rev.N)
+		return a.acceptPinned(ctx, in)
+	}
+	// From here the PUSH arm, unchanged: a project is a push-arm fact, and only
+	// this arm needs one (there is no protected ref without a project).
+	if in.ProjectID == "" {
+		return Outcome{}, fmt.Errorf("accept: repo-backed deliverable %q needs a project to push to", in.DeliverableID)
 	}
 	candidate := rev.SnapshotSHA
 
@@ -299,6 +319,34 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 		subject: in.Subject, provenance: in.Provenance, gitProfile: in.GitProfile,
 		when: approved.ApprovedTS,
 	})
+}
+
+// acceptPinned is the payload-pinned arm (P3-RW-17): the owner's decision on a
+// revision that pins content rather than a snapshot commit.
+//
+// It is the SAME state verb the push arm ends on — `review.Store.Accept`, which
+// carries the S13.1 supersession, the owner-attributed `deliverable.accepted`
+// row and the idempotent state guard — and nothing else. No effect is proposed,
+// because the S02.7 journal exists for OUTWARD effects and nothing here leaves
+// the platform: a DB state flip and its event row are the record of a decision,
+// not a class-A act. No project verb is called, no broker request is built, and
+// there is no commit to return.
+//
+// The sibling-accept freshness trigger (S02.8) fires only for a deliverable that
+// HAS a project: it routes that project's active runs to re-validation, and a
+// projectless accept has no siblings to route.
+func (a *Accepter) acceptPinned(ctx context.Context, in Input) (Outcome, error) {
+	acc, err := a.cfg.Review.Accept(ctx, in.DeliverableID, in.AcceptingUser)
+	if err != nil {
+		return Outcome{}, err
+	}
+	var routed []string
+	if in.ProjectID != "" {
+		if routed, err = a.fireSibling(ctx, in.ProjectID); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return Outcome{Accepted: true, Superseded: acc.Superseded, RoutedRuns: routed}, nil
 }
 
 // acceptPayload is the class-A accept effect's pinned payload — self-sufficient

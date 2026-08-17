@@ -1361,6 +1361,23 @@ const (
 	          AND ts >= ?
 	          AND COALESCE(change_class, '') <> 'none'`
 
+	// QueryTaskIntakeState reads a TASK's latest `intake.state` payload — the
+	// Stage-0 triage record the task detail serves (P3-RW-17 R8). Runs and tasks
+	// carry no shared event column, so the hop is the same one migration 0022's
+	// pin edge makes, written the same way for the same measured reason: the
+	// CROSS JOIN is load-bearing, not decoration. It pins the join order so
+	// `runs` is the outer loop, which is what lets 0022's runs_task_idx serve the
+	// task hop and 0015's run_events_run_type_idx serve the event seek; a plain
+	// JOIN lets the planner reverse them and walk the whole intake.state history
+	// descending instead — a cost that grows with the event log rather than with
+	// the task. `event_seq` is the sole ordering authority (S14.1), so the newest
+	// state event IS the record, exactly as intake.Pipeline.LoadState reads it.
+	QueryTaskIntakeState = `SELECT e.payload
+	          FROM runs r
+	          CROSS JOIN run_events e ON e.run_id = r.run_id
+	         WHERE r.task_id = ? AND e.type = 'intake.state'
+	         ORDER BY e.event_seq DESC LIMIT 1`
+
 	// OwnerScopeClause is the S01.9 member filter appended to each query above.
 	OwnerScopeClause = ` AND user_id = ?`
 	// OwnerOrPlatformScopeClause additionally admits platform-scope rows, so a
