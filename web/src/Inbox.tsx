@@ -84,7 +84,6 @@ export function Inbox({ stream }: { stream?: EventStream }) {
       />
       <Freshness stale={live.stale} error={live.error} hasData={live.data !== null} />
       <NoFrameNote items={items} />
-      <BenchmarkOptIn stream={stream} />
       {live.data && items.length === 0 ? (
         <EmptyState
           what="Nothing is waiting on you."
@@ -118,6 +117,13 @@ export function Inbox({ stream }: { stream?: EventStream }) {
           This is one page of a longer queue — the control plane bounds what one read returns. Answer some and re-read.
         </p>
       )}
+      {/* RA-10 (third report: W2-10, RA-10): the OPT-IN PITCH renders after
+          the mail, never above it. Earlier fixes softened the page's promise
+          but left the panel physically first, so the queue still greeted a
+          person with an essay before their urgent cards. The door stays on the
+          page for everyone (gating it on already-having-a-pair would hide the
+          way in); it just stops standing in front of the queue. */}
+      <BenchmarkOptIn stream={stream} />
     </section>
   )
 }

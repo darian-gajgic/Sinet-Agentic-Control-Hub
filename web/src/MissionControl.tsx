@@ -835,6 +835,21 @@ function ActivityPanel({
  * to, pressure renders only when the gauge says it applies, and burn rates
  * render at the view's own grain — money is read, never computed (§37).
  */
+/**
+ * gauge renders a consumption READING for eyes (RA-7). The wire's float
+ * arithmetic leaks artifacts ("169378.20000000004"), and a raw String() put
+ * them on the page as if they were data. This is presentation of a token
+ * gauge, not money (§37 binds money; these are weighted TOKENS, and the unit
+ * now says so beside every figure): group separators, at most one decimal.
+ */
+function gauge(n: number): string {
+  // Intl.NumberFormat, not the Number method: the timestamp sweep bans the
+  // toLocale* family tree-wide (dates are served verbatim UTC), and a number
+  // formatter that shares the name would read as a violation. The locale is
+  // pinned so the figure renders the same for every reader.
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(n)
+}
+
 export function MetersPanel({ meters, stale, error }: { meters: Meters | null; stale: boolean; error: string }) {
   return (
     <Section title="Consumption and budgets" stale={stale}>
@@ -847,9 +862,13 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
                 <tr>
                   <th>Whose</th>
                   <th>Lane</th>
-                  <th>Weighted consumption</th>
+                  <th>
+                    Consumption <span className="muted">(weighted tokens)</span>
+                  </th>
                   <th>Pressure</th>
-                  <th>Budget remaining</th>
+                  <th>
+                    Budget remaining <span className="muted">(weighted tokens)</span>
+                  </th>
                   <th>Runs</th>
                   <th>Parked</th>
                 </tr>
@@ -862,7 +881,7 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
                     </td>
                     <td>{l.lane}</td>
                     <td>
-                      {String(l.weighted_consumption)}
+                      {gauge(l.weighted_consumption)}
                       {l.assumed && (
                         <span className="assumed" title={`cache reads weighted at ${String(l.cache_read_weight)}`}>
                           {' '}
@@ -885,7 +904,7 @@ export function MetersPanel({ meters, stale, error }: { meters: Meters | null; s
                     </td>
                     <td>
                       {l.budget_declared && l.budget_remaining !== null ? (
-                        String(l.budget_remaining)
+                        gauge(l.budget_remaining)
                       ) : (
                         <Absent reason="no budget declared" />
                       )}

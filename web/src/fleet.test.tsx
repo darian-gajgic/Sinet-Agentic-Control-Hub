@@ -442,9 +442,11 @@ test('a replacement renders old→new from the served prior, and the re-read gau
   const line = view.container.querySelector('.budget-row[data-lane="anthropic"] [data-outcome]')!
   expect(line.textContent).toContain('replacing 100000 weighted-consumption units (S10.4)')
   // The FIGURES come from the re-read, never from the editor: the gauge row now
-  // reports the declared budget, its pressure and its remainder.
+  // reports the declared budget, its pressure and its remainder. The remainder
+  // renders through the RA-7 gauge formatter (group separators, one decimal) —
+  // a reading for eyes, in the unit the header now names.
   const text = view.container.textContent ?? ''
-  expect(text).toContain('249987.5')
+  expect(text).toContain('249,987.5')
   expect(text).toContain('0.05')
   // The label the editor offers is the served declaration state, re-read.
   expect(view.container.querySelector('[data-declare-budget="alice/anthropic"]')?.textContent).toBe(

@@ -367,7 +367,10 @@ function StatusLine({ what, status, version }: { what: string; status: string; v
 function structuredKindWords(kind: string): string {
   switch (kind) {
     case 'ears':
-      return 'written in the EARS requirement form'
+      // RA-4: "EARS" is standards-committee dialect on a lay surface. The
+      // plain words say what the shape IS; the acronym stays findable in
+      // parentheses for anyone who wants to look it up.
+      return 'written as strict when-X-then-Y requirements (the EARS form)'
     case 'gwt':
       return 'written as Given / When / Then'
     default:

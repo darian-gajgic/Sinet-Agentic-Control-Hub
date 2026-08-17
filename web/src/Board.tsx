@@ -222,6 +222,85 @@ function useFoldCue(axis: 'x' | 'y', itemSelector: string, signal: number) {
 }
 
 /**
+ * usePanScroll makes the horizontally-scrolling board row scrollable FROM
+ * ANYWHERE (RA-9: the "more stages" pill was the secret door — wheel and drag
+ * over the card area did nothing). Two gestures join the native scrollbar:
+ *
+ *  - plain WHEEL over the row moves it sideways — except over a column body
+ *    that can still scroll vertically in that direction, which keeps its own
+ *    wheel (the column's scroll is real work, never hijacked);
+ *  - PRESS-DRAG on the row pans it. Form controls and the dnd handles keep
+ *    their gestures; a drag past the threshold suppresses the click it would
+ *    otherwise fire, so panning over a card never opens it.
+ *
+ * jsdom has no layout and fires none of these events, so the hook is inert in
+ * tests — the same posture useFoldCue takes.
+ */
+function usePanScroll(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaX !== 0) return // a real sideways gesture already works natively
+      if (el.scrollWidth <= el.clientWidth) return
+      const col = e.target instanceof Element ? e.target.closest('.col-body') : null
+      if (col instanceof HTMLElement && col.scrollHeight > col.clientHeight + 1) {
+        const canGoDown = col.scrollTop + col.clientHeight < col.scrollHeight - 1
+        const canGoUp = col.scrollTop > 0
+        if (e.deltaY > 0 ? canGoDown : canGoUp) return
+      }
+      el.scrollLeft += e.deltaY
+      e.preventDefault()
+    }
+
+    let down: { x: number; y: number; left: number } | null = null
+    let panning = false
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return
+      const t = e.target instanceof Element ? e.target : null
+      if (t?.closest('button, input, select, textarea, [draggable="true"]')) return
+      down = { x: e.clientX, y: e.clientY, left: el.scrollLeft }
+      panning = false
+    }
+    const onMove = (e: PointerEvent) => {
+      if (down === null) return
+      const dx = e.clientX - down.x
+      const dy = e.clientY - down.y
+      if (!panning && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) panning = true
+      if (panning) el.scrollLeft = down.left - dx
+    }
+    const onUp = () => {
+      down = null
+      // The click suppression below reads `panning`; it fires after pointerup,
+      // so the flag clears on the next tick rather than here.
+      setTimeout(() => {
+        panning = false
+      }, 0)
+    }
+    const onClickCapture = (e: MouseEvent) => {
+      if (panning) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    el.addEventListener('click', onClickCapture, true)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      el.removeEventListener('click', onClickCapture, true)
+    }
+  }, [ref])
+}
+
+/**
  * One column's scrollable body: keyboard-reachable (tabIndex — the board page
  * itself never overflows, so document keys like PageDown are structurally
  * dead unless the column scroller can take focus), with the fold cue as a
@@ -280,6 +359,9 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
   // right edge. Keyed on the column count so an unknown-status column joining
   // the row re-measures it.
   const row = useFoldCue('x', ':scope > .kanban-col', columnsFor(tasks).length)
+  // RA-9: the row scrolls from anywhere — wheel and press-drag, not only the
+  // scrollbar and the pill.
+  usePanScroll(row.ref)
 
   const onDragEnd = (result: DropResult) => {
     void applyDrag(queue, result).then(
@@ -590,7 +672,7 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
           {run !== null && run !== undefined && (
             <span
               className="task-cost mono"
-              title="The priced total so far. Work on subscription lanes has no per-call price and never joins this figure — the task card's receipts list it as UNPRICED."
+              title="The priced total so far. Subscription-lane work is no extra charge — it has no per-call price and never joins this figure; the task card's receipts list it as UNPRICED."
             >
               {/* `cost_so_far_usd` is the PRICED total; the list read carries
                   no unpriced marker (a reported wire note), so a bare "USD 0"

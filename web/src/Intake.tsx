@@ -578,6 +578,19 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
   // A cold resume's task read carries no tier; the open card does. Either
   // source is the platform's own figure — never derived here.
   const tier = view.tier !== undefined && view.tier !== '' ? view.tier : view.open_card?.tier
+  // RA-6: the walk saw stakes flip HIGH→LOW→HIGH with no reason given. The
+  // wire serves no per-flip cause (the platform records floor reasons but
+  // never serves them — a REPORTED gap), so the honest view-side story is the
+  // mechanism itself: this page REMEMBERS the level it last showed for this
+  // task, and when the level moves it says so and says why levels move at all.
+  const seenTier = useRef<{ task: string; tier: string; moved: string }>({ task: '', tier: '', moved: '' })
+  let moved = seenTier.current.task === view.task_id ? seenTier.current.moved : ''
+  if (tier !== undefined && tier !== '') {
+    if (seenTier.current.task === view.task_id && seenTier.current.tier !== tier && seenTier.current.tier !== '') {
+      moved = seenTier.current.tier
+    }
+    seenTier.current = { task: view.task_id, tier, moved }
+  }
   return (
     <header className="journey-head">
       <div className="journey-title">
@@ -599,6 +612,12 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
               stakes: {tier}
               {tier === 'high' && <> — extra care, PIN to approve</>}
             </Chip>
+            {moved !== '' && moved !== tier && (
+              <span className="muted text-xs" data-stakes-moved={moved}>
+                {' '}
+                was {moved} — the platform refined its reading of the goal as it learned more
+              </span>
+            )}
           </span>
         )}
         {/* The meter shows only WHILE THE PLATFORM IS ASKING (W1-9): clearance
@@ -1735,14 +1754,32 @@ function PlanCard({
           {estimate !== undefined && estimate.known ? (
             <b className="mono">cost: ≈ USD {String(estimate.usd ?? 0)}</b>
           ) : (
-            <span>
-              cost: <b className="mono">UNPRICED</b>
-              <span className="muted">
-                {' '}
-                — no per-call dollar price exists
-                {a.routing?.lane !== undefined && a.routing.lane !== '' && <> on the {a.routing.lane} lane</>}; the
-                receipt itemizes the work with the same UNPRICED label
-              </span>
+            // RA-3: the door promised "a plan with a price", and the walk met
+            // "UNPRICED — no per-call dollar price exists…" instead. The humane
+            // sentence is structurally honest at v0: metered per-call selection
+            // is switched off (D5), so a routed paid lane is BY CONSTRUCTION
+            // one this household holds as a subscription, and the local lane is
+            // the house's own machine. The billing vocabulary moves one fold
+            // down, where the receipt's own word (UNPRICED) is explained.
+            <span data-cost-unpriced="true">
+              {a.routing?.lane === 'local' ? (
+                <>
+                  cost: <b>no extra charge</b>
+                  <span className="muted"> — this runs on the house&apos;s own computer</span>
+                </>
+              ) : a.routing?.lane !== undefined && a.routing.lane !== '' ? (
+                <>
+                  cost: <b>no extra charge</b>
+                  <span className="muted">
+                    {' '}
+                    — covered by your {a.routing.lane} subscription, which this work runs on
+                  </span>
+                </>
+              ) : (
+                <>
+                  cost: <span className="muted">no dollar figure exists for this work</span>
+                </>
+              )}
             </span>
           )}
           {estimate?.size_class !== undefined && estimate.size_class !== '' && <> · size: {estimate.size_class}</>}
@@ -1757,6 +1794,17 @@ function PlanCard({
           )}
           {l1.size_note !== undefined && l1.size_note !== '' && <span className="warn-flag"> · {l1.size_note}</span>}
         </p>
+        {estimate !== undefined && !estimate.known && (
+          <details className="cost-tech" data-cost-detail>
+            <summary className="cursor-pointer text-xs text-muted-foreground">how this is billed, exactly</summary>
+            <p className="m-0 text-xs text-muted-foreground">
+              No per-call dollar price exists
+              {a.routing?.lane !== undefined && a.routing.lane !== '' && <> on the {a.routing.lane} lane</>}: paying
+              per call is switched off at this version, so work runs on lanes this household already holds. The receipt
+              itemizes every call with the same label the meters use — UNPRICED, never a silent $0.
+            </p>
+          </details>
+        )}
       </section>
 
       {a.routing !== undefined && (

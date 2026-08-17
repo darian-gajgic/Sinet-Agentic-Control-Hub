@@ -105,7 +105,15 @@ export function Fleet({
               <tr>
                 <th>Whose</th>
                 <th>Lane</th>
-                <th>Active</th>
+                {/* RA-7: "Active 5" here beside "0 running" on Home read as a
+                    contradiction. Both were true — this gauge counts every run
+                    still OPEN on the lane, including ones parked waiting on a
+                    person, while Home's "running" counts only what is
+                    executing this second. The header now says which one this
+                    is instead of leaving the reader to reconcile two words. */}
+                <th title="Every run still open on this lane — executing OR waiting on a person. Home's 'running' counts only what is executing right now.">
+                  Open runs
+                </th>
                 <th>Parked</th>
                 <th>Until</th>
               </tr>

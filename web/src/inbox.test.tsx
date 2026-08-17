@@ -1652,3 +1652,16 @@ test('a KNOWN kind whose card family is unrecognized gets no guidance, and loses
   const { view: v2 } = await open('/inbox', served)
   expect(row(v2, shipCard.id).querySelector('[data-check-first]')?.getAttribute('data-check-first')).toBe('proposal')
 })
+
+test('RA-10: the opt-in pitch renders AFTER the mail, never above it (third report)', async () => {
+  const { view } = await open('/inbox', fixtures.approvals())
+  const list = view.container.querySelector('ol.cards')
+  const panel = optInPanel(view)
+  expect(list, 'no card list rendered, so the position pin proves nothing').not.toBeNull()
+  expect(panel).not.toBeNull()
+  // DOM order IS the reading order here: the panel must follow the queue.
+  expect(
+    (list!.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    'the opt-in pitch sits above the queue again — W2-10/RA-10 regressed',
+  ).toBe(true)
+})

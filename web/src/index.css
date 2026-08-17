@@ -3189,9 +3189,14 @@ input[type='radio'] {
 }
 
 /* A verdict citation is a door (W2-8): link-shaped, no button chrome.
-   The state story's jumps (RA-B1) are the same class of door. */
+   The state story's jumps (RA-B1) are the same class of door. `display` and
+   `width` are stated because the global button chrome (width: 100%) would
+   otherwise break the sentence these doors sit inside onto its own line —
+   seen live at RA-B1's first pixels. */
 .verdict-link,
 .jump-link {
+  display: inline;
+  width: auto;
   padding: 0;
   border: none;
   background: none;

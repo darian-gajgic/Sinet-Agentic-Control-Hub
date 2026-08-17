@@ -1942,12 +1942,18 @@ function DoorRow({ door, detail, reload }: { door: Door; detail: DeliverableDeta
       {/* `.door-reason` KEEPS its rule (the `responsive.test.ts:245` group), so
           no wrap utility competes with it. */}
       <p className="door-reason m-0 text-sm">{door.reason}</p>
+      {/* W2-6/RA-4: the wire address is REAL and stays on the surface — but as
+          a technical fold, not as a sentence. A household reviewer read "POST
+          /api/deliverables/…" as radio chatter; an integrator opens one fold. */}
       {door.route !== '' && (
-        <p className={cn('door-route m-0 text-xs text-muted-foreground', figure)}>
-          {door.method} {door.route}
-          {door.preset !== undefined && door.preset !== '' ? <> · preset {door.preset}</> : null}
-          {door.pin_from !== undefined && door.pin_from !== '' ? <> · pin from {door.pin_from}</> : null}
-        </p>
+        <details className="door-tech">
+          <summary className="cursor-pointer text-xs text-muted-foreground">technical detail</summary>
+          <p className={cn('door-route m-0 text-xs text-muted-foreground', figure)}>
+            {door.method} {door.route}
+            {door.preset !== undefined && door.preset !== '' ? <> · preset {door.preset}</> : null}
+            {door.pin_from !== undefined && door.pin_from !== '' ? <> · pin from {door.pin_from}</> : null}
+          </p>
+        </details>
       )}
       {door.available && driveableRevisionDoor(door) && <RequestRevision door={door} />}
       {driveableFollowUpDoor(door) && <SpawnFollowUp door={door} detail={detail} reload={reload} />}
@@ -2992,12 +2998,15 @@ function MergeCardPanel({ view }: { view: import('./api').MergeCardView }) {
             className="text-sm"
           >
             <span className={cn('option-name font-semibold', figure)}>{o.option}</span> — {o.reason}
+            {/* Same W2-6 rule as the doors: the wire address folds. */}
             {o.route !== undefined && o.route !== '' && (
-              <span className={cn('text-xs text-muted-foreground', figure)}>
-                {' '}
-                · {o.route}
-                {o.preset !== undefined && o.preset !== '' ? ` · preset ${o.preset}` : ''}
-              </span>
+              <details className="door-tech">
+                <summary className="cursor-pointer text-xs text-muted-foreground">technical detail</summary>
+                <span className={cn('text-xs text-muted-foreground', figure)}>
+                  {o.route}
+                  {o.preset !== undefined && o.preset !== '' ? ` · preset ${o.preset}` : ''}
+                </span>
+              </details>
             )}
           </li>
         ))}
