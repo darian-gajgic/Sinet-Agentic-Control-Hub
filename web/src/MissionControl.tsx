@@ -7,6 +7,7 @@ import {
   type MeterView,
   type Meters,
   type RunListItem,
+  type Session,
   type TaskListItem,
 } from './api'
 import type { EventStream } from './events'
@@ -17,6 +18,7 @@ import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Thr
 import { useProjectScope } from './project'
 import { Link } from './router'
 import { hrefFor } from './routes'
+import { SignInFirstDoor } from './signinfirst'
 import { StageName } from './TaskDetail'
 import { Chip, EmptyState, Panel, StatTile, StatusDot, Timestamp, type Tone } from './ui'
 
@@ -51,6 +53,39 @@ const recentlyFinishedWindowMs = 24 * 60 * 60 * 1000
 const terminalStates = ['completed', 'crashed', 'finalized', 'tombstoned', 'died-at-gate']
 
 export type Bucket = { id: string; title: string; runs: RunListItem[] }
+
+/**
+ * Home under the DEV FALLBACK: structure, not data (re-walk B).
+ *
+ * The dev identity may browse (S01.9's fallback is a browsable session), but
+ * the dashboard it landed on showed the HOUSEHOLD's own work — counts, spend
+ * per person, the roster — to someone who has not said who they are. The
+ * sign-in-first posture that already guards the work-creating doors (W1-B1)
+ * extends here: before sign-in the page says what Home IS, and shows whose
+ * numbers it would be showing, without showing them. Production is
+ * byte-equivalent — `session.dev` is never true without the fallback, so this
+ * component never renders there.
+ */
+export function HomeSignInFirst({ session, onSignedIn }: { session: Session; onSignedIn: () => void }) {
+  return (
+    <section className="surface mission" data-home-signin-first="true">
+      <div className="hero">
+        <p className="hero-kicker">SINET · CONTROL ROOM</p>
+        <h2 className="m-0">The household&apos;s work, behind sign-in</h2>
+        <p className="hero-sub">
+          Signed in, this page is the household&apos;s work at a glance: what is running right now, what waits on a
+          person, parked work, each person&apos;s spend today, the roster of tasks, and a live feed of what just
+          happened. Those are somebody&apos;s own numbers — so they show after you say who you are, not before.
+        </p>
+      </div>
+      <SignInFirstDoor
+        session={session}
+        onSignedIn={onSignedIn}
+        doorWords="This page shows the household's own work and spending."
+      />
+    </section>
+  )
+}
 
 /**
  * What puts a run in each bucket, in the reader's words — the teaching half of

@@ -1442,16 +1442,46 @@ test('the jump leg is the SERVED task ref, and a card with none grows no door', 
     'the run ref left with the jump it is not',
   ).not.toBeNull()
 
-  // AND NO DELIVERABLE JUMP EXISTS, because no card serves a deliverable ref.
-  // The proposal's "jump-to-deliverable" is answered by the task page, which is
-  // where the revisions and receipts live; a deliverable link would be a fact
-  // off the wire.
+  // AND NO CARD GROWS A DELIVERABLE JUMP, because no card serves a deliverable
+  // ref. The proposal's "jump-to-deliverable" is answered by the task page,
+  // which is where the revisions and receipts live; a deliverable link on a
+  // CARD would be a fact off the wire. (The review-waiting section below the
+  // queue does link deliverables — from the deliverables read's own served
+  // rows, which is its own test.)
   for (const i of served.items) {
     for (const field of ['deliverable', 'deliverable_id', 'artifact_id']) {
       expect(Object.keys(i), `a card serves ${field} after all — the jump leg should carry it`).not.toContain(field)
     }
   }
-  expect(view.container.querySelector('a[href^="/deliverables/"]'), 'the inbox invented a deliverable link').toBeNull()
+  expect(
+    view.container.querySelector('.cards a[href^="/deliverables/"]'),
+    'a card invented a deliverable link',
+  ).toBeNull()
+})
+
+test('finished work in review renders as its own waiting-on-you section, owner-scoped, after the queue', async () => {
+  const served = mine()
+  const { view } = await open('/inbox', served)
+
+  // The section exists and its rows are the deliverables read's own in-review
+  // rows owned by the session identity (alice in the doubles), each a door to
+  // the review page (return-visit item 5).
+  const section = view.container.querySelector('[data-review-waiting]')!
+  expect(section, 'the review-waiting section did not render').not.toBeNull()
+  const links = [...section.querySelectorAll('a[href^="/deliverables/"]')].map((a) => a.getAttribute('href'))
+  expect(links, 'the owner-scoped in-review rows are the section').toContain('/deliverables/d-site')
+  expect(links.length, 'a row rendered that the served read does not hold').toBe(
+    Number(section.getAttribute('data-review-waiting')),
+  )
+
+  // Placement: the queue is never pushed below it — the section follows the
+  // card list in document order (the card queue's order is the control
+  // plane's; this section is a second feed, not a re-ranking).
+  const cards = view.container.querySelector('.cards')!
+  expect(
+    cards.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
+    'the review-waiting section jumped above the card queue',
+  ).toBeTruthy()
 })
 
 test('THE NON-VACUITY THE OLD LINK NEVER HAD: every served task ref resolves on the task read', async () => {

@@ -92,6 +92,35 @@ test('a DRAFT pair is labelled a draft and never presented as the confirmed spec
   expect(text, 'a draft was presented as confirmed').not.toContain('confirmed')
 })
 
+test('template assumed-default rows collapse into ONE line on the spec card (re-walk B)', async () => {
+  // The old-era wall: every skipped interview slot leaves a per-slot template
+  // row — "<Name> — …so I assumed a sensible default." — which names nothing
+  // contestable and repeats. The plan card collapsed it at blocker #15; this
+  // pins the SAME collapse on TaskDetail's own render path. Substantive rows
+  // render whole; unrecognized rows render verbatim (driven by the substantive
+  // row below, which the recognizer must NOT eat).
+  const base = fixtures.taskDetail() as Record<string, unknown>
+  const spec = {
+    ...(base.spec as Record<string, unknown>),
+    assumptions: [
+      { text: 'The tone stays neutral and factual.', basis: 'planner' },
+      { text: 'Audience — you asked me to go ahead without answering, so I assumed a sensible default.' },
+      { text: 'Length — you asked me to go ahead without answering, so I assumed a sensible default.' },
+      { text: 'Format — you asked me to go ahead without answering, so I assumed a sensible default.' },
+    ],
+  }
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: { ...base, spec } } })
+  const text = view.container.textContent ?? ''
+  expect(text.match(/so I assumed a sensible default/g) ?? [], 'the template wall rendered').toHaveLength(0)
+  const line = view.container.querySelector('[data-assume-skipped]')!
+  expect(line, 'the collapsed line is missing').not.toBeNull()
+  expect(line.getAttribute('data-assume-skipped')).toBe('3')
+  expect(line.textContent).toContain('Audience · Length · Format')
+  expect(text, 'the substantive assumption must render whole, with its basis').toContain(
+    'The tone stays neutral and factual. (planner)',
+  )
+})
+
 test('a task with no drafted pair renders a plain-words absence, never the internal reason string', async () => {
   // REWRITTEN 2026-08-06 (C2-13): the served `artifacts_absent` is the
   // pipeline's own internal reason ("intake: invalid artifact: …") and the

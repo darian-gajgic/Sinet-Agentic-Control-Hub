@@ -15,6 +15,7 @@ import {
 } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import type { EventStream } from './events'
+import { isAssumedDefaultBoilerplate } from './Intake'
 import { activityEventTypes, boardEventTypes, inboxEventTypes, useLive } from './live'
 import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Stamp } from './parts'
 import { Link, navigate } from './router'
@@ -384,7 +385,6 @@ function SpecLists({ spec }: { spec: Spec }) {
     { title: 'Constraints', items: spec.constraints ?? [] },
     { title: 'Will not do', items: spec.out_of_scope ?? [] },
     { title: 'Open clarifications', items: spec.clarifications ?? [] },
-    { title: 'Assumptions', items: (spec.assumptions ?? []).map((a) => (a.basis ? `${a.text} (${a.basis})` : a.text)) },
   ]
   return (
     <>
@@ -400,7 +400,49 @@ function SpecLists({ spec }: { spec: Spec }) {
             </ul>
           </div>
         ))}
+      <SpecAssumptions assumptions={spec.assumptions ?? []} />
     </>
+  )
+}
+
+/**
+ * The stored spec's assumption list, collapsed the way the plan card's is
+ * (re-walk B; blocker #15's collapse applied to THIS render path too).
+ *
+ * The old-era wall: every skipped interview slot leaves a template row —
+ * "<Name> — …so I assumed a sensible default." — that names nothing anyone
+ * can contest and repeats per slot. Substantive assumptions render whole,
+ * with their basis; the template rows collapse into ONE line naming the
+ * points. Rows the recognition does not match render verbatim — nothing is
+ * hidden on a guess.
+ */
+function SpecAssumptions({ assumptions }: { assumptions: { text: string; basis?: string }[] }) {
+  if (assumptions.length === 0) return null
+  const shown: typeof assumptions = []
+  const skipped: string[] = []
+  for (const a of assumptions) {
+    const name = /^(.+?) — /.exec(a.text)?.[1] ?? ''
+    if (name !== '' && isAssumedDefaultBoilerplate(name, a.text)) {
+      skipped.push(name)
+      continue
+    }
+    shown.push(a)
+  }
+  return (
+    <div>
+      <h4>Assumptions</h4>
+      <ul>
+        {shown.map((a) => (
+          <li key={a.text}>{a.basis ? `${a.text} (${a.basis})` : a.text}</li>
+        ))}
+        {skipped.length > 0 && (
+          <li data-assume-skipped={String(skipped.length)}>
+            {skipped.join(' · ')} — skipped in the interview, so the work went ahead on sensible defaults it did not
+            spell out here.
+          </li>
+        )}
+      </ul>
+    </div>
   )
 }
 
@@ -652,8 +694,26 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
             <li>{String(card.counters.steps)} steps</li>
             <li>{String(card.counters.tokens)} tokens</li>
             {/* Human-readable, never raw seconds (C2-13: "1500991 s elapsed"
-                is the banned class). The counter stays monotonic fact. */}
-            <li>{fmtDuration(card.counters.elapsed_s)} elapsed</li>
+                is the banned class). The counter stays monotonic fact — AND IT
+                STOPS AT THE TERMINAL (return-visit item 7): the served
+                `elapsed_s` is now−created at read time, so on a COMPLETED run
+                it kept counting hours after the work ended ("3 h 52 min
+                elapsed" on a 3-minute check). A finished run's honest figure
+                is the span between two SERVED instants — its first record and
+                its last — so that is what renders once the state is terminal;
+                the ticking derivation stays for a run still going. */}
+            {(() => {
+              const ended = terminalStates.includes(card.state)
+              const ranFor =
+                ended && card.last_activity !== null && run !== null
+                  ? (Date.parse(card.last_activity.ts) - Date.parse(run.created_ts)) / 1000
+                  : Number.NaN
+              return ended && Number.isFinite(ranFor) && ranFor >= 0 ? (
+                <li data-elapsed="final">ran for {fmtDuration(ranFor)} — from its first record to its last</li>
+              ) : (
+                <li data-elapsed="live">{fmtDuration(card.counters.elapsed_s)} elapsed</li>
+              )
+            })()}
             <li className="run-cost">
               {/* The unpriced truth (review #9): a subscription-lane run's
                   served figure is 0 because NO dollar price exists — calling
@@ -1034,6 +1094,17 @@ function DeliverablesBlock({ taskID, ended, stream }: { taskID: string; ended?: 
                 {d.deliverable.type} · {d.deliverable.state}
               </span>
             </h4>
+            {/* Re-walk B: DONE up top and "in-review" down here read as two
+                stories until somebody says they are one. They are one: the
+                TASK'S work ends when the result is minted; the RESULT then
+                waits on its own owner. Said where the two words meet. */}
+            {d.deliverable.state === 'in-review' && (
+              <p className="muted my-1 text-sm" data-one-story="in-review">
+                The task&apos;s work on this is finished — what remains is not the platform&apos;s to do:{' '}
+                <strong>{d.deliverable.owner}</strong> reviews it, and accepts it or asks for changes on{' '}
+                <Link to={hrefFor('deliverable', { id: d.deliverable.id })}>its review page</Link>.
+              </p>
+            )}
             <ol className="revisions">
               {d.revisions.map((r) => (
                 <li key={r.n} data-revision={String(r.n)}>
@@ -1138,14 +1209,20 @@ export function ReceiptView({
         </p>
       ) : (
       <div className="table-scroll">
+        {/* COLUMN ORDER IS THE NARROW-SCREEN DESIGN (re-walk B): on a phone
+            the sideways scroll hides everything past the first ~two columns,
+            and the reason a person opens a receipt is the MONEY — so the
+            priced figure rides second, right beside the purpose, and never
+            arrives cut. Model and lane are the detail a reader scrolls FOR,
+            not the answer they came for. */}
         <table className="items">
           <thead>
             <tr>
               <th>Purpose</th>
+              <th>Priced</th>
+              <th>Calls</th>
               <th>Model</th>
               <th>Lane</th>
-              <th>Calls</th>
-              <th>Priced</th>
               <th>Unpriced calls</th>
             </tr>
           </thead>
@@ -1156,12 +1233,12 @@ export function ReceiptView({
                     ceremony" was radio chatter); an unmapped served value
                     renders verbatim (§42). */}
                 <td>{purposeWords[it.Purpose] ?? it.Purpose}</td>
-                <td>{it.Model}</td>
-                <td>{it.Lane}</td>
-                <td>{String(it.Calls)}</td>
                 <td>
                   <Money usd={it.PricedUSD} />
                 </td>
+                <td>{String(it.Calls)}</td>
+                <td>{it.Model}</td>
+                <td>{it.Lane}</td>
                 <td>{it.UnpricedCalls > 0 ? <span className="warn-flag">{String(it.UnpricedCalls)}</span> : '0'}</td>
               </tr>
             ))}

@@ -45,3 +45,41 @@ export function SignInFirstDoor({
     </div>
   )
 }
+
+/**
+ * The same posture for a DATA surface under the dev fallback (re-walk B).
+ *
+ * The walls started at the doors that CREATE work (W1-B1); the walk showed the
+ * exposure's other half — the dev landing could read the household's own
+ * numbers (Home's counts, Fleet's per-person money, the inbox queue) before
+ * anyone said who they were. So every surface whose content is the household's
+ * own records teases its structure — its name and what it holds — and shows
+ * the data after sign-in, in place. Production is byte-equivalent: without the
+ * fallback `session.dev` is never true and this never renders.
+ */
+export function SurfaceSignInFirst({
+  session,
+  onSignedIn,
+  title,
+  sub,
+}: {
+  session: Session
+  onSignedIn: () => void
+  title: string
+  sub: string
+}) {
+  return (
+    <section className="surface" data-surface-signin-first={title}>
+      <h2 className="mt-0 mb-1">{title} — behind sign-in</h2>
+      <p className="mb-3 max-w-prose text-sm text-muted-foreground">
+        {sub === '' ? 'This page reads the household’s own records' : sub} — the household&apos;s own records, shown
+        to the household. They appear after you say who you are, and this page unlocks in place.
+      </p>
+      <SignInFirstDoor
+        session={session}
+        onSignedIn={onSignedIn}
+        doorWords={`${title} shows the household's own records.`}
+      />
+    </section>
+  )
+}

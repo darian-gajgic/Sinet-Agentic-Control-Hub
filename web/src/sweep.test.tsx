@@ -925,6 +925,8 @@ describe('client-side filtering narrows the DISPLAY, never the scope (S15.2)', (
       'the OWN-QUEUED lane, which is the board’s one <Droppable>. It decides what is DRAGGABLE, not what is visible: every other task still renders in its stage column, and the priority-hint verb refuses a non-own run server-side regardless (§42). The operator is deliberately not excepted, matching the verb.',
     './Fleet.tsx':
       'the person and lane SELECTORS, whose options are derived from the served rows themselves. The default is ALL — an empty selection hides nothing — and the server already scoped the read (§42-B). Narrowing the DATA is a server parameter, which is what the `mine` filter uses.',
+    './Inbox.tsx':
+      'the review-waiting section (return-visit item 5). The deliverables read is already caller-scoped; an operator’s answer may legitimately include other people’s in-review rows, and a review is a D10 decision belonging to the row’s OWNER — so “finished work waiting for YOUR review” shows exactly the rows whose owner is the session identity. Nothing is hidden for privacy: the rest are other people’s decisions, readable on their own surfaces.',
   }
 
   test('every owner-comparing filter is a NAMED presentation-only site', () => {

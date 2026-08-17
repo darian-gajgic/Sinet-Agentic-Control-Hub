@@ -700,11 +700,14 @@ function howWords(how: string): string {
  * which rides the same card in `layer1.assumptions` under `assumption:<slots>`
  * origins. Unrecognized prose renders as itself — nothing is guessed.
  */
-function assumptionRemainder(name: string, text: string): string {
+export function assumptionRemainder(name: string, text: string): string {
   return text.startsWith(`${name} — `) ? text.slice(name.length + 3) : text
 }
 
-function isAssumedDefaultBoilerplate(name: string, text: string): boolean {
+/** Exported for TaskDetail's spec render path (re-walk B): the same template
+ *  walls the stored spec's assumption list, and the same recognition collapses
+ *  it there. */
+export function isAssumedDefaultBoilerplate(name: string, text: string): boolean {
   return /so I assumed a sensible default\.?$/.test(assumptionRemainder(name, text))
 }
 

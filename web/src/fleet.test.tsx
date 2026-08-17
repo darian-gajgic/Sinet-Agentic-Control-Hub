@@ -220,16 +220,27 @@ test('and a member handed a household body is STILL offered nobody else’s cont
   expect([...view.container.querySelectorAll('.fleet-lanes tbody tr')].length).toBeGreaterThan(budgets.length)
 })
 
-test('the switch is two position verbs and never a toggle, and it posts the position it names', async () => {
+test('the switch offers ONE state-aware position verb — the one that moves it (re-walk B)', async () => {
   const view = await fleet()
-  const alice = view.container.querySelector('.automation-switch[data-owner="alice"]')!
-  // BOTH buttons exist on BOTH positions: the verb refuses a request that did
-  // not say which way it wanted the switch, so this control never sends one.
-  expect(alice.querySelector('[data-pause="true"]')).not.toBeNull()
-  expect(alice.querySelector('[data-pause="false"]')).not.toBeNull()
-  const bob = view.container.querySelector('.automation-switch[data-owner="bob"]')!
-  expect(bob.querySelector('[data-pause="true"]')).not.toBeNull()
-  expect(bob.querySelector('[data-pause="false"]')).not.toBeNull()
+  // The wire keeps two position verbs (a verb that names its position can
+  // never send the opposite of what was meant), but the CONTROL offered is the
+  // one that moves the switch from its SERVED position: a running automation
+  // offers Pause, a paused one offers Resume, never both stacked as if both
+  // changed something. Sending a verb against an already-moved switch stays
+  // safe server-side ("it was already there").
+  for (const sw of view.container.querySelectorAll('.automation-switch')) {
+    const paused = sw.getAttribute('data-paused') === 'true'
+    const wanted = paused ? 'false' : 'true'
+    const other = paused ? 'true' : 'false'
+    expect(
+      sw.querySelector(`[data-pause="${wanted}"]`),
+      `the ${paused ? 'paused' : 'running'} switch must offer the verb that moves it`,
+    ).not.toBeNull()
+    expect(
+      sw.querySelector(`[data-pause="${other}"]`),
+      'the verb for the position the switch is already in is a dead choice',
+    ).toBeNull()
+  }
 })
 
 test('pausing renders the served preservation sentence verbatim, and re-reads', async () => {
@@ -801,11 +812,24 @@ test('the hoisted operator predicate is dev-inclusive, and is NOT the memory sur
     "operator={session.user?.role === 'operator'}",
   )
 
-  // Driven, not only read: under the dev fallback there is no `user` object at
-  // all, so a role-only predicate would offer NOTHING. The dev identity is
-  // offered every switch the read serves, which is byte-equivalent to what the
-  // surface's own read produced before the hoist.
-  const view = await fleet({ 'GET /api/auth/session': { body: { authenticated: true, dev: true } } })
+  // Driven, both halves of the posture: under the dev fallback the App now
+  // stands the household-data wall in front of Fleet (re-walk B — the meters
+  // are per-person money), so dev reaches the sign-in door, not the switches;
+  // the predicate's dev arm stays in source as the server-mirror the first
+  // half of this test pins. An operator session is offered every switch the
+  // read serves, through the same hoisted predicate.
+  const walled = await fleet({ 'GET /api/auth/session': { body: { authenticated: true, dev: true } } })
+  expect(
+    walled.container.querySelector('[data-surface-signin-first]'),
+    'the dev fallback must meet the wall, not the household meters',
+  ).not.toBeNull()
+  expect(walled.container.querySelectorAll('.automation-switch')).toHaveLength(0)
+  walled.unmount()
+  const view = await fleet({
+    'GET /api/auth/session': {
+      body: { authenticated: true, user: { user_id: 'op', display_name: 'Op', role: 'operator', pin_set: true } },
+    },
+  })
   const served = (fixtures.meters() as unknown as Meters).automation.states ?? []
   expect(served.length, 'the served body carries no switch, so this asserts nothing').toBeGreaterThan(1)
   expect(view.container.querySelectorAll('.automation-switch')).toHaveLength(served.length)

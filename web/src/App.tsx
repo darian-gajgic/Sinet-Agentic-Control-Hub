@@ -33,12 +33,13 @@ import { DescribeGoal } from './Intake'
 import { inboxEventTypes, useLive } from './live'
 import { Memory, MemoryEntryView } from './Memory'
 import { Settings } from './Settings'
-import { MissionControl } from './MissionControl'
+import { HomeSignInFirst, MissionControl } from './MissionControl'
 import { TaskDetail } from './TaskDetail'
 import { NotFound } from './Stub'
 import { ComingSurface, HistorySurface } from './Placeholders'
 import { Projects } from './Projects'
 import { OldFence } from './fence'
+import { SurfaceSignInFirst } from './signinfirst'
 import { ProjectScopeContext, scopedRoutes, useProjectScope } from './project'
 import { SessionContext } from './session'
 import { Link, navigate, useRoute } from './router'
@@ -80,6 +81,29 @@ const navGroupOf: Partial<Record<RouteID, string>> = {
   settings: 'System',
   manual: 'System',
 }
+
+/**
+ * The surfaces whose content is the HOUSEHOLD'S OWN RECORDS — under the dev
+ * fallback each of these teases its structure and puts the data behind the
+ * in-place sign-in (re-walk B; the W1-B1 posture extended from the
+ * work-creating doors to the data surfaces). Not listed: `new` and `chat`
+ * carry their own in-place doors at the point work would be born; the
+ * placeholder rooms (reviews, lessons, health, manual) hold no data; Home has
+ * its own hero-shaped wall.
+ */
+const householdDataSurfaces = new Set<RouteID>([
+  'projects',
+  'board',
+  'inbox',
+  'inbox-item',
+  'deliverable',
+  'history',
+  'memory',
+  'memory-entry',
+  'workforce',
+  'fleet',
+  'settings',
+])
 
 const navIcons: Partial<Record<RouteID, LucideIcon>> = {
   'mission-control': LayoutDashboard,
@@ -276,14 +300,34 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                   <p className="muted">{failure === '' ? 'Loading…' : failure}</p>
                 ) : v === undefined ? (
                   // A cold /tasks/:id deep link: nothing underneath — the
-                  // card renders standalone over the room itself.
-                  null
+                  // card renders standalone over the room itself. Under the
+                  // dev fallback the card is data, so the wall stands here.
+                  devFallback ? (
+                    <SurfaceSignInFirst session={session} onSignedIn={reload} title="Task" sub={pageSub.task ?? ''} />
+                  ) : null
                 ) : v === 'login' ? (
                   <Login session={session} onSignedIn={reload} />
                 ) : v === 'not-found' ? (
                   <NotFound pathname={window.location.pathname} />
+                ) : devFallback && householdDataSurfaces.has(v) ? (
+                  // Re-walk B: a data surface under the dev fallback teases
+                  // its structure; the household's records wait for a person.
+                  <SurfaceSignInFirst
+                    session={session}
+                    onSignedIn={reload}
+                    title={shown?.route.title ?? ''}
+                    sub={pageSub[v] ?? ''}
+                  />
                 ) : v === 'mission-control' ? (
-                  <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
+                  devFallback ? (
+                    // Re-walk B: the dev-fallback landing showed the household's
+                    // own numbers before anyone said who they were. Structure
+                    // teases; data waits for sign-in (same posture as the
+                    // work-creating doors, W1-B1).
+                    <HomeSignInFirst session={session} onSignedIn={reload} />
+                  ) : (
+                    <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
+                  )
                 ) : v === 'new' ? (
                   <DescribeGoal search={window.location.search} stream={stream} session={session} onSignedIn={reload} />
                 ) : v === 'projects' ? (
@@ -337,7 +381,11 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                   from. Closing returns there (history.back over the push that
                   opened it); a cold load closes to the board. Its own fence
                   (F1): a crashing card must not kill the surface underneath. */}
-              {overlayOpen && authed && session !== null && (
+              {/* Under the dev fallback the overlay stays closed: the surface
+                  underneath already stands walled with the same in-place
+                  sign-in, and signing in reopens this exact address with the
+                  card over it. */}
+              {overlayOpen && authed && !devFallback && session !== null && (
                 <ErrorBoundary
                   grain="overlay"
                   resetKey={params.id}

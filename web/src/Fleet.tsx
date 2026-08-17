@@ -263,13 +263,23 @@ function PauseSwitch({ state, reload }: { state: AutomationState; reload: () => 
           {state.paused ? 'background work is paused' : 'background work is running'}
         </span>
       </p>
+      {/* Re-walk B: BOTH position verbs stacked full-width read as two live
+          choices when only one changes anything. The switch stays two verbs
+          on the wire (the verb names its position, so a stale render can
+          never send the opposite of what was meant) — but the CONTROL offered
+          is the one that moves the switch from the position the platform just
+          served. Sending it against an already-moved switch stays safe: the
+          verb answers "it was already there". */}
       <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" size="sm" data-pause="true" disabled={act.busy} onClick={() => flip(true)}>
-          Pause this automation
-        </Button>
-        <Button variant="secondary" size="sm" data-pause="false" disabled={act.busy} onClick={() => flip(false)}>
-          Resume this automation
-        </Button>
+        {state.paused ? (
+          <Button variant="secondary" size="sm" data-pause="false" disabled={act.busy} onClick={() => flip(false)}>
+            Resume this automation
+          </Button>
+        ) : (
+          <Button variant="secondary" size="sm" data-pause="true" disabled={act.busy} onClick={() => flip(true)}>
+            Pause this automation
+          </Button>
+        )}
       </div>
       <OutcomeLine outcome={act.outcome} />
       {/* Where a run that parked while paused is released: its OWN resume, on

@@ -117,6 +117,12 @@ export function Inbox({ stream }: { stream?: EventStream }) {
           This is one page of a longer queue — the control plane bounds what one read returns. Answer some and re-read.
         </p>
       )}
+      {/* Return-visit item 5: alice's own acceptance was nowhere in
+          waiting-on-you while thirteen alien cards were. Finished work waiting
+          on the CALLER'S review is served by the deliverables read; it renders
+          here as its own section — after the card queue (whose order is the
+          control plane's and stays untouched), before the opt-in pitch. */}
+      <ReviewWaiting stream={stream} />
       {/* RA-10 (third report: W2-10, RA-10): the OPT-IN PITCH renders after
           the mail, never above it. Earlier fixes softened the page's promise
           but left the panel physically first, so the queue still greeted a
@@ -125,6 +131,53 @@ export function Inbox({ stream }: { stream?: EventStream }) {
           way in); it just stops standing in front of the queue. */}
       <BenchmarkOptIn stream={stream} />
     </section>
+  )
+}
+
+/**
+ * Finished work waiting on the CALLER's review (return-visit item 5).
+ *
+ * "Waiting on you" was the approvals queue alone, so an owner's own finished
+ * deliverable — the thing the whole journey exists to hand over — never
+ * appeared while a dozen platform cards did. The deliverables read serves the
+ * in-review set; the rows OWNED BY the caller are exactly the ones waiting on
+ * nobody else (D10: the review is the owner's), so those render here with a
+ * door each. Rows owned by others are not "waiting on you" and are not shown.
+ * Nothing here re-orders or filters the card queue above — this is a second
+ * served feed, rendered as its own section.
+ */
+function ReviewWaiting({ stream }: { stream?: EventStream }) {
+  const session = useSessionInfo()
+  const me = session?.user?.user_id ?? ''
+  const live = useLive({
+    key: `/api/deliverables?state=in-review#inbox:${me}`,
+    read: () => api.deliverables({ state: 'in-review' }),
+    types: inboxEventTypes,
+    stream,
+  })
+  const mine = (live.data?.deliverables ?? []).filter((d) => me !== '' && d.owner === me)
+  // Nothing to say until the read lands (§51 served-gating), and nothing to
+  // say when nothing waits — an empty section would out-shout the queue.
+  if (live.data === null || mine.length === 0) return null
+  return (
+    <div className="review-waiting mt-4" data-review-waiting={String(mine.length)}>
+      <h3 className="mt-0 mb-1">Finished work waiting for your review</h3>
+      <p className="m-0 mb-2 text-sm text-muted-foreground">
+        {mine.length === 1 ? 'One piece of finished work waits' : `${String(mine.length)} pieces of finished work wait`}{' '}
+        on you — nobody else reviews your work. Open one to see it, accept it, or ask for changes.
+      </p>
+      <ul className="m-0 flex list-none flex-col gap-1 ps-0">
+        {mine.map((d) => (
+          <li key={d.deliverable_id} className="text-sm" data-waiting-review={d.deliverable_id}>
+            <Link to={hrefFor('deliverable', { id: d.deliverable_id })}>{d.deliverable_id}</Link>{' '}
+            <span className="text-xs text-muted-foreground">
+              {d.type} · from <Link to={hrefFor('task', { id: d.task_id })}>{d.task_id}</Link> · revision{' '}
+              {String(d.current_revision)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
