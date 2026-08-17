@@ -19,6 +19,7 @@ import {
   type ChatTurn,
   type ChatTurnRequest,
   type HistoryRegistry,
+  type Session,
 } from './api'
 import {
   argumentReady,
@@ -46,6 +47,7 @@ import {
 import { Absent, Empty, Freshness, SurfaceHead } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
+import { SignInFirstDoor } from './signinfirst'
 import { Button, EmptyState, Timestamp } from './ui'
 import { Hint } from './hints'
 import { cn } from './lib/utils'
@@ -94,8 +96,28 @@ const chatPanel =
  *     view switch. Walking away leaves the turn running on the platform, which is
  *     what makes it there when you come back.
  */
-export function Chat({ stream, search }: { stream?: EventStream; search: string }) {
+export function Chat({
+  stream,
+  search,
+  session,
+  onSignedIn,
+}: {
+  stream?: EventStream
+  search: string
+  /** The current identity, when the shell passes it (W1-B1: chat is the
+   *  second give-work door — it hands work to intake, and its conversations
+   *  are owned like tasks are). */
+  session?: Session
+  onSignedIn?: () => void
+}) {
   const active = new URLSearchParams(search).get('session') ?? ''
+
+  // THE SIGN-IN-FIRST WALL (W1-B1): under the dev fallback the give-work door
+  // signs you in IN PLACE before any conversation or task exists here. Same
+  // wall as Describe-a-goal; same return-by-construction (the address, session
+  // param included, is untouched). All hooks below run unconditionally — this
+  // gate renders INSTEAD of the surface, after every hook has been called.
+  const devWalled = session?.dev === true && onSignedIn !== undefined
 
   const sessions = useLive<{ sessions: ChatSession[] }>({
     key: 'chat-sessions',
@@ -127,6 +149,18 @@ export function Chat({ stream, search }: { stream?: EventStream; search: string 
     },
     [],
   )
+
+  if (devWalled && session !== undefined && onSignedIn !== undefined) {
+    return (
+      <section className="chat flex max-w-full flex-col gap-4" data-live="assistant">
+        <SignInFirstDoor
+          session={session}
+          onSignedIn={onSignedIn}
+          doorWords="This is a give-work door: a conversation here can hand something over as a task, and conversations themselves belong to an account."
+        />
+      </section>
+    )
+  }
 
   return (
     <section className="chat flex max-w-full flex-col gap-4" data-live="assistant">

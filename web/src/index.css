@@ -3126,6 +3126,14 @@ input[type='radio'] {
   max-width: 46rem;
 }
 
+/* The sign-in-first wall (W1-B1): the door's why-line above the same login
+   panel the /login page renders — one look, learned once. */
+.door-signin {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .door-kicker {
   display: flex;
   align-items: center;

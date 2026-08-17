@@ -229,7 +229,12 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 {authed && (
                   <span className="who">
                     {devFallback ? (
-                      <Link to={hrefFor('login')} data-auth="sign-in">
+                      // The link carries WHERE YOU ARE (W1-B1b): signing in
+                      // returns to this exact page and query, never to Home.
+                      <Link
+                        to={`${hrefFor('login')}?next=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+                        data-auth="sign-in"
+                      >
                         Sign in
                       </Link>
                     ) : (
@@ -278,7 +283,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 ) : v === 'mission-control' ? (
                   <MissionControl stream={stream} me={session.user?.user_id ?? ''} search={window.location.search} />
                 ) : v === 'new' ? (
-                  <DescribeGoal search={window.location.search} stream={stream} />
+                  <DescribeGoal search={window.location.search} stream={stream} session={session} onSignedIn={reload} />
                 ) : v === 'projects' ? (
                   <Projects me={session.user?.user_id ?? ''} stream={stream} />
                 ) : v === 'board' ? (
@@ -296,7 +301,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 ) : v === 'settings' ? (
                   <Settings stream={stream} />
                 ) : v === 'chat' ? (
-                  <Chat stream={stream} search={window.location.search} />
+                  <Chat stream={stream} search={window.location.search} session={session} onSignedIn={reload} />
                 ) : v === 'deliverable' ? (
                   <Deliverable id={vp.id} me={session.user?.user_id ?? ''} stream={stream} />
                 ) : v === 'workforce' ? (

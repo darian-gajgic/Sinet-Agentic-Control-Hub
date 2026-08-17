@@ -432,7 +432,10 @@ test('under the dev fallback the header offers Sign in, never a Sign out that ca
   expect(who.querySelector('[data-auth="sign-out"]'), 'a Sign out that revokes nothing is offered').toBeNull()
   const signIn = who.querySelector('[data-auth="sign-in"]')!
   expect(signIn, 'the dev posture offers no affordance that reaches the picker').not.toBeNull()
-  expect(signIn.getAttribute('href')).toBe(hrefFor('login'))
+  // ▲ W1-B1b (cold walk 2026-08-17): the link carries WHERE YOU ARE, so
+  // signing in returns to this exact page and query — never a dump to Home.
+  const here = window.location.pathname + window.location.search
+  expect(signIn.getAttribute('href')).toBe(`${hrefFor('login')}?next=${encodeURIComponent(here)}`)
   expect(signIn.textContent).toBe('Sign in')
   // NO INVENTED STATE: the client renders the two states the server serves and
   // never synthesizes a third. The dev identity still browses — deny-by-default
@@ -494,6 +497,99 @@ test('the whole dev-posture cycle is honest: fallback → picker → real sessio
   expect(calls.some((c) => c.method === 'POST' && c.path === '/api/auth/logout')).toBe(true)
   expect(view.container.querySelector('[data-auth="sign-out"]'), 'a Sign out survived the logout it fired').toBeNull()
   expect(view.container.querySelector('[data-auth="sign-in"]')).not.toBeNull()
+  view.unmount()
+})
+
+// ── the sign-in-first wall (W1-B1, cold walk 2026-08-17 — release-gating) ──
+//
+// The trap: work created under the dev fallback was owned by `dev`, which
+// cannot step up at the PIN ceremony (S01.9) — so the task could never be
+// approved by anyone, and the walk's errand died in a circle. The wall stands
+// where work would be born: the give-work doors present the sign-in step IN
+// PLACE, before any work exists, and signing in unlocks the same address.
+
+test('the give-work door walls itself behind sign-in under the dev fallback, and unlocks IN PLACE (W1-B1)', async () => {
+  const impl: Record<string, Route> = {
+    'GET /api/auth/session': devFallbackSession,
+    'GET /api/auth/users': {
+      body: {
+        users: [
+          { user_id: 'alice', display_name: 'Alice', role: 'member', pin_set: true },
+          { user_id: 'op', display_name: 'Op', role: 'operator', pin_set: true },
+        ],
+      },
+    },
+    'POST /api/auth/login': { body: { user_id: 'alice', expires: '2026-08-28T00:00:00Z' } },
+  }
+  const calls = routeFetch(impl)
+  // The walk's exact door, project pin and all.
+  window.history.replaceState(null, '', '/new?project=demo')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  // The wall stands IN PLACE of the ask box — no work can be born as dev.
+  const door = view.container.querySelector('[data-door="describe-goal"]')!
+  expect(door.querySelector('[data-signin-first]'), 'the dev fallback reached a work-creating door').not.toBeNull()
+  expect(door.querySelector('textarea'), 'the ask box renders before sign-in').toBeNull()
+
+  // The picker explains the seeded people (W1-2): who each account is, and
+  // that created work belongs to the picked account.
+  expect(door.querySelector('[data-seeded-note]')).not.toBeNull()
+  const labels = [...door.querySelectorAll('option')].map((o) => o.textContent ?? '')
+  expect(labels.some((l) => l.includes('Alice') && l.includes('alice') && l.includes('household member'))).toBe(true)
+  expect(labels.some((l) => l.includes('Op') && l.includes('operator'))).toBe(true)
+
+  // Signing in unlocks the door IN PLACE: same address, query intact — never
+  // a dump to Home (W1-B1b).
+  setValue(door.querySelector('input[type=password]') as HTMLInputElement, '4321')
+  impl['GET /api/auth/session'] = signedIn
+  submit(door.querySelector('form')!)
+  await flush()
+  expect(calls.some((c) => c.method === 'POST' && c.path === '/api/auth/login')).toBe(true)
+  expect(window.location.pathname + window.location.search).toBe('/new?project=demo')
+  expect(view.container.querySelector('[data-signin-first]'), 'the wall outlived the sign-in').toBeNull()
+  expect(view.container.querySelector('[data-door="describe-goal"] textarea'), 'the ask box did not unlock').not.toBeNull()
+  view.unmount()
+})
+
+test('the chat give-work door stands behind the same wall under the dev fallback (W1-B1)', async () => {
+  routeFetch({
+    'GET /api/auth/session': devFallbackSession,
+    'GET /api/auth/users': {
+      body: { users: [{ user_id: 'alice', display_name: 'Alice', role: 'member', pin_set: true }] },
+    },
+  })
+  window.history.replaceState(null, '', '/chat')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  expect(view.container.querySelector('[data-signin-first]'), 'chat hands work to intake and was reachable as dev').not.toBeNull()
+  expect(view.container.querySelector('.chat-body'), 'the conversation surface renders before sign-in').toBeNull()
+  view.unmount()
+})
+
+test('a resume of somebody else\'s task refuses with WHO you are, not a false Inbox promise (W1-B1c)', async () => {
+  routeFetch({
+    'GET /api/auth/session': signedIn,
+    // The server's own classification: this task is not among the caller's.
+    'GET /api/tasks/t-devborn': { status: 403, body: { error: 'forbidden' } },
+  })
+  window.history.replaceState(null, '', '/new?task=t-devborn')
+
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const refusal = view.container.querySelector('.door-refusal')!
+  expect(refusal, 'no refusal rendered for a 403 resume').not.toBeNull()
+  const text = refusal.textContent ?? ''
+  // Identity-aware: it names the signed-in account and explains ownership.
+  expect(text).toContain('alice')
+  expect(text).toContain('belongs to the account that created it')
+  // The old copy's false promise is gone: this card will never be in alice's
+  // Inbox, so the refusal must not point there.
+  expect(text, 'the refusal still promises an Inbox that cannot hold the card').not.toContain('Inbox')
   view.unmount()
 })
 

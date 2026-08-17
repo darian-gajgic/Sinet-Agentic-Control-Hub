@@ -276,6 +276,14 @@ export type Live<T> = {
   /** The failure this view could not read past — rendered, never swallowed. */
   error: string
   /**
+   * The HTTP status behind `error` when the server ANSWERED (an ApiError),
+   * else 0. Served so a view can branch on the server's own classification —
+   * a 403 is "not yours" and a 404 "not found", and words for each belong to
+   * the surface — without re-classifying the failure by reading message text
+   * (§30/§38).
+   */
+  errorStatus: number
+  /**
    * True whenever this view owes a re-snapshot: before its first read lands,
    * and again from the moment the stream says continuity is not proven until
    * the re-read completes. Data on screen while this is true is PRE-GAP data
@@ -303,6 +311,7 @@ export type LiveRead<T> = {
 export function useLive<T>(o: LiveRead<T>): Live<T> {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
+  const [errorStatus, setErrorStatus] = useState(0)
   const [stale, setStale] = useState(true)
 
   // The callbacks are re-created on every render by their callers; holding them
@@ -334,6 +343,7 @@ export function useLive<T>(o: LiveRead<T>): Live<T> {
     setStale(true)
     setData(null)
     setError('')
+    setErrorStatus(0)
 
     const run = () => {
       if (!mounted) return
@@ -359,6 +369,7 @@ export function useLive<T>(o: LiveRead<T>): Live<T> {
           if (!mounted) return
           setData(next)
           setError('')
+          setErrorStatus(0)
           if (owed === null || mine > owedAt) setStale(false)
           settleNow()
           if (dirty) {
@@ -372,6 +383,7 @@ export function useLive<T>(o: LiveRead<T>): Live<T> {
           // The debt is deliberately NOT cleared: a view that could not
           // re-read is not caught up, and the indicator must not say live.
           setError(describeError(err))
+          setErrorStatus(err instanceof ApiError ? err.status : 0)
           if (dirty) {
             dirty = false
             run()
@@ -407,7 +419,7 @@ export function useLive<T>(o: LiveRead<T>): Live<T> {
   }, [key, types, injected])
 
   const reload = useCallback(() => runRef.current(), [])
-  return { data, error, stale, reload }
+  return { data, error, errorStatus, stale, reload }
 }
 
 /** describeError says which KIND of failure happened, because an unreachable

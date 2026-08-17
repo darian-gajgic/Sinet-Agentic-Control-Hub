@@ -136,6 +136,16 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
     <section className="panel">
       <SurfaceHead title="Sign in" what={signInWhat} />
       {notice !== '' && <p className="text-sm text-[var(--green)]">{notice}</p>}
+      {session.dev === true && (
+        // The dev-fallback explainer (W1-2: the picker gave no clue who these
+        // people are or whose work is whose). Only the fallback posture shows
+        // it — in production these are simply the household's accounts.
+        <p className="text-sm text-muted-foreground" data-seeded-note>
+          These accounts are this demo world&apos;s seeded household. Pick who you are: what you create is owned,
+          answered and approved by the account you pick, and the other accounts will not see it in their lists. The
+          operator can additionally see house-wide work.
+        </p>
+      )}
       {session.hint?.device_login && (
         <p className="text-sm text-muted-foreground">
           This device is known as <span className="font-mono tabular-nums">{session.hint.device_login}</span>.
@@ -165,8 +175,11 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
             }}
           >
             {users.map((u) => (
+              // The option says WHO this is, not just a first name (W1-2):
+              // the id it acts as, and the role in plain words — the served
+              // role string itself when it is one this page has no words for.
               <option key={u.user_id} value={u.user_id}>
-                {u.display_name}
+                {u.display_name} ({u.user_id}) — {roleWords(u.role)}
               </option>
             ))}
           </select>
@@ -235,6 +248,15 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
  */
 const signInWhat =
   "Who is signing in on this device. The accounts are the household's — pick yours and enter your PIN. This page stores no credential of its own: your PIN is sent to the platform to be checked and cleared the moment the answer comes back, and what signing in leaves behind is the platform's own session cookie, which this page cannot read."
+
+/** roleWords: plain words for the two roles the platform serves today; an
+ *  unrecognized served value renders verbatim rather than being guessed at
+ *  (the board's honest-bucket rule, applied to a word). */
+function roleWords(role: string): string {
+  if (role === 'operator') return 'the operator, approves house-wide work'
+  if (role === 'member') return 'household member'
+  return role
+}
 
 /** describe keeps the server's collapsed failure collapsed: a login-shaped
  *  failure says only that it failed, because the event log carries the precise

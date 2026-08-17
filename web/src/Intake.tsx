@@ -11,12 +11,15 @@ import {
   type IntakeQuestion,
   type IntakeTaskView,
   type IntakeUnderstood,
+  type Session,
+  type User,
 } from './api'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive } from './live'
 import { Owner } from './parts'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
+import { SignInFirstDoor } from './signinfirst'
 import { Button, Chip } from './ui'
 
 /**
@@ -42,7 +45,19 @@ import { Button, Chip } from './ui'
  * source. Mid-journey state lives in this tab; the same open card is always
  * also in the Inbox, which the header says.
  */
-export function DescribeGoal({ search = '', stream }: { search?: string; stream?: EventStream }) {
+export function DescribeGoal({
+  search = '',
+  stream,
+  session,
+  onSignedIn,
+}: {
+  search?: string
+  stream?: EventStream
+  /** The current identity, when the shell passes it. `dev: true` walls the
+   *  door behind sign-in (W1-B1) — work born here must have a real owner. */
+  session?: Session
+  onSignedIn?: () => void
+}) {
   const [view, setView] = useState<IntakeTaskView | null>(null)
   const params = new URLSearchParams(search)
   const pinned = params.get('project') ?? ''
@@ -63,12 +78,26 @@ export function DescribeGoal({ search = '', stream }: { search?: string; stream?
     setView(v)
   }
 
+  // THE SIGN-IN-FIRST WALL (W1-B1, release-gating): under the dev fallback
+  // this door presents the sign-in step IN PLACE before any work exists —
+  // create AND resume arms, because answering a card advances approval-gated
+  // work just as creating one starts it. Signing in reloads the session and
+  // the door unlocks under this same address, project pin and all: return to
+  // origin by construction, never a dump to Home.
+  if (session?.dev === true && onSignedIn !== undefined) {
+    return (
+      <section className="surface door" data-door="describe-goal">
+        <SignInFirstDoor session={session} onSignedIn={onSignedIn} doorWords="This door starts a task." />
+      </section>
+    )
+  }
+
   return (
     <section className="surface door" data-door="describe-goal">
       {view !== null ? (
         <Journey view={view} onView={setView} answeredRounds={resumedRounds} stream={stream} />
       ) : resumeTask !== '' ? (
-        <ResumeJourney taskID={resumeTask} onView={setView} stream={stream} />
+        <ResumeJourney taskID={resumeTask} me={session?.user} onView={setView} stream={stream} />
       ) : (
         <AskForm pinned={pinned} onBorn={born} stream={stream} />
       )}
@@ -86,7 +115,19 @@ export function DescribeGoal({ search = '', stream }: { search?: string; stream?
  * 2026-08-16). No pipeline state is re-derived: what cannot be known from a
  * served read renders as the follow state's honest waiting face.
  */
-function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v: IntakeTaskView) => void; stream?: EventStream }) {
+function ResumeJourney({
+  taskID,
+  me,
+  onView,
+  stream,
+}: {
+  taskID: string
+  /** WHO is resuming, when the shell knows — the refusal below names the
+   *  identity instead of promising an Inbox that may not hold the card. */
+  me?: User
+  onView: (v: IntakeTaskView) => void
+  stream?: EventStream
+}) {
   const detail = useLive({
     key: `/api/tasks/${taskID}#door`,
     read: () => api.task(taskID),
@@ -107,13 +148,27 @@ function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d === null])
   if (detail.error !== '' && detail.data === null) {
+    // IDENTITY-AWARE refusal (W1-B1c). The old copy pointed every failure at
+    // "your Inbox" — false for the walk's exact shape, where the task belongs
+    // to a different identity and the reader's inbox will never hold its
+    // card. The server's own classification (403/404) picks the words.
+    const notYours = detail.errorStatus === 403 || detail.errorStatus === 404
     return (
       <div className="door-refusal" role="alert">
         <CircleAlert size={16} strokeWidth={2} aria-hidden="true" />
-        <p className="refusal-detail">
-          This journey could not be resumed — the task {taskID} did not answer. Its card, if one is open, is in your{' '}
-          <Link to={hrefFor('inbox')}>Inbox</Link>.
-        </p>
+        {notYours ? (
+          <p className="refusal-detail">
+            This journey could not be resumed{me ? <> as <Owner id={me.user_id} /></> : null}: the platform answers
+            that task {taskID} is not among {me ? `${me.display_name}'s` : 'your'} tasks. A task belongs to the
+            account that created it, and only that account can see it or answer its questions — if it was started
+            under a different sign-in, sign in as that account to continue it.
+          </p>
+        ) : (
+          <p className="refusal-detail">
+            This journey could not be resumed — the task {taskID} did not answer. Its card, if one is open, is in
+            your <Link to={hrefFor('inbox')}>Inbox</Link>.
+          </p>
+        )}
       </div>
     )
   }
