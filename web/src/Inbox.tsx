@@ -561,7 +561,7 @@ function checkClass(item: ApprovalItem): string {
     case 'ask': {
       const envelope = answerEnvelope(item)
       if (envelope === 'contest') return 'proposal'
-      if (envelope === 'choice' || envelope === 'answers') return 'question'
+      if (envelope === 'choice' || envelope === 'answers' || envelope === 'verify') return 'question'
       return ''
     }
   }
@@ -824,6 +824,40 @@ type AskSnapshot = {
     }
   }
   delta?: { origin?: string; items?: { kind: string; target: string; old?: string; new?: string }[]; help?: HelpBlock }
+  // The S07.7 verify escalation card (verify.Card): its choices are plain verb
+  // strings, its findings the drain's own numbered findings. `infrastructure`
+  // marks the P3-RW-14 R4 card — verification never ran, the run is parked on
+  // this card, and its verbs are exactly {retry, cancel}.
+  category?: string
+  summary?: string
+  detail?: string[]
+  choices?: string[]
+  findings?: { n?: number; severity?: string; category?: string; criterion?: string; anchor?: string; text?: string; round?: number }[]
+  best_effort?: string
+  quarantined?: string
+  infrastructure?: boolean
+  run_id?: string
+}
+
+/** isVerifyCard recognizes the S07.7 escalation snapshot by its own declared
+ *  shape: the `decision_card` sink kind carrying a plain `summary` string —
+ *  the one family whose choices are verb STRINGS rather than labelled options. */
+function isVerifyCard(snap: AskSnapshot): boolean {
+  return snap.kind === 'decision_card' && typeof snap.summary === 'string' && snap.decision === undefined
+}
+
+/** The verify verbs the landed server accepts, per card (verify.ValidateAnswer):
+ *  an infrastructure card answers {retry, cancel}; the rework family
+ *  (CAP-HIT / AC-BLOCKER / SANITY-BLOCKER) answers its three verbs; every other
+ *  category's verbs land with their owning packet and the server refuses them
+ *  loudly today. Mirroring that here keeps the buttons honest: a verb the
+ *  platform would refuse renders disabled WITH the reason, never as a live
+ *  control that fails on press. */
+function verifyVerbLive(snap: AskSnapshot, action: string): boolean {
+  if (snap.infrastructure === true) return action === 'retry' || action === 'cancel'
+  const answerable = snap.category === 'CAP-HIT' || snap.category === 'AC-BLOCKER' || snap.category === 'SANITY-BLOCKER'
+  if (!answerable) return false
+  return action === 'accept_best_effort' || action === 'revise_with_guidance' || action === 'cancel'
 }
 
 function asSnapshot(card: unknown): AskSnapshot {
@@ -835,6 +869,7 @@ function AskContent({ card, expanded }: { card: unknown; expanded: boolean }) {
   if (snap.approval) return <ApprovalCard snap={snap} expanded={expanded} />
   if (snap.delta) return <DeltaCard snap={snap} />
   if (snap.decision) return <DecisionCard snap={snap} />
+  if (isVerifyCard(snap)) return <VerifyEscalationCard snap={snap} />
   if (snap.questions && snap.questions.length > 0) return <InterviewCard snap={snap} />
   return <RowCard card={card} />
 }
@@ -959,6 +994,49 @@ function DecisionCard({ snap }: { snap: AskSnapshot }) {
       <p className="restatement wrap-anywhere">{d.summary ?? <Absent reason="the card records no summary" />}</p>
       <Bullets title="What this is about" items={d.detail} />
       <Help help={d.help} />
+    </div>
+  )
+}
+
+/** The S07.7 verify escalation card, in the ratified row anatomy: what is
+ *  being decided (the drain's own summary, written for the person who can fix
+ *  it), what it means (the card's detail lines), the numbered findings, and
+ *  the quarantine record. Every string is the stored snapshot's own. */
+function VerifyEscalationCard({ snap }: { snap: AskSnapshot }) {
+  return (
+    <div className="ask-card" data-card-kind="verify.decision_card" data-category={snap.category ?? ''}>
+      <p className="restatement wrap-anywhere">{snap.summary !== '' ? snap.summary : <Absent reason="the card records no summary" />}</p>
+      {snap.infrastructure === true && (
+        <p className="text-sm text-[var(--yellow)]" data-verify="infrastructure">
+          Verification never ran — nothing was judged, nothing was delivered, and the work is parked on this card.
+          Answering it is what moves the task.
+        </p>
+      )}
+      <Bullets title="What this means" items={snap.detail} />
+      {(snap.findings ?? []).length > 0 && (
+        <>
+          <h4>The findings</h4>
+          <ol className="findings">
+            {(snap.findings ?? []).map((f, i) => (
+              <li key={f.n ?? i} className="wrap-anywhere" data-finding={String(f.n ?? i + 1)}>
+                {f.severity && <span className="font-mono text-[11px] uppercase text-[var(--yellow)]">{f.severity} </span>}
+                {f.text ?? <Absent reason="this finding carries no text" />}
+                {f.anchor && <span className="muted"> — at {f.anchor}</span>}
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      {snap.best_effort && (
+        <p className="muted" data-verify="best-effort">
+          Best-effort state on this card: {snap.best_effort}
+        </p>
+      )}
+      {snap.quarantined && (
+        <p className="muted" data-verify="quarantined">
+          Quarantined pending fix: {snap.quarantined}
+        </p>
+      )}
     </div>
   )
 }
@@ -1258,6 +1336,21 @@ function Acts({
       {envelope === 'choice' && takesCriteria(item) && (
         <CriteriaPicker item={item} picked={criteria} onPick={setCriteria} />
       )}
+      {envelope === 'verify' &&
+        actions.includes('revise_with_guidance') &&
+        verifyVerbLive(asSnapshot(item.card), 'revise_with_guidance') && (
+          <label className="contest">
+            <span>What should change (recorded as your guidance — the send-back needs at least this one line)</span>
+            <input
+              type="text"
+              value={contest}
+              data-field="guidance"
+              onChange={(e) => {
+                setContest(e.currentTarget.value)
+              }}
+            />
+          </label>
+        )}
       {acceptsReason.includes(item.kind) && (
         <label className="reason">
           <span>Why (recorded with your decision)</span>
@@ -1292,6 +1385,13 @@ function Acts({
         </label>
       )}
 
+      {envelope === 'verify' && actions.some((a) => !verifyVerbLive(asSnapshot(item.card), a)) && (
+        <p className="text-sm text-muted-foreground" data-verify-verbs="deferred">
+          The greyed verbs are declared by this card, but their machinery lands with a later build — the platform
+          refuses them today, and the card stands as the record until then. Nothing is lost by leaving it open.
+        </p>
+      )}
+
       <div className="buttons">
         {actions.map((action) => (
           <Button
@@ -1299,7 +1399,7 @@ function Acts({
             size="sm"
             variant={action === 'approve' ? 'primary' : 'secondary'}
             data-action={action}
-            disabled={state.busy || !canFire(item, action, { verdict, guess })}
+            disabled={state.busy || !canFire(item, action, { verdict, guess, contest })}
             onClick={() => {
               void run(action, () =>
                 fireAction(item, action, {
@@ -1368,6 +1468,12 @@ const plainVerbs: Record<string, string> = {
   acknowledge: 'Acknowledge — read and noted',
   dispose: 'Record the disposition',
   resolve: 'Resolve',
+  // The S07.7 verify card verbs (P3-RW-14): frozen ids, plain names.
+  retry: 'Retry — run verification again',
+  accept_best_effort: 'Accept it as it stands (best effort)',
+  revise_with_guidance: 'Send it back with guidance',
+  fix_suite: 'The checks are fixed — clear the quarantine',
+  waive_check: 'Waive this check',
 }
 
 function actionLabel(item: ApprovalItem, action: string): string {
@@ -1436,11 +1542,18 @@ function conflictID(item: ApprovalItem): number | null {
  *  BENCH-REG §3.3 is frozen: no verdict without a guess. The backend refuses a
  *  guess-less vote regardless — its constructor cannot express one — so this is
  *  the form agreeing with the rule, never the form enforcing it. */
-function canFire(item: ApprovalItem, action: string, form: { verdict: string; guess: string }): boolean {
+function canFire(item: ApprovalItem, action: string, form: { verdict: string; guess: string; contest?: string }): boolean {
   if (item.kind === 'benchmark_verdict' && action === 'verdict') {
     return form.verdict !== '' && form.guess !== ''
   }
   if (item.kind === 'benchmark_alarm' && action === 'dispose') return form.verdict !== ''
+  if (answerEnvelope(item) === 'verify') {
+    // A verb the landed server would refuse does not arm (the note beside the
+    // buttons says why), and a revise with no guidance text does not arm —
+    // verify.ValidateAnswer requires at least one guidance point.
+    if (!verifyVerbLive(asSnapshot(item.card), action)) return false
+    if (action === 'revise_with_guidance') return (form.contest ?? '') !== ''
+  }
   // A conflict card with no readable row number has nothing to resolve, so the
   // control does not arm rather than posting a guess at an id.
   if (item.kind === 'memory_conflict' && action === 'resolve') return conflictID(item) !== null
@@ -1457,12 +1570,13 @@ function canFire(item: ApprovalItem, action: string, form: { verdict: string; gu
  * the act path says so rather than guessing an envelope the pipeline would
  * refuse for reasons nobody could read.
  */
-function answerEnvelope(item: ApprovalItem): 'action' | 'contest' | 'choice' | 'answers' | 'unknown' {
+function answerEnvelope(item: ApprovalItem): 'action' | 'contest' | 'choice' | 'answers' | 'verify' | 'unknown' {
   if (item.kind !== 'ask') return 'action'
   const snap = asSnapshot(item.card)
   if (snap.approval) return 'contest'
   if (snap.delta) return 'contest'
   if (snap.decision) return 'choice'
+  if (isVerifyCard(snap)) return 'verify'
   if (snap.questions && snap.questions.length > 0) return 'answers'
   return 'unknown'
 }
@@ -1589,6 +1703,15 @@ function composeAnswer(item: ApprovalItem, action: string, input: ActInput): unk
       return input.contest === '' ? { action } : { action, contest: { target: input.contest } }
     case 'choice':
       return input.criteria.length === 0 ? { choice: action } : { choice: action, criteria: input.criteria }
+    case 'verify':
+      // The verify answer body (verify.DecodeAnswer): {choice}, with the
+      // person's guidance riding revise_with_guidance — the server refuses a
+      // guidance-less revise, and `canFire` keeps that button unarmed until
+      // the text exists.
+      if (action === 'revise_with_guidance') {
+        return input.contest === '' ? null : { choice: action, guidance: [{ text: input.contest }] }
+      }
+      return { choice: action }
     case 'answers':
       // A question card's answer is its slot answers, and this surface offers
       // no slot editor — so it composes only the one shape it can honestly

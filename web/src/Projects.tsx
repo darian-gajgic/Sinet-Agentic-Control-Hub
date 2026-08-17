@@ -163,25 +163,30 @@ type Bucket = {
   recent: Deliverable[]
 }
 
-/** The bucket a deliverable files under: its project, with BOTH the empty
- *  string and an absent field degrading to '(no project)'. The list wire
- *  promises the field, but an older binary omits it when empty — and an
- *  undefined bucket name would throw in the name sort and take the whole
- *  surface down with it (operator, 2026-08-12). */
-function bucketOf(d: Deliverable): string {
-  return d.project_id ? d.project_id : '(no project)'
+/** The bucket a deliverable files under: its own project when the wire stamps
+ *  one, else ITS TASK's project — the deliverable names its task, the task list
+ *  names the project, and that join is exactly the client-side aggregation this
+ *  surface already owns (map §5). Only a deliverable whose task is also
+ *  unpinned degrades to '(no project)'; an absent field never throws the name
+ *  sort (operator, 2026-08-12). */
+function bucketOf(d: Deliverable, taskProject: Map<string, string>): string {
+  if (d.project_id) return d.project_id
+  const viaTask = taskProject.get(d.task_id)
+  return viaTask !== undefined && viaTask !== '' ? viaTask : '(no project)'
 }
 
 export function projectBuckets(tasks: TaskListItem[], deliverables: Deliverable[]): Bucket[] {
   const names = new Map<string, TaskListItem[]>()
+  const taskProject = new Map<string, string>()
   for (const t of tasks) {
+    taskProject.set(t.task_id, t.project)
     const list = names.get(t.project)
     if (list) list.push(t)
     else names.set(t.project, [t])
   }
   // Deliverables can name a project no task currently shows — keep the bucket.
   for (const d of deliverables) {
-    const key = bucketOf(d)
+    const key = bucketOf(d, taskProject)
     if (!names.has(key)) names.set(key, [])
   }
 
@@ -211,7 +216,7 @@ export function projectBuckets(tasks: TaskListItem[], deliverables: Deliverable[
       }
     }
     const recent = deliverables
-      .filter((d) => bucketOf(d) === name)
+      .filter((d) => bucketOf(d, taskProject) === name)
       .sort((a, b) => b.updated_ts.localeCompare(a.updated_ts))
       .slice(0, 3)
     buckets.push({

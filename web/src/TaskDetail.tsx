@@ -824,7 +824,7 @@ function DecisionsBlock({ decisions, stale }: { decisions: TaskDecision[]; stale
       {decisions.length === 0 ? (
         <EmptyState
           what="Nobody has had to decide anything on this task yet."
-          why="A row appears here every time a person approves, rejects, accepts or otherwise answers a card on this task. The rail above shows where each one fell in the story."
+          why="A row appears here when a person's decision is recorded in its own right — a delta re-approval, an operator override, accepting a deliverable. Answering a plan or interview card resumes the pipeline instead of minting a row: those answers show in the rail above, as parked stretches that end with 'resumed on plan approved'."
         />
       ) : (
         <ul className="decisions">

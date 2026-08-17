@@ -1330,7 +1330,7 @@ test('the task detail’s empty arms teach, and none renders over a read that ha
   expect(text).toContain('No stage boundary has been recorded yet.')
   expect(text, 'the empty rail does not teach what fills it').toContain('The rail fills in as the platform')
   expect(text).toContain('Nobody has had to decide anything on this task yet.')
-  expect(text, 'the empty decisions block does not teach what fills it').toContain('every time a person approves')
+  expect(text, 'the empty decisions block does not teach what fills it').toContain("recorded in its own right")
   view.unmount()
 
   // NONE-VS-NOT-LOADED, observed on the surface's own pending window: the
