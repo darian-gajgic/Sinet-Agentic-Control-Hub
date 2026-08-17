@@ -96,20 +96,145 @@ func TestAcceptCardShowsTheTrailersAndThePinBeforeTheAccept(t *testing.T) {
 	}
 }
 
+// TestAcceptCardSaysWhyTheActIsClosed is the P3-RW-17 INVERSION of the landed
+// test of this name (brief §4/§6, sanctioned by name). Its old body pinned the
+// refusal of a content-pinned revision, which 5.8/D10/S13.1 say is the owner's
+// act to make; what stays true — and what this now pins — is that a card whose
+// act is closed by the deliverable's STATE says so as data. The state limb is
+// the one refusal no pin kind can open: an accepted deliverable is finished.
 func TestAcceptCardSaysWhyTheActIsClosed(t *testing.T) {
 	e := newDlvEnv(t)
 	e.mkRun("t-a", "r-a", "alice")
-	// No snapshot commit: content-pinned only, so there is nothing to push.
 	e.mkDeliverable("d-a", "alice", "t-a", "r-a", "proj", "markdown", map[string]string{"a.md": "x\n"}, "")
+	if _, err := e.rev.Accept(e.ctx, "d-a", "alice"); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
 	card := readAcceptCard(t, e, "alice", "d-a")
 	if card.Acceptable {
-		t.Fatalf("a non-repo-backed revision must not be acceptable: %+v", card)
+		t.Fatalf("an accepted deliverable must not be acceptable again: %+v", card)
 	}
-	if !strings.Contains(card.Reason, "repo-backed") {
+	if !strings.Contains(card.Reason, "accepted") {
 		t.Errorf("the card must NAME why the act is closed, got %q", card.Reason)
 	}
 	if card.PayloadHash == "" {
 		t.Error("the card still pins itself — the reason is data, not an error that hides the facts")
+	}
+}
+
+// ── P3-RW-17: the pinned arm — the journey's final press for content tasks ──
+
+func pinnedFixture(t *testing.T, e *dlvEnv) string {
+	t.Helper()
+	e.mkRun("t-a", "r-a", "alice")
+	// The rewalk-a shape: content family → no project, no snapshot commit.
+	e.mkDeliverable("d-pin", "alice", "t-a", "r-a", "", "markdown",
+		map[string]string{"deliverable.md": "# Amber & Oak\n"}, "")
+	return "d-pin"
+}
+
+// RW17-T1 (red): the card opens for a payload-pinned deliverable (5.8/D10/S13.1).
+// Inverts the landed TestAcceptCardSaysWhyTheActIsClosed, which pinned the refusal.
+func TestAcceptCardOpensForAPayloadPinnedDeliverable(t *testing.T) {
+	e := newDlvEnv(t)
+	id := pinnedFixture(t, e)
+	card := readAcceptCard(t, e, "alice", id)
+	if !card.Acceptable {
+		t.Fatalf("V3 is universal: an in-review payload-pinned deliverable must be acceptable (5.8/D10/S13.1), got %+v", card)
+	}
+	if card.PinKind != "content" || card.ContentPin == "" || card.PayloadHash == "" {
+		t.Errorf("the card must pin the act to the revision's immutable content pin (S13.1): %+v", card)
+	}
+	if card.ProtectedRef != "" {
+		t.Errorf("no project, no protected ref — the card must not name a push target, got %q", card.ProtectedRef)
+	}
+	if !strings.Contains(card.Reason, "pushed") && !strings.Contains(card.Reason, "push") {
+		t.Errorf("the open reason must say honestly that nothing is pushed, got %q", card.Reason)
+	}
+}
+
+// RW17-T2 (red): the accept records the decision and pushes NOTHING (S13.1; R3).
+func TestPayloadPinnedAcceptRecordsTheDecisionAndPushesNothing(t *testing.T) {
+	e := newDlvEnv(t)
+	id := pinnedFixture(t, e)
+	card := readAcceptCard(t, e, "alice", id)
+	before := e.count(review.EventAccepted)
+
+	var out api.AcceptOutcome
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST",
+		"/api/deliverables/"+id+"/accept", acceptBody(card.PayloadHash, dlvPIN))), &out); err != nil {
+		t.Fatalf("decode accept outcome: %v", err)
+	}
+	if !out.Applied || out.State != review.StateAccepted {
+		t.Fatalf("the accept must apply and land accepted, got %+v", out)
+	}
+	if out.Commit != "" || out.EffectID != "" {
+		t.Errorf("a pinned accept makes no commit and journals no effect, got commit=%q effect=%q", out.Commit, out.EffectID)
+	}
+	if len(e.push.reqs) != 0 {
+		t.Error("nothing may reach the broker for a payload-pinned accept")
+	}
+	var effects int
+	if err := e.b.db.QueryRowContext(e.ctx, `SELECT COUNT(*) FROM effects`).Scan(&effects); err != nil {
+		t.Fatal(err)
+	}
+	if effects != 0 {
+		t.Errorf("no class-A effect may exist for a pinned accept, found %d", effects)
+	}
+	if e.count(review.EventAccepted) != before+1 {
+		t.Error("the accept must land exactly one deliverable.accepted event (S13.1 audit)")
+	}
+	d, err := e.rev.Deliverable(e.ctx, id)
+	if err != nil || d.State != review.StateAccepted {
+		t.Fatalf("the durable state must be accepted, got %+v err=%v", d, err)
+	}
+
+	// Retry-safety (R5): a repeat reads the resolved state back, fires nothing.
+	var again api.AcceptOutcome
+	if err := json.Unmarshal([]byte(e.mustDo(t, "alice", "POST",
+		"/api/deliverables/"+id+"/accept", acceptBody(card.PayloadHash, dlvPIN))), &again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Applied || e.count(review.EventAccepted) != before+1 {
+		t.Errorf("a repeat must be applied:false with no second event, got %+v", again)
+	}
+}
+
+// RW17-T3 (red): the pinned arm keeps the High-tier ceremony (named sub-choice).
+func TestPayloadPinnedAcceptStillDemandsThePIN(t *testing.T) {
+	e := newDlvEnv(t)
+	id := pinnedFixture(t, e)
+	card := readAcceptCard(t, e, "alice", id)
+	code, out := e.do(t, "alice", "POST", "/api/deliverables/"+id+"/accept", acceptBody(card.PayloadHash, ""))
+	if code != http.StatusUnauthorized || !strings.Contains(out, "pin_required") {
+		t.Fatalf("the pinned arm keeps the step-up, got %d: %s", code, out)
+	}
+	if d, _ := e.rev.Deliverable(e.ctx, id); d.State != review.StateInReview {
+		t.Error("nothing may change state before the step-up")
+	}
+}
+
+// RW17-T4 (red): provenance absence closes only the PUSH arm (R4) — a pinned
+// accept renders no permanent trailers, so absent trailer facts must not
+// refuse the owner's decision.
+func TestPayloadPinnedAcceptDoesNotRequireTrailerProvenance(t *testing.T) {
+	e := newDlvEnv(t)
+	// A deliverable minted with NO run: no substrate, no routing decision.
+	if _, err := e.rev.EnsureDeliverable(e.ctx, review.EnsureInput{
+		ID: "d-noprov", Owner: "alice", TaskID: "t-noprov", Type: "markdown",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.rev.MintRevision(e.ctx, review.MintInput{
+		DeliverableID: "d-noprov", N: 1, Files: map[string]string{"deliverable.md": "x\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	card := readAcceptCard(t, e, "alice", "d-noprov")
+	if !card.Acceptable {
+		t.Fatalf("absent trailer provenance must not close the pinned arm: %+v", card)
+	}
+	if card.Trailers != "" {
+		t.Errorf("no provenance still means no rendered trailers, got %q", card.Trailers)
 	}
 }
 

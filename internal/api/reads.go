@@ -759,6 +759,25 @@ type TaskRunView struct {
 	ReceiptAbsent string          `json:"receipt_absent,omitempty"`
 }
 
+// TaskTriage is the S06 Stage-0 record as the owner reads it: the family and
+// WHAT RESOLVED IT, the stakes tier, and the deterministic floors that were
+// tripped with the reason each one gives (P3-RW-17 R8).
+//
+// Every value is lifted by key out of the task's latest `intake.state` payload —
+// the same ordering authority `intake.Pipeline.LoadState` and migration 0022's
+// pin edge use — so it redacts at this serving edge with the rest of the
+// payload-derived strings on this response (the drain-D10 reasoning). Nothing
+// here is derived, recomputed or re-decided: a tier this block disagreed with
+// would be a second answer to a question the pipeline already answered.
+type TaskTriage struct {
+	Family       string `json:"family"`
+	FamilySource string `json:"family_source,omitempty"`
+	Tier         string `json:"tier"`
+	// FloorTier is the deterministic floor ("" = none tripped).
+	FloorTier    string               `json:"floor_tier,omitempty"`
+	FloorReasons []intake.FloorReason `json:"floor_reasons"`
+}
+
 // TaskDetail is the S15.2 task resource: spec + numbered ACs, plan, stage
 // progress, lineage and the per-run receipt view.
 type TaskDetail struct {
@@ -779,6 +798,13 @@ type TaskDetail struct {
 	StageProgress []StageStep   `json:"stage_progress"`
 	Lineage       TaskLineage   `json:"lineage"`
 	Runs          []TaskRunView `json:"runs"`
+
+	// Triage is the Stage-0 record when the task HAS one, and is absent
+	// otherwise — a task whose intake never classified anything (or whose state
+	// event recorded no triage facts) has no triage to show, and an empty block
+	// would claim one that never happened. The absence is a fact about the task,
+	// exactly as `pipeline` is absent when no pipeline surface is wired.
+	Triage *TaskTriage `json:"triage,omitempty"`
 
 	// Decisions is every human decision along this task's way (S2.4), derived
 	// server-side because no landed read served the Human-decision family and
