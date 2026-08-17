@@ -166,6 +166,9 @@ func New(cfg Config) (*Skeleton, error) {
 		Fingerprint:        cfg.Fingerprint,
 		CitedEntryVersions: cfg.CitedEntryVersions,
 		Now:                cfg.Now,
+		// The pipeline's degrade log (PH-1 F3) rides the same logger as every
+		// other layer this skeleton composes.
+		Logger: cfg.Logger,
 	}
 	// The review store's Compare old-side 0 resolves the repo-backed pre-task
 	// base through the topology seam (R25); nil keeps the empty-base behavior.

@@ -236,9 +236,14 @@ func (d *Duty) callOnSeat(ctx context.Context, runID, alias string, seat SeatRec
 		Name:      in.Name,
 		MaxTokens: in.MaxTokens,
 		Logprobs:  in.Classification,
-		// Classification duties are greedy label emitters — disable any
-		// reasoning-model <think> phase so the length cap yields the JSON.
-		NoThink: in.Classification,
+		// Two duties suppress the <think> phase for two different reasons, and
+		// both reasons end at the same flag (PH-1 F1). A CLASSIFICATION duty is a
+		// greedy label emitter and has nothing to reason about. A duty that asked
+		// for it EXPLICITLY did so because its answer is engine-constrained JSON
+		// and the think phase, emitted before the constrained region, would spend
+		// the cap the schema needs. Welding the flag to Classification alone left
+		// the drafting duties thinking until the budget was gone.
+		NoThink: in.NoThink || in.Classification,
 	})
 	if err != nil {
 		return DutyResult{}, err
@@ -260,7 +265,7 @@ func (d *Duty) callOnSeat(ctx context.Context, runID, alias string, seat SeatRec
 		return DutyResult{}, fmt.Errorf("local: D7 metering write failed for duty %q on run %q: %w", alias, runID, err)
 	}
 
-	return DutyResult{
+	res := DutyResult{
 		Alias:        alias,
 		Model:        seat.Model,
 		Seat:         seat,
@@ -269,7 +274,41 @@ func (d *Duty) callOnSeat(ctx context.Context, runID, alias string, seat SeatRec
 		InputTokens:  comp.InputTokens,
 		OutputTokens: comp.OutputTokens,
 		CheckpointID: cp.ID,
-	}, nil
+		FinishReason: comp.FinishReason,
+	}
+
+	// A reply the engine CUT OFF is not a reply (PH-1 F2). It is returned as a
+	// named failure — after the D7 row, because the call ran and the tokens were
+	// spent — so the caller degrades on a cause it can read instead of on
+	// whatever the half-written content happens to break first. Every duty
+	// inherits this by sitting here rather than in one adapter.
+	if truncated(in.MaxTokens, comp) {
+		d.surfaceTruncation(runID, alias, seat.Model, in.MaxTokens, comp)
+		return res, fmt.Errorf("%w: duty %q on %s stopped after %d output tokens (cap %d, finish_reason %q)",
+			ErrTruncated, alias, seat.Model, comp.OutputTokens, in.MaxTokens, comp.FinishReason)
+	}
+	return res, nil
+}
+
+// truncated reports a completion the ENGINE stopped rather than one the model
+// finished. The engine's own word is the primary signal; output tokens landing
+// on the cap is the belt, and not a theoretical one — `output_tokens` equal to
+// `phraseMaxTokens` TO THE TOKEN is the single fact that diagnosed PH-1.
+func truncated(maxTokens int64, comp Completion) bool {
+	if strings.EqualFold(comp.FinishReason, "length") {
+		return true
+	}
+	return maxTokens > 0 && comp.OutputTokens >= maxTokens
+}
+
+// surfaceTruncation logs the cap boundary the call hit. Platform-authored
+// fields ONLY — the duty, the seat, the budget and the counts. Nothing the
+// model wrote enters an operator log (S01.11).
+func (d *Duty) surfaceTruncation(runID, alias, model string, maxTokens int64, comp Completion) {
+	d.logger.Warn("local: duty reply TRUNCATED at its length cap — the model never finished, so the caller degrades (PH-1/S12.4)",
+		"run", runID, "duty", alias, "model", model, "cap", maxTokens,
+		"input_tokens", comp.InputTokens, "output_tokens", comp.OutputTokens,
+		"finish_reason", comp.FinishReason)
 }
 
 // surfaceUnmeteredDefect logs LOUDLY and records a platform-scope event when a

@@ -36,21 +36,20 @@ const (
 	// phraseMaxTokens sizes one card: up to maxQuestionsPerCard (4) rewordings
 	// plus a short summary plus the leading reason field (P3-RW-12 R7).
 	//
-	// It budgets the THINK PHASE, not just the JSON, and that is why it is not
-	// the helpMaxTokens class. This is a DRAFTING duty, so Classification is
-	// false and `NoThink` therefore stays off (duty.go: NoThink = Classification)
-	// — the S12.4 duty table wants drafting quality here, and the reasoning
-	// workhorse earns it by thinking first. But the think phase is emitted
-	// BEFORE the constrained region, so a cap sized for the JSON alone is spent
-	// entirely on reasoning and the schema region never starts.
+	// It budgets the JSON, and only the JSON, because this duty sends the think
+	// phase away (NoThink below). The previous reading of this constant said the
+	// opposite — that the cap budgets the think phase too, and that 4000 was the
+	// measured-working size for it — and that reading is now known to be wrong
+	// in the way that matters: an unbounded think phase cannot be out-budgeted.
+	// The cap was chased once (1000 → 4000) and cold walk 1 spent all 4000 on
+	// reasoning anyway, delivering zero phrasings on every card of the walk
+	// (P3/design/ph1-phrase-fallback-diagnosis-2026-08-17.md).
 	//
-	// MEASURED on the ratified stack, not reasoned: at 1000 the call returned
-	// content length 0 every time ("unexpected end of JSON input"); at 4000 the
-	// output is schema-exact with good phrasings (P3-RW-12 drain r1 F1, and the
-	// live leg below is the standing tripwire). 4000 is the measured-working
-	// class, so 4000 is the constant. Flipping NoThink on instead would trade
-	// away the drafting quality the duty row asks for and was NOT measured, so
-	// it is not taken.
+	// So PH-1 did NOT raise it again. 4000 stays, and with the think phase off
+	// it is now what it always claimed to be: several times the ~350–500 tokens
+	// a full four-question card's JSON actually needs. The live leg asserts the
+	// margin (TestLivePhraseAndSummarize), so "it fit, barely" fails in a test
+	// rather than on a requester's card.
 	//
 	// Structural constant beside the others here — S18 declares no key, and it
 	// falls under the standing settings-tab directive (§26, §8 reading 7).
@@ -244,6 +243,11 @@ func (u *localUtility) Help(ctx context.Context, pair intake.Pair) (intake.HelpB
 		Name:           "utility-help",
 		MaxTokens:      helpMaxTokens,
 		Classification: false, // drafting, not classification — no forced-label abstain
+		// …but the answer is still engine-constrained JSON, so the budget must
+		// reach the schema region: no think phase (PH-1 F1). This duty failed
+		// exactly as phrase did — 700 of a 700-token cap, cp 13 of cold walk 1,
+		// falling back byte-identically to defaultHelp().
+		NoThink: true,
 	})
 	if err != nil {
 		return intake.HelpBlock{}, err // pipeline falls back to deterministic text
@@ -283,6 +287,13 @@ func (u *localUtility) PhraseAndSummarize(ctx context.Context, in intake.PhraseI
 		Name:           "utility-phrase",
 		MaxTokens:      phraseMaxTokens,
 		Classification: false, // drafting, not classification — no forced-label abstain
+		// Drafting, and CONSTRAINED: the wordings come back inside an
+		// engine-enforced schema, so the tokens have to be there when the schema
+		// region opens. With the think phase on, they never were — the seat's
+		// live success rate across a whole cold walk was 0% (PH-1 F1). A duty
+		// that genuinely wants to think must leave this false and own the budget
+		// question; this one wants a filled-in object.
+		NoThink: true,
 	})
 	if err != nil {
 		// The pipeline ships the taxonomy's own words with zero added clicks

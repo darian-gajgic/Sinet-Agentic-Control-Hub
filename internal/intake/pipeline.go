@@ -115,6 +115,19 @@ func (p *Pipeline) logger() *slog.Logger {
 	return slog.Default()
 }
 
+// logSeatDegrade records an OPTIONAL model seat that failed and the lesser card
+// that shipped because of it (PH-1 F3).
+//
+// Platform-authored fields only: which seat, which run, which card, how much
+// of it was affected, and the seam's own error — never the requester's text or
+// anything a model wrote (S01.11). WARN, because nothing is broken enough to
+// stop the run and everything here is worth an operator's attention: this is
+// the line whose absence let a 0%-success seat run a whole cold walk unnoticed.
+func (p *Pipeline) logSeatDegrade(seat, runID string, card CardKind, questions int, cause error) {
+	p.logger().Warn("intake: "+seat+" seat degraded — the card ships the platform's own wording, and the requester is told so",
+		"seat", seat, "run", runID, "card", string(card), "questions", questions, "cause", cause)
+}
+
 func (p *Pipeline) store() artifactStore { return artifactStore{root: p.ArtifactRoot} }
 
 func (p *Pipeline) taxonomies() map[Family]*Taxonomy {
@@ -888,6 +901,13 @@ func (p *Pipeline) buildInterviewCard(ctx context.Context, st *State, tax *Taxon
 	}
 	res, err := p.Phraser.PhraseAndSummarize(ctx, in)
 	if err != nil {
+		// The card still ships the taxonomy's own words with no added click —
+		// that posture is right and is unchanged. What was wrong was that it
+		// happened in SILENCE: the requester was told on screen that the wording
+		// is stock, and the operator had nothing to search for. A degradation the
+		// user can see must never be invisible to the person who can fix it
+		// (PH-1 F3).
+		p.logSeatDegrade("phrase", st.RunID, CardInterview, len(qs), err)
 		return card
 	}
 	for i := range card.Questions {
@@ -1400,7 +1420,13 @@ func (p *Pipeline) issueCard(ctx context.Context, st *State, card *Card) error {
 func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair) (*Card, error) {
 	help := defaultHelp(pair)
 	if p.Utility != nil {
-		if h, err := p.Utility.Help(ctx, *pair); err == nil {
+		h, err := p.Utility.Help(ctx, *pair)
+		if err != nil {
+			// Same seat, same alias, same silence — the S06.9 Help block fell
+			// back byte-identically to defaultHelp() on cold walk 1 and left no
+			// trace either (PH-1 F3).
+			p.logSeatDegrade("help", st.RunID, CardApproval, 0, err)
+		} else {
 			help = h
 		}
 	}
