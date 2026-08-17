@@ -256,14 +256,25 @@ function usePanScroll(ref: React.RefObject<HTMLDivElement | null>) {
 
     let down: { x: number; y: number; left: number } | null = null
     let panning = false
-    const onDown = (e: PointerEvent) => {
+    // MOUSE events, not pointer events, and that is a measured choice: every
+    // real pointer fires the compatibility mouse events too, while the CDP
+    // input synthesizer (how this app is driven in verification, and how some
+    // assistive tooling drives it) dispatches ONLY mouse events — a pan wired
+    // on pointerdown never armed under it (seen live at RA-9's first pixels).
+    // Touch keeps native overflow scrolling; nothing here runs for it.
+    const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return
       const t = e.target instanceof Element ? e.target : null
-      if (t?.closest('button, input, select, textarea, [draggable="true"]')) return
+      // Buttons are NOT skipped, deliberately: a card's whole face is one
+      // (task-face), so skipping them made the card area — the very place
+      // RA-9 names — dead to panning. A plain click on any button still
+      // works; only a drag past the threshold suppresses the click it would
+      // have fired. Links and the dnd handles keep their native gestures.
+      if (t?.closest('a, input, select, textarea, [draggable="true"]')) return
       down = { x: e.clientX, y: e.clientY, left: el.scrollLeft }
       panning = false
     }
-    const onMove = (e: PointerEvent) => {
+    const onMove = (e: MouseEvent) => {
       if (down === null) return
       const dx = e.clientX - down.x
       const dy = e.clientY - down.y
@@ -272,7 +283,7 @@ function usePanScroll(ref: React.RefObject<HTMLDivElement | null>) {
     }
     const onUp = () => {
       down = null
-      // The click suppression below reads `panning`; it fires after pointerup,
+      // The click suppression below reads `panning`; it fires after mouseup,
       // so the flag clears on the next tick rather than here.
       setTimeout(() => {
         panning = false
@@ -286,15 +297,15 @@ function usePanScroll(ref: React.RefObject<HTMLDivElement | null>) {
     }
 
     el.addEventListener('wheel', onWheel, { passive: false })
-    el.addEventListener('pointerdown', onDown)
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    el.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
     el.addEventListener('click', onClickCapture, true)
     return () => {
       el.removeEventListener('wheel', onWheel)
-      el.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+      el.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
       el.removeEventListener('click', onClickCapture, true)
     }
   }, [ref])

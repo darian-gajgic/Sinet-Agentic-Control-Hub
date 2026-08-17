@@ -334,7 +334,18 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  overflow-x: hidden;
+  /* ⚠ THE TWO-WALK SCROLL BUG LIVED ON THIS LINE (W1-13, W2-12, RA re-walk).
+     The value `hidden` here made BODY a scroll container, and because the
+     root's overflow is visible the browser PROPAGATES body's overflow to the
+     viewport — on some surfaces (Home, live) Chrome then had NO scrollable
+     node for wheel/PageDown input at all: the wheel was dead everywhere while
+     script scrolling (which targets the viewport directly) kept working,
+     which is exactly what two cold walks reported and the RA round finally
+     reproduced and bisected to this one declaration in a live browser.
+     `clip` clips exactly the same sideways overflow WITHOUT creating a
+     scroll container, so nothing is propagated and the viewport keeps its
+     own wheel. Do not put the old value back — responsive.test.ts pins it. */
+  overflow-x: clip;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }

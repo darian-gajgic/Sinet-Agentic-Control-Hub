@@ -117,7 +117,12 @@ test('the shell is phone-first and widens at a breakpoint, not the other way rou
 })
 
 test('the body cannot scroll sideways and oversized content is contained', () => {
-  expect(block('body')).toContain('overflow-x: hidden')
+  // `clip`, not the old value: both keep the body from scrolling sideways,
+  // but the old value additionally made body a SCROLL CONTAINER and killed
+  // wheel input on whole surfaces — the two-walk bug pinned at the bottom of
+  // this file. The property this test guards ("cannot scroll sideways") is
+  // exactly what clip does, minus the trap.
+  expect(block('body')).toContain('overflow-x: clip')
   expect(css).toMatch(/max-width:\s*100%/)
 })
 
@@ -281,4 +286,16 @@ test('the review surface reads at phone width and nothing widens the page', () =
   // else's whole application.
   expect(block('.image-side img'), 'a full-size image would widen the page').toContain('max-width: 100%')
   expect(block('.frame iframe')).toContain('width: 100%')
+})
+
+test('the body clips sideways overflow WITHOUT becoming a scroll container (W1-13/W2-12/RA)', () => {
+  // Two cold walks reported wheel and PageDown dead while script scrolling
+  // worked; the RA round reproduced it live and bisected it to ONE declaration:
+  // `body { overflow-x: hidden }`. A non-visible overflow on body makes body a
+  // scroll container and is PROPAGATED to the viewport, and Chrome was left
+  // with no scrollable node for wheel input on some surfaces. `clip` clips the
+  // same sideways overflow without creating a scroll container. This pin is
+  // what keeps the one-word regression from ever shipping again.
+  expect(block('body'), 'body must clip sideways overflow, never hide it').toContain('overflow-x: clip')
+  expect(block('body'), 'overflow-x: hidden on body is the two-walk scroll bug').not.toContain('overflow-x: hidden')
 })
