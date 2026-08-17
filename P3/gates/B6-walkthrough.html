@@ -80,8 +80,12 @@
   </table></div>
   <p style="margin:.5rem 0 0; color:var(--muted); font-size:.9rem">
     You start under the <b>dev fallback</b> — browsable with no PIN, but it is nobody in
-    particular, so <code>/chat</code> is empty until you sign in as alice. That is correct, not a defect.
-    Use <b>Sign in</b> in the header.
+    particular. <b>The doors that create work sign you in on the spot</b> (coldwalk fix W1-B1):
+    walk into "Describe a goal" or the Assistant and the sign-in step appears right there, with the
+    seeded people explained — pick who you are, and the page unlocks <i>in place</i>, never dumping
+    you to Home. The header's <b>Sign in</b> also returns you to the exact page you left. Work
+    created before signing in was the old trap (a task nobody could approve); that trap can no
+    longer be entered.
   </p>
 </div>
 
@@ -147,16 +151,22 @@
 <li>
   <div class="head"><h3>The interview — a form, not a chat</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">Numbered question cards in plain wording (the local utility model phrases them;
-    when it can't, the standard question shows and <b>says so</b> — a quiet &quot;standard wording&quot;
-    line under the question, or one line for a whole unrephrased round), options as buttons, free text
-    everywhere. Points you skip recap as <b>one line naming them</b>, never a wall of rows, and the
-    Clearance meter reads &quot;N/100 settled&quot; — a full meter is not approval; open markers can
-    still hold the plan. From the second round on, a <b>"What it understood so far"</b> recap sits above the
+  <p class="look">Numbered question cards, options as buttons, free text everywhere.
+    <b>Today's truth on wording (PH-1):</b> questions arrive in the platform's standard wording and
+    the page <b>says so</b> — a quiet &quot;standard wording&quot; line under the question, or one
+    line for a whole round. The live-rephrasing seat has never fired in production (its silent
+    failure is diagnosed; the backend fix lands right after this round) — so a round that reads
+    fluent is the paid planner speaking, not rephrasing. Points you skip recap as <b>one line
+    naming what runs on defaults</b> — counted honestly as checklist points (one skipped question
+    can fan out into several), never a wall of rows. The <b>Clearance meter appears only while it
+    is asking</b> — it measures how settled the must-knows are, so outside the questioning it
+    measures nothing and is gone (a full meter beside open markers used to read as a
+    contradiction). From the second round on, a <b>"What it understood so far"</b> recap sits above the
     questions: every settled point with where it came from — <i>you answered</i>, <i>from the
-    project record</i>, or <i>assumed — out loud</i> — and the stakes/clearance header re-sizes as
-    it learns (HIGH flipped to LOW on this walk once the goal proved trivial).
-    <b>"Proceed — turn open questions into assumptions"</b> is legitimate — every skip becomes a
+    project record</i>, or <i>assumed — out loud</i> — and the stakes header re-sizes as
+    it learns (HIGH flipped to LOW on this walk once the goal proved trivial); the stakes chip now
+    carries <b>what its level means</b> on sight. <b>Proceed keeps what you typed and says so on the
+    button</b> — &quot;Proceed — keep my N answers, assume the rest&quot; — and every skip becomes a
     LISTED assumption on the plan card, where you can still contest it. Each answered round takes
     about a minute; between rounds the page shows what the machine is doing and how long it has
     been at it; the same card also sits in your Inbox, so leaving the page loses nothing.</p>

@@ -28,13 +28,10 @@ type Fence = {
 export const fencedSurfaces: Partial<Record<RouteID, Fence>> = {
   // `board` and `task` LEFT the registry 2026-08-06 in the commits that
   // replaced them (the real Kanban; the overlay card) — the fence rule's own
-  // clause.
-  inbox: {
-    step: 3,
-    act: 'Decide — the inbox in plain words',
-    known: ['the row language is jargon ("opt in / opt out", benchmark verdict cards) — the rebuild renders every row in plain words'],
-  },
-  'inbox-item': { step: 3, act: 'Decide — the inbox in plain words' },
+  // clause. `inbox`/`inbox-item` left 2026-08-17 (coldwalk W1-8): the step-3
+  // rework had long since landed on them (row anatomy, plain-words cards,
+  // verify family), so the banner had become the opposite lie — an operator
+  // told to distrust the surface they were being asked to judge.
   deliverable: {
     step: 4,
     act: 'Judge — reviews with Run-it previews',

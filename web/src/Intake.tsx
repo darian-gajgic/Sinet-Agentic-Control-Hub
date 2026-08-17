@@ -569,16 +569,39 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
       </div>
       <div className="journey-side">
         {tier !== undefined && tier !== '' && (
-          <span className="journey-tier">
+          // The badge carries its why AT FIRST SIGHT (W1-4): what stakes are,
+          // what this level changes — not a bare token explained by a footnote
+          // twenty-five minutes later. The specific cause is the platform's to
+          // state (it arrives with the plan card's own notes); what the chip
+          // can honestly say now is what the level MEANS.
+          <span className="journey-tier" title={stakesWords(tier)}>
             <Chip tone={tier === 'high' ? 'red' : tier === 'medium' ? 'orange' : 'blue'}>
               stakes: {tier}
+              {tier === 'high' && <> — extra care, PIN to approve</>}
             </Chip>
           </span>
         )}
-        {clearance !== undefined && <ClearanceMeter value={clearance} />}
+        {/* The meter shows only WHILE THE PLATFORM IS ASKING (W1-9): clearance
+            measures how settled the must-knows are, so before the first
+            question and after the questions end it measures nothing a reader
+            can act on — at the plan stage the card's own open markers speak,
+            and a full meter beside them read as a contradiction. */}
+        {clearance !== undefined && (view.open_card?.questions ?? []).length > 0 && <ClearanceMeter value={clearance} />}
       </div>
     </header>
   )
+}
+
+/** The stakes chip's plain-words why (W1-4): what the level MEANS, said where
+ *  the chip is. The platform sets the level from the goal; an unknown served
+ *  value gets the general words only. */
+function stakesWords(tier: string): string {
+  const what = 'Stakes — how much care this goal gets before anything runs. The platform set this from your description.'
+  if (tier === 'high')
+    return `${what} High stakes bring stricter questions, and approving the plan asks for your PIN. The plan card states what made it high.`
+  if (tier === 'medium') return `${what} Medium stakes bring the standard questions and a plain approval.`
+  if (tier === 'low') return `${what} Low stakes keep the ceremony light — trivial read-only work can skip it entirely.`
+  return what
 }
 
 /** The served S06.5 clearance: how settled the must-knows are, on the
@@ -761,10 +784,20 @@ export function UnderstoodPanel({
             </li>
           ))}
           {skipped.length > 0 && (
+            // HONEST COUNTING (W1-6): these are the platform's checklist
+            // POINTS now covered by defaults — skipping one question can fan
+            // out into several of them, so "N points you skipped" blamed the
+            // reader for a count they never saw. The count names what it
+            // counts, and the fan-out is said out loud.
             <li data-how="assumption" data-skipped={skipped.map((s) => s.slot).join(',')}>
-              <span className="understood-name">{skipped.length === 1 ? 'One point you skipped' : `${String(skipped.length)} points you skipped`}</span>
+              <span className="understood-name">
+                {skipped.length === 1
+                  ? 'One point runs on a default'
+                  : `${String(skipped.length)} points run on defaults`}
+              </span>
               <span className="understood-value">
-                {skipped.map((s) => s.name).join(' · ')} — it goes ahead on sensible defaults;{' '}
+                {skipped.map((s) => s.name).join(' · ')} — these are the checklist points behind what was left
+                unanswered (one skipped question can cover several);{' '}
                 {resolutions !== undefined
                   ? 'each one is listed under Assumptions below, where you can still contest it'
                   : 'each one becomes a listed assumption on the plan card, where you can still contest it'}
@@ -841,7 +874,11 @@ function ComposingFace({ mode }: { mode: 'answer' | 'approve' }) {
         <p className="composing-sub">
           {mode === 'approve'
             ? 'The approval is being recorded and the work handed to its worker. This usually takes a few seconds.'
-            : 'It is choosing and phrasing the next questions, or drafting the plan. A question round takes about a minute on the local models; the full plan is drafted in one piece and can take a few minutes.'}
+            : // TODAY'S TRUTH (PH-1, 2026-08-17): the phrase seat has never
+              // answered live — questions arrive in standard wording and the
+              // page admits it per round — so this face does not claim a
+              // "phrasing" step it cannot show. The choosing is real.
+              'It is choosing the next questions, or drafting the plan. A question round takes about a minute on the local models; the full plan is drafted in one piece and can take a few minutes.'}
         </p>
         <p className="composing-clock mono">working · {elapsedWords(seconds)}</p>
         {mode === 'answer' && long && (
@@ -1243,6 +1280,9 @@ function QuestionForm({
 
       {allowAssume && (
         <div className="door-acts">
+          {/* The button SAYS what happens to typed answers (W1-10): the next
+              screen used to be the first place that admitted Proceed kept
+              them, which is one screen too late for the person deciding. */}
           <Button
             variant="secondary"
             disabled={busy}
@@ -1251,9 +1291,12 @@ function QuestionForm({
               send(true)
             }}
           >
-            Proceed — turn open questions into assumptions
+            {answered.length > 0
+              ? `Proceed — keep my ${String(answered.length)} answer${answered.length === 1 ? '' : 's'}, assume the rest`
+              : 'Proceed — turn open questions into assumptions'}
           </Button>
           <span className="door-why">
+            {answered.length > 0 ? 'your typed answers are sent with it; ' : ''}
             what you don&apos;t answer becomes a LISTED assumption on the plan card, where you can still contest it
           </span>
         </div>
@@ -1647,17 +1690,35 @@ function PlanCard({
 
       <section className="plan-sec plan-costs" data-plan="cost">
         <h3 className="plan-h">Cost and time</h3>
-        <p className="m-0">
-          {l1.cost_time !== undefined && l1.cost_time !== '' ? l1.cost_time : 'no time estimate was drafted'}
-          {estimate !== undefined && (
+        {/* ONE cost voice (W1-5): the platform's estimate is the cost figure,
+            and when no dollar figure exists the line says WHY in the same
+            words the receipts will use — never a third dialect. The time half
+            is LABELED, so its absence is a loud stated absence instead of a
+            heading quietly missing its second noun. The planner's own prose,
+            when it exists, renders under its own name — it is the planner
+            speaking, not this page's figure. */}
+        <p className="m-0" data-cost-line>
+          {estimate !== undefined && estimate.known ? (
+            <b className="mono">cost: ≈ USD {String(estimate.usd ?? 0)}</b>
+          ) : (
+            <span>
+              cost: <b className="mono">UNPRICED</b>
+              <span className="muted">
+                {' '}
+                — no per-call dollar price exists
+                {a.routing?.lane !== undefined && a.routing.lane !== '' && <> on the {a.routing.lane} lane</>}; the
+                receipt itemizes the work with the same UNPRICED label
+              </span>
+            </span>
+          )}
+          {estimate?.size_class !== undefined && estimate.size_class !== '' && <> · size: {estimate.size_class}</>}
+          {l1.cost_time !== undefined && l1.cost_time !== '' ? (
             <>
-              {' · '}
-              {estimate.known ? (
-                <b className="mono">≈ USD {String(estimate.usd ?? 0)}</b>
-              ) : (
-                <span className="muted">cost unpriced — no honest dollar figure exists yet</span>
-              )}
-              {estimate.size_class !== undefined && estimate.size_class !== '' && <> · size: {estimate.size_class}</>}
+              {' · '}the planner adds: <span data-planner-words>&ldquo;{l1.cost_time}&rdquo;</span>
+            </>
+          ) : (
+            <>
+              {' · '}time: <span className="muted">no estimate was drafted</span>
             </>
           )}
           {l1.size_note !== undefined && l1.size_note !== '' && <span className="warn-flag"> · {l1.size_note}</span>}
@@ -2050,16 +2111,18 @@ function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting:
             too.
           </>
         ) : working ? (
+          // TODAY'S TRUTH (PH-1): no live "phrasing" step exists to claim —
+          // questions arrive in standard wording and admit it on the card.
           <>
-            It took what you said and moved: it is choosing and phrasing the next questions, or — once it knows
+            It took what you said and moved: it is choosing the next questions, or — once it knows
             enough — drafting the full plan. A question round takes about a minute on the local models; the plan is
             drafted in one piece and can take a few minutes. It appears RIGHT HERE the moment it exists, and lands in
             your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
           </>
         ) : (
           <>
-            It is working out what it must ask you — sizing the goal, picking the questions that matter, phrasing
-            them. The first card takes about a minute on the local models, appears RIGHT HERE the moment it exists,
+            It is working out what it must ask you — sizing the goal and picking the questions that matter. The
+            first card takes about a minute on the local models, appears RIGHT HERE the moment it exists,
             and lands in your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
           </>
         )}

@@ -40,6 +40,7 @@ import { ComingSurface, HistorySurface } from './Placeholders'
 import { Projects } from './Projects'
 import { OldFence } from './fence'
 import { ProjectScopeContext, scopedRoutes, useProjectScope } from './project'
+import { SessionContext } from './session'
 import { Link, navigate, useRoute } from './router'
 import { ToastProvider } from './ui'
 import { TurnToasts, useEtiquette } from './etiquette'
@@ -187,6 +188,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
 
   return (
     <ToastProvider>
+      <SessionContext.Provider value={session}>
       <ProjectScopeContext.Provider value={{ project, setProject }}>
         <div className="shell">
           <div className="aurora" aria-hidden="true" />
@@ -399,6 +401,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
           )}
         </div>
       </ProjectScopeContext.Provider>
+      </SessionContext.Provider>
     </ToastProvider>
   )
 }

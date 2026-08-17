@@ -20,6 +20,7 @@ import { Absent, Freshness, Owner, Stamp, SurfaceHead } from './parts'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { reconcileBadge } from './push'
+import { useSessionInfo } from './session'
 import { Button, Chip, EmptyState, Panel, Timestamp, type Tone } from './ui'
 
 /**
@@ -649,17 +650,43 @@ function Expiry({ item }: { item: ApprovalItem }) {
   const remaining = Date.parse(item.expiry_at) - Date.now()
   return (
     <span className="expiry" data-expiry={item.expiry_at}>
-      expires <Timestamp ts={item.expiry_at} variant="live" />
-      <span className={remaining <= 0 ? 'text-[var(--red)]' : 'text-muted-foreground'}>
-        {' '}
-        {remaining <= 0 ? '(past)' : `(in ${describeSpan(remaining)})`}
-      </span>
+      {/* A PAST expiry says what it means (W2-4): the fact that the card is
+          still in this served queue IS the consequence — the date passing
+          withdrew nothing and answered nothing, the ask still stands. A bare
+          "(past)" left the reader guessing whether this was live work. */}
+      {remaining <= 0 ? (
+        <span className="text-[var(--red)]">
+          expired <Timestamp ts={item.expiry_at} variant="live" /> ({describeSpan(-remaining)} ago) — still waiting
+          on you: passing the date withdrew nothing and answered nothing
+        </span>
+      ) : (
+        <>
+          expires <Timestamp ts={item.expiry_at} variant="live" />
+          <span className="text-muted-foreground"> (in {describeSpan(remaining)})</span>
+        </>
+      )}
       {item.engine_expiry_ts && (
         <span className="text-muted-foreground">
           {' '}
           · the engine's own deadline: <Timestamp ts={item.engine_expiry_ts} variant="live" />
         </span>
       )}
+    </span>
+  )
+}
+
+/** The sign-in-to-act line (W2-4): rendered beside a read-only acts row when
+ *  the viewer is the dev fallback — the one posture where "not yours to
+ *  answer" has a remedy this page can name. A real signed-in user seeing a
+ *  card that is not theirs gets no false invitation. */
+function SignInToAct() {
+  const s = useSessionInfo()
+  if (s?.dev !== true) return null
+  return (
+    <span className="text-sm text-muted-foreground" data-sign-in-to-act>
+      {' '}
+      You are browsing as nobody in particular — <b>Sign in</b> (top right) as the person this belongs to, and its
+      answer controls appear here.
     </span>
   )
 }
@@ -1335,6 +1362,10 @@ function Acts({
     return (
       <p className="acts" data-acts="read-only">
         <Absent reason={item.not_answerable_reason ?? 'this card is not yours to answer'} />
+        {/* The missing sentence (W2-4): under the dev fallback every card is
+            read-only, and a card with no verbs and no way forward posed as a
+            dead end. Who can act, and how to become them, is said here. */}
+        <SignInToAct />
       </p>
     )
   }
