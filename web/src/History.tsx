@@ -32,6 +32,17 @@ const emptyQuestionReason =
  * frame would be noise on Layer 0 and a repeated model call on Layer 2. Asking
  * again is an act, so the panel offers one.
  */
+/** The direction of a date bound, said beside its field (W2-5): the query
+ *  surface treats "to"/"until"/"before" as exclusive instants, and a day typed
+ *  there is NOT included — a fact the reader otherwise learns from missing
+ *  rows. Unrecognized slot names get no hint rather than a guessed one. */
+function boundHint(slot: string): string {
+  const s = slot.toLowerCase()
+  if (s === 'to' || s === 'until' || s === 'before') return '(up to, not including)'
+  if (s === 'from' || s === 'since') return '(from, including)'
+  return ''
+}
+
 export function HistoryPanel() {
   const [registry, setRegistry] = useState<HistoryRegistry | null>(null)
   const [catalog, setCatalog] = useState<HistoryRegistry | null>(null)
@@ -142,6 +153,11 @@ export function HistoryPanel() {
           {(selected.slots ?? []).map((s) => (
             <label key={s.name}>
               {s.name}
+              {/* W2-5: the walker filled a "to" date expecting it included
+                  that day, and the exclusive bound silently dropped a day of
+                  rows. The bound's direction is the QUERY surface's contract;
+                  what this page can do is say it where the value is typed. */}
+              {boundHint(s.name) !== '' && <span className="muted text-xs"> {boundHint(s.name)}</span>}
               <input
                 type="text"
                 value={slots[s.name] ?? ''}
