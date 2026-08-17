@@ -267,7 +267,7 @@ test('navigation drives an explicit pair including old=0, the pre-task base', as
     log.calls.some((c) => c.path === `/api/deliverables/${reviewDeliverableID}/compare?old=0&new=2`),
     'picking the base did not drive an explicit pair',
   ).toBe(true)
-  expect(at(view, '[data-compared]')!.textContent).toContain('the pre-task base')
+  expect(at(view, '[data-compared]')!.textContent).toContain('pre-task base')
 })
 
 // ── R3 / rubric 4: every surface type, degrade lanes included ───────────────
@@ -408,7 +408,9 @@ test('all five placement statuses render, visibly distinct, from one served body
   // Each comment's rendered card carries the status the SERVER computed, and the
   // three degraded ones say so in words rather than only in an attribute.
   for (const p of served.placements) {
-    const card = at(view, `.comment-list [data-comment="${p.comment_id}"]`)!
+    // review #2: list and strip are complements — the card renders exactly once
+    // somewhere under `.comments`, wherever its placement puts it.
+    const card = at(view, `.comments [data-comment="${p.comment_id}"]`)!
     expect(card.getAttribute('data-placement'), `comment ${p.comment_id} renders the wrong placement`).toBe(p.status)
   }
   expect(text(view)).toContain('drifted — the quote was found near, not at, the mapped position')
@@ -441,14 +443,14 @@ test('open and consumed render distinctly, and a consumed one shows [F#] and its
   const consumed = served.comments.find((c) => c.status === 'consumed')!
   const open = served.comments.find((c) => c.status === 'open')!
 
-  const consumedCard = at(view, `.comment-list [data-comment="${consumed.id}"]`)!
+  const consumedCard = at(view, `.comments [data-comment="${consumed.id}"]`)!
   expect(consumedCard.getAttribute('data-status')).toBe('consumed')
   expect(consumedCard.querySelector('[data-lifecycle="consumed"]')).not.toBeNull()
   expect(consumedCard.textContent).toContain(`[F${String(consumed.finding_number)}]`)
   expect(consumedCard.textContent, 'the batch stamp is not on screen').toContain(consumed.consumed_at ?? '')
   expect(consumedCard.textContent, 'the consuming attempt is not on screen').toContain(consumed.consumed_by ?? '')
 
-  const openCard = at(view, `.comment-list [data-comment="${open.id}"]`)!
+  const openCard = at(view, `.comments [data-comment="${open.id}"]`)!
   expect(openCard.querySelector('[data-lifecycle="open"]')).not.toBeNull()
 })
 
@@ -456,7 +458,7 @@ test('a verification finding renders under the same schema as a human comment', 
   const { view } = await review()
   const served = fixtures.placedComments() as unknown as PlacedComments
   const finding = served.comments.find((c) => c.kind === 'finding')!
-  const card = at(view, `.comment-list [data-comment="${finding.id}"]`)!
+  const card = at(view, `.comments [data-comment="${finding.id}"]`)!
   expect(card.getAttribute('data-kind')).toBe('finding')
   expect(card.textContent).toContain(finding.category ?? '')
   expect(card.textContent).toContain(finding.criterion ?? '')
@@ -1173,6 +1175,19 @@ test('D2/D3: EVERY served comment is reachable as a widget or present on the str
   // the strip is showing something that already has a place.
   for (const id of inWidgets) {
     expect(onStrip.has(id ?? ''), `comment ${id} is both anchored and on the strip`).toBe(false)
+  }
+})
+
+test('review #2: no comment renders twice in the block below the diff', async () => {
+  // The ×4 sighting (design review 2026-08-17): the flat list held EVERY
+  // comment while the strip re-held the unplaced ones, so each unplaced
+  // comment rendered twice on one screen — and ×2 data made it ×4. The list
+  // and the strip are complements now: one card per served comment down there.
+  const { view } = await review()
+  const served = fixtures.placedComments() as unknown as PlacedComments
+  for (const c of served.comments) {
+    const cards = all(view, `.comments [data-comment="${String(c.id)}"]`)
+    expect(cards.length, `comment ${String(c.id)} renders ${String(cards.length)} times below the diff`).toBe(1)
   }
 })
 

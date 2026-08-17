@@ -1002,10 +1002,41 @@ function DecisionCard({ snap }: { snap: AskSnapshot }) {
  *  being decided (the drain's own summary, written for the person who can fix
  *  it), what it means (the card's detail lines), the numbered findings, and
  *  the quarantine record. Every string is the stored snapshot's own. */
+/**
+ * The CHECK-INTEGRITY summary arrives as the platform's own error chain —
+ * `check-integrity: check "lint" runner failure (not a verdict): verify:
+ * compose check sandbox: … no such file or directory` — which is a record, not
+ * a sentence for a person (review #11; the C2-13 raw-error ban, applied to a
+ * SERVED body). Where the chain matches the known shape, plain words lead and
+ * the verbatim chain stands under them as the record (the greyed-verbs
+ * pattern beside it: say it plainly, keep the machine's own line visible).
+ * A summary this parser does not recognize renders whole, unchanged.
+ */
+function humanizeVerifySummary(summary: string): { plain: string; record: string } | null {
+  const m = /^check-integrity: check "([^"]+)" runner failure \(not a verdict\): (.+)$/.exec(summary)
+  if (m === null) return null
+  return {
+    plain:
+      `The "${m[1]}" check could not RUN — the machinery that runs checks failed before any checking happened, ` +
+      `so this is not a verdict on the work. Nothing was judged, and the platform did not fake a pass.`,
+    record: m[2],
+  }
+}
+
 function VerifyEscalationCard({ snap }: { snap: AskSnapshot }) {
+  const humanized = snap.category === 'CHECK-INTEGRITY' ? humanizeVerifySummary(snap.summary ?? '') : null
   return (
     <div className="ask-card" data-card-kind="verify.decision_card" data-category={snap.category ?? ''}>
-      <p className="restatement wrap-anywhere">{snap.summary !== '' ? snap.summary : <Absent reason="the card records no summary" />}</p>
+      {humanized !== null ? (
+        <>
+          <p className="restatement wrap-anywhere" data-summary="humanized">{humanized.plain}</p>
+          <p className="raw-record wrap-anywhere" data-summary-record>
+            <span className="raw-record-label">the platform&apos;s own record:</span> <code>{humanized.record}</code>
+          </p>
+        </>
+      ) : (
+        <p className="restatement wrap-anywhere">{snap.summary !== '' ? snap.summary : <Absent reason="the card records no summary" />}</p>
+      )}
       {snap.infrastructure === true && (
         <p className="text-sm text-[var(--yellow)]" data-verify="infrastructure">
           Verification never ran — nothing was judged, nothing was delivered, and the work is parked on this card.

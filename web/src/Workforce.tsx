@@ -718,9 +718,18 @@ function RoutedRunRow({ run: r }: { run: RoutedRun }) {
           <Absent reason={r.meter_absent ?? 'no meter reading'} />
         ) : (
           <>
-            <Money usd={r.api_equiv_cost_usd} />
+            {/* Same unpriced truth as the task card (review #9): a zero on a
+                subscription lane is "no price exists", never an API-equivalent
+                figure. */}
+            {r.unpriced === true && r.api_equiv_cost_usd === 0 ? (
+              <span>subscription lane — no dollar price exists for these calls (UNPRICED)</span>
+            ) : (
+              <Money usd={r.api_equiv_cost_usd} />
+            )}
             {r.tokens !== null && <> · {String(r.tokens)} tokens</>}
-            {r.unpriced === true && <> · subscription lane, so this is the API-equivalent figure</>}
+            {r.unpriced === true && r.api_equiv_cost_usd !== 0 && (
+              <> · API-equivalent estimate — subscription lane, no per-call price</>
+            )}
           </>
         )}
       </p>

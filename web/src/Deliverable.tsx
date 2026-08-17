@@ -443,7 +443,7 @@ function RevisionPicker({
         {served ? (
           <>
             Comparing{' '}
-            <strong>{served.old_n === 0 ? 'the pre-task base' : `revision ${String(served.old_n)}`}</strong> with{' '}
+            <strong>{served.old_n === 0 ? 'the project’s pre-task base' : `revision ${String(served.old_n)}`}</strong> with{' '}
             <strong>revision {String(served.new_n)}</strong>
             {pair.new === undefined && pair.old === undefined && (
               <span className="text-muted-foreground"> — the platform&apos;s own round-over-round default</span>
@@ -646,17 +646,56 @@ function DiffSurface({
         // migrate only where a teaching `why` is true and useful.
         <Empty what="The platform served no diff text for this pair — the two revisions have no differing file." />
       ) : (
-        files.map(({ file, path }) => (
-          <DiffFile
-            key={path}
-            file={file}
-            path={path}
-            viewType={viewType}
-            comments={placed.data?.comments ?? []}
-            placements={placed.data?.placements ?? []}
-            onSelect={setClaim}
-          />
-        ))
+        (() => {
+          // THE PRE-TASK-BASE COMPARE IS A CROSS-GRAIN COMPARE (review #1):
+          // the base side is the whole project as it stood, while a content
+          // revision records only the files the work shipped. The served diff
+          // unions the two, so every base file the revision does not carry
+          // arrived rendered as a DELETION — a false story about the work
+          // (the walk's Makefile "deleted" by a task that only added a note).
+          // The revision's own fileset is exactly the files with a NEW side,
+          // so the base-only files are separable here: they render collapsed
+          // under the truth ("not carried, no change recorded"), never as
+          // deletions the work made. Same-grain compares (revision vs
+          // revision) keep deletions as the real deletions they are.
+          const crossGrain = cmp.old_n === 0
+          const own = crossGrain ? files.filter(({ file }) => file.type !== 'delete') : files
+          const baseOnly = crossGrain ? files.filter(({ file }) => file.type === 'delete') : []
+          const renderFile = ({ file, path }: RenderedFile) => (
+            <DiffFile
+              key={path}
+              file={file}
+              path={path}
+              viewType={viewType}
+              comments={placed.data?.comments ?? []}
+              placements={placed.data?.placements ?? []}
+              onSelect={setClaim}
+            />
+          )
+          return (
+            <>
+              {crossGrain && (
+                <p className="diff-scope my-2 text-xs text-muted-foreground" data-diff-scope="pre-task-base">
+                  Two different scopes meet here: the pre-task base is the WHOLE project as it stood, while revision{' '}
+                  {String(cmp.new_n)} records only the {own.length === 1 ? 'file' : `${String(own.length)} files`} the
+                  work shipped. Only those files carry changes below.
+                </p>
+              )}
+              {own.map(renderFile)}
+              {baseOnly.length > 0 && (
+                <details className="diff-basefiles my-2" data-base-only={String(baseOnly.length)}>
+                  <summary className="text-xs text-muted-foreground">
+                    {baseOnly.length === 1 ? '1 project file' : `${String(baseOnly.length)} project files`} from the
+                    pre-task base that revision {String(cmp.new_n)} does not carry — the revision records no change to
+                    {baseOnly.length === 1 ? ' it' : ' them'}, and nothing here was deleted by the work. Open to see
+                    {baseOnly.length === 1 ? ' it' : ' them'} as the base held {baseOnly.length === 1 ? 'it' : 'them'}.
+                  </summary>
+                  {baseOnly.map(renderFile)}
+                </details>
+              )}
+            </>
+          )
+        })()
       )}
       <CommentsBlock
         detail={detail}
@@ -939,7 +978,19 @@ function CommentsBlock({
   // widget will not render inside the diff renders here, whatever the reason —
   // file-level, orphaned, in a file this pair does not show, or on a line outside
   // every rendered hunk. One function decides, so the two cannot drift apart.
-  const unanchored = comments.filter((c) => widgetReach(files, byID.get(c.id)) === null)
+  //
+  // AND THE LIST IS THE COMPLEMENT'S COMPLEMENT (review #2): it holds only the
+  // comments the strip does not. When the list held EVERYTHING, each unplaced
+  // comment rendered twice on one screen — list and strip — which doubled into
+  // ×4 the day the platform served a duplicated finding. Every served comment
+  // still renders exactly once down here, plus its widget inside the diff when
+  // it has a live position.
+  // With no diff on screen there is no "position" to lack, so the strip would
+  // be a distinction without a difference: the object, image and unknown
+  // surfaces list every comment plainly and render no strip at all.
+  const hasDiff = files.length > 0
+  const unanchored = hasDiff ? comments.filter((c) => widgetReach(files, byID.get(c.id)) === null) : []
+  const placed = hasDiff ? comments.filter((c) => widgetReach(files, byID.get(c.id)) !== null) : comments
 
   return (
     <div className={cn('comments', reviewPanel, 'mt-3')} data-revision={String(revision)}>
@@ -958,16 +1009,23 @@ function CommentsBlock({
             what="Nobody has commented on this revision yet."
             why="Selecting a line in the diff anchors a comment to it; leaving the anchor off files it against the deliverable. A verification run's findings land here too, and a blocker is what makes the platform run another round."
           />
-        ) : (
+        ) : placed.length > 0 ? (
           <ul className="comment-list m-0 flex list-none flex-col gap-2 ps-0">
-            {comments.map((c) => (
+            {placed.map((c) => (
               <li key={c.id}>
                 <CommentCard comment={c} placement={byID.get(c.id)} />
               </li>
             ))}
           </ul>
+        ) : (
+          <p className="m-0 text-xs text-muted-foreground">
+            {comments.length === 1
+              ? 'One comment exists on this revision; it has no live position in the view above, so it is in the strip below.'
+              : `${String(comments.length)} comments exist on this revision; none has a live position in the view above, so they are in the strip below.`}
+          </p>
         ))}
 
+      {hasDiff && (
       <div className="synthetic-strip my-2 border-s-[3px] border-current px-2 py-1.5" data-strip="unanchored">
         <h5 className="mt-0 mb-1">Without a place in this view</h5>
         {feed.data !== null &&
@@ -987,6 +1045,7 @@ function CommentsBlock({
             </ul>
           ))}
       </div>
+      )}
 
       <CommentComposer
         deliverable={detail.id}

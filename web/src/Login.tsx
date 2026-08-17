@@ -152,7 +152,18 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
       >
         <label>
           Account
-          <select value={userID} onChange={(e) => setUserID(e.target.value)}>
+          <select
+            value={userID}
+            onChange={(e) => {
+              // Switching WHO clears what was typed (review #8): a PIN typed
+              // for one account must not sit in the field under another's
+              // name on a shared device — and a stale failure line about the
+              // previous account clears with it.
+              setUserID(e.target.value)
+              setPin('')
+              setError('')
+            }}
+          >
             {users.map((u) => (
               <option key={u.user_id} value={u.user_id}>
                 {u.display_name}
@@ -170,6 +181,15 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
             required={!autoLogin}
           />
         </label>
+        {/* The failure, WHERE THE PERSON IS LOOKING (review #8): beside the
+            act, as an alert — not a quiet line after the buttons. The PIN
+            field is already empty again (`run` clears it on every path), and
+            saying so saves a puzzled retry of a blank field. */}
+        {error !== '' && (
+          <p className="login-error text-sm text-[var(--red)]" role="alert" data-login-error>
+            {error} {error.startsWith('That did not') ? 'The PIN field was cleared — type it again.' : ''}
+          </p>
+        )}
         <Button type="submit" variant="primary" disabled={busy}>
           Sign in
         </Button>
@@ -188,7 +208,6 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
           </Button>
         )}
       </form>
-      {error !== '' && <p className="text-sm text-[var(--red)]">{error}</p>}
     </section>
   )
 }

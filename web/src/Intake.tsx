@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, CircleAlert, FolderOpen, Sparkles, X } from 'lucide-react'
 
 import {
@@ -47,6 +47,12 @@ export function DescribeGoal({ search = '', stream }: { search?: string; stream?
   const params = new URLSearchParams(search)
   const pinned = params.get('project') ?? ''
   const resumeTask = params.get('task') ?? ''
+  // `r` is the answered-rounds stamp the journey writes into its own address
+  // (the §41-B one-pocket rule): a reload mid-interview knows THIS browser
+  // already answered, so the wait face never greets the task as newborn again
+  // (review #7 — the served task read carries no "answers were given" fact,
+  // reported as a wire note).
+  const resumedRounds = Number(params.get('r') ?? '0') || 0
 
   // A born task stamps its id onto the door's own address, so a reload lands
   // back IN the journey (the open card is durable server-side) instead of on
@@ -60,7 +66,7 @@ export function DescribeGoal({ search = '', stream }: { search?: string; stream?
   return (
     <section className="surface door" data-door="describe-goal">
       {view !== null ? (
-        <Journey view={view} onView={setView} stream={stream} />
+        <Journey view={view} onView={setView} answeredRounds={resumedRounds} stream={stream} />
       ) : resumeTask !== '' ? (
         <ResumeJourney taskID={resumeTask} onView={setView} stream={stream} />
       ) : (
@@ -117,6 +123,32 @@ function ResumeJourney({ taskID, onView, stream }: { taskID: string; onView: (v:
 /* ── the ask box ─────────────────────────────────────────────────────────── */
 
 /**
+ * titleFromGoal keeps the door's own promise — "it names itself otherwise".
+ *
+ * The platform mints no title of its own (RW-14 OQ6: tasks.title stays empty on
+ * the wire), so a task submitted without one wore its raw `t-…` id on the board
+ * and the overlay (design review 2026-08-17, blocker #3). The door is where the
+ * human words exist, so the door derives the name: the goal's first sentence,
+ * cut at a word boundary. It is DISPLAYED in the title field as the live
+ * placeholder before it is sent, so what the board will say is on screen —
+ * nothing is named behind the person's back.
+ */
+export function titleFromGoal(text: string): string {
+  // First sentence-ish fragment: cut at the first terminator that ends a word.
+  const flat = text.trim().replace(/\s+/g, ' ')
+  const m = /^(.{8,79}?[.!?])(?:\s|$)/.exec(flat)
+  let head = (m ? m[1].replace(/[.!?]$/, '') : flat).trim()
+  if (head.length > 60) {
+    const cut = head.slice(0, 60)
+    let atWord = cut.slice(0, cut.lastIndexOf(' ') > 24 ? cut.lastIndexOf(' ') : 60).replace(/[,;:\s]+$/, '')
+    // A name should not trail off on a connective ("…the order and…").
+    atWord = atWord.replace(/\s+(and|or|the|a|an|to|for|of|with|in|on|at|by|it)$/i, '')
+    head = `${atWord}…`
+  }
+  return head === '' ? '' : head.charAt(0).toUpperCase() + head.slice(1)
+}
+
+/**
  * The plain ask. The project pin is the LANDED P3-RW-1 field: the registry id
  * verbatim, validated server-side — an invalid pin refuses the submission
  * loudly (404/409 render below the button, nothing is quietly dropped).
@@ -160,6 +192,11 @@ function AskForm({
   }, [registry.data, project])
 
   const empty = text.trim() === ''
+  // The name the task will actually wear: the typed one, or the derived one the
+  // placeholder is showing. Sending the derivation is what keeps raw `t-…` ids
+  // off the board — the promise under the field, kept (blocker #3).
+  const derived = titleFromGoal(text)
+  const effectiveTitle = title.trim() !== '' ? title.trim() : derived
 
   const submit = () => {
     if (empty || busy) return
@@ -167,7 +204,7 @@ function AskForm({
     setRefusal(null)
     api
       .submitRequest({
-        ...(title.trim() !== '' ? { title: title.trim() } : {}),
+        ...(effectiveTitle !== '' ? { title: effectiveTitle } : {}),
         text: text.trim(),
         ...(project !== '' ? { project } : {}),
       })
@@ -224,16 +261,23 @@ function AskForm({
 
       <label className="door-field">
         <span className="door-label">
-          A short name for the board <span className="door-optional">optional — it names itself otherwise</span>
+          A short name for the board{' '}
+          <span className="door-optional">
+            {derived === '' || title.trim() !== ''
+              ? 'optional — it names itself from the goal otherwise'
+              : 'optional — left empty, it will be called what the box below shows'}
+          </span>
         </span>
         <input
           className="door-input"
           type="text"
           value={title}
+          placeholder={derived}
           onChange={(e) => {
             setTitle(e.target.value)
           }}
           data-ask="title"
+          data-derived-title={derived !== '' && title.trim() === '' ? derived : undefined}
         />
       </label>
 
@@ -308,10 +352,15 @@ const kindLine: Record<string, string> = {
 function Journey({
   view,
   onView,
+  answeredRounds = 0,
   stream,
 }: {
   view: IntakeTaskView
   onView: (v: IntakeTaskView) => void
+  /** Rounds this BROWSER already answered, read back from the ?r= stamp on a
+   *  resume — so a reload mid-interview does not reset the face to the birth
+   *  copy (review #7). */
+  answeredRounds?: number
   stream?: EventStream
 }) {
   const phase = view.phase ?? ''
@@ -319,10 +368,26 @@ function Journey({
   // it: before the first answer the machine is reading the goal; after one,
   // it is composing the next round or the plan — different words, and the
   // "task is born" line after an answer read as a stall (live walk,
-  // 2026-08-16).
-  const [beats, setBeats] = useState(0)
+  // 2026-08-16). Seeded from the URL stamp on a resume; each fold restamps.
+  const [beats, setBeats] = useState(answeredRounds)
+  const beatsRef = useRef(answeredRounds)
+  // The beat lands AT SEND, not at response: the answer request carries the
+  // next round's compose and takes minutes, while the live approvals read
+  // closes the card within seconds — so the card panel unmounts long before
+  // the response resolves, and a response-time bump never ran (found live,
+  // drain r1: the wait between rounds greeted the task as newborn — review
+  // #7's second path). Sending IS this browser answering; the stamp rides the
+  // address in the same breath (§41-B: the URL is the one pocket).
+  const sent = () => {
+    beatsRef.current += 1
+    window.history.replaceState(
+      null,
+      '',
+      `${hrefFor('new')}?task=${encodeURIComponent(view.task_id)}&r=${String(beatsRef.current)}`,
+    )
+    setBeats(beatsRef.current)
+  }
   const fold = (v: IntakeTaskView) => {
-    setBeats((b) => b + 1)
     onView(v)
   }
 
@@ -334,14 +399,14 @@ function Journey({
   // only SEEDS the panel (see FollowTask); the caller's own live read is the
   // one truth for which card is open.
   return (
-    <div className="door-journey" data-task={view.task_id}>
+    <div className="door-journey" data-task={view.task_id} data-beats={String(beats)}>
       <JourneyHead view={view} />
       {phase === 'approved' ? (
         <Landed view={view} />
       ) : phase === 'cancelled' ? (
         <Cancelled view={view} />
       ) : (
-        <FollowTask view={view} onView={fold} answered={beats > 0} stream={stream} />
+        <FollowTask view={view} onView={fold} onSent={sent} answered={beats > 0} stream={stream} />
       )}
     </div>
   )
@@ -357,11 +422,14 @@ function Journey({
 function FollowTask({
   view,
   onView,
+  onSent,
   answered = false,
   stream,
 }: {
   view: IntakeTaskView
   onView: (v: IntakeTaskView) => void
+  /** Fired the moment an answer LEAVES this tab (see Journey.sent). */
+  onSent?: () => void
   answered?: boolean
   stream?: EventStream
 }) {
@@ -385,6 +453,7 @@ function FollowTask({
         card={card}
         askID={askID}
         onView={onView}
+        onSent={onSent}
       />
     )
   }
@@ -402,6 +471,7 @@ function FollowTask({
         card={view.open_card}
         askID={view.open_ask_id}
         onView={onView}
+        onSent={onSent}
       />
     )
   }
@@ -444,17 +514,24 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
  *  width is scaled onto the track. */
 function ClearanceMeter({ value }: { value: number }) {
   const ratio = Math.max(0, Math.min(1, value > 1 ? value / 100 : value))
+  // Display precision, not a different fact: the platform serves the measure
+  // at float precision ("12.121212…"), and a meter is read at whole points.
+  // The exact served value stays on data-clearance.
+  const shown = Math.round(value > 1 ? value : value * 100)
   return (
     <div
       className="clearance"
-      title="Clearance — how much of what it must know before planning is settled, out of 100. The platform computes it; answering raises it."
+      title="Clearance — how much of what it must know before planning is settled, out of 100. The platform computes it; answering raises it. A full meter is not approval: open markers on the drafted spec can still hold the plan until they are answered."
       data-clearance={String(value)}
     >
       <span className="clearance-label">Clearance</span>
       <span className="clearance-track" aria-hidden="true">
         <span className="clearance-fill" style={{ width: `${String(ratio * 100)}%` }} />
       </span>
-      <b className="mono">{String(value)}</b>
+      <b className="mono">
+        {String(shown)}
+        <span className="clearance-unit">/100 settled</span>
+      </b>
     </div>
   )
 }
@@ -479,37 +556,151 @@ function howWords(how: string): string {
 }
 
 /**
+ * The platform's per-skipped-slot assumption prose is a TEMPLATE
+ * (intake/pipeline.go): "<Name> — you asked me to go ahead without answering,
+ * so I assumed a sensible default." / "…small enough to run without an
+ * interview…". Rendered raw it doubled the slot's name and said nothing about
+ * WHAT was assumed — nine near-identical rows walled the plan card (design
+ * review 2026-08-17, blocker #15). These helpers recognize the template so the
+ * views can collapse it and substitute the planner's ACTUAL assumed value,
+ * which rides the same card in `layer1.assumptions` under `assumption:<slots>`
+ * origins. Unrecognized prose renders as itself — nothing is guessed.
+ */
+function assumptionRemainder(name: string, text: string): string {
+  return text.startsWith(`${name} — `) ? text.slice(name.length + 3) : text
+}
+
+function isAssumedDefaultBoilerplate(name: string, text: string): boolean {
+  return /so I assumed a sensible default\.?$/.test(assumptionRemainder(name, text))
+}
+
+/** The slots an origin tag names: `assumption:a,b` → [a,b]; `slot:a` → [a];
+ *  anything else → []. Reading, not inventing — the tags are the wire's. */
+function originSlots(origin: string): string[] {
+  const m = /^(assumption|slot|answered):(.+)$/.exec(origin)
+  if (m === null) return []
+  return m[2]
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+}
+
+/** A slot id in reader's words: `comparison_rules` → "comparison rules".
+ *  Raw slot ids never surface (blocker #15). */
+function humanSlot(id: string): string {
+  return id.replace(/[_-]+/g, ' ').trim()
+}
+
+/**
+ * The plan card's substantive assumed values, keyed by the slot each covers:
+ * parsed from the planner's own assumption rows whose origin is
+ * `assumption:<slot,…>`. This is the resolution the wire carries — the actual
+ * "sensible default", stated by the planner.
+ */
+function slotResolutions(assumptions: { text: string; origin?: string }[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const a of assumptions) {
+    if (a.origin === undefined || !a.origin.startsWith('assumption:')) continue
+    for (const slot of originSlots(a.origin)) {
+      if (!out.has(slot)) out.set(slot, a.text)
+    }
+  }
+  return out
+}
+
+/**
  * "Here is what I understood so far" — the per-round recap on interview and
  * clarification cards, and the platform's slot-by-slot record beside the
  * planner's restatement on the plan card. Items are the platform's own
  * deterministic record; `text` is the optional utility-phrased prose and
  * renders as the lead when present. An absent block renders nothing — the
  * first round has nothing to recap, and that is not a defect.
+ *
+ * Assumed slots render their ACTUAL assumed value wherever the card carries
+ * one (`resolutions`, from the plan's own assumption rows); template rows with
+ * no stated value collapse into ONE line naming the skipped points — never a
+ * wall of "assumed a sensible default" (blocker #15).
  */
-export function UnderstoodPanel({ understood, heading }: { understood?: IntakeUnderstood; heading: string }) {
+export function UnderstoodPanel({
+  understood,
+  heading,
+  resolutions,
+}: {
+  understood?: IntakeUnderstood
+  heading: string
+  resolutions?: Map<string, string>
+}) {
   if (understood === undefined) return null
   const items = understood.items ?? []
   const text = understood.text ?? ''
   if (items.length === 0 && text === '') return null
+
+  // Rows in card order; boilerplate-assumed slots with a resolution GROUP by
+  // that resolution (one sentence can cover five slots — say it once), and
+  // ones without any stated value collect into the single skipped line.
+  type Row = { key: string; names: string[]; slots: string[]; value: string; how: string }
+  const rows: Row[] = []
+  const byValue = new Map<string, Row>()
+  const skipped: { name: string; slot: string }[] = []
+  for (const it of items) {
+    const stated =
+      it.how === 'assumption' && it.assumption !== undefined && it.assumption !== ''
+        ? it.assumption
+        : it.value !== undefined && it.value !== ''
+          ? it.value
+          : ''
+    if (it.how === 'assumption' && isAssumedDefaultBoilerplate(it.name, stated)) {
+      const resolved = resolutions?.get(it.slot_id)
+      if (resolved !== undefined && resolved !== '') {
+        const have = byValue.get(resolved)
+        if (have !== undefined) {
+          have.names.push(it.name)
+          have.slots.push(it.slot_id)
+        } else {
+          const row = { key: `${it.slot_id}:${it.how}`, names: [it.name], slots: [it.slot_id], value: resolved, how: it.how }
+          byValue.set(resolved, row)
+          rows.push(row)
+        }
+      } else {
+        skipped.push({ name: it.name, slot: it.slot_id })
+      }
+      continue
+    }
+    rows.push({
+      key: `${it.slot_id}:${it.how}`,
+      names: [it.name],
+      slots: [it.slot_id],
+      value: stated === '' ? '—' : assumptionRemainder(it.name, stated),
+      how: it.how,
+    })
+  }
+
   return (
     <div className="understood" data-understood>
       <p className="understood-head">{heading}</p>
       {text !== '' && <p className="understood-text">{text}</p>}
-      {items.length > 0 && (
+      {(rows.length > 0 || skipped.length > 0) && (
         <ul className="understood-items">
-          {items.map((it) => (
-            <li key={`${it.slot_id}:${it.how}`} data-slot={it.slot_id} data-how={it.how}>
-              <span className="understood-name">{it.name}</span>
-              <span className="understood-value">
-                {it.how === 'assumption' && it.assumption !== undefined && it.assumption !== ''
-                  ? it.assumption
-                  : it.value !== undefined && it.value !== ''
-                    ? it.value
-                    : '—'}
-              </span>
-              <span className="understood-how">{howWords(it.how)}</span>
+          {rows.map((r) => (
+            <li key={r.key} data-slot={r.slots.join(',')} data-how={r.how}>
+              <span className="understood-name">{r.names.join(' · ')}</span>
+              <span className="understood-value">{r.value}</span>
+              <span className="understood-how">{howWords(r.how)}</span>
             </li>
           ))}
+          {skipped.length > 0 && (
+            <li data-how="assumption" data-skipped={skipped.map((s) => s.slot).join(',')}>
+              <span className="understood-name">{skipped.length === 1 ? 'One point you skipped' : `${String(skipped.length)} points you skipped`}</span>
+              <span className="understood-value">
+                {skipped.map((s) => s.name).join(' · ')} — it goes ahead on sensible defaults;{' '}
+                {resolutions !== undefined
+                  ? 'each one is listed under Assumptions below, where you can still contest it'
+                  : 'each one becomes a listed assumption on the plan card, where you can still contest it'}
+                .
+              </span>
+              <span className="understood-how">{howWords('assumption')}</span>
+            </li>
+          )}
         </ul>
       )}
     </div>
@@ -599,40 +790,61 @@ function CardPanel({
   card,
   askID,
   onView,
+  onSent,
 }: {
   view: IntakeTaskView
   card: IntakeCard
   askID: string
   onView: (v: IntakeTaskView) => void
+  onSent?: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState('')
   const [needPin, setNeedPin] = useState(false)
   const [pin, setPin] = useState('')
+  // The answer the step-up is holding: stashed when the platform said
+  // `pin_required`, sent again by the armed panel's own confirm. Holding it
+  // here is what lets the panel sit NEXT TO the person's attention instead of
+  // needing the original button found again two screenfuls up (blocker #4).
+  const [pending, setPending] = useState<IntakeAnswerBody | null>(null)
+  const stepupRef = useRef<HTMLDivElement | null>(null)
+
+  // The armed step-up must be SEEN to be armed: the card above it is long
+  // (a full plan), and the field used to render off-screen below it — the
+  // viewport stayed at the card top and nothing visibly happened (blocker #4).
+  useEffect(() => {
+    if (!needPin) return
+    stepupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    stepupRef.current?.querySelector('input')?.focus()
+  }, [needPin])
 
   // ONE answer path for every card kind: send, fold the returned view in, and
-  // render any refusal in the server's own words. `pin_required` reveals the
-  // PIN field instead of failing — the S01.9 step-up rides the same request.
+  // render any refusal in the server's own words. `pin_required` arms the
+  // step-up panel instead of failing — the S01.9 step-up rides the same request.
   const answer = (body: IntakeAnswerBody) => {
     if (busy) return
     setBusy(true)
     setRefusal('')
+    onSent?.()
     api.answerAsk(askID, { answer: body, ...(pin !== '' ? { pin } : {}) }).then(
       (v) => {
         setBusy(false)
         setNeedPin(false)
         setPin('')
+        setPending(null)
         onView(v)
       },
       (err: unknown) => {
         setBusy(false)
         if (err instanceof ApiError && err.code === 'pin_required') {
           setNeedPin(true)
-          setRefusal('This approval is High stakes: enter your PIN below and confirm again — it rides the same request and is never stored.')
+          setPending(body)
+          setRefusal('')
           return
         }
         if (err instanceof ApiError && err.code === 'pin_rejected') {
           setNeedPin(true)
+          setPending(body)
           setRefusal('The PIN was not accepted. Try again.')
           return
         }
@@ -711,20 +923,57 @@ function CardPanel({
       )}
 
       {needPin && (
-        <label className="door-field door-pin">
-          <span className="door-label">Your PIN</span>
-          <input
-            className="door-input"
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChange={(e) => {
-              setPin(e.target.value)
-            }}
-            data-ask="pin"
-          />
-        </label>
+        <div className="door-stepup" ref={stepupRef} role="alert" data-stepup="armed">
+          <p className="stepup-head">
+            <CircleAlert size={15} strokeWidth={2} aria-hidden="true" /> Armed — your PIN confirms it
+          </p>
+          <p className="stepup-sub">
+            This is a High-stakes act, so the platform asks you to prove it is you in the same breath. Nothing has
+            happened yet: entering your PIN and confirming is what makes it real, and the PIN rides that one request —
+            it is never stored.
+          </p>
+          <label className="door-field door-pin">
+            <span className="door-label">Your PIN</span>
+            <input
+              className="door-input"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value)
+              }}
+              data-ask="pin"
+            />
+          </label>
+          <div className="door-acts">
+            <Button
+              variant="primary"
+              disabled={pin === '' || busy || pending === null}
+              aria-busy={busy}
+              data-stepup-confirm
+              onClick={() => {
+                if (pending !== null) answer(pending)
+              }}
+            >
+              {busy ? 'Confirming…' : 'Confirm with PIN'}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              data-stepup-disarm
+              onClick={() => {
+                setNeedPin(false)
+                setPin('')
+                setPending(null)
+                setRefusal('')
+              }}
+            >
+              Never mind — stand down
+            </Button>
+            {pin === '' && !busy && <span className="door-why">enter your PIN to confirm, or stand down and nothing happens</span>}
+          </div>
+        </div>
       )}
       {refusal !== '' && (
         <div className="door-refusal" role="alert">
@@ -795,6 +1044,14 @@ function QuestionForm({
   allowAssume: boolean
   onAnswer: (b: IntakeAnswerBody) => void
 }) {
+  // Interview rounds are the phrased kind (P3-RW-12 R6); clarification cards
+  // are never phrased BY DESIGN, so marking their standard wording would be
+  // noise about an absence that is not a fallback. The honesty marker (#6)
+  // rides only where phrased-vs-stock is a real distinction — and when the
+  // WHOLE round is stock (the phrasing seat did not answer at all), one line
+  // says it once instead of stamping every question (the #15 lesson).
+  const phrasable = card.kind === 'interview'
+  const allStock = phrasable && (card.questions ?? []).every((q) => q.phrased === undefined || q.phrased === '')
   const questions = card.questions ?? []
   const [picked, setPicked] = useState<Record<string, string>>({})
   const [own, setOwn] = useState<Record<string, string>>({})
@@ -819,14 +1076,30 @@ function QuestionForm({
   return (
     <div className="q-form">
       <UnderstoodPanel understood={card.understood} heading="What it understood so far" />
+      {allStock && questions.length > 1 && (
+        <p className="q-stock" data-phrasing="canonical-round">
+          standard wording throughout — this round was not rephrased for your request
+        </p>
+      )}
       {questions.map((q, i) => (
         <fieldset className="q-card" key={q.id} data-question={q.id}>
           <legend className="q-legend">
             {/* The phrased wording when the utility seat answered, the
                 canonical taxonomy text otherwise (P3-RW-12 R6) — the
-                producer's own display rule. */}
+                producer's own display rule. The fallback ADMITS itself
+                (review #6): a stock question and a phrased one read
+                differently, and pretending they are the same voice is a
+                small lie. */}
             <span className="q-n mono">{String(i + 1)}</span>{' '}
-            {q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text}
+            {/* The marker's internal token never surfaces (#17): the kind line
+                above already says these are the spec's open markers, so the
+                words that follow the token are the question. */}
+            {(q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text).replace(/^NEEDS-CLARIFICATION:\s*/, '')}
+            {phrasable && !(allStock && questions.length > 1) && (q.phrased === undefined || q.phrased === '') && (
+              <span className="q-stock" data-phrasing="canonical">
+                standard wording — this one was not rephrased for your request
+              </span>
+            )}
           </legend>
           <div className="q-options" role="group" aria-label={`options for: ${q.text}`}>
             {(q.options ?? []).map((o) => {
@@ -1214,8 +1487,15 @@ function PlanCard({
         <p className="plan-restatement">{l1.restatement}</p>
         {/* Beside the planner's prose: what the PLATFORM recorded, slot by
             slot, each answer origin-labeled (P3-RW-12 R9). The two together
-            are the 1.3 restate-and-confirm — approve IS the confirmation. */}
-        <UnderstoodPanel understood={l1.understood} heading="Point by point — what was settled, and how" />
+            are the 1.3 restate-and-confirm — approve IS the confirmation.
+            Assumed slots show the planner's ACTUAL assumed value (the
+            `assumption:<slot>` rows this same card carries), never the
+            contentless template (blocker #15). */}
+        <UnderstoodPanel
+          understood={l1.understood}
+          heading="Point by point — what was settled, and how"
+          resolutions={slotResolutions(l1.assumptions ?? [])}
+        />
       </section>
 
       {(l1.deliverable ?? []).length > 0 && (
@@ -1272,18 +1552,7 @@ function PlanCard({
 
       <section className="plan-sec plan-assumptions" data-plan="assumptions">
         <h3 className="plan-h">Assumptions — read these first</h3>
-        {(l1.assumptions ?? []).length === 0 ? (
-          <p className="muted m-0">None. Everything it needed, you answered.</p>
-        ) : (
-          <ul className="plan-list">
-            {l1.assumptions?.map((as) => (
-              <li key={as.text}>
-                {as.text}
-                {as.origin !== undefined && as.origin !== '' && <span className="assume-origin"> · {originWords(as.origin)}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
+        <AssumptionList assumptions={l1.assumptions ?? []} />
       </section>
 
       {(l1.uncovered ?? []).length > 0 && (
@@ -1451,12 +1720,65 @@ function PlanCard({
   )
 }
 
-/** The S06.6 assumption origins, in the reader's words. */
-function originWords(origin: string): string {
-  if (origin.startsWith('slot:')) return `assumed because you skipped "${origin.slice(5)}"`
+/**
+ * The plan's assumption list, deduplicated (blocker #15).
+ *
+ * The wire carries every skipped slot TWICE: the planner's substantive row
+ * (origin `assumption:<slots>`, the actual assumed value) and the platform's
+ * per-slot template row (origin `slot:<id>`, "…so I assumed a sensible
+ * default"). Both are true, but printing both walls the card while the second
+ * says nothing. Here: substantive rows render whole; template rows whose slot
+ * a substantive row already covers are DROPPED as the duplicates they are; the
+ * uncovered remainder collapses into one plain line naming the skipped points.
+ * Rows this logic does not recognize render verbatim — nothing is hidden on a
+ * guess.
+ */
+function AssumptionList({ assumptions }: { assumptions: { text: string; origin?: string }[] }) {
+  if (assumptions.length === 0) return <p className="muted m-0">None. Everything it needed, you answered.</p>
+  const covered = new Set(slotResolutions(assumptions).keys())
+  const shown: typeof assumptions = []
+  const skipped: string[] = []
+  for (const as of assumptions) {
+    const slotOrigin = as.origin !== undefined && as.origin.startsWith('slot:') ? originSlots(as.origin) : []
+    const nameFromText = /^(.+?) — /.exec(as.text)?.[1] ?? ''
+    if (slotOrigin.length > 0 && isAssumedDefaultBoilerplate(nameFromText, as.text)) {
+      if (slotOrigin.every((s) => covered.has(s))) continue // the substantive row above already states the default
+      skipped.push(nameFromText !== '' ? nameFromText : humanSlot(slotOrigin[0]))
+      continue
+    }
+    shown.push(as)
+  }
+  return (
+    <ul className="plan-list">
+      {shown.map((as) => (
+        <li key={as.text}>
+          {as.text}
+          {as.origin !== undefined && as.origin !== '' && <span className="assume-origin"> · {originWords(as.origin)}</span>}
+        </li>
+      ))}
+      {skipped.length > 0 && (
+        <li data-assume-skipped={String(skipped.length)}>
+          {skipped.join(' · ')} — skipped in the interview, so it goes ahead on sensible defaults it has not spelled
+          out. Contest any of these via Re-plan if that is not what you meant.
+          <span className="assume-origin"> · assumed because you chose to proceed</span>
+        </li>
+      )}
+    </ul>
+  )
+}
+
+/** The S06.6 assumption origins, in the reader's words — raw slot ids and
+ *  origin tags never surface (blocker #15; jargon sweep #17). */
+export function originWords(origin: string): string {
+  if (origin.startsWith('slot:')) return `assumed because you skipped "${humanSlot(origin.slice(5))}"`
   if (origin === 'force_proceed') return 'assumed because you chose to proceed'
   if (origin === 'planner') return 'the planner assumed it'
-  if (origin === 'band') return 'assumed by the low-stakes band'
+  if (origin === 'band') return 'assumed — the ask was small enough to run without an interview'
+  if (origin.startsWith('answered:'))
+    return `follows from what you answered (${originSlots(origin).map(humanSlot).join(', ')})`
+  if (origin.startsWith('assumption:'))
+    return `its stated call on ${originSlots(origin).map(humanSlot).join(', ')}`
+  if (origin.startsWith('research:')) return 'from its own research notes'
   return origin
 }
 
@@ -1610,9 +1932,20 @@ function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting:
   })
   const runs = detail.data?.runs ?? []
   const crashed = runs.length > 0 && runs[runs.length - 1].state === 'crashed'
-  // More than one run = the story moved past birth (a healed fork, a later
-  // stage) — a resumed tab must not greet it as newborn.
-  const working = answered || runs.length > 1
+  // The story has moved past birth when THIS TAB folded answers in — or when
+  // the SERVED record says so: a second run (healed fork, later stage), a
+  // drafted spec or plan (the first emission exists only after answers), any
+  // recorded stage boundary or human decision. A resumed tab reads the record
+  // instead of greeting a mid-interview task as newborn (review #7 — the
+  // birth copy stood on two paths where this face knew better).
+  // NOT stage_progress: the intake run records a boundary at BIRTH, which made
+  // this face greet a newborn with "answers recorded" (caught live, drain r1).
+  const working =
+    answered ||
+    runs.length > 1 ||
+    detail.data?.spec != null ||
+    detail.data?.plan != null ||
+    (detail.data?.decisions ?? []).length > 0
   return (
     <div className="door-landed" data-door-result="no-card" data-after-answer={answered ? 'true' : undefined}>
       <h3 className="landed-head">

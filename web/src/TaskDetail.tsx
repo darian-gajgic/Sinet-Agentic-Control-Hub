@@ -126,11 +126,12 @@ export function TaskDetail({
           {data === null && error === '' && <p className="muted">Reading the task…</p>}
           {data && (
             <>
+              {data.kanban_status === 'cancelled' && <CancelledBanner decisions={data.decisions} />}
               <ActionBar detail={data} reload={reload} stream={stream} />
               <SpecBlock detail={data} stale={stale} />
               <StageBlock detail={data} stale={stale} />
               <LiveActivity run={activeRun(data)} stream={stream} />
-              <DecisionsBlock decisions={data.decisions} stale={stale} />
+              <DecisionsBlock decisions={data.decisions} stale={stale} cancelled={data.kanban_status === 'cancelled'} />
               <DeliverablesBlock taskID={id} stream={stream} />
               <ReceiptsBlock runs={data.runs} stale={stale} reload={reload} />
             </>
@@ -162,6 +163,40 @@ function statusTone(status: string): Tone {
     default:
       return 'blue'
   }
+}
+
+/**
+ * A stage marker in the reader's words (review #17): live runs serve internal
+ * step ids ("intake.state", "t-….execute"), and the rail wore them raw. The
+ * FAMILY gets plain words; the full id stays beside them as the record it is.
+ * An unmapped family renders verbatim — this client owns no stage vocabulary
+ * (§42).
+ */
+const stageFamilyWords: Record<string, string> = {
+  intake: 'understanding the ask',
+  interview: 'asking its questions',
+  plan: 'planning',
+  planning: 'planning',
+  drafting: 'drafting',
+  execute: 'doing the work',
+  executing: 'doing the work',
+  verify: 'checking the work',
+  verifying: 'checking the work',
+}
+
+export function StageName({ stage }: { stage: string }) {
+  if (stage === '') return <Absent reason="no stage marker" />
+  const family = stage.split('.')[0]
+  const words = stageFamilyWords[family]
+  if (words === undefined) {
+    return <span className="stage-name font-mono text-xs tracking-wide uppercase">{stage}</span>
+  }
+  return (
+    <span className="stage-name" data-stage-id={stage}>
+      {words}
+      {stage !== family && <span className="stage-id font-mono text-[10.5px] text-(--text-faint)"> · {stage}</span>}
+    </span>
+  )
 }
 
 /** fmtDuration: seconds → human words. Raw seconds never render (C2-13). */
@@ -237,7 +272,10 @@ function SpecBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
                 {ac.structured && (
                   <span className="muted">
                     {' '}
-                    — {ac.structured} ({ac.structured_kind})
+                    — {ac.structured}
+                    {ac.structured_kind !== undefined && ac.structured_kind !== '' && (
+                      <> ({structuredKindWords(ac.structured_kind)})</>
+                    )}
                   </span>
                 )}
               </li>
@@ -288,6 +326,19 @@ function StatusLine({ what, status, version }: { what: string; status: string; v
       </span>
     </h3>
   )
+}
+
+/** The two structured-AC notations, in plain words instead of their internal
+ *  tokens "(ears)" / "(gwt)" (review #17). Unknown values render verbatim. */
+function structuredKindWords(kind: string): string {
+  switch (kind) {
+    case 'ears':
+      return 'written in the EARS requirement form'
+    case 'gwt':
+      return 'written as Given / When / Then'
+    default:
+      return kind
+  }
 }
 
 function SpecLists({ spec }: { spec: Spec }) {
@@ -514,11 +565,7 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
             <Chip className="run-state" tone={card.wedged ? 'red' : 'green'}>
               {card.state}
             </Chip>{' '}
-            {card.stage !== '' ? (
-              <span className="stage-name font-mono text-xs tracking-wide uppercase">{card.stage}</span>
-            ) : (
-              <Absent reason="no stage marker" />
-            )}
+            <StageName stage={card.stage} />
             {card.wedged && <span className="warn-flag"> wedged</span>}
             {card.waiting_on_human && <span className="waiting-human"> waiting on a person</span>}
           </p>
@@ -571,9 +618,22 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
                 is the banned class). The counter stays monotonic fact. */}
             <li>{fmtDuration(card.counters.elapsed_s)} elapsed</li>
             <li className="run-cost">
-              <Money usd={card.counters.api_equiv_cost_usd} />
-              {card.counters.unpriced === true && (
-                <> · subscription lane, so this is the API-equivalent figure</>
+              {/* The unpriced truth (review #9): a subscription-lane run's
+                  served figure is 0 because NO dollar price exists — calling
+                  that 0 "the API-equivalent figure" contradicted the UNPRICED
+                  receipts below it. A zero says unpriced; only a real nonzero
+                  estimate may call itself API-equivalent. */}
+              {card.counters.unpriced === true ? (
+                card.counters.api_equiv_cost_usd !== null && card.counters.api_equiv_cost_usd > 0 ? (
+                  <>
+                    <Money usd={card.counters.api_equiv_cost_usd} /> · API-equivalent estimate — this work runs on a
+                    subscription lane with no per-call price
+                  </>
+                ) : (
+                  <>subscription lane — no dollar price exists for these calls; the receipt lists them as UNPRICED</>
+                )
+              ) : (
+                <Money usd={card.counters.api_equiv_cost_usd} />
               )}
             </li>
           </ul>
@@ -616,9 +676,7 @@ function stepNode(s: Detail['stage_progress'][number]): RailNode {
     stage: s.stage,
     head: (
       <>
-        <span className="stage-name font-mono text-xs tracking-wide uppercase">
-          {s.stage === '' ? <Absent reason="unnamed stage" /> : s.stage}
-        </span>
+        {s.stage === '' ? <Absent reason="unnamed stage" /> : <StageName stage={s.stage} />}
         <span className="muted text-xs"> {s.type}</span>
         {s.kind !== '' && <span className="muted text-xs"> · {s.kind}</span>}
         {s.outcome && (
@@ -817,15 +875,57 @@ function ProjectLineage({ detail }: { detail: Detail }) {
 
 /* ── decisions ───────────────────────────────────────────────────────────── */
 
+/**
+ * The cancelled task's plain-words why (review #10). A cancel is ALWAYS a
+ * person's act on this platform (internal/stage/cancel.go: every entry point
+ * takes an authenticated actor) — so a cancelled task saying "nobody has
+ * decided anything" was false. What the wire serves today: the cancel's actor
+ * and reason ride the run's TRANSITION event, which the task read does not
+ * project into `decisions` (reported as a backend gap) — so where a decision
+ * row exists it is named, and where none does the banner still tells the true
+ * part in plain words instead of leaving the rail's state tokens as the only
+ * story.
+ */
+function CancelledBanner({ decisions }: { decisions: TaskDecision[] }) {
+  const cancel = [...decisions].reverse().find((d) => d.decision.toLowerCase().includes('cancel'))
+  return (
+    <StallBanner kind="cancelled" tone="red" what={
+      cancel !== undefined ? (
+        <>
+          This task was cancelled by <Owner id={cancel.actor} />
+          {cancel.reason !== undefined && cancel.reason !== '' && <> — {cancel.reason}</>}. Nothing runs on it and
+          nothing more is spent; the record below stays.
+        </>
+      ) : (
+        <>
+          This task was cancelled — a person stopped it; a cancel is never the machine&apos;s own act. Nothing runs on
+          it and nothing more is spent; the record below stays. (Who pressed it and why is on the run&apos;s own record,
+          which this card does not receive yet.)
+        </>
+      )
+    } />
+  )
+}
+
 /** R12: every human decision along the way, from served rows only. */
-function DecisionsBlock({ decisions, stale }: { decisions: TaskDecision[]; stale: boolean }) {
+function DecisionsBlock({ decisions, stale, cancelled }: { decisions: TaskDecision[]; stale: boolean; cancelled?: boolean }) {
   return (
     <Section title="Human decisions" stale={stale}>
       {decisions.length === 0 ? (
+        cancelled === true ? (
+          // "Nobody has decided anything" on a task a person CANCELLED is a
+          // false sentence (review #10). The honest one names the act and the
+          // gap.
+          <EmptyState
+            what="One decision was made here: a person cancelled this task."
+            why="The cancel itself is recorded on the run's transition record, which is not yet served into this list — a platform gap, reported. No other decision was recorded."
+          />
+        ) : (
         <EmptyState
           what="Nobody has had to decide anything on this task yet."
           why="A row appears here when a person's decision is recorded in its own right — a delta re-approval, an operator override, accepting a deliverable. Answering a plan or interview card resumes the pipeline instead of minting a row: those answers show in the rail above, as parked stretches that end with 'resumed on plan approved'."
         />
+        )
       ) : (
         <ul className="decisions">
           {decisions.map((d) => (
@@ -910,15 +1010,32 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
           why="A run is one attempt at the work, and each carries its own receipt of what it consumed. Nothing has been started for this task."
         />
       ) : (
-        runs.map((r) => (
-          <div className="run-receipt" key={r.run_id} data-run={r.run_id}>
-            <h4>
-              {r.run_id} <span className="muted">{r.state}</span>
-            </h4>
-            <CancelRun run={r} reload={reload} />
-            {r.receipt ? <ReceiptView receipt={r.receipt} /> : <Absent reason={r.receipt_absent ?? 'no receipt'} />}
-          </div>
-        ))
+        (() => {
+          // The S10.6 mode note is often the SAME sentence on every run of a
+          // task; printing it whole per receipt read as a stuck footnote
+          // (review #17). The first receipt carries it in full; repeats point
+          // up instead. The note stays the platform's verbatim text where it
+          // renders, and a run whose note DIFFERS still prints its own.
+          const seen = new Set<string>()
+          return runs.map((r) => {
+            const note = r.receipt?.mode.note ?? ''
+            const repeated = note !== '' && seen.has(note)
+            if (note !== '') seen.add(note)
+            return (
+              <div className="run-receipt" key={r.run_id} data-run={r.run_id}>
+                <h4>
+                  {r.run_id} <span className="muted">{r.state}</span>
+                </h4>
+                <CancelRun run={r} reload={reload} />
+                {r.receipt ? (
+                  <ReceiptView receipt={r.receipt} modeNoteRepeated={repeated} />
+                ) : (
+                  <Absent reason={r.receipt_absent ?? 'no receipt'} />
+                )}
+              </div>
+            )
+          })
+        })()
       )}
     </Section>
   )
@@ -929,7 +1046,7 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
  * from execution; unpriced calls are shown as unpriced, never folded into
  * the priced total.
  */
-export function ReceiptView({ receipt }: { receipt: Receipt }) {
+export function ReceiptView({ receipt, modeNoteRepeated }: { receipt: Receipt; modeNoteRepeated?: boolean }) {
   const direct = receipt.direct_use
   // `items` is null on the wire when the receipt itemizes nothing — a run
   // cancelled before any model call materializes exactly that (F1's crasher).
@@ -998,9 +1115,17 @@ export function ReceiptView({ receipt }: { receipt: Receipt }) {
         </ul>
       )}
 
-      {/* The S10.6 seam note, printed exactly as the platform wrote it. */}
-      <p className="mode-note" data-mode-note="verbatim">
-        {receipt.mode.note === '' ? <Absent reason="no mode line recorded" /> : receipt.mode.note}
+      {/* The S10.6 seam note, printed exactly as the platform wrote it — once:
+          a note identical to an earlier receipt's points up instead (review
+          #17's stuck-footnote read). */}
+      <p className="mode-note" data-mode-note={modeNoteRepeated === true ? 'repeated' : 'verbatim'}>
+        {receipt.mode.note === '' ? (
+          <Absent reason="no mode line recorded" />
+        ) : modeNoteRepeated === true ? (
+          'same accounting note as the receipt above'
+        ) : (
+          receipt.mode.note
+        )}
       </p>
 
       {/* The done-directly figure UNDER THE LABEL THE API SERVED. No label

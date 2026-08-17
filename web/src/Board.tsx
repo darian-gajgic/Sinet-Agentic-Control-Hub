@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 
 import { api, type PriorityHint, type TaskDetail, type TaskListItem } from './api'
+import { StageName } from './TaskDetail'
 import type { EventStream } from './events'
 import { cancelledStatus, columnsFor, groupByProject, tasksInColumn } from './kanban'
 import { boardEventTypes, describeError, useLive } from './live'
@@ -489,8 +490,21 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
             </span>
           )}
           {run !== null && run !== undefined && (
-            <span className="task-cost mono">
-              {run.cost_so_far_usd !== null ? <Money usd={run.cost_so_far_usd} /> : <Absent reason="no cost reading" />}
+            <span
+              className="task-cost mono"
+              title="The priced total so far. Work on subscription lanes has no per-call price and never joins this figure — the task card's receipts list it as UNPRICED."
+            >
+              {/* `cost_so_far_usd` is the PRICED total; the list read carries
+                  no unpriced marker (a reported wire note), so a bare "USD 0"
+                  on a task whose spend was all subscription-lane read as
+                  "free" (review #12). The chip says which figure it is. */}
+              {run.cost_so_far_usd === null ? (
+                <Absent reason="no cost reading" />
+              ) : run.cost_so_far_usd === 0 ? (
+                <>USD 0 priced</>
+              ) : (
+                <Money usd={run.cost_so_far_usd} />
+              )}
             </span>
           )}
           {run?.downgrade_note !== undefined && run.downgrade_note !== '' && (
@@ -591,7 +605,7 @@ function SubItems({ taskID, cancelled }: { taskID: string; cancelled: boolean })
                   tone={s.outcome === 'error' ? 'red' : s.outcome === 'split' ? 'blue' : 'green'}
                   className="sub-dot"
                 />
-                <span className="mono">{s.stage === '' ? '(unnamed)' : s.stage}</span>
+                {s.stage === '' ? <span className="mono">(unnamed)</span> : <StageName stage={s.stage} />}
                 {s.outcome !== undefined && s.outcome !== '' && <span className="sub-note"> · {s.outcome}</span>}
               </li>
             ))}

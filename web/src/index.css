@@ -77,7 +77,11 @@
   --panel-3: rgba(148, 148, 190, 0.14);
   --border-l: rgba(148, 148, 190, 0.28);
   --text-dim: #9a9ab2;
-  --text-faint: #5e5e78;
+  /* AA-corrected 2026-08-17 (design review #22): #5e5e78 measured 3.2:1 on the
+     page ground and 2.9:1 on panels — under the 4.5:1 small-text bar the
+     provenance lines and footnotes live at. #82829f reads 5.4:1 / 4.9:1 and
+     stays visibly fainter than --text-dim, so the hierarchy survives. */
+  --text-faint: #82829f;
   --accent-2: #5eead4;
   --cyan: #22d3ee;
   --accent-glow: rgba(124, 92, 255, 0.16);
@@ -169,6 +173,39 @@
    `text-muted-foreground` and `border-border` all resolve from the ONE token
    set. It is also where the two colliding names are decoupled: the utility
    follows shadcn's meaning, the variable keeps the landed one. */
+
+/* react-diff-view, re-based onto the dark ground through ITS OWN
+   custom-property seam (design review #23: the adopted stylesheet ships
+   light-theme pastels, which under this page's light text rendered the diff
+   faded and the line numbers ghosted; theming the published variables is the
+   library's sanctioned door — no fork). Declared in the UNLAYERED token
+   region: the library's own :root block is unlayered too, so a layered
+   override would lose; the doubled :root outranks it by specificity. */
+:root:root {
+  --diff-background-color: transparent;
+  --diff-text-color: var(--foreground);
+  --diff-font-family: 'JetBrains Mono', ui-monospace, monospace;
+  --diff-selection-background-color: rgba(124, 92, 255, 0.35);
+  --diff-selection-text-color: var(--foreground);
+  --diff-gutter-insert-background-color: rgba(74, 222, 128, 0.14);
+  --diff-gutter-insert-text-color: #b7f0c6;
+  --diff-gutter-delete-background-color: rgba(248, 113, 113, 0.14);
+  --diff-gutter-delete-text-color: #f7c2bd;
+  --diff-gutter-selected-background-color: rgba(124, 92, 255, 0.22);
+  --diff-gutter-selected-text-color: var(--foreground);
+  --diff-code-insert-background-color: rgba(74, 222, 128, 0.1);
+  --diff-code-insert-text-color: var(--foreground);
+  --diff-code-delete-background-color: rgba(248, 113, 113, 0.1);
+  --diff-code-delete-text-color: var(--foreground);
+  --diff-code-insert-edit-background-color: rgba(74, 222, 128, 0.3);
+  --diff-code-insert-edit-text-color: #eafff0;
+  --diff-code-delete-edit-background-color: rgba(248, 113, 113, 0.32);
+  --diff-code-delete-edit-text-color: #fff0ee;
+  --diff-code-selected-background-color: rgba(124, 92, 255, 0.18);
+  --diff-code-selected-text-color: var(--foreground);
+  --diff-omit-gutter-line-color: var(--red);
+}
+
 
 @theme inline {
   --color-background: var(--background);
@@ -792,10 +829,16 @@ a {
   top: 0;
   z-index: 30;
   display: flex;
-  flex-wrap: wrap;
+  /* #19 (design review 2026-08-17): nowrap, phone-first. The head-right
+     cluster used to wrap into ~230px of sticky stacked rows at phone width;
+     now the row COMPACTS instead of stacking — the title truncates, the
+     right-side cluster sheds its wide forms below the breakpoint — so the
+     sticky bar is one thin line everywhere and the S15.12 always-visible
+     connection pill keeps its place on every surface. */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.6rem;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: rgba(10, 10, 18, 0.55);
   backdrop-filter: blur(var(--blur-shell));
   border-bottom: 1px solid var(--border);
@@ -827,6 +870,7 @@ a {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 1 1 auto; /* #19: the title is what gives way — by truncation, never by wrapping the bar */
 }
 
 .page-title h1 {
@@ -841,6 +885,7 @@ a {
 }
 
 .page-sub {
+  display: none; /* #19: the teaching subtitle is a wide-screen line; at phone the title carries the bar */
   font-size: 11.5px;
   color: var(--text-faint);
   white-space: nowrap;
@@ -850,18 +895,24 @@ a {
 
 .head-right {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap; /* #19: the cluster compacts, it never stacks */
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   margin-inline-start: auto;
   min-width: 0;
+  flex: none;
 }
 
-/* At phone width the cluster wraps under the title; the connection pill leads
-   the wrapped rows — always visible comes first (S15.12). Reset at the
-   breakpoint, where everything sits on one line. */
-.head-right .conn {
-  order: -1;
+/* #19: what the phone bar sheds (each restored at the breakpoint) — the
+   signed-in display name (the avatar identifies; Sign out stays). The tour
+   button's phone-hide lives in the UNLAYERED token region: its own display
+   utility outranks any base-layer rule. */
+.head-right .who-name {
+  display: none;
+}
+
+.scope-select {
+  max-width: 7rem;
 }
 
 /* The signed-in chip (Nexus .user-chip). */
@@ -1932,12 +1983,20 @@ input[type='radio'] {
     padding: 14px 30px;
   }
 
+  .page-sub {
+    display: block;
+  }
+
   .head-right {
     gap: 0.9rem;
   }
 
-  .head-right .conn {
-    order: 0;
+  .head-right .who-name {
+    display: block;
+  }
+
+  .scope-select {
+    max-width: none;
   }
 
   .shell-main {
@@ -2402,7 +2461,7 @@ input[type='radio'] {
 
 .task-under {
   display: block;
-  font-size: 10px;
+  font-size: 11px; /* #22: provenance microtext at reading grade */
   color: var(--text-faint);
   margin-bottom: 7px;
   overflow: hidden;
@@ -2418,7 +2477,7 @@ input[type='radio'] {
 }
 
 .task-foot .chip {
-  font-size: 9.5px;
+  font-size: 10.5px; /* #22: chip microtext lifted with the AA faint token */
 }
 
 .task-park {
@@ -3168,7 +3227,7 @@ input[type='radio'] {
 
 .journey-under {
   margin: 2px 0 0;
-  font-size: 10.5px;
+  font-size: 11px; /* #22 */
   color: var(--text-faint);
   overflow-wrap: anywhere;
 }
@@ -3185,7 +3244,15 @@ input[type='radio'] {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: 11px; /* #22 */
+}
+
+.clearance-unit {
+  margin-inline-start: 2px;
   font-size: 10px;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
 }
 
 .clearance-label {
@@ -3220,6 +3287,46 @@ input[type='radio'] {
   font-size: 11px;
   color: var(--text-dim);
   font-weight: 600;
+}
+
+/* ── the armed PIN step-up (design review blocker #4) ── */
+
+.door-stepup {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: 0 0 26px rgba(124, 92, 255, 0.14);
+}
+
+.stepup-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stepup-sub {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* ── the stock-wording honesty marker (review #6) ── */
+
+.q-stock {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
 }
 
 /* ── the card panel ── */
@@ -4422,5 +4529,73 @@ a.feed-text:hover {
   color: var(--text-faint);
 }
 
+
+/* ── the platform's-own-record line under a humanized card body (review #11) ── */
+
+.raw-record {
+  margin: 2px 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.raw-record-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9.5px;
+}
+
+.raw-record code {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ── diff frame legibility (review #23): the widget's own variables carry the
+   palette (token region); these are the Sinet frame's own cells — line
+   numbers were ghost-faint, and the code line rode the page's 16px default
+   inside a dense table. ── */
+
+.diff-file .diff-gutter {
+  color: var(--text-dim);
+}
+
+.diff-file .diff-line {
+  font-size: 12px;
+}
+
+/* ── the pre-task-base scope group (review #1's minimal honest cut) ── */
+
+.diff-basefiles summary {
+  cursor: pointer;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-l);
+  border-radius: var(--radius-sm);
+  line-height: 1.5;
+}
+
+.diff-basefiles[open] summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 } /* @layer base — the owned sheet ends here */
 
+/* #19 (unlayered on purpose): at phone width the topbar sheds the tour button —
+   the Manual page keeps its launcher. The button's own display utility sits in
+   the utilities layer, which outranks every layered rule; only an unlayered
+   rule can win this one. It sits at the END of the sheet so the structural
+   responsive tests' first-media locator keeps pointing at the owned breakpoint
+   block. Phone-first like everything else (S1.10): hidden by
+   default, restored at the breakpoint — the restore must be unlayered too, or
+   it would lose to the unlayered hide. */
+.head-right [data-tour-start] {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .head-right [data-tour-start] {
+    display: inline-flex;
+  }
+}

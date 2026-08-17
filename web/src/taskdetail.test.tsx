@@ -273,13 +273,12 @@ test('the task detail renders the active run&apos;s live activity, not just stag
   expect(text.toLowerCase()).not.toContain('%')
 })
 
-test('a subscription-lane run card says the figure is API-equivalent instead of printing a bare USD 0', async () => {
-  // The unpriced lane prices UNPRICED, so the served cost is 0 — and this card
-  // rendered it as a bare "USD 0", which asserts the run was free when what is
-  // true is that nobody priced it. That is the same fabrication class the
-  // workforce map's routed rows were already labelling; `meterReading` is one
-  // expression across three surfaces and this was the surface that could not
-  // say the word.
+test('a subscription-lane zero says UNPRICED, and only a real estimate calls itself API-equivalent', async () => {
+  // Reworked at the 2026-08-17 design review (#9): the old copy called the
+  // served 0 "the API-equivalent figure", which contradicted the UNPRICED
+  // receipts below it — 0 is not an equivalent of anything; it is the absence
+  // of a price. A zero now says so, and the API-equivalent label is reserved
+  // for a genuinely computed nonzero estimate.
   const served = fixtures.runDetail() as unknown as RunDetail
   const unpriced = {
     ...served,
@@ -290,10 +289,25 @@ test('a subscription-lane run card says the figure is API-equivalent instead of 
     'GET /api/runs/r-ship': { body: unpriced },
   })
   const panel = view.container.querySelector('.activity')!
-  expect(panel.textContent, 'a served unpriced figure renders with no marking at all').toContain(
-    'subscription lane, so this is the API-equivalent figure',
+  expect(panel.textContent, 'an unpriced zero must say no price exists').toContain(
+    'no dollar price exists for these calls',
   )
+  expect(panel.textContent, 'a zero must not pose as an API-equivalent figure').not.toContain('API-equivalent')
   view.unmount()
+
+  const estimated = {
+    ...served,
+    card: { ...served.card, counters: { ...served.card.counters, api_equiv_cost_usd: 1.42, unpriced: true } },
+  }
+  const second = await task('t-ship', {
+    ...detailRoutes(),
+    'GET /api/runs/r-ship': { body: estimated },
+  })
+  const panel2 = second.view.container.querySelector('.activity')!
+  expect(panel2.textContent, 'a real unpriced estimate carries the API-equivalent label').toContain(
+    'API-equivalent estimate',
+  )
+  second.view.unmount()
 })
 
 test('NO money span on the run card prints a bare zero, whatever the seam serves', async () => {
@@ -1124,7 +1138,12 @@ test('the rail runs in served-instant order, and every stage fact still renders'
   // outcome and the instant — through the timestamp primitive, never formatted.
   const verify = [...view.container.querySelectorAll('.stages [data-stage="verify"]')][0]
   const text = verify.textContent ?? ''
-  for (const fact of ['verify', 'stage.finished', 'execute-step', 'completed']) {
+  // review #17: a mapped stage family renders in plain words ("checking the
+  // work"); the marker itself stays on the node as data-stage and, when the
+  // full step id differs from its family, as the visible mono id beside the
+  // words. The other served facts render verbatim.
+  expect(text, 'the rail dropped the plain words for verify').toContain('checking the work')
+  for (const fact of ['stage.finished', 'execute-step', 'completed']) {
     expect(text, `the rail dropped the served ${fact}`).toContain(fact)
   }
   expect(verify.querySelector('time')?.getAttribute('dateTime')).toBe('2026-07-20T09:05:00Z')

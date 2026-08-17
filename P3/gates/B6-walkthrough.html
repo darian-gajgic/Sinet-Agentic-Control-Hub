@@ -134,7 +134,9 @@
   <div class="head"><h3>On the project card: "Describe a goal"</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">The door opens pinned to the project and says the task will build on that
-    project's world. Say what you want the way you'd tell a person, and send it. The task is born
+    project's world. Say what you want the way you'd tell a person, and send it. <b>Left empty, the
+    name field fills itself from your goal</b> — the name the board will use is shown in the field
+    before you send, so a task never wears a raw <span class="mono">t-…</span> id as its title. The task is born
     with its family already on the breadcrumb (<span class="mono">op · software</span>) — <b>no
     kind-of-work card appears at all</b>: the project declared it, and the running classifier covers
     the undeclared case. Seeing the six-choice family card on a clear goal into a declared project
@@ -146,8 +148,11 @@
   <div class="head"><h3>The interview — a form, not a chat</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">Numbered question cards in plain wording (the local utility model phrases them;
-    when it can't, the canonical question shows — both are correct), options as buttons, free text
-    everywhere. From the second round on, a <b>"What it understood so far"</b> recap sits above the
+    when it can't, the standard question shows and <b>says so</b> — a quiet &quot;standard wording&quot;
+    line under the question, or one line for a whole unrephrased round), options as buttons, free text
+    everywhere. Points you skip recap as <b>one line naming them</b>, never a wall of rows, and the
+    Clearance meter reads &quot;N/100 settled&quot; — a full meter is not approval; open markers can
+    still hold the plan. From the second round on, a <b>"What it understood so far"</b> recap sits above the
     questions: every settled point with where it came from — <i>you answered</i>, <i>from the
     project record</i>, or <i>assumed — out loud</i> — and the stakes/clearance header re-sizes as
     it learns (HIGH flipped to LOW on this walk once the goal proved trivial).
@@ -169,9 +174,14 @@
     so the generalist runs it. That sentence is the platform refusing to hand billed write-work to
     something that cannot write (the wrote-nothing era is over). The full plan is drafted in one
     piece and can take a few minutes; the page says so while it works, and if the drafting session
-    dies the page says <i>that</i> too — it heals on its own, no button pressed. Approve. The
+    dies the page says <i>that</i> too — it heals on its own, no button pressed. <b>Assumptions carry
+    their content</b>: a point you skipped shows what was actually assumed for it, and the platform's
+    per-slot &quot;assumed a sensible default&quot; rows collapse into one line naming the skipped
+    points — never a wall. Approve. The
     <b>PIN step-up appears only on higher-stakes plans</b> — a trivial LOW-stakes note approves
-    without one, and that is the tier mechanics working, not a hole.</p>
+    without one, and that is the tier mechanics working, not a hole. When it does appear, the page
+    <b>scrolls you to an armed panel</b> (&quot;Armed — your PIN confirms it&quot;) with its own
+    Confirm and a &quot;Never mind — stand down&quot; that leaves nothing done.</p>
 </li>
 
 <li>
@@ -221,7 +231,9 @@
     sandbox (a first-run platform gap: the state dir's <span class="mono">check-work/</span>
     scratch dir was never created — logged as a backend finding, fixed on this world by creating
     it). The platform did the honest thing: it did NOT fake a verdict — each failed check filed a
-    <b>CHECK-INTEGRITY quarantine card</b> in the Inbox, findings numbered, suite quarantined. Their
+    <b>CHECK-INTEGRITY quarantine card</b> in the Inbox — plain words first (the check could not
+    RUN; this is not a verdict on the work), the machine's own error line kept underneath as the
+    record — findings numbered, suite quarantined. Their
     suite verbs (fix / waive) land with a later build, so they render greyed with a note saying
     exactly that; the cards stand as the record and nothing is lost by leaving them open.</p>
 </li>
