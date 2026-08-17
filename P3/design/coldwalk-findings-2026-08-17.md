@@ -38,4 +38,30 @@ The engine's brace-short defect fired THREE times during this one walk (plan-dra
 
 ---
 
-## Walk 2 — the oversight walk (spouse persona, kept world) — PENDING, appended on completion.
+## Walk 2 — the oversight walk (spouse persona, kept world `~/.sinet-b6-final`, ~616px throughout)
+
+**Outcome: 4 of 5 errands completed — errand 3 (find why something was cancelled) FAILED → WALK BLOCKS RELEASE.** Verdict as the persona: "I'd trust it to *do* the work; I don't yet trust it to *account* for the work."
+
+### W2-B1 (BLOCKING, coordinator-diagnosed regression) — cancelled tasks vanished from the Board
+
+The walker could not find any cancelled thing across Board (14 tasks), Home, Inbox, Projects, and the History query desk asked four ways. Coordinator verified: the world's DB holds `t-fe5ff6c325967c3e` `kanban_status='cancelled'` ("Welcome note for contributors") — but post-drain-D1 the view serves the STORED column for ended tasks, and the Board has no `cancelled` mapping → the task falls out of every column and off every surface. Regression from the drain-r1 D1 fix (pre-drain builds showed "CANCELLED — OPEN FOR WHY" in Backlog — the ratified rendering). **Fix: map `cancelled` → Backlog with the CANCELLED chip at the Board view (and anywhere else ended tasks list); regression test pinning a cancelled task's visibility.**
+
+### W2 ranked frictions (walker's order, triage inline)
+
+| # | Finding | Triage |
+|---|---|---|
+| W2-2 | "Done" task with NO deliverable and NO receipt ("receipts materialize at the run's terminal transition" on a completed run) — worst trust hit | builder: seeded-task story honesty — the seed mints Done without artifacts; either the seed produces a complete Done or the view says why nothing is shown, in plain words |
+| W2-3 | One task shown EXECUTING + "stands at PARKED" + blocked-on-human at once | builder: one state story per task (root-cause the three sources) |
+| W2-4 | Permission cards "expires 20d ago (past)" still sit as live waiting-on-you work; no stated consequence; signed-out shows no answer verbs and never says "sign in to act" | builder: expiry means something on the card + sign-in-to-act line |
+| W2-5 | History/query desk answers with header-only EMPTY tables; text search returns a non-sequitur about "a query for a secret's plaintext"; page reflows under the cursor; Layer-0 pick erases previous answer; date "to" exclusive | builder: honest empty answers ("nothing matches — and here's why/what to try"), reflow fix, inclusive-or-labeled dates; the secret-plaintext canned line = wire text (gap list) |
+| W2-6 | Engineer-speak on lay surfaces: receipt notes leak spec refs, "Purpose: ceremony", raw POST endpoints printed on the deliverable page, duplicated machine-dialect judge comments, "intent label margin 8.315" | builder sweep + the standing wire-side gap list (dup judge comments already G-listed) |
+| W2-7 | Narrow: per-person money clips mid-number; Board shows ~1.2 columns with NO cue more exist; wide tables hide their key column behind unsignaled sideways scroll (nearly missed the verdict) | builder: narrow affordances (scroll cues, money never clips) |
+| W2-8 | "verdict #275" cited but not a link; Reviews room is an IOU while Health badge shows "17" and the room shows none | builder: linkify verdict cites; placeholder rooms carry honest badges/copy |
+| W2-9 | Blocked list rows = jargon confetti ("r-claim · no cost reading · anthropic · quick"); PARKED badge does double duty for blocked-on-human AND parked | builder: plain-words rows + distinct badge |
+| W2-10 | First thing in the Inbox queue = an opt-in experiment pitch above urgent cards; month-old HIGH alarm ("losing its own blind comparison") unanswered | builder: queue ordering honesty; the alarm itself = operator-visible at the session (real card, real state) |
+| W2-11 | "106 runs finished" mostly platform housekeeping runs, inflating the work story | builder: task-work vs housekeeping split in the counts |
+| W2-12 | Scrolling fought the walker on Home/overlay/Board (wheel+PageDown dead; script scroll fine) — second report (W1-13) | builder: reproduce and fix for real this time (two walks hit it) |
+
+### W2 delights
+
+Plain-words banners ("The honest bucket", "nothing is thrown away while it waits"); the stage timeline in human phrasing; the shipping-note spec as a checkable contract that MATCHED the result; live-updating home; receipts as real itemized tables; the accept warning ("pushes a commit under your own credentials, and nothing on this page takes one back"); consent handled seriously; board scroll-position kept.
