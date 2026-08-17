@@ -1116,7 +1116,7 @@ var (
 //     answer.go's Cancel and rethink legs. `ledger.decide` also carries
 //     retries, accepts and revisions, so the entry text is what separates a
 //     cancel from the rest of the family. Each prefix is pinned at its
-//     producer by a mint-side test (canceltext_test.go in stage and intake),
+//     producer by a mint-side test (cancelmint_rw18_test.go in stage and intake),
 //     so a reworded mint fails there rather than silently emptying this leg
 //     (P3-RW-18 OQ1; the durable fix is a typed `kind` on ledger decisions,
 //     a ledger schema change left to a future packet).
