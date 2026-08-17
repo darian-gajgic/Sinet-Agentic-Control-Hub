@@ -70,6 +70,25 @@ export function tasksInColumn(tasks: TaskListItem[], status: string): TaskListIt
   )
 }
 
+/**
+ * beyondFold counts the items of a scrollable region that sit past its visible
+ * end — the number a fold cue shows so nothing "vanishes" below an unsignaled
+ * scroll edge (W2-B1: a cancelled task rendered correctly in Backlog and was
+ * still unfindable, because it sat in the alphabetically-last project group
+ * ~320px under a fold that gave no sign more cards existed).
+ *
+ * `positions` are the items' leading edges relative to the region's visible
+ * origin (getBoundingClientRect deltas — they already account for the current
+ * scroll), `viewLength` is the region's inner height (or width, for the
+ * horizontal board row). An item whose leading edge crosses the last
+ * `allowance` px is counted: a card showing only its final pixels is hidden in
+ * every sense that matters.
+ */
+export function beyondFold(viewLength: number, positions: number[], allowance = 24): number {
+  if (viewLength <= 0) return 0
+  return positions.filter((p) => p > viewLength - allowance).length
+}
+
 /** The project bucket a card belongs to. '(no project)' arrives from the
  *  server as a real value — the honest bucket, never a dropped row (§37). */
 export function groupByProject(tasks: TaskListItem[]): { project: string; tasks: TaskListItem[] }[] {

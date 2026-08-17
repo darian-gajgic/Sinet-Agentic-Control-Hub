@@ -2,11 +2,11 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
-import { applyDrag, hintPostsFor, ownQueueDroppableId, ownQueued, spacedRank } from './Board'
+import { applyDrag, hintPostsFor, matchesFilter, ownQueueDroppableId, ownQueued, spacedRank } from './Board'
 import type { TaskListItem } from './api'
 import { FakeSource, oversightRoutes, scriptedFetch, signedIn } from './doubles'
 import { EventStream } from './events'
-import { columnsFor } from './kanban'
+import { beyondFold, columnsFor } from './kanban'
 import { flush, mount } from './testing'
 
 /**
@@ -170,6 +170,62 @@ test('a cancelled task renders IN Backlog wearing the cancelled sign (D-B)', asy
   expect(card, 'the cancelled card left the board').toBeDefined()
   expect(card.getAttribute('data-cancelled')).toBe('true')
   expect(card.textContent).toContain('cancelled')
+  view.unmount()
+})
+
+// ── findability of ended tasks (W2-B1, cold walk 2026-08-17) ──────────────
+//
+// The walk proved a cancelled task can render CORRECTLY in Backlog and still
+// be unfindable: it sat in the alphabetically-last project group below the
+// column's silent scroll fold, and the title-only search could not match the
+// word "cancelled". These pins are the anti-regression for the walk's exact
+// failure shape; the fold cue's geometry is pixel-proven in real Chrome
+// (jsdom has no layout), while its arithmetic and the search's reach are
+// pinned here.
+
+test('the board search matches what the card shows, so a cancelled task answers to "cancelled" (W2-B1)', () => {
+  const t: TaskListItem = {
+    ...fixtureTasks()[0],
+    task_id: 't-fe5ff6c325967c3e',
+    title: 'Welcome note for contributors',
+    owner: 'op',
+    project: 'recipe-box',
+    kanban_status: 'cancelled',
+  }
+  const f = { q: '', person: '', project: '', effort: '', waiting: false }
+  // The walker's exact query — and the failure shape: the title carries no
+  // trace of the word "cancel".
+  expect(matchesFilter(t, { ...f, q: 'cancel' })).toBe(true)
+  expect(matchesFilter(t, { ...f, q: 'cancelled' })).toBe(true)
+  // The rest of the card's own face answers too: id, person, project.
+  expect(matchesFilter(t, { ...f, q: 'recipe-box' })).toBe(true)
+  expect(matchesFilter(t, { ...f, q: 'op' })).toBe(true)
+  expect(matchesFilter(t, { ...f, q: 'fe5ff6c' })).toBe(true)
+  // And a query matching nothing the card shows still filters it out.
+  expect(matchesFilter(t, { ...f, q: 'zzz-not-on-this-card' })).toBe(false)
+})
+
+test('beyondFold counts exactly the items past a fold and claims nothing when all fit (W2-B1)', () => {
+  // The walk's real numbers: a 424px column body, the cancelled card's
+  // leading edge at 747px — one card beyond the fold.
+  expect(beyondFold(424, [10, 148, 290, 380, 747])).toBe(1)
+  // Everything visible → the cue must claim nothing.
+  expect(beyondFold(424, [10, 148, 290])).toBe(0)
+  // A card showing only its last pixels counts as hidden (allowance).
+  expect(beyondFold(424, [410])).toBe(1)
+  // A zero-size region (jsdom, collapsed layout) never claims anything.
+  expect(beyondFold(0, [10, 20])).toBe(0)
+})
+
+test('column bodies are keyboard-reachable scroll regions (W2-12: PageDown was structurally dead)', async () => {
+  const { view } = await board()
+  const bodies = [...view.container.querySelectorAll('.col-body')]
+  expect(bodies.length).toBeGreaterThan(0)
+  for (const b of bodies) {
+    expect(b.getAttribute('tabindex'), 'a column scroller a keyboard cannot reach').toBe('0')
+    expect(b.getAttribute('role')).toBe('region')
+    expect(b.getAttribute('aria-label'), 'a scroll region with no name').toMatch(/task/)
+  }
   view.unmount()
 })
 

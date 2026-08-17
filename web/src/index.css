@@ -2297,6 +2297,13 @@ input[type='radio'] {
   white-space: nowrap;
 }
 
+/* The wrap exists so the row's fold cue can float over the scroller's right
+   edge without joining the scroll (W2-7: ~1.2 columns visible at 616px with
+   no sign more stages existed). */
+.kanban-wrap {
+  position: relative;
+}
+
 /* The board row: the ONE horizontal scroller. */
 .kanban-board {
   display: flex;
@@ -2308,6 +2315,38 @@ input[type='radio'] {
      growing without end; the viewport minus the shell chrome above. */
   height: calc(100dvh - 250px);
   min-height: 320px;
+}
+
+/* The row's fold cue: whole stages past the right edge, said out loud.
+   Anchored to the bottom-right corner (over the row's own scrollbar line)
+   and shrink-wrapped — mid-height it sat across a 78vw phone column's cards,
+   and a stray width rule stretched it wall to wall. */
+.board-more {
+  position: absolute;
+  right: 6px;
+  bottom: 12px;
+  width: max-content;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-l);
+  border-radius: 999px;
+  background: rgba(14, 14, 26, 0.88);
+  backdrop-filter: blur(6px);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.board-more:hover {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 /* PHONE BASE (min-width-first, S1.10): one column fills most of the screen
@@ -2369,6 +2408,45 @@ input[type='radio'] {
   display: flex;
   flex-direction: column;
   gap: 9px;
+}
+
+/* The column scroller is keyboard-reachable (the page itself never overflows,
+   so PageDown is dead unless the scroller can take focus — W2-12's real
+   half). The ring only shows for keyboard focus. */
+.col-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* The column's fold cue: cards below the fold, counted, and the pill is the
+   scroll button (W2-B1: nothing may sit invisibly under a silent fold). */
+.col-more {
+  position: sticky;
+  bottom: 2px;
+  z-index: 4;
+  align-self: center;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-l);
+  border-radius: 999px;
+  background: rgba(14, 14, 26, 0.88);
+  backdrop-filter: blur(6px);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+}
+
+.col-more:hover {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 .col-empty {

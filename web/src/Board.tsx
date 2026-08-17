@@ -1,11 +1,11 @@
 import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd'
-import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, ChevronUp, Sparkles } from 'lucide-react'
 
 import { api, type PriorityHint, type TaskDetail, type TaskListItem } from './api'
 import { StageName } from './TaskDetail'
 import type { EventStream } from './events'
-import { cancelledStatus, columnsFor, groupByProject, tasksInColumn } from './kanban'
+import { beyondFold, cancelledStatus, columnsFor, groupByProject, tasksInColumn } from './kanban'
 import { boardEventTypes, describeError, useLive } from './live'
 import { Absent, Freshness, Money, Owner, ParkedUntil } from './parts'
 import { useProjectScope } from './project'
@@ -156,12 +156,96 @@ type BoardFilter = {
 const noFilter: BoardFilter = { q: '', person: '', project: '', effort: '', waiting: false }
 
 export function matchesFilter(t: TaskListItem, f: BoardFilter): boolean {
-  if (f.q !== '' && !t.title.toLowerCase().includes(f.q.toLowerCase())) return false
+  // The search matches everything the card itself shows — title, id, person,
+  // project AND the stored status — so typing "cancelled" finds a cancelled
+  // task. Title-only search was half of W2-B1: the cancelled card was titled
+  // "Welcome note…", so searching "cancel" honestly answered nothing.
+  if (f.q !== '') {
+    const hay = `${t.title} ${t.task_id} ${t.owner} ${t.project} ${t.kanban_status}`.toLowerCase()
+    if (!hay.includes(f.q.toLowerCase())) return false
+  }
   if (f.person !== '' && t.owner !== f.person) return false
   if (f.project !== '' && t.project !== f.project) return false
   if (f.effort !== '' && (t.latest_run?.effort_mode ?? '') !== f.effort) return false
   if (f.waiting && t.latest_run?.waiting_on_human !== true) return false
   return true
+}
+
+/**
+ * useFoldCue measures a scrollable region and reports how many of its items
+ * sit past the visible fold, so the fold is never silent (W2-B1: a correctly
+ * rendered cancelled card was unfindable below an unsignaled scroll edge;
+ * W2-7: at ~616px the board shows ~1.2 columns with no sign more stages
+ * exist). The count comes from the real geometry via `beyondFold`; scroll,
+ * region resize and content changes all re-measure. In environments without
+ * layout (jsdom) every rect is zero, so the cue simply never claims anything.
+ */
+function useFoldCue(axis: 'x' | 'y', itemSelector: string, signal: number) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [hidden, setHidden] = useState(0)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const measure = () => {
+      const box = el.getBoundingClientRect()
+      const positions = [...el.querySelectorAll(itemSelector)].map((item) => {
+        const r = item.getBoundingClientRect()
+        return axis === 'y' ? r.top - box.top : r.left - box.left
+      })
+      setHidden(beyondFold(axis === 'y' ? el.clientHeight : el.clientWidth, positions))
+    }
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    ro?.observe(el)
+    const mo = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure)
+    mo?.observe(el, { childList: true, subtree: true })
+    return () => {
+      el.removeEventListener('scroll', measure)
+      ro?.disconnect()
+      mo?.disconnect()
+    }
+  }, [axis, itemSelector, signal])
+
+  // Instant, not smooth: the cue re-measures on every scroll frame and the
+  // re-render's DOM mutation lets Chrome's scroll anchoring cancel an
+  // animated scroll mid-flight (observed live: a smooth reveal stalled after
+  // ~30px). A synchronous jump cannot be interrupted.
+  const reveal = () => {
+    const el = ref.current
+    if (el === null) return
+    if (axis === 'y') el.scrollBy({ top: el.clientHeight * 0.8 })
+    else el.scrollBy({ left: el.clientWidth * 0.85 })
+  }
+  return { ref, hidden, reveal }
+}
+
+/**
+ * One column's scrollable body: keyboard-reachable (tabIndex — the board page
+ * itself never overflows, so document keys like PageDown are structurally
+ * dead unless the column scroller can take focus), with the fold cue as a
+ * sticky pill that is also the "show me" button.
+ */
+function ColumnBody({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
+  const { ref, hidden, reveal } = useFoldCue('y', '[data-task]', count)
+  return (
+    <div
+      className="col-body"
+      ref={ref}
+      tabIndex={0}
+      role="region"
+      aria-label={`${label} — ${String(count)} ${count === 1 ? 'task' : 'tasks'}`}
+    >
+      {children}
+      {hidden > 0 && (
+        <button type="button" className="col-more" onClick={reveal} title="Scroll this column">
+          <ChevronDown size={12} strokeWidth={2.5} aria-hidden="true" />
+          {String(hidden)} more below
+        </button>
+      )}
+    </div>
+  )
 }
 
 export function Board({ me, stream }: { me: string; stream?: EventStream }) {
@@ -191,6 +275,11 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
     [scoped],
   )
   const filtered = filter !== noFilter && tasks.length !== scoped.length
+
+  // The board row's own fold cue (W2-7): how many whole stages sit past the
+  // right edge. Keyed on the column count so an unknown-status column joining
+  // the row re-measures it.
+  const row = useFoldCue('x', ':scope > .kanban-col', columnsFor(tasks).length)
 
   const onDragEnd = (result: DropResult) => {
     void applyDrag(queue, result).then(
@@ -372,8 +461,10 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
       </DragDropContext>
 
       {/* The board: bounded columns, glowing headers, count pills. The row
-          scrolls horizontally as one piece and never wraps. */}
-      <div className="kanban-board" data-board>
+          scrolls horizontally as one piece and never wraps; when whole stages
+          sit past the right edge, the row SAYS so (W2-7). */}
+      <div className="kanban-wrap">
+        <div className="kanban-board" data-board ref={row.ref}>
         {columnsFor(tasks).map((col) => {
           const inCol = tasksInColumn(tasks, col.status)
           return (
@@ -388,7 +479,7 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                   A stored status the board has no name for — shown under its own value rather than hidden.
                 </p>
               )}
-              <div className="col-body">
+              <ColumnBody label={col.label} count={inCol.length}>
                 {inCol.length === 0 && answered && (
                   <p className="col-empty">
                     {col.status === 'intake'
@@ -407,10 +498,17 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                     ))}
                   </div>
                 ))}
-              </div>
+              </ColumnBody>
             </section>
           )
         })}
+        </div>
+        {row.hidden > 0 && (
+          <button type="button" className="board-more" onClick={row.reveal} title="Scroll to the next stage">
+            {String(row.hidden)} more {row.hidden === 1 ? 'stage' : 'stages'}
+            <ChevronRight size={13} strokeWidth={2.5} aria-hidden="true" />
+          </button>
+        )}
       </div>
       </div>
     </section>
