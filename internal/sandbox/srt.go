@@ -340,6 +340,13 @@ func buildSrtPlan(caps Capabilities, c Class, sp Spawn, egress EgressPolicy, dir
 			return nil, fmt.Errorf("sandbox: srt config dir: %w", err)
 		}
 		ownedDir = dir
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
+		// A handed platform-owned scratch dir (S03.5) may not exist yet: on a
+		// fresh world nothing has ever written to `<state>/check-work`, so the
+		// first V1 check run used to die here at write time. The side that
+		// writes into the dir is the side that ensures it — the MkdirTemp
+		// branch above already does exactly this, at the same 0700 (P3-RW-15).
+		return nil, fmt.Errorf("sandbox: srt config dir: %w", err)
 	}
 	cfgPath := filepath.Join(dir, "srt-config.json")
 	if err := os.WriteFile(cfgPath, blob, 0o600); err != nil {
