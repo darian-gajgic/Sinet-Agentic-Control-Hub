@@ -87,9 +87,10 @@
 
 <h2>The give-work journey — walk this first (checkpoint 3)</h2>
 <p class="sub" style="margin-bottom:.75rem">
-  A project born, activated from your Inbox, given work, and the work watched to Done —
-  end-to-end on this seeded world. <b>Sign in as <span class="mono">op</span> first</b> (PIN above):
-  creating a project is a person's act, and the door says exactly that if you skip this.
+  A project born, activated from your Inbox, given work, and the work watched <b>all the way to
+  Done</b> — proven end-to-end on this world on 2026-08-17 (both endings below are photographed in
+  <code>P3/design/rework-screens/step4/</code>). <b>Sign in as <span class="mono">op</span> first</b>
+  (PIN above): creating a project is a person's act, and the door says exactly that if you skip this.
 </p>
 
 <ol class="steps">
@@ -98,83 +99,131 @@
   <div class="head"><h3><a href="http://127.0.0.1:8483/projects">Projects → "New project"</a></h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">Give it an id and a plain name; leave "Remote to clone" empty — that starts a fresh
-    store. Register, and onboarding runs machine-side (register → store → scan → draft). The dialog
+    store. <b>"What kind of tasks this project holds"</b> is offered right here — declare
+    "Build or change software" and no task in this project is ever asked the kind-of-work question.
+    Register, and onboarding runs machine-side (register → store → scan → draft). The dialog
     names the onboarding task and its approval, and offers <b>"To the Inbox — the approval finishes it"</b>.</p>
 </li>
 
 <li>
   <div class="head"><h3><a href="http://127.0.0.1:8483/inbox">Inbox → the onboarding card</a></h3>
   <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">The card says what it is about (the drafted danger zones), what approving records,
-    and why <b>approve</b> is its only verb — there is no decline, because nothing yet undoes a
-    registration; cancelling the onboarding task is the honest way out, and the card says so itself.
-    Press <b>approve</b>.</p>
+  <p class="look">The card says what it is about in plain words — the task family it will set, the
+    drafted danger zones — what approving records, and why <b>approve</b> is its only verb: nothing
+    yet undoes a registration; cancelling the onboarding task is the honest way out, and the card
+    says so itself. Press <b>Approve — activate this project</b>.</p>
   <ul class="look">
     <li class="no">Defect: an approve that errors, or a card that looks answerable with no working button.</li>
   </ul>
 </li>
 
 <li>
-  <div class="head"><h3>See the consequences</h3>
+  <div class="head"><h3>See the consequences — and know what a fresh store means</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">On <a href="http://127.0.0.1:8483/projects">Projects</a> the card flips to
-    <b>ACTIVE</b> (capture v1 · conventions · danger zones). On the
-    <a href="http://127.0.0.1:8483/board">board</a>, the Done column holds
-    "Onboard …" under the project's own group.</p>
+    <b>ACTIVE</b> and shows exactly what the scan captured. On the
+    <a href="http://127.0.0.1:8483/board">board</a>, Done holds "Onboard …" under the project's own
+    group. <b>Read the capture line on the project card.</b> A store born empty has NO build/test
+    commands — its card says "0 conventions · 2 danger zones" and no tests line — and that decides
+    which ending your first software task gets (step 8 vs step 9). On this walk's world,
+    <span class="mono">parts-catalog</span> already carries <b>capture v2 · tests: make test</b>
+    (a Makefile seeded into its store, then re-scanned), which is why its task rode straight to Done.</p>
 </li>
 
 <li>
   <div class="head"><h3>On the project card: "Describe a goal"</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">The door opens pinned to the project and says the task will build on that
-    project's world. Say what you want the way you'd tell a person, and send it. While it reads
-    your goal the page says so — with its own clock ticking, never a bare spinner. The first
-    card takes about a minute on the local models.</p>
-</li>
-
-<li>
-  <div class="head"><h3>The kind-of-work question — only when it must ask</h3>
-  <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">The platform first tries to know what KIND of task this is on its own — the
-    project's record can declare it, and the local classifier reads your goal. Only when neither
-    answers do six plain-language choices appear ("Build or change software" … "Something else"),
-    each with a hint line and the help block underneath. Seeing <i>no</i> such card on a clear goal
-    is the machine working, not a skipped step.</p>
+    project's world. Say what you want the way you'd tell a person, and send it. The task is born
+    with its family already on the breadcrumb (<span class="mono">op · software</span>) — <b>no
+    kind-of-work card appears at all</b>: the project declared it, and the running classifier covers
+    the undeclared case. Seeing the six-choice family card on a clear goal into a declared project
+    is a DEFECT now, not a step. While it reads your goal the page says so — its own clock ticking,
+    never a bare spinner. The first card takes one to two minutes on the local models.</p>
 </li>
 
 <li>
   <div class="head"><h3>The interview — a form, not a chat</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">Numbered question cards in plain, non-programmer wording (the local utility model
-    phrases them; when it can't, the canonical question shows — both are correct). From the second
-    round on, a <b>"What it understood so far"</b> recap sits above the questions: every settled
-    point with where it came from — <i>you answered</i>, <i>from the project record</i>, or
-    <i>assumed — out loud</i>. Answer, pick an option, or skip.
+  <p class="look">Numbered question cards in plain wording (the local utility model phrases them;
+    when it can't, the canonical question shows — both are correct), options as buttons, free text
+    everywhere. From the second round on, a <b>"What it understood so far"</b> recap sits above the
+    questions: every settled point with where it came from — <i>you answered</i>, <i>from the
+    project record</i>, or <i>assumed — out loud</i> — and the stakes/clearance header re-sizes as
+    it learns (HIGH flipped to LOW on this walk once the goal proved trivial).
     <b>"Proceed — turn open questions into assumptions"</b> is legitimate — every skip becomes a
-    LISTED assumption on the plan card, where you can still contest it. Between rounds the page
-    shows what the machine is doing and how long it has been at it; the same card also sits in
-    your Inbox, so leaving the page loses nothing.</p>
+    LISTED assumption on the plan card, where you can still contest it. Each answered round takes
+    about a minute; between rounds the page shows what the machine is doing and how long it has
+    been at it; the same card also sits in your Inbox, so leaving the page loses nothing.</p>
 </li>
 
 <li>
-  <div class="head"><h3>The plan card — approve it</h3>
+  <div class="head"><h3>The plan card — read the routing line, then approve</h3>
   <label class="chk"><input type="checkbox"> done</label></div>
   <p class="look">What I understood — the planner's own words <i>plus</i> the platform's
     point-by-point record of what was settled and how · what you'll get · numbered steps each with
-    "done when" · <b>what I will NOT do</b> · assumptions first · the price. The full plan is
-    drafted in one piece and can take a few minutes; the page says so while it works, and if the
-    drafting session dies the page says <i>that</i> too — the platform heals it on its own within
-    a few minutes, no button pressed. Approve — the <b>PIN step-up</b>
-    takes the PIN above and is never stored. Re-plan, Re-interview and Cancel are the other doors.</p>
+    "done when" · <b>what I will NOT do</b> · assumptions first · the price (an unpriced side is
+    SAID, never a silent $0). <b>WHO DOES IT tells you the routing truth</b>: on this walk it read
+    <i>"This plan writes files, and "release-notes-writer" cannot write it (a read-only workspace,
+    or no editing tool granted)"</i> — a specialist matched the work and was refused the equipment,
+    so the generalist runs it. That sentence is the platform refusing to hand billed write-work to
+    something that cannot write (the wrote-nothing era is over). The full plan is drafted in one
+    piece and can take a few minutes; the page says so while it works, and if the drafting session
+    dies the page says <i>that</i> too — it heals on its own, no button pressed. Approve. The
+    <b>PIN step-up appears only on higher-stakes plans</b> — a trivial LOW-stakes note approves
+    without one, and that is the tier mechanics working, not a hole.</p>
 </li>
 
 <li>
-  <div class="head"><h3><a href="http://127.0.0.1:8483/board">Watch it on the board, then open its card</a></h3>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/board">Ending one — watch it run to DONE</a></h3>
   <label class="chk"><input type="checkbox"> done</label></div>
-  <p class="look">The task carries its project from birth and moves Backlog → Executing → Verifying →
-    Done as you watch. Its <b>PLAN</b> expander shows the plan's steps with live recorded progress.
-    Click the card — the structured overlay window holds the whole story: the confirmed spec with
-    acceptance criteria, the stage ledger with every decision you made, the receipts.</p>
+  <p class="look">On a project WITH captured commands the task moves Backlog → Executing → Verifying
+    → <b>Done</b> — and on a note-sized task the execute leg is seconds, so be looking at the board
+    when you approve. Verification materializes the revision with its history stripped and runs the
+    project's own captured commands against it; the judge's verdict landed
+    <span class="mono">SHIP-with-notes</span> here and the card settled into Done under its
+    project's group, wearing its real cost. The <b>PLAN</b> expander on the Done card shows the
+    plan's steps and the recorded stage progress as sub-items. Click the card — the structured
+    overlay holds the whole story: the confirmed spec with acceptance criteria, the stage rail with
+    every park and resume, the deliverable (in-review, one revision, content hash), and receipts
+    that itemize ceremony vs execution per model and lane — local Qwen calls at USD 0, frontier
+    calls on the subscription lane marked <i>UNPRICED, never a silent $0</i>.</p>
+</li>
+
+<li>
+  <div class="head"><h3><a href="http://127.0.0.1:8483/inbox">Ending two — THE DOOR: verify parks on a card instead of wedging</a></h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">A first software task on a <b>fresh</b> project (no captured commands — the
+    honest v0 state of every store born from the New-project door) cannot be verified: there is
+    nothing to check it with. The old platform wedged forever here. Now the work executes, then
+    verification STOPS and parks the task on a <b>verification-infrastructure card</b> in your
+    Inbox. Read it: the summary names the exact missing thing — <i>"no build, test or lint commands
+    are captured for project "The recipe box", so there is nothing to check this work with —
+    capture them for the project (its Commands), then retry"</i> — above three plain what-this-means
+    lines, the quarantine record, and two live verbs: <b>Retry — run verification again</b> and
+    <b>Cancel the task</b>. On the board the task sits in <b>Needs attention</b> wearing
+    "waiting on a person". Nothing was marked verified, nothing was delivered, and nothing runs
+    again until you answer.</p>
+  <ul class="look">
+    <li class="yes">Answer <b>Cancel the task</b> (this walk did) and the task settles into Backlog
+      wearing <span class="mono">CANCELLED — OPEN FOR WHY</span> — there is no Cancelled column,
+      by your own ruling.</li>
+    <li class="yes">Retry is the door for the day the project HAS commands — capture them first,
+      or the same card returns and says so again.</li>
+    <li class="no">Defect: a black screen, a wedge, or a verify that "approves" work nothing checked.</li>
+  </ul>
+</li>
+
+<li>
+  <div class="head"><h3>Honest smallprint — three quarantine cards you may find</h3>
+  <label class="chk"><input type="checkbox"> done</label></div>
+  <p class="look">On this world's first verified task the check runner itself failed to compose its
+    sandbox (a first-run platform gap: the state dir's <span class="mono">check-work/</span>
+    scratch dir was never created — logged as a backend finding, fixed on this world by creating
+    it). The platform did the honest thing: it did NOT fake a verdict — each failed check filed a
+    <b>CHECK-INTEGRITY quarantine card</b> in the Inbox, findings numbered, suite quarantined. Their
+    suite verbs (fix / waive) land with a later build, so they render greyed with a note saying
+    exactly that; the cards stand as the record and nothing is lost by leaving them open.</p>
 </li>
 
 </ol>
@@ -379,10 +428,14 @@
 
 <footer>
   <p>Written 2026-08-05 against the seeded world the click-through builds; the give-work journey
-  section was added 2026-08-12 from a verified end-to-end walk of that exact journey (crash-heal
-  included). The IDs above are the seed's own names; <code>P3/gates/B6-clickthrough.sh</code> reads
-  them back out of the running instance and prints the same list, so if the seed ever changes,
-  <b>the script's printout wins</b>.</p>
+  section was added 2026-08-12 from a verified end-to-end walk (crash-heal included) and rewritten
+  2026-08-17 from the FINAL journey-completion walk — a real paid run to Done on
+  <span class="mono">parts-catalog</span> and the parked-verification door on
+  <span class="mono">recipe-box</span>, both photographed in
+  <code>P3/design/rework-screens/step4/</code>. That walk's world lives at
+  <code>~/.sinet-b6-final</code> (port 8483, stopped, state kept). The IDs above are the seed's own
+  names; <code>P3/gates/B6-clickthrough.sh</code> reads them back out of the running instance and
+  prints the same list, so if the seed ever changes, <b>the script's printout wins</b>.</p>
   <p>Logs: <code>~/.sinet-b6-clickthrough/control.log</code> · Reset: <code>./P3/gates/B6-clickthrough.sh --clean</code>
   · Non-default port: set <code>SINET_CLICKTHROUGH_PORT</code> and the links above need the same port.</p>
 </footer>
