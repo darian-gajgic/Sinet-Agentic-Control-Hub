@@ -126,7 +126,7 @@ export function TaskDetail({
           {data === null && error === '' && <p className="muted">Reading the task…</p>}
           {data && (
             <>
-              {data.kanban_status === 'cancelled' && <CancelledBanner decisions={data.decisions} />}
+              {data.kanban_status === 'cancelled' && <CancelledBanner decisions={data.decisions} runs={data.runs} />}
               <ActionBar detail={data} reload={reload} stream={stream} />
               <SpecBlock detail={data} stale={stale} />
               <StageBlock detail={data} stale={stale} />
@@ -182,6 +182,8 @@ const stageFamilyWords: Record<string, string> = {
   executing: 'doing the work',
   verify: 'checking the work',
   verifying: 'checking the work',
+  spine: 'cross-checking the spec',
+  critique: 'fresh-eyes critique of the plan',
 }
 
 export function StageName({ stage }: { stage: string }) {
@@ -886,14 +888,22 @@ function ProjectLineage({ detail }: { detail: Detail }) {
  * part in plain words instead of leaving the rail's state tokens as the only
  * story.
  */
-function CancelledBanner({ decisions }: { decisions: TaskDecision[] }) {
+function CancelledBanner({ decisions, runs }: { decisions: TaskDecision[]; runs: TaskRunView[] }) {
   const cancel = [...decisions].reverse().find((d) => d.decision.toLowerCase().includes('cancel'))
+  // Second served source: the receipt's park history records the resume cause,
+  // and a cancel ends the last park as "cancelled by <actor> …" — reading the
+  // name out of the record the card already receives.
+  const fromPark = runs
+    .flatMap((r) => r.receipt?.park_history ?? [])
+    .map((park) => /^cancelled by ([^\s(]+)/.exec(park.resume_cause ?? '')?.[1])
+    .find((who) => who !== undefined)
+  const who = cancel?.actor ?? fromPark
   return (
     <StallBanner kind="cancelled" tone="red" what={
-      cancel !== undefined ? (
+      who !== undefined ? (
         <>
-          This task was cancelled by <Owner id={cancel.actor} />
-          {cancel.reason !== undefined && cancel.reason !== '' && <> — {cancel.reason}</>}. Nothing runs on it and
+          This task was cancelled by <Owner id={who} />
+          {cancel?.reason !== undefined && cancel.reason !== '' && <> — {cancel.reason}</>}. Nothing runs on it and
           nothing more is spent; the record below stays.
         </>
       ) : (
@@ -1017,10 +1027,16 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
           // up instead. The note stays the platform's verbatim text where it
           // renders, and a run whose note DIFFERS still prints its own.
           const seen = new Set<string>()
+          const seenDirect = new Set<string>()
           return runs.map((r) => {
             const note = r.receipt?.mode.note ?? ''
             const repeated = note !== '' && seen.has(note)
             if (note !== '') seen.add(note)
+            const d = r.receipt?.direct_use
+            const directSig =
+              d === undefined ? '' : [d.label, d.reason ?? '', d.formula_ref, d.measured_stage_seam ?? '', String(d.unpriced)].join('|')
+            const directRepeated = directSig !== '' && seenDirect.has(directSig)
+            if (directSig !== '') seenDirect.add(directSig)
             return (
               <div className="run-receipt" key={r.run_id} data-run={r.run_id}>
                 <h4>
@@ -1028,7 +1044,7 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
                 </h4>
                 <CancelRun run={r} reload={reload} />
                 {r.receipt ? (
-                  <ReceiptView receipt={r.receipt} modeNoteRepeated={repeated} />
+                  <ReceiptView receipt={r.receipt} modeNoteRepeated={repeated} directUseRepeated={directRepeated} />
                 ) : (
                   <Absent reason={r.receipt_absent ?? 'no receipt'} />
                 )}
@@ -1046,7 +1062,15 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
  * from execution; unpriced calls are shown as unpriced, never folded into
  * the priced total.
  */
-export function ReceiptView({ receipt, modeNoteRepeated }: { receipt: Receipt; modeNoteRepeated?: boolean }) {
+export function ReceiptView({
+  receipt,
+  modeNoteRepeated,
+  directUseRepeated,
+}: {
+  receipt: Receipt
+  modeNoteRepeated?: boolean
+  directUseRepeated?: boolean
+}) {
   const direct = receipt.direct_use
   // `items` is null on the wire when the receipt itemizes nothing — a run
   // cancelled before any model call materializes exactly that (F1's crasher).
@@ -1131,6 +1155,21 @@ export function ReceiptView({ receipt, modeNoteRepeated }: { receipt: Receipt; m
       {/* The done-directly figure UNDER THE LABEL THE API SERVED. No label
           string is written in this file; the registered text lives in the
           registration and reaches the screen through the data. */}
+      {directUseRepeated === true ? (
+        // The same registered pricing note, word for word, on every run of a
+        // task read as a stuck footnote (review #17) — the first receipt
+        // carries it whole; repeats point up.
+        <p className="direct-use" data-direct-use-label={direct.label} data-direct-use="repeated">
+          <span className="direct-use-label text-foreground">{direct.label}</span>:{' '}
+          <span className="muted">same pricing note as the receipt above</span>
+          {!direct.unpriced && (
+            <>
+              {' '}
+              <Money usd={direct.heuristic_usd} />
+            </>
+          )}
+        </p>
+      ) : (
       <p className="direct-use" data-direct-use-label={direct.label}>
         <span className="direct-use-label text-foreground">{direct.label}</span>:{' '}
         {direct.unpriced ? (
@@ -1141,6 +1180,7 @@ export function ReceiptView({ receipt, modeNoteRepeated }: { receipt: Receipt; m
         <span className="muted"> · {direct.formula_ref}</span>
         {direct.measured_stage_seam && <span className="muted"> · {direct.measured_stage_seam}</span>}
       </p>
+      )}
     </div>
   )
 }

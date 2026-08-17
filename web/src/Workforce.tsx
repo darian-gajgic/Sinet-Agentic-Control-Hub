@@ -401,7 +401,7 @@ function Grants({ version }: { version: WorkerVersion }) {
         <dd data-schedule-attachable={String(g.schedule_attachable)} data-schedule-barred={String(barred)}>
           {g.schedule_attachable ? 'granted' : 'no'}
           {barred && (
-            <> — but barred while this worker’s domain is degraded: a schedule that auto-accepts is closed to it (S08.7)</>
+            <> — but barred while this worker’s domain is degraded: a schedule that auto-accepts is closed to it until the domain has a verified quality check</>
           )}
         </dd>
       </div>

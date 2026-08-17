@@ -659,8 +659,15 @@ function DiffSurface({
           // deletions the work made. Same-grain compares (revision vs
           // revision) keep deletions as the real deletions they are.
           const crossGrain = cmp.old_n === 0
-          const own = crossGrain ? files.filter(({ file }) => file.type !== 'delete') : files
-          const baseOnly = crossGrain ? files.filter(({ file }) => file.type === 'delete') : []
+          // A base-only file arrives as `delete` — or, because the server
+          // diffs file-vs-empty with --no-index, as a `modify` whose every
+          // line is a deletion and whose new side is empty. Both shapes mean
+          // the same fact here: the revision records nothing about this file.
+          const notCarried = ({ file }: RenderedFile) =>
+            file.type === 'delete' ||
+            (file.hunks.length > 0 && file.hunks.every((h) => h.changes.every((c) => c.type === 'delete')))
+          const own = crossGrain ? files.filter((f) => !notCarried(f)) : files
+          const baseOnly = crossGrain ? files.filter(notCarried) : []
           const renderFile = ({ file, path }: RenderedFile) => (
             <DiffFile
               key={path}

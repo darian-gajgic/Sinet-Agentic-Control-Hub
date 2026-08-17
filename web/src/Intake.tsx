@@ -390,6 +390,12 @@ function Journey({
   const fold = (v: IntakeTaskView) => {
     onView(v)
   }
+  // The header's stakes chip and clearance meter read the OPEN CARD's own
+  // figures. A cold resume's task read carries neither, and the live card
+  // lived only inside FollowTask — so a resumed journey's header dropped
+  // stakes and clearance at every width (review #20's mechanism). The card
+  // the follow read finds is lifted here for the header to wear.
+  const [liveCard, setLiveCard] = useState<IntakeCard | null>(null)
 
   // EVERY non-terminal state rides the live follow path (fixed 2026-08-11,
   // found on the seeded world): the pipeline keeps moving after a write
@@ -400,13 +406,13 @@ function Journey({
   // one truth for which card is open.
   return (
     <div className="door-journey" data-task={view.task_id} data-beats={String(beats)}>
-      <JourneyHead view={view} />
+      <JourneyHead view={liveCard !== null && view.open_card === undefined ? { ...view, open_card: liveCard } : view} />
       {phase === 'approved' ? (
         <Landed view={view} />
       ) : phase === 'cancelled' ? (
         <Cancelled view={view} />
       ) : (
-        <FollowTask view={view} onView={fold} onSent={sent} answered={beats > 0} stream={stream} />
+        <FollowTask view={view} onView={fold} onSent={sent} onCard={setLiveCard} answered={beats > 0} stream={stream} />
       )}
     </div>
   )
@@ -423,6 +429,7 @@ function FollowTask({
   view,
   onView,
   onSent,
+  onCard,
   answered = false,
   stream,
 }: {
@@ -430,6 +437,9 @@ function FollowTask({
   onView: (v: IntakeTaskView) => void
   /** Fired the moment an answer LEAVES this tab (see Journey.sent). */
   onSent?: () => void
+  /** Hands the live card up so the journey header can wear its stakes and
+   *  clearance (review #20). */
+  onCard?: (c: IntakeCard | null) => void
   answered?: boolean
   stream?: EventStream
 }) {
@@ -443,6 +453,13 @@ function FollowTask({
   // `card` is the stored ask snapshot the approvals read serves (api.ts): for
   // an intake ask that IS the IntakeCard shape, by the same producer.
   const card = item?.card as IntakeCard | undefined
+  const cardKey = item !== undefined && card !== undefined ? `${item.id}:${String(card.version ?? 0)}` : ''
+  useEffect(() => {
+    onCard?.(card ?? null)
+    // Keyed on the ask identity, not the object: the read re-serves equal
+    // snapshots and an object-keyed effect would loop the parent's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardKey])
 
   if (item !== undefined && card !== undefined) {
     const askID = item.id.startsWith('ask:') ? item.id.slice(4) : item.id
@@ -807,6 +824,12 @@ function CardPanel({
   // here is what lets the panel sit NEXT TO the person's attention instead of
   // needing the original button found again two screenfuls up (blocker #4).
   const [pending, setPending] = useState<IntakeAnswerBody | null>(null)
+  // What the held answer IS, in the person's words — an armed panel that
+  // doesn't say whether it holds an Approve or a Cancel invites a mis-fire.
+  const pendingWords =
+    pending !== null && 'action' in pending && typeof pending.action === 'string'
+      ? (planActionLabels[pending.action] ?? pending.action)
+      : 'your answer'
   const stepupRef = useRef<HTMLDivElement | null>(null)
 
   // The armed step-up must be SEEN to be armed: the card above it is long
@@ -925,7 +948,8 @@ function CardPanel({
       {needPin && (
         <div className="door-stepup" ref={stepupRef} role="alert" data-stepup="armed">
           <p className="stepup-head">
-            <CircleAlert size={15} strokeWidth={2} aria-hidden="true" /> Armed — your PIN confirms it
+            <CircleAlert size={15} strokeWidth={2} aria-hidden="true" /> Armed: &quot;{pendingWords}&quot; — your PIN
+            confirms it
           </p>
           <p className="stepup-sub">
             This is a High-stakes act, so the platform asks you to prove it is you in the same breath. Nothing has
@@ -1779,6 +1803,8 @@ export function originWords(origin: string): string {
   if (origin.startsWith('assumption:'))
     return `its stated call on ${originSlots(origin).map(humanSlot).join(', ')}`
   if (origin.startsWith('research:')) return 'from its own research notes'
+  const marker = /^marker-(\d+) answered$/.exec(origin)
+  if (marker !== null) return `settled by your answer to open question ${marker[1]}`
   return origin
 }
 
