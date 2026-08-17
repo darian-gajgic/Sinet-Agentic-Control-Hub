@@ -63,12 +63,13 @@ func parseJSONCompleting(text string, into any) (int, error) {
 	t := strings.TrimSpace(text)
 	// A ``` inside a JSON string value is CONTENT, not a fence (R4): strip
 	// only when the first fence precedes the first '{' of the reply, i.e.
-	// when it really is the opening fence of a fenced block.
+	// when it really is the opening fence of a fenced block — and close the
+	// block at a fence that can actually BE its closer (closingFence).
 	if i := strings.Index(t, "```"); i >= 0 {
 		if b := strings.IndexByte(t, '{'); b < 0 || i < b {
 			t = t[i+3:]
 			t = strings.TrimPrefix(t, "json")
-			if j := strings.LastIndex(t, "```"); j >= 0 {
+			if j := closingFence(t); j >= 0 {
 				t = t[:j]
 			}
 		}
@@ -89,6 +90,43 @@ func parseJSONCompleting(text string, into any) (int, error) {
 		return 0, fmt.Errorf("stage: session output is not the contracted JSON object: %w", err)
 	}
 	return closers, nil
+}
+
+// closingFence returns the index of a fenced reply's CLOSING fence within
+// the block body, or -1 when the block was never closed — the truncated
+// case, where the body's true tail must reach the prefix analysis intact.
+//
+// The last ``` in the body is not automatically the closer: a step's
+// done_when that mentions a fence puts one inside a JSON string value, and
+// cutting there destroys the document (the R2×R4 composition gap — a
+// truncated fenced reply carrying an in-string fence could never complete).
+// A fence qualifies as the closer when it starts its own line — JSON
+// forbids a raw newline inside a string, so a line-anchored fence is
+// PROVABLY outside the document — or when nothing but whitespace follows
+// it, which is what closes a block whose fence trails the object on one
+// line. Prose after the closing fence stays supported by the first rule.
+func closingFence(body string) int {
+	for j := strings.LastIndex(body, "```"); j >= 0; j = strings.LastIndex(body[:j], "```") {
+		if lineAnchored(body, j) || strings.TrimSpace(body[j+3:]) == "" {
+			return j
+		}
+	}
+	return -1
+}
+
+// lineAnchored reports whether only whitespace separates body[j] from the
+// start of its line (or from the start of the body).
+func lineAnchored(body string, j int) bool {
+	for k := j - 1; k >= 0; k-- {
+		switch body[k] {
+		case '\n':
+			return true
+		case ' ', '\t', '\r':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // jsonPrefixClosers reports the closing delimiters that finish t — and

@@ -61,13 +61,42 @@ func rw16Contained(sub, full any) bool {
 	}
 }
 
-// restingPlace reports whether the prefix ends where a JSON value is
+// insideString reports whether a cut at the end of p lands inside a JSON
+// string — a deliberately different (and much simpler) algorithm than the
+// implementation's state machine, so the oracle can catch it drifting.
+// Quote parity is enough: in JSON a '"' is either a string delimiter or
+// escaped, never anything else.
+func insideString(p string) bool {
+	in := false
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '\\':
+			if in {
+				i++ // whatever it escapes is content, INCLUDING a quote
+			}
+		case '"':
+			in = !in
+		}
+	}
+	return in
+}
+
+// restingPlace reports whether cutting doc at k lands where a JSON value is
 // complete — the only cut points the completion may fire on, stated
-// independently of the implementation's own state machine.
-func restingPlace(prefix string) bool {
-	p := strings.TrimRight(prefix, " \t\r\n")
-	if p == "" {
+// independently of the implementation's own state machine. Two rejections
+// the last byte alone cannot see (drain r1 D3):
+//
+//   - a cut after an ESCAPED quote is inside a string, not after one;
+//   - a cut after an object KEY's closing quote awaits a ':' — the oracle
+//     knows this because it holds the WHOLE document and can look at what
+//     the cut removed, which the implementation never can.
+func restingPlace(doc string, k int) bool {
+	p := strings.TrimRight(doc[:k], " \t\r\n")
+	if p == "" || insideString(p) {
 		return false
+	}
+	if rest := strings.TrimLeft(doc[k:], " \t\r\n"); strings.HasPrefix(rest, ":") {
+		return false // the cut sat after a key, awaiting its colon
 	}
 	switch p[len(p)-1] {
 	case '}', ']', '"':
@@ -100,7 +129,7 @@ func TestRW16CompletionSweepHoldsItsWalls(t *testing.T) {
 		}
 		fired++
 		// P1: only at a value-complete resting place, bounded.
-		if !restingPlace(prefix) {
+		if !restingPlace(rw16SweepDoc, k) {
 			t.Fatalf("cut %d fired at a non-resting place: %q", k, prefix[max(0, k-24):k])
 		}
 		if n <= 0 || n > maxJSONCompletionClosers {
@@ -121,6 +150,41 @@ func TestRW16CompletionSweepHoldsItsWalls(t *testing.T) {
 	if fired < 12 {
 		t.Fatalf("the sweep only fired %d times — the corpus is not exercising the completion", fired)
 	}
+}
+
+// TestRW16SweepOracleIsStrictEnough pins the sweep's own oracle (drain r1
+// D3): an oracle looser than the walls it guards would let an eligibility
+// regression through silently. Both rejections are checked against the
+// implementation too — the oracle and the walls must agree.
+func TestRW16SweepOracleIsStrictEnough(t *testing.T) {
+	afterKey := strings.Index(rw16SweepDoc, `"spec":`) + len(`"spec"`)
+	afterEscapedQuote := strings.Index(rw16SweepDoc, `\"quoted`) + 2
+	afterValue := strings.Index(rw16SweepDoc, `"email ready"`) + len(`"email ready"`)
+	if afterKey < len(`"spec"`) || afterEscapedQuote < 2 || afterValue < len(`"email ready"`) {
+		t.Fatal("corpus lost a landmark the oracle test needs")
+	}
+	for _, tc := range []struct {
+		name string
+		k    int
+	}{
+		{"after an object key awaiting its colon", afterKey},
+		{"after an escaped quote (still inside the string)", afterEscapedQuote},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if restingPlace(rw16SweepDoc, tc.k) {
+				t.Fatalf("oracle accepted a cut %s: %q", tc.name, rw16SweepDoc[max(0, tc.k-16):tc.k])
+			}
+			var got any
+			if _, err := parseJSONCompleting(rw16SweepDoc[:tc.k], &got); err == nil {
+				t.Fatalf("the completion fired %s", tc.name)
+			}
+		})
+	}
+	t.Run("and still accepts a genuine resting place", func(t *testing.T) {
+		if !restingPlace(rw16SweepDoc, afterValue) {
+			t.Fatal("oracle rejected a cut after a complete array element")
+		}
+	})
 }
 
 // TestRW16CompletionNeverFiresInsideAString sweeps the cuts that land
@@ -180,6 +244,19 @@ func TestRW16CompletionComposesWithTheFenceRule(t *testing.T) {
 			`{"a":{"b":"run ` + "```" + `bash here"}`, 1},
 		{"intact fenced block with a fence in a string",
 			"```json\n" + `{"a":{"b":"run ` + "```" + `bash here"}}` + "\n```", 0},
+		// The R2×R4 composition (drain r1 D1): a TRUNCATED fenced reply
+		// whose string value carries a fence. The block has no closing
+		// fence at all, so the in-string one must not be mistaken for it —
+		// otherwise the body is cut mid-string and can never complete.
+		{"truncated fenced block with a fence in a string",
+			"```json\n" + `{"a":{"b":"run ` + "```" + `bash here"}`, 1},
+		{"truncated fenced block, fence in a string, two closers short",
+			"```json\n" + `{"a":{"b":"run ` + "```" + `bash here"`, 2},
+		// A closing fence followed by prose still closes the block: it
+		// starts its own line, and a line-anchored fence is provably
+		// outside the JSON (a raw newline cannot occur inside a string).
+		{"fenced block then trailing prose",
+			"```json\n" + `{"a":{"b":"run ` + "```" + `bash here"}}` + "\n```\nLet me know if you want changes.", 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
