@@ -260,7 +260,7 @@ func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request)
 // preset (B6-2A), and the preview doors are R16's.
 func (s *Server) doorsFor(ctx context.Context, d review.Deliverable, revs []review.Revision) []Door {
 	base := "/api/deliverables/" + d.ID
-	doors := []Door{s.acceptDoor(d, revs, base)}
+	doors := []Door{s.acceptDoor(ctx, d, revs, base)}
 	doors = append(doors, s.reviseDoor(ctx, d, base))
 	doors = append(doors, Door{
 		Verb: doorFollowUp, Method: http.MethodPost, Route: base + "/follow-up",
@@ -291,42 +291,49 @@ func followUpReason(ok bool) string {
 	return "closed until a revision is minted:"
 }
 
-// acceptDoor states whether the accept is live.
+// acceptDoor states whether the accept is live — and it ASKS `acceptable()`
+// (accept.go), which is the one authority on the accept's preconditions, rather
+// than mirroring them here (P3-RW-17 finish).
 //
-// ⚠ STALE LIMB, DECLARED AND NOT TOUCHED (P3-RW-17). The third limb below —
-// "not repo-backed" — mirrors a precondition `acceptable()` (accept.go) NO
-// LONGER holds: a payload-pinned revision is now acceptable, because 5.8/D10/
-// S13.1 define the accept for every deliverable and only the S13.6 PUSH needs a
-// snapshot commit. The card and the verb agree (both read `acceptable()`); this
-// door does not, so a content-pinned deliverable's detail still says closed
-// while its accept card opens and its accept works. The surface consequence is
-// bounded: the frontend renders the accept FORM from the card
-// (`card.acceptable`, web/src/Deliverable.tsx), and this door's reason renders
-// as the precondition line above it.
+// THE DOOR MAY SUMMARIZE THE AUTHORITY; IT MAY NEVER CONTRADICT IT. A hand-copy
+// of the preconditions is exactly what went stale: this limb still refused a
+// payload-pinned revision as "not repo-backed … an accept pushes a commit" long
+// after 5.8/D10/S13.1 opened the accept for every deliverable, so the detail
+// introduced a High-tier press with the reason it could not be made while the
+// same deliverable's card opened and the verb worked. Delegating leaves ONE
+// place where a precondition can change.
 //
-// It is not fixed here because the fix is not code-shaped: unifying this limb
-// with `acceptable()` flips `available` on the fixture world's content-pinned
-// deliverable, which drifts the committed API contract body
-// (`web/src/fixtures/api/deliverable-rework.json`) and the frontend expectations
-// built against it — the builder's lane, outside this packet's walls. Referral
-// line for the coordinator: one door, one regeneration, one frontend re-check.
-func (s *Server) acceptDoor(d review.Deliverable, revs []review.Revision, base string) Door {
+// What stays door-shaped is only the OPEN sentence, because the door's job
+// differs from the card's: the card carries the pin and the trailers, and the
+// door points at the card. That sentence is per-ARM for the same reason the
+// card's tier statement is — the person is about to make one of two different
+// acts, and being told about the other one is being told something untrue
+// (S13.1/S13.6).
+func (s *Server) acceptDoor(ctx context.Context, d review.Deliverable, revs []review.Revision, base string) Door {
 	door := Door{
 		Verb: doorAccept, Method: http.MethodPost, Route: base + "/accept",
 		PinFrom: "GET " + base + "/accept-card",
 	}
-	switch {
-	case s.accept == nil:
-		door.Reason = "no accept orchestration is composed in this process"
-	case d.State != review.StateInReview:
-		door.Reason = fmt.Sprintf("this deliverable is %s, and only an in-review deliverable is accepted (S13.1/S13.6)", d.State)
-	case currentRevision(revs, d.CurrentRevision).SnapshotSHA == "":
-		door.Reason = "revision " + strconv.Itoa(d.CurrentRevision) +
-			" is not repo-backed: it pins content but no snapshot commit, and an accept pushes a commit (S13.1/S13.6)"
-	default:
-		door.Available = true
-		door.Reason = "open: read the card for the trailers and the pin, then accept with your PIN in the same request (High tier, S15.6)"
+	rev := currentRevision(revs, d.CurrentRevision)
+	// The trailer facts are read only when the act is actually in play. The
+	// guard mirrors `acceptable()`'s own earlier limbs — not its arm split — so
+	// the door never assumes WHICH arm needs provenance, only that a settled
+	// refusal needs none.
+	var prov AcceptProvenance
+	if s.accept != nil && d.State == review.StateInReview && rev.N >= 1 {
+		prov = s.acceptProvenance(ctx, rev)
 	}
+	door.Available, door.Reason = acceptable(s.accept != nil, d, rev, prov)
+	if !door.Available {
+		return door
+	}
+	if rev.SnapshotSHA == "" {
+		door.Reason = "open: nothing is pushed — revision " + strconv.Itoa(rev.N) +
+			" pins its content, so accepting records your decision against that immutable pin and files the work as accepted. " +
+			"Read the card for the pin, then accept with your PIN in the same request (High tier, S13.1/S15.6)"
+		return door
+	}
+	door.Reason = "open: read the card for the trailers and the pin, then accept with your PIN in the same request (High tier, S15.6)"
 	return door
 }
 

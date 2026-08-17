@@ -60,8 +60,8 @@
       "verb": "accept",
       "method": "POST",
       "route": "/api/deliverables/d-brief/accept",
-      "available": false,
-      "reason": "revision 2 is not repo-backed: it pins content but no snapshot commit, and an accept pushes a commit (S13.1/S13.6)",
+      "available": true,
+      "reason": "open: nothing is pushed — revision 2 pins its content, so accepting records your decision against that immutable pin and files the work as accepted. Read the card for the pin, then accept with your PIN in the same request (High tier, S13.1/S15.6)",
       "pin_from": "GET /api/deliverables/d-brief/accept-card"
     },
     {

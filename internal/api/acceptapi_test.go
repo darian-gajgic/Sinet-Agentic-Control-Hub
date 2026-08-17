@@ -152,6 +152,75 @@ func TestAcceptCardOpensForAPayloadPinnedDeliverable(t *testing.T) {
 	}
 }
 
+// RW17-F1 (red): the DOOR tells the arm's truth, on BOTH arms.
+//
+// The detail's accept door and the accept card are two renders of ONE
+// precondition set — `acceptable()` — and the door is the SUMMARY of it: it may
+// say less than the card, never something the card denies. The limb this pins
+// shut introduced a High-tier press with "revision N is not repo-backed … an
+// accept pushes a commit" over a pinned accept that is OPEN and pushes nothing,
+// while the same deliverable's card opened and the verb worked (S13.1/S13.6).
+func TestTheAcceptDoorNeverContradictsTheCardOnEitherArm(t *testing.T) {
+	for _, arm := range []struct {
+		name    string
+		fixture func(*testing.T, *dlvEnv) string
+		pushes  bool
+	}{
+		{"pinned", pinnedFixture, false},
+		{"repo-backed", acceptFixture, true},
+	} {
+		t.Run(arm.name, func(t *testing.T) {
+			e := newDlvEnv(t)
+			id := arm.fixture(t, e)
+			door := doorByVerb(t, e.mustDo(t, "alice", "GET", "/api/deliverables/"+id, ""), "accept")
+			card := readAcceptCard(t, e, "alice", id)
+			if door.Available != card.Acceptable {
+				t.Fatalf("the door and the card disagree about the SAME act: door %+v, card acceptable=%v reason=%q",
+					door, card.Acceptable, card.Reason)
+			}
+			if !door.Available {
+				t.Fatalf("an in-review %s deliverable's accept is open (5.8/D10/S13.1): %+v", arm.name, door)
+			}
+			if door.PinFrom == "" || door.Route != "/api/deliverables/"+id+"/accept" {
+				t.Errorf("an open door still names its route and where its pin comes from: %+v", door)
+			}
+			// The reason is what a person reads immediately before a High-tier
+			// press, so it carries THIS arm's consequence and never the other's.
+			if arm.pushes {
+				if !strings.Contains(door.Reason, "trailers") {
+					t.Errorf("the repo arm pushes an attributed commit, so its door names the trailers: %q", door.Reason)
+				}
+				return
+			}
+			if !strings.Contains(door.Reason, "nothing is pushed") {
+				t.Errorf("the pinned arm pushes NOTHING, and the door has to say so: %q", door.Reason)
+			}
+			if strings.Contains(door.Reason, "pushes a commit") || strings.Contains(door.Reason, "not repo-backed") {
+				t.Errorf("the pinned arm's door must not describe a push it never makes: %q", door.Reason)
+			}
+		})
+	}
+	// The one refusal no pin kind opens: a finished deliverable. Both renders
+	// close, with the SAME sentence — the door QUOTES the authority rather than
+	// keeping a hand-copy that can drift away from it, which is how the limb
+	// above went stale in the first place.
+	t.Run("finished", func(t *testing.T) {
+		e := newDlvEnv(t)
+		id := pinnedFixture(t, e)
+		if _, err := e.rev.Accept(e.ctx, id, "alice"); err != nil {
+			t.Fatalf("Accept: %v", err)
+		}
+		door := doorByVerb(t, e.mustDo(t, "alice", "GET", "/api/deliverables/"+id, ""), "accept")
+		card := readAcceptCard(t, e, "alice", id)
+		if door.Available || card.Acceptable {
+			t.Fatalf("an accepted deliverable is finished on both renders: door %+v, card acceptable=%v", door, card.Acceptable)
+		}
+		if door.Reason != card.Reason {
+			t.Errorf("the closed door must quote the card's own reason, got door %q vs card %q", door.Reason, card.Reason)
+		}
+	})
+}
+
 // RW17-T2 (red): the accept records the decision and pushes NOTHING (S13.1; R3).
 func TestPayloadPinnedAcceptRecordsTheDecisionAndPushesNothing(t *testing.T) {
 	e := newDlvEnv(t)
