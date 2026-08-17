@@ -1319,9 +1319,14 @@ button {
 }
 
 /* `.money` and `.warn-flag` stay: `parts.tsx`'s `Money` and the inbox, the
-   settings tab, the review surface and the push panel all still render them. */
+   settings tab, the review surface and the push panel all still render them.
+   MONEY NEVER CLIPS (W2-7, ~616px): a figure that must shrink moves WHOLE to
+   its own line — it never breaks mid-number and never disappears behind an
+   overflow edge. */
 .money {
   color: var(--fg);
+  white-space: nowrap;
+  overflow: visible;
 }
 
 .warn-flag {
@@ -1336,10 +1341,20 @@ button {
 
 /* Wide content is contained rather than page-widening: the one place a
    horizontal scrollbar is allowed is inside the thing that is genuinely too
-   wide for a phone. */
+   wide for a phone. THE FOLD IS SIGNALED (W2-7): scroll shadows — the
+   background-attachment:local pattern — fade in at whichever edge hides
+   content, so a key column past the right edge announces itself; the walker
+   nearly missed a verdict behind an unsignaled sideways scroll. */
 .table-scroll {
   overflow-x: auto;
   max-width: 100%;
+  background:
+    linear-gradient(to right, var(--background) 35%, transparent) left/48px 100%,
+    linear-gradient(to left, var(--background) 35%, transparent) right/48px 100%,
+    linear-gradient(to right, rgba(124, 92, 255, 0.28), transparent) left/16px 100%,
+    linear-gradient(to left, rgba(124, 92, 255, 0.28), transparent) right/16px 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
 }
 
 table {
@@ -3132,6 +3147,17 @@ input[type='radio'] {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* The re-issued-card notice (W1-11): loud, at the top of the card. */
+.card-reissued {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--yellow) 9%, transparent);
+  color: var(--yellow);
+  font-size: 12.5px;
 }
 
 /* The one-state story (W2-3): quiet, one line, above the action bar. */

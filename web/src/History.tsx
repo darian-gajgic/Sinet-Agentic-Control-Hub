@@ -120,7 +120,11 @@ export function HistoryPanel() {
               setQueryName(e.target.value)
               setView('')
               setSlots({})
-              setAnswer(null)
+              // The previous answer deliberately STAYS (W2-5): selecting the
+              // next question must not erase the answer being read — every
+              // answer names its own query in its header, and it leaves the
+              // screen only when a new answer replaces it. The same survival
+              // rule the typed drafts already follow.
             }}
           >
             <option value="">Choose a question…</option>
@@ -174,7 +178,12 @@ export function HistoryPanel() {
         />
       </div>
 
-      {asking && <p className="muted">Asking…</p>}
+      {/* The status line holds its height whether or not it speaks (W2-5:
+          the page reflowed under the cursor every time this line appeared
+          and vanished around a request). */}
+      <p className="muted min-h-5" aria-live="polite">
+        {asking ? 'Asking…' : ' '}
+      </p>
       {answer && (
         <AnswerView
           answer={answer}
@@ -432,6 +441,14 @@ export function AnswerView({ answer, onChoose }: { answer: Answer; onChoose?: (q
         <EmptyState
           what="This answer carries no rows."
           why="The layer answered — it simply matched nothing. A refusal and a disambiguation card are answers too, and each says so above."
+        />
+      ) : (answer.rows ?? []).length === 0 ? (
+        // W2-5: a header-only table read as a broken answer. The absence is
+        // the answer, so it gets words — and the columns the answer WOULD
+        // carry stay visible as the shape of what was asked.
+        <EmptyState
+          what="Nothing matches this question right now."
+          why={`The question ran and came back empty — that is the answer, not a failure. A match would carry: ${(answer.columns ?? []).join(', ')}. A narrower date range or filter is the usual reason; widen it and ask again.`}
         />
       ) : (
         <div className="table-scroll">

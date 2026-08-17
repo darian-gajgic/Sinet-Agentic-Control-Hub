@@ -1217,7 +1217,9 @@ test('a card renders its observed and expiry instants verbatim, with the labels 
   // The landed countdown is a DIFFERENT statement and it stays: it reads at
   // second precision and says whether the deadline has passed at all, which the
   // coarse label does not. The server enforces the real expiry regardless.
-  expect(node.querySelector('.expiry')?.textContent).toMatch(/\(past\)|\(in /)
+  // ▲ W2-4 (cold walk 2026-08-17): a PAST expiry now states its consequence —
+  // the card still waits; passing the date withdrew nothing.
+  expect(node.querySelector('.expiry')?.textContent).toMatch(/ago\) — still waiting|\(in /)
   view.unmount()
 })
 
@@ -1287,7 +1289,10 @@ test('the inbox says what it is, and does not claim a power this page does not h
   // The facts, and each is one of the four rules the file is built on.
   expect(what, 'the line does not say what arrives here').toContain('waiting on a person')
   expect(what, 'the line drops the one-queue fact').toContain('one queue')
-  expect(what, 'the line drops WHO ranks').toContain('ranked by risk by the control plane')
+  // ▲ W2-10 (cold walk 2026-08-17): "ranked by risk" promised more than the
+  // served order kept, so the line claims exactly what is true — the order
+  // is the control plane's own.
+  expect(what, 'the line drops WHO orders').toContain("in the control plane's own order")
   expect(what, 'the line drops the never-re-orders rule').toContain('never re-orders')
   expect(what, 'the line does not say what answering does').toContain('releases the work')
 

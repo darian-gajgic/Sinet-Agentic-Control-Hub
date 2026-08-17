@@ -76,7 +76,11 @@ export function Inbox({ stream }: { stream?: EventStream }) {
           product than the one that shipped. */}
       <SurfaceHead
         title="Inbox"
-        what="Everything waiting on a person, in one queue, ranked by risk by the control plane. This page never re-orders it, and answering a card releases the work that was paused on it."
+        // W2-10: "ranked by risk" promised more than the served order kept
+        // (an opt-in experiment pitch sat above urgent expired cards). The
+        // words now claim exactly what is true — the ORDER is the control
+        // plane's — and the ranking defect is on the wire-side gap list.
+        what="Everything waiting on a person, in one queue, in the control plane's own order. This page never re-orders it, and answering a card releases the work that was paused on it."
       />
       <Freshness stale={live.stale} error={live.error} hasData={live.data !== null} />
       <NoFrameNote items={items} />

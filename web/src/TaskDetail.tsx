@@ -226,6 +226,13 @@ export function StageName({ stage }: { stage: string }) {
   )
 }
 
+/** The receipt purpose tokens, in the reader's words (W2-6). The two values
+ *  are the S10 receipt vocabulary; anything new renders verbatim (§42). */
+const purposeWords: Record<string, string> = {
+  ceremony: 'planning & questions (ceremony)',
+  execution: 'doing the work',
+}
+
 /** fmtDuration: seconds → human words. Raw seconds never render (C2-13). */
 export function fmtDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds))
@@ -1142,7 +1149,10 @@ export function ReceiptView({
           <tbody>
             {items.map((it, i) => (
               <tr key={i} data-purpose={it.Purpose}>
-                <td>{it.Purpose}</td>
+                {/* The purpose token in the reader's words (W2-6: "Purpose:
+                    ceremony" was radio chatter); an unmapped served value
+                    renders verbatim (§42). */}
+                <td>{purposeWords[it.Purpose] ?? it.Purpose}</td>
                 <td>{it.Model}</td>
                 <td>{it.Lane}</td>
                 <td>{String(it.Calls)}</td>

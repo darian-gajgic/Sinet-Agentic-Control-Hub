@@ -65,8 +65,11 @@ const coming: Partial<Record<RouteID, Coming>> = {
   health: {
     icon: HeartPulse,
     will: 'Known issues first: open watchdog flags, drift records, conformance failures, alarms and parked runs — each with what happened, why, and what to do — then benchmark state and canary status, displayed honestly.',
-    why: 'The badge on this tab counts open issues. Every disposition verb (suppress, dismiss, acknowledge, resume) is already served and lands here.',
-    today: [{ label: 'Issue cards arrive in the Inbox and are dispositioned there', to: hrefFor('inbox') }],
+    // W2-8: the tab's badge said "17" while this room showed none of them —
+    // the count and the room must tell one story, so the room says where
+    // those counted items LIVE until it lands.
+    why: 'The badge on this tab counts real open issues — but this room is not built yet, so it lists none of them here. Every one of those counted cards is in your Inbox today, and that is where they are answered. Every disposition verb (suppress, dismiss, acknowledge, resume) is already served and lands here.',
+    today: [{ label: 'The counted issue cards are in the Inbox — answer them there', to: hrefFor('inbox') }],
     step: 'build step 5',
   },
   manual: {

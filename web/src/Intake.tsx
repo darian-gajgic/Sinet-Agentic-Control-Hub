@@ -516,6 +516,25 @@ function FollowTask({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardKey])
 
+  // W1-11: remember which card was LAST on screen, so a replacement can say
+  // so instead of silently dropping what was typed for the old one. A
+  // replacement that follows this page's OWN send is the journey moving
+  // forward — expected, not a re-issue — so the own-send flag suppresses the
+  // notice for exactly one transition.
+  const shownKey = useRef('')
+  const ownSend = useRef(false)
+  const reissued = shownKey.current !== '' && cardKey !== '' && shownKey.current !== cardKey && !ownSend.current
+  useEffect(() => {
+    if (cardKey !== '') {
+      shownKey.current = cardKey
+      ownSend.current = false
+    }
+  }, [cardKey])
+  const sentHere = () => {
+    ownSend.current = true
+    onSent?.()
+  }
+
   if (item !== undefined && card !== undefined) {
     const askID = item.id.startsWith('ask:') ? item.id.slice(4) : item.id
     return (
@@ -524,8 +543,9 @@ function FollowTask({
         view={{ ...view, open_card: card }}
         card={card}
         askID={askID}
+        reissued={reissued}
         onView={onView}
-        onSent={onSent}
+        onSent={sentHere}
       />
     )
   }
@@ -543,7 +563,7 @@ function FollowTask({
         card={view.open_card}
         askID={view.open_ask_id}
         onView={onView}
-        onSent={onSent}
+        onSent={sentHere}
       />
     )
   }
@@ -898,12 +918,17 @@ function CardPanel({
   view,
   card,
   askID,
+  reissued,
   onView,
   onSent,
 }: {
   view: IntakeTaskView
   card: IntakeCard
   askID: string
+  /** True when this card REPLACED a different card/version on this screen —
+   *  the remount that (correctly) drops unsent answers must say so out loud
+   *  (W1-11: a typed answer vanished in silence). */
+  reissued?: boolean
   onView: (v: IntakeTaskView) => void
   onSent?: () => void
 }) {
@@ -1007,6 +1032,15 @@ function CardPanel({
   const composing = busy && (kind === 'approval' || kind === 'approval.delta' ? 'approve' : 'answer')
   return (
     <div className="door-card" data-card-kind={kind}>
+      {reissued === true && (
+        // W1-11: the remount that replaces a re-issued card CORRECTLY drops
+        // unsent answers for the old card — but doing it silently read as the
+        // page eating what was typed. The drop says so, where it happened.
+        <p className="card-reissued" role="alert" data-card-reissued>
+          This card was re-issued while you were here. Anything typed and not yet sent belonged to the previous
+          card and did not carry over — read the card as it now stands before answering.
+        </p>
+      )}
       <p className="card-kind-line">{kindLine[kind] ?? `A ${kind} card — what it asks of you is below.`}</p>
       {composing !== false ? (
         <ComposingFace mode={composing} />
