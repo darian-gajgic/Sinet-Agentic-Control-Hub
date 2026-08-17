@@ -143,6 +143,20 @@ var (
 	// local.broker.sandbox_logprobs is off for the run (R5 side-channel
 	// reduction) — the platform plane keeps logprobs, the sandboxed plane does not.
 	ErrLogprobsRefused = errors.New("local: logprobs refused for the sandboxed caller (⚙ local.broker.sandbox_logprobs off)")
+	// ErrTruncated reports a duty reply the engine STOPPED at the length cap
+	// (finish_reason "length", or output tokens at the cap) rather than one the
+	// model finished. Such a reply is not a result: a constrained-JSON duty
+	// returns a half-written object that fails to decode, and a drafting duty
+	// returns a sentence that stops mid-word. Before PH-1 this arrived at the
+	// caller as an opaque decode failure — indistinguishable from a model that
+	// answered badly — and every caller degraded silently. It is now a NAMED
+	// cause callers match with errors.Is, so a cap regression is loud on its
+	// first occurrence instead of after a cold walk (PH-1 F2; S12.4).
+	//
+	// The D7 usage row is written BEFORE this error is returned: the call really
+	// did run and really did spend those tokens, and R18 meters what happened,
+	// not what succeeded.
+	ErrTruncated = errors.New("local: duty reply hit its length cap (truncated, not finished)")
 )
 
 // normalizeAlias trims and lowercases an alias for map lookup tolerance.

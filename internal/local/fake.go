@@ -33,6 +33,10 @@ type FakeRequest struct {
 	Logprobs      bool
 	MaxTokens     int64
 	Messages      []struct{ Role, Content string }
+	// NoThink records that the request carried
+	// chat_template_kwargs.enable_thinking=false — the wire form of a duty
+	// suppressing a reasoning model's think phase (PH-1 F1).
+	NoThink bool
 }
 
 // FakeResponse is the configurable /v1 response a test wants the fake "model"
@@ -44,6 +48,9 @@ type FakeResponse struct {
 	OutputTokens int64
 	// Status, when non-zero, overrides the 200 OK (unhealthy-stack tests).
 	Status int
+	// FinishReason, when non-empty, overrides the default "stop" — "length" is
+	// the engine's word for a reply cut off at the cap (PH-1 F2).
+	FinishReason string
 }
 
 // FakeServer is an httptest fake of the llama-swap surface.
@@ -196,10 +203,16 @@ func (fs *FakeServer) handleChat(w http.ResponseWriter, r *http.Request) {
 				Schema json.RawMessage `json:"schema"`
 			} `json:"json_schema"`
 		} `json:"response_format"`
+		ChatTemplateKwargs struct {
+			EnableThinking *bool `json:"enable_thinking"`
+		} `json:"chat_template_kwargs"`
 	}
 	_ = json.Unmarshal(raw, &req)
 
 	captured := FakeRequest{Model: req.Model, Temperature: req.Temperature, Logprobs: req.Logprobs, MaxTokens: req.MaxTokens}
+	if et := req.ChatTemplateKwargs.EnableThinking; et != nil && !*et {
+		captured.NoThink = true
+	}
 	if req.ResponseFormat != nil && req.ResponseFormat.JSONSchema != nil {
 		captured.HasJSONSchema = req.ResponseFormat.Type == "json_schema"
 		captured.SchemaName = req.ResponseFormat.JSONSchema.Name
@@ -223,10 +236,14 @@ func (fs *FakeServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	finish := resp.FinishReason
+	if finish == "" {
+		finish = "stop"
+	}
 	out := map[string]any{
 		"choices": []map[string]any{{
 			"message":       map[string]any{"role": "assistant", "content": resp.Content},
-			"finish_reason": "stop",
+			"finish_reason": finish,
 		}},
 		"usage": map[string]any{
 			"prompt_tokens":     resp.InputTokens,

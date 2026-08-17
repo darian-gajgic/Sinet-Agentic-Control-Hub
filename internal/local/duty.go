@@ -48,6 +48,24 @@ type DutyRequest struct {
 	// the abstain-member assertion (S12.4). False = free-text drafting
 	// (utility Help), no forced-label abstain.
 	Classification bool
+	// NoThink suppresses a reasoning model's <think> phase for THIS duty,
+	// independently of Classification (PH-1 F1).
+	//
+	// The two were one field, and they are two different questions. A
+	// classification duty must not think — that was the reason the flag existed.
+	// But a duty that emits ENGINE-CONSTRAINED JSON must not think either, for a
+	// different reason: the think phase is emitted BEFORE the constrained region,
+	// so it is spent out of the same MaxTokens budget the schema region needs,
+	// and a think phase long enough to exhaust the cap means the JSON region
+	// never opens at all. Welding the flag to Classification silently left
+	// thinking ON for the drafting duties, and the phrase seat's live success
+	// rate was 0% for exactly that reason (P3/design/ph1-phrase-fallback-
+	// diagnosis-2026-08-17.md).
+	//
+	// So the rule at the call site is: a constrained-JSON duty sets NoThink; a
+	// duty that WANTS the think phase says so by leaving it false, and then owns
+	// the budget question.
+	NoThink bool
 }
 
 // DutyResult is a completed duty call (the stage adapter maps it to the
@@ -61,6 +79,10 @@ type DutyResult struct {
 	InputTokens  int64
 	OutputTokens int64
 	CheckpointID int64
+	// FinishReason is the engine's own word for why generation stopped
+	// ("stop", "length", …). Carried through from the completion so a
+	// truncated reply can never masquerade as a finished one (PH-1 F2).
+	FinishReason string
 }
 
 // Duty is the platform-plane duty caller + D7 metering. Nil-safe: a nil Duty

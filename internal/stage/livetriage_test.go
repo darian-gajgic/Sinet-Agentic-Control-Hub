@@ -106,6 +106,61 @@ func liveFreePort(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
+// liveStackBase resolves the /v1 base URL this live leg calls.
+//
+// If the operator's stack is ALREADY RUNNING (SINET_LOCAL_ENDPOINT, answering
+// /v1/models), the leg rides it and starts nothing. A second llama-swap on the
+// same GPU is not a second measurement — it is a second claim on the same
+// VRAM, and whichever manager asks second fails to load ("upstream command
+// exited prematurely"). Riding the running stack is also the operator's
+// standing directive after the RW-14B runaway: one stack, serial work.
+//
+// With no endpoint declared, the leg starts its own manager from TODAY'S
+// manifest on an ephemeral port and tears it down UNLOAD-BEFORE-KILL (killing
+// the manager orphans the llama-server child still holding its VRAM, measured
+// at RW-11).
+func liveStackBase(t *testing.T, llamaSwap, llamaServer, modelCache string) string {
+	t.Helper()
+	if ep := strings.TrimRight(os.Getenv("SINET_LOCAL_ENDPOINT"), "/"); ep != "" {
+		if resp, err := http.Get(ep + "/v1/models"); err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				t.Logf("riding the ALREADY-RUNNING stack at %s — no second manager, no second claim on the GPU", ep)
+				return ep
+			}
+		}
+		t.Skip(liveSanctionedSkip + "SINET_LOCAL_ENDPOINT is declared but not answering /v1/models — that endpoint is the stack this leg must use, and starting a rival manager would contend for the same GPU")
+	}
+	cfg, err := local.GenerateConfig(local.ConfigParams{
+		ModelCacheDir: modelCache, GPUUUIDs: liveGPUUUIDs(t), LlamaServer: llamaServer,
+		TTLFastS: 120, TTLWorkhorseS: 300, UnloadGraceS: 5,
+	})
+	if err != nil {
+		t.Fatalf("GenerateConfig from today's manifest: %v", err)
+	}
+	cfgPath := filepath.Join(t.TempDir(), "llamaswap.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	port := liveFreePort(t)
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	cmd := exec.Command(llamaSwap, "--config", cfgPath, "--listen", fmt.Sprintf("127.0.0.1:%d", port))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start llama-swap: %v", err)
+	}
+	t.Cleanup(func() {
+		if resp, err := http.Post(base+"/api/models/unload", "application/json", nil); err == nil {
+			resp.Body.Close()
+		}
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if !liveWaitReady(base + "/v1/models") {
+		t.Fatal("llama-swap did not accept the generated config / did not become ready")
+	}
+	return base
+}
+
 func liveWaitReady(url string) bool {
 	for i := 0; i < 120; i++ {
 		if resp, err := http.Get(url); err == nil {
@@ -132,40 +187,7 @@ func TestLiveIntakeTriageClassifiesWebshop(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	cfg, err := local.GenerateConfig(local.ConfigParams{
-		ModelCacheDir: modelCache, GPUUUIDs: liveGPUUUIDs(t), LlamaServer: llamaServer,
-		TTLFastS: 120, TTLWorkhorseS: 300, UnloadGraceS: 5,
-	})
-	if err != nil {
-		t.Fatalf("GenerateConfig from today's manifest: %v", err)
-	}
-	cfgPath := filepath.Join(t.TempDir(), "llamaswap.yaml")
-	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	port := liveFreePort(t)
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	cmd := exec.Command(llamaSwap, "--config", cfgPath, "--listen", fmt.Sprintf("127.0.0.1:%d", port))
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start llama-swap: %v", err)
-	}
-	// Teardown UNLOADS BEFORE IT KILLS. llama-swap starts llama-server as a
-	// child, and killing the manager orphans that child still holding its VRAM —
-	// measured here: a leaked backend held ~3.5 GB and the NEXT run of this leg
-	// failed to load at all ("upstream command exited prematurely"). The unload
-	// route is the manager's own teardown verb (the same one the §26 tier-R
-	// contract test asserts), so the model is released by the process that owns
-	// it rather than abandoned.
-	defer func() {
-		if resp, err := http.Post(base+"/api/models/unload", "application/json", nil); err == nil {
-			resp.Body.Close()
-		}
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
-	if !liveWaitReady(base + "/v1/models") {
-		t.Fatal("llama-swap did not accept the generated config / did not become ready")
-	}
+	base := liveStackBase(t, llamaSwap, llamaServer, modelCache)
 
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)

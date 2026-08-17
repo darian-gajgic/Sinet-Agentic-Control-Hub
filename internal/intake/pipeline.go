@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -84,6 +85,12 @@ type Pipeline struct {
 	// Now is the clock seam (tests). Timestamps are recorded, never an
 	// ordering authority (P-T07-4).
 	Now func() time.Time
+
+	// Logger records the pipeline's DEGRADES — the places an optional seam
+	// failed and the requester silently got the lesser card (PH-1 F3;
+	// CONVENTIONS §71 slog/stderr). Nil = slog.Default(); the event log stays
+	// the audit truth, this is the operator's search surface.
+	Logger *slog.Logger
 }
 
 // leaseHolderIntake names the intake pipeline in the lease block while it is
@@ -98,6 +105,15 @@ func (p *Pipeline) now() time.Time {
 }
 
 func (p *Pipeline) nowRFC3339() string { return p.now().UTC().Format(time.RFC3339Nano) }
+
+// logger is the nil-safe degrade logger (an unwired pipeline logs to the
+// process default, never to nothing).
+func (p *Pipeline) logger() *slog.Logger {
+	if p.Logger != nil {
+		return p.Logger
+	}
+	return slog.Default()
+}
 
 func (p *Pipeline) store() artifactStore { return artifactStore{root: p.ArtifactRoot} }
 
