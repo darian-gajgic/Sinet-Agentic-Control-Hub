@@ -46,6 +46,8 @@ The engine's brace-short defect fired THREE times during this one walk (plan-dra
 
 The walker could not find any cancelled thing across Board (14 tasks), Home, Inbox, Projects, and the History query desk asked four ways. Coordinator verified: the world's DB holds `t-fe5ff6c325967c3e` `kanban_status='cancelled'` ("Welcome note for contributors") — but post-drain-D1 the view serves the STORED column for ended tasks, and the Board has no `cancelled` mapping → the task falls out of every column and off every surface. Regression from the drain-r1 D1 fix (pre-drain builds showed "CANCELLED — OPEN FOR WHY" in Backlog — the ratified rendering). **Fix: map `cancelled` → Backlog with the CANCELLED chip at the Board view (and anywhere else ended tasks list); regression test pinning a cancelled task's visibility.**
 
+**CORRECTION 2026-08-17 (builder, read-only verification — the coordinator's mechanism above is DISPROVEN):** the wire is clean (`/api/tasks` on the kept world serves all 14 tasks incl. `t-fe5ff6c325967c3e` with `kanban_status='cancelled'` and a benign `latest_run`; reads.go has no exclusion), and BOTH the world binary's embedded bundle and current `kanban.ts`/`Board.tsx` contain the "cancelled — open for why" chip and the cancelled→Backlog mapping. The walker's observation stands (no trace on any surface at ~616px) but the vanishing mechanism is subtler — render-time, narrow-width, or scope-related — and needs real-Chrome pixels to pin. The finding stays BLOCKING; the fix direction is now: reproduce as pixels first, then fix what is actually broken.
+
 ### W2 ranked frictions (walker's order, triage inline)
 
 | # | Finding | Triage |
