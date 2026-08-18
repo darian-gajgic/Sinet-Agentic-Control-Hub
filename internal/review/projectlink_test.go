@@ -73,7 +73,8 @@ func TestEnsureDeliverableResolvesTheProjectAtMint(t *testing.T) {
 }
 
 // TestDeliverableReadsServeTheProjectForLegacyEmptyRows — rows minted before
-// the fix (the live walk world's dlv-t-1e211253dfa21c28) carry ''. The read
+// the fix (the live walk world's dlv-t-1e211253dfa21c28) carry the empty
+// string. The read
 // side serves the task-join fallback so the accept door and every view see the
 // truth WITHOUT a data migration: serve-time COALESCE over task_project.
 func TestDeliverableReadsServeTheProjectForLegacyEmptyRows(t *testing.T) {
