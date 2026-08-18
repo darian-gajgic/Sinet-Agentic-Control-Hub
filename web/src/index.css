@@ -3679,6 +3679,25 @@ input[type='radio'] {
   color: var(--accent-2);
 }
 
+/* The footer cancel's two-step (P3-RW-19): the quiet verb opens this pane,
+   where the why is asked for before anything fires. Full row on the wrapping
+   flex footer, in the door-refusal family's red register. */
+.foot-cancel {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+  border-inline-start: 4px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+
+.foot-cancel .door-field {
+  margin-bottom: 0;
+}
+
 /* ── the understanding block (RW-12): "here is what I understood so far" ── */
 
 .understood {

@@ -151,6 +151,105 @@ export function useAct(): Act {
   }
 }
 
+/* ── the cancel's why (P3-RW-19) ─────────────────────────────────────────── */
+
+/**
+ * The one bound the cancel verbs apply to the reason, mirrored from
+ * internal/api/actions.go `cancelReasonMaxRunes`. It counts RUNES there, so it
+ * counts code points here — `.length` counts UTF-16 units and would hold back
+ * a sentence the server accepts (or wave through one it refuses) the moment
+ * anyone types outside the basic plane.
+ */
+export const cancelReasonMaxRunes = 280
+
+export function runeCount(s: string): number {
+  return [...s].length
+}
+
+/** The reason is over the server's bound, so the act is HELD — the same
+ *  pre-validation stance the History question form takes: stop a request the
+ *  server already refuses, never answer for the server. */
+export function whyHolds(why: string): boolean {
+  return runeCount(why) > cancelReasonMaxRunes
+}
+
+/** The over-bound sentence, ONE spelling for every surface that says it
+ *  (the modal ceremony and the door's own field idiom): the bound is said,
+ *  nothing is truncated, and cancelling without a reason stays open. Null
+ *  while the why fits. */
+export function whyOverLine(why: string): string | null {
+  const runes = runeCount(why)
+  if (runes <= cancelReasonMaxRunes) return null
+  return `That is ${String(runes)} characters and the record keeps one line (${String(cancelReasonMaxRunes)}). Nothing is sent while it is over — shorten it, or clear it to cancel without a reason. Nothing is ever cut short for you.`
+}
+
+/**
+ * The person-language arm for the one refusal this ceremony can draw
+ * (`reason_too_long`, 400, nothing cancelled). The held field makes it
+ * unreachable from this client, but a refusal that does arrive renders in the
+ * person's words with the server's own sentence beside them — never as a bare
+ * machine code.
+ */
+export function catchReasonRefusal(err: unknown): ActOutcome {
+  if (err instanceof ApiError && err.code === 'reason_too_long') {
+    return {
+      kind: 'failed',
+      note: 'nothing was cancelled — the reason needs to fit one line',
+      detail: err.message,
+    }
+  }
+  throw err
+}
+
+/**
+ * The optional one-line why, part of the cancel confirm ceremony wherever the
+ * two cancel verbs fire (P3-RW-19: the walk found rule citations where a
+ * motive should be — this is where the motive enters).
+ *
+ * THE BOUND IS SAID, NEVER APPLIED SILENTLY: nothing is truncated, ever. Near
+ * the bound a quiet count appears; over it the field says so in plain words
+ * and the act is held (`whyHolds` feeds ActConfirm's `disabled`, which is the
+ * N7 held-not-busy arm — the field beside the act states why it will not
+ * fire). An empty why is always fine and always says so.
+ */
+export function CancelWhy({
+  value,
+  onChange,
+  keptWhere = 'kept with the record of what was stopped',
+}: {
+  value: string
+  onChange: (v: string) => void
+  /** Where the words end up, in the sentence's own words — the run's record,
+   *  every run this stops, the task's record. */
+  keptWhere?: string
+}) {
+  const runes = runeCount(value)
+  const over = runes > cancelReasonMaxRunes
+  return (
+    <label className="cancel-why flex flex-col gap-1 text-xs" data-cancel-why-field>
+      <span className="text-muted-foreground">Why? — optional, one line, {keptWhere}</span>
+      <input
+        type="text"
+        data-field="cancel-why"
+        value={value}
+        onChange={(e) => {
+          onChange(e.currentTarget.value)
+        }}
+        className="rounded-(--radius-sm) border border-border bg-transparent px-2 py-1 text-sm"
+      />
+      {over ? (
+        <span className="warn-flag" data-why-over="true">
+          {whyOverLine(value)}
+        </span>
+      ) : runes > cancelReasonMaxRunes - 40 ? (
+        <span className="muted" data-why-count>
+          {String(runes)} of {String(cancelReasonMaxRunes)} characters
+        </span>
+      ) : null}
+    </label>
+  )
+}
+
 export type ActConfirmProps = {
   open: boolean
   onOpenChange: (open: boolean) => void

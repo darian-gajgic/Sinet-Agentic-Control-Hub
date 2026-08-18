@@ -14,6 +14,7 @@ import {
   type Session,
   type User,
 } from './api'
+import { whyHolds, whyOverLine } from './controls'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive } from './live'
 import { Owner } from './parts'
@@ -1159,38 +1160,98 @@ function CardPanel({
 }
 
 /** Cancel is always available pre-approval (4.5) — quiet, but present, and it
- *  says what it does. The inbox note keeps the tab-lifetime state honest. */
+ *  says what it does. The inbox note keeps the tab-lifetime state honest.
+ *  P3-RW-19: pressing it opens the two-step — the optional one-line why rides
+ *  the cancel verb as its `reason`, under the same 280 bound the verb applies
+ *  (over it the act is HELD with the bound said; nothing is ever truncated). */
 function JourneyFoot({ view, onView, busy }: { view: IntakeTaskView; onView: (v: IntakeTaskView) => void; busy: boolean }) {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [why, setWhy] = useState('')
+  const overLine = whyOverLine(why)
   return (
     <footer className="journey-foot">
       <span className="foot-note">
         This card also sits in your <Link to={hrefFor('inbox')}>Inbox</Link> — leaving this page loses nothing.
       </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={busy || cancelBusy}
-        data-door-cancel
-        onClick={() => {
-          setCancelBusy(true)
-          setNote('')
-          api.cancelTask(view.task_id).then(
-            (res) => {
-              setCancelBusy(false)
-              if (res.applied) onView({ ...view, phase: 'cancelled', open_ask_id: '', open_card: undefined })
-              else setNote(res.runs[0]?.detail ?? 'nothing was cancelled')
-            },
-            (err: unknown) => {
-              setCancelBusy(false)
-              setNote(describeError(err))
-            },
-          )
-        }}
-      >
-        {cancelBusy ? 'Cancelling…' : 'Cancel this task'}
-      </Button>
+      {!confirming ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy || cancelBusy}
+          data-door-cancel
+          onClick={() => {
+            setNote('')
+            setConfirming(true)
+          }}
+        >
+          Cancel this task
+        </Button>
+      ) : (
+        <div className="foot-cancel" data-door-cancel-confirm>
+          <p className="m-0 text-sm">
+            Cancel this task? It stops here — nothing more is asked, started or spent, and the task keeps its record,
+            marked cancelled.
+          </p>
+          <label className="door-field">
+            <span className="door-label">
+              Why cancel it <span className="door-optional">optional — one line, kept with the record of what was stopped</span>
+            </span>
+            <input
+              className="door-input"
+              type="text"
+              data-field="cancel-why"
+              value={why}
+              onChange={(e) => {
+                setWhy(e.target.value)
+              }}
+            />
+          </label>
+          {overLine !== null && (
+            <span className="warn-flag" data-why-over="true">
+              {overLine}
+            </span>
+          )}
+          <div className="door-acts">
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={busy || cancelBusy || whyHolds(why)}
+              aria-busy={cancelBusy}
+              data-door-cancel-fire
+              onClick={() => {
+                setCancelBusy(true)
+                setNote('')
+                api.cancelTask(view.task_id, why.trim() === '' ? undefined : why).then(
+                  (res) => {
+                    setCancelBusy(false)
+                    if (res.applied) onView({ ...view, phase: 'cancelled', open_ask_id: '', open_card: undefined })
+                    else setNote(res.runs[0]?.detail ?? 'nothing was cancelled')
+                  },
+                  (err: unknown) => {
+                    setCancelBusy(false)
+                    setNote(describeError(err))
+                  },
+                )
+              }}
+            >
+              {cancelBusy ? 'Cancelling…' : 'Cancel the task'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={cancelBusy}
+              data-door-cancel-back
+              onClick={() => {
+                setConfirming(false)
+              }}
+            >
+              Keep going
+            </Button>
+          </div>
+        </div>
+      )}
       {note !== '' && <span className="foot-note">{note}</span>}
     </footer>
   )
@@ -1410,10 +1471,15 @@ function DecisionForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolea
   const [criteria, setCriteria] = useState('')
   const [ruleID, setRuleID] = useState('')
   const [fact, setFact] = useState('')
+  // The cancel's why (P3-RW-19): `rethink` IS a cancel — it ends the intake —
+  // so picking it opens the optional one-line why, riding the answer as its
+  // `note`. No other choice carries it (the platform honors it on no other).
+  const [why, setWhy] = useState('')
   if (d === undefined) return <p className="muted">This decision card carried no body — its controls live on its inbox card.</p>
 
   const needsCriteria = choice === 'drop_criterion'
   const needsFact = choice === 'supply_fact'
+  const isRethink = choice === 'rethink'
   const criteriaList = criteria
     .split(',')
     .map((s) => s.trim())
@@ -1465,6 +1531,22 @@ function DecisionForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolea
           />
         </label>
       )}
+      {isRethink && (
+        <label className="door-field">
+          <span className="door-label">
+            Why stop it <span className="door-optional">optional — your words, kept with the record of what was stopped</span>
+          </span>
+          <input
+            className="door-input"
+            type="text"
+            data-field="cancel-why"
+            value={why}
+            onChange={(e) => {
+              setWhy(e.target.value)
+            }}
+          />
+        </label>
+      )}
       {needsFact && (
         <>
           <label className="door-field">
@@ -1503,6 +1585,7 @@ function DecisionForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolea
               choice,
               ...(needsCriteria ? { criteria: criteriaList } : {}),
               ...(needsFact ? { facts: [{ rule_id: ruleID.trim(), fact: fact.trim() }] } : {}),
+              ...(isRethink && why.trim() !== '' ? { note: why } : {}),
             })
           }}
         >
@@ -1634,6 +1717,11 @@ function PlanCard({
   const [contesting, setContesting] = useState(false)
   const [target, setTarget] = useState('')
   const [note, setNote] = useState('')
+  // The cancel's two-step (P3-RW-19): pressing Cancel flips into the same
+  // inline pane Re-plan uses, where the why is asked for — optional, the
+  // person's own words, riding the `{action:"cancel"}` answer as its `note`.
+  const [cancelling, setCancelling] = useState(false)
+  const [why, setWhy] = useState('')
   if (a === undefined) return <p className="muted">This approval card carried no body — approve it from its inbox card.</p>
 
   const l1 = a.layer1
@@ -1827,7 +1915,7 @@ function PlanCard({
 
       <HelpNote help={l1.help} />
 
-      {!contesting ? (
+      {!contesting && !cancelling ? (
         <div className="door-acts plan-acts">
           {actions.includes('approve') && (
             <Button
@@ -1872,12 +1960,57 @@ function PlanCard({
               disabled={busy}
               data-plan-act="cancel"
               onClick={() => {
-                onAnswer({ action: 'cancel' })
+                setCancelling(true)
               }}
             >
               {planActionLabels.cancel}
             </Button>
           )}
+        </div>
+      ) : cancelling ? (
+        <div className="contest" data-plan="cancel">
+          <h3 className="plan-h plan-h-not">Cancel this task?</h3>
+          <p className="m-0 text-sm">
+            It stops here: the interview and this plan close, and nothing is started or spent. The task keeps its
+            record, marked cancelled — with your why on it, if you give one.
+          </p>
+          <label className="door-field">
+            <span className="door-label">
+              Why cancel it <span className="door-optional">optional — your words, kept with the record of what was stopped</span>
+            </span>
+            <input
+              className="door-input"
+              type="text"
+              data-field="cancel-why"
+              value={why}
+              onChange={(e) => {
+                setWhy(e.target.value)
+              }}
+            />
+          </label>
+          <div className="door-acts">
+            <Button
+              variant="danger"
+              disabled={busy}
+              aria-busy={busy}
+              data-plan-act="send-cancel"
+              onClick={() => {
+                onAnswer({ action: 'cancel', ...(why.trim() !== '' ? { note: why } : {}) })
+              }}
+            >
+              {busy ? 'Cancelling…' : 'Cancel the task'}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              data-plan-act="cancel-back"
+              onClick={() => {
+                setCancelling(false)
+              }}
+            >
+              Back to the plan
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="contest" data-plan="contest">
@@ -1938,7 +2071,7 @@ function PlanCard({
           </div>
         </div>
       )}
-      {view.tier === 'high' && !contesting && (
+      {view.tier === 'high' && !contesting && !cancelling && (
         <p className="muted mt-1 text-xs">High stakes: approving asks for your PIN in the same breath.</p>
       )}
     </div>

@@ -13,7 +13,7 @@ import {
   type TaskDetail as Detail,
   type TaskRunView,
 } from './api'
-import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
+import { ActConfirm, CancelWhy, OutcomeLine, catchReasonRefusal, outcomeOf, useAct, whyHolds } from './controls'
 import type { EventStream } from './events'
 import { isAssumedDefaultBoilerplate } from './Intake'
 import { activityEventTypes, boardEventTypes, inboxEventTypes, useLive } from './live'
@@ -506,6 +506,11 @@ function runOutcomeNote(res: CancelOutcome): string {
 function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunView[]; reload: () => void }) {
   const [open, setOpen] = useState(false)
   const [result, setResult] = useState<TaskCancelOutcome | null>(null)
+  // The person's one-line why (P3-RW-19). The draft SURVIVES a refusal —
+  // reopening the dialog keeps what was typed, because losing it would make
+  // fixing one word mean retyping the sentence. It clears only when the
+  // cancel it was written for actually fires.
+  const [why, setWhy] = useState('')
   const act = useAct()
   const live = runs.filter((r) => cancellable(r.state))
   if (live.length === 0) return null
@@ -533,18 +538,22 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
         what={`Every run of this task that has not ended is cancelled — ${String(live.length)} right now — each under the rule for the state it is in. If one of them turns out to be mid-dispatch the request stops there: the runs already cancelled stay cancelled, and this page re-reads so you can see how far it got before trying the rest.`}
         act="Cancel every unfinished run"
         busy={act.busy}
+        disabled={whyHolds(why)}
         onConfirm={() => {
           setOpen(false)
           act.run(
             () =>
-              api.cancelTask(taskID).then((res) => {
-                setResult(res)
-                return outcomeOf(
-                  res.applied,
-                  res.applied ? `cancelled, and the board reads ${res.kanban_status}` : 'nothing was cancelled',
-                  '',
-                )
-              }),
+              api
+                .cancelTask(taskID, why.trim() === '' ? undefined : why)
+                .then((res) => {
+                  setResult(res)
+                  if (res.applied) setWhy('')
+                  return outcomeOf(
+                    res.applied,
+                    res.applied ? `cancelled, and the board reads ${res.kanban_status}` : 'nothing was cancelled',
+                    '',
+                  )
+                }, catchReasonRefusal),
             reload,
             'the request stopped where it was refused — anything already cancelled stays cancelled, and this page has re-read',
           )
@@ -558,6 +567,7 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
             </li>
           ))}
         </ul>
+        <CancelWhy value={why} onChange={setWhy} keptWhere="kept on the record of every run this stops, so anyone who finds this task later knows" />
       </ActConfirm>
       <OutcomeLine outcome={act.outcome} />
       {result && (
@@ -577,6 +587,9 @@ function CancelTask({ taskID, runs, reload }: { taskID: string; runs: TaskRunVie
 /** R3's run half: the same verb at the grain a person is looking at. */
 function CancelRun({ run, reload }: { run: TaskRunView; reload: () => void }) {
   const [open, setOpen] = useState(false)
+  // The one-line why, same ceremony as the task grain: draft survives a
+  // refusal, clears only when the cancel fires.
+  const [why, setWhy] = useState('')
   const act = useAct()
   if (!cancellable(run.state)) return null
 
@@ -600,11 +613,23 @@ function CancelRun({ run, reload }: { run: TaskRunView; reload: () => void }) {
         what={cancelConsequence(run.state)}
         act="Cancel this run"
         busy={act.busy}
+        disabled={whyHolds(why)}
         onConfirm={() => {
           setOpen(false)
-          act.run(() => api.cancelRun(run.run_id).then((res) => outcomeOf(res.applied, runOutcomeNote(res), res.detail)), reload)
+          act.run(
+            () =>
+              api
+                .cancelRun(run.run_id, why.trim() === '' ? undefined : why)
+                .then((res) => {
+                  if (res.applied) setWhy('')
+                  return outcomeOf(res.applied, runOutcomeNote(res), res.detail)
+                }, catchReasonRefusal),
+            reload,
+          )
         }}
-      />
+      >
+        <CancelWhy value={why} onChange={setWhy} keptWhere="kept on this run's record, so anyone who finds it later knows" />
+      </ActConfirm>
       <OutcomeLine outcome={act.outcome} />
     </div>
   )
@@ -972,19 +997,25 @@ function ProjectLineage({ detail }: { detail: Detail }) {
 
 /* ── decisions ───────────────────────────────────────────────────────────── */
 
+/** A reconstructed cancel row — the ONE machine code the serve side puts on
+ *  them (`decision:"cancel"`, reads.go cancelDecisions; coordinator ruling
+ *  OQ1: the plain words are this client's to render from that code). */
+function isCancelRow(d: TaskDecision): boolean {
+  return d.decision === 'cancel'
+}
+
 /**
- * The cancelled task's plain-words why (review #10). A cancel is ALWAYS a
- * person's act on this platform (internal/stage/cancel.go: every entry point
- * takes an authenticated actor) — so a cancelled task saying "nobody has
- * decided anything" was false. What the wire serves today: the cancel's actor
- * and reason ride the run's TRANSITION event, which the task read does not
- * project into `decisions` (reported as a backend gap) — so where a decision
- * row exists it is named, and where none does the banner still tells the true
- * part in plain words instead of leaving the rail's state tokens as the only
- * story.
+ * The cancelled task's plain-words why (review #10; P3-RW-19). A cancel is
+ * ALWAYS a person's act on this platform (internal/stage/cancel.go: every
+ * entry point takes an authenticated actor). The serve side now reconstructs
+ * the cancel into `decisions` (P3-RW-18) and — where the person said why —
+ * carries their own words in `human_reason` (P3-RW-19). ABSENCE IS
+ * STRUCTURAL on that key: no key means no reason was given, and the banner
+ * says exactly that in the same words History's cancelled view uses, instead
+ * of the rule citation the walk found standing where a motive should be.
  */
 function CancelledBanner({ decisions, runs }: { decisions: TaskDecision[]; runs: TaskRunView[] }) {
-  const cancel = [...decisions].reverse().find((d) => d.decision.toLowerCase().includes('cancel'))
+  const cancel = [...decisions].reverse().find(isCancelRow)
   // Second served source: the receipt's park history records the resume cause,
   // and a cancel ends the last park as "cancelled by <actor> …" — reading the
   // name out of the record the card already receives.
@@ -992,20 +1023,24 @@ function CancelledBanner({ decisions, runs }: { decisions: TaskDecision[]; runs:
     .flatMap((r) => r.receipt?.park_history ?? [])
     .map((park) => /^cancelled by ([^\s(]+)/.exec(park.resume_cause ?? '')?.[1])
     .find((who) => who !== undefined)
-  const who = cancel?.actor ?? fromPark
+  const who = cancel !== undefined && cancel.actor !== '' ? cancel.actor : fromPark
   return (
     <StallBanner kind="cancelled" tone="red" what={
       who !== undefined ? (
         <>
           This task was cancelled by <Owner id={who} />
-          {cancel?.reason !== undefined && cancel.reason !== '' && <> — {cancel.reason}</>}. Nothing runs on it and
-          nothing more is spent; the record below stays.
+          {cancel?.human_reason !== undefined && cancel.human_reason !== '' ? (
+            <span data-cancel-why="given"> — &ldquo;{cancel.human_reason}&rdquo;</span>
+          ) : cancel !== undefined ? (
+            <span data-cancel-why="absent"> — no reason was given</span>
+          ) : null}
+          . Nothing runs on it and nothing more is spent; the record below stays.
         </>
       ) : (
         <>
           This task was cancelled — a person stopped it; a cancel is never the machine&apos;s own act. Nothing runs on
-          it and nothing more is spent; the record below stays. (Who pressed it and why is on the run&apos;s own record,
-          which this card does not receive yet.)
+          it and nothing more is spent; the record below stays. (Its records don&apos;t say who: they were written
+          before the platform kept the cancel&apos;s who and why.)
         </>
       )
     } />
@@ -1019,11 +1054,13 @@ function DecisionsBlock({ decisions, stale, cancelled }: { decisions: TaskDecisi
       {decisions.length === 0 ? (
         cancelled === true ? (
           // "Nobody has decided anything" on a task a person CANCELLED is a
-          // false sentence (review #10). The honest one names the act and the
-          // gap.
+          // false sentence (review #10). The cancel is normally reconstructed
+          // into this list from the run's own records (P3-RW-18); a cancelled
+          // task with NO row means those records predate that reconstruction
+          // or carry nothing it can read — said plainly, claimed no further.
           <EmptyState
             what="One decision was made here: a person cancelled this task."
-            why="The cancel itself is recorded on the run's transition record, which is not yet served into this list — a platform gap, reported. No other decision was recorded."
+            why="A cancel is never the machine's own act. Its row is normally rebuilt from the run's records and listed here — this task's records carry none the platform can read that way, so who pressed it is not listed. No other decision was recorded."
           />
         ) : (
         <EmptyState
@@ -1033,7 +1070,28 @@ function DecisionsBlock({ decisions, stale, cancelled }: { decisions: TaskDecisi
         )
       ) : (
         <ul className="decisions">
-          {decisions.map((d) => (
+          {decisions.map((d) =>
+            isCancelRow(d) ? (
+              // The cancel row, in plain words from its machine code (ruling
+              // OQ1: the serve side ships no prose for this page). The why is
+              // the person's own words — or its honest absence, in History's
+              // exact phrase. The record's mechanical sentence stays served in
+              // `reason`; it does not render here, because a rule citation
+              // standing where a motive should be is the walk finding this
+              // packet exists to end.
+              <li key={d.seq} data-card-type={d.card_type} data-decision="cancel">
+                <Owner id={d.actor} />
+                {d.actor_is_operator && <span className="muted"> (as operator)</span>}{' '}
+                <span className="decision text-[var(--red)]">cancelled this work</span>{' '}
+                {d.run_id !== undefined && d.run_id !== '' && <span className="muted font-mono">{d.run_id}</span>}{' '}
+                <Stamp ts={d.decided_at ?? d.ts} />
+                {d.human_reason !== undefined && d.human_reason !== '' ? (
+                  <span data-cancel-why="given"> — &ldquo;{d.human_reason}&rdquo;</span>
+                ) : (
+                  <span className="muted" data-cancel-why="absent"> — no reason was given</span>
+                )}
+              </li>
+            ) : (
             <li key={d.seq} data-card-type={d.card_type}>
               <Owner id={d.actor} />
               {d.actor_is_operator && <span className="muted"> (as operator)</span>}{' '}
@@ -1042,7 +1100,8 @@ function DecisionsBlock({ decisions, stale, cancelled }: { decisions: TaskDecisi
               <Stamp ts={d.decided_at ?? d.ts} />
               {d.reason && <span className="muted"> — {d.reason}</span>}
             </li>
-          ))}
+            ),
+          )}
         </ul>
       )}
     </Section>

@@ -1386,6 +1386,10 @@ function Acts({
   const [pin, setPin] = useState('')
   const [contest, setContest] = useState<string>('')
   const [reason, setReason] = useState('')
+  // The cancel's why (P3-RW-19): one line in the person's own words, riding
+  // ONLY the cancel-shaped answer it is labeled for. Typing it and pressing
+  // any other verb sends nothing of it — the label promises exactly that.
+  const [note, setNote] = useState('')
   const [verdict, setVerdict] = useState('')
   const [guess, setGuess] = useState('')
   const [criteria, setCriteria] = useState<string[]>([])
@@ -1489,6 +1493,19 @@ function Acts({
           />
         </label>
       )}
+      {actions.some((a) => isCancelShaped(item, a)) && (
+        <label className="reason">
+          <span>If you cancel — say why, in your own words (optional, kept with the record of what was stopped)</span>
+          <input
+            type="text"
+            value={note}
+            data-field="cancel-note"
+            onChange={(e) => {
+              setNote(e.currentTarget.value)
+            }}
+          />
+        </label>
+      )}
       {item.kind === 'benchmark_verdict' && actions.includes('verdict') && (
         <VerdictPicker forms={forms} verdict={verdict} guess={guess} onVerdict={setVerdict} onGuess={setGuess} />
       )}
@@ -1530,6 +1547,7 @@ function Acts({
                 fireAction(item, action, {
                   pin,
                   reason,
+                  note,
                   contest,
                   verdict,
                   guess,
@@ -1706,9 +1724,32 @@ function answerEnvelope(item: ApprovalItem): 'action' | 'contest' | 'choice' | '
   return 'unknown'
 }
 
+/**
+ * isCancelShaped names the three answers whose landed decoder honors the
+ * person's `note` as the cancel's why (P3-RW-19, ratified OQ2): the verify /
+ * ladder cards' `{choice:"cancel"}`, the intake approval card's
+ * `{action:"cancel"}`, and the SPEC-DOUBT card's `{choice:"rethink"}` —
+ * which IS a cancel: it ends the intake ("requester: rethink — intake
+ * cancelled after SPEC-DOUBT"). Every other verb ignores the field
+ * server-side, so this client sends it on no other.
+ */
+function isCancelShaped(item: ApprovalItem, action: string): boolean {
+  switch (answerEnvelope(item)) {
+    case 'verify':
+    case 'contest':
+      return action === 'cancel'
+    case 'choice':
+      return action === 'rethink'
+    default:
+      return false
+  }
+}
+
 type ActInput = {
   pin: string
   reason: string
+  /** The cancel's why — attached ONLY to a cancel-shaped answer. */
+  note: string
   contest: string
   verdict: string
   guess: string
@@ -1818,6 +1859,11 @@ async function fireAction(item: ApprovalItem, action: string, input: ActInput): 
  *  card's family has no shape here, which the caller renders as the honest
  *  nothing-was-sent rather than posting a guess. */
 function composeAnswer(item: ApprovalItem, action: string, input: ActInput): unknown {
+  // The cancel's why rides its cancel-shaped answer and no other (P3-RW-19):
+  // the field's label promises the words go with the CANCEL, so a why typed
+  // and then Approved sends nothing of it. Whitespace-only is no reason;
+  // real words go verbatim.
+  const why = isCancelShaped(item, action) && input.note.trim() !== '' ? { note: input.note } : {}
   if (item.kind === 'effect') {
     return input.reason === '' ? { action } : { action, reason: input.reason }
   }
@@ -1825,9 +1871,11 @@ function composeAnswer(item: ApprovalItem, action: string, input: ActInput): unk
     case 'contest':
       // The S06.9 structured Re-plan entry: the contest names the criterion,
       // assumption or step being contested, and rides the same answer.
-      return input.contest === '' ? { action } : { action, contest: { target: input.contest } }
+      return input.contest === '' ? { action, ...why } : { action, contest: { target: input.contest }, ...why }
     case 'choice':
-      return input.criteria.length === 0 ? { choice: action } : { choice: action, criteria: input.criteria }
+      return input.criteria.length === 0
+        ? { choice: action, ...why }
+        : { choice: action, criteria: input.criteria, ...why }
     case 'verify':
       // The verify answer body (verify.DecodeAnswer): {choice}, with the
       // person's guidance riding revise_with_guidance — the server refuses a
@@ -1836,7 +1884,7 @@ function composeAnswer(item: ApprovalItem, action: string, input: ActInput): unk
       if (action === 'revise_with_guidance') {
         return input.contest === '' ? null : { choice: action, guidance: [{ text: input.contest }] }
       }
-      return { choice: action }
+      return { choice: action, ...why }
     case 'answers':
       // A question card's answer is its slot answers, and this surface offers
       // no slot editor — so it composes only the one shape it can honestly
@@ -2044,7 +2092,9 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
         selected.map((i) => ({
           id: i.id,
           payload_hash: i.payload_hash ?? '',
-          answer: composeAnswer(i, action, { pin: '', reason: '', contest: '', verdict: '', guess: '', criteria: [] }),
+          // A batch answers many cards with ONE action and no per-card entry,
+          // so it carries no why — a batched cancel is honestly reason-less.
+          answer: composeAnswer(i, action, { pin: '', reason: '', note: '', contest: '', verdict: '', guess: '', criteria: [] }),
         })),
       )
       setOutcomes(res.outcomes)

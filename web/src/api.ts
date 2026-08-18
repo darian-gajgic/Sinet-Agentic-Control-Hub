@@ -364,6 +364,12 @@ export type TaskDecision = {
   decision: string
   subject?: string
   reason?: string
+  /** The person's own words for a cancel (P3-RW-19), lifted from the one
+   *  constructor's record. ABSENCE IS STRUCTURAL: no key at all means no
+   *  reason was given — the honest "no reason given" line renders from the
+   *  absence, never from a blank. `reason` (the record's own mechanical
+   *  sentence) is untouched; this field is additive. */
+  human_reason?: string
   decided_at?: string
 }
 
@@ -1760,6 +1766,13 @@ export type IntakeAnswerBody = {
   facts?: { rule_id: string; fact: string }[]
   action?: string
   contest?: { target: string; note?: string }
+  /** The person's one-line why, riding a cancel-shaped answer (P3-RW-19).
+   *  The field is reachable on every intake card because one Answer type
+   *  serves them all, but the platform honors it ONLY on the two
+   *  cancel-shaped answers — `{action:"cancel"}` on the approval card and
+   *  `{choice:"rethink"}` on the SPEC-DOUBT card (ratified OQ2) — so this
+   *  client sends it only there. */
+  note?: string
 }
 
 // ── the S13.7 projects family's wire shapes (P3-RW-2, 2026-08-06) ─────────
@@ -2275,8 +2288,15 @@ export const api = {
   // points to the cancel choreography, and a control here is a human's button —
   // nothing in this client may call one on its own (§39: no auto-kill).
 
-  cancelRun: (run: string) => post<CancelOutcome>(`/api/runs/${encodeURIComponent(run)}/cancel`, {}),
-  cancelTask: (task: string) => post<TaskCancelOutcome>(`/api/tasks/${encodeURIComponent(task)}/cancel`, {}),
+  // Both cancel verbs take the person's optional one-line why (P3-RW-19). The
+  // words go VERBATIM — never trimmed, never truncated client-side; an
+  // over-bound reason is the server's 400 `reason_too_long` with NOTHING
+  // cancelled. Absent/empty stays the landed `{}` body: no reason is always
+  // accepted — the reason never blocks a cancel.
+  cancelRun: (run: string, reason?: string) =>
+    post<CancelOutcome>(`/api/runs/${encodeURIComponent(run)}/cancel`, reason !== undefined && reason !== '' ? { reason } : {}),
+  cancelTask: (task: string, reason?: string) =>
+    post<TaskCancelOutcome>(`/api/tasks/${encodeURIComponent(task)}/cancel`, reason !== undefined && reason !== '' ? { reason } : {}),
   /** The S10.4 budget declaration. `period_tokens` is in the gauge's own
    *  weighted-consumption units; `person` defaults to the caller and is the
    *  operator's administer path. */
