@@ -39,7 +39,7 @@ func TestCancelDeriveLiteralsMatchTheirProducers(t *testing.T) {
 // looks for at `$.detail.cause`. Read here through the produced JSON, so a
 // change to the field NAME (not just the value) trips too.
 func TestTheCancelDetailConstructorWritesTheDiscriminator(t *testing.T) {
-	got := string(run.CancelDetail("alice", false, "ask-1"))
+	got := string(run.CancelDetail("alice", false, "ask-1", ""))
 	for _, want := range []string{
 		`"cause":"` + humanCancelCause + `"`,
 		`"actor":"alice"`,
@@ -52,7 +52,7 @@ func TestTheCancelDetailConstructorWritesTheDiscriminator(t *testing.T) {
 	// The verb path has no card, and an empty ask_id must be ABSENT rather than
 	// present-and-blank: the served decision names a card only when there was
 	// one.
-	if noCard := string(run.CancelDetail("alice", true, "")); strings.Contains(noCard, "ask_id") {
+	if noCard := string(run.CancelDetail("alice", true, "", "")); strings.Contains(noCard, "ask_id") {
 		t.Errorf("a cardless cancel detail claims a card: %s", noCard)
 	}
 }

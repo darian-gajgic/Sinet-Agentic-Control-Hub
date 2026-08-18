@@ -1,0 +1,127 @@
+package intake_test
+
+// cancelwhy_rw19_test.go — P3-RW-19 executor half, intake card mints (T11).
+// Committed RED before the implementation (Amendment-A carve-out,
+// CONVENTIONS §3).
+//
+// R6: the intake cards gain the same one channel the verify/ladder cards
+// already had — an additive `note` on the answer — honored on the TWO
+// cancel-shaped answers, the approval card's `cancel` and the SPEC-DOUBT
+// card's `rethink`. Everywhere else it is ignored at v0 (ratified OQ2), and
+// the last test here is what keeps that honest: a note on an answer that
+// cancels nothing must leave no motive anywhere in the record.
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
+)
+
+// rw19IntakeCancelReason reads the human reason off an intake run's structured
+// cancel transition, reporting whether the key rode at all.
+func rw19IntakeCancelReason(t *testing.T, f *fix, runID string) (string, bool) {
+	t.Helper()
+	var raw string
+	if err := f.db.QueryRowContext(context.Background(),
+		`SELECT COALESCE(json_extract(payload, '$.detail'), '')
+		   FROM run_events
+		  WHERE run_id = ? AND type = ? AND json_extract(payload, '$.detail.cause') = ?
+		  ORDER BY event_seq DESC LIMIT 1`,
+		runID, run.EventState, run.CancelCauseHuman).Scan(&raw); err != nil {
+		t.Fatalf("no structured cancel transition on %s: %v", runID, err)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+		t.Fatalf("decode cancel detail %q: %v", raw, err)
+	}
+	v, present := detail["reason"]
+	s, _ := v.(string)
+	return s, present
+}
+
+// TestIntakeApprovalCancelNoteBecomesTheHumanReason — T11, approval limb: the
+// requester cancels at their approval card and says why in the card's note.
+func TestIntakeApprovalCancelNoteBecomesTheHumanReason(t *testing.T) {
+	f := newFix(t)
+	const note = "I described the wrong thing"
+	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID)
+	askID, _ := f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{ForceProceed: true}) // reach the approval card
+	askID, _ = f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{Action: intake.ActionCancel, Note: note})
+	if st.Phase != intake.PhaseCancelled {
+		t.Fatalf("phase %s, want cancelled", st.Phase)
+	}
+	if got, present := rw19IntakeCancelReason(t, f, st.RunID); !present || got != note {
+		t.Errorf("detail.reason = %q (present=%v), want the card note %q", got, present, note)
+	}
+}
+
+// TestIntakeRethinkNoteBecomesTheHumanReason — T11, SPEC-DOUBT limb: rethink is
+// a cancel that does not say "cancel", and it carries a motive just the same.
+func TestIntakeRethinkNoteBecomesTheHumanReason(t *testing.T) {
+	f := newFix(t)
+	const note = "the tool I already have does this"
+	f.critic.verdicts = []intake.Verdict{{Kind: intake.VerdictSpecDoubt, Doubt: "the goal duplicates an existing tool"}}
+	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID)
+	st = f.answerInterviewToFloor("u1", st.RunID)
+	if st.OpenAskKind != intake.CardSpecDoubt {
+		t.Fatalf("expected the SPEC-DOUBT card, got %q", st.OpenAskKind)
+	}
+	askID, _ := f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{Choice: intake.ChoiceRethink, Note: note})
+	if st.Phase != intake.PhaseCancelled {
+		t.Fatalf("phase %s, want cancelled after rethink", st.Phase)
+	}
+	if got, present := rw19IntakeCancelReason(t, f, st.RunID); !present || got != note {
+		t.Errorf("detail.reason = %q (present=%v), want the card note %q", got, present, note)
+	}
+}
+
+// TestIntakeCancelWithoutANoteRecordsNoReason — the absence posture at this
+// mint: no note means no reason key, never a blank one.
+func TestIntakeCancelWithoutANoteRecordsNoReason(t *testing.T) {
+	f := newFix(t)
+	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID)
+	askID, _ := f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{ForceProceed: true})
+	askID, _ = f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{Action: intake.ActionCancel})
+	if got, present := rw19IntakeCancelReason(t, f, st.RunID); present {
+		t.Errorf("a note-less intake cancel recorded reason %q — absence must be absent", got)
+	}
+}
+
+// TestIntakeNoteIsIgnoredOutsideTheCancelShapedAnswers — ratified OQ2: the
+// field exists on every intake answer because one struct carries them all, but
+// v0 honors it only where it is a cancel's why. An answer that cancels nothing
+// must leave no motive in the record at all.
+func TestIntakeNoteIsIgnoredOutsideTheCancelShapedAnswers(t *testing.T) {
+	f := newFix(t)
+	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID)
+	askID, _ := f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{ForceProceed: true, Note: "a note nobody asked for"})
+	askID, _ = f.openAsk(st.RunID)
+	st = f.answer("u1", askID, intake.Answer{Action: intake.ActionReInterview, Note: "another one"})
+
+	var n int
+	if err := f.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND json_extract(payload, '$.detail.reason') IS NOT NULL`,
+		st.RunID).Scan(&n); err != nil {
+		t.Fatalf("count reasons: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("%d record(s) carry a motive for answers that cancelled nothing — the note is honored only at the two cancel-shaped answers (OQ2)", n)
+	}
+}

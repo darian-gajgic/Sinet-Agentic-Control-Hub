@@ -20,25 +20,27 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
-// fakeCancel records the actor and subject each cancel verb hands to the
-// choreography, so the transport's identity plumbing is asserted independently
-// of the mapping it drives.
+// fakeCancel records the actor, subject and reason each cancel verb hands to
+// the choreography, so the transport's identity plumbing is asserted
+// independently of the mapping it drives.
 type fakeCancel struct {
 	runActor, runID   string
 	taskActor, taskID string
+	runReason         string
+	taskReason        string
 	err               error
 }
 
-func (f *fakeCancel) CancelRun(_ context.Context, actor, runID string) (json.RawMessage, error) {
-	f.runActor, f.runID = actor, runID
+func (f *fakeCancel) CancelRun(_ context.Context, actor, runID, reason string) (json.RawMessage, error) {
+	f.runActor, f.runID, f.runReason = actor, runID, reason
 	if f.err != nil {
 		return nil, f.err
 	}
 	return json.RawMessage(`{"run_id":"` + runID + `","to":"completed","applied":true}`), nil
 }
 
-func (f *fakeCancel) CancelTask(_ context.Context, actor, taskID string) (json.RawMessage, error) {
-	f.taskActor, f.taskID = actor, taskID
+func (f *fakeCancel) CancelTask(_ context.Context, actor, taskID, reason string) (json.RawMessage, error) {
+	f.taskActor, f.taskID, f.taskReason = actor, taskID, reason
 	if f.err != nil {
 		return nil, f.err
 	}

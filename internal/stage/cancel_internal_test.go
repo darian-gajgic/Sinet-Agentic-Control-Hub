@@ -222,7 +222,7 @@ func TestCancelRunningInvokesTheLadderThenCompletes(t *testing.T) {
 	sess := &fakeSession{}
 	e.sk.cancels.register(r.ID, sess)
 
-	out, err := e.sk.CancelRun(context.Background(), "alice", r.ID)
+	out, err := e.sk.CancelRun(context.Background(), "alice", r.ID, "")
 	if err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestCancelRunningInvokesTheLadderThenCompletes(t *testing.T) {
 		t.Errorf("kanban = %q, want cancelled", e.kanban(t, "t-1"))
 	}
 	// A repeat is the honest already-ended answer, never a second cancellation.
-	again, err := e.sk.CancelRun(context.Background(), "alice", r.ID)
+	again, err := e.sk.CancelRun(context.Background(), "alice", r.ID, "")
 	if err != nil {
 		t.Fatalf("repeat cancel: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestCancelRunningInvokesTheLadderThenCompletes(t *testing.T) {
 func TestCancelDrainingCompletesLikeRunning(t *testing.T) {
 	e := newCancelEnv(t)
 	r := e.seedRun(t, "t-2.execute", "t-2", "alice", run.StateDraining)
-	if _, err := e.sk.CancelRun(context.Background(), "alice", r.ID); err != nil {
+	if _, err := e.sk.CancelRun(context.Background(), "alice", r.ID, ""); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	if got := e.state(t, r.ID); got != run.StateCompleted {
@@ -286,7 +286,7 @@ func TestCancelParkedFinalizesWithItsCard(t *testing.T) {
 		t.Fatalf("seed ask: %v", err)
 	}
 
-	if _, err := e.sk.CancelRun(ctx, "alice", r.ID); err != nil {
+	if _, err := e.sk.CancelRun(ctx, "alice", r.ID, ""); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	if got := e.state(t, r.ID); got != run.StateFinalized {
@@ -321,7 +321,7 @@ func TestCancelQueuedFinalizesAndSettlesTheQueueRow(t *testing.T) {
 		t.Fatalf("fixture: run is %s, want queued", got)
 	}
 
-	out, err := e.sk.CancelRun(ctx, "alice", "t-4.execute")
+	out, err := e.sk.CancelRun(ctx, "alice", "t-4.execute", "")
 	if err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestCancelQueuedFinalizesAndSettlesTheQueueRow(t *testing.T) {
 func TestCancelClaimedIsA409Retry(t *testing.T) {
 	e := newCancelEnv(t)
 	r := e.seedRun(t, "t-5.execute", "t-5", "alice", run.StateClaimed)
-	if _, err := e.sk.CancelRun(context.Background(), "alice", r.ID); !errors.Is(err, ErrCancelInFlight) {
+	if _, err := e.sk.CancelRun(context.Background(), "alice", r.ID, ""); !errors.Is(err, ErrCancelInFlight) {
 		t.Fatalf("claimed cancel error = %v, want ErrCancelInFlight", err)
 	}
 	if got := e.state(t, r.ID); got != run.StateClaimed {
@@ -367,7 +367,7 @@ func TestCancelTaskCoversEveryNonTerminalRun(t *testing.T) {
 	e.seedRun(t, "t-6.execute", "t-6", "alice", run.StateRunning)
 	e.seedRun(t, "t-6.verify", "t-6", "alice", run.StateParked)
 
-	out, err := e.sk.CancelTask(ctx, "alice", "t-6")
+	out, err := e.sk.CancelTask(ctx, "alice", "t-6", "")
 	if err != nil {
 		t.Fatalf("CancelTask: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestFailedCancelClearsItsSuppression(t *testing.T) {
 	r := e.seedRun(t, "t-10.execute", "t-10", "alice", run.StateRunning)
 	e.sk.cancels.register(r.ID, &fakeSession{})
 
-	if _, err := e.sk.CancelRun(ctx, "alice", r.ID); err == nil {
+	if _, err := e.sk.CancelRun(ctx, "alice", r.ID, ""); err == nil {
 		t.Fatal("the cancel must fail when its terminal transition does")
 	}
 	if got := e.state(t, r.ID); got != run.StateRunning {
@@ -497,7 +497,7 @@ func TestCancelTaskLeavesKanbanAloneWhenNothingWasCancelled(t *testing.T) {
 	e.seedRun(t, "t-11.execute", "t-11", "alice", run.StateCompleted)
 	e.setKanbanFixture(t, "t-11", "done")
 
-	out, err := e.sk.CancelTask(ctx, "alice", "t-11")
+	out, err := e.sk.CancelTask(ctx, "alice", "t-11", "")
 	if err != nil {
 		t.Fatalf("CancelTask: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestCancelTaskLeavesKanbanAloneWhenNothingWasCancelled(t *testing.T) {
 	// The control: a task with a live run DOES move.
 	e.seedRun(t, "t-12.execute", "t-12", "alice", run.StateRunning)
 	e.setKanbanFixture(t, "t-12", "executing")
-	if _, err := e.sk.CancelTask(ctx, "alice", "t-12"); err != nil {
+	if _, err := e.sk.CancelTask(ctx, "alice", "t-12", ""); err != nil {
 		t.Fatalf("CancelTask: %v", err)
 	}
 	if got := e.kanban(t, "t-12"); got != kanbanCancelled {
@@ -555,7 +555,7 @@ func TestQueuedCancelWithoutASchedulerIsRefusedFailClosed(t *testing.T) {
 	e.sk.sched = nil // a process with no scheduler bound
 	r := e.seedRun(t, "t-14.execute", "t-14", "alice", run.StateQueued)
 
-	_, err := e.sk.CancelRun(ctx, "alice", r.ID)
+	_, err := e.sk.CancelRun(ctx, "alice", r.ID, "")
 	if !errors.Is(err, ErrCancelQueueUnsettleable) {
 		t.Fatalf("error = %v, want ErrCancelQueueUnsettleable", err)
 	}
