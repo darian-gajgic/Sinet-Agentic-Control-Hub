@@ -101,7 +101,7 @@ func TestIntakeVerbCancelRecordsTheHumanAndKeepsItsLedgerPrefix(t *testing.T) {
 	f.admit(st.RunID)
 	f.advance(st.TaskID)
 
-	st, err := f.p.Cancel(context.Background(), "u1", st.TaskID)
+	st, err := f.p.Cancel(context.Background(), "u1", st.TaskID, "")
 	if err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}

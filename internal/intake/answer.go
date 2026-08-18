@@ -707,13 +707,13 @@ func (p *Pipeline) claimOverlapTx(ctx context.Context, tx *sql.Tx, taskID, proje
 // Cancel cancels the intake (4.5: cancel is always available). The intake
 // run finalizes (parked, via closeAndResume) or completes (running).
 //
-// It records no human reason, and takes no parameter for one, because it has no
-// affordance behind it: nothing in production routes to this verb, so there is
-// no surface at which a person could type a motive for it. The three cancel
-// paths that DO have affordances — the two HTTP verbs and the card answers —
-// carry the requester's own words onto their transitions (P3-RW-19 R6). Routing
-// this verb means giving it that parameter in the same change.
-func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, error) {
+// reason is the requester's own words for why, empty when they gave none. The
+// verb is UNROUTED today — nothing in production calls it, so no affordance can
+// supply one — and it takes the parameter regardless, because mint parity is
+// the one constructor's contract: all four cancel paths hand it the same shape,
+// and a path that could not carry a motive would be the one that quietly serves
+// a blank why the day it is routed (P3-RW-19 R13/OQ4).
+func (p *Pipeline) Cancel(ctx context.Context, actor, taskID, reason string) (*State, error) {
 	st, err := p.LoadState(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -730,7 +730,7 @@ func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, er
 	}
 	st.Phase = PhaseCancelled
 	if st.OpenAskID != "" {
-		if err := p.closeAndResume(ctx, st, st.OpenAskID, "cancelled", nil, ""); err != nil {
+		if err := p.closeAndResume(ctx, st, st.OpenAskID, "cancelled", nil, reason); err != nil {
 			return nil, err
 		}
 		return st, nil
@@ -747,7 +747,7 @@ func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, er
 			// open on this leg, so no ask id rides along.
 			if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateCompleted, run.TransitionOptions{
 				Reason: "intake cancelled (4.5)", Actor: st.Owner,
-				Detail: run.CancelDetail(st.Owner, false, "", ""),
+				Detail: run.CancelDetail(st.Owner, false, "", reason),
 			}); err != nil {
 				return err
 			}

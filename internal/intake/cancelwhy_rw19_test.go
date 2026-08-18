@@ -101,6 +101,31 @@ func TestIntakeCancelWithoutANoteRecordsNoReason(t *testing.T) {
 	}
 }
 
+// TestIntakeVerbCancelCarriesTheHumanReason — ratified OQ4 / R13: the intake
+// cancel VERB reaches the one constructor with a reason like the three
+// affordance-backed paths do. Nothing routes to it today, which is exactly why
+// the parameter is threaded now: mint parity is the constructor's contract, and
+// the path that could not carry a motive would be the one serving a blank why
+// the day it is routed.
+func TestIntakeVerbCancelCarriesTheHumanReason(t *testing.T) {
+	f := newFix(t)
+	const why = "I no longer need this built"
+	st := f.start(stdRequest())
+	f.admit(st.RunID)
+	f.advance(st.TaskID)
+
+	st, err := f.p.Cancel(context.Background(), "u1", st.TaskID, why)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if st.Phase != intake.PhaseCancelled {
+		t.Fatalf("phase %s, want cancelled", st.Phase)
+	}
+	if got, present := rw19IntakeCancelReason(t, f, st.RunID); !present || got != why {
+		t.Errorf("detail.reason = %q (present=%v), want %q", got, present, why)
+	}
+}
+
 // TestIntakeNoteIsIgnoredOutsideTheCancelShapedAnswers — ratified OQ2: the
 // field exists on every intake answer because one struct carries them all, but
 // v0 honors it only where it is a cancel's why. An answer that cancels nothing
