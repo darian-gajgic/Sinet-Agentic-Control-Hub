@@ -17,33 +17,95 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 )
+
+// rw19CancelMintPrefixes are the two spellings the catalog's ledger leg matches
+// on, mirroring internal/api's cancelLedgerPrefixes and pinned at their own
+// mints by cancelmint_rw18_test.go in internal/stage and internal/intake.
+var rw19CancelMintPrefixes = []string{"requester cancelled", "requester: rethink"}
 
 func TestCancelledQueryLiteralsMatchTheirProducers(t *testing.T) {
 	q, ok := history.QueryByName("status.tasks_cancelled")
 	if !ok {
 		t.Fatal("status.tasks_cancelled is missing from the catalog")
 	}
-	for _, c := range []struct{ what, literal string }{
+	cases := []struct{ what, literal string }{
 		{"the ledger event type", ledger.EventLedgerUpdate},
 		{"the ledger decide verb", ledger.VerbDecide},
 		{"the ledger human author", ledger.AuthorHuman},
-		// The two cancel mint prefixes, pinned at their producers by
-		// internal/stage and internal/intake's cancelmint_rw18_test.go, and read
-		// here because `ledger.decide` also carries retries, accepts and
-		// revisions and the entry has no typed kind to read instead.
-		{"the card/verb cancel mint prefix", "requester cancelled"},
-		{"the SPEC-DOUBT rethink mint prefix", "requester: rethink"},
 		// The frozen honest absence: this row has no renderer between it and the
 		// reader, so the line the reader sees IS the served value.
 		{"the honest-absence literal", "no reason given"},
-	} {
+	}
+	// The two cancel mint prefixes are read here because `ledger.decide` also
+	// carries retries, accepts and revisions and the entry has no typed kind to
+	// read instead.
+	for _, p := range rw19CancelMintPrefixes {
+		cases = append(cases, struct{ what, literal string }{"a cancel mint prefix", p})
+	}
+	for _, c := range cases {
 		if !strings.Contains(q.SQL, "'"+c.literal+"'") {
 			t.Errorf("%s (%q) does not appear in the query — the ledger leg would go quiet:\n%s",
 				c.what, c.literal, q.SQL)
+		}
+	}
+}
+
+// TestCancelMintPrefixesStayInTheAsciiSubsetBothReadersAgreeOn — P3-RW-19 drain
+// r1 F1.
+//
+// The catalog matches these prefixes with SQLite's `lower(trim(...))`, and
+// internal/api's leg B matches them with Go's `strings.ToLower(strings.
+// TrimSpace(...))`. Those pairs are NOT the same function: SQLite's `trim`
+// strips spaces only and its `lower` folds ASCII only, while Go's strip and
+// fold the whole Unicode space. So a ledger text led by a tab, or carrying a
+// non-ASCII case pair inside the matched prefix, would attribute on the task
+// page and NOT in History — the two surfaces answering one question
+// differently, which is the exact defect this packet was cut to end.
+//
+// The divergence is UNREACHABLE, and this is the invariant that keeps it so:
+// every producer builds its text by concatenating one of these prefixes as a
+// literal head ("requester cancelled at the "+card, "requester: rethink — …"),
+// so the matched region is always these bytes and nothing else. While both
+// spellings are pure printable ASCII with no leading whitespace, the two
+// implementations agree on them exactly.
+//
+// This test is what makes that a checked property rather than an observation:
+// a future mint reworded to open with a Unicode space, a non-breaking space, or
+// a non-ASCII letter trips HERE — loudly, at the pin — instead of silently
+// splitting the two surfaces apart again. The SQL is deliberately not
+// "corrected" to chase Unicode: the fix for a divergence nothing can reach is
+// to keep it unreachable, not to add a second spelling of the qualification.
+func TestCancelMintPrefixesStayInTheAsciiSubsetBothReadersAgreeOn(t *testing.T) {
+	if len(rw19CancelMintPrefixes) == 0 {
+		t.Fatal("no cancel mint prefixes are pinned — the ledger leg matches on nothing")
+	}
+	for _, p := range rw19CancelMintPrefixes {
+		if p == "" {
+			t.Error("an empty cancel mint prefix would match every ledger entry")
+			continue
+		}
+		for i, r := range p {
+			switch {
+			case r > unicode.MaxASCII:
+				t.Errorf("prefix %q holds the non-ASCII rune %q at %d: SQLite's lower() folds ASCII only, "+
+					"so History and the task page would disagree about this entry", p, r, i)
+			case !unicode.IsPrint(r):
+				t.Errorf("prefix %q holds the non-printable rune %q at %d — a control character in a matched "+
+					"prefix is a spelling no reader can verify", p, r, i)
+			case i == 0 && unicode.IsSpace(r):
+				t.Errorf("prefix %q begins with whitespace: SQLite's trim() strips spaces only, so a "+
+					"tab- or Unicode-space-led text attributes on the task page and not in History", p)
+			}
+		}
+		// Whole-string belt: the head this leg matches must survive both readers'
+		// normalizations identically, which is what the two checks above buy.
+		if strings.ToLower(p) != strings.ToLower(strings.TrimSpace(p)) {
+			t.Errorf("prefix %q changes under TrimSpace — the two readers normalize it differently", p)
 		}
 	}
 }

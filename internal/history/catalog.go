@@ -221,6 +221,21 @@ var catalog = []Query{
 		// three to internal/ledger's exported constants, the two prefixes to the
 		// mint-side tests that pin the same spellings in stage and intake.
 		//
+		// BOUNDED DIVERGENCE, stated rather than papered over (drain r1 F1).
+		// `lower(trim(...))` here is not literally the same function as leg B's
+		// `strings.ToLower(strings.TrimSpace(...))`: SQLite's trim strips spaces
+		// only and its lower folds ASCII only, while Go's do the whole Unicode
+		// space. A ledger text led by a TAB would therefore attribute on the task
+		// page and not here. No producer can write one: every mint concatenates
+		// one of these prefixes as a literal head, so the matched region is
+		// always exactly those bytes — and while both spellings are pure
+		// printable ASCII with no leading whitespace, the two implementations
+		// agree on them exactly. That is the invariant, and it is CHECKED
+		// (TestCancelMintPrefixesStayInTheAsciiSubsetBothReadersAgreeOn), so a
+		// mint reworded into a Unicode-space-led text fails at the pin instead of
+		// silently splitting the two surfaces. Widening this SQL toward Unicode
+		// would be a second spelling of a qualification that already has one.
+		//
 		// `reason` serves the PERSON'S OWN WORDS, or the frozen honest absence:
 		// nothing renders between this row and its reader, so the honest line
 		// has to be IN the row (the §37 'UNPRICED' / '(no project)' precedent).
