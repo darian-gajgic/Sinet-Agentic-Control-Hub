@@ -1146,7 +1146,14 @@ type TaskDecision struct {
 	Decision        string    `json:"decision"`
 	Subject         string    `json:"subject,omitempty"`
 	Reason          string    `json:"reason,omitempty"`
-	DecidedAt       string    `json:"decided_at,omitempty"`
+	// HumanReason is the person's own words for a cancel, lifted from the one
+	// constructor's `$.detail.reason` (P3-RW-19 R7). Absence is STRUCTURAL: no
+	// key at all when no reason was given, so the view draws its honest line
+	// from the absence rather than from a blank that would claim a motive
+	// nobody gave. Reason (the record's own mechanical sentence) is untouched
+	// — this field is additive.
+	HumanReason string `json:"human_reason,omitempty"`
+	DecidedAt   string `json:"decided_at,omitempty"`
 }
 
 // redactTaskDecisions applies the codor-C2 primitive per lifted VALUE, the
@@ -1161,6 +1168,7 @@ func redactTaskDecisions(rows []TaskDecision) {
 		rows[i].Decision = redact.Redact(rows[i].Decision)
 		rows[i].Subject = redact.Redact(rows[i].Subject)
 		rows[i].Reason = redact.Redact(rows[i].Reason)
+		rows[i].HumanReason = redact.Redact(rows[i].HumanReason)
 	}
 }
 
@@ -1327,7 +1335,8 @@ func (p *projector) structuredCancels(ctx context.Context, runID string) ([]Task
 	const q = `SELECT event_seq, ts,
 	                  COALESCE(json_extract(payload, '$.detail.actor'), json_extract(payload, '$.actor'), '') AS actor,
 	                  COALESCE(json_extract(payload, '$.reason'), '')                                        AS reason,
-	                  COALESCE(json_extract(payload, '$.detail.ask_id'), '')                                 AS ask_id
+	                  COALESCE(json_extract(payload, '$.detail.ask_id'), '')                                 AS ask_id,
+	                  COALESCE(json_extract(payload, '$.detail.reason'), '')                                 AS human_reason
 	             FROM run_events
 	            WHERE run_id = ? AND type = ? AND json_extract(payload, '$.detail.cause') = ?
 	            ORDER BY event_seq LIMIT ?`
@@ -1339,15 +1348,16 @@ func (p *projector) structuredCancels(ctx context.Context, runID string) ([]Task
 	var out []TaskDecision
 	for rows.Next() {
 		var (
-			d                 TaskDecision
-			ts, actor, reason string
-			askID             string
+			d                  TaskDecision
+			ts, actor, reason  string
+			askID, humanReason string
 		)
-		if err := rows.Scan(&d.Seq, &ts, &actor, &reason, &askID); err != nil {
+		if err := rows.Scan(&d.Seq, &ts, &actor, &reason, &askID, &humanReason); err != nil {
 			return nil, fmt.Errorf("projection: run cancel scan %q: %w", runID, err)
 		}
 		d.Type, d.TS, d.RunID = runStateChangedType, parseTS(ts), runID
 		d.Actor, d.Reason, d.CardID, d.Decision = actor, reason, askID, "cancel"
+		d.HumanReason = humanReason
 		out = append(out, d)
 	}
 	return out, rows.Err()
@@ -1362,6 +1372,12 @@ func (p *projector) structuredCancels(ctx context.Context, runID string) ([]Task
 // a human AND opens with one of the three mints' cancel words; `ledger.decide`
 // is also how retries, accepts and revisions are recorded, and none of those
 // are cancels.
+//
+// This leg serves NO human reason (P3-RW-19 R7). A pre-parity record holds no
+// motive — nothing captured one — and the "— note: …" suffix some of these
+// entries carry is prose, not a field. Scraping a motive out of a sentence
+// would be this derive inventing structure, which is the failure it exists to
+// end; the absent key is the honest answer.
 func (p *projector) ledgerCancels(ctx context.Context, runID string) ([]TaskDecision, error) {
 	const q = `SELECT event_seq, ts, payload FROM run_events
 	            WHERE run_id = ? AND type = ? AND json_extract(payload, '$.change.verb') = ?

@@ -533,7 +533,7 @@ func TestRacedCancelIsAConflictNotAnInternalError(t *testing.T) {
 		Reason: "finished first", Actor: "platform"}); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	_, err := e.sk.cancelOne(ctx, "alice", stale) // stale.State is still `running`
+	_, err := e.sk.cancelOne(ctx, "alice", "", stale) // stale.State is still `running`
 	if !errors.Is(err, ErrCancelRaced) {
 		t.Fatalf("a raced cancel returned %v, want ErrCancelRaced (drain D8)", err)
 	}

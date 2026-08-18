@@ -128,9 +128,13 @@ func (s *Skeleton) answerCancel(ctx context.Context, actor, askID string, card v
 		// this the transition said `platform` and carried no detail, so the
 		// only record of who cancelled lived in the ledger entry above and the
 		// task detail could not serve it.
+		//
+		// The card's own note IS the reason channel (P3-RW-19 R6): it keeps
+		// riding the ledger text above, and it now also lands where a reader
+		// can find the motive without scraping a sentence.
 		_, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateFinalized, run.TransitionOptions{
 			Reason: "verification cancelled at the card (4.5): finalize-with-card", Actor: actor,
-			Detail: run.CancelDetail(actor, false, askID),
+			Detail: run.CancelDetail(actor, false, askID, ans.Note),
 		})
 		return err
 	})

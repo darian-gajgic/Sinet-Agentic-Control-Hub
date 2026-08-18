@@ -316,6 +316,16 @@ type Answer struct {
 	// Route is the S08.8 re-route/pin entry, applied with Approve (the
 	// pre-execution override surface; recorded with its actor).
 	Route *RouteOverride `json:"route,omitempty"`
+
+	// Note is the person's own one-line reason, the same channel the
+	// verify/ladder cards carry (P3-RW-19 R6). One Answer type serves every
+	// intake card, so the field is reachable everywhere — but at v0 it is
+	// honored ONLY on the two cancel-shaped answers, ActionCancel on the
+	// approval card and ChoiceRethink on the SPEC-DOUBT card, where it becomes
+	// the cancel's `$.detail.reason`. Everywhere else it is ignored: honoring
+	// it would rewrite the wording of every intake ledger mint, which is a
+	// different packet's blast radius (ratified OQ2).
+	Note string `json:"note,omitempty"`
 }
 
 // SlotAnswer answers or assumes one slot/marker.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
@@ -29,15 +30,66 @@ import (
 // (S14.4 / G1 D1.3; CONVENTIONS §31, §35).
 
 // CancelSurface is the S02.3 cancel choreography seam (feature 4.5). The
-// transport resolves identity and owner scope; the surface owns the ratified
-// mapping — the live-session ladder, the FSM edges, the queue-row settle and
-// the kanban column (CONVENTIONS §14 reading 9). The stage skeleton implements
-// it; nil leaves the cancel routes answering 503 (surface not wired).
+// transport resolves identity and owner scope and bounds the reason; the
+// surface owns the ratified mapping — the live-session ladder, the FSM edges,
+// the queue-row settle and the kanban column (CONVENTIONS §14 reading 9). The
+// stage skeleton implements it; nil leaves the cancel routes answering 503
+// (surface not wired).
 type CancelSurface interface {
-	// CancelRun cancels one run as actor.
-	CancelRun(ctx context.Context, actor, runID string) (json.RawMessage, error)
-	// CancelTask cancels every non-terminal run of a task as actor.
-	CancelTask(ctx context.Context, actor, taskID string) (json.RawMessage, error)
+	// CancelRun cancels one run as actor, recording reason as the person's own
+	// words for why (empty when they gave none).
+	CancelRun(ctx context.Context, actor, runID, reason string) (json.RawMessage, error)
+	// CancelTask cancels every non-terminal run of a task as actor, recording
+	// the same reason on each ending.
+	CancelTask(ctx context.Context, actor, taskID, reason string) (json.RawMessage, error)
+}
+
+// cancelReasonMaxRunes bounds the reason a cancel verb accepts.
+//
+// A structural constant with its reason, not a ⚙ key (the §37 OQ6 pattern; S18
+// ratifies nothing here): the affordance is a ONE-LINE motive, the value rides
+// every transition a task cancel mints, and anything paragraph-shaped belongs
+// in a card's note, which is a channel that already exists. Interim under the
+// standing settings-tab directive.
+//
+// The bound counts RUNES, because it exists to describe what a person typed and
+// a byte count would refuse a shorter sentence for being written in a language
+// with wider characters. The landed card `note` gains no bound: bounding a
+// landed contract is a behavior change this packet was not given.
+const cancelReasonMaxRunes = 280
+
+// cancelBody is the optional POST body both cancel verbs accept. Absent, empty,
+// `{}` and an empty reason all mean "no reason" — the landed clients post `{}`
+// or nothing, so the field is strictly additive.
+type cancelBody struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// cancelReason reads and bounds the optional reason, answering the caller
+// itself when it refuses.
+//
+// Over the bound the answer is a refusal and NOTHING is cancelled: content is
+// never silently altered (CONVENTIONS §60), and a truncated motive is a
+// sentence the person did not write attributed to them forever. The words
+// themselves are taken verbatim.
+func (s *Server) cancelReason(w http.ResponseWriter, r *http.Request) (string, bool) {
+	raw, ok := s.readBody(w, r)
+	if !ok {
+		return "", false
+	}
+	var body cancelBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_body", Msg: err.Error()})
+		return "", false
+	}
+	if utf8.RuneCountInString(body.Reason) > cancelReasonMaxRunes {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "reason_too_long",
+			Msg: fmt.Sprintf(
+				"that is a bit long for one line — please shorten it to %d characters or fewer. Nothing has been cancelled yet.",
+				cancelReasonMaxRunes)})
+		return "", false
+	}
+	return body.Reason, true
 }
 
 func (s *Server) cancelReady(w http.ResponseWriter) bool {
@@ -66,8 +118,12 @@ func (s *Server) handleRunCancel(w http.ResponseWriter, r *http.Request) {
 		s.writeSurfaceErr(w, &SurfaceError{Status: code, Code: httpCode(code), Msg: cerr.Error()})
 		return
 	}
+	reason, ok := s.cancelReason(w, r)
+	if !ok {
+		return
+	}
 	id, _ := IdentityFrom(r.Context())
-	payload, err := s.cancel.CancelRun(r.Context(), id.UserID, runID)
+	payload, err := s.cancel.CancelRun(r.Context(), id.UserID, runID, reason)
 	s.writeSurface(w, payload, err)
 }
 
@@ -89,8 +145,12 @@ func (s *Server) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
 		s.writeSurfaceErr(w, &SurfaceError{Status: code, Code: httpCode(code), Msg: cerr.Error()})
 		return
 	}
+	reason, ok := s.cancelReason(w, r)
+	if !ok {
+		return
+	}
 	id, _ := IdentityFrom(r.Context())
-	payload, err := s.cancel.CancelTask(r.Context(), id.UserID, taskID)
+	payload, err := s.cancel.CancelTask(r.Context(), id.UserID, taskID, reason)
 	s.writeSurface(w, payload, err)
 }
 

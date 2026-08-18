@@ -337,11 +337,12 @@ func (u *Surface) Advance(ctx context.Context, userID, taskID string) (json.RawM
 
 // CancelRun implements api.CancelSurface: the ratified S02.3 cancel mapping on
 // ONE run (feature 4.5; cancel.go). The transport has already resolved owner
-// scope; actor is the authenticated person, and a cancel is only ever a human
-// act — these two methods are the mapping's only callers (NO AUTO-KILL,
-// S14.4 / G1 D1.3).
-func (u *Surface) CancelRun(ctx context.Context, actor, runID string) (json.RawMessage, error) {
-	out, err := u.sk.CancelRun(ctx, actor, runID)
+// scope and bounded the reason; actor is the authenticated person, reason is
+// their own words for why (empty when they gave none), and a cancel is only
+// ever a human act — these two methods are the mapping's only callers
+// (NO AUTO-KILL, S14.4 / G1 D1.3).
+func (u *Surface) CancelRun(ctx context.Context, actor, runID, reason string) (json.RawMessage, error) {
+	out, err := u.sk.CancelRun(ctx, actor, runID, reason)
 	if err != nil {
 		return nil, mapCancelErr(err)
 	}
@@ -349,9 +350,9 @@ func (u *Surface) CancelRun(ctx context.Context, actor, runID string) (json.RawM
 }
 
 // CancelTask implements api.CancelSurface: every non-terminal run of the task
-// under the same mapping.
-func (u *Surface) CancelTask(ctx context.Context, actor, taskID string) (json.RawMessage, error) {
-	out, err := u.sk.CancelTask(ctx, actor, taskID)
+// under the same mapping, each carrying the same reason.
+func (u *Surface) CancelTask(ctx context.Context, actor, taskID, reason string) (json.RawMessage, error) {
+	out, err := u.sk.CancelTask(ctx, actor, taskID, reason)
 	if err != nil {
 		return nil, mapCancelErr(err)
 	}

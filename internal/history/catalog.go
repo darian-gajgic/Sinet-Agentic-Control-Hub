@@ -198,10 +198,58 @@ var catalog = []Query{
 		// platform decided".
 		Name: "status.tasks_cancelled", Category: CatStatus,
 		Description: "tasks that were cancelled or stopped — who cancelled each one, why, and when, most recent first",
+		// cancelled_by reads the SAME two legs internal/api's task-page derive
+		// reads (reads.go cancelDecisions), in the same order, because the two
+		// surfaces answering one question differently is what the walk found:
+		// the banner said "cancelled by op" while this row said "—". The
+		// structured leg WINS; the ledger leg only FILLS, for rows minted before
+		// the structured detail existed; the NULLIF-platform fallback stays last;
+		// and a row where all three are empty stays NULL, which is an honest
+		// residual absence and not an error (P3-RW-19 R1).
+		//
+		// The ledger leg is a correlated SCALAR subquery on the same run, never
+		// a join: a join would widen this row's `GROUP BY t.task_id` answer, and
+		// one act must stay one row. It adds no bind placeholder, so the §37
+		// structural rules hold unchanged.
+		//
+		// Its qualification is reads.go's, restated in SQL: the LAST decisions
+		// entry (each update carries the whole ledger, so the entry this update
+		// added is the last one), authored `human`, opening with one of the two
+		// cancel mint prefixes — `ledger.decide` also carries retries, accepts
+		// and revisions, and the entry has no typed kind to read instead. Every
+		// literal below is pinned to its producer by cancelrow_rw19_test.go —
+		// three to internal/ledger's exported constants, the two prefixes to the
+		// mint-side tests that pin the same spellings in stage and intake.
+		//
+		// `reason` serves the PERSON'S OWN WORDS, or the frozen honest absence:
+		// nothing renders between this row and its reader, so the honest line
+		// has to be IN the row (the §37 'UNPRICED' / '(no project)' precedent).
+		// The mechanical sentence is no longer served here — it is still served
+		// verbatim by status.run_state_history and by the task page — because a
+		// row whose question is "who cancelled each one, why, and when" must not
+		// answer the why three different ways.
+		//
+		// `cause` is the mechanical ENDING in plain words, written for someone
+		// who is not a programmer (CONVENTIONS §57): the running-stop and the
+		// waiting/queued-withdrawal are different facts and read differently,
+		// and no rule citation appears in either.
 		SQL: `SELECT t.task_id, t.user_id, t.title, MAX(e.event_seq) AS event_seq, e.ts AS cancelled_ts,` +
 			` COALESCE(json_extract(e.payload, '$.detail.actor'),` +
+			`          (SELECT json_extract(le.payload, '$.change.actor') FROM run_events le` +
+			`            WHERE le.run_id = r.run_id AND le.type = 'ledger_update'` +
+			`              AND json_extract(le.payload, '$.change.verb') = 'ledger.decide'` +
+			`              AND json_extract(le.payload, '$.ledger.decisions[#-1].author') = 'human'` +
+			`              AND (instr(lower(trim(COALESCE(json_extract(le.payload, '$.ledger.decisions[#-1].text'), ''))),` +
+			`                         'requester cancelled') = 1` +
+			`                OR instr(lower(trim(COALESCE(json_extract(le.payload, '$.ledger.decisions[#-1].text'), ''))),` +
+			`                         'requester: rethink') = 1)` +
+			`            ORDER BY le.event_seq DESC LIMIT 1),` +
 			`          NULLIF(json_extract(e.payload, '$.actor'), 'platform')) AS cancelled_by,` +
-			` json_extract(e.payload, '$.reason') AS reason` +
+			` COALESCE(json_extract(e.payload, '$.detail.reason'), 'no reason given') AS reason,` +
+			` CASE json_extract(e.payload, '$.to')` +
+			`      WHEN 'completed' THEN 'stopped while it was already running'` +
+			`      WHEN 'finalized' THEN 'called off before it went any further'` +
+			`      ELSE 'called off' END AS cause` +
 			` FROM tasks t` +
 			` JOIN runs r ON r.task_id = t.task_id` +
 			` JOIN run_events e ON e.run_id = r.run_id AND e.type = 'run.state_changed'` +

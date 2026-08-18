@@ -171,7 +171,9 @@ func (s *Skeleton) ladderCancel(ctx context.Context, actor, askID string, card r
 	s.recordLadderDecision(ctx, card, actor, "requester cancelled at the "+card.Card+" card"+noteSuffix(ans),
 		"cancel is always available (4.5); the whole task ends under the ratified S02.3 mapping — every live sibling run with it (CONVENTIONS §14 reading 9)")
 	if card.TaskID != "" {
-		if _, err := s.CancelTaskAtCard(ctx, actor, card.TaskID); err != nil {
+		// The card note rides through as the human reason, so every sibling
+		// transition this one act ends carries the same motive (P3-RW-19 R6).
+		if _, err := s.CancelTaskAtCard(ctx, actor, card.TaskID, ans.Note); err != nil {
 			// The card stays OPEN on a refused cancel (a claimed run mid-dispatch
 			// answers 409-retry): the door must not be consumed by a decision the
 			// platform did not carry out.

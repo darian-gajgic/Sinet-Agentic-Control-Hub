@@ -91,7 +91,7 @@ func (p *Pipeline) Answer(ctx context.Context, actor, askID string, raw json.Raw
 		return nil, fmt.Errorf("%w: kind %q", ErrBadAnswer, card.Kind)
 	}
 
-	if err := p.closeAndResume(ctx, st, askID, "answered", raw); err != nil {
+	if err := p.closeAndResume(ctx, st, askID, "answered", raw, ans.Note); err != nil {
 		return nil, err
 	}
 	if st.Phase == PhaseCancelled {
@@ -103,7 +103,13 @@ func (p *Pipeline) Answer(ctx context.Context, actor, askID string, raw json.Raw
 // closeAndResume closes the ask, resumes the parked run (parked→running —
 // the resume bumps the generation, Spec S02.3), and appends the state, in
 // one transaction.
-func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status string, raw json.RawMessage) error {
+//
+// cancelReason is the person's own words for a cancel. It is read ONLY on the
+// leg below, which is what makes the answer note "ignored outside the two
+// cancel-shaped answers" (P3-RW-19 ratified OQ2) a property of this code rather
+// than of each caller's care: a note handed in with an answer that resumes the
+// pipeline reaches nothing.
+func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status string, raw json.RawMessage, cancelReason string) error {
 	st.OpenAskID, st.OpenAskKind = "", ""
 	return p.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if err := p.closeAskTx(ctx, tx, askID, status, raw); err != nil {
@@ -127,7 +133,7 @@ func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status 
 				to = run.StateFinalized
 				opts = run.TransitionOptions{
 					Reason: "intake cancelled (4.5): finalize-with-card",
-					Actor:  st.Owner, Detail: run.CancelDetail(st.Owner, false, askID),
+					Actor:  st.Owner, Detail: run.CancelDetail(st.Owner, false, askID, cancelReason),
 				}
 			}
 			if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, to, opts); err != nil {
@@ -434,7 +440,7 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 	default:
 		return nil, fmt.Errorf("%w: approval action %q", ErrBadAnswer, ans.Action)
 	}
-	if err := p.closeAndResume(ctx, st, st.OpenAskID, "answered", raw); err != nil {
+	if err := p.closeAndResume(ctx, st, st.OpenAskID, "answered", raw, ans.Note); err != nil {
 		return nil, err
 	}
 	if st.Phase == PhaseCancelled {
@@ -700,6 +706,13 @@ func (p *Pipeline) claimOverlapTx(ctx context.Context, tx *sql.Tx, taskID, proje
 
 // Cancel cancels the intake (4.5: cancel is always available). The intake
 // run finalizes (parked, via closeAndResume) or completes (running).
+//
+// It records no human reason, and takes no parameter for one, because it has no
+// affordance behind it: nothing in production routes to this verb, so there is
+// no surface at which a person could type a motive for it. The three cancel
+// paths that DO have affordances — the two HTTP verbs and the card answers —
+// carry the requester's own words onto their transitions (P3-RW-19 R6). Routing
+// this verb means giving it that parameter in the same change.
 func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, error) {
 	st, err := p.LoadState(ctx, taskID)
 	if err != nil {
@@ -717,7 +730,7 @@ func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, er
 	}
 	st.Phase = PhaseCancelled
 	if st.OpenAskID != "" {
-		if err := p.closeAndResume(ctx, st, st.OpenAskID, "cancelled", nil); err != nil {
+		if err := p.closeAndResume(ctx, st, st.OpenAskID, "cancelled", nil, ""); err != nil {
 			return nil, err
 		}
 		return st, nil
@@ -734,7 +747,7 @@ func (p *Pipeline) Cancel(ctx context.Context, actor, taskID string) (*State, er
 			// open on this leg, so no ask id rides along.
 			if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateCompleted, run.TransitionOptions{
 				Reason: "intake cancelled (4.5)", Actor: st.Owner,
-				Detail: run.CancelDetail(st.Owner, false, ""),
+				Detail: run.CancelDetail(st.Owner, false, "", ""),
 			}); err != nil {
 				return err
 			}

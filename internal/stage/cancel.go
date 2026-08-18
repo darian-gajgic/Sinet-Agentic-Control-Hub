@@ -181,13 +181,14 @@ func raced(err error) error {
 
 // CancelRun applies the ratified cancel mapping to ONE run. actor is the
 // authenticated person who pressed cancel; the transport has already resolved
-// owner scope (S01.9).
-func (s *Skeleton) CancelRun(ctx context.Context, actor, runID string) (CancelOutcome, error) {
+// owner scope (S01.9) and bounded the reason. reason is that person's own words
+// for why, empty when they gave none.
+func (s *Skeleton) CancelRun(ctx context.Context, actor, runID, reason string) (CancelOutcome, error) {
 	r, err := s.cfg.Runs.Get(ctx, runID)
 	if err != nil {
 		return CancelOutcome{}, err
 	}
-	out, err := s.cancelOne(ctx, actor, r)
+	out, err := s.cancelOne(ctx, actor, reason, r)
 	if err != nil {
 		return CancelOutcome{}, err
 	}
@@ -201,7 +202,11 @@ func (s *Skeleton) CancelRun(ctx context.Context, actor, runID string) (CancelOu
 // (S15.2 tasks row: "cancel (4.5)"). A run that refuses (the transient claimed
 // window) fails the whole call so the caller retries the task as a unit rather
 // than being told a partial cancellation succeeded.
-func (s *Skeleton) CancelTask(ctx context.Context, actor, taskID string) (TaskCancelOutcome, error) {
+//
+// The reason rides EVERY transition the call mints: each ending is its own
+// durable record, and a motive on only the first would leave the other endings
+// unexplained on the same task page.
+func (s *Skeleton) CancelTask(ctx context.Context, actor, taskID, reason string) (TaskCancelOutcome, error) {
 	rows, err := s.cfg.DB.QueryContext(ctx,
 		`SELECT run_id FROM runs WHERE task_id = ? ORDER BY created_ts, run_id`, taskID)
 	if err != nil {
@@ -227,7 +232,7 @@ func (s *Skeleton) CancelTask(ctx context.Context, actor, taskID string) (TaskCa
 		if err != nil {
 			return TaskCancelOutcome{}, err
 		}
-		one, err := s.cancelOne(ctx, actor, r)
+		one, err := s.cancelOne(ctx, actor, reason, r)
 		if err != nil {
 			return TaskCancelOutcome{}, err
 		}
@@ -264,14 +269,18 @@ const kanbanCancelled = "cancelled"
 // file list (cancel_internal_test.go), so a machine caller added from anywhere
 // else fails the wall. Making the call from this file rather than from the
 // answer path keeps the mapping itself single-implementation.
-func (s *Skeleton) CancelTaskAtCard(ctx context.Context, actor, taskID string) (TaskCancelOutcome, error) {
-	return s.CancelTask(ctx, actor, taskID)
+func (s *Skeleton) CancelTaskAtCard(ctx context.Context, actor, taskID, reason string) (TaskCancelOutcome, error) {
+	return s.CancelTask(ctx, actor, taskID, reason)
 }
 
 // cancelOne is the mapping itself.
-func (s *Skeleton) cancelOne(ctx context.Context, actor string, r run.Run) (CancelOutcome, error) {
+func (s *Skeleton) cancelOne(ctx context.Context, actor, reason string, r run.Run) (CancelOutcome, error) {
 	out := CancelOutcome{RunID: r.ID, From: string(r.State), To: string(r.State)}
-	reason := "cancelled by " + actor + " (4.5)"
+	// The mechanical sentence the transition has always carried. The person's
+	// own words ride the structured detail beside it: additive, never a
+	// replacement — the record keeps saying what the platform did as well as
+	// why the person did it.
+	mechanical := "cancelled by " + actor + " (4.5)"
 
 	switch r.State {
 	case run.StateCompleted, run.StateFinalized, run.StateTombstoned, run.StateDiedAtGate:
@@ -293,7 +302,7 @@ func (s *Skeleton) cancelOne(ctx context.Context, actor string, r run.Run) (Canc
 		// transition so the disposition the adapter reports is the cancel's.
 		out.LadderInvoked = s.runLadder(ctx, r)
 		if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateCompleted, run.TransitionOptions{
-			Reason: reason, Actor: actor, Detail: cancelDetail(actor, out.LadderInvoked),
+			Reason: mechanical, Actor: actor, Detail: cancelDetail(actor, out.LadderInvoked, reason),
 		}); err != nil {
 			// The terminal transition did NOT commit, so the crash suppression
 			// this cancel took must not outlive it (drain D1): a later genuine
@@ -316,7 +325,7 @@ func (s *Skeleton) cancelOne(ctx context.Context, actor string, r run.Run) (Canc
 				return err
 			}
 			_, err := s.cfg.Runs.TransitionTx(ctx, tx, r.ID, run.StateFinalized, run.TransitionOptions{
-				Reason: reason, Actor: actor, Detail: cancelDetail(actor, false),
+				Reason: mechanical, Actor: actor, Detail: cancelDetail(actor, false, reason),
 			})
 			return err
 		})
@@ -340,7 +349,7 @@ func (s *Skeleton) cancelOne(ctx context.Context, actor string, r run.Run) (Canc
 		}
 		err := s.cfg.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 			if _, err := s.cfg.Runs.TransitionTx(ctx, tx, r.ID, run.StateFinalized, run.TransitionOptions{
-				Reason: reason, Actor: actor, Detail: cancelDetail(actor, false),
+				Reason: mechanical, Actor: actor, Detail: cancelDetail(actor, false, reason),
 			}); err != nil {
 				return err
 			}
@@ -384,8 +393,8 @@ func (s *Skeleton) runLadder(ctx context.Context, r run.Run) bool {
 // verify-card and intake cancels must write the same shape and the same cause
 // literal, and `internal/intake` cannot import `internal/stage`. The verb path
 // has no card, so it passes no ask id.
-func cancelDetail(actor string, ladder bool) json.RawMessage {
-	return run.CancelDetail(actor, ladder, "")
+func cancelDetail(actor string, ladder bool, reason string) json.RawMessage {
+	return run.CancelDetail(actor, ladder, "", reason)
 }
 
 // closeOpenAsksTx closes every open ask of a run as cancelled, inside the

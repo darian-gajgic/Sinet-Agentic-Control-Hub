@@ -36,16 +36,24 @@ const CancelCauseHuman = "human cancel (4.5)"
 // S03.1 safe-boundary → abort → TERM → KILL ladder ran on a live session.
 // askID names the card the cancel was answered at when there was one (S2.4
 // wants "card id + type"); it is omitted for the verb path, which has no card
-// — an empty key would claim a card that never existed.
-func CancelDetail(actor string, ladderInvoked bool, askID string) json.RawMessage {
+// — an empty key would claim a card that never existed. reason is the person's
+// own one-line motive, captured at whichever cancel affordance they used, and
+// is omitted on the same principle: a blank reason would claim a motive nobody
+// gave, and the surfaces render their honest line from the ABSENT key.
+//
+// The reason is taken VERBATIM. Its bound belongs to the transport, which is
+// where a caller can be told to shorten it (internal/api); this constructor
+// never edits and never fails, so every cancel that reaches it is recorded.
+func CancelDetail(actor string, ladderInvoked bool, askID, reason string) json.RawMessage {
 	b, err := json.Marshal(struct {
 		Cause         string `json:"cause"`
 		Actor         string `json:"actor"`
 		LadderInvoked bool   `json:"ladder_invoked"`
 		AskID         string `json:"ask_id,omitempty"`
-	}{CancelCauseHuman, actor, ladderInvoked, askID})
+		Reason        string `json:"reason,omitempty"`
+	}{CancelCauseHuman, actor, ladderInvoked, askID, reason})
 	if err != nil {
-		// Marshalling four plain fields cannot fail; a nil detail still leaves
+		// Marshalling five plain fields cannot fail; a nil detail still leaves
 		// the transition (and its actor) recorded, so the cancel is never lost.
 		return nil
 	}

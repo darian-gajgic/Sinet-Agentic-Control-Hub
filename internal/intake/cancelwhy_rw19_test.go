@@ -107,21 +107,50 @@ func TestIntakeCancelWithoutANoteRecordsNoReason(t *testing.T) {
 // must leave no motive in the record at all.
 func TestIntakeNoteIsIgnoredOutsideTheCancelShapedAnswers(t *testing.T) {
 	f := newFix(t)
+	const forceNote = "a note riding a force-proceed"
+	const replanNote = "a note riding a re-interview"
 	st := f.start(stdRequest())
 	f.admit(st.RunID)
 	f.advance(st.TaskID)
 	askID, _ := f.openAsk(st.RunID)
-	st = f.answer("u1", askID, intake.Answer{ForceProceed: true, Note: "a note nobody asked for"})
+	st = f.answer("u1", askID, intake.Answer{ForceProceed: true, Note: forceNote})
 	askID, _ = f.openAsk(st.RunID)
-	st = f.answer("u1", askID, intake.Answer{Action: intake.ActionReInterview, Note: "another one"})
+	st = f.answer("u1", askID, intake.Answer{Action: intake.ActionReInterview, Note: replanNote})
 
+	// The control that makes the assertions below mean something: the answers
+	// were really applied, not refused for carrying a field v0 ignores.
+	if st.Phase != intake.PhaseInterview {
+		t.Fatalf("phase %s, want the re-interview the second answer asked for", st.Phase)
+	}
+	// No cancel record exists — scoped to the cancel discriminator, because an
+	// ordinary lifecycle payload may carry a `detail.reason` of its own
+	// (`run.created` does) and this test is about the cancel's why.
 	var n int
 	if err := f.db.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND json_extract(payload, '$.detail.reason') IS NOT NULL`,
-		st.RunID).Scan(&n); err != nil {
-		t.Fatalf("count reasons: %v", err)
+		`SELECT COUNT(*) FROM run_events
+		  WHERE run_id = ? AND json_extract(payload, '$.detail.cause') = ?`,
+		st.RunID, run.CancelCauseHuman).Scan(&n); err != nil {
+		t.Fatalf("count cancel records: %v", err)
 	}
 	if n != 0 {
-		t.Errorf("%d record(s) carry a motive for answers that cancelled nothing — the note is honored only at the two cancel-shaped answers (OQ2)", n)
+		t.Errorf("%d cancel record(s) exist for answers that cancelled nothing", n)
+	}
+	// And the notes themselves reached NOTHING: not a transition detail, not a
+	// ledger decision's prose. This is the limb that can actually fail — folding
+	// the note into every intake mint's wording is the tempting symmetry with
+	// verify's noteSuffix, and it is exactly what OQ2 held back.
+	//
+	// The answer snapshot on the `asks` row is deliberately not judged: an
+	// answer is recorded as the caller sent it, which is the record, not a use.
+	for _, note := range []string{forceNote, replanNote} {
+		var hits int
+		if err := f.db.QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND instr(payload, ?) > 0`,
+			st.RunID, note).Scan(&hits); err != nil {
+			t.Fatalf("scan for the note: %v", err)
+		}
+		if hits != 0 {
+			t.Errorf("the note %q reached %d record(s) — v0 honors it only at the two cancel-shaped answers (OQ2)", note, hits)
+		}
 	}
 }
