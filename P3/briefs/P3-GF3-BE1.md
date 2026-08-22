@@ -502,3 +502,47 @@ grants them.)
   extended schema wherever the stack is installed) and putting only the NEW extended
   measurement behind the opt-in env; the landed reinterview branch's "top-weight" comment
   does not match its declaration-order behavior — R8 replaces the branch, mooting it.
+
+---
+
+## 11. Coordinator rulings on §10 (2026-08-23, before executor launch — the RW-19 precedent)
+
+- **OQ-1 — GRANTED as recommended.** Packet scope WIDENS to `internal/memory` (the
+  `rw12seeds.go` re-point onto frozen RW-12 content + the new `EnsureGF3TaxonomyGovernance`
+  file) and ONE boot line in `internal/shell/shell.go` (GF3 Ensure after the RW-12 Ensure).
+  **Three by-name edit sanctions, exactly and only:**
+  1. `internal/intake/taxonomy_test.go` `TestSeedTaxonomiesCoverSixFamilies` — the one-line
+     software version pin `"v2"` → `"v3"` (plus the same pin for generic if that test carries
+     one).
+  2. `internal/memory/rw12seeds_test.go` `TestTaxonomyGovernanceCreatesAndSupersedes` —
+     re-point its expectation onto the frozen RW-12 snapshot content (and/or additionally run
+     the GF3 Ensure), per the §57-recorded precedent.
+  3. `internal/memory/rw12seeds_test.go` `TestGovernanceDecidesFromTheRowNotTheFile` — tear
+     with the frozen v2 bytes instead of live-seed bytes.
+  No other landed test may change. `rw12ContentDigest` values are never edited; the digest
+  tripwire survives unmodified. The design note's §3 file scope is corrected by this ruling
+  (recorded in STATE).
+- **OQ-2 — EXTEND the reading.** `Answer.Note` is honored on the two cancel-shaped answers
+  AND on `ActionRePlan`, where it is the free-text contest channel ("what I want different,
+  in my words"); it stays ignored everywhere else. One requester-words field with per-action
+  meaning beats a parallel second string. Update the `cards.go` and `api.ts` doc comments to
+  say exactly this, honestly. The RW-19 pinned test stays green (it does not cover replan);
+  the RW-19 ratified record is EXTENDED, not contradicted — STATE logs the extension.
+- **OQ-3 — CONFIRMED as briefed.** S06.5's "up to 4 questions per card" governs interview
+  DELIVERY (fresh asking, highest-weight-first, below-floor). The S06.9 Re-interview verb's
+  review surface re-presents the whole set with current resolutions — a review-and-adjust
+  act the requester explicitly requested, not delivery of unresolved questions (the
+  CardFamily precedent). Same CardKind, richer content; `maxQuestionsPerCard` doc gains the
+  one scoping sentence. Reading logged in STATE.
+- **OQ-4 — CONFIRMED: note-only replan is VALID** (one target-less finding). The structured
+  entry remains the primary affordance; the requester's own words entering the same bounded
+  delta re-plan serves S06.9's purpose (bounded re-plan, delta re-approved). Reading logged.
+- **OQ-5 — CONFIRMED as the design note's letter:** generic jumps v1 → v3; "v3" = the GF3
+  revision label across both revised sets. Version labels are provenance, not per-set
+  sequence.
+- **OQ-6 — CONFIRMED: ship-with-pending-record.** The GF3 Ensure runs at boot with an
+  originRef stating operator ratification is PENDING the resumed B6 gate; the gate ruling
+  then stands in STATE. Deferring the Ensure would recreate the exact live-pointer drift
+  §57 closed. If the gate REFUSES v3, the refusal is executed as its own supersession back
+  to the frozen v2 content (governance machinery already supports it) — the pending record
+  makes that path honest.
