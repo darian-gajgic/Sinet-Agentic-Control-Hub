@@ -34,12 +34,16 @@ type Option struct {
 // Slot is one must-know slot of a family taxonomy. Weight is shipped in
 // the taxonomy file and operator-editable (G1 P8).
 type Slot struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	MustKnow string   `json:"must_know"`
-	Weight   int      `json:"weight"`
-	Question string   `json:"question"`
-	Options  []Option `json:"options,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	MustKnow string `json:"must_know"`
+	Weight   int    `json:"weight"`
+	Question string `json:"question"`
+	// Why is the one-line plain-words reason this question is worth answering,
+	// written for the requester (P3-GF3-BE1 R1; design note §2.A(iii)). It is
+	// requester-facing where MustKnow is the internal rationale.
+	Why     string   `json:"why,omitempty"`
+	Options []Option `json:"options,omitempty"`
 }
 
 // Taxonomy is one versioned family question set.

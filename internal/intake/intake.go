@@ -388,6 +388,11 @@ type Utility interface {
 type PhraseQuestion struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// Options are the slot's labeled options (P3-GF3-BE1 R3): the suggestion
+	// decoration needs the seat to SEE them so it can name an existing option
+	// value in SuggestedOptions. Label phrasing is still not a v0 duty — the
+	// options ride along as context, never as something to rewrite.
+	Options []Option `json:"options,omitempty"`
 }
 
 // PhraseInput is one card's phrase-and-summarize request (Spec S06.5, the
@@ -420,6 +425,15 @@ type PhraseInput struct {
 type PhraseResult struct {
 	Phrasings map[string]string `json:"phrasings,omitempty"`
 	Summary   string            `json:"summary,omitempty"`
+	// Suggestions are one-line task-grounded proposed answers keyed by slot
+	// id (P3-GF3-BE1 R3; design note §2.B). Folded by the caller under the
+	// same containment as Phrasings: an id that was not asked is dropped, an
+	// absent id leaves the question undecorated.
+	Suggestions map[string]string `json:"suggestions,omitempty"`
+	// SuggestedOptions name, per slot id, the EXISTING option value the
+	// suggestion corresponds to; the fold drops any value that names no
+	// option of the asked question.
+	SuggestedOptions map[string]string `json:"suggested_options,omitempty"`
 }
 
 // Phraser is the S06.5 phrase-and-summarize seat (Spec S06.10: "question/card

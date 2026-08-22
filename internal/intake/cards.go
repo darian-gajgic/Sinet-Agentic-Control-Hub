@@ -64,6 +64,25 @@ type Question struct {
 	Phrased string   `json:"phrased,omitempty"`
 	Options []Option `json:"options,omitempty"` // 2–4 labeled options; free text always available
 	Weight  int      `json:"weight,omitempty"`
+	// Why is the slot's plain-words reason line (P3-GF3-BE1 R1/R8; taxonomy
+	// Slot.Why), served so the card can say why the question is worth
+	// answering. Additive and optional.
+	Why string `json:"why,omitempty"`
+	// Suggested is the utility seat's one-line task-grounded proposed answer
+	// for this question (P3-GF3-BE1 R5; design note §2.B), folded by slot id
+	// under the same containment as Phrased. Absent whenever the seat
+	// degrades — the honest-absence posture, no new failure mode.
+	Suggested string `json:"suggested,omitempty"`
+	// SuggestedOption names the EXISTING option value the suggestion
+	// corresponds to; a value that names no option of this question is
+	// dropped by the fold (the Suggested text is kept).
+	SuggestedOption string `json:"suggested_option,omitempty"`
+	// Resolution is the slot's CURRENT resolution on a re-interview review
+	// card (P3-GF3-BE1 R8; design note §2.D): how it settled (registry /
+	// answered / assumption), so the surface can render review-and-adjust.
+	// Nil on ordinary interview cards and for unresolved slots. Composed by
+	// platform code from State.Resolutions — never by a model.
+	Resolution *UnderstoodItem `json:"resolution,omitempty"`
 }
 
 // UnderstoodItem is one resolved must-know slot, rendered back to the
@@ -115,7 +134,13 @@ type Card struct {
 	Version   int      `json:"version"` // card version, cited by the approval record
 	IssuedTS  string   `json:"issued_ts"`
 	Clearance float64  `json:"clearance"`
-	Tier      Tier     `json:"tier"`
+	// ClearanceFloor is the tier's ⚙ clearance floor, served next to the
+	// computed Clearance so a surface can say where the questions stop
+	// (P3-GF3-BE1 R11; ⚙ intake.clearance_floor.*, read at card issue). The
+	// trivial tier has no floor and omits it. Served, never derived — the
+	// floor VALUE and its consumption stay exactly as landed.
+	ClearanceFloor float64 `json:"clearance_floor,omitempty"`
+	Tier           Tier    `json:"tier"`
 
 	Questions []Question    `json:"questions,omitempty"` // interview / clarification / escalation
 	Decision  *DecisionBody `json:"decision,omitempty"`  // coverage / research / spec_doubt
@@ -313,6 +338,11 @@ type Answer struct {
 	// Approval / delta cards.
 	Action  string      `json:"action,omitempty"`
 	Contest *ContestRef `json:"contest,omitempty"`
+	// Contests is the multi-contest Re-plan entry (P3-GF3-BE1 R10; design
+	// note §2.E; S06.9 structured entry — named targets, not a cardinality of
+	// one): a SET of contested targets, back-compatible with the single
+	// Contest above. All merge into one bounded delta re-plan.
+	Contests []ContestRef `json:"contests,omitempty"`
 	// Route is the S08.8 re-route/pin entry, applied with Approve (the
 	// pre-execution override surface; recorded with its actor).
 	Route *RouteOverride `json:"route,omitempty"`
@@ -332,6 +362,12 @@ type Answer struct {
 type SlotAnswer struct {
 	ID    string `json:"id"`
 	Value string `json:"value"`
+	// Skip is the per-slot "take the recommendation and move on" arm
+	// (P3-GF3-BE1 R6; design note §2.C; S06.5's explicit-assumption
+	// resolution arm): {id, skip:true} converts THAT slot to an explicit
+	// assumption carrying the card's served suggestion when one exists. Valid
+	// only for a slot asked on this card, and never together with a value.
+	Skip bool `json:"skip,omitempty"`
 }
 
 // ContestRef is the structured Re-plan entry: tap the AC, assumption, or
