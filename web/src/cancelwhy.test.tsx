@@ -163,14 +163,22 @@ const mine = () => fixtures.approvalsMine() as unknown as ApprovalList
 
 const answered = { body: { applied: true, state: 'answered', detail: '' } }
 
-const askRow = (view: { container: HTMLElement }, id: string) =>
-  view.container.querySelector(`[data-card-id="${CSS.escape(id)}"]`) as HTMLElement
+/** askRow presses the card's compact face open first — the gate-ordered
+ *  anatomy (2026-08-22) keeps the answer fields in the detail behind it. */
+const askRow = async (view: { container: HTMLElement }, id: string) => {
+  const node = view.container.querySelector(`[data-card-id="${CSS.escape(id)}"]`) as HTMLElement
+  if (node.getAttribute('data-open') !== 'true') {
+    click(node.querySelector('button[data-face]'))
+    await flush()
+  }
+  return view.container.querySelector(`[data-card-id="${CSS.escape(id)}"]`) as HTMLElement
+}
 
 test('the verify card cancel carries the note: {choice:"cancel", note}', async () => {
   const { view, log } = await openAt('/inbox', { 'GET /api/approvals': { body: mine() } })
   log.set(`POST /api/approvals/${encodeURIComponent('ask:ask-brief')}/answer`, answered)
 
-  const row = askRow(view, 'ask:ask-brief')
+  const row = await askRow(view, 'ask:ask-brief')
   typeInto(row.querySelector('[data-field="cancel-note"]') as HTMLInputElement, "two rounds is enough — I'll write it myself")
   click(row.querySelector('[data-action="cancel"]'))
   await flush()
@@ -186,7 +194,7 @@ test('the note rides ONLY the cancel-shaped verb: typed and then Accepted, nothi
   const { view, log } = await openAt('/inbox', { 'GET /api/approvals': { body: mine() } })
   log.set(`POST /api/approvals/${encodeURIComponent('ask:ask-brief')}/answer`, answered)
 
-  const row = askRow(view, 'ask:ask-brief')
+  const row = await askRow(view, 'ask:ask-brief')
   typeInto(row.querySelector('[data-field="cancel-note"]') as HTMLInputElement, 'a why that belongs to the cancel alone')
   click(row.querySelector('[data-action="accept_best_effort"]'))
   await flush()
@@ -206,7 +214,7 @@ test('the intake approval cancel carries the note: {action:"cancel", note}', asy
   const { view, log } = await openAt('/inbox', { 'GET /api/approvals': { body } })
   log.set(`POST /api/approvals/${encodeURIComponent('ask:ask-ship')}/answer`, answered)
 
-  const row = askRow(view, 'ask:ask-ship')
+  const row = await askRow(view, 'ask:ask-ship')
   typeInto(row.querySelector('[data-field="cancel-note"]') as HTMLInputElement, 'wrong week for this')
   click(row.querySelector('[data-action="cancel"]'))
   await flush()
@@ -226,7 +234,7 @@ test('the SPEC-DOUBT rethink IS a cancel and carries the note: {choice:"rethink"
   const { view, log } = await openAt('/inbox', { 'GET /api/approvals': { body } })
   log.set(`POST /api/approvals/${encodeURIComponent('ask:ask-coverage')}/answer`, answered)
 
-  const row = askRow(view, 'ask:ask-coverage')
+  const row = await askRow(view, 'ask:ask-coverage')
   typeInto(row.querySelector('[data-field="cancel-note"]') as HTMLInputElement, 'the whole ask was wrong')
   click(row.querySelector('[data-action="rethink"]'))
   await flush()
@@ -239,7 +247,7 @@ test('a whitespace-only note is no note at all', async () => {
   const { view, log } = await openAt('/inbox', { 'GET /api/approvals': { body: mine() } })
   log.set(`POST /api/approvals/${encodeURIComponent('ask:ask-brief')}/answer`, answered)
 
-  const row = askRow(view, 'ask:ask-brief')
+  const row = await askRow(view, 'ask:ask-brief')
   typeInto(row.querySelector('[data-field="cancel-note"]') as HTMLInputElement, '   ')
   click(row.querySelector('[data-action="cancel"]'))
   await flush()
@@ -251,7 +259,7 @@ test('a whitespace-only note is no note at all', async () => {
 test('a card with no cancel-shaped verb renders no why field', async () => {
   const { view } = await openAt('/inbox', { 'GET /api/approvals': { body: mine() } })
   // ask:ask-delta answers {approve, reject} — nothing cancel-shaped.
-  expect(askRow(view, 'ask:ask-delta').querySelector('[data-field="cancel-note"]')).toBeNull()
+  expect((await askRow(view, 'ask:ask-delta')).querySelector('[data-field="cancel-note"]')).toBeNull()
 })
 
 // ── the telling side: the person's words, or the honest absence ───────────

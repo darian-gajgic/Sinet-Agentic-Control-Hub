@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
 import {
@@ -11,13 +12,15 @@ import {
   type IntakeUnderstood,
   type MemoryConflict,
   type PendingPair,
+  type TaskList,
 } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
 import { UnderstoodPanel } from './Intake'
 import type { EventStream } from './events'
-import { describeError, inboxEventTypes, useLive } from './live'
+import { describeError, inboxEventTypes, useLive, type Live } from './live'
+import { useProjectScope } from './project'
 import { Absent, Freshness, Owner, Stamp, SurfaceHead } from './parts'
-import { Link } from './router'
+import { Link, navigate } from './router'
 import { hrefFor } from './routes'
 import { reconcileBadge } from './push'
 import { useSessionInfo } from './session'
@@ -35,21 +38,34 @@ import { Button, Chip, EmptyState, Panel, Timestamp, type Tone } from './ui'
  * dead button, never a door this view invented. That is the D9 principle on
  * screen: the inbox never offers a control whose use would be refused.
  *
- * THE SERVER RANKS, THE CLIENT DOES NOT. The list renders in served order. The
- * display groups below are presentation over that order and never a filter:
- * every served card appears exactly once, and a kind this file has never heard
- * of still gets a row.
+ * THE SERVER RANKS; THE CLIENT MAY NARROW AND RE-ORDER, SAYING SO. The landed
+ * posture here was "never a filter" — OVERRULED by the operator at the B6 gate
+ * (P3/design/b6-gate-clickthrough-findings-2026-08-22.md: finding 1). Filtering
+ * by project/task and a reading order are PRESENTATION over the served list
+ * (S15.12): the served order stays the default, an active filter states plainly
+ * what it is hiding, every served card stays reachable, and nothing is ever
+ * silently dropped — a kind this file has never heard of still gets a row.
  *
  * NOTHING IS COMPUTED THAT WAS NOT SERVED. No percentage, no fraction, no
  * estimate of anything. The expiry line is a display derivation of a served
- * INSTANT and nothing else; when no expiry is served, none is shown.
+ * INSTANT and nothing else; when no expiry is served, none is shown. The
+ * project on a row is a client-side JOIN of the card's served `task_id`
+ * against the served tasks read — never a guess, and a card that resolves to
+ * no task files under the honest "(no project)" bucket (api.ts:156 precedent).
  *
  * THE PIN LIVES ONLY IN THE REQUEST. A High-tier answer collects the actor's
  * PIN, sends it in the SAME request the answer rides (S01.9 verify-at-act), and
  * clears it. It is never stored, never kept in state past the submit, and there
  * is no elevation to inherit.
+ *
+ * THE FACE IS FOR FINDING; THE DETAIL IS FOR DECIDING (gate findings 2/3/5).
+ * A row's face carries what project · what task · the issue in plain words,
+ * with the class and tier as chips. Pressing it opens the full detail — the
+ * issue, what has to be decided, what that decision needs, what the platform
+ * recommends, then the verbs. Raw projection internals (row id, change class,
+ * fingerprint, seq) live only inside the collapsed "Technical details" fold.
  */
-export function Inbox({ stream }: { stream?: EventStream }) {
+export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: string }) {
   const live = useLive<ApprovalList>({
     key: '/api/approvals',
     read: () => api.approvals(),
@@ -57,30 +73,38 @@ export function Inbox({ stream }: { stream?: EventStream }) {
     stream,
   })
   const items = live.data?.items ?? []
+  const join = useTaskJoin(stream)
+  const scope = useProjectScope()
+  const q = inboxQueryFromSearch(search)
   // The badge is reconciled from the SERVED count, not recomputed: it is the
-  // length of the very list below, which is the same derivation the notifier
-  // counts when it composes a push (B6-9 OQ5). Without this the badge holds its
-  // last PUSHED value until the next cadence, so answering a card would leave
-  // the home screen claiming work that is done (drain r1, D2).
+  // length of the whole served list — never the filtered one, because a filter
+  // is presentation and the badge is the platform's own claim about what waits
+  // (B6-9 OQ5). Without this the badge holds its last PUSHED value until the
+  // next cadence, so answering a card would leave the home screen claiming
+  // work that is done (drain r1, D2).
   useEffect(() => {
     if (live.data !== null) reconcileBadge(items.length)
   }, [live.data, items.length])
 
+  const project = effectiveProject(q, scope.project)
+  // The join answers the project filter. While it is still in flight the cards
+  // cannot honestly be bucketed, so a project-filtered view waits for it; a
+  // join that FAILED leaves the filter unapplied and says so, which is honester
+  // than hiding cards on a guess.
+  const joinPending = project !== '' && join.data === null && join.error === ''
+  const joinFailed = project !== '' && join.data === null && join.error !== ''
+  const wheres = new Map(items.map((i) => [i.id, whereOf(i, join)]))
+  const shown = filterItems(items, wheres, joinFailed ? { ...q, project: '' } : q, joinFailed ? '' : scope.project)
+  const ordered = orderItems(shown, q.sort)
+
   return (
     <section className="surface inbox">
-      {/* The D8 "what this is" line. Its facts are the four rules above, stated
-          for a reader rather than for a maintainer: the SERVER ranks, this page
-          renders that order, and an answer releases the work that is waiting on
-          it (S15.6). It must not claim this page sorts, groups or filters —
-          nothing here does, and a line that said so would describe a different
-          product than the one that shipped. */}
+      {/* The D8 "what this is" line, updated with the gate-ordered powers this
+          page now genuinely has: the served order is the default, narrowing and
+          re-ordering are presentation, and a narrowed view declares itself. */}
       <SurfaceHead
         title="Inbox"
-        // W2-10: "ranked by risk" promised more than the served order kept
-        // (an opt-in experiment pitch sat above urgent expired cards). The
-        // words now claim exactly what is true — the ORDER is the control
-        // plane's — and the ranking defect is on the wire-side gap list.
-        what="Everything waiting on a person, in one queue, in the control plane's own order. This page never re-orders it, and answering a card releases the work that was paused on it."
+        what="Everything waiting on a person, in one queue — served in the control plane's own order. You can narrow it to one project or one task and change the reading order; that changes what this page shows, never what is served, and a narrowed view says what it is hiding. Answering a card releases the work that was paused on it."
       />
       <Freshness stale={live.stale} error={live.error} hasData={live.data !== null} />
       <NoFrameNote items={items} />
@@ -91,25 +115,45 @@ export function Inbox({ stream }: { stream?: EventStream }) {
         />
       ) : (
         <>
-          <BatchBar items={items} onAnswered={live.reload} />
-          <WithForms items={items} stream={stream}>
-            {(forms) => (
-              <ol className="cards">
-                {items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="card-row"
-                    data-card-id={item.id}
-                    data-kind={item.kind}
-                    data-tier={item.tier}
-                  >
-                    <CardHead item={item} />
-                    <CardBody item={item} forms={forms} onAnswered={live.reload} />
-                  </li>
-                ))}
-              </ol>
-            )}
-          </WithForms>
+          {live.data !== null && (
+            <InboxControls items={items} wheres={wheres} q={q} scopeProject={scope.project} join={join} shown={shown.length} />
+          )}
+          {joinFailed && (
+            <p className="max-w-prose text-sm text-[var(--yellow)]" data-inbox-join="failed">
+              The project filter is NOT applied — the task list that says which project each card belongs to could not
+              be read ({join.error}). Every card is shown instead.
+            </p>
+          )}
+          {joinPending ? (
+            <p className="max-w-prose text-sm text-muted-foreground" data-inbox-join="pending">
+              Matching cards to their projects…
+            </p>
+          ) : (
+            <>
+              {live.data !== null && shown.length === 0 && (
+                <EmptyState
+                  what="No card matches the filter."
+                  why={`${String(items.length)} card${items.length === 1 ? ' is' : 's are'} hidden by it — nothing is dropped. Clear the filter above to see ${items.length === 1 ? 'it' : 'them all'}.`}
+                />
+              )}
+              <BatchBar items={ordered} onAnswered={live.reload} />
+              <WithForms items={ordered} stream={stream}>
+                {(forms) => (
+                  <ol className="cards">
+                    {ordered.map((item) => (
+                      <InboxRow
+                        key={item.id}
+                        item={item}
+                        where={wheres.get(item.id) ?? { project: null, task: item.task_id ?? null, note: '' }}
+                        forms={forms}
+                        onAnswered={live.reload}
+                      />
+                    ))}
+                  </ol>
+                )}
+              </WithForms>
+            </>
+          )}
         </>
       )}
       {live.data?.truncated && (
@@ -222,16 +266,362 @@ export function InboxItem({ id, stream }: { id: string; stream?: EventStream }) 
           reason={`No card with the id ${id} is waiting on you. It may have been answered already, or it may belong to somebody else — the inbox only ever carries the cards you can see.`}
         />
       ) : (
-        item && (
-          <div className="card-row" data-card-id={item.id} data-kind={item.kind} data-tier={item.tier}>
-            <CardHead item={item} />
-            <WithForms items={[item]} stream={stream}>
-              {(forms) => <CardBody item={item} forms={forms} onAnswered={live.reload} expanded />}
-            </WithForms>
-          </div>
-        )
+        item && <DeepLinkedCard item={item} stream={stream} onAnswered={live.reload} />
       )}
     </section>
+  )
+}
+
+/** The one card at its stable address: the same face the queue shows (static —
+ *  there is no list to fold back into), with the detail already open. */
+function DeepLinkedCard({
+  item,
+  stream,
+  onAnswered,
+}: {
+  item: ApprovalItem
+  stream?: EventStream
+  onAnswered: () => void
+}) {
+  const join = useTaskJoin(stream)
+  return (
+    <div className="card-row" data-card-id={item.id} data-kind={item.kind} data-tier={item.tier} data-open="true">
+      <CardFace item={item} where={whereOf(item, join)} />
+      <WithForms items={[item]} stream={stream}>
+        {(forms) => <CardDetail item={item} forms={forms} onAnswered={onAnswered} deep />}
+      </WithForms>
+    </div>
+  )
+}
+
+// ── the gate-ordered filters (2026-08-22): project · task · reading order ──
+//
+// All three live in the URL, so a filtered slice is a stable address a project
+// page can link to and a bookmark keeps (?project=…&task=…&sort=…). They are
+// PRESENTATION over the served list — sanctioned at the gate (findings §1,
+// S15.12) — and the served order remains the default.
+
+export type InboxSort = '' | 'newest' | 'oldest' | 'deadline' | 'tier'
+
+/** The reading orders, each a derivation over one SERVED field ('' = the
+ *  control plane's own order, always the default). */
+const sortChoices: { value: InboxSort; label: string }[] = [
+  { value: '', label: "The platform's order" },
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Waiting longest first' },
+  { value: 'deadline', label: 'Deadline first' },
+  { value: 'tier', label: 'Highest risk first' },
+]
+
+export type InboxQuery = {
+  /** null = no param → follow the app-wide project scope; '' = the explicit
+   *  "all projects" override; anything else = that served project bucket. */
+  project: string | null
+  /** '' = no task filter; else the served task id. */
+  task: string
+  sort: InboxSort
+}
+
+/** inboxQueryFromSearch reads the filter off the URL. An unknown sort is the
+ *  default order rather than an error — a stale bookmark still shows the
+ *  queue, exactly the posture the mission-control filters take. */
+export function inboxQueryFromSearch(search: string): InboxQuery {
+  const p = new URLSearchParams(search)
+  const sort = p.get('sort') ?? ''
+  return {
+    project: p.get('project'),
+    task: p.get('task') ?? '',
+    sort: sortChoices.some((s) => s.value === sort) ? (sort as InboxSort) : '',
+  }
+}
+
+/** hrefForInbox builds the deep-linkable address of one slice. The project
+ *  param stays PRESENT-BUT-EMPTY for the explicit "all projects" override —
+ *  that is what distinguishes "show everything" from "follow the app scope". */
+export function hrefForInbox(q: InboxQuery): string {
+  const p = new URLSearchParams()
+  if (q.project !== null) p.set('project', q.project)
+  if (q.task !== '') p.set('task', q.task)
+  if (q.sort !== '') p.set('sort', q.sort)
+  const qs = p.toString()
+  return qs === '' ? hrefFor('inbox') : `${hrefFor('inbox')}?${qs}`
+}
+
+/** The project this view narrows to: the URL when it says anything (its empty
+ *  form is the explicit override), else the app-wide scope from the topbar. */
+function effectiveProject(q: InboxQuery, scopeProject: string): string {
+  return q.project !== null ? q.project : scopeProject
+}
+
+/**
+ * The tasks read this surface joins cards against (gate finding 4). The wire
+ * serves `task_id` on a card but no project; the project is a served fact OF
+ * THE TASK, so it comes from the served tasks read — a presentation-only join,
+ * never a guess. The read is the same one the topbar's scope options make;
+ * its own key keeps the subscriptions independent (§49 records the shape).
+ */
+function useTaskJoin(stream?: EventStream): Live<TaskList> {
+  const session = useSessionInfo()
+  const me = session?.user?.user_id ?? ''
+  return useLive<TaskList>({
+    key: `/api/tasks#inbox-join:${me}`,
+    read: () => api.tasks(),
+    // A task is born (and gets its project) on the intake family's frame.
+    types: ['intake.state'],
+    stream,
+  })
+}
+
+/** Where one card belongs, resolved from served facts only. */
+type Where = {
+  /** The served project bucket; '(no project)' for a card with no task (the
+   *  honest bucket, api.ts:156); null while the tasks read has not answered —
+   *  or answered TRUNCATED without this card's task, when claiming any bucket
+   *  would be a guess. */
+  project: string | null
+  /** The task's own title where the join found it, else the served task id;
+   *  null when the card names no task. */
+  task: string | null
+  /** The honest note when a served task ref could not be resolved. */
+  note: string
+}
+
+function whereOf(item: ApprovalItem, join: Live<TaskList>): Where {
+  if (item.task_id === undefined || item.task_id === '') return { project: '(no project)', task: null, note: '' }
+  if (join.data === null) return { project: null, task: item.task_id, note: '' }
+  const t = join.data.tasks.find((row) => row.task_id === item.task_id)
+  if (t !== undefined) {
+    return { project: t.project, task: t.title !== '' ? t.title : t.task_id, note: '' }
+  }
+  if (join.data.truncated) {
+    // The join broke on the read's own page bound: the task exists somewhere
+    // past what one read returns. No bucket is claimed — the card stays
+    // visible under every filter rather than hidden on a guess.
+    return { project: null, task: item.task_id, note: 'its project is not readable from one page of the task list' }
+  }
+  return {
+    project: '(no project)',
+    task: item.task_id,
+    note: 'its task is not in your task list, so it files under (no project)',
+  }
+}
+
+/** filterItems narrows by task then by project. A card whose project could not
+ *  be resolved (truncated tasks read) is KEPT under a project filter — shown
+ *  with its honest note, never silently dropped on a guess. */
+function filterItems(
+  items: ApprovalItem[],
+  wheres: Map<string, Where>,
+  q: InboxQuery,
+  scopeProject: string,
+): ApprovalItem[] {
+  const project = effectiveProject(q, scopeProject)
+  return items.filter((item) => {
+    if (q.task !== '' && item.task_id !== q.task) return false
+    if (project !== '') {
+      const where = wheres.get(item.id)
+      if (where === undefined) return true
+      if (where.project !== null && where.project !== project) return false
+    }
+    return true
+  })
+}
+
+const tierOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+
+/** orderItems applies the chosen reading order. '' returns the served array
+ *  untouched; every other order is a STABLE sort over one served field, so
+ *  ties keep the control plane's own order. */
+function orderItems(items: ApprovalItem[], sort: InboxSort): ApprovalItem[] {
+  if (sort === '') return items
+  const out = [...items]
+  if (sort === 'newest') out.sort((a, b) => cmp(b.observed_ts, a.observed_ts))
+  if (sort === 'oldest') out.sort((a, b) => cmp(a.observed_ts, b.observed_ts))
+  if (sort === 'deadline') {
+    // A card with no served deadline sinks below every card with one — it is
+    // not "due last", it has no deadline at all, and inventing one would be
+    // worse than sorting it after.
+    out.sort((a, b) => {
+      const ax = a.expiry_at ?? ''
+      const bx = b.expiry_at ?? ''
+      if (ax === '' && bx === '') return 0
+      if (ax === '') return 1
+      if (bx === '') return -1
+      return cmp(ax, bx)
+    })
+  }
+  if (sort === 'tier') out.sort((a, b) => (tierOrder[a.tier] ?? 3) - (tierOrder[b.tier] ?? 3))
+  return out
+}
+
+/** Served instants are UTC RFC3339, so the lexicographic compare IS the time
+ *  compare — no Date parsing, no zone. */
+function cmp(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * The filter bar and its honesty line. Every option list is derived from the
+ * cards actually served (plus the current value, so a deep link to a slice
+ * with no cards still shows what it asked for); the line under the controls
+ * says how many cards are hidden and by what, because a filter that hides
+ * silently is the failure mode the landed posture existed to prevent.
+ */
+function InboxControls({
+  items,
+  wheres,
+  q,
+  scopeProject,
+  join,
+  shown,
+}: {
+  items: ApprovalItem[]
+  wheres: Map<string, Where>
+  q: InboxQuery
+  scopeProject: string
+  join: Live<TaskList>
+  shown: number
+}) {
+  const project = effectiveProject(q, scopeProject)
+  const joinReady = join.data !== null
+
+  // The project options: every bucket the served cards resolve into.
+  const projects = [...new Set([...wheres.values()].map((w) => w.project).filter((p): p is string => p !== null))].sort(
+    (a, b) => (a === '(no project)' ? 1 : b === '(no project)' ? -1 : a.localeCompare(b)),
+  )
+  if (project !== '' && !projects.includes(project)) projects.push(project)
+
+  // The task options: every task the served cards name, labelled by its own
+  // title where the join knows it. Narrowed to the project filter so the two
+  // selects agree about what is on offer.
+  const tasks = new Map<string, string>()
+  for (const item of items) {
+    if (item.task_id === undefined || item.task_id === '') continue
+    const where = wheres.get(item.id)
+    if (project !== '' && where !== undefined && where.project !== null && where.project !== project) continue
+    tasks.set(item.task_id, where?.task ?? item.task_id)
+  }
+  if (q.task !== '' && !tasks.has(q.task)) tasks.set(q.task, q.task)
+
+  const go = (next: InboxQuery) => {
+    navigate(hrefForInbox(next))
+  }
+
+  const hidden = items.length - shown
+  const filters: string[] = []
+  if (q.task !== '') filters.push(`the task filter (${tasks.get(q.task) ?? q.task})`)
+  if (project !== '') {
+    filters.push(
+      q.project !== null
+        ? `the project filter (${project})`
+        : `your project scope (${project}) — picked at the top of the app`,
+    )
+  }
+
+  return (
+    <div className="inbox-controls" data-inbox-controls>
+      <div className="inbox-selects">
+        <label>
+          <span>Project</span>
+          <select
+            value={project}
+            data-filter="project"
+            disabled={!joinReady && join.error !== ''}
+            onChange={(e) => {
+              const picked = e.currentTarget.value
+              // Picking "all" writes the explicit override only where the app
+              // scope would otherwise re-narrow this page; changing project
+              // drops a task filter that may not belong to it.
+              go({ project: picked === '' && scopeProject === '' ? null : picked, task: '', sort: q.sort })
+            }}
+          >
+            <option value="">All projects</option>
+            {projects.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Task</span>
+          <select
+            value={q.task}
+            data-filter="task"
+            onChange={(e) => {
+              go({ project: q.project, task: e.currentTarget.value, sort: q.sort })
+            }}
+          >
+            <option value="">All tasks</option>
+            {[...tasks.entries()]
+              .sort((a, b) => a[1].localeCompare(b[1]))
+              .map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          <span>Order</span>
+          <select
+            value={q.sort}
+            data-filter="sort"
+            onChange={(e) => {
+              go({ project: q.project, task: q.task, sort: e.currentTarget.value as InboxSort })
+            }}
+          >
+            {sortChoices.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {filters.length > 0 && (
+        <p className="max-w-prose text-sm text-muted-foreground" data-inbox-hiding={String(hidden)}>
+          {hidden > 0 ? (
+            <>
+              Showing <span className="font-mono tabular-nums">{String(shown)}</span> of{' '}
+              <span className="font-mono tabular-nums">{String(items.length)}</span> cards —{' '}
+              <span className="font-mono tabular-nums">{String(hidden)}</span> hidden by {filters.join(' and ')}.
+              Nothing is dropped: every card is still served and waiting.
+            </>
+          ) : (
+            <>Narrowed by {filters.join(' and ')} — every served card happens to match, so nothing is hidden.</>
+          )}{' '}
+          <Button
+            variant="ghost"
+            size="sm"
+            data-action="clear-filters"
+            onClick={() => {
+              // "Show everything" must beat the app scope too, or clearing
+              // would quietly re-narrow to it — hence the explicit override.
+              go({ project: scopeProject !== '' ? '' : null, task: '', sort: q.sort })
+            }}
+          >
+            Show everything
+          </Button>
+        </p>
+      )}
+      {q.sort !== '' && (
+        <p className="max-w-prose text-sm text-muted-foreground" data-inbox-sorted={q.sort}>
+          Re-ordered for reading: {sortChoices.find((s) => s.value === q.sort)?.label.toLowerCase()}. The platform&apos;s
+          own order is the default, and this changes nothing about what is served.{' '}
+          <Button
+            variant="ghost"
+            size="sm"
+            data-action="clear-sort"
+            onClick={() => {
+              go({ project: q.project, task: q.task, sort: '' })
+            }}
+          >
+            Platform order
+          </Button>
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -455,32 +845,241 @@ function NoFrameNote({ items }: { items: ApprovalItem[] }) {
   )
 }
 
-// ── the card head: the approval-row anatomy ────────────────────────────────
+// ── the row anatomy: a compact face for finding, a detail for deciding ─────
+//
+// Reworked whole at the gate order (findings 2/3/5, 2026-08-22): the face
+// carries what project · what task · the issue in plain words with the class
+// and tier as chips; pressing it opens the full detail; raw internals live
+// only in the collapsed "Technical details" fold at the detail's end.
+
+/** One queue row: the face, and the detail while it is open. */
+function InboxRow({
+  item,
+  where,
+  forms,
+  onAnswered,
+}: {
+  item: ApprovalItem
+  where: Where
+  forms: BenchmarkVerdictForms | null
+  onAnswered: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li
+      className="card-row"
+      data-card-id={item.id}
+      data-kind={item.kind}
+      data-tier={item.tier}
+      data-open={open ? 'true' : 'false'}
+    >
+      <CardFace
+        item={item}
+        where={where}
+        open={open}
+        onToggle={() => {
+          setOpen((was) => !was)
+        }}
+      />
+      {open && <CardDetail item={item} forms={forms} onAnswered={onAnswered} />}
+    </li>
+  )
+}
 
 /**
- * The five-leg anatomy (design proposal §3): what's being approved · the mono
- * provenance line · what to check first · the jump to the work · then the verbs.
- *
- * EVERY LEG IS PRESENTATION OVER A SERVED FIELD. The whole inventory is
- * `ApprovalItem` (api.ts:512–538); nothing here derives, estimates or infers a
- * fact the wire did not carry. Legs 1, 2 and 4 render served values; leg 3 is
- * class-grain teaching copy that names no card fact at all (see `checkFirst`);
- * leg 5 is the landed served-actions row and lives in `Acts`.
+ * The compact face (gate finding 2): what project · what task · a one-line
+ * plain-words account of the issue, with the class label and tier as chips.
+ * Every string on it is served or a class-grain line (`issueLine`); no raw id,
+ * no kind token, no projection field. Without `onToggle` it renders static —
+ * the deep-link surface has no list to fold back into.
  */
-function CardHead({ item }: { item: ApprovalItem }) {
-  return (
-    <header data-anatomy="head">
-      {/* LEG 1 — what's being approved. The display class is the label a reader
-          tells a sign-off from a question by; the tier, answerability and
-          step-up are the served flags that decide what the verbs below will
-          even accept. `.card-head` keeps its landed phone-first wrap. */}
-      <div className="card-head">
-        <span className="text-sm font-medium" data-display-class={displayClass(item)}>
-          {displayClass(item)}
+function CardFace({
+  item,
+  where,
+  open,
+  onToggle,
+}: {
+  item: ApprovalItem
+  where: Where
+  open?: boolean
+  onToggle?: () => void
+}) {
+  const inner = (
+    <>
+      <span className="face-top">
+        <span className="face-where">
+          {where.project !== null ? (
+            <b className="face-project" data-face-project={where.project}>
+              {where.project}
+            </b>
+          ) : (
+            // The join has not answered (or answered truncated): claiming a
+            // bucket would be a guess, so the slot says so instead.
+            <b className="face-project" data-face-project="">
+              (project not known yet)
+            </b>
+          )}
+          {where.task !== null && (
+            <span className="face-task" data-face-task={item.task_id ?? ''}>
+              {where.task}
+            </span>
+          )}
         </span>
-        <Chip tone={tierTone(item.tier)} data-tier-label={item.tier}>
-          {item.tier}
-        </Chip>
+        <span className="face-chips">
+          <Chip data-display-class={displayClass(item)}>{displayClass(item)}</Chip>
+          <Chip tone={tierTone(item.tier)} data-tier-label={item.tier}>
+            {item.tier}
+          </Chip>
+          <ExpiryChip item={item} />
+          {!item.answerable && (
+            <Chip tone="pink" className="normal-case tracking-normal" data-face-not-yours>
+              not yours to answer
+            </Chip>
+          )}
+          {item.stale && (
+            <Chip tone="yellow" className="normal-case tracking-normal" data-face-stale>
+              may be stale
+            </Chip>
+          )}
+          {onToggle !== undefined && <ChevronDown size={14} strokeWidth={2} aria-hidden="true" className="face-chev" />}
+        </span>
+      </span>
+      <span className="face-issue" data-face-issue>
+        {issueLine(item)}
+      </span>
+      {where.note !== '' && (
+        <span className="face-note text-xs text-muted-foreground" data-face-note>
+          {where.note}
+        </span>
+      )}
+    </>
+  )
+  if (onToggle === undefined) {
+    return (
+      <div className="card-face-btn" data-face="static">
+        {inner}
+      </div>
+    )
+  }
+  return (
+    <button type="button" className="card-face-btn" data-face aria-expanded={open === true} onClick={onToggle}>
+      {inner}
+    </button>
+  )
+}
+
+/** The compact deadline signal. A served expiry earns a face chip — a card
+ *  past its date is exactly the one a person is scanning for — and a card
+ *  with none shows nothing, never an invented deadline. */
+function ExpiryChip({ item }: { item: ApprovalItem }) {
+  if (!item.expiry_at) return null
+  const remaining = Date.parse(item.expiry_at) - Date.now()
+  return remaining <= 0 ? (
+    <Chip tone="red" className="normal-case tracking-normal" data-face-expired>
+      expired — still waiting
+    </Chip>
+  ) : (
+    <Chip tone="orange" className="normal-case tracking-normal" data-face-expires>
+      expires in {describeSpan(remaining)}
+    </Chip>
+  )
+}
+
+/** readString lifts one string field off a served card body, or null. It reads
+ *  a key by name and judges nothing — the §38 no-classifying rule stays. */
+function readString(card: unknown, key: string): string | null {
+  if (!card || typeof card !== 'object') return null
+  const v = (card as Record<string, unknown>)[key]
+  return typeof v === 'string' && v !== '' ? v : null
+}
+
+/**
+ * The face's one-line account of the issue (gate finding 3: "the headline is
+ * sign-off or question — what do I want with that").
+ *
+ * SERVED TEXT FIRST. Wherever the card body carries the platform's own plain
+ * words — a plan's restatement, a decision's summary, a watchdog's detail, a
+ * drift or alarm summary, the conflict's question — that is the line, verbatim
+ * (clamped by CSS, whole in the detail). Where a kind serves no prose, the
+ * line is class-grain teaching copy under the same D8 mandate as `checkFirst`:
+ * true of every card of the kind, naming no fact the wire did not carry. An
+ * unknown kind gets its honest generic line and still renders (§42).
+ */
+function issueLine(item: ApprovalItem): string {
+  switch (item.kind) {
+    case 'ask':
+      return askIssueLine(item)
+    case 'effect': {
+      const kind = readString(item.card, 'kind')
+      return kind !== null
+        ? `Wants to run "${kind}" outside the platform — nothing happens until it is signed.`
+        : 'Wants to do something outside the platform — nothing happens until it is signed.'
+    }
+    case 'memory_conflict':
+      return readString(item.card, 'question') ?? 'Two saved lessons may disagree — say which one is right.'
+    case 'benchmark_verdict':
+      return (
+        readString(item.card, 'reason') ??
+        'Two answers to the same request, shown blind — pick the better one and guess which was the platform.'
+      )
+    case 'benchmark_alarm':
+      return readString(item.card, 'summary') ?? 'The blind-comparison practice raised an alarm — decide what to do with it.'
+    case 'watchdog_flag':
+      return readString(item.card, 'detail') ?? 'A watchdog flagged something unusual — look at it and sign off.'
+    case 'drift_card':
+      return readString(item.card, 'summary') ?? 'Something the platform depends on changed outside it — look and sign off.'
+    case 'conformance_card':
+      return 'A platform self-check came back red — acknowledging records that a person has seen it.'
+    default:
+      return 'The platform sent a card this page has not met before — open it for the record it carries.'
+  }
+}
+
+/** The ask families' face lines, keyed the same way the answer envelope is:
+ *  off the stored snapshot's own declarations. */
+function askIssueLine(item: ApprovalItem): string {
+  const snap = asSnapshot(item.card)
+  if (snap.approval) {
+    return snap.approval.layer1?.restatement ?? 'A plan is ready — approve it or send it back.'
+  }
+  if (snap.delta) return 'The plan changed after you approved it — look at exactly what changed.'
+  if (snap.decision) return snap.decision.summary ?? 'The run needs a decision before it can go on.'
+  if (isVerifyCard(snap)) {
+    const humanized = snap.category === 'CHECK-INTEGRITY' ? humanizeVerifySummary(snap.summary ?? '') : null
+    if (humanized !== null) return humanized.plain
+    return snap.summary !== undefined && snap.summary !== ''
+      ? snap.summary
+      : 'Checking the work hit a wall — decide how it goes on.'
+  }
+  const questions = snap.questions ?? []
+  if (questions.length > 0) {
+    const first = questions[0].phrased !== undefined && questions[0].phrased !== '' ? questions[0].phrased : questions[0].text
+    return questions.length === 1 ? first : `${first} (+${String(questions.length - 1)} more question${questions.length === 2 ? '' : 's'})`
+  }
+  return 'A question the platform needs answered — open it for what was sent.'
+}
+
+/**
+ * The full detail (gate finding 3): what the issue is, what has to be decided
+ * and the information that decision needs (the card's own content), what the
+ * platform recommends (the served 13.5 help, rendered inside the content),
+ * then the verbs — with the raw internals folded at the end. Every fact is the
+ * landed served field it always was; only the arrangement is new.
+ */
+function CardDetail({
+  item,
+  forms,
+  onAnswered,
+  deep,
+}: {
+  item: ApprovalItem
+  forms: BenchmarkVerdictForms | null
+  onAnswered: () => void
+  deep?: boolean
+}) {
+  return (
+    <div className="card-detail" data-detail>
+      <div className="card-head">
         {item.answerable ? (
           <Chip tone="green" data-answerable="true">
             yours to answer
@@ -495,37 +1094,56 @@ function CardHead({ item }: { item: ApprovalItem }) {
         )}
         <Staleness item={item} />
       </div>
-
-      {/* LEG 2 — the mono provenance line. Card id, kind, owner, the instant the
-          platform observed it, and its deadlines: the identity of the thing
-          being decided, in JetBrains Mono with tabular figures (§47), because
-          every one of them is an id, a token or a timestamp. */}
-      <p
-        className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground"
-        data-provenance="card"
-      >
-        <Link to={hrefFor('inbox-item', { id: item.id })} className="card-id">
-          {item.id}
-        </Link>
-        <span data-provenance-field="kind">{item.kind}</span>
+      <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-muted-foreground" data-card-facts>
         <Owner id={item.owner} />
-        {/* The run ref stays here, as the run ref it is. It is a served fact
-            about which run raised the card, and it is NOT the jump: the task
-            route keys on task ids and this is a run id. Leg 4 below carries the
-            resolved task. */}
-        {item.run_id && <span data-provenance-field="run">run {item.run_id}</span>}
         <span>
           seen <Timestamp ts={item.observed_ts} variant="live" />
         </span>
         <Expiry item={item} />
       </p>
-
-      {/* LEG 3 — what to check first. */}
       <CheckFirst item={item} />
-
-      {/* LEG 4 — the jump to the work this card came from. */}
       <JumpToWork item={item} />
-    </header>
+      <CardBody item={item} forms={forms} onAnswered={onAnswered} expanded={deep} />
+      <TechDetails item={item} />
+    </div>
+  )
+}
+
+/** The kinds whose stored card is a projection row: their raw record renders
+ *  ONLY inside the technical fold (gate finding 2/4). The list names the kinds
+ *  whose plain-words content above already says what matters — an unknown
+ *  kind's record stays VISIBLE in the detail instead (§42: forward tolerance
+ *  must not hide the one thing a new kind has). */
+const foldedRowKinds = ['watchdog_flag', 'drift_card', 'conformance_card', 'benchmark_alarm', 'benchmark_verdict']
+
+/**
+ * The collapsed fold every card ends with (gate finding 4): the card's own
+ * ids — card id (as its stable address), kind, run ref — and, for the
+ * projection-row kinds, the row's raw record whole. Nothing in here is new
+ * derivation; it is the landed provenance line and the landed RowCard, moved
+ * out of everyone's way and kept for the reader who needs the record.
+ */
+function TechDetails({ item }: { item: ApprovalItem }) {
+  return (
+    <details className="tech-fold" data-tech-details>
+      <summary className="cursor-pointer text-sm text-muted-foreground">Technical details</summary>
+      <p
+        className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground"
+        data-provenance="card"
+      >
+        <Link to={hrefFor('inbox-item', { id: item.id })} className="card-id" title="This card's own stable address">
+          {item.id}
+        </Link>
+        <span data-provenance-field="kind">{item.kind}</span>
+        {/* The run ref stays a run ref: the task route keys on task ids, and
+            the resolved task jump lives in the detail above. */}
+        {item.run_id && <span data-provenance-field="run">run {item.run_id}</span>}
+        <span>
+          seen <Stamp ts={item.observed_ts} />
+        </span>
+      </p>
+      {foldedRowKinds.includes(item.kind) && <RowCard card={item.card} />}
+    </details>
   )
 }
 
@@ -658,7 +1276,7 @@ function checkFirst(item: ApprovalItem): string {
     case 'question':
       return 'the question itself and the options listed on this card. Those options are the whole of the answer — nothing outside this card is part of it.'
     case 'sign-off':
-      return "the row's own fields below, which are what the platform recorded. Signing it off records that a person has read it; it does not undo it and does not make it go away."
+      return "the platform's own account of what happened, below — the full raw record is inside Technical details. Signing it off records that a person has read it; it does not undo it and does not make it go away."
     case 'judgement':
       return 'both responses, without knowing which is which, and then say which one you think the platform produced. The guess travels with the vote — it is part of the answer rather than an extra.'
     case 'effect':
@@ -825,7 +1443,10 @@ function CardBody({
 
 /** CardContent dispatches on the SERVED kind. Everything it renders is text:
  *  card bodies are model-derived and web-derived content, so nothing here is
- *  ever markup (§41-B escape-by-default). */
+ *  ever markup (§41-B escape-by-default). The projection-row kinds lead with
+ *  their own served prose; their raw record lives in the technical fold (gate
+ *  finding 2). An UNKNOWN kind keeps its record visible right here — hiding
+ *  the one thing a new kind has would be forward tolerance in name only. */
 function CardContent({
   item,
   forms,
@@ -844,9 +1465,123 @@ function CardContent({
       return <ConflictContent card={item.card as MemoryConflict} />
     case 'benchmark_verdict':
       return <VerdictContent item={item} forms={forms} />
+    case 'watchdog_flag':
+      return <WatchdogContent card={item.card} />
+    case 'drift_card':
+      return <DriftContent card={item.card} />
+    case 'conformance_card':
+      return <ConformanceContent card={item.card} />
+    case 'benchmark_alarm':
+      return <AlarmContent card={item.card} />
     default:
       return <RowCard card={item.card} />
   }
+}
+
+// ── the projection-row kinds, in plain words (gate findings 2/3) ───────────
+//
+// Each of these renders the SERVED fields a person deciding actually needs —
+// the producer's own prose first, the honest absence where it served none —
+// and nothing else: the full raw row stands in the technical fold, so no key
+// a producer adds is ever lost, it is just never the face of the card.
+
+/** The watchdog flag: the watchdog's own account of what looked wrong. */
+function WatchdogContent({ card }: { card: unknown }) {
+  const detail = readString(card, 'detail')
+  const ts = readString(card, 'flagged_ts')
+  return (
+    <div className="ask-card" data-card-kind="watchdog_flag">
+      <p className="restatement wrap-anywhere">
+        {detail ?? <Absent reason="the flag carries no account of what looked wrong" />}
+      </p>
+      <p className="muted">
+        The run this flag is about is paused on it.
+        {ts !== null && (
+          <>
+            {' '}
+            Flagged <Timestamp ts={ts} variant="live" />.
+          </>
+        )}
+      </p>
+    </div>
+  )
+}
+
+/** The outside-world drift card: the producer's summary, and how often the
+ *  same incident has hit. `hits` is a served count, never a computation. */
+function DriftContent({ card }: { card: unknown }) {
+  const summary = readString(card, 'summary')
+  const source = readString(card, 'source')
+  const note = readString(card, 'revalidation_note')
+  const hits = card !== null && typeof card === 'object' ? (card as Record<string, unknown>).hits : undefined
+  const classified = card !== null && typeof card === 'object' ? (card as Record<string, unknown>).classified : undefined
+  return (
+    <div className="ask-card" data-card-kind="drift_card">
+      <p className="restatement wrap-anywhere">
+        {summary ?? <Absent reason="the finding carries no summary" />}
+      </p>
+      <p className="muted">
+        {source !== null && <>Noticed watching {source}. </>}
+        {typeof hits === 'number' && hits > 1 && <>The same incident has hit {String(hits)} times. </>}
+        {classified === false && <>The local pass could not judge it — this card is here for a person&apos;s eyes. </>}
+        Dismissing records that a person has read it; it changes nothing outside this queue.
+      </p>
+      {note !== null && <p className="muted">{note}</p>}
+    </div>
+  )
+}
+
+/** The red conformance row: which recurring self-check, when it last ran, and
+ *  what acknowledging does (records a reader — the red clears only when the
+ *  check itself passes, S14.5). */
+function ConformanceContent({ card }: { card: unknown }) {
+  const result = readString(card, 'last_result')
+  const schedule = readString(card, 'schedule')
+  const ts = readString(card, 'last_run_ts')
+  return (
+    <div className="ask-card" data-card-kind="conformance_card">
+      <p className="restatement wrap-anywhere">
+        One of the platform&apos;s own recurring self-checks came back{' '}
+        {result ?? <Absent reason="no result recorded" />} on its last run
+        {ts !== null && (
+          <>
+            {' '}
+            (<Timestamp ts={ts} variant="live" />)
+          </>
+        )}
+        {schedule !== null && <> — it runs on the {schedule}</>}.
+      </p>
+      <p className="muted">
+        Acknowledging records that a person has read this. It does not fix anything and does not make the red go away —
+        only the check passing does that.
+      </p>
+    </div>
+  )
+}
+
+/** The standing benchmark alarm: the practice's own summary and the served
+ *  freeze state. The measured figure and its registered line are served
+ *  numbers, printed as served (§30). */
+function AlarmContent({ card }: { card: unknown }) {
+  const summary = readString(card, 'summary')
+  const domain = readString(card, 'domain')
+  const body = card !== null && typeof card === 'object' ? (card as Record<string, unknown>) : {}
+  const freeze = body.expansion_freeze === true
+  return (
+    <div className="ask-card" data-card-kind="benchmark_alarm">
+      <p className="restatement wrap-anywhere">
+        {summary ?? <Absent reason="the alarm carries no summary" />}
+      </p>
+      <p className="muted">
+        {domain !== null && <>Domain: {domain}. </>}
+        {typeof body.loss_g === 'number' && typeof body.threshold === 'number' && (
+          <>The measured reading is {String(body.loss_g)} against the registered line of {String(body.threshold)}. </>
+        )}
+        {freeze && <>While this alarm stands, the practice does not expand to new domains. </>}
+        Recording a disposition is what closes it.
+      </p>
+    </div>
+  )
 }
 
 /**
@@ -1318,10 +2053,14 @@ function ConflictContent({ card }: { card: MemoryConflict | undefined }) {
 function VerdictContent({ item, forms }: { item: ApprovalItem; forms: BenchmarkVerdictForms | null }) {
   const pairID = item.id.slice(item.id.indexOf(':') + 1)
   const pair = (forms?.pairs ?? []).find((p) => p.pair_id === pairID) ?? null
+  // The FAILED pair's served reason (arm ended without an answer): the one
+  // plain-words account the row carries, and exactly what the person deciding
+  // between "judge" and "decline" needs. The row itself stands in the fold.
+  const reason = readString(item.card, 'reason')
 
   return (
     <div className="verdict-card">
-      <RowCard card={item.card} />
+      {reason !== null && <p className="restatement wrap-anywhere">{reason}</p>}
       {pair ? (
         <PairRenders pair={pair} />
       ) : (

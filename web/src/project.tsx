@@ -42,5 +42,8 @@ export function useProjectScope(): ProjectScope {
  * join in their own rework steps; listing one before its surface actually
  * narrows would make the chip lie about what the reader is seeing.
  * Board joined at rework step 2 (the real Kanban narrows to the scope).
+ * Inbox joined at the B6 gate rework (operator findings 2026-08-22, finding 1:
+ * "the inbox ignores the selected project") — the queue narrows to the scope
+ * unless its own URL filter says otherwise, and it declares what it hides.
  */
-export const scopedRoutes: ReadonlySet<RouteID> = new Set<RouteID>(['mission-control', 'board'])
+export const scopedRoutes: ReadonlySet<RouteID> = new Set<RouteID>(['mission-control', 'board', 'inbox'])

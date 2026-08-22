@@ -1462,12 +1462,157 @@ td {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  padding: 0.75rem;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .card-row[data-tier='high'] {
   border-inline-start: 3px solid var(--warn);
+}
+
+/* ── the compact face (gate rework 2026-08-22): press to open the detail ── */
+
+.card-face-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+div.card-face-btn {
+  cursor: default;
+}
+
+button.card-face-btn:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.face-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+}
+
+.face-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+  min-width: 0;
+}
+
+.face-project {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.face-task {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.face-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin-inline-start: auto;
+}
+
+.face-chev {
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+
+.card-face-btn[aria-expanded='true'] .face-chev {
+  transform: rotate(180deg);
+}
+
+.face-issue {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+/* The open detail keeps the face above it as the row's header. */
+.card-detail {
+  padding: 0 0.75rem 0.75rem;
+  border-block-start: 1px solid var(--line);
+}
+
+.card-detail > .card-head {
+  margin-block-start: 0.6rem;
+}
+
+/* ── the technical fold: raw internals, out of everyone's way ── */
+
+.tech-fold {
+  margin-block-start: 0.75rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+
+.tech-fold[open] {
+  background: color-mix(in srgb, var(--muted-foreground) 4%, transparent);
+}
+
+.tech-fold > summary {
+  user-select: none;
+}
+
+/* ── the filter bar (project · task · order) ── */
+
+.inbox-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-block-end: 1rem;
+}
+
+.inbox-selects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.inbox-selects label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.inbox-selects label > span {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inbox-selects select {
+  width: auto;
+  max-width: 100%;
 }
 
 .card-head {

@@ -65,6 +65,18 @@ const rowIDs = (view: { container: HTMLElement }) =>
 const row = (view: { container: HTMLElement }, id: string) =>
   view.container.querySelector(`[data-card-id="${CSS.escape(id)}"]`) as HTMLElement
 
+/** expand presses one row's face — the gate-ordered compact anatomy
+ *  (2026-08-22) keeps the detail closed until a person opens it, so every
+ *  test that reads the detail walks through the same door a person does. */
+async function expand(view: { container: HTMLElement }, id: string): Promise<HTMLElement> {
+  const node = row(view, id)
+  if (node.getAttribute('data-open') !== 'true') {
+    click(node.querySelector('button[data-face]'))
+    await flush()
+  }
+  return row(view, id)
+}
+
 beforeEach(() => {
   window.history.replaceState(null, '', '/')
   FakeSource.reset()
@@ -123,7 +135,10 @@ test('a card you cannot answer renders the served reason and exposes NO acting c
   const notMine = served.items.find((i) => !i.answerable)
   expect(notMine, 'the operator body carries no unanswerable card').toBeTruthy()
 
-  const node = row(view, notMine?.id ?? '')
+  // The FACE already warns before the press — the reader scanning for their
+  // own cards can tell without opening it.
+  expect(row(view, notMine?.id ?? '').querySelector('[data-face-not-yours]')).not.toBeNull()
+  const node = await expand(view, notMine?.id ?? '')
   expect(node.querySelector('[data-acts="read-only"]')).not.toBeNull()
   expect(node.textContent).toContain(notMine?.not_answerable_reason ?? '')
   expect(node.querySelectorAll('button[data-action]'), 'a dead control was rendered on a card the verb would refuse')
@@ -135,7 +150,7 @@ test('a card you cannot answer renders the served reason and exposes NO acting c
 test('the plan card renders its Layer-1 screen, the 13.5 help block and Layer 2 — all from the snapshot', async () => {
   const served = mine()
   const { view } = await open('/inbox', served)
-  const node = row(view, 'ask:ask-ship')
+  const node = await expand(view, 'ask:ask-ship')
   const text = node.textContent ?? ''
 
   const snap = card(served, 'ask:ask-ship').card as {
@@ -162,7 +177,7 @@ test('the plan card renders its Layer-1 screen, the 13.5 help block and Layer 2 
 test('a plan card always carries Approve AND Re-plan, from its OWN served vocabulary', async () => {
   const served = mine()
   const { view } = await open('/inbox', served)
-  const actions = [...row(view, 'ask:ask-ship').querySelectorAll('button[data-action]')].map((b) =>
+  const actions = [...(await expand(view, 'ask:ask-ship')).querySelectorAll('button[data-action]')].map((b) =>
     b.getAttribute('data-action'),
   )
   expect(actions).toEqual(card(served, 'ask:ask-ship').actions)
@@ -183,7 +198,7 @@ test("a decision card's actions come from the choice VALUES the pipeline accepts
     'proceed_uncovered',
   ])
   const { view } = await open('/inbox', served)
-  const rendered = [...row(view, 'ask:ask-coverage').querySelectorAll('button[data-action]')].map((b) =>
+  const rendered = [...(await expand(view, 'ask:ask-coverage')).querySelectorAll('button[data-action]')].map((b) =>
     b.getAttribute('data-action'),
   )
   expect(rendered).toEqual(actions)
@@ -199,7 +214,7 @@ test('a delta card renders ADDED / MODIFIED / REMOVED and is ANSWERABLE from its
     'reject',
   ])
   const { view, log } = await open('/inbox', served)
-  const node = row(view, 'ask:ask-delta')
+  const node = await expand(view, 'ask:ask-delta')
   expect([...node.querySelectorAll('[data-delta]')].map((n) => n.getAttribute('data-delta'))).toEqual([
     'ADDED',
     'MODIFIED',
@@ -226,7 +241,10 @@ test('a stale card flags it with the served reasons and STILL offers approve', a
   const stale = card(served, 'ask:ask-ship')
   expect(stale.stale, 'the fixture card is not stale, so this asserts nothing').toBe(true)
   const { view } = await open('/inbox', served)
-  const node = row(view, 'ask:ask-ship')
+  // The face warns compactly before the press; the served reasons wait in the
+  // detail's own flag.
+  expect(row(view, 'ask:ask-ship').querySelector('[data-face-stale]')).not.toBeNull()
+  const node = await expand(view, 'ask:ask-ship')
 
   const flag = node.querySelector('[data-stale-flag="true"]')
   expect(flag, 'a stale card renders no flag').not.toBeNull()
@@ -246,15 +264,19 @@ test('expiry renders from the served instant — and renders nothing when none i
   expect(withExpiry.expiry_at, 'the fixture card has no expiry').toBeTruthy()
 
   const { view } = await open('/inbox', served)
-  const node = row(view, 'ask:ask-ship')
+  // The face carries the compact deadline signal before any press.
+  expect(row(view, 'ask:ask-ship').querySelector('[data-face-expires]')?.textContent).toContain('in 10s')
+  const node = await expand(view, 'ask:ask-ship')
   expect(node.querySelector('[data-expiry]')?.getAttribute('data-expiry')).toBe(withExpiry.expiry_at)
   expect(node.querySelector('.expiry')?.textContent).toContain('in 10s')
 
   // The other direction: a body with no expiry_at renders no countdown at all
-  // rather than inventing a deadline.
+  // rather than inventing a deadline — no face chip, and no detail line.
   const bare = { ...served, items: served.items.map((i) => ({ ...i, expiry_at: undefined })) }
   const { view: v2 } = await open('/inbox', bare)
+  await expand(v2, 'ask:ask-ship')
   expect(v2.container.querySelectorAll('[data-expiry]')).toHaveLength(0)
+  expect(v2.container.querySelectorAll('[data-face-expires], [data-face-expired]')).toHaveLength(0)
   vi.useRealTimers()
 })
 
@@ -356,7 +378,7 @@ test('a High-tier card demands the PIN, sends it in the SAME request, and keeps 
   expect(effect.step_up_required, 'the fixture effect is not step-up').toBe(true)
 
   const { view, log } = await open('/inbox', served)
-  const node = row(view, 'effect:e-notify')
+  const node = await expand(view, 'effect:e-notify')
   const pin = node.querySelector('[data-field="pin"]') as HTMLInputElement
   expect(pin, 'a step-up card renders no PIN field').not.toBeNull()
   expect(pin.type, 'the PIN is not a password field').toBe('password')
@@ -388,7 +410,7 @@ test('a High-tier card demands the PIN, sends it in the SAME request, and keeps 
 test('a refused PIN re-prompts honestly and nothing is left claiming it applied', async () => {
   const served = mine()
   const { view, log } = await open('/inbox', served)
-  const node = row(view, 'effect:e-notify')
+  const node = await expand(view, 'effect:e-notify')
   typeInto(node.querySelector('[data-field="pin"]') as HTMLInputElement, '0000')
   log.set(`POST ${verb('effect:e-notify', 'answer')}`, {
     status: 401,
@@ -424,7 +446,7 @@ test('an effect renders both approver states from the served approvals block', a
     ),
   }
   const { view } = await open('/inbox', platform)
-  const block = row(view, 'effect:e-notify').querySelector('.co-approval')!
+  const block = (await expand(view, 'effect:e-notify')).querySelector('.co-approval')!
   expect(block.getAttribute('data-platform-level')).toBe('true')
   const signed = [...block.querySelectorAll('dd')].map((d) => d.getAttribute('data-signed'))
   expect(signed, 'both limbs must be visible on a platform-level effect').toEqual(['true', 'false'])
@@ -443,7 +465,7 @@ test('a signature that completes nothing renders as recorded-and-waiting, from t
       detail: 'recorded: a platform-level effect needs both the owner and the operator before it is approved',
     },
   })
-  const node = row(view, 'effect:e-notify')
+  const node = await expand(view, 'effect:e-notify')
   typeInto(node.querySelector('[data-field="pin"]') as HTMLInputElement, '4242')
   click(node.querySelector('button[data-action="approve"]'))
   await flush()
@@ -473,7 +495,7 @@ test('a 409 stale_payload re-renders the CARRIED card with a visible notice, and
     status: 409,
     body: { error: 'stale_payload', detail: 'the card changed since it was shown', current: fresh },
   })
-  click(row(view, 'ask:ask-ship').querySelector('button[data-action="approve"]'))
+  click((await expand(view, 'ask:ask-ship')).querySelector('button[data-action="approve"]'))
   await flush()
 
   const node = row(view, 'ask:ask-ship')
@@ -493,7 +515,7 @@ test('a repeat answer renders applied:false as the already-resolved state it is'
       detail: 'already answered: the recorded answer is returned and nothing fired again',
     },
   })
-  click(row(view, 'ask:ask-ship').querySelector('button[data-action="approve"]'))
+  click((await expand(view, 'ask:ask-ship')).querySelector('button[data-action="approve"]'))
   await flush()
   const text = row(view, 'ask:ask-ship').querySelector('[data-outcome="applied"]')?.textContent ?? ''
   expect(text).toContain('already answered')
@@ -506,7 +528,7 @@ test('after any verb the inbox re-reads — the POST is followed by a GET', asyn
     body: { id: 'ask:ask-ship', applied: true, state: 'answered', detail: 'answered' },
   })
   const before = log.calls.filter((c) => c.path === '/api/approvals').length
-  click(row(view, 'ask:ask-ship').querySelector('button[data-action="approve"]'))
+  click((await expand(view, 'ask:ask-ship')).querySelector('button[data-action="approve"]'))
   await flush()
   expect(log.calls.filter((c) => c.path === '/api/approvals').length, 'the view did not re-read after its own verb')
     .toBeGreaterThan(before)
@@ -514,7 +536,7 @@ test('after any verb the inbox re-reads — the POST is followed by a GET', asyn
 
 test('Re-plan drives the S06.9 structured contest into the answer', async () => {
   const { view, log } = await open('/inbox', mine())
-  const node = row(view, 'ask:ask-ship')
+  const node = await expand(view, 'ask:ask-ship')
   typeInto(node.querySelector('[data-field="contest"]') as HTMLInputElement, 'AC-2')
   log.set(`POST ${verb('ask:ask-ship', 'answer')}`, {
     body: { id: 'ask:ask-ship', applied: true, state: 'answered', detail: 're-planning' },
@@ -532,7 +554,7 @@ test("suppress posts the card's OWN identifiers and renders the served retune st
   const served = mine()
   const flag = card(served, 'watchdog_flag:r-ship\x1fwatchdog.loop')
   const { view, log } = await open('/inbox', served)
-  const node = row(view, flag.id)
+  const node = await expand(view, flag.id)
 
   log.set('POST /api/watchdog/flags/suppress', {
     body: {
@@ -566,7 +588,7 @@ test('the watchdog card carries the resume door, and its refusal renders verbati
       detail: 'this run is parked on an OPEN ask — answer it in the inbox and the run resumes itself',
     },
   })
-  click(row(view, flag.id).querySelector('button[data-action="resume"]'))
+  click((await expand(view, flag.id)).querySelector('button[data-action="resume"]'))
   await flush()
   expect(row(view, flag.id).textContent).toContain('parked on an OPEN ask')
 
@@ -589,7 +611,7 @@ test('a successful resume renders the SERVED outcome, and authors no story of it
       detail: 'resumed by a person: the run is running again and its generation bumped to 3',
     },
   })
-  click(row(view, flag.id).querySelector('button[data-action="resume"]'))
+  click((await expand(view, flag.id)).querySelector('button[data-action="resume"]'))
   await flush()
   const text = row(view, flag.id).querySelector('[data-outcome="applied"]')?.textContent ?? ''
   expect(text).toContain('parked → running')
@@ -613,7 +635,7 @@ test('a conformance acknowledgement renders as STILL RED, never as a pass', asyn
       detail: 'acknowledged: this red STAYS LISTED red. Only a real green suite result clears it',
     },
   })
-  click(row(view, id).querySelector('button[data-action="acknowledge"]'))
+  click((await expand(view, id)).querySelector('button[data-action="acknowledge"]'))
   await flush()
   const text = row(view, id).textContent ?? ''
   expect(text).toContain('STILL RED')
@@ -623,7 +645,7 @@ test('a conformance acknowledgement renders as STILL RED, never as a pass', asyn
 test('a drift dismissal carries its reason and renders the incident-window scope', async () => {
   const { view, log } = await open('/inbox', all())
   const id = 'drift_card:fp-anthropic-1'
-  const node = row(view, id)
+  const node = await expand(view, id)
   typeInto(node.querySelector('[data-field="reason"]') as HTMLInputElement, 'read it, nothing we send is affected')
   log.set(`POST ${verb(id, 'dismiss')}`, {
     body: {
@@ -645,7 +667,7 @@ test('a drift dismissal carries its reason and renders the incident-window scope
 
 test('the verdict form renders ONLY the fields a blind voter may see', async () => {
   const { view } = await open('/inbox', mine())
-  const node = row(view, 'benchmark_verdict:bp-notes')
+  const node = await expand(view, 'benchmark_verdict:bp-notes')
   const forms = fixtures.benchmarkVerdicts() as unknown as BenchmarkVerdictForms
   const pair = (forms.pairs ?? [])[0]
 
@@ -663,7 +685,7 @@ test('the verdict form renders ONLY the fields a blind voter may see', async () 
 
 test('the verdict cannot be submitted without BOTH the pick and the arm-guess', async () => {
   const { view, log } = await open('/inbox', mine())
-  const node = row(view, 'benchmark_verdict:bp-notes')
+  const node = await expand(view, 'benchmark_verdict:bp-notes')
   const button = () => row(view, 'benchmark_verdict:bp-notes').querySelector('button[data-action="verdict"]') as HTMLButtonElement
 
   expect(button().disabled, 'an empty form could be submitted').toBe(true)
@@ -713,14 +735,14 @@ test('the verdict cannot be submitted without BOTH the pick and the arm-guess', 
 test('the form renders the vocabularies it is SERVED and declares none of its own', async () => {
   const forms = fixtures.benchmarkVerdicts() as unknown as BenchmarkVerdictForms
   const { view } = await open('/inbox', mine())
-  const node = row(view, 'benchmark_verdict:bp-notes')
+  const node = await expand(view, 'benchmark_verdict:bp-notes')
   expect([...node.querySelectorAll('[data-verdict]')].map((n) => n.getAttribute('data-verdict'))).toEqual(forms.choices)
   expect([...node.querySelectorAll('[data-guess]')].map((n) => n.getAttribute('data-guess'))).toEqual(forms.guess_sides)
 })
 
 test('a recorded verdict whose reveal could not be read back renders as late-reveal, not as a failure', async () => {
   const { view, log } = await open('/inbox', mine())
-  const node = row(view, 'benchmark_verdict:bp-notes')
+  const node = await expand(view, 'benchmark_verdict:bp-notes')
   click(node.querySelector('[data-verdict="tie"]'))
   click(row(view, 'benchmark_verdict:bp-notes').querySelector('[data-guess="A"]'))
   log.set(`POST ${verb('benchmark_verdict:bp-notes', 'verdict')}`, {
@@ -742,13 +764,13 @@ test('a recorded verdict whose reveal could not be read back renders as late-rev
 test('decline is first-class beside the verdict, and the failed pair offers ONLY decline', async () => {
   const served = mine()
   const { view, log } = await open('/inbox', served)
-  const pending = [...row(view, 'benchmark_verdict:bp-notes').querySelectorAll('button[data-action]')].map((b) =>
-    b.getAttribute('data-action'),
+  const pending = [...(await expand(view, 'benchmark_verdict:bp-notes')).querySelectorAll('button[data-action]')].map(
+    (b) => b.getAttribute('data-action'),
   )
   expect(pending).toEqual(['verdict', 'decline'])
 
-  const failed = [...row(view, 'benchmark_verdict:bp-archive').querySelectorAll('button[data-action]')].map((b) =>
-    b.getAttribute('data-action'),
+  const failed = [...(await expand(view, 'benchmark_verdict:bp-archive')).querySelectorAll('button[data-action]')].map(
+    (b) => b.getAttribute('data-action'),
   )
   expect(failed, 'a pair that can never be shown was offered a vote').toEqual(['decline'])
 
@@ -765,7 +787,7 @@ test('the alarm card disposes with a SERVED disposition and a reason', async () 
   const forms = fixtures.benchmarkVerdicts() as unknown as BenchmarkVerdictForms
   const id = 'benchmark_alarm:blind-pairs#e1'
   const { view, log } = await open('/inbox', served)
-  const node = row(view, id)
+  const node = await expand(view, id)
   expect([...node.querySelectorAll('[data-disposition]')].map((n) => n.getAttribute('data-disposition'))).toEqual(
     forms.dispositions,
   )
@@ -797,7 +819,7 @@ test('the addressee sees their memory-conflict card and can resolve it', async (
   const served = mine()
   const conflict = card(served, 'memory_conflict:1')
   const { view, log } = await open('/inbox', served)
-  const node = row(view, conflict.id)
+  const node = await expand(view, conflict.id)
 
   const stored = conflict.card as { question: string; entry_id: string; other_entry_id: string }
   expect(node.textContent).toContain(stored.question)
@@ -822,7 +844,7 @@ test('a conflict card with no readable id does not arm its control, and posts no
     items: served.items.map((i) => (i.kind === 'memory_conflict' ? { ...i, card: { question: 'which is right?' } } : i)),
   }
   const { view, log } = await open('/inbox', broken)
-  const button = row(view, 'memory_conflict:1').querySelector('button[data-action="resolve"]') as HTMLButtonElement
+  const button = (await expand(view, 'memory_conflict:1')).querySelector('button[data-action="resolve"]') as HTMLButtonElement
   expect(button.disabled, 'the control armed on a card with no conflict id').toBe(true)
   click(button)
   await flush()
@@ -853,6 +875,11 @@ test('the ninth kind says how it stays current, and nothing polls for it', async
 test('every card id round-trips through /inbox/:id — including the ones with : and # and a separator', async () => {
   const served = mine()
   const { view } = await open('/inbox', served)
+  // The stable address lives in each card's technical fold now — expand the
+  // rows whose ids this walk checks.
+  for (const id of ['watchdog_flag:r-ship\x1fwatchdog.loop', 'ask:ask-ship', 'memory_conflict:1']) {
+    await expand(view, id)
+  }
   const hrefs = new Map(
     [...view.container.querySelectorAll('a.card-id')].map((a) => [a.textContent, a.getAttribute('href')]),
   )
@@ -951,9 +978,9 @@ test("an automation's station-3 proposal renders through the generic card, and w
   const { view } = await open('/inbox', served)
   const item = card(served, 'effect:e-digest')
 
-  const row = view.container.querySelector('[data-card-id="effect:e-digest"]')
-  expect(row, 'the automation-step proposal does not render at all').not.toBeNull()
-  expect(row!.getAttribute('data-kind')).toBe('effect')
+  const node = view.container.querySelector('[data-card-id="effect:e-digest"]')
+  expect(node, 'the automation-step proposal does not render at all').not.toBeNull()
+  expect(node!.getAttribute('data-kind')).toBe('effect')
 
   // What the card IS, from the served body: a High-tier outward step on one
   // named service, owned by the person whose worker it is.
@@ -962,11 +989,12 @@ test("an automation's station-3 proposal renders through the generic card, and w
   expect(item.step_up_required).toBe(true)
   expect(item.actions).toEqual(['approve', 'deny'])
 
-  // What renders: the generic fallback shows the payload's own fields. The
-  // verb and the step are the two facts that say what would happen, and both
-  // reach the screen — so the fallback is legible enough to decide against,
-  // even though it is not a purpose-built arm.
-  const text = row!.textContent ?? ''
+  // What renders: an effect's payload IS the thing being signed, so its own
+  // fields stay in the open detail (never demoted to the fold). The verb and
+  // the step are the two facts that say what would happen, and both reach the
+  // screen — so the fallback is legible enough to decide against, even though
+  // it is not a purpose-built arm.
+  const text = (await expand(view, 'effect:e-digest')).textContent ?? ''
   for (const fact of ['calendar.post', 'post', 'calendar']) {
     expect(text, `the card does not show ${fact}, so a person cannot tell what they are approving`).toContain(fact)
   }
@@ -1211,7 +1239,7 @@ test('a card renders its observed and expiry instants verbatim, with the labels 
   expect(withExpiry, 'the fixture inbox no longer carries an expiring card').toBeDefined()
   const { view } = await open('/inbox', list as unknown as Record<string, unknown>)
 
-  const node = row(view, withExpiry.id)
+  const node = await expand(view, withExpiry.id)
   assertBeside(node.querySelector('time'), withExpiry.observed_ts, 'the observed stamp')
   assertBeside(node.querySelector('.expiry time'), withExpiry.expiry_at!, 'the expiry stamp')
   // The landed countdown is a DIFFERENT statement and it stays: it reads at
@@ -1231,13 +1259,13 @@ test('the engine deadline and the conflict notice are live too, and the verdict 
     items: list.items.map((i) => (i.id === expiring.id ? { ...i, engine_expiry_ts: '2026-07-20T09:06:00Z' } : i)),
   }
   const { view, log } = await open('/inbox', engine as unknown as Record<string, unknown>)
-  const node = row(view, expiring.id)
+  const node = await expand(view, expiring.id)
   const stamps = [...node.querySelectorAll('.expiry time')]
   assertBeside(stamps[1], '2026-07-20T09:06:00Z', 'the engine’s own deadline')
 
   const conflict = list.items.find((i) => i.kind === 'memory_conflict')!
   expect(conflict, 'the fixture inbox no longer carries a memory conflict').toBeDefined()
-  const cnode = row(view, conflict.id)
+  const cnode = await expand(view, conflict.id)
   assertBeside(cnode.querySelector('time'), conflict.observed_ts, 'the conflict card’s observed stamp')
 
   // AND THE VERDICT RECORD IS NOT — the other half of the title, which this
@@ -1245,7 +1273,7 @@ test('the engine deadline and the conflict notice are live too, and the verdict 
   // the eighteen sites the D5 map deliberately LEAVES on `Stamp`: it is the
   // instant a §14 record committed, and a record needs the instant alone.
   const recorded = '2026-07-20T09:05:00Z'
-  const verdictCard = row(view, 'benchmark_verdict:bp-notes')
+  const verdictCard = await expand(view, 'benchmark_verdict:bp-notes')
   click(verdictCard.querySelector('[data-verdict="A"]'))
   click(row(view, 'benchmark_verdict:bp-notes').querySelector('[data-guess="B"]'))
   log.set(`POST ${verb('benchmark_verdict:bp-notes', 'verdict')}`, {
@@ -1282,26 +1310,27 @@ test('the engine deadline and the conflict notice are live too, and the verdict 
 
 // ── D8 pass II: the surface header, the teaching empty, the row anatomy ────
 
-test('the inbox says what it is, and does not claim a power this page does not have', async () => {
+test('the inbox says what it is, and claims exactly the powers the gate gave it', async () => {
+  // ▲ REWRITTEN at the B6 gate rework (2026-08-22): the landed "never a
+  // filter" posture was overruled by the operator, so the header now claims
+  // narrowing and re-ordering — as PRESENTATION, with the served order the
+  // default and a narrowed view declaring itself. The line must say all of
+  // that and still invent nothing about ranking or tiers.
   const { view } = await open('/inbox', mine())
   const what = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
 
-  // The facts, and each is one of the four rules the file is built on.
   expect(what, 'the line does not say what arrives here').toContain('waiting on a person')
   expect(what, 'the line drops the one-queue fact').toContain('one queue')
   // ▲ W2-10 (cold walk 2026-08-17): "ranked by risk" promised more than the
-  // served order kept, so the line claims exactly what is true — the order
-  // is the control plane's own.
-  expect(what, 'the line drops WHO orders').toContain("in the control plane's own order")
-  expect(what, 'the line drops the never-re-orders rule').toContain('never re-orders')
+  // served order kept — the order is claimed as the control plane's own.
+  expect(what, 'the line drops WHO orders').toContain("control plane's own order")
+  expect(what, 'the line does not say the powers are display-only').toContain('never what is served')
+  expect(what, 'the line does not promise the hiding declaration').toContain('says what it is hiding')
   expect(what, 'the line does not say what answering does').toContain('releases the work')
 
-  // The overclaims. The client ranks nothing, groups nothing and filters
-  // nothing (Inbox.tsx's four rules), so the line may not say it does.
-  for (const claim of ['sorted', 'sorts', 'grouped', 'groups', 'filter', 'hides', 'most important first']) {
-    expect(what.toLowerCase(), `the header claims this page ${claim}`).not.toContain(claim)
-  }
-  // …and it invents no tier meaning beyond S15.6's own.
+  // The overclaims that stay banned: no risk-ranking promise (W2-10), and no
+  // tier meaning beyond S15.6's own.
+  expect(what.toLowerCase(), 'the header promises risk ranking again').not.toContain('ranked by risk')
   for (const word of ['low-risk', 'safe', 'urgent']) {
     expect(what.toLowerCase(), `the header re-defines a tier (${word})`).not.toContain(word)
   }
@@ -1341,39 +1370,62 @@ test('an empty queue TEACHES what arrives here — and teaches nothing while the
   expect(waiting, 'the pending window taught what arrives here').not.toContain('Cards arrive here')
 })
 
-test('the row anatomy renders five legs, and every fact in them is one the wire carried', async () => {
+test('the row anatomy: a compact face for finding, the full detail behind a press', async () => {
+  // ▲ REWRITTEN at the B6 gate rework (2026-08-22, findings 2/3/5). The face
+  // carries what project · what task · the issue in plain words with the class
+  // and tier as chips — and nothing else. The detail behind the press carries
+  // the served flags, the instants, the guidance, the jump and the verbs; the
+  // raw ids live inside the collapsed technical fold.
   const served = mine()
   const item = card(served, 'ask:ask-ship')
   const { view } = await open('/inbox', served)
   const node = row(view, item.id)
 
-  // (1) what's being approved — the display class, and the served flags that
-  // decide what the verbs will accept.
-  expect(node.querySelector('[data-display-class]')?.getAttribute('data-display-class')).toBe('question')
-  expect(node.querySelector('[data-tier-label]')?.getAttribute('data-tier-label')).toBe(item.tier)
-  expect(node.querySelector('[data-answerable="true"]'), 'an answerable card does not say so').not.toBeNull()
+  // THE FACE. The project and task come from joining the served task_id
+  // against the served tasks read — t-ship belongs to 'release-notes' and is
+  // titled in the tasks fixture — and the issue line is the plan's own served
+  // restatement, verbatim.
+  const face = node.querySelector('button[data-face]') as HTMLElement
+  expect(face, 'the row has no pressable face').not.toBeNull()
+  expect(face.querySelector('[data-face-project]')?.textContent).toBe('release-notes')
+  expect(face.querySelector('[data-face-task]')?.textContent).toBe('Ship the release notes')
+  const snap = item.card as { approval: { layer1: { restatement: string } } }
+  expect(face.querySelector('[data-face-issue]')?.textContent).toBe(snap.approval.layer1.restatement)
+  expect(face.querySelector('[data-display-class]')?.getAttribute('data-display-class')).toBe('question')
+  expect(face.querySelector('[data-tier-label]')?.getAttribute('data-tier-label')).toBe(item.tier)
 
-  // (2) the mono provenance line — id, kind, owner and the observed instant,
-  // all served, all in the mono/tabular treatment §47 fixes for ids and stamps.
-  const prov = node.querySelector('[data-provenance="card"]') as HTMLElement
-  expect(prov, 'the card has no provenance line').not.toBeNull()
+  // NO RAW INTERNAL ON THE FACE: not the card id, not the kind token, not the
+  // run id (gate finding 2).
+  const faceText = face.textContent ?? ''
+  expect(faceText, 'the card id leaked onto the face').not.toContain(item.id)
+  expect(faceText, 'the run id leaked onto the face').not.toContain(item.run_id ?? 'r-ship')
+
+  // THE DETAIL, behind the press: served flags, guidance, jump, verbs.
+  const detail = await expand(view, item.id)
+  expect(detail.querySelector('[data-answerable="true"]'), 'an answerable card does not say so').not.toBeNull()
+  expect(detail.querySelector('time')?.getAttribute('dateTime')).toBe(item.observed_ts)
+  expect(detail.querySelector('[data-check-first]'), 'the check-first guidance is missing').not.toBeNull()
+  expect(detail.querySelector('[data-jump="task"]'), 'a card with a served task ref has no jump').not.toBeNull()
+  expect([...detail.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(
+    item.actions,
+  )
+
+  // THE TECHNICAL FOLD: the provenance ids in the mono/tabular treatment §47
+  // fixes for ids and stamps, closed by default, inside the detail.
+  const fold = detail.querySelector('[data-tech-details]') as HTMLDetailsElement
+  expect(fold, 'the technical fold is missing').not.toBeNull()
+  expect(fold.open, 'the fold ships open — internals back on the face').toBe(false)
+  const prov = fold.querySelector('[data-provenance="card"]') as HTMLElement
   expect(prov.className, 'the provenance line is not mono').toContain('font-mono')
   expect(prov.className, 'the provenance line has no tabular figures').toContain('tabular-nums')
   expect(prov.querySelector('a.card-id')?.textContent).toBe(item.id)
   expect(prov.querySelector('[data-provenance-field="kind"]')?.textContent).toBe(item.kind)
-  expect(prov.textContent).toContain(item.owner)
-  expect(prov.querySelector('time')?.getAttribute('dateTime')).toBe(item.observed_ts)
+  expect(prov.querySelector('[data-provenance-field="run"]')?.textContent).toContain(item.run_id ?? '')
 
-  // (3) what to check first, and (4) the jump — both below.
-  expect(node.querySelector('[data-check-first]'), 'the check-first leg is missing').not.toBeNull()
-  expect(node.querySelector('[data-jump="task"]'), 'a card with a served task ref has no jump leg').not.toBeNull()
-  expect(prov.querySelector('[data-provenance-field="run"]')?.textContent, 'the run ref left the provenance line')
-    .toContain(item.run_id ?? '')
-
-  // (5) the verbs, still the card's OWN served vocabulary and nothing else.
-  expect([...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(
-    item.actions,
-  )
+  // Pressing the face again folds the detail away.
+  click(face)
+  await flush()
+  expect(row(view, item.id).querySelector('[data-detail]'), 'the detail did not fold back').toBeNull()
 })
 
 test('an unknown kind still gets a row under its SERVED name — anatomy included', async () => {
@@ -1388,15 +1440,21 @@ test('an unknown kind still gets a row under its SERVED name — anatomy include
     ],
   }
   const { view } = await open('/inbox', invented)
-  const node = row(view, 'quorum_vote:qv-1')
-  expect(node, 'an unknown kind lost its row').not.toBeNull()
-  expect(node.querySelector('[data-display-class]')?.textContent, 'the served kind was not used as its own label').toBe(
-    'quorum_vote',
-  )
+  expect(row(view, 'quorum_vote:qv-1'), 'an unknown kind lost its row').not.toBeNull()
+  expect(
+    row(view, 'quorum_vote:qv-1').querySelector('[data-display-class]')?.textContent,
+    'the served kind was not used as its own label',
+  ).toBe('quorum_vote')
+  const node = await expand(view, 'quorum_vote:qv-1')
   expect(node.querySelector('[data-provenance="card"]')?.textContent).toContain('quorum_vote')
   expect([...node.querySelectorAll('button[data-action]')].map((b) => b.getAttribute('data-action'))).toEqual(['ratify'])
   expect(node.querySelector('[data-check-first]'), 'guidance was invented for a class nobody has written one for')
     .toBeNull()
+  // An unknown kind's stored record stays VISIBLE in the detail — the fold is
+  // for kinds whose plain rendering already says what matters, and hiding the
+  // one thing a new kind has would be forward tolerance in name only.
+  expect(node.querySelector('[data-detail] .card-face')?.textContent, "the new kind's record is not on the detail")
+    .toContain('a new kind')
 })
 
 test('the jump leg is the SERVED task ref, and a card with none grows no door', async () => {
@@ -1406,7 +1464,7 @@ test('the jump leg is the SERVED task ref, and a card with none grows no door', 
   // The task ref is what the task ROUTE can be given, and the link uses it.
   const withTask = card(served, 'ask:ask-ship')
   expect(withTask.task_id, 'the fixture card serves no task ref').toBeTruthy()
-  const jump = row(view, withTask.id).querySelector('[data-jump="task"]')!
+  const jump = (await expand(view, withTask.id)).querySelector('[data-jump="task"]')!
   expect(jump, 'a card with a served task ref has no jump leg').not.toBeNull()
   expect(jump.querySelector('a')?.getAttribute('href')).toBe(`/tasks/${String(withTask.task_id)}`)
   // …and the label claims the task page, which it now really opens.
@@ -1426,8 +1484,10 @@ test('the jump leg is the SERVED task ref, and a card with none grows no door', 
   const bare = served.items.find((i) => !i.run_id)
   expect(bare, 'every fixture card carries a run ref, so the absence arm is undriven').toBeTruthy()
   expect(bare?.task_id, 'a card with no run somehow carries a task ref').toBeFalsy()
-  expect(row(view, bare?.id ?? '').querySelector('[data-jump]'), 'a jump was invented for a card with no work ref')
-    .toBeNull()
+  expect(
+    (await expand(view, bare?.id ?? '')).querySelector('[data-jump]'),
+    'a jump was invented for a card with no work ref',
+  ).toBeNull()
 
   // The other absence arm: a run whose row resolves to NO task serves the field
   // empty, and the leg stays absent rather than linking to nothing.
@@ -1436,9 +1496,10 @@ test('the jump leg is the SERVED task ref, and a card with none grows no door', 
     items: served.items.map((i) => (i.id === withTask.id ? { ...i, task_id: undefined } : i)),
   }
   const { view: v2 } = await open('/inbox', unresolved)
-  expect(row(v2, withTask.id).querySelector('[data-jump]'), 'an unresolved task ref still rendered a door').toBeNull()
+  const detail2 = await expand(v2, withTask.id)
+  expect(detail2.querySelector('[data-jump]'), 'an unresolved task ref still rendered a door').toBeNull()
   expect(
-    row(v2, withTask.id).querySelector('[data-provenance-field="run"]'),
+    detail2.querySelector('[data-provenance-field="run"]'),
     'the run ref left with the jump it is not',
   ).not.toBeNull()
 
@@ -1512,10 +1573,19 @@ test('THE NON-VACUITY THE OLD LINK NEVER HAD: every served task ref resolves on 
   }
 })
 
-/** checkFirstOf reads one card's class-grain guidance line off the rendered row. */
-const checkFirstOf = (view: { container: HTMLElement }, id: string) => {
-  const node = row(view, id).querySelector('[data-check-first]')
+/** checkFirstOf reads one card's class-grain guidance line off the rendered
+ *  row — expanding it first, since guidance lives in the detail now. */
+const checkFirstOf = async (view: { container: HTMLElement }, id: string) => {
+  const node = (await expand(view, id)).querySelector('[data-check-first]')
   return { klass: node?.getAttribute('data-check-first') ?? '', text: node?.textContent ?? '' }
+}
+
+/** expandAll opens every row on screen, for the walks that read every line. */
+async function expandAll(view: { container: HTMLElement }): Promise<void> {
+  for (const face of [...view.container.querySelectorAll('[data-open="false"] > button[data-face]')]) {
+    click(face)
+  }
+  await flush()
 }
 
 test('"what to check first" is CLASS-grain: one line per class, keyed off the card\'s own declarations', async () => {
@@ -1524,7 +1594,7 @@ test('"what to check first" is CLASS-grain: one line per class, keyed off the ca
 
   // A plan card points at the S06.9 centerpiece — the assumptions and the
   // will-NOT-do list — which is what the card itself puts first.
-  const proposal = checkFirstOf(view, 'ask:ask-ship')
+  const proposal = await checkFirstOf(view, 'ask:ask-ship')
   expect(proposal.klass).toBe('proposal')
   expect(proposal.text).toContain('assumptions')
   expect(proposal.text).toContain('will NOT do')
@@ -1532,7 +1602,7 @@ test('"what to check first" is CLASS-grain: one line per class, keyed off the ca
   // A decision card and the ninth kind are both questions, and the line is true
   // of both: the options ON the card are the answer vocabulary the verbs accept.
   for (const id of ['ask:ask-coverage', 'memory_conflict:1']) {
-    const q = checkFirstOf(view, id)
+    const q = await checkFirstOf(view, id)
     expect(q.klass, `${id} is not classed as a question`).toBe('question')
     expect(q.text).toContain('options listed on this card')
     expect(q.text).toContain('nothing outside this card')
@@ -1540,19 +1610,19 @@ test('"what to check first" is CLASS-grain: one line per class, keyed off the ca
 
   // A sign-off agrees with the conformance verb, whose acknowledgement comes
   // back STILL RED: signing off records that somebody read it.
-  const signoff = checkFirstOf(ops, 'conformance_card:api-read-surface')
+  const signoff = await checkFirstOf(ops, 'conformance_card:api-read-surface')
   expect(signoff.klass).toBe('sign-off')
   expect(signoff.text).toContain('does not undo it')
   expect(signoff.text, 'the sign-off line promises a clearance the verb does not give').not.toContain('clears')
 
   // A judgement states BENCH-REG §3.3's frozen rule, which `canFire` enforces.
-  const judgement = checkFirstOf(view, 'benchmark_verdict:bp-notes')
+  const judgement = await checkFirstOf(view, 'benchmark_verdict:bp-notes')
   expect(judgement.klass).toBe('judgement')
   expect(judgement.text).toContain('without knowing which is which')
   expect(judgement.text).toContain('part of the answer')
 
   // An effect names what it would do and who has signed.
-  const effect = checkFirstOf(view, 'effect:e-notify')
+  const effect = await checkFirstOf(view, 'effect:e-notify')
   expect(effect.klass).toBe('effect')
   expect(effect.text).toContain('outside the platform')
   expect(effect.text).toContain('who has already signed')
@@ -1561,6 +1631,8 @@ test('"what to check first" is CLASS-grain: one line per class, keyed off the ca
 test('the guidance contradicts nothing it teaches — the overclaims, asserted absent', async () => {
   const { view } = await open('/inbox', mine())
   const { view: ops } = await open('/inbox', all())
+  await expandAll(view)
+  await expandAll(ops)
   const lines = [...view.container.querySelectorAll('[data-check-first]'), ...ops.container.querySelectorAll('[data-check-first]')].map(
     (n) => (n.textContent ?? '').toLowerCase(),
   )
@@ -1586,7 +1658,7 @@ test('the guidance contradicts nothing it teaches — the overclaims, asserted a
   // The one that matters most: a platform-level effect is NOT approved by one
   // signature, and the co-approval block below says so. The line may not
   // promise that approving fires the outward act.
-  const effect = checkFirstOf(view, 'effect:e-notify').text
+  const effect = (await checkFirstOf(view, 'effect:e-notify')).text
   expect(effect).toContain('not approved until both')
   for (const claim of ['approving fires', 'takes effect immediately', 'will fire it', 'happens as soon as you approve']) {
     expect(effect.toLowerCase(), `the effect line promises an outward act one signature does not cause`).not.toContain(claim)
@@ -1596,7 +1668,7 @@ test('the guidance contradicts nothing it teaches — the overclaims, asserted a
 test('the served 13.5 help stays the card-specific authority, beside the class line and byte-true', async () => {
   const served = mine()
   const { view } = await open('/inbox', served)
-  const node = row(view, 'ask:ask-ship')
+  const node = await expand(view, 'ask:ask-ship')
   const help = (card(served, 'ask:ask-ship').card as { approval: { layer1: { help: { what: string; wrong: string; recommend: string } } } })
     .approval.layer1.help
 
@@ -1620,11 +1692,14 @@ test('the anatomy is readable at phone width: nothing new pins a pixel width', a
   // stylesheet by responsive.test.ts. These are the renders this packet added.
   const pinned = /w-\[\d+px\]|min-w-\[\d+px\]|max-w-\[\d+px\]/
   const { view } = await open('/inbox', mine())
+  await expandAll(view)
   const nodes = [
     ...view.container.querySelectorAll('[data-surface-what]'),
     ...view.container.querySelectorAll('[data-provenance="card"]'),
     ...view.container.querySelectorAll('[data-check-first]'),
     ...view.container.querySelectorAll('[data-jump]'),
+    ...view.container.querySelectorAll('[data-face]'),
+    ...view.container.querySelectorAll('[data-inbox-controls]'),
   ]
   expect(nodes.length, 'the walk found none of the new renders').toBeGreaterThan(4)
   for (const n of nodes) {
@@ -1657,7 +1732,7 @@ test('a KNOWN kind whose card family is unrecognized gets no guidance, and loses
     ),
   }
   const { view } = await open('/inbox', strange)
-  const node = row(view, shipCard.id)
+  const node = await expand(view, shipCard.id)
 
   // No guidance, because none could be written honestly.
   expect(node.querySelector('[data-check-first]'), 'guidance was invented for a card family nobody has written one for')
@@ -1680,7 +1755,249 @@ test('a KNOWN kind whose card family is unrecognized gets no guidance, and loses
   // The control: the SAME card with its landed family back gets its line, so
   // this is about the family and not about a row that never had one.
   const { view: v2 } = await open('/inbox', served)
-  expect(row(v2, shipCard.id).querySelector('[data-check-first]')?.getAttribute('data-check-first')).toBe('proposal')
+  expect(
+    (await expand(v2, shipCard.id)).querySelector('[data-check-first]')?.getAttribute('data-check-first'),
+  ).toBe('proposal')
+})
+
+// ── the gate-ordered rework (2026-08-22): filters, order, faces, the fold ──
+//
+// Operator findings P3/design/b6-gate-clickthrough-findings-2026-08-22.md.
+// Everything below is presentation over the served list: the badge and the
+// wire are untouched, the served order stays the default, and a narrowed view
+// declares itself. The project on a row is the client-side join of the card's
+// served task_id against the served tasks read (t-ship → 'release-notes' in
+// the golden fixtures; every other fixture task files under '(no project)').
+
+test('?project= narrows to one project, says what it hides, and drops nothing', async () => {
+  const served = mine()
+  const { view } = await open('/inbox?project=release-notes', served)
+
+  // Exactly the cards whose task joins to release-notes, in SERVED order.
+  const wanted = served.items.filter((i) => i.task_id === 't-ship').map((i) => i.id)
+  expect(wanted.length, 'the fixture lost its multi-card project').toBe(4)
+  expect(rowIDs(view)).toEqual(wanted)
+
+  // The select shows the slice the URL asked for.
+  expect((view.container.querySelector('[data-filter="project"]') as HTMLSelectElement).value).toBe('release-notes')
+
+  // The hiding line: the counts, the filter's own name, and the no-drop promise.
+  const line = view.container.querySelector('[data-inbox-hiding]')!
+  expect(line, 'a narrowed view rendered no declaration of what it hides').not.toBeNull()
+  expect(line.getAttribute('data-inbox-hiding')).toBe(String(served.items.length - wanted.length))
+  expect(line.textContent).toContain('hidden by the project filter (release-notes)')
+  expect(line.textContent).toContain('Nothing is dropped')
+
+  // Show everything really shows everything again.
+  click(line.querySelector('button[data-action="clear-filters"]'))
+  await flush()
+  expect(rowIDs(view), 'clearing the filter did not restore the whole served queue').toEqual(
+    served.items.map((i) => i.id),
+  )
+})
+
+test('the honest "(no project)" bucket holds every card that resolves to no project', async () => {
+  const served = mine()
+  const { view } = await open(`/inbox?project=${encodeURIComponent('(no project)')}`, served)
+  const shown = rowIDs(view)
+
+  // Cards with NO task at all file here (api.ts:156 precedent)…
+  for (const id of ['memory_conflict:1', 'benchmark_verdict:bp-notes', 'benchmark_verdict:bp-archive']) {
+    expect(shown, `${id} has no task and left the (no project) bucket`).toContain(id)
+  }
+  // …beside cards whose TASK is served in the bucket.
+  expect(shown).toContain('ask:ask-notes')
+  // The two slices partition the served list: nothing dropped, nothing doubled.
+  expect(shown.length + served.items.filter((i) => i.task_id === 't-ship').length).toBe(served.items.length)
+})
+
+test('?task= narrows to one task and names it by its own title', async () => {
+  const served = mine()
+  const { view } = await open('/inbox?task=t-ship', served)
+  expect(rowIDs(view)).toEqual(served.items.filter((i) => i.task_id === 't-ship').map((i) => i.id))
+  const line = view.container.querySelector('[data-inbox-hiding]')!
+  expect(line.textContent, 'the task filter does not name the task in its own words').toContain(
+    'the task filter (Ship the release notes)',
+  )
+})
+
+test('a filtered view that matches nothing says so and offers the way back', async () => {
+  const served = mine()
+  const { view } = await open('/inbox?task=t-nothing-here', served)
+  expect(view.container.querySelectorAll('[data-card-id]')).toHaveLength(0)
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('No card matches the filter.')
+  expect(text, 'the empty slice does not say the cards still exist').toContain('hidden by it')
+  // The SERVED empty teaching state did not fire — the queue is not empty.
+  expect(text).not.toContain('Nothing is waiting on you.')
+})
+
+test('the reading orders are stable derivations over served fields; served order stays the default', async () => {
+  const served = mine()
+
+  // Default: no sort param, no re-order, no sort declaration.
+  const { view: plain } = await open('/inbox', served)
+  expect(rowIDs(plain)).toEqual(served.items.map((i) => i.id))
+  expect((plain.container.querySelector('[data-filter="sort"]') as HTMLSelectElement).value).toBe('')
+  expect(plain.container.querySelector('[data-inbox-sorted]')).toBeNull()
+
+  // Highest risk first, driven against a REVERSED body so the sort is doing
+  // the work: the two high cards lead in the reversed body's own relative
+  // order (a STABLE sort — ties keep the served order), the lows close.
+  const reversed = { ...served, items: [...served.items].reverse() }
+  const { view } = await open('/inbox?sort=tier', reversed)
+  const ids = rowIDs(view)
+  expect(ids.slice(0, 2)).toEqual(['watchdog_flag:r-ship\x1fwatchdog.loop', 'effect:e-notify'])
+  expect(ids.slice(-4)).toEqual(['benchmark_verdict:bp-archive', 'ask:ask-sweep', 'ask:ask-notes', 'ask:ask-claim'])
+  // The declaration: what re-ordered it, and that the default is the platform's.
+  const note = view.container.querySelector('[data-inbox-sorted]')!
+  expect(note.textContent).toContain('own order is the default')
+
+  // Deadline first: a card with NO served deadline sinks below every card
+  // with one — never given an invented deadline — in served order among
+  // themselves.
+  const { view: byDeadline } = await open('/inbox?sort=deadline', served)
+  expect(rowIDs(byDeadline).slice(-4)).toEqual([
+    'watchdog_flag:r-ship\x1fwatchdog.loop',
+    'benchmark_verdict:bp-notes',
+    'memory_conflict:1',
+    'benchmark_verdict:bp-archive',
+  ])
+
+  // A sort the vocabulary does not know is the default order, not an error.
+  const { view: stale } = await open('/inbox?sort=bogus', served)
+  expect(rowIDs(stale)).toEqual(served.items.map((i) => i.id))
+})
+
+test('the inbox follows the app-wide project scope, and the page select can override it', async () => {
+  const served = mine()
+  const { view } = await open('/inbox', served)
+
+  // The topbar scope narrows THIS page now (scopedRoutes gained inbox), and
+  // the declaration names the scope as the thing doing the hiding.
+  choose(view.container.querySelector('.scope-select') as HTMLSelectElement, 'release-notes')
+  await flush()
+  expect(rowIDs(view)).toEqual(served.items.filter((i) => i.task_id === 't-ship').map((i) => i.id))
+  expect(view.container.querySelector('[data-inbox-hiding]')?.textContent).toContain(
+    'your project scope (release-notes)',
+  )
+  // …and the topbar no longer disclaims this page.
+  expect(view.container.querySelector('.scope-note')).toBeNull()
+
+  // The page's own "All projects" beats the scope EXPLICITLY (the URL keeps a
+  // present-but-empty project param) — clearing must not quietly re-narrow.
+  choose(view.container.querySelector('[data-filter="project"]') as HTMLSelectElement, '')
+  await flush()
+  expect(window.location.search, 'the explicit all-projects override is not in the URL').toContain('project=')
+  expect(rowIDs(view)).toEqual(served.items.map((i) => i.id))
+})
+
+test('the batch bar offers only the visible slice', async () => {
+  const served = mine()
+  // All three batchable fixture cards live in the (no project) bucket…
+  const { view } = await open(`/inbox?project=${encodeURIComponent('(no project)')}`, served)
+  expect(view.container.querySelector('.batch-bar')?.getAttribute('data-batchable')).toBe('3')
+  // …so the release-notes slice has none, and no bar renders at all.
+  const { view: scoped } = await open('/inbox?project=release-notes', served)
+  expect(scoped.container.querySelector('.batch-bar')).toBeNull()
+})
+
+test('the face leads with served words: the issue in the producer’s own sentence', async () => {
+  const servedMine = mine()
+  const { view } = await open('/inbox', servedMine)
+  const issue = (id: string) => row(view, id).querySelector('[data-face-issue]')?.textContent ?? ''
+
+  // The plan's own restatement; the decision's own summary; the verify card's
+  // own summary; the conflict's own question; the failed pair's own reason.
+  expect(issue('ask:ask-ship')).toContain('Write the release notes for this cycle')
+  expect(issue('ask:ask-coverage')).toContain('The plan does not cover: AC-2')
+  expect(issue('ask:ask-brief')).toContain('AC-2 is unmet after two rounds')
+  expect(issue('memory_conflict:1')).toContain('do they conflict?')
+  expect(issue('benchmark_verdict:bp-archive')).toContain('without producing an answer')
+  // The watchdog's own detail sentence.
+  expect(issue('watchdog_flag:r-ship\x1fwatchdog.loop')).toBe(
+    'the same tool call repeated 12 times with no change in its arguments',
+  )
+  // An interview leads with its own first question and counts the rest.
+  expect(issue('ask:ask-chatborn-1')).toContain('Who are these release notes for?')
+  expect(issue('ask:ask-chatborn-1')).toContain('+1 more question')
+
+  // The operator's oversight kinds: the drift summary verbatim; the
+  // conformance card's class-grain line (its row serves no prose).
+  const { view: ops } = await open('/inbox', all())
+  const opIssue = (id: string) => row(ops, id).querySelector('[data-face-issue]')?.textContent ?? ''
+  expect(opIssue('drift_card:fp-anthropic-1')).toBe('the messages endpoint deprecates a parameter this platform sends')
+  expect(opIssue('benchmark_alarm:blind-pairs#e1')).toBe(
+    'the platform arm is losing its own blind comparison in this domain',
+  )
+  expect(opIssue('conformance_card:api-read-surface')).toContain('self-check came back red')
+})
+
+test('the face says where a card belongs, and a card with no task wears the honest bucket', async () => {
+  const served = mine()
+  const { view } = await open('/inbox', served)
+  const where = (id: string) => row(view, id).querySelector('[data-face-project]')?.textContent ?? ''
+  expect(where('ask:ask-ship')).toBe('release-notes')
+  expect(where('ask:ask-notes')).toBe('(no project)')
+  expect(where('memory_conflict:1')).toBe('(no project)')
+  // The task slot carries the task's own served TITLE, not its id.
+  expect(row(view, 'ask:ask-notes').querySelector('[data-face-task]')?.textContent).toBe('Write the weekly note')
+  // A card with no task renders no task slot at all — never an invented one.
+  expect(row(view, 'memory_conflict:1').querySelector('[data-face-task]')).toBeNull()
+})
+
+test('raw projection internals live ONLY inside the technical fold (gate finding 2)', async () => {
+  const ops = all()
+  const { view } = await open('/inbox', ops)
+  const detail = await expand(view, 'drift_card:fp-anthropic-1')
+
+  // The fold holds the whole raw row — nothing a producer serves is lost.
+  const fold = detail.querySelector('[data-tech-details]')!
+  for (const internal of ['fingerprint', 'latest_seq', 'change_class', 'row_id', 'fp-anthropic-1']) {
+    expect(fold.textContent, `the fold lost the raw ${internal}`).toContain(internal)
+  }
+
+  // Outside the fold, the detail shows the platform's plain account and NONE
+  // of the named internals (row id, change class, fingerprint, seq — the
+  // operator's own list).
+  const outside = detail.cloneNode(true) as HTMLElement
+  outside.querySelector('[data-tech-details]')?.remove()
+  const text = outside.textContent ?? ''
+  expect(text).toContain('the messages endpoint deprecates a parameter this platform sends')
+  for (const internal of ['fingerprint', 'latest_seq', 'change_class', 'row_id', 'fp-anthropic-1', 'w-anthropic']) {
+    expect(text, `the raw ${internal} escaped the fold`).not.toContain(internal)
+  }
+
+  // The face never carried them either.
+  const face = row(view, 'drift_card:fp-anthropic-1').querySelector('[data-face]')!
+  expect(face.textContent).not.toContain('fp-anthropic-1')
+})
+
+test('the projects page jumps straight into a project’s own inbox slice', async () => {
+  const routes: Record<string, Scripted> = {
+    ...oversightRoutes(),
+    'GET /api/approvals': { body: mine() },
+    'GET /api/projects': { body: { projects: [], cursor: 0, visibility: 'entries you own or belong to' } },
+    'GET /api/deliverables': { body: { deliverables: [], cursor: 0, truncated: false } },
+  }
+  const log = scriptedFetch(routes)
+  window.history.replaceState(null, '', '/projects')
+  const view = mount(<App stream={inertStream()} />)
+  await flush()
+
+  const jump = view.container.querySelector('[data-proj-inbox="release-notes"]')
+  expect(jump, 'the project card grew no inbox door').not.toBeNull()
+  click(jump)
+  await flush()
+
+  // The door is the deep-linkable URL, and it lands on the narrowed queue.
+  expect(window.location.pathname).toBe('/inbox')
+  expect(window.location.search).toContain('project=release-notes')
+  expect(rowIDs({ container: view.container })).toEqual(
+    mine().items.filter((i) => i.task_id === 't-ship').map((i) => i.id),
+  )
+  expect(log.calls.some((c) => c.path === '/api/approvals')).toBe(true)
+  view.unmount()
 })
 
 test('RA-10: the opt-in pitch renders AFTER the mail, never above it (third report)', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, FolderOpen, FolderPlus, Sparkles } from 'lucide-react'
+import { BookOpen, FolderOpen, FolderPlus, Inbox as InboxIcon, Sparkles } from 'lucide-react'
 
 import {
   ApiError,
@@ -15,6 +15,7 @@ import { columnsFor } from './kanban'
 import { boardEventTypes, describeError, useLive } from './live'
 import { Freshness, Money, Owner } from './parts'
 import { useProjectScope } from './project'
+import { hrefForInbox } from './Inbox'
 import { Link, navigate } from './router'
 import { hrefFor } from './routes'
 import { Button, Chip, EmptyState, Modal, Timestamp, type Tone } from './ui'
@@ -390,6 +391,21 @@ function ProjectCard({ card, registryAnswered }: { card: CardData; registryAnswe
           }}
         >
           Open — scope the app to it
+        </Button>
+        {/* The gate-ordered jump (findings 2026-08-22, requirement 1): a
+            project reaches ITS OWN inbox slice by URL. The address is the
+            inbox's deep-linkable filter, so it survives a bookmark; an empty
+            slice answers honestly over there rather than hiding the door. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          data-proj-inbox={name}
+          onClick={() => {
+            navigate(hrefForInbox({ project: name, task: '', sort: '' }))
+          }}
+        >
+          <InboxIcon size={13} strokeWidth={2} aria-hidden="true" />
+          Its inbox cards
         </Button>
         {entry !== null && (
           <Button

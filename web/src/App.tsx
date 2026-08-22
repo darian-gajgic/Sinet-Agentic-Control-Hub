@@ -341,7 +341,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                     stream={stream}
                   />
                 ) : v === 'inbox' ? (
-                  <Inbox stream={stream} />
+                  <Inbox stream={stream} search={window.location.search} />
                 ) : v === 'inbox-item' ? (
                   <InboxItem id={vp.id} stream={stream} />
                 ) : v === 'settings' ? (
