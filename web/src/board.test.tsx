@@ -169,7 +169,11 @@ test('a cancelled task renders IN Backlog wearing the cancelled sign (D-B)', asy
   const card = [...backlog.querySelectorAll('.task-card')].find((c) => c.textContent?.includes('Triage the inbox backlog'))!
   expect(card, 'the cancelled card left the board').toBeDefined()
   expect(card.getAttribute('data-cancelled')).toBe('true')
-  expect(card.textContent).toContain('cancelled')
+  // The chip points at where the why now lives (RW-19: the task page renders
+  // who cancelled and their own words) — it no longer calls the why an open
+  // question, because it is not one.
+  expect(card.textContent).toContain('cancelled — the task says why')
+  expect(card.textContent, 'the stale pre-RW-19 chip wording is back').not.toContain('open for why')
   view.unmount()
 })
 

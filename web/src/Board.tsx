@@ -664,9 +664,12 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
           {showProject && task.project !== '' && <> · {task.project}</>}
         </span>
         <span className="task-foot">
+          {/* RW-19 landed the cancel's why on the task page (who pressed it,
+              and their own words where they gave any) — the chip now points
+              there truthfully instead of calling the why an open question. */}
           {cancelled && (
             <Chip tone="red" className="task-flag">
-              cancelled — open for why
+              cancelled — the task says why
             </Chip>
           )}
           {run?.wedged === true && <Chip tone="red">wedged</Chip>}
