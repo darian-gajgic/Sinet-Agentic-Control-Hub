@@ -15,6 +15,7 @@ import {
 } from './api'
 import { ActConfirm, CancelWhy, OutcomeLine, catchReasonRefusal, outcomeOf, useAct, whyHolds } from './controls'
 import type { EventStream } from './events'
+import { intakeResumeHref } from './Inbox'
 import { isAssumedDefaultBoilerplate } from './Intake'
 import { activityEventTypes, boardEventTypes, inboxEventTypes, useLive } from './live'
 import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, Stamp } from './parts'
@@ -262,6 +263,12 @@ function ActionBar({ detail, reload, stream }: { detail: Detail; reload: () => v
     stream,
   })
   const openAsk = (asks.data?.items ?? []).find((i) => i.task_id === detail.task_id)
+  // The r2 finding-1 fix: an intake QUESTION card (interview / clarification /
+  // escalation / the family question) is answered on the give-work journey —
+  // option chips, free text, Send — so this door goes straight there instead
+  // of bouncing through an inbox card that has no controls of its own. Every
+  // other card kind keeps its inbox address, where its verbs live.
+  const resume = openAsk === undefined ? null : intakeResumeHref(openAsk)
 
   return (
     <div className="win-acts">
@@ -271,11 +278,11 @@ function ActionBar({ detail, reload, stream }: { detail: Detail; reload: () => v
           size="sm"
           data-act="answer"
           onClick={() => {
-            navigate(hrefFor('inbox-item', { id: openAsk.id }))
+            navigate(resume ?? hrefFor('inbox-item', { id: openAsk.id }))
           }}
         >
           <ArrowUpRight size={13} strokeWidth={2} aria-hidden="true" />
-          Answer its open card
+          {resume !== null ? 'Continue answering its questions' : 'Answer its open card'}
         </Button>
       )}
       <CancelTask taskID={detail.task_id} runs={detail.runs} reload={reload} />

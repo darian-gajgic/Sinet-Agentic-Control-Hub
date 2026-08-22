@@ -707,16 +707,23 @@ function CreateProject({
             <Button variant="primary" disabled={!ready || busy} aria-busy={busy} data-create-project onClick={submit}>
               {busy ? 'Registering…' : 'Register — start onboarding'}
             </Button>
-            {!ready && !busy && (
-              <span className="door-why">
-                {projectID === '' || name.trim() === ''
-                  ? 'both the id and the name are needed'
-                  : 'ids are lowercase letters, digits and dashes'}
-              </span>
-            )}
             <Button variant="ghost" disabled={busy} onClick={close}>
               Cancel
             </Button>
+            {/* GF1-W2: the why-line sits AFTER both buttons and KEEPS ITS SPACE
+                when the form becomes ready (hidden, not unmounted) — the old
+                placement (between the two) shifted Cancel the instant Register
+                enabled and ate the operator's click, and unmounting the line
+                re-centered the whole dialog for the same effect vertically. */}
+            <span
+              className="door-why"
+              style={ready || busy ? { visibility: 'hidden' } : undefined}
+              aria-hidden={ready || busy ? true : undefined}
+            >
+              {projectID === '' || name.trim() === ''
+                ? 'both the id and the name are needed'
+                : 'ids are lowercase letters, digits and dashes'}
+            </span>
           </>
         )
       }
@@ -760,8 +767,11 @@ function CreateProject({
             />
           </label>
           <label className="door-field m-0">
+            {/* GF1-W1: "Remote to clone" is git's vocabulary, not the
+                reader's. Same served field, plain words. */}
             <span className="door-label">
-              Remote to clone <span className="door-optional">optional — empty starts a fresh store</span>
+              Start from an existing repository{' '}
+              <span className="door-optional">optional — paste its address; empty starts a fresh store</span>
             </span>
             <input
               className="door-input"

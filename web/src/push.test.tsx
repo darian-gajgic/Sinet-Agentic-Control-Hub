@@ -550,9 +550,28 @@ describe('the home-screen badge agrees with the queue after an answer', () => {
     await flush()
     // The number is the length of the list actually on screen — the property
     // OQ5 calls glance agreement, checked against the DOM rather than against
-    // the same variable the badge came from.
+    // the same variable the badge came from. Alice's body is all answerable
+    // non-notice cards, so her needs-you count IS the served length; the mixed
+    // body's narrower claim is the next test.
     expect(ui.container.querySelectorAll('.cards > li')).toHaveLength(count)
     expect(set).toHaveBeenCalledWith(count)
+    ui.unmount()
+  })
+
+  test('the badge counts what needs THIS person — notices and other people’s cards do not ring it (r2 §1)', async () => {
+    const { set } = badgeSpies()
+    const body = fixtures.approvals()
+    const items = body.items as { kind: string; answerable: boolean }[]
+    const needsMe = items.filter((i) => i.answerable && i.kind !== 'drift_card').length
+    // The operator body must genuinely mix the three sections, or this test
+    // pins nothing.
+    expect(needsMe).toBeGreaterThan(0)
+    expect(items.length).toBeGreaterThan(needsMe)
+    scriptedFetch({ 'GET /api/approvals': { body } })
+    const ui = mount(<Inbox stream={new EventStream({ createEventSource: (u) => new FakeSource(u) })} />)
+    await flush()
+    expect(set).toHaveBeenCalledWith(needsMe)
+    expect(set).not.toHaveBeenCalledWith(items.length)
     ui.unmount()
   })
 

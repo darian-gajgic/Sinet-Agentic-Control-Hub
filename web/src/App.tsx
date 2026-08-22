@@ -28,7 +28,7 @@ import { Deliverable } from './Deliverable'
 import { EventStream, sharedStream, type Status } from './events'
 import { Login } from './Login'
 import { Fleet } from './Fleet'
-import { Inbox, InboxItem } from './Inbox'
+import { Inbox, InboxItem, needsYou } from './Inbox'
 import { DescribeGoal } from './Intake'
 import { inboxEventTypes, useLive } from './live'
 import { Memory, MemoryEntryView } from './Memory'
@@ -130,7 +130,7 @@ const pageSub: Partial<Record<RouteID, string>> = {
   new: 'Describe a goal in plain words',
   board: 'Every task by stage',
   task: 'One task, end to end',
-  inbox: 'Everything that needs a person',
+  inbox: 'What needs you — notices wait in their drawer',
   'inbox-item': 'One decision',
   reviews: 'Judge the work that came back',
   deliverable: 'One deliverable under review',
@@ -494,7 +494,11 @@ function SideNav({
 
   const badges: Partial<Record<RouteID, number>> = {}
   if (asks.data !== null) {
-    badges.inbox = asks.data.items.length
+    // The r2 gate order §1: the inbox badge counts only what needs THIS
+    // person — a decision, an answer, a sign-off. Notice-class cards and
+    // cards someone else must answer sit in the inbox's drawers and are
+    // not a demand on the reader, so they are not a number on the nav.
+    badges.inbox = asks.data.items.filter(needsYou).length
     // The oversight subset of the same served queue. Wedged runs join this
     // count when the Health surface itself lands (build step 6) — counting
     // them here would cost the shell a second global read for a number no

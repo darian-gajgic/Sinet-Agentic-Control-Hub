@@ -1698,6 +1698,104 @@ input[type='radio'] {
   padding: 0;
 }
 
+.batch-candidates label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+/* ── the r2 drawers: notices, and cards waiting on somebody else ──
+   Collapsed by default (native <details>, works with no JavaScript); the
+   summary is the whole claim — a plain name, a count, a quiet subline —
+   so a calm queue stays calm while everything stays reachable. */
+
+.side-drawer {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-block-start: 1.25rem;
+  max-width: 100%;
+}
+
+.side-drawer[open] {
+  background: color-mix(in srgb, var(--muted-foreground) 3%, transparent);
+}
+
+.side-drawer > summary,
+.notice-group > summary {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+}
+
+.drawer-title {
+  font-weight: 600;
+}
+
+.drawer-count {
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  line-height: 1.35;
+}
+
+.drawer-sub {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.notice-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  margin-block-start: 0.6rem;
+  background: var(--panel);
+  max-width: 100%;
+}
+
+.notice-group > summary {
+  overflow-wrap: anywhere;
+}
+
+.notice-group[open] > summary {
+  margin-block-end: 0.5rem;
+}
+
+.notice-group .cards {
+  margin-block-start: 0.5rem;
+  gap: 0.5rem;
+}
+
+.side-drawer > .cards {
+  margin-block-start: 0.75rem;
+}
+
+.clear-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block-end: 0.25rem;
+}
+
+/* ── the intake answer door (r2 finding 1): a real way to act ── */
+
+.intake-door {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0;
+}
+
 .pair {
   display: flex;
   flex-direction: column;

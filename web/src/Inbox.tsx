@@ -64,7 +64,65 @@ import { Button, Chip, EmptyState, Panel, Timestamp, type Tone } from './ui'
  * issue, what has to be decided, what that decision needs, what the platform
  * recommends, then the verbs. Raw projection internals (row id, change class,
  * fingerprint, seq) live only inside the collapsed "Technical details" fold.
+ *
+ * THE QUEUE IS WHAT NEEDS *YOU*; EVERYTHING ELSE STANDS ASIDE (gate round 2,
+ * P3/design/b6-gate-operator-findings-r2-2026-08-22.md). The main list and the
+ * sidebar badge count only the cards the signed-in person can act on. Notice-
+ * class cards — the platform read something for you and recorded it — live in
+ * their own collapsed drawer, grouped by source, each clearable with the
+ * served dismiss verb. Cards someone ELSE must answer sit in a second drawer.
+ * Nothing is dropped: every served card stays on this surface and reachable —
+ * the split is presentation over the one served list.
+ *
+ * EVERY ANSWERABLE CARD CARRIES A WORKING DOOR (round-2 bug). An intake
+ * question card (interview / clarification / escalation / the family
+ * question) declares no approvals-verb actions — its real answering surface
+ * is the give-work journey at /new?task=<id>, which resumes the interview.
+ * Those cards render that door instead of the honest "nothing here to press"
+ * sentence, which remains only for a kind that genuinely has no route.
  */
+// ── the round-2 split: what needs you · notices · waiting on others ────────
+
+/**
+ * The notice class (gate r2 order §2): cards that INFORM and gate nothing.
+ * `drift_card` is the one landed kind of the class — the platform noticed an
+ * outside-world change while watching a source; reading it (and clearing it
+ * with the served dismiss) is the whole act, and no work is paused on it.
+ * Everything else in the queue asks for a decision, an answer or a sign-off.
+ */
+const noticeKinds = ['drift_card']
+
+export function isNotice(item: Pick<ApprovalItem, 'kind'>): boolean {
+  return noticeKinds.includes(item.kind)
+}
+
+/** needsYou — the card asks THIS person to decide, answer or sign off. The
+ *  main queue and the sidebar badge are exactly this set (r2 order §1): a
+ *  notice is not a demand, and a card someone else must answer is not yours. */
+export function needsYou(item: Pick<ApprovalItem, 'kind' | 'answerable'>): boolean {
+  return item.answerable && !isNotice(item)
+}
+
+/**
+ * The intake question-class card kinds (internal/intake/cards.go vocabulary):
+ * the cards whose real answering surface is the give-work journey at
+ * /new?task=<id> — option chips, free text, Send (verified live, r2 finding 1).
+ * `interview` and `decision.family` are the gate-named two; `clarification`
+ * and `escalation` are the same class (question cards answered through the
+ * intake answer route, not the approvals verb) and dead-end identically
+ * without the door.
+ */
+const intakeQuestionKinds = ['interview', 'clarification', 'escalation', 'decision.family']
+
+/** intakeResumeHref — the working door for an open intake ask, or null when
+ *  the card is not one. Null never renders a door: absence invents nothing. */
+export function intakeResumeHref(item: Pick<ApprovalItem, 'kind' | 'task_id' | 'card'>): string | null {
+  if (item.kind !== 'ask' || item.task_id === undefined || item.task_id === '') return null
+  const snapKind = asSnapshot(item.card).kind ?? ''
+  if (!intakeQuestionKinds.includes(snapKind)) return null
+  return `${hrefFor('new')}?task=${encodeURIComponent(item.task_id)}`
+}
+
 export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: string }) {
   const live = useLive<ApprovalList>({
     key: '/api/approvals',
@@ -76,15 +134,18 @@ export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: 
   const join = useTaskJoin(stream)
   const scope = useProjectScope()
   const q = inboxQueryFromSearch(search)
-  // The badge is reconciled from the SERVED count, not recomputed: it is the
-  // length of the whole served list — never the filtered one, because a filter
-  // is presentation and the badge is the platform's own claim about what waits
-  // (B6-9 OQ5). Without this the badge holds its last PUSHED value until the
-  // next cadence, so answering a card would leave the home screen claiming
-  // work that is done (drain r1, D2).
+  // The badge is reconciled from the SERVED list, not recomputed per view: it
+  // is the needs-you count over the whole served list — never the filtered
+  // one, because a filter is presentation and the badge is the platform's own
+  // claim about what waits (B6-9 OQ5). Counting only what needs the person is
+  // the r2 gate order §1: a badge of 72 over a queue of notices is exactly the
+  // glance disagreement OQ5 exists to prevent. Without the reconcile the badge
+  // holds its last PUSHED value until the next cadence, so answering a card
+  // would leave the home screen claiming work that is done (drain r1, D2).
+  const needsMe = items.filter(needsYou).length
   useEffect(() => {
-    if (live.data !== null) reconcileBadge(items.length)
-  }, [live.data, items.length])
+    if (live.data !== null) reconcileBadge(needsMe)
+  }, [live.data, needsMe])
 
   const project = effectiveProject(q, scope.project)
   // The join answers the project filter. While it is still in flight the cards
@@ -96,6 +157,12 @@ export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: 
   const wheres = new Map(items.map((i) => [i.id, whereOf(i, join)]))
   const shown = filterItems(items, wheres, joinFailed ? { ...q, project: '' } : q, joinFailed ? '' : scope.project)
   const ordered = orderItems(shown, q.sort)
+  // The r2 split, applied AFTER the filter and the reading order so all three
+  // sections agree with the controls above them. It is a partition of the one
+  // served list: every card lands in exactly one section, nothing is dropped.
+  const queue = ordered.filter(needsYou)
+  const notices = ordered.filter(isNotice)
+  const waiting = ordered.filter((i) => !needsYou(i) && !isNotice(i))
 
   return (
     <section className="surface inbox">
@@ -104,7 +171,7 @@ export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: 
           re-ordering are presentation, and a narrowed view declares itself. */}
       <SurfaceHead
         title="Inbox"
-        what="Everything waiting on a person, in one queue — served in the control plane's own order. You can narrow it to one project or one task and change the reading order; that changes what this page shows, never what is served, and a narrowed view says what it is hiding. Answering a card releases the work that was paused on it."
+        what="What needs you, in one queue — served in the control plane's own order. Notices the platform read for you sit in their own drawer below the queue, and cards waiting on somebody else sit under those; nothing is dropped. You can narrow the page to one project or one task and change the reading order; that changes what it shows, never what is served, and a narrowed view says what it is hiding. Answering a card releases the work that was paused on it."
       />
       <Freshness stale={live.stale} error={live.error} hasData={live.data !== null} />
       <NoFrameNote items={items} />
@@ -136,20 +203,45 @@ export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: 
                   why={`${String(items.length)} card${items.length === 1 ? ' is' : 's are'} hidden by it — nothing is dropped. Clear the filter above to see ${items.length === 1 ? 'it' : 'them all'}.`}
                 />
               )}
-              <BatchBar items={ordered} onAnswered={live.reload} />
+              {/* The calm queue (r2 order §1): zero actionable cards is said
+                  plainly even while notices or other people's cards exist —
+                  those sit in their drawers below and demand nothing. */}
+              {live.data !== null && shown.length > 0 && queue.length === 0 && (
+                <EmptyState
+                  what="Nothing needs you right now."
+                  why={[
+                    notices.length > 0
+                      ? `${String(notices.length)} notice${notices.length === 1 ? '' : 's'} — things the platform read and recorded for you — sit${notices.length === 1 ? 's' : ''} in the drawer below`
+                      : '',
+                    waiting.length > 0
+                      ? `${String(waiting.length)} card${waiting.length === 1 ? ' waits' : 's wait'} on somebody else`
+                      : '',
+                  ]
+                    .filter((s) => s !== '')
+                    .join(', and ')
+                    .concat('. None of it needs a decision from you.')}
+                />
+              )}
+              <BatchBar items={queue} onAnswered={live.reload} />
               <WithForms items={ordered} stream={stream}>
                 {(forms) => (
-                  <ol className="cards">
-                    {ordered.map((item) => (
-                      <InboxRow
-                        key={item.id}
-                        item={item}
-                        where={wheres.get(item.id) ?? { project: null, task: item.task_id ?? null, note: '' }}
-                        forms={forms}
-                        onAnswered={live.reload}
-                      />
-                    ))}
-                  </ol>
+                  <>
+                    {queue.length > 0 && (
+                      <ol className="cards">
+                        {queue.map((item) => (
+                          <InboxRow
+                            key={item.id}
+                            item={item}
+                            where={wheres.get(item.id) ?? { project: null, task: item.task_id ?? null, note: '' }}
+                            forms={forms}
+                            onAnswered={live.reload}
+                          />
+                        ))}
+                      </ol>
+                    )}
+                    <NoticesDrawer items={notices} wheres={wheres} forms={forms} onAnswered={live.reload} />
+                    <WaitingDrawer items={waiting} wheres={wheres} forms={forms} onAnswered={live.reload} />
+                  </>
                 )}
               </WithForms>
             </>
@@ -175,6 +267,238 @@ export function Inbox({ stream, search = '' }: { stream?: EventStream; search?: 
           way in); it just stops standing in front of the queue. */}
       <BenchmarkOptIn stream={stream} />
     </section>
+  )
+}
+
+// ── the notices drawer: informational cards, grouped by source ─────────────
+
+/** One source's standing notices, in served order. The group KEY is the served
+ *  `source` string verbatim; the honest bucket catches a card that names none. */
+type NoticeGroupData = { source: string; items: ApprovalItem[] }
+
+const noSource = '(no source named)'
+
+function groupBySource(items: ApprovalItem[]): NoticeGroupData[] {
+  const bySource = new Map<string, ApprovalItem[]>()
+  for (const item of items) {
+    const source = readString(item.card, 'source') ?? noSource
+    const list = bySource.get(source) ?? []
+    list.push(item)
+    bySource.set(source, list)
+  }
+  return [...bySource.entries()].map(([source, grouped]) => ({ source, items: grouped }))
+}
+
+/**
+ * sourceLabel — the served source string in plain words (r2 order §2: "grouped
+ * by source in plain words"). A display DERIVATION of the one served string,
+ * the same class of move as `describeSpan` over a served instant: an http(s)
+ * URL renders as its host plus the path segments that name what is watched
+ * (a feed filename is dropped — it names a format, not a subject), plus the
+ * `q` search term where one exists, because that is what distinguishes two
+ * feeds on one host. Anything that is not an http(s) URL renders verbatim —
+ * never a guess at what it means. The raw string stays on the group.
+ */
+export function sourceLabel(source: string): string {
+  let u: URL
+  try {
+    u = new URL(source)
+  } catch {
+    return source
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return source
+  const host = u.hostname.replace(/^www\./, '')
+  const segs = u.pathname.split('/').filter((s) => s !== '')
+  if (segs.length > 0 && /\.(atom|rss|xml|json)$/i.test(segs[segs.length - 1])) segs.pop()
+  const path = segs.slice(0, 2).join('/')
+  const q = u.searchParams.get('q') ?? ''
+  const base = path === '' ? host : `${host} · ${path}`
+  return q === '' ? base : `${base} · “${q}”`
+}
+
+/**
+ * The collapsed notices drawer (r2 order §2/§3). Everything the platform read
+ * for you and recorded, OUT of the main queue but never out of reach: one
+ * group per watched source, a count each, the cards whole inside. Clearing is
+ * the SERVED per-card dismiss — surfaced in plain words per card, and as a
+ * per-group clear-all that fires the same served verb once per card,
+ * sequentially, with visible progress. No new wire verb exists here.
+ */
+function NoticesDrawer({
+  items,
+  wheres,
+  forms,
+  onAnswered,
+}: {
+  items: ApprovalItem[]
+  wheres: Map<string, Where>
+  forms: BenchmarkVerdictForms | null
+  onAnswered: () => void
+}) {
+  if (items.length === 0) return null
+  const groups = groupBySource(items)
+  return (
+    <details className="side-drawer" data-notices={String(items.length)}>
+      <summary>
+        <span className="drawer-title">Notices</span>
+        <span className="drawer-count">{String(items.length)}</span>
+        <span className="drawer-sub">
+          things the platform noticed while watching outside sources — nothing here needs a decision
+        </span>
+      </summary>
+      <p className="max-w-prose text-sm text-muted-foreground">
+        Each notice records that something the platform depends on changed outside it. Reading one and pressing
+        &ldquo;Got it — clear this&rdquo; records that you saw it; nothing outside this page changes, and the watch
+        itself keeps running.
+      </p>
+      {groups.map((g) => (
+        <NoticeGroup key={g.source} group={g} wheres={wheres} forms={forms} onAnswered={onAnswered} />
+      ))}
+    </details>
+  )
+}
+
+/** One source's group: the plain-words label, the count, the served cards
+ *  expandable inside, and the sequential clear-all over the served verb. */
+function NoticeGroup({
+  group,
+  wheres,
+  forms,
+  onAnswered,
+}: {
+  group: NoticeGroupData
+  wheres: Map<string, Where>
+  forms: BenchmarkVerdictForms | null
+  onAnswered: () => void
+}) {
+  return (
+    <details className="notice-group" data-notice-source={group.source}>
+      <summary>
+        <span className="drawer-title">{sourceLabel(group.source)}</span>
+        <span className="drawer-count">{String(group.items.length)}</span>
+      </summary>
+      {group.source !== noSource && (
+        <p className="m-0 mb-2 font-mono text-[11px] text-muted-foreground wrap-anywhere" data-notice-raw-source>
+          watching {group.source}
+        </p>
+      )}
+      <ClearAll items={group.items} onAnswered={onAnswered} />
+      <ol className="cards">
+        {group.items.map((item) => (
+          <InboxRow
+            key={item.id}
+            item={item}
+            where={wheres.get(item.id) ?? { project: null, task: item.task_id ?? null, note: '' }}
+            forms={forms}
+            onAnswered={onAnswered}
+            quietWhere
+          />
+        ))}
+      </ol>
+    </details>
+  )
+}
+
+/** The clear-all progress: how far the sequence got, and the honest stop. */
+type ClearRun = { done: number; total: number; error: string; finished: boolean }
+
+/**
+ * ClearAll issues the SERVED per-card dismiss once per clearable card in the
+ * group, sequentially, narrating progress (r2 order §3: presentation over
+ * served actions, no new wire verbs). Only cards that are answerable AND
+ * declare the dismiss verb are cleared — the card stays the authority, so a
+ * group of somebody else's notices offers no button. A refusal mid-sequence
+ * stops the run and says which card refused; the cards already cleared stay
+ * cleared, which the re-read shows honestly.
+ */
+function ClearAll({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: () => void }) {
+  const [run, setRun] = useState<ClearRun | null>(null)
+  const clearable = items.filter((i) => i.answerable && (i.actions ?? []).includes('dismiss'))
+  if (clearable.length === 0) return null
+  const busy = run !== null && !run.finished
+
+  const clearAll = async () => {
+    setRun({ done: 0, total: clearable.length, error: '', finished: false })
+    let done = 0
+    for (const item of clearable) {
+      try {
+        await api.dismissDrift(item.id)
+        done++
+        setRun({ done, total: clearable.length, error: '', finished: false })
+      } catch (err: unknown) {
+        setRun({ done, total: clearable.length, error: describeError(err), finished: true })
+        onAnswered()
+        return
+      }
+    }
+    setRun({ done, total: clearable.length, error: '', finished: true })
+    onAnswered()
+  }
+
+  return (
+    <div className="clear-all" data-clear-all={String(clearable.length)}>
+      <Button
+        variant="secondary"
+        size="sm"
+        data-action="clear-group"
+        disabled={busy}
+        onClick={() => {
+          void clearAll()
+        }}
+      >
+        {busy ? `Clearing ${String(run.done + 1)} of ${String(run.total)}…` : `Got it — clear all ${String(clearable.length)}`}
+      </Button>
+      {run !== null && run.finished && run.error === '' && (
+        <span className="text-sm text-[var(--green)]" data-clear-outcome="done">
+          Cleared {String(run.done)} of {String(run.total)} — each recorded as read by you.
+        </span>
+      )}
+      {run !== null && run.error !== '' && (
+        <span className="text-sm text-[var(--red)]" data-clear-outcome="failed">
+          Cleared {String(run.done)} of {String(run.total)}, then one refused: {run.error}. The rest stay listed.
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The second drawer (r2 order §1's complement): cards this person can SEE but
+ * not answer — somebody else's decisions, kept reachable because a shared
+ * household reads over each other's shoulders, but never counted as yours.
+ * Each card's detail carries its served not-answerable reason.
+ */
+function WaitingDrawer({
+  items,
+  wheres,
+  forms,
+  onAnswered,
+}: {
+  items: ApprovalItem[]
+  wheres: Map<string, Where>
+  forms: BenchmarkVerdictForms | null
+  onAnswered: () => void
+}) {
+  if (items.length === 0) return null
+  return (
+    <details className="side-drawer" data-waiting-drawer={String(items.length)}>
+      <summary>
+        <span className="drawer-title">Waiting on somebody else</span>
+        <span className="drawer-count">{String(items.length)}</span>
+        <span className="drawer-sub">cards you can see but not answer — each says whose they are</span>
+      </summary>
+      <ol className="cards">
+        {items.map((item) => (
+          <InboxRow
+            key={item.id}
+            item={item}
+            where={wheres.get(item.id) ?? { project: null, task: item.task_id ?? null, note: '' }}
+            forms={forms}
+            onAnswered={onAnswered}
+          />
+        ))}
+      </ol>
+    </details>
   )
 }
 
@@ -240,10 +564,12 @@ export function InboxItem({ id, stream }: { id: string; stream?: EventStream }) 
   const item = all.find((i) => i.id === id) ?? null
   // The deep-link surface reconciles too, and it is the one that matters most:
   // it is where a tapped notification lands, and answering here is exactly the
-  // moment the drill checks the badge against the queue.
+  // moment the drill checks the badge against the queue. Same count as the
+  // queue's own: what needs THIS person (r2 order §1).
+  const needsMe = all.filter(needsYou).length
   useEffect(() => {
-    if (live.data !== null) reconcileBadge(all.length)
-  }, [live.data, all.length])
+    if (live.data !== null) reconcileBadge(needsMe)
+  }, [live.data, needsMe])
 
   return (
     <section className="surface inbox">
@@ -766,9 +1092,9 @@ function BenchmarkOptIn({ stream }: { stream?: EventStream }) {
         ) : optIn.enabled === undefined ? (
           <Absent reason={optIn.absent ?? ''} />
         ) : optIn.enabled ? (
-          <>You are opted in: your tasks may be picked for comparison.</>
+          <>This is turned on for you: a task of yours may be picked for comparison.</>
         ) : (
-          <>You are not opted in: none of your tasks is picked for comparison.</>
+          <>This is turned off for you: none of your tasks is picked for comparison.</>
         )}
       </p>
       {live.error !== '' && <p className="text-sm text-[var(--red)]">{live.error}</p>}
@@ -785,6 +1111,10 @@ function BenchmarkOptIn({ stream }: { stream?: EventStream }) {
  * either way and the verb has no already-there arm to report, so this control
  * invents none. Asking for the position you are already in is a decision you are
  * allowed to record again.
+ *
+ * THE VERBS ARE PLAIN WORDS (r2 finding 2: "opt-in and opt-out… nobody knows
+ * what this shit means"). What is recorded on the wire is unchanged; only the
+ * words on the buttons and in the outcome line moved to the reader's language.
  */
 function OptInSwitch({ reload }: { reload: () => void }) {
   const [asking, setAsking] = useState<boolean | null>(null)
@@ -802,7 +1132,7 @@ function OptInSwitch({ reload }: { reload: () => void }) {
             setAsking(true)
           }}
         >
-          Opt in
+          Take part
         </Button>
         <Button
           variant="secondary"
@@ -814,7 +1144,7 @@ function OptInSwitch({ reload }: { reload: () => void }) {
             setAsking(false)
           }}
         >
-          Opt out
+          Don&apos;t take part
         </Button>
       </div>
       <ActConfirm
@@ -826,7 +1156,7 @@ function OptInSwitch({ reload }: { reload: () => void }) {
             ? "From now on a task of yours may be picked out and run a second time against your own subscription, paid for out of your own automation budget, and you will be asked to judge the two answers blind. You can turn down any particular pair, and you can turn this off again at any time."
             : 'From now on none of your tasks is picked out for comparison. Any pair already waiting for your judgement stays in this queue — you can still judge it or turn it down.'
         }
-        act={asking === true ? 'Opt me in' : 'Opt me out'}
+        act={asking === true ? 'Yes — take part' : 'No — stop taking part'}
         variant="primary"
         busy={act.busy}
         onConfirm={() => {
@@ -836,7 +1166,7 @@ function OptInSwitch({ reload }: { reload: () => void }) {
             () =>
               // No `person` is sent, ever: the subject defaults to the caller,
               // and that is the only subject this consent has.
-              api.setBenchmarkOptIn(enabled).then((res) => outcomeOf(true, `recorded: ${res.enabled ? 'opted in' : 'opted out'}`, res.detail)),
+              api.setBenchmarkOptIn(enabled).then((res) => outcomeOf(true, `recorded: ${res.enabled ? 'you are taking part' : 'you are not taking part'}`, res.detail)),
             reload,
           )
         }}
@@ -871,17 +1201,23 @@ function NoFrameNote({ items }: { items: ApprovalItem[] }) {
 // and tier as chips; pressing it opens the full detail; raw internals live
 // only in the collapsed "Technical details" fold at the detail's end.
 
-/** One queue row: the face, and the detail while it is open. */
+/** One queue row: the face, and the detail while it is open. `quietWhere`
+ *  (the notices drawer) drops the project/task slot from the face when the
+ *  card names no task — the drawer's own header already says what these are,
+ *  and "(no project)" forty-five times over is the round-1 noise class again.
+ *  A notice that DOES name a task keeps its slot. */
 function InboxRow({
   item,
   where,
   forms,
   onAnswered,
+  quietWhere,
 }: {
   item: ApprovalItem
   where: Where
   forms: BenchmarkVerdictForms | null
   onAnswered: () => void
+  quietWhere?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const faceRef = useRef<HTMLButtonElement | null>(null)
@@ -907,6 +1243,7 @@ function InboxRow({
         where={where}
         open={open}
         faceRef={faceRef}
+        quietWhere={quietWhere}
         onToggle={() => {
           setOpen((was) => !was)
         }}
@@ -929,16 +1266,20 @@ function CardFace({
   open,
   onToggle,
   faceRef,
+  quietWhere,
 }: {
   item: ApprovalItem
   where: Where
   open?: boolean
   onToggle?: () => void
   faceRef?: Ref<HTMLButtonElement>
+  quietWhere?: boolean
 }) {
+  const hideWhere = quietWhere === true && (item.task_id === undefined || item.task_id === '')
   const inner = (
     <>
       <span className="face-top">
+        {!hideWhere && (
         <span className="face-where">
           {where.project !== null ? (
             <b className="face-project" data-face-project={where.project}>
@@ -957,6 +1298,7 @@ function CardFace({
             </span>
           )}
         </span>
+        )}
         <span className="face-chips">
           <Chip data-display-class={displayClass(item)}>{displayClass(item)}</Chip>
           <Chip tone={tierTone(item.tier)} data-tier-label={item.tier}>
@@ -2230,7 +2572,23 @@ function Acts({
       </p>
     )
   }
+  // The working door (r2 finding 1): an intake question card's answers travel
+  // the intake route, not the approvals verb, so its real controls live on the
+  // give-work journey. The door renders WHEREVER the card resolves to one —
+  // alone where the card declares no verbs (the interview shape), above the
+  // card's own buttons where it declares some (the family question).
+  const resume = intakeResumeHref(item)
   if (actions.length === 0) {
+    if (resume !== null) {
+      return (
+        <div className="acts" data-acts="intake-door">
+          <IntakeDoor href={resume} />
+        </div>
+      )
+    }
+    // The honest fallback, now reachable ONLY from a kind with genuinely no
+    // route (r2 order §4): a card marked yours-to-answer with a route renders
+    // its door above instead of this sentence.
     return (
       <p className="acts" data-acts="none">
         <Absent reason="this card declares no answer verbs, so there is nothing here to press. It is waiting on somebody, and the platform has not said what closes it." />
@@ -2243,6 +2601,7 @@ function Acts({
 
   return (
     <div className="acts" data-acts="live">
+      {resume !== null && <IntakeDoor href={resume} />}
       {envelope === 'contest' && (
         <label className="contest">
           <span>What is wrong (tap the criterion, assumption or step)</span>
@@ -2337,7 +2696,7 @@ function Acts({
             data-action={action}
             disabled={state.busy || !canFire(item, action, { verdict, guess, contest })}
             onClick={() => {
-              void run(action, () =>
+              void run(actionLabel(item, action), () =>
                 fireAction(item, action, {
                   pin,
                   reason,
@@ -2369,6 +2728,31 @@ function Acts({
   )
 }
 
+/** The door an intake question card carries (r2 finding 1): the give-work
+ *  journey resumes this task's interview — option chips, free text, Send —
+ *  and the answers given there are what close this card. A real navigation,
+ *  in plain words, where "nothing here to press" used to be. */
+function IntakeDoor({ href }: { href: string }) {
+  return (
+    <p className="intake-door" data-answer-door="intake">
+      <Button
+        variant="primary"
+        size="sm"
+        data-action="continue-answering"
+        onClick={() => {
+          navigate(href)
+        }}
+      >
+        Continue answering its questions
+      </Button>
+      <span className="text-sm text-muted-foreground">
+        Opens this task&apos;s interview — pick from its options or answer in your own words. What you answer there is
+        what closes this card.
+      </span>
+    </p>
+  )
+}
+
 /** The kinds whose landed verb accepts an optional reason. It is a list of the
  *  VERBS' own bodies, not a guess: an effect answer, a flag suppression, a
  *  drift dismissal and a conformance acknowledgement each take one, and the
@@ -2397,13 +2781,13 @@ const plainVerbs: Record<string, string> = {
   cancel: 'Cancel the task',
   compose: 'Compose a specialist',
   force_proceed: 'Proceed — open questions become assumptions',
-  verdict: 'Record the verdict',
+  verdict: 'Record my pick',
   decline: 'Decline to judge',
   resume: 'Resume the run',
-  suppress: 'Suppress the flag',
-  dismiss: 'Dismiss',
-  acknowledge: 'Acknowledge — read and noted',
-  dispose: 'Record the disposition',
+  suppress: 'Set this flag aside',
+  dismiss: 'Got it — clear this',
+  acknowledge: 'I have read this',
+  dispose: 'Record my decision',
   resolve: 'Resolve',
   // The S07.7 verify card verbs (P3-RW-14): frozen ids, plain names.
   retry: 'Retry — run verification again',
@@ -2625,7 +3009,7 @@ async function fireAction(item: ApprovalItem, action: string, input: ActInput): 
     }
     case 'benchmark_alarm': {
       const res = await api.disposeAlarm(item.id, input.verdict, input.reason === '' ? undefined : input.reason)
-      return { note: `dispositioned: ${res.disposition}`, detail: res.detail }
+      return { note: `recorded: ${res.disposition}`, detail: res.detail }
     }
     case 'memory_conflict': {
       const conflict = conflictID(item)
@@ -2825,7 +3209,7 @@ function DispositionPicker({
   return (
     <div className="disposition-form flex flex-col gap-2">
       <fieldset className="border-0 p-0" data-form="disposition">
-        <legend className="text-sm text-muted-foreground">How you are disposing of this alarm</legend>
+        <legend className="text-sm text-muted-foreground">What should happen with this alarm</legend>
         {dispositions.map((d) => (
           <label key={d}>
             <input
@@ -2903,8 +3287,9 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
   return (
     <div className="batch-bar" data-batchable={String(batchable.length)}>
       <p className="max-w-prose text-sm text-muted-foreground">
-        <span className="font-mono tabular-nums">{String(batchable.length)}</span> low-risk card(s) can be answered
-        together. Pick the one action first — a batch answers cards that all accept it, and nothing else.
+        <span className="font-mono tabular-nums">{String(batchable.length)}</span> low-risk card
+        {batchable.length === 1 ? '' : 's'} can be answered together. Pick the one action first — a batch answers cards
+        that all accept it, and nothing else.
       </p>
       <label>
         <span>Action</span>
@@ -2920,7 +3305,7 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
           <option value="">choose an action</option>
           {offered.map((a) => (
             <option key={a} value={a}>
-              {a}
+              {plainVerbs[a] ?? a}
             </option>
           ))}
         </select>
@@ -2929,7 +3314,7 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
         <ul className="batch-candidates">
           {eligible.map((i) => (
             <li key={i.id}>
-              <label className="font-mono text-xs tabular-nums">
+              <label className="text-sm">
                 <input
                   type="checkbox"
                   data-batch-pick={i.id}
@@ -2938,7 +3323,9 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
                     setPicked(e.currentTarget.checked ? [...picked, i.id] : picked.filter((p) => p !== i.id))
                   }}
                 />
-                {i.id}
+                {/* The plain issue line names the card the way the queue does;
+                    the raw id stays findable in the row's technical fold. */}
+                <span>{issueLine(i)}</span>
               </label>
             </li>
           ))}
@@ -2954,7 +3341,7 @@ function BatchBar({ items, onAnswered }: { items: ApprovalItem[]; onAnswered: ()
             void send()
           }}
         >
-          {action} {String(selected.length)} card(s)
+          {plainVerbs[action] ?? action} — {String(selected.length)} card{selected.length === 1 ? '' : 's'}
         </Button>
       )}
       {failure !== '' && <p className="text-sm text-[var(--red)]">{failure}</p>}

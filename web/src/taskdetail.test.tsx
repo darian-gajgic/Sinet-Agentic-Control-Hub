@@ -5,6 +5,7 @@ import App from './App'
 import { ReceiptView, fmtDuration } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
+import { intakeResumeHref } from './Inbox'
 import { EventStream } from './events'
 import detailSource from './TaskDetail.tsx?raw'
 import { click, flush, mount } from './testing'
@@ -1546,4 +1547,32 @@ test('a parked run on the live lane says until WHEN, and an absent horizon is no
   const { view: running } = await task('t-ship', detailRoutes())
   expect(running.container.querySelector('[data-stall="parked"]'), 'an unparked run was marked parked').toBeNull()
   running.unmount()
+})
+
+// ── gate round 2 (2026-08-22), finding 1: the task-page answer door ────────
+
+test('r2 finding 1: an intake question card routes the task-page door to the give-work journey', async () => {
+  // t-chatborn's open ask is an INTERVIEW card (approvals-mine fixture): its
+  // real answering surface is /new?task=…, so the door goes straight there —
+  // the inbox card it used to bounce through had nothing to press.
+  const chatborn = { ...fixtures.taskDetail(), task_id: 't-chatborn', title: 'Chat-born goal' }
+  const { view } = await task('t-chatborn', {
+    ...detailRoutes(),
+    'GET /api/tasks/t-chatborn': { body: chatborn },
+  })
+  const door = view.container.querySelector('[data-act="answer"]')
+  expect(door, 'the task page offers no answer door').not.toBeNull()
+  expect(door?.textContent).toContain('Continue answering its questions')
+  // Where it goes is pinned through the one shared resolver the button calls —
+  // the inbox suite drives the same door's actual navigation end to end (the
+  // task window's portal teardown makes an in-test navigation flaky here).
+  const ask = (fixtures.approvalsMine().items as { task_id?: string }[]).find((i) => i.task_id === 't-chatborn')
+  expect(intakeResumeHref(ask as Parameters<typeof intakeResumeHref>[0])).toBe('/new?task=t-chatborn')
+})
+
+test('r2 finding 1: a plan-approval ask keeps its inbox address — its verbs live on the card', async () => {
+  const { view } = await task('t-ship', detailRoutes())
+  const door = view.container.querySelector('[data-act="answer"]')
+  expect(door, 'the task page offers no answer door').not.toBeNull()
+  expect(door?.textContent).toContain('Answer its open card')
 })

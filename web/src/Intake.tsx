@@ -609,10 +609,17 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
           // state (it arrives with the plan card's own notes); what the chip
           // can honestly say now is what the level MEANS.
           <span className="journey-tier" title={stakesWords(tier)}>
-            <Chip tone={tier === 'high' ? 'red' : tier === 'medium' ? 'orange' : 'blue'}>
-              stakes: {tier}
-              {tier === 'high' && <> — extra care, PIN to approve</>}
-            </Chip>
+            <Chip tone={tier === 'high' ? 'red' : tier === 'medium' ? 'orange' : 'blue'}>stakes: {tier}</Chip>
+            {/* GF1-W3: the chip keeps the served tier truth; the consequence
+                stands BESIDE it in calm words instead of shouting inside the
+                red — "EXTRA CARE, PIN TO APPROVE" terrified a birthday-dinner
+                project. High stakes mean more care, and that is good news. */}
+            {tier === 'high' && (
+              <span className="muted text-xs" data-stakes-why>
+                {' '}
+                handled with extra care — approving the plan asks for your PIN
+              </span>
+            )}
             {moved !== '' && moved !== tier && (
               <span className="muted text-xs" data-stakes-moved={moved}>
                 {' '}

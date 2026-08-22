@@ -6,6 +6,7 @@ import stylesheet from './index.css?raw'
 import App from './App'
 import type { ApprovalItem, ApprovalList, BenchmarkVerdictForms } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch, signedIn, type Scripted } from './doubles'
+import { sourceLabel } from './Inbox'
 import { EventStream } from './events'
 import { click, choose, flush, mount, typeInto } from './testing'
 
@@ -90,12 +91,45 @@ afterEach(() => {
 })
 
 // ── R1: one ranked queue, every kind, served order ────────────────────────
+//
+// ▲ REWRITTEN at gate round 2 (2026-08-22): the surface is now a PARTITION of
+// the one served list — the needs-you queue, the notices drawer (grouped by
+// source), the waiting-on-others drawer. The invariants these tests protect
+// are unchanged in substance: every served card renders exactly once, nothing
+// is dropped, and WITHIN each section the control plane's relative order
+// holds. `sectionedOrder` mirrors that contract.
+
+function sectionedOrder(list: ApprovalList): string[] {
+  const queue = list.items.filter((i) => i.answerable && i.kind !== 'drift_card')
+  const notices = list.items.filter((i) => i.kind === 'drift_card')
+  const waiting = list.items.filter((i) => !i.answerable && i.kind !== 'drift_card')
+  // The notices drawer groups by served source in first-encounter order,
+  // cards within a group in served order — the same fold the render makes.
+  const bySource = new Map<string, string[]>()
+  for (const i of notices) {
+    const source =
+      i.card !== null && typeof i.card === 'object' && typeof (i.card as { source?: unknown }).source === 'string'
+        ? ((i.card as { source: string }).source)
+        : '(no source named)'
+    const grouped = bySource.get(source) ?? []
+    grouped.push(i.id)
+    bySource.set(source, grouped)
+  }
+  return [...queue.map((i) => i.id), ...[...bySource.values()].flat(), ...waiting.map((i) => i.id)]
+}
 
 test('every served kind renders once, in the order the control plane ranked them', async () => {
   const served = all()
   const { view } = await open('/inbox', served)
 
-  expect(rowIDs(view), 'the inbox re-ordered or dropped a served card').toEqual(served.items.map((i) => i.id))
+  expect(rowIDs(view), 'the inbox re-ordered or dropped a served card').toEqual(sectionedOrder(served))
+  // The partition claims its sections honestly on the surface itself.
+  const notices = served.items.filter((i) => i.kind === 'drift_card').length
+  const waiting = served.items.filter((i) => !i.answerable && i.kind !== 'drift_card').length
+  expect(view.container.querySelector('[data-notices]')?.getAttribute('data-notices')).toBe(String(notices))
+  expect(view.container.querySelector('[data-waiting-drawer]')?.getAttribute('data-waiting-drawer')).toBe(
+    String(waiting),
+  )
 
   // All eight kinds the operator can see are present — including the EIGHTH
   // (a failed pair riding the verdict id space at Low with decline only).
@@ -128,7 +162,9 @@ test('the client never re-ranks: a shuffled body renders in ITS order, not a sor
   const served = all()
   const shuffled = { ...served, items: [...served.items].reverse() }
   const { view } = await open('/inbox', shuffled)
-  expect(rowIDs(view)).toEqual(shuffled.items.map((i) => i.id))
+  // Within every section the shuffled body's own order survives — the split
+  // is a partition, never a sort.
+  expect(rowIDs(view)).toEqual(sectionedOrder(shuffled))
 })
 
 test('a card you cannot answer renders the served reason and exposes NO acting control', async () => {
@@ -1020,7 +1056,9 @@ test('the standing opt-in renders with NO pending pair — it is what makes some
   const panel = optInPanel(view)
   expect(panel, 'the opt-in is absent from an inbox with no pairs pending').not.toBeNull()
   expect(panel.querySelector('[data-position]')?.getAttribute('data-position')).toBe('true')
-  expect(panel.textContent).toContain('You are opted in')
+  // ▲ r2 finding 2: the position and the verbs read in plain words now —
+  // "opted in/out" said nothing to the person it was about.
+  expect(panel.textContent).toContain('This is turned on for you')
   // Self-only is structural: there is no subject to choose.
   expect(panel.querySelector('select'), 'the consent control offers a person picker').toBeNull()
   expect(panel.querySelector('input'), 'the consent control offers a person field').toBeNull()
@@ -1121,7 +1159,7 @@ test('a position that could not be read is an absence with its reason, never an 
   expect(panel.querySelector('[data-position]')?.getAttribute('data-position')).toBe('unread')
   expect(panel.querySelector('.absent')?.textContent).toContain('the users table is unreadable')
   expect(panel.textContent, 'an unread consent was rendered as a decision nobody made').not.toContain(
-    'You are not opted in',
+    'This is turned off for you',
   )
   // The control is still offered: not knowing the position is a reason to be
   // able to state one, not a reason to hide the switch.
@@ -1136,7 +1174,7 @@ test('an OFF position reads as one, and the two positions are distinguishable', 
   )
   const panel = optInPanel(view)
   expect(panel.querySelector('[data-position]')?.getAttribute('data-position')).toBe('false')
-  expect(panel.textContent).toContain('You are not opted in')
+  expect(panel.textContent).toContain('This is turned off for you')
 })
 
 test.each([
@@ -1321,8 +1359,12 @@ test('the inbox says what it is, and claims exactly the powers the gate gave it'
   const { view } = await open('/inbox', mine())
   const what = view.container.querySelector('[data-surface-what]')?.textContent ?? ''
 
-  expect(what, 'the line does not say what arrives here').toContain('waiting on a person')
+  // ▲ r2 (2026-08-22): the queue's claim narrowed to what needs the READER —
+  // notices and other people's cards are declared as drawers, not queue.
+  expect(what, 'the line does not say the queue is what needs YOU').toContain('What needs you')
   expect(what, 'the line drops the one-queue fact').toContain('one queue')
+  expect(what, 'the line does not declare the notices drawer').toContain('drawer')
+  expect(what, 'the line does not promise that the split drops nothing').toContain('nothing is dropped')
   // ▲ W2-10 (cold walk 2026-08-17): "ranked by risk" promised more than the
   // served order kept — the order is claimed as the control plane's own.
   expect(what, 'the line drops WHO orders').toContain("control plane's own order")
@@ -2103,4 +2145,181 @@ test('RA-10: the opt-in pitch renders AFTER the mail, never above it (third repo
     (list!.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     'the opt-in pitch sits above the queue again — W2-10/RA-10 regressed',
   ).toBe(true)
+})
+
+// ── gate round 2 (2026-08-22): the split surface, the notices drawer, the
+//    intake answer door. P3/design/b6-gate-operator-findings-r2-2026-08-22.md.
+
+/** One synthetic drift notice. The r2 flood is real watch activity; these are
+ *  its minimal shape — served dismiss verb, a source, a summary. */
+const notice = (fp: string, source: string): Record<string, unknown> => ({
+  id: `drift_card:${fp}`,
+  kind: 'drift_card',
+  owner: 'platform',
+  tier: 'medium',
+  answerable: true,
+  batchable: false,
+  step_up_required: false,
+  observed_ts: '2026-08-22T10:00:00Z',
+  actions: ['dismiss'],
+  card: { seq: 1, latest_seq: 2, fingerprint: fp, source, summary: `something changed at ${source}`, hits: 2 },
+})
+
+test('r2 finding 1: an answerable interview card carries the WORKING door, never the nothing-to-press sentence', async () => {
+  const served = mine()
+  const interview = card(served, 'ask:ask-chatborn-1')
+  expect(interview.answerable, 'the fixture interview card is not answerable — the door would be untestable').toBe(true)
+  expect(interview.actions ?? [], 'the fixture interview card grew verbs — the dead end this pins is gone').toEqual([])
+
+  const { view } = await open('/inbox', served)
+  const node = await expand(view, 'ask:ask-chatborn-1')
+  // The dead-end sentence is gone from this card…
+  expect(node.querySelector('[data-acts="none"]'), 'the no-verbs sentence still renders beside a working door').toBeNull()
+  // …because the real door stands in its place, and it works: it navigates to
+  // the give-work journey, which resumes this task's interview.
+  const door = node.querySelector('[data-answer-door="intake"]')
+  expect(door, 'the interview card renders no door').not.toBeNull()
+  click(door?.querySelector('button[data-action="continue-answering"]'))
+  await flush()
+  expect(window.location.pathname + window.location.search).toBe('/new?task=t-chatborn')
+})
+
+test('r2 finding 1: the family question gets the door TOO, above the choices it already serves', async () => {
+  const familyAsk = {
+    id: 'ask:intake:t-fam:1',
+    kind: 'ask',
+    owner: 'alice',
+    task_id: 't-fam',
+    tier: 'medium',
+    answerable: true,
+    batchable: false,
+    step_up_required: false,
+    payload_hash: 'h-fam',
+    observed_ts: '2026-08-22T10:00:00Z',
+    actions: ['software', 'research'],
+    card: {
+      kind: 'decision.family',
+      task_id: 't-fam',
+      decision: {
+        summary: 'What kind of work is this?',
+        choices: [
+          { label: 'Build or change software', value: 'software' },
+          { label: 'Find something out', value: 'research' },
+        ],
+      },
+    },
+  }
+  const { view } = await open('/inbox', { items: [familyAsk], cursor: 1, truncated: false })
+  const node = await expand(view, 'ask:intake:t-fam:1')
+  // Both are true at once: the served choices render as the card's own verbs,
+  // and the door to the full interview surface stands beside them.
+  expect(node.querySelector('[data-answer-door="intake"]')).not.toBeNull()
+  expect(node.querySelector('button[data-action="software"]')?.textContent).toContain('Build or change software')
+})
+
+test('r2 order §4: a routeless kind still says nothing-to-press — the honest fallback did not die', async () => {
+  const orphan = {
+    id: 'ask:ask-orphan',
+    kind: 'ask',
+    owner: 'alice',
+    tier: 'medium',
+    answerable: true,
+    batchable: false,
+    step_up_required: false,
+    payload_hash: 'h-orphan',
+    observed_ts: '2026-08-22T10:00:00Z',
+    actions: [],
+    card: {},
+  }
+  const { view } = await open('/inbox', { items: [orphan], cursor: 1, truncated: false })
+  const node = await expand(view, 'ask:ask-orphan')
+  expect(node.querySelector('[data-answer-door="intake"]'), 'a card with no route invented a door').toBeNull()
+  expect(node.querySelector('[data-acts="none"]'), 'the honest no-verbs fallback is gone').not.toBeNull()
+})
+
+test('r2 order §2: notices leave the queue into a grouped drawer, and nothing is dropped', async () => {
+  const effect = card(all(), 'effect:e-digest')
+  const body = {
+    items: [effect, notice('fp-a1', 'https://github.com/anomalyco/models.dev/commits.atom'), notice('fp-a2', 'https://github.com/anomalyco/models.dev/commits.atom'), notice('fp-b1', 'https://www.reddit.com/r/LocalLLaMA/.rss')],
+    cursor: 9,
+    truncated: false,
+  }
+  const { view } = await open('/inbox', body)
+
+  // The main queue holds ONLY the actionable non-notice card.
+  const queue = view.container.querySelector('ol.cards')
+  expect([...(queue?.querySelectorAll('[data-card-id]') ?? [])].map((n) => n.getAttribute('data-card-id'))).toEqual([
+    'effect:e-digest',
+  ])
+  // The drawer declares its count; each source is a group with its own.
+  const drawer = view.container.querySelector('[data-notices]')
+  expect(drawer?.getAttribute('data-notices')).toBe('3')
+  const groups = [...view.container.querySelectorAll('[data-notice-source]')]
+  expect(groups.map((g) => g.querySelectorAll('[data-card-id]').length)).toEqual([2, 1])
+  // Plain words on the group face, the raw source kept on the record line.
+  expect(groups[0].textContent).toContain('github.com · anomalyco/models.dev')
+  expect(groups[1].textContent).toContain('reddit.com · r/LocalLLaMA')
+  // Every served card is still reachable: union of queue + drawer = served.
+  expect(rowIDs(view).sort()).toEqual(body.items.map((i) => i.id as string).sort())
+  // The per-card verb wears plain words.
+  const first = await expand(view, 'drift_card:fp-a1')
+  expect(first.querySelector('button[data-action="dismiss"]')?.textContent).toBe('Got it — clear this')
+})
+
+test('r2 order §3: per-group clear-all fires the SERVED dismiss once per card, in order, and reports', async () => {
+  const body = {
+    items: [notice('fp-a1', 'https://github.com/anomalyco/models.dev/commits.atom'), notice('fp-a2', 'https://github.com/anomalyco/models.dev/commits.atom'), notice('fp-b1', 'https://www.reddit.com/r/LocalLLaMA/.rss')],
+    cursor: 9,
+    truncated: false,
+  }
+  const dismissed = (id: string) => ({
+    body: { card_id: id, fingerprint: id.slice('drift_card:'.length), window_start_seq: 1, dismissed: true, detail: 'recorded' },
+  })
+  const { view, log } = await open('/inbox', body, {
+    [`POST ${verb('drift_card:fp-a1', 'dismiss')}`]: dismissed('drift_card:fp-a1'),
+    [`POST ${verb('drift_card:fp-a2', 'dismiss')}`]: dismissed('drift_card:fp-a2'),
+  })
+  const group = view.container.querySelector('[data-notice-source="https://github.com/anomalyco/models.dev/commits.atom"]')
+  const button = group?.querySelector('button[data-action="clear-group"]')
+  expect(button?.textContent).toBe('Got it — clear all 2')
+  click(button)
+  await flush()
+  await flush()
+  // The served per-card verb, once per card, in the group's own order — and
+  // the OTHER group's card was not touched.
+  const posts = log.calls.filter((c) => c.path.endsWith('/dismiss')).map((c) => c.path)
+  expect(posts).toEqual([verb('drift_card:fp-a1', 'dismiss'), verb('drift_card:fp-a2', 'dismiss')])
+  expect(group?.querySelector('[data-clear-outcome="done"]')?.textContent).toContain('Cleared 2 of 2')
+})
+
+test('r2 order §1: a queue of only notices is a CALM queue', async () => {
+  const body = { items: [notice('fp-a1', 'https://hnrss.org/newest?q=Anthropic&points=50')], cursor: 2, truncated: false }
+  const { view } = await open('/inbox', body)
+  expect(view.container.textContent).toContain('Nothing needs you right now.')
+  expect(view.container.querySelector('[data-notices]')?.getAttribute('data-notices')).toBe('1')
+  // The q-term keeps two feeds on one host apart, in plain words.
+  expect(view.container.querySelector('[data-notice-source]')?.textContent).toContain('hnrss.org · newest · “Anthropic”')
+})
+
+test('r2 order §1: cards someone ELSE must answer sit in their own drawer, reachable but not yours', async () => {
+  const served = all()
+  const { view } = await open('/inbox', served)
+  const waiting = served.items.filter((i) => !i.answerable && i.kind !== 'drift_card')
+  const drawer = view.container.querySelector('[data-waiting-drawer]')
+  expect(drawer?.getAttribute('data-waiting-drawer')).toBe(String(waiting.length))
+  for (const w of waiting) {
+    expect(drawer?.querySelector(`[data-card-id="${CSS.escape(w.id)}"]`), `${w.id} fell out of the surface`).not.toBeNull()
+  }
+})
+
+test('sourceLabel: plain words for a watched URL, verbatim for anything else', () => {
+  expect(sourceLabel('https://github.com/anomalyco/models.dev/commits.atom')).toBe('github.com · anomalyco/models.dev')
+  expect(sourceLabel('https://www.reddit.com/r/LocalLLaMA/.rss')).toBe('reddit.com · r/LocalLLaMA')
+  expect(sourceLabel('https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json')).toBe(
+    'raw.githubusercontent.com · pydantic/genai-prices',
+  )
+  expect(sourceLabel('https://hnrss.org/newest?q=Claude+Code&points=50')).toBe('hnrss.org · newest · “Claude Code”')
+  // Not an http(s) URL: never a guess at what it means.
+  expect(sourceLabel('conformance:adapter-anthropic')).toBe('conformance:adapter-anthropic')
+  expect(sourceLabel('anthropic-changelog')).toBe('anthropic-changelog')
 })
