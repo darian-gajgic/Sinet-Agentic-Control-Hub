@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
@@ -148,13 +149,37 @@ func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status 
 
 func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error {
 	tax := p.taxonomyFor(st.Family)
-	asked := make(map[string]bool, len(card.Questions))
+	asked := make(map[string]Question, len(card.Questions))
 	for _, q := range card.Questions {
-		asked[q.ID] = true
+		asked[q.ID] = q
 	}
+	var skipped []SlotResolution
 	for _, a := range ans.Answers {
-		if !asked[a.ID] || tax.Slot(a.ID) == nil {
+		question, onCard := asked[a.ID]
+		if !onCard || tax.Slot(a.ID) == nil {
 			return fmt.Errorf("%w: slot %q was not asked", ErrBadAnswer, a.ID)
+		}
+		if a.Skip {
+			// The per-slot skip is S06.5's third resolution arm ("converted to
+			// an explicit assumption"), aimed at ONE slot: the requester takes
+			// the recommendation for this question and moves on, and the
+			// assumption lands on the approval card's centerpiece where it can
+			// be contested. It is strictly more conservative than the
+			// whole-interview force-proceed, which stays exactly as it was.
+			//
+			// Skipping is not answering, so the two arms are exclusive: a body
+			// carrying both says two different things about the same slot and
+			// the platform must not pick one.
+			if a.Value != "" {
+				return fmt.Errorf("%w: slot %q carries both an answer and a skip — a skip takes the recommendation instead of an answer", ErrBadAnswer, a.ID)
+			}
+			r := SlotResolution{
+				SlotID: a.ID, How: ResolvedAssumption,
+				Assumption: skipAssumption(tax.Slot(a.ID), question),
+			}
+			st.resolveSlot(r)
+			skipped = append(skipped, r)
+			continue
 		}
 		if a.Value == "" {
 			return fmt.Errorf("%w: empty answer for %q", ErrBadAnswer, a.ID)
@@ -178,8 +203,12 @@ func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error
 		// via a bounded revision, then re-verify.
 		merge := &ReviseReq{Reason: ReviseInterview}
 		for _, a := range ans.Answers {
+			if a.Skip {
+				continue // carried by the skip resolutions below
+			}
 			merge.Resolutions = append(merge.Resolutions, SlotResolution{SlotID: a.ID, How: ResolvedAnswered, Value: a.Value})
 		}
+		merge.Resolutions = append(merge.Resolutions, skipped...)
 		for _, a := range ans.Assume {
 			merge.Resolutions = append(merge.Resolutions, SlotResolution{SlotID: a.ID, How: ResolvedAssumption, Assumption: a.Value})
 		}
@@ -187,6 +216,26 @@ func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error
 		st.Phase = PhaseSpine
 	}
 	return nil
+}
+
+// skipAssumption writes the disclosed assumption a skipped slot carries, in
+// words for the PERSON who will read it on the approval card (CONVENTIONS §59).
+//
+// It says its own reason, because this arm's reason is genuinely its own: the
+// band was never asked, the force-proceed was asked and declined the lot, and
+// this requester answered the other questions and told the platform to take the
+// recommendation on this one. The suggestion comes from the CARD SNAPSHOT — the
+// durable record of what was actually offered — never recomputed, so the
+// assumption says what the requester saw when they skipped.
+func skipAssumption(slot *Slot, asked Question) string {
+	name := asked.ID
+	if slot != nil && slot.Name != "" {
+		name = slot.Name
+	}
+	if suggestion := strings.TrimSpace(asked.Suggested); suggestion != "" {
+		return fmt.Sprintf("%s: you skipped this one, so I am going with what was suggested on the card: %s", name, suggestion)
+	}
+	return fmt.Sprintf("%s: you skipped this one, so I will pick something sensible and show you what I picked on the plan.", name)
 }
 
 func (p *Pipeline) applyClarificationAnswer(st *State, card *Card, ans Answer) error {
@@ -410,18 +459,19 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 		}
 		return st, nil
 	case ActionRePlan:
-		if ans.Contest == nil || ans.Contest.Target == "" {
-			return nil, fmt.Errorf("%w: re-plan needs the contested target (S06.9 structured entry)", ErrBadAnswer)
-		}
-		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "approval",
-			"requester contested "+ans.Contest.Target+" via Re-plan", "approval card (S06.9)", 0); err != nil {
+		targets, findings, err := replanContest(ans)
+		if err != nil {
 			return nil, err
 		}
-		finding := ans.Contest.Target
-		if ans.Contest.Note != "" {
-			finding += ": " + ans.Contest.Note
+		contested := "the plan in their own words"
+		if len(targets) > 0 {
+			contested = strings.Join(targets, ", ")
 		}
-		st.PendingRevise = mergeRevise(st.PendingRevise, &ReviseReq{Reason: ReviseContest, Findings: []string{finding}})
+		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "approval",
+			"requester contested "+contested+" via Re-plan", "approval card (S06.9)", 0); err != nil {
+			return nil, err
+		}
+		st.PendingRevise = mergeRevise(st.PendingRevise, &ReviseReq{Reason: ReviseContest, Findings: findings})
 		st.Phase = PhaseSpine
 	case ActionReInterview:
 		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "approval",
@@ -447,6 +497,48 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 		return st, nil
 	}
 	return p.advanceLoaded(ctx, st)
+}
+
+// replanContest folds the S06.9 structured Re-plan entry into the contested
+// targets and the findings ONE bounded delta re-plan is asked to fix
+// (P3-GF3-BE1 R10; design note §2.E).
+//
+// S06.9's "tap the AC, assumption, or step being contested" is a structure, not
+// a cardinality of one: a requester who finds three things wrong with a plan
+// should say all three in one send and get one revision, instead of three
+// rounds of re-plan and re-approval. The plural findings this produces are the
+// SAME `ReviseReq.Findings` the landed single contest produced, so nothing
+// downstream changes: one Revise call, spine re-run, no second paid critique.
+//
+// The legacy single `contest` keeps its exact behavior. The optional top-level
+// note is the requester's own words about the plan as a whole, and it may stand
+// ALONE (§11 OQ-4): a person who cannot point at the step that is wrong, only
+// at the result, has still said something a bounded re-plan can act on. What is
+// refused is an empty send, which asks for a paid revision that names nothing.
+func replanContest(ans Answer) (targets, findings []string, err error) {
+	refs := make([]ContestRef, 0, len(ans.Contests)+1)
+	if ans.Contest != nil {
+		refs = append(refs, *ans.Contest)
+	}
+	refs = append(refs, ans.Contests...)
+	for _, c := range refs {
+		if strings.TrimSpace(c.Target) == "" {
+			return nil, nil, fmt.Errorf("%w: a contested item needs the target it names (S06.9 structured entry)", ErrBadAnswer)
+		}
+		targets = append(targets, c.Target)
+		finding := c.Target
+		if c.Note != "" {
+			finding += ": " + c.Note
+		}
+		findings = append(findings, finding)
+	}
+	if note := strings.TrimSpace(ans.Note); note != "" {
+		findings = append(findings, note)
+	}
+	if len(findings) == 0 {
+		return nil, nil, fmt.Errorf("%w: re-plan needs the contested target (S06.9 structured entry)", ErrBadAnswer)
+	}
+	return targets, findings, nil
 }
 
 // ---- Approve (Spec S06.9 "On Approve" + S02.8 claims) ----

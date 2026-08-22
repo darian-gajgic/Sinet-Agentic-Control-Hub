@@ -123,7 +123,11 @@ type UnderstoodBlock struct {
 }
 
 // maxQuestionsPerCard is spec-structural, not ⚙: Spec S06.5 fixes "up to 4
-// questions per card" in the ratified text; S18 declares no key for it.
+// questions per card" in the ratified text; S18 declares no key for it. It
+// bounds interview DELIVERY — the fresh asking of unresolved slots below the
+// floor, highest-weight-first; the S06.9 Re-interview verb's review card
+// re-presents the whole set with its current answers and is not bound by it
+// (P3-GF3-BE1 §11 OQ-3).
 const maxQuestionsPerCard = 4
 
 // Card is one ask snapshot. Exactly one Body field is set, per Kind.
@@ -347,14 +351,17 @@ type Answer struct {
 	// pre-execution override surface; recorded with its actor).
 	Route *RouteOverride `json:"route,omitempty"`
 
-	// Note is the person's own one-line reason, the same channel the
-	// verify/ladder cards carry (P3-RW-19 R6). One Answer type serves every
-	// intake card, so the field is reachable everywhere — but at v0 it is
-	// honored ONLY on the two cancel-shaped answers, ActionCancel on the
-	// approval card and ChoiceRethink on the SPEC-DOUBT card, where it becomes
-	// the cancel's `$.detail.reason`. Everywhere else it is ignored: honoring
-	// it would rewrite the wording of every intake ledger mint, which is a
-	// different packet's blast radius (ratified OQ2).
+	// Note is the person's own words, the same channel the verify/ladder cards
+	// carry (P3-RW-19 R6). One Answer type serves every intake card, so the
+	// field is reachable everywhere — it is honored on exactly three answers:
+	// the two cancel-shaped ones, ActionCancel on the approval card and
+	// ChoiceRethink on the SPEC-DOUBT card, where it becomes the cancel's
+	// `$.detail.reason`; and ActionRePlan, where it is the free-text contest
+	// channel ("what I want different, in my words") and becomes a target-less
+	// finding on the one bounded delta re-plan (P3-GF3-BE1 §11 OQ-2, which
+	// EXTENDS the ratified OQ2 reading rather than contradicting it).
+	// Everywhere else it is ignored: honoring it would rewrite the wording of
+	// every intake ledger mint, which is a different packet's blast radius.
 	Note string `json:"note,omitempty"`
 }
 

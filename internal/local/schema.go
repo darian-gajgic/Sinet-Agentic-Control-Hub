@@ -120,26 +120,61 @@ func HelpSchema() json.RawMessage {
 	}, []string{"what", "wrong", "recommend"})
 }
 
-// PhraseSchema is the S06.5 phrase-and-summarize duty schema (P3-RW-12 R7):
-// `reason` first (F5), then the requester-facing summary, then ONE required
-// string property per question id the caller asked about. DRAFTING, not
-// classification — the HelpSchema posture, no forced-label abstain member (F7
-// ratified); the duty layer sets Classification=false.
+// PhraseQuestion is one asked question's schema shape: the id the entry is
+// keyed by, and the option values a suggestion may name. The caller owns both
+// (the intake taxonomy is intake's vocabulary); this package owns the SHAPE —
+// the import wall, R24.
+type PhraseQuestion struct {
+	ID string
+	// OptionValues are this question's labeled option values, if any. Empty
+	// means free text only, and the entry then carries no option member.
+	OptionValues []string
+}
+
+// PhraseNoOption is the option member's "none of these fits" value — the empty
+// string, which no taxonomy option carries. A suggestion is free to correspond
+// to no offered option, and a schema that could not say so would force the
+// model to point at one anyway (the S12.4 never-fabricate posture, in the shape
+// a drafting duty can carry).
+const PhraseNoOption = ""
+
+// PhraseSchema is the S06.5 phrase-and-summarize duty schema (P3-RW-12 R7,
+// extended P3-GF3-BE1 R4): `reason` first (F5), then the requester-facing
+// summary, then ONE required entry per question id the caller asked about.
+// DRAFTING, not classification — the HelpSchema posture, no forced-label
+// abstain member (F7 ratified); the duty layer sets Classification=false.
 //
-// One property per asked id, with additionalProperties:false, makes the engine
-// itself unable to emit a wording for a question that was never selected. That
-// is a BELT: the authority is the caller's fold-by-id in platform code, because
-// containment that lives only in a schema or a prompt is containment that a
-// clever input can argue with (R03 §2.1).
-func PhraseSchema(questionIDs []string) json.RawMessage {
+// Each entry is an object rather than a bare string, because the seat now
+// returns two things per question: the plainer WORDING, and a one-line
+// SUGGESTED answer grounded in this particular request, plus the option value
+// that suggestion corresponds to where the question offers options. The
+// suggestion comes before the option member on purpose: the free text is
+// written first and the constrained pick follows it, which is the same
+// free-text-then-constrained ordering rule as `reason` (F5).
+//
+// One entry per asked id, with additionalProperties:false at both levels, makes
+// the engine itself unable to emit anything for a question that was never
+// selected. That is a BELT: the authority is the caller's fold-by-id in
+// platform code, because containment that lives only in a schema or a prompt is
+// containment that a clever input can argue with (R03 §2.1).
+func PhraseSchema(questions []PhraseQuestion) json.RawMessage {
 	props := []prop{
 		{"reason", strField("brief free-text reasoning — fill this FIRST, before the wordings")},
 		{"summary", strField("one short paragraph addressed to the requester: what is understood about their request so far")},
 	}
 	required := []string{"reason", "summary"}
-	for _, id := range questionIDs {
-		props = append(props, prop{id, strField("a clearer, plainer wording of the question with id " + id + " — the SAME question, never a different one")})
-		required = append(required, id)
+	for _, q := range questions {
+		entry := []prop{
+			{"question", strField("a clearer, plainer wording of the question with id " + q.ID + " — the SAME question, never a different one")},
+			{"suggestion", strField("one line: the answer you would suggest for THIS request, concrete enough to accept as it stands")},
+		}
+		entryRequired := []string{"question", "suggestion"}
+		if len(q.OptionValues) > 0 {
+			entry = append(entry, prop{"option", enumField(append(append([]string{}, q.OptionValues...), PhraseNoOption))})
+			entryRequired = append(entryRequired, "option")
+		}
+		props = append(props, prop{q.ID, orderedObjectSchema(entry, entryRequired)})
+		required = append(required, q.ID)
 	}
 	return orderedObjectSchema(props, required)
 }
@@ -178,10 +213,13 @@ func BatterySchema(fields []LabelField) json.RawMessage {
 	return orderedObjectSchema(props, required)
 }
 
-// prop is one ordered schema property (name → spec).
+// prop is one ordered schema property (name → spec). The spec is `any` so a
+// nested object can be passed as pre-rendered JSON: a Go map marshals its keys
+// alphabetically, which would reorder a nested grammar exactly as it would the
+// top-level one (F5).
 type prop struct {
 	name string
-	spec map[string]any
+	spec any
 }
 
 func strField(desc string) map[string]any {

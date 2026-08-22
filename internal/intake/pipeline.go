@@ -696,18 +696,12 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 	resolved := st.resolvedSet()
 	st.Clearance = tax.Clearance(resolved)
 
-	// Explicit Re-interview (S06.9): one full card of the top-weight
-	// slots, answered values overwrite.
+	// Explicit Re-interview (S06.9): the REVIEW card — every slot of the
+	// active set, each carrying what it currently says, answered values
+	// overwrite (P3-GF3-BE1 R8).
 	if st.ReinterviewRequested {
 		st.ReinterviewRequested = false
-		qs := make([]Question, 0, maxQuestionsPerCard)
-		for _, s := range tax.Slots {
-			if len(qs) == maxQuestionsPerCard {
-				break
-			}
-			qs = append(qs, Question{ID: s.ID, Text: s.Question, Options: s.Options, Weight: s.Weight})
-		}
-		return true, pair, p.issueCard(ctx, st, p.buildInterviewCard(ctx, st, tax, qs))
+		return true, pair, p.issueCard(ctx, st, p.buildInterviewCard(ctx, st, tax, reviewQuestions(st, tax)))
 	}
 
 	// The interview: continues while Clearance is below the tier floor and
@@ -725,7 +719,7 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 				if len(qs) == maxQuestionsPerCard {
 					break
 				}
-				qs = append(qs, Question{ID: s.ID, Text: s.Question, Options: s.Options, Weight: s.Weight})
+				qs = append(qs, Question{ID: s.ID, Text: s.Question, Why: s.Why, Options: s.Options, Weight: s.Weight})
 			}
 			return true, pair, p.issueCard(ctx, st, p.buildInterviewCard(ctx, st, tax, qs))
 		}
@@ -864,6 +858,54 @@ func understoodRecap(st *State, tax *Taxonomy) *UnderstoodBlock {
 	return block
 }
 
+// reviewQuestions composes the S06.9 Re-interview review card: every slot of
+// the active set, in taxonomy declaration order, each resolved one carrying
+// what the record currently says about it (P3-GF3-BE1 R8; design note §2.D).
+//
+// It is the answer to a requester who wants to CHANGE something, and the shape
+// follows from that: re-asking four blind questions makes a person who already
+// answered eight of them hunt for the one they wanted to correct. The whole set
+// with its current answers attached is the surface they asked for.
+//
+// S06.5's "up to 4 questions per card" governs interview DELIVERY — fresh
+// asking, highest-weight-first, below the floor — and that loop is untouched
+// (maxQuestionsPerCard still bounds it). This is the S06.9 verb's own review
+// surface, a card the requester explicitly asked for, not a batch of unresolved
+// questions (§11 OQ-3, the CardFamily precedent).
+//
+// The resolutions are composed by platform code from State.Resolutions under
+// the understoodBlock discipline: the card can never claim more than the record
+// holds, and no model contributes to it.
+func reviewQuestions(st *State, tax *Taxonomy) []Question {
+	res := make(map[string]SlotResolution, len(st.Resolutions))
+	for _, r := range st.Resolutions {
+		res[r.SlotID] = r
+	}
+	qs := make([]Question, 0, len(tax.Slots))
+	for _, s := range tax.Slots {
+		q := Question{ID: s.ID, Text: s.Question, Why: s.Why, Options: s.Options, Weight: s.Weight}
+		if r, ok := res[s.ID]; ok {
+			q.Resolution = &UnderstoodItem{
+				SlotID: r.SlotID, Name: s.Name, How: r.How,
+				Value: r.Value, Assumption: r.Assumption,
+			}
+		}
+		qs = append(qs, q)
+	}
+	return qs
+}
+
+// hasOptionValue reports whether v names one of this question's own option
+// values — the containment check the suggested-option fold runs.
+func hasOptionValue(opts []Option, v string) bool {
+	for _, o := range opts {
+		if o.Value == v {
+			return true
+		}
+	}
+	return false
+}
+
 // buildInterviewCard turns an ALREADY-MADE slot selection into the card the
 // requester sees (Spec S06.5; P3-RW-12 R6).
 //
@@ -894,7 +936,11 @@ func (p *Pipeline) buildInterviewCard(ctx context.Context, st *State, tax *Taxon
 		Questions: make([]PhraseQuestion, 0, len(qs)),
 	}
 	for _, q := range qs {
-		in.Questions = append(in.Questions, PhraseQuestion{ID: q.ID, Text: q.Text})
+		// The options ride along so the seat can name one in its suggestion
+		// (R3). They are context, never something to rewrite: the labels are
+		// authored content and the values are canonical vocabulary, and the fold
+		// below takes only a value that already belongs to this question.
+		in.Questions = append(in.Questions, PhraseQuestion{ID: q.ID, Text: q.Text, Options: q.Options})
 	}
 	if card.Understood != nil {
 		in.Understood = card.Understood.Items
@@ -911,8 +957,21 @@ func (p *Pipeline) buildInterviewCard(ctx context.Context, st *State, tax *Taxon
 		return card
 	}
 	for i := range card.Questions {
-		if text, ok := res.Phrasings[card.Questions[i].ID]; ok && strings.TrimSpace(text) != "" {
-			card.Questions[i].Phrased = text
+		q := &card.Questions[i]
+		if text, ok := res.Phrasings[q.ID]; ok && strings.TrimSpace(text) != "" {
+			q.Phrased = text
+		}
+		// The suggestion folds under the SAME containment as the phrasing: by
+		// asked slot id, in platform code. An id nobody asked reaches nothing,
+		// an empty suggestion decorates nothing, and a suggested option that
+		// names no option of THIS question is dropped while its text survives —
+		// a wrong pointer must not become a click that answers the question
+		// wrongly (R5).
+		if text, ok := res.Suggestions[q.ID]; ok && strings.TrimSpace(text) != "" {
+			q.Suggested = text
+		}
+		if value, ok := res.SuggestedOptions[q.ID]; ok && hasOptionValue(q.Options, value) {
+			q.SuggestedOption = value
 		}
 	}
 	if summary := strings.TrimSpace(res.Summary); summary != "" {
@@ -1391,12 +1450,22 @@ func (p *Pipeline) handleEscalation(ctx context.Context, st *State, err error, f
 // one transaction. Gates wait; answering resumes the pipeline in place
 // (Spec S06.1).
 func (p *Pipeline) issueCard(ctx context.Context, st *State, card *Card) error {
+	// The tier's ⚙ floor rides every card next to the computed Clearance, from
+	// the one site that issues them all (R11): a meter that says how far along
+	// the questions are, without saying where they stop, is a meter nobody can
+	// read. Served, never derived — the floor VALUE and every use of it are
+	// exactly as landed, and the trivial tier's 0 omits the field.
+	floor, err := p.clearanceFloor(st.Tier)
+	if err != nil {
+		return err
+	}
 	st.CardVersion++
 	askID := fmt.Sprintf("intake:%s:%d", st.TaskID, st.CardVersion)
 	card.TaskID, card.RunID = st.TaskID, st.RunID
 	card.Version = st.CardVersion
 	card.IssuedTS = p.nowRFC3339()
 	card.Clearance = st.Clearance
+	card.ClearanceFloor = floor
 	card.Tier = st.Tier
 	st.OpenAskID, st.OpenAskKind = askID, card.Kind
 	st.CardIssuedTS = card.IssuedTS
