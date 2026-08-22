@@ -49,9 +49,12 @@ func appendFinding(t *testing.T, log *eventlog.Log, at time.Time, owner, fingerp
 func TestDriftCardsFoldOneStormIntoOneCard(t *testing.T) {
 	ctx := context.Background()
 	db, log, _ := wdTestDB(t)
-	p := &projector{db: db}
-
 	base := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	// The clock is pinned (the TestDriftCardsAreBounded seam): the projection is
+	// horizon-bounded, so under the real clock these fixed-date fixtures age out
+	// of driftCardHorizon and the test starts failing by calendar alone.
+	p := &projector{db: db, now: func() time.Time { return base.Add(48 * time.Hour) }}
+
 	// Five hits of one incident, inside a single window.
 	for i := 0; i < 5; i++ {
 		appendFinding(t, log, base.Add(time.Duration(i)*time.Hour), "platform",
@@ -101,9 +104,11 @@ func TestDriftCardsFoldOneStormIntoOneCard(t *testing.T) {
 func TestDriftCardsAreOwnerScoped(t *testing.T) {
 	ctx := context.Background()
 	db, log, _ := wdTestDB(t)
-	p := &projector{db: db}
-
 	base := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	// Clock pinned for the same reason as the storm test above: a fixed-date
+	// fixture under the real clock falls out of driftCardHorizon.
+	p := &projector{db: db, now: func() time.Time { return base.Add(time.Hour) }}
+
 	appendFinding(t, log, base, "platform", "fp-a", "price", "flag-now", "a price moved")
 
 	op, err := p.inbox(ctx, ownerScope{Operator: true})
@@ -222,7 +227,9 @@ func TestCanaryFailureDerivesIntoADriftCard(t *testing.T) {
 		at = at.Add(time.Second)
 	}
 
-	p := &projector{db: db}
+	// Clock pinned like the tests above: fixed-date fixtures age out of
+	// driftCardHorizon under the real clock.
+	p := &projector{db: db, now: func() time.Time { return at.Add(time.Hour) }}
 	snap, err := p.inbox(ctx, ownerScope{Operator: true})
 	if err != nil {
 		t.Fatalf("inbox: %v", err)
