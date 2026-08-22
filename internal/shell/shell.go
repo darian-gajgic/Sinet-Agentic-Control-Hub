@@ -434,6 +434,37 @@ func Run(ctx context.Context, opts Options) error {
 					"created", res.Created, "superseded", res.Superseded)
 			}
 		}
+		// The v3 question sets (P3-GF3-BE1): the software and generic sets
+		// were revised for a requester who is not a programmer, so they move
+		// to v3 by SUPERSESSION under their own record — which says plainly
+		// that operator ratification is due at the resumed B6 gate. It runs
+		// AFTER the RW-12 governance above, which is what puts the version it
+		// supersedes there. Same D10 deferral.
+		gf3Gate := newWriteGate(memStore, committer, nil)
+		switch res, err := gf3Gate.EnsureGF3TaxonomyGovernance(ctx); {
+		case errors.Is(err, memory.ErrNoOperator):
+			logger.Info("memory: v3 taxonomy governance deferred — no operator account yet (Spec S09.10, D10)")
+		case errors.Is(err, memory.ErrSeedDiverged):
+			logger.Warn("memory: v3 taxonomy governance SKIPPED — the in-code question sets no longer match the content this "+
+				"packet's record covers; a question-set edit needs its own governance function and provenance record (Spec S09.10)", "err", err)
+		case err != nil:
+			return fmt.Errorf("shell: v3 taxonomy governance: %w", err)
+		default:
+			if res.Repaired > 0 {
+				logger.Warn("memory: governed taxonomy file diverged from the committed row — "+
+					"crash-torn write or out-of-band edit; repaired from the row (Spec S09.8)",
+					"repaired", res.Repaired)
+			}
+			if res.Unverifiable > 0 {
+				logger.Warn("memory: governed taxonomy provenance hash unavailable — compacted or pruned; "+
+					"supersession not attempted; divergence check limited this boot (Spec S14.9)",
+					"unverifiable", res.Unverifiable)
+			}
+			if res.Superseded > 0 {
+				logger.Info("memory: interview taxonomies superseded to v3 under S09.10 governance "+
+					"(operator ratification PENDING at the resumed B6 gate)", "superseded", res.Superseded)
+			}
+		}
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded
 		// provenance says so). Same D10 deferral as the B2 seeds.

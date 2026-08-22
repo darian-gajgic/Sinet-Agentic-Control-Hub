@@ -59,8 +59,10 @@ func TestSeedTaxonomiesCoverSixFamilies(t *testing.T) {
 	}
 
 	soft := seeds[FamilySoftware]
-	if soft.Version != "v2" {
-		t.Errorf("software seed version = %q, want v2 (the Deep-Plan revision)", soft.Version)
+	// P3-GF3-BE1 §11 OQ-1 sanction 1: the version pin moves to v3 (the
+	// requester-facing revision; ids, weights, count and order verbatim).
+	if soft.Version != "v3" {
+		t.Errorf("software seed version = %q, want v3 (the GF3 requester-facing revision)", soft.Version)
 	}
 	for _, id := range append(append([]string{}, ccbSlotIDs...), rw12SoftwareSlotIDs...) {
 		if soft.Slot(id) == nil {

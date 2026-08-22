@@ -188,111 +188,206 @@ func SeedTaxonomies() map[Family]*Taxonomy {
 const rw12Provenance = "drafted P3-RW-12 with claude-opus-5 on 2026-08-13 per Spec S06.5; " +
 	"8.3-gate entry as a governed S09.10 house object, ratified by the operator at the P3-RW-12 packet gate"
 
-// softwareSeed is the software family's Deep-Plan question set (v2).
+// gf3Provenance is the drafting record the two sets revised at P3-GF3-BE1
+// carry. It is APPENDED to each set's existing Source: the v2 record stays
+// whole, because the ids and weights it attests to are unchanged and the
+// citation behind them is still the reason they are what they are.
+//
+// Ratification is stated as PENDING on purpose. The v3 content ships and is
+// governed under its own supersession from the first boot (S09.8), with the
+// record saying plainly that the operator has not seen it yet; the resumed B6
+// gate rules, and a refusal is executed as its own supersession back to v2.
+// The alternative would leave the governed file at v2 while the runtime serves
+// v3, which is the live-pointer drift the snapshot doctrine closed.
+const gf3Provenance = "Requester-facing v3 revision drafted P3-GF3-BE1 with claude-opus-5 on 2026-08-23 per Spec S06.5: " +
+	"every slot asks a question a person who is not a programmer can answer, offers 2 to 4 concrete labeled options, and " +
+	"carries a one-line plain-words why; the precise engineering form of each question moved into MustKnow, which is read by " +
+	"the planner and never shown as the asked question. Slot ids, weights, count and order are VERBATIM from v2 (the measured " +
+	"thing, untouched). Operator ratification PENDING at the resumed B6 gate."
+
+// softwareSeed is the software family's question set (v3).
 //
 // The ten ClarifyCodeBench clarity types (arXiv:2607.00711 Table 2) are kept
 // verbatim from the B2-2 seed, ids and weights intact — they are the one
-// MEASURED thing in this file. P3-RW-12 adds the three questions a requester
+// MEASURED thing in this file. P3-RW-12 added the three questions a requester
 // who is not a programmer is never asked but always has an answer to: what to
 // build it with, where the pictures come from, and what it should look like.
-// The operator's own webshop request is the case that named them.
+//
+// P3-GF3-BE1 rewrites what is ASKED, and nothing else. The benchmark's own
+// phrasings ("what belongs in the collections, and how are they updated or
+// accessed?") describe a clarity type to an engineer; the operator watched a
+// non-programmer meet them on a real card and have nothing to type. Each slot
+// now asks a question in the requester's world, offers concrete options, and
+// says in one plain line why it is worth answering; the precise form moved into
+// MustKnow, which the planner reads and the requester never sees.
+//
+// Where a slot asks for a DECISION the requester may have no opinion about, the
+// planner-chooses option leads (the §57 rule). The three benchmark-failed slots
+// deliberately do NOT offer it: those are the types models measurably get
+// wrong, so inviting a guess there would spend the one thing the evidence says
+// to ask about. A requester with no answer still has the free-text box and the
+// per-slot skip, which converts the slot to a disclosed assumption on the
+// approval card rather than to a silent guess.
 func softwareSeed() *Taxonomy {
 	return &Taxonomy{
 		ID:      "software",
 		Family:  FamilySoftware,
-		Version: "v2",
+		Version: "v3",
 		Source: "ClarifyCodeBench 10-type taxonomy (arXiv:2607.00711, Table 2) for the ten clarity slots, seeded P3-B2-2 — " +
 			"weights EVIDENCE-INFORMED from that benchmark: the types every model measurably fails (collection semantics, " +
 			"comparison rules, ordering & atomicity) weigh 12, ordinary clarity types 10/8, the types models natively handle " +
 			"(units, numerical precision) weigh 6. The three Deep-Plan slots (technology_stack 11, assets_media 10, look_feel 10) " +
 			"are REASONED, not measured: for a requester who is not a programmer they shape the deliverable more than output " +
 			"format or units do, so they sit above the natively-handled types — and strictly below the benchmark-failed 12, " +
-			"because reasoning does not outrank measurement. Deep-Plan revision " + rw12Provenance,
+			"because reasoning does not outrank measurement. Deep-Plan revision " + rw12Provenance + ". " + gf3Provenance,
 		Slots: []Slot{
 			{
-				ID: "behavior", Name: "Behavior", Weight: 10,
-				MustKnow: "The required function, objective, or side effect is underspecified, so the intended behavior is not uniquely determined.",
-				Question: "What exactly should this do — what behavior or outcome makes it correct?",
-			},
-			{
-				ID: "terminology", Name: "Terminology", Weight: 10,
-				MustKnow: "A domain term, action, or state is undefined, overloaded, or open to multiple interpretations.",
-				Question: "Are there terms in the request that need pinning down — what do they mean here?",
-			},
-			{
-				ID: "edge_cases", Name: "Edge Cases", Weight: 10,
-				MustKnow: "Boundary or exceptional conditions are not specified, leaving behavior unclear for special inputs.",
-				Question: "How should boundary and exceptional inputs be handled (empty, missing, malformed, extreme)?",
+				ID: "behavior", Name: "What it should do", Weight: 10,
+				MustKnow: "The required function, objective, or side effect is underspecified, so the intended behavior is not uniquely determined. " +
+					"Precise form: what exactly should this do — what behavior or outcome makes it correct?",
+				Question: "What should this do for the people who end up using it?",
+				Why:      "Everything else in the plan is built to make this one thing true.",
 				Options: []Option{
-					{Label: "Fail loudly on anything unexpected", Value: "fail_loud"},
-					{Label: "Handle gracefully with sensible defaults", Value: "graceful"},
-					{Label: "I'll specify per case", Value: "specify"},
+					{Label: "Let people do something they cannot do today", Value: "new_capability"},
+					{Label: "Fix or improve something that already exists", Value: "improve_existing"},
+					{Label: "Take over a job somebody does by hand today", Value: "automate_manual"},
+					{Label: "I will describe it in my own words", Value: "specify"},
 				},
 			},
 			{
-				ID: "collection_semantics", Name: "Collection Semantics", Weight: 12,
-				MustKnow: "A collection, container, or state object is mentioned, but its membership, update rule, or access semantics are underspecified.",
-				Question: "For the collections/state involved: what belongs in them, and how are they updated or accessed?",
-			},
-			{
-				ID: "comparison_rules", Name: "Comparison Rules", Weight: 12,
-				MustKnow: "The comparison key, tie-breaking rule, or stability requirement is not specified.",
-				Question: "Where things are compared, sorted, or deduplicated: by what key, and how are ties broken?",
-			},
-			{
-				ID: "ordering_atomicity", Name: "Ordering & Atomicity", Weight: 12,
-				MustKnow: "Temporal order, simultaneity, or indivisible execution assumptions are unclear.",
-				Question: "Does order of operations or atomicity matter here — what must happen before what, and what must never interleave?",
-			},
-			{
-				ID: "indices_ranges", Name: "Indices & Ranges", Weight: 8,
-				MustKnow: "Index bases, interval boundaries, or inclusion rules are underspecified.",
-				Question: "For indices and ranges: zero- or one-based, and are boundaries inclusive or exclusive?",
+				ID: "terminology", Name: "Words that mean something specific", Weight: 10,
+				MustKnow: "A domain term, action, or state is undefined, overloaded, or open to multiple interpretations. " +
+					"Precise form: are there terms in the request that need pinning down — what do they mean here?",
+				Question: "Do any words in your request mean something particular in your line of work?",
+				Why:      "One word can mean two things, and building the other one is expensive to undo.",
 				Options: []Option{
-					{Label: "Zero-based, end-exclusive (language-conventional)", Value: "zero_exclusive"},
-					{Label: "One-based, inclusive", Value: "one_inclusive"},
-					{Label: "I'll specify", Value: "specify"},
+					{Label: "No, everything means what it usually means", Value: "none"},
+					{Label: "Yes, a few words do and I will explain them", Value: "some_explain"},
+					{Label: "Yes, and there is a list or a page I can point you at", Value: "glossary"},
 				},
 			},
 			{
-				ID: "output_format", Name: "Output Format", Weight: 8,
-				MustKnow: "The required output structure, layout, or presentation rule is missing or unclear.",
-				Question: "What shape should the output take?",
+				ID: "edge_cases", Name: "When something unexpected happens", Weight: 10,
+				MustKnow: "Boundary or exceptional conditions are not specified, leaving behavior unclear for special inputs. " +
+					"Precise form: how should boundary and exceptional inputs be handled (empty, missing, malformed, extreme)?",
+				Question: "When something turns up that nobody planned for, what should happen?",
+				Why:      "Most unpleasant surprises live here, and this decides whether they are loud or quiet.",
 				Options: []Option{
-					{Label: "Match the existing/conventional format", Value: "conventional"},
-					{Label: "Exact format matters — I'll specify", Value: "specify"},
-					{Label: "Any clear format is fine", Value: "any"},
+					{Label: "Stop and say clearly that something is wrong", Value: "fail_loud"},
+					{Label: "Carry on with a sensible default and make a note of it", Value: "graceful"},
+					{Label: "I will say what to do, case by case", Value: "specify"},
 				},
 			},
 			{
-				ID: "units", Name: "Units", Weight: 6,
-				MustKnow: "A quantity is specified without a clear unit, scale, prefix, or dimensional convention.",
-				Question: "Are all quantities' units and scales unambiguous — if not, which convention applies?",
+				ID: "collection_semantics", Name: "The things it keeps track of", Weight: 12,
+				MustKnow: "A collection, container, or state object is mentioned, but its membership, update rule, or access semantics are underspecified. " +
+					"Precise form: for the collections/state involved, what belongs in them, and how are they updated or accessed?",
+				Question: "What things does this keep track of, and what should happen when the same one turns up twice?",
+				Why:      "Repeats are the most common mess in anything that keeps a list, and the rule has to be decided once.",
+				Options: []Option{
+					{Label: "Merge them into one and keep the newest details", Value: "merge_newest"},
+					{Label: "Keep both and flag them for me to look at", Value: "keep_both_flag"},
+					{Label: "Turn the second one away and say why", Value: "reject_new"},
+				},
 			},
 			{
-				ID: "numerical_precision", Name: "Numerical Precision", Weight: 6,
-				MustKnow: "Precision, rounding, tolerance, or error handling requirements are unclear.",
-				Question: "Do precision, rounding, or tolerance requirements apply to numeric results?",
+				ID: "comparison_rules", Name: "What order things come in", Weight: 12,
+				MustKnow: "The comparison key, tie-breaking rule, or stability requirement is not specified. " +
+					"Precise form: where things are compared, sorted, or deduplicated, by what key, and how are ties broken?",
+				Question: "When things get listed or ranked, what order should they be in?",
+				Why:      "A list in the wrong order looks broken to whoever reads it, and the rule is cheap to set now.",
+				Options: []Option{
+					{Label: "Newest first", Value: "newest_first"},
+					{Label: "Alphabetical, by name", Value: "alphabetical"},
+					{Label: "Closest to what the person was looking for", Value: "best_match"},
+					{Label: "I will describe the order I want", Value: "specify"},
+				},
+			},
+			{
+				ID: "ordering_atomicity", Name: "What has to happen in order", Weight: 12,
+				MustKnow: "Temporal order, simultaneity, or indivisible execution assumptions are unclear. " +
+					"Precise form: does order of operations or atomicity matter here — what must happen before what, and what must never interleave?",
+				Question: "Does anything here have to happen in a strict order, or happen completely or not at all?",
+				Why:      "This is what stands between you and a half-finished job, like a payment taken with no order recorded.",
+				Options: []Option{
+					{Label: "Yes, some steps must happen in a set order and I will say which", Value: "strict_order"},
+					{Label: "Yes, some things must either finish completely or not happen at all", Value: "all_or_nothing"},
+					{Label: "No, nothing here depends on order", Value: "no_constraint"},
+				},
+			},
+			{
+				ID: "indices_ranges", Name: "Counting and ranges", Weight: 8,
+				MustKnow: "Index bases, interval boundaries, or inclusion rules are underspecified. " +
+					"Precise form: for indices and ranges, zero- or one-based, and are boundaries inclusive or exclusive?",
+				Question: "When you say something like the first ten, or Monday to Friday, should both ends be counted in?",
+				Why:      "Being out by one comes from here, and it is far easier to prevent than to find later.",
+				Options: []Option{
+					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
+					{Label: "Count both ends in, so Monday to Friday is five days", Value: "inclusive"},
+					{Label: "Count the start in but not the end", Value: "start_only"},
+					{Label: "I will say, case by case", Value: "specify"},
+				},
+			},
+			{
+				ID: "output_format", Name: "The shape of what comes out", Weight: 8,
+				MustKnow: "The required output structure, layout, or presentation rule is missing or unclear. " +
+					"Precise form: what shape should the output take?",
+				Question: "What should the result look like when it comes out?",
+				Why:      "This is the part you will actually see, so it is worth a moment now.",
+				Options: []Option{
+					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
+					{Label: "Match whatever this project already does", Value: "conventional"},
+					{Label: "The exact shape matters and I will describe it", Value: "specify"},
+					{Label: "Anything clear and readable is fine", Value: "any"},
+				},
+			},
+			{
+				ID: "units", Name: "Units and measurements", Weight: 6,
+				MustKnow: "A quantity is specified without a clear unit, scale, prefix, or dimensional convention. " +
+					"Precise form: are all quantities' units and scales unambiguous — if not, which convention applies?",
+				Question: "Are there measurements involved, and which units should they be in?",
+				Why:      "Mixed-up units stay invisible: everything looks right until a number is ten times off.",
+				Options: []Option{
+					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
+					{Label: "Metric: millimetres, kilograms, degrees Celsius", Value: "metric"},
+					{Label: "Imperial: inches, pounds, degrees Fahrenheit", Value: "imperial"},
+					{Label: "There are no measurements in this", Value: "none"},
+				},
+			},
+			{
+				ID: "numerical_precision", Name: "Rounding", Weight: 6,
+				MustKnow: "Precision, rounding, tolerance, or error handling requirements are unclear. " +
+					"Precise form: do precision, rounding, or tolerance requirements apply to numeric results?",
+				Question: "Do any numbers need rounding a particular way, like money or percentages?",
+				Why:      "Rounding decides whether totals add up the way the person reading them expects.",
+				Options: []Option{
+					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
+					{Label: "Money: two decimal places, rounded the usual way", Value: "money"},
+					{Label: "Whole numbers only", Value: "whole"},
+					{Label: "I will say what needs rounding and how", Value: "specify"},
+				},
 			},
 			// ---- The three Deep-Plan slots (P3-RW-12) ----
 			{
 				ID: "technology_stack", Name: "Technology choice", Weight: 11,
 				MustKnow: "Which language, framework, or platform the work should use is unstated — and everything else gets built on top of that choice, so a wrong one is expensive to undo later.",
 				Question: "What should this be built with?",
+				Why:      "Everything else gets built on top of this, so it is the choice that is hardest to change later.",
 				Options: []Option{
 					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
 					{Label: "Match whatever this project already uses", Value: "match_existing"},
 					{Label: "The simplest thing that does the job", Value: "simplest"},
-					{Label: "I have something specific in mind — I'll say what", Value: "specify"},
+					{Label: "I have something specific in mind and I will say what", Value: "specify"},
 				},
 			},
 			{
 				ID: "assets_media", Name: "Pictures and other media", Weight: 10,
 				MustKnow: "Where the images, logos, or other media come from is unstated, so anything visible either stalls waiting for them or gets built around invented ones.",
 				Question: "Where should pictures, logos, and any other media come from?",
+				Why:      "Anything people look at needs pictures from somewhere, and sorting that out late stalls the work.",
 				Options: []Option{
 					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "I'll supply the files", Value: "i_supply"},
+					{Label: "I will supply the files", Value: "i_supply"},
 					{Label: "Use free images that are licensed for this", Value: "free_stock"},
 					{Label: "Plain placeholders for now", Value: "placeholders"},
 				},
@@ -301,11 +396,12 @@ func softwareSeed() *Taxonomy {
 				ID: "look_feel", Name: "Look and feel", Weight: 10,
 				MustKnow: "The intended visual style is unstated, so anything the requester will actually look at gets built to somebody else's taste.",
 				Question: "How should it look?",
+				Why:      "You are the one who will look at it, so this is your call rather than anyone else's taste.",
 				Options: []Option{
 					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
 					{Label: "Plain and clean, nothing fancy", Value: "plain"},
-					{Label: "Like something that already exists — I'll point at it", Value: "match_reference"},
-					{Label: "I'll describe the style I want", Value: "specify"},
+					{Label: "Like something that already exists, and I will point at it", Value: "match_reference"},
+					{Label: "I will describe the style I want", Value: "specify"},
 				},
 			},
 		},
@@ -762,60 +858,99 @@ func choreSeed() *Taxonomy {
 // vocabulary now that all six ship, and the machinery stays for an operator
 // override map or a family seeded later.
 //
-// P3-RW-12 REVIEWED it against the Deep-Plan bar and changed nothing: it is
-// already plain language, every slot states its MustKnow, it holds the shape
-// bar comfortably (8 slots, one card short of full clearance), and it asks
-// for no technical decision that would need a "you choose" default — being
-// technology-agnostic is the point of a generic set. Version therefore stays
-// v1 and the provenance stays the B2 gate's, because nothing was redrafted;
-// a bump here would cost review attention and buy nothing.
+// P3-RW-12 reviewed it and changed nothing. P3-GF3-BE1 does change it, for the
+// reason that review missed: plain WORDS are not the same as an ANSWERABLE
+// question. Six of the eight slots offered a blank box, and a blank box is
+// where a person who came to describe what they want gives up. Every slot now
+// carries concrete options and a one-line why; ids, weights, count and order
+// are verbatim. It stays technology-agnostic, so no slot asks for a technical
+// decision and none leads with the planner-chooses default; the free-text box
+// and the per-slot skip carry a requester who has no answer.
 func genericSeed() *Taxonomy {
 	return &Taxonomy{
 		ID:      "generic",
 		Family:  FamilyGeneric,
-		Version: "v1",
-		Source:  "Generic fallback must-know set; drafted P3-B2-2 per Spec S06.5 TBD-P3; 8.3-gate entry pending S09 (B3)",
+		Version: "v3",
+		Source: "Generic fallback must-know set; drafted P3-B2-2 per Spec S06.5 TBD-P3; 8.3-gate entry pending S09 (B3). " +
+			gf3Provenance,
 		Slots: []Slot{
 			{
-				ID: "goal", Name: "Goal", Weight: 12,
-				MustKnow: "The outcome that makes the task done is not uniquely determined.",
-				Question: "What outcome makes this done — what will you look at to say it worked?",
-			},
-			{
-				ID: "deliverable", Name: "Deliverable", Weight: 10,
-				MustKnow: "The form the result should take is unspecified.",
-				Question: "What form should the result take?",
+				ID: "goal", Name: "What done looks like", Weight: 12,
+				MustKnow: "The outcome that makes the task done is not uniquely determined. " +
+					"Precise form: what outcome makes this done — what will you look at to say it worked?",
+				Question: "What has to be true at the end for you to call this done?",
+				Why:      "This is what the finished work gets checked against, so it is the one to get right.",
 				Options: []Option{
-					{Label: "A document or write-up", Value: "document"},
-					{Label: "A working change (code, config, files)", Value: "change"},
-					{Label: "A recommendation with reasoning", Value: "recommendation"},
-					{Label: "Something else — I'll describe", Value: "other"},
+					{Label: "Something exists that did not exist before", Value: "something_new"},
+					{Label: "Something broken or missing is put right", Value: "fixed"},
+					{Label: "A question I have is answered", Value: "answered"},
+					{Label: "I will describe it in my own words", Value: "specify"},
 				},
 			},
 			{
-				ID: "scope", Name: "Scope", Weight: 10,
-				MustKnow: "What is in and out of scope is unstated.",
-				Question: "Where are the edges — what should this explicitly include, and what should it not touch?",
+				ID: "deliverable", Name: "What you get", Weight: 10,
+				MustKnow: "The form the result should take is unspecified.",
+				Question: "What form should the result take?",
+				Why:      "This is what actually lands in your hands at the end.",
+				Options: []Option{
+					{Label: "A document or write-up", Value: "document"},
+					{Label: "A working change (code, settings, files)", Value: "change"},
+					{Label: "A recommendation with the reasoning behind it", Value: "recommendation"},
+					{Label: "Something else, and I will describe it", Value: "other"},
+				},
 			},
 			{
-				ID: "inputs", Name: "Inputs & sources", Weight: 8,
-				MustKnow: "Which materials, sources, or prior work the task should build on is unclear.",
-				Question: "What should this be based on — specific files, sources, or prior work?",
+				ID: "scope", Name: "Where the edges are", Weight: 10,
+				MustKnow: "What is in and out of scope is unstated. " +
+					"Precise form: what should this explicitly include, and what should it not touch?",
+				Question: "Is there anything this should deliberately stay away from?",
+				Why:      "Saying what is out of bounds now is what stops work you never wanted.",
+				Options: []Option{
+					{Label: "Keep to exactly what I asked for, nothing extra", Value: "narrow"},
+					{Label: "Go a little further where it obviously helps", Value: "sensible_extras"},
+					{Label: "There are things it must not touch and I will name them", Value: "specify_limits"},
+				},
 			},
 			{
-				ID: "constraints", Name: "Constraints", Weight: 8,
+				ID: "inputs", Name: "What to build on", Weight: 8,
+				MustKnow: "Which materials, sources, or prior work the task should build on is unclear. " +
+					"Precise form: what should this be based on — specific files, sources, or prior work?",
+				Question: "Is there anything existing this should build on, like files, notes, or earlier work?",
+				Why:      "Starting from what you already have is faster and lands closer to what you meant.",
+				Options: []Option{
+					{Label: "Yes, and I will supply it or point at it", Value: "i_supply"},
+					{Label: "Yes, it is already somewhere the platform can see", Value: "in_project"},
+					{Label: "No, start from nothing", Value: "from_scratch"},
+				},
+			},
+			{
+				ID: "constraints", Name: "Hard limits", Weight: 8,
 				MustKnow: "Hard constraints (tools, style, budget, privacy, compatibility) are unstated.",
-				Question: "Any hard constraints — tools to use or avoid, style, budget, privacy?",
+				Question: "Are there hard limits, like a budget, a tool you must use, or something that has to stay private?",
+				Why:      "A limit that turns up late usually means doing the work a second time.",
+				Options: []Option{
+					{Label: "None that I can think of", Value: "none"},
+					{Label: "Yes, and I will name them", Value: "specify"},
+					{Label: "Keep it cheap and simple, whatever that takes", Value: "cheap_simple"},
+				},
 			},
 			{
-				ID: "audience", Name: "Audience", Weight: 6,
+				ID: "audience", Name: "Who it is for", Weight: 6,
 				MustKnow: "Who the result is for, and where it will be used, is unclear.",
-				Question: "Who is this for, and where will it be used?",
+				Question: "Who is going to use or read this?",
+				Why:      "It sets how much the result has to explain itself.",
+				Options: []Option{
+					{Label: "Just me", Value: "just_me"},
+					{Label: "Me and a few people I work with", Value: "small_group"},
+					{Label: "Customers, or the public", Value: "public"},
+					{Label: "I will describe who they are", Value: "specify"},
+				},
 			},
 			{
-				ID: "quality_bar", Name: "Quality bar", Weight: 6,
+				ID: "quality_bar", Name: "How thorough", Weight: 6,
 				MustKnow: "The intended thoroughness of the work is unstated.",
 				Question: "How thorough should this be?",
+				Why:      "This is the biggest lever on how long it takes and what it costs.",
 				Options: []Option{
 					{Label: "Quick and rough is fine", Value: "quick"},
 					{Label: "Solid, normal quality", Value: "normal"},
@@ -825,7 +960,13 @@ func genericSeed() *Taxonomy {
 			{
 				ID: "deadline", Name: "Timing", Weight: 4,
 				MustKnow: "Whether timing matters is unstated.",
-				Question: "Is there a deadline or preferred timing?",
+				Question: "Is there a date this needs to be ready by?",
+				Why:      "If there is a date, the plan can be cut to fit it instead of missing it.",
+				Options: []Option{
+					{Label: "No, whenever it is ready", Value: "no_deadline"},
+					{Label: "As soon as it can be done", Value: "asap"},
+					{Label: "There is a date and I will give it", Value: "specify"},
+				},
 			},
 		},
 	}

@@ -66,6 +66,12 @@ func TestGF3TaxonomyV3EverySlotCarriesOptionsAndWhy(t *testing.T) {
 	seeds := intake.SeedTaxonomies()
 	for _, fam := range []intake.Family{intake.FamilySoftware, intake.FamilyGeneric} {
 		tax := seeds[fam]
+		// Added by the implementation commit with the OQ-1 sanction (brief §8
+		// T1): one revision label across both revised sets — generic jumps
+		// v1 → v3, because the version is provenance, not a per-set sequence.
+		if tax.Version != "v3" {
+			t.Errorf("%s seed version = %q, want v3 (the GF3 revision label, OQ-5)", fam, tax.Version)
+		}
 		for _, s := range tax.Slots {
 			if len(s.Options) < 2 || len(s.Options) > 4 {
 				t.Errorf("%s/%s carries %d options, want 2–4 on every v3 slot (S06.5; design §2.A(ii))",

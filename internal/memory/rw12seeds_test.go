@@ -115,6 +115,15 @@ func TestTaxonomyGovernanceCreatesAndSupersedes(t *testing.T) {
 		t.Errorf("superseding version provenance = %q", cur.OriginRef)
 	}
 
+	// P3-GF3-BE1 §11 OQ-1 sanction 2: RW-12's Ensure now writes the content
+	// its own gate ratified (the frozen snapshot), so the two sets THIS packet
+	// revised reach the runtime content through their own supersession. Run it
+	// here, which is what a boot does, and the file check below keeps meaning
+	// what it meant: the governed files are what the runtime serves.
+	if _, err := f.gate.EnsureGF3TaxonomyGovernance(ctx); err != nil {
+		t.Fatalf("EnsureGF3TaxonomyGovernance: %v", err)
+	}
+
 	// Every governed active file IS the operator-editable override input, and
 	// it says exactly what the runtime seed says (the §17 proven-by-test rule).
 	seeds := intake.SeedTaxonomies()
@@ -212,7 +221,11 @@ func TestGovernanceDecidesFromTheRowNotTheFile(t *testing.T) {
 	}
 
 	// Tear the write: v2 bytes on disk, v1 row still active.
-	v2, err := json.MarshalIndent(intake.SeedTaxonomies()[intake.FamilySoftware], "", "  ")
+	//
+	// P3-GF3-BE1 §11 OQ-1 sanction 3: the bytes are the FROZEN v2 content this
+	// Ensure writes, not the live seed, which is now v3 and belongs to a later
+	// packet's record. The torn state being simulated is unchanged.
+	v2, err := json.MarshalIndent(memory.RW12SoftwareTaxonomyForTest(), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
