@@ -1553,6 +1553,14 @@ button.card-face-btn:hover {
   font-size: 0.92rem;
 }
 
+/* F1 (drain r1): the clamp is a CLOSED-row economy. An open card's face is
+   the detail's own heading, so the full issue sentence unclamps there —
+   otherwise a kind whose body carries no prose (an effect's kind/target)
+   would have its sentence tail readable nowhere at all. */
+.card-row[data-open='true'] .face-issue {
+  white-space: normal;
+}
+
 /* The open detail keeps the face above it as the row's header. */
 .card-detail {
   padding: 0 0.75rem 0.75rem;
@@ -1593,14 +1601,21 @@ button.card-face-btn:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 1rem;
+  max-width: 100%;
 }
 
+/* F2 (drain r1): a select's intrinsic width follows its longest option (a
+   task title), which pushed past a 390px viewport. The label is capped at
+   the bar's width and the select is a shrinkable flex item, so a long
+   option ellipsizes inside the control instead of clipping the page. */
 .inbox-selects label {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 0.4rem;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
 }
 
 .inbox-selects label > span {
@@ -1608,10 +1623,13 @@ button.card-face-btn:hover {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  flex: 0 0 auto;
 }
 
 .inbox-selects select {
   width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 

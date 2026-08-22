@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 
 import {
   api,
@@ -284,11 +284,12 @@ function DeepLinkedCard({
   onAnswered: () => void
 }) {
   const join = useTaskJoin(stream)
+  const where = whereOf(item, join)
   return (
     <div className="card-row" data-card-id={item.id} data-kind={item.kind} data-tier={item.tier} data-open="true">
-      <CardFace item={item} where={whereOf(item, join)} />
+      <CardFace item={item} where={where} />
       <WithForms items={[item]} stream={stream}>
-        {(forms) => <CardDetail item={item} forms={forms} onAnswered={onAnswered} deep />}
+        {(forms) => <CardDetail item={item} where={where} forms={forms} onAnswered={onAnswered} deep />}
       </WithForms>
     </div>
   )
@@ -351,6 +352,13 @@ export function hrefForInbox(q: InboxQuery): string {
  *  form is the explicit override), else the app-wide scope from the topbar. */
 function effectiveProject(q: InboxQuery, scopeProject: string): string {
   return q.project !== null ? q.project : scopeProject
+}
+
+/** paren wraps a name for prose unless it already wears its own parentheses —
+ *  the "(no project)" bucket's served name IS parenthesised, and wrapping it
+ *  again printed "((no project))" (F4, drain r1). */
+function paren(name: string): string {
+  return name.startsWith('(') && name.endsWith(')') ? name : `(${name})`
 }
 
 /**
@@ -509,14 +517,18 @@ function InboxControls({
 
   const hidden = items.length - shown
   const filters: string[] = []
-  if (q.task !== '') filters.push(`the task filter (${tasks.get(q.task) ?? q.task})`)
+  if (q.task !== '') filters.push(`the task filter ${paren(tasks.get(q.task) ?? q.task)}`)
   if (project !== '') {
     filters.push(
       q.project !== null
-        ? `the project filter (${project})`
-        : `your project scope (${project}) — picked at the top of the app`,
+        ? `the project filter ${paren(project)}`
+        : `your project scope ${paren(project)} — picked at the top of the app`,
     )
   }
+  // F3 (drain r1): the URL beating the topbar scope is the designed rule, and
+  // it must be SAID — a person whose topbar shows one project while the page
+  // filters by another was left to guess which control had won.
+  const overridden = q.project !== null && scopeProject !== '' && q.project !== scopeProject
 
   return (
     <div className="inbox-controls" data-inbox-controls>
@@ -603,6 +615,13 @@ function InboxControls({
           >
             Show everything
           </Button>
+        </p>
+      )}
+      {overridden && (
+        <p className="max-w-prose text-sm text-muted-foreground" data-inbox-override>
+          This page&apos;s address carries its own project filter
+          {q.project === '' && <> — every project</>}, and it overrides the project picked at the top of the app{' '}
+          {paren(scopeProject)}.
         </p>
       )}
       {q.sort !== '' && (
@@ -865,6 +884,7 @@ function InboxRow({
   onAnswered: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const faceRef = useRef<HTMLButtonElement | null>(null)
   return (
     <li
       className="card-row"
@@ -872,16 +892,26 @@ function InboxRow({
       data-kind={item.kind}
       data-tier={item.tier}
       data-open={open ? 'true' : 'false'}
+      // F6 (drain r1): Escape folds the detail from anywhere inside the row —
+      // keyboard parity with the click-to-close — and hands focus back to the
+      // face, so the keyboard reader is not dropped into a removed subtree.
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && open) {
+          setOpen(false)
+          faceRef.current?.focus()
+        }
+      }}
     >
       <CardFace
         item={item}
         where={where}
         open={open}
+        faceRef={faceRef}
         onToggle={() => {
           setOpen((was) => !was)
         }}
       />
-      {open && <CardDetail item={item} forms={forms} onAnswered={onAnswered} />}
+      {open && <CardDetail item={item} where={where} forms={forms} onAnswered={onAnswered} />}
     </li>
   )
 }
@@ -898,11 +928,13 @@ function CardFace({
   where,
   open,
   onToggle,
+  faceRef,
 }: {
   item: ApprovalItem
   where: Where
   open?: boolean
   onToggle?: () => void
+  faceRef?: Ref<HTMLButtonElement>
 }) {
   const inner = (
     <>
@@ -962,7 +994,14 @@ function CardFace({
     )
   }
   return (
-    <button type="button" className="card-face-btn" data-face aria-expanded={open === true} onClick={onToggle}>
+    <button
+      type="button"
+      className="card-face-btn"
+      data-face
+      aria-expanded={open === true}
+      onClick={onToggle}
+      ref={faceRef}
+    >
       {inner}
     </button>
   )
@@ -1068,11 +1107,13 @@ function askIssueLine(item: ApprovalItem): string {
  */
 function CardDetail({
   item,
+  where,
   forms,
   onAnswered,
   deep,
 }: {
   item: ApprovalItem
+  where?: Where
   forms: BenchmarkVerdictForms | null
   onAnswered: () => void
   deep?: boolean
@@ -1102,7 +1143,7 @@ function CardDetail({
         <Expiry item={item} />
       </p>
       <CheckFirst item={item} />
-      <JumpToWork item={item} />
+      <JumpToWork item={item} where={where} />
       <CardBody item={item} forms={forms} onAnswered={onAnswered} expanded={deep} />
       <TechDetails item={item} />
     </div>
@@ -1136,8 +1177,11 @@ function TechDetails({ item }: { item: ApprovalItem }) {
         </Link>
         <span data-provenance-field="kind">{item.kind}</span>
         {/* The run ref stays a run ref: the task route keys on task ids, and
-            the resolved task jump lives in the detail above. */}
+            the resolved task jump lives in the detail above. The task id sits
+            here too (F5) — the jump line wears the task's human title, so the
+            raw ref's home is this fold. */}
         {item.run_id && <span data-provenance-field="run">run {item.run_id}</span>}
+        {item.task_id && <span data-provenance-field="task">task {item.task_id}</span>}
         <span>
           seen <Stamp ts={item.observed_ts} />
         </span>
@@ -1307,14 +1351,25 @@ function checkFirst(item: ApprovalItem): string {
  * — has no leg. A card whose run resolves to no task serves no `task_id` and
  * likewise has no leg, rather than a door to a page that does not exist.
  */
-function JumpToWork({ item }: { item: ApprovalItem }) {
+function JumpToWork({ item, where }: { item: ApprovalItem; where?: Where }) {
   if (!item.task_id) return null
+  // F5 (drain r1): the joined task TITLE is the human name for what the link
+  // opens; the raw id renders only where no title is known (the join has not
+  // answered, or the task has no title) and stays findable in the technical
+  // fold either way.
+  const title = where?.task ?? item.task_id
   return (
     <p className="text-sm" data-jump="task">
       <Link to={hrefFor('task', { id: item.task_id })}>
         Open the task this came from — its deliverable revisions and receipts are there
       </Link>{' '}
-      <span className="font-mono tabular-nums text-muted-foreground">{item.task_id}</span>
+      {title === item.task_id ? (
+        <span className="font-mono tabular-nums text-muted-foreground">{item.task_id}</span>
+      ) : (
+        <span className="text-muted-foreground" data-jump-title>
+          {title}
+        </span>
+      )}
     </p>
   )
 }

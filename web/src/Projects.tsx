@@ -280,9 +280,13 @@ function ProjectCard({ card, registryAnswered }: { card: CardData; registryAnswe
       <header className="proj-card-head">
         <FolderOpen size={17} strokeWidth={1.8} aria-hidden="true" className="proj-ico" />
         <h3 className="proj-name">{entry !== null && entry.name !== '' ? entry.name : name}</h3>
+        {/* F7 (drain r1): the chip counts TASKS whose latest run waits on a
+            person (this read's own derivation) — the inbox slice counts CARDS,
+            and one task can hold several. The unit is said so the two numbers
+            stop reading as a bug; nothing is recomputed. */}
         {bucket !== null && bucket.waiting > 0 && (
           <Chip tone="orange" className="waiting-human">
-            {String(bucket.waiting)} waiting on you
+            {String(bucket.waiting)} task{bucket.waiting === 1 ? '' : 's'} waiting on you
           </Chip>
         )}
         {entry !== null && <Chip tone={stateChip(entry.state).tone}>{stateChip(entry.state).label}</Chip>}

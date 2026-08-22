@@ -1,6 +1,8 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
+import stylesheet from './index.css?raw'
+
 import App from './App'
 import type { ApprovalItem, ApprovalList, BenchmarkVerdictForms } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch, signedIn, type Scripted } from './doubles'
@@ -1987,6 +1989,14 @@ test('the projects page jumps straight into a project’s own inbox slice', asyn
 
   const jump = view.container.querySelector('[data-proj-inbox="release-notes"]')
   expect(jump, 'the project card grew no inbox door').not.toBeNull()
+
+  // F7 (drain r1): the chip beside the door counts TASKS (this read's own
+  // derivation) while the slice counts CARDS — the chip says its unit, so
+  // the two numbers stop reading as a bug.
+  const chip = view.container.querySelector('.waiting-human')
+  expect(chip, 'no waiting chip rendered, so the unit label is unasserted').not.toBeNull()
+  expect(chip?.textContent).toMatch(/task(s)? waiting on you/)
+
   click(jump)
   await flush()
 
@@ -1998,6 +2008,88 @@ test('the projects page jumps straight into a project’s own inbox slice', asyn
   )
   expect(log.calls.some((c) => c.path === '/api/approvals')).toBe(true)
   view.unmount()
+})
+
+// ── drain r1 (live design review, 2026-08-22): the seven findings pinned ──
+
+test('F1: an OPEN face unclamps its issue line — pinned in the stylesheet', () => {
+  // jsdom computes no layout, so the contract is pinned where it lives: the
+  // closed-row clamp stays, and the open-row rule lifts it — otherwise a kind
+  // whose detail body carries no prose (an effect's kind/target) had its
+  // sentence tail readable nowhere at all.
+  expect(stylesheet).toMatch(/\.face-issue\s*\{[^}]*white-space:\s*nowrap/)
+  expect(stylesheet).toMatch(/\.card-row\[data-open='true'\]\s+\.face-issue\s*\{[^}]*white-space:\s*normal/)
+})
+
+test('F3: the URL filter SAYS it beats the topbar scope, and only when it does', async () => {
+  const served = mine()
+  const { view } = await open('/inbox', served)
+  // No scope, no URL filter: nothing to reconcile, no line.
+  expect(view.container.querySelector('[data-inbox-override]')).toBeNull()
+
+  // Scope alone: the scope IS the filter — still no override to declare.
+  choose(view.container.querySelector('.scope-select') as HTMLSelectElement, 'release-notes')
+  await flush()
+  expect(view.container.querySelector('[data-inbox-override]')).toBeNull()
+
+  // The page's own select writes the URL, which now DIFFERS from the scope:
+  // the win is declared in plain words, naming the losing scope.
+  choose(view.container.querySelector('[data-filter="project"]') as HTMLSelectElement, '(no project)')
+  await flush()
+  const override = view.container.querySelector('[data-inbox-override]')
+  expect(override, 'the URL beat the scope silently').not.toBeNull()
+  expect(override?.textContent).toContain('overrides the project picked at the top of the app (release-notes)')
+
+  // Agreement is not an override: URL and scope naming the SAME project say nothing.
+  choose(view.container.querySelector('[data-filter="project"]') as HTMLSelectElement, 'release-notes')
+  await flush()
+  expect(view.container.querySelector('[data-inbox-override]')).toBeNull()
+})
+
+test('F4: the (no project) bucket never wears doubled parentheses', async () => {
+  const { view } = await open(`/inbox?project=${encodeURIComponent('(no project)')}`, mine())
+  const line = view.container.querySelector('[data-inbox-hiding]')!
+  expect(line.textContent).toContain('the project filter (no project)')
+  expect(line.textContent, 'the parenthesised bucket name was wrapped again').not.toContain('((')
+})
+
+test("F5: the jump wears the task's own title; the raw id keeps its home in the fold", async () => {
+  const { view } = await open('/inbox', mine())
+  const detail = await expand(view, 'ask:ask-ship')
+  const jump = detail.querySelector('[data-jump="task"]')!
+  expect(jump.querySelector('[data-jump-title]')?.textContent).toBe('Ship the release notes')
+  expect(jump.textContent, 'the raw task id is still on the jump line').not.toContain('t-ship')
+  // …while the link still opens the task, and the id stays findable.
+  expect(jump.querySelector('a')?.getAttribute('href')).toBe('/tasks/t-ship')
+  expect(detail.querySelector('[data-provenance-field="task"]')?.textContent).toContain('t-ship')
+  // A card whose task the join cannot NAME keeps the honest id, in mono.
+  const conflictDetail = await expand(view, 'memory_conflict:1')
+  expect(conflictDetail.querySelector('[data-jump]'), 'a no-task card grew a jump').toBeNull()
+})
+
+test('F6: Escape folds the open card and hands focus back to its face', async () => {
+  const { view } = await open('/inbox', mine())
+  const node = await expand(view, 'ask:ask-ship')
+  const input = node.querySelector('[data-field="contest"]') as HTMLInputElement
+  act(() => {
+    input.focus()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  })
+  await flush()
+  expect(row(view, 'ask:ask-ship').getAttribute('data-open')).toBe('false')
+  expect(row(view, 'ask:ask-ship').querySelector('[data-detail]'), 'Escape did not fold the detail').toBeNull()
+  expect(document.activeElement, 'the fold dropped keyboard focus on the floor').toBe(
+    row(view, 'ask:ask-ship').querySelector('button[data-face]'),
+  )
+  // A key that is not Escape folds nothing.
+  const reopened = await expand(view, 'ask:ask-ship')
+  act(() => {
+    reopened.querySelector<HTMLInputElement>('[data-field="contest"]')?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    )
+  })
+  await flush()
+  expect(row(view, 'ask:ask-ship').getAttribute('data-open')).toBe('true')
 })
 
 test('RA-10: the opt-in pitch renders AFTER the mail, never above it (third report)', async () => {
