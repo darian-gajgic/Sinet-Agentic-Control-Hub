@@ -6,7 +6,7 @@ import stylesheet from './index.css?raw'
 import App from './App'
 import type { ApprovalItem, ApprovalList, BenchmarkVerdictForms } from './api'
 import { FakeSource, fixtures, oversightRoutes, scriptedFetch, signedIn, type Scripted } from './doubles'
-import { sourceLabel } from './Inbox'
+import { plainCostLine, plainDriftSummary, plainReason, sourceLabel } from './Inbox'
 import { EventStream } from './events'
 import { click, choose, flush, mount, typeInto } from './testing'
 
@@ -1131,9 +1131,13 @@ test('both positions fire, each sending only `enabled` — never a subject', asy
 
   const line = optInPanel(view).querySelector('[data-outcome]')!
   expect(line.getAttribute('data-outcome')).toBe('applied')
-  expect(line.textContent, 'the served detail was not rendered verbatim').toContain(
-    'It defaults OFF and no boot step, migration or administrator turns it on (BENCH-REG §4.2.1)',
-  )
+  // GF2 F1 (r2 jargon bar): the recorded line is plain words, and the served
+  // detail — the registration's own "(BENCH-REG §4.2.1)" sentence — is NOT
+  // parroted onto the panel face. The plain position line above is the
+  // panel's only status line.
+  expect(line.textContent).toContain('recorded: you are not taking part')
+  expect(line.textContent, 'the served BENCH-REG sentence leaked onto the panel face').not.toContain('BENCH-REG')
+  expect(line.textContent, 'the served opt-in jargon leaked onto the panel face').not.toContain('opt-in')
 
   // And the opposite position is one act, not a toggle over guessed state.
   click(optInPanel(view).querySelector('[data-opt-in="true"]'))
@@ -2319,7 +2323,35 @@ test('sourceLabel: plain words for a watched URL, verbatim for anything else', (
     'raw.githubusercontent.com · pydantic/genai-prices',
   )
   expect(sourceLabel('https://hnrss.org/newest?q=Claude+Code&points=50')).toBe('hnrss.org · newest · “Claude Code”')
-  // Not an http(s) URL: never a guess at what it means.
-  expect(sourceLabel('conformance:adapter-anthropic')).toBe('conformance:adapter-anthropic')
+  // The platform's own self-check watches (GF2 F6): the known
+  // "conformance:<suite>" shape reads in plain words, the raw id demoted to
+  // the group's own watching-line.
+  expect(sourceLabel('conformance:adapter-anthropic')).toBe('platform self-check · adapter-anthropic')
+  // Anything else that is not an http(s) URL: verbatim, never a guess.
   expect(sourceLabel('anthropic-changelog')).toBe('anthropic-changelog')
+})
+
+test('GF2 drain: plain words lead, cites and raw ids sit in the fold', () => {
+  // F4: the watch runner's id prefix leaves the notice face; an unprefixed
+  // summary is untouched.
+  expect(plainDriftSummary('w-localllama: new high-signal discussion upstream')).toBe(
+    'new high-signal discussion upstream',
+  )
+  expect(plainDriftSummary('the messages endpoint deprecates a parameter this platform sends')).toBe(
+    'the messages endpoint deprecates a parameter this platform sends',
+  )
+  // F2: the one known served not-answerable sentence drops its bare spec
+  // cite; every other reason is verbatim, never parsed.
+  expect(plainReason("the card's owner answers it (D10); you can read it but not decide it")).toBe(
+    "the card's owner answers it; you can read it but not decide it",
+  )
+  expect(plainReason('somebody else is named on this card')).toBe('somebody else is named on this card')
+  // F7: the estimator's one known cost shape leads with plain words; the
+  // already-plain served shapes render verbatim.
+  expect(plainCostLine('~0.00 USD (API-equivalent, D5)')).toBe(
+    "about 0.00 USD of model use, by the platform's own estimate",
+  )
+  expect(plainCostLine('about 4 minutes of model time; no outward effect until you approve one')).toBe(
+    'about 4 minutes of model time; no outward effect until you approve one',
+  )
 })

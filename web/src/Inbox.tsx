@@ -296,10 +296,15 @@ function groupBySource(items: ApprovalItem[]): NoticeGroupData[] {
  * URL renders as its host plus the path segments that name what is watched
  * (a feed filename is dropped — it names a format, not a subject), plus the
  * `q` search term where one exists, because that is what distinguishes two
- * feeds on one host. Anything that is not an http(s) URL renders verbatim —
- * never a guess at what it means. The raw string stays on the group.
+ * feeds on one host. The platform's own self-check watches name themselves
+ * "conformance:<suite>" (internal/watchlist/canary_conformance.go) — a second
+ * known shape, rendered in plain words (GF2 F6). Anything else renders
+ * verbatim — never a guess at what it means. The raw string stays on the
+ * group.
  */
 export function sourceLabel(source: string): string {
+  const selfCheck = /^conformance:(.+)$/.exec(source)
+  if (selfCheck !== null) return `platform self-check · ${selfCheck[1]}`
   let u: URL
   try {
     u = new URL(source)
@@ -1166,7 +1171,14 @@ function OptInSwitch({ reload }: { reload: () => void }) {
             () =>
               // No `person` is sent, ever: the subject defaults to the caller,
               // and that is the only subject this consent has.
-              api.setBenchmarkOptIn(enabled).then((res) => outcomeOf(true, `recorded: ${res.enabled ? 'you are taking part' : 'you are not taking part'}`, res.detail)),
+              //
+              // The served `detail` is NOT rendered here (GF2 F1): it is the
+              // registration's own sentence — "your standing benchmark
+              // opt-in … (BENCH-REG §4.2.1)" — and parroting it made the
+              // panel's recorded line jargon in both positions. The
+              // plain-words position line above, re-read on the reload, is
+              // this panel's only status line.
+              api.setBenchmarkOptIn(enabled).then((res) => outcomeOf(true, `recorded: ${res.enabled ? 'you are taking part' : 'you are not taking part'}`, '')),
             reload,
           )
         }}
@@ -1366,6 +1378,18 @@ function ExpiryChip({ item }: { item: ApprovalItem }) {
   )
 }
 
+/** The one served not-answerable sentence, byte-exact (internal/api/approvals.go:253). */
+const d10Reason = "the card's owner answers it (D10); you can read it but not decide it"
+
+/** plainReason — the served not-answerable reason minus its bare spec cite
+ *  (GF2 F2): "(D10)" names a spec section, not anything a reader can use.
+ *  Exactly the known sentence renders without the cite — a display derivation
+ *  over one known served string (the humanizeVerifySummary precedent); every
+ *  other reason renders verbatim, never parsed. */
+export function plainReason(reason: string): string {
+  return reason === d10Reason ? "the card's owner answers it; you can read it but not decide it" : reason
+}
+
 /** readString lifts one string field off a served card body, or null. It reads
  *  a key by name and judges nothing — the §38 no-classifying rule stays. */
 function readString(card: unknown, key: string): string | null {
@@ -1407,8 +1431,16 @@ function issueLine(item: ApprovalItem): string {
       return readString(item.card, 'summary') ?? 'The blind-comparison practice raised an alarm — decide what to do with it.'
     case 'watchdog_flag':
       return readString(item.card, 'detail') ?? 'A watchdog flagged something unusual — look at it and sign off.'
-    case 'drift_card':
-      return readString(item.card, 'summary') ?? 'Something the platform depends on changed outside it — look and sign off.'
+    case 'drift_card': {
+      // The face leads with the summary's plain words (GF2 F4) — the raw
+      // watch id it arrives prefixed with stays in the technical fold — and
+      // the fallback claims no decision (GF2 F5): a notice is read, not
+      // signed off.
+      const summary = readString(item.card, 'summary')
+      return summary !== null
+        ? plainDriftSummary(summary)
+        : 'Something the platform depends on changed outside it — open it to read what was noticed.'
+    }
     case 'conformance_card':
       return 'A platform self-check came back red — acknowledging records that a person has seen it.'
     default:
@@ -1465,10 +1497,13 @@ function CardDetail({
       <div className="card-head">
         {item.answerable ? (
           <Chip tone="green" data-answerable="true">
-            yours to answer
+            {/* A notice's chip says what a notice is (GF2 F5): something to
+                read and clear, never a decision claim — the drawer's own
+                intro promises nothing here needs one. */}
+            {isNotice(item) ? 'yours to clear' : 'yours to answer'}
           </Chip>
         ) : (
-          <Absent reason={item.not_answerable_reason ?? 'not yours to answer'} />
+          <Absent reason={plainReason(item.not_answerable_reason ?? 'not yours to answer')} />
         )}
         {item.step_up_required && (
           <Chip tone="orange" data-step-up="true">
@@ -1528,8 +1563,46 @@ function TechDetails({ item }: { item: ApprovalItem }) {
           seen <Stamp ts={item.observed_ts} />
         </span>
       </p>
+      <PlanMechanics item={item} />
       {foldedRowKinds.includes(item.kind) && <RowCard card={item.card} />}
     </details>
+  )
+}
+
+/** plainCostLine — the plan's served cost line in the reader's words (GF2 F7).
+ *  The estimator's own dialect is one known shape — "~0.00 USD
+ *  (API-equivalent, D5)" (internal/intake/pipeline.go:1439) — whose cite meant
+ *  nothing on the card face. The known shape leads with plain words and the
+ *  served line stands whole in the fold (PlanMechanics); any other cost line
+ *  renders verbatim — the other served shapes are already plain sentences. */
+export function plainCostLine(costTime: string): string {
+  const m = /^~(\d+(?:\.\d+)?) USD \(API-equivalent, D5\)$/.exec(costTime)
+  if (m === null) return costTime
+  return `about ${m[1]} USD of model use, by the platform's own estimate`
+}
+
+/**
+ * The plan card's routing mechanics, in the fold (GF2 F7): the served cost
+ * line verbatim, the clearance measure, the size class and the size note.
+ * None of it is a decision input for the card face; all of it stays whole and
+ * findable for the reader who wants the record. Renders nothing for a card
+ * that is not an S06.9 plan.
+ */
+function PlanMechanics({ item }: { item: ApprovalItem }) {
+  if (item.kind !== 'ask') return null
+  const l1 = asSnapshot(item.card).approval?.layer1
+  if (l1 === undefined) return null
+  const rows = [
+    l1.cost_time,
+    l1.clearance !== undefined ? `clearance ${String(l1.clearance)}` : undefined,
+    l1.size_class !== undefined && l1.size_class !== '' ? `size class ${l1.size_class}` : undefined,
+    l1.size_note,
+  ].filter((s): s is string => typeof s === 'string' && s !== '')
+  if (rows.length === 0) return null
+  return (
+    <p className="font-mono text-[11px] tabular-nums text-muted-foreground wrap-anywhere" data-plan-mechanics>
+      {rows.join(' · ')}
+    </p>
   )
 }
 
@@ -1560,10 +1633,13 @@ function displayClass(item: ApprovalItem): string {
     case 'effect':
       return 'proposal'
     case 'watchdog_flag':
-    case 'drift_card':
     case 'conformance_card':
     case 'benchmark_alarm':
       return 'sign-off'
+    case 'drift_card':
+      // GF2 F5: inside the notices drawer a "sign-off" chip read as a
+      // decision claim under an intro promising none. A notice is a notice.
+      return 'notice'
     case 'benchmark_verdict':
       return 'judgement'
     case 'memory_conflict':
@@ -1622,10 +1698,13 @@ function checkClass(item: ApprovalItem): string {
     case 'benchmark_verdict':
       return 'judgement'
     case 'watchdog_flag':
-    case 'drift_card':
     case 'conformance_card':
     case 'benchmark_alarm':
       return 'sign-off'
+    case 'drift_card':
+      // The notice class (GF2 F5): its advice must not read as a decision —
+      // the sign-off line's "signing it off" was one inside the drawer.
+      return 'notice'
     case 'ask': {
       const envelope = answerEnvelope(item)
       if (envelope === 'contest') return 'proposal'
@@ -1637,7 +1716,7 @@ function checkClass(item: ApprovalItem): string {
 }
 
 /**
- * The five lines. Each is checked against the thing it teaches:
+ * The six lines. Each is checked against the thing it teaches:
  *
  *  - the proposal line points at `ApprovalCard`'s own centerpiece — the
  *    assumptions and the will-not-do list (S06.9);
@@ -1646,6 +1725,8 @@ function checkClass(item: ApprovalItem): string {
  *    verbs accept (`composeAnswer`);
  *  - the sign-off line agrees with the conformance verb, whose acknowledgement
  *    is served STILL RED — acknowledging records that somebody read it;
+ *  - the notice line agrees with the served dismiss verb (GF2 F5): clearing
+ *    records a reader and stops nothing, and it claims no decision;
  *  - the judgement line states BENCH-REG §3.3's frozen rule, which `canFire`
  *    enforces in the form: no verdict without a guess;
  *  - the effect line is careful in the one direction that matters — where a
@@ -1663,6 +1744,8 @@ function checkFirst(item: ApprovalItem): string {
       return 'the question itself and the options listed on this card. Those options are the whole of the answer — nothing outside this card is part of it.'
     case 'sign-off':
       return "the platform's own account of what happened, below — the full raw record is inside Technical details. Signing it off records that a person has read it; it does not undo it and does not make it go away."
+    case 'notice':
+      return "the platform's own account of what it noticed, below — the full raw record is inside Technical details. Clearing it just records that you've seen it; the watch itself keeps running either way."
     case 'judgement':
       return 'both responses, without knowing which is which, and then say which one you think the platform produced. The guess travels with the vote — it is part of the answer rather than an extra.'
     case 'effect':
@@ -1904,6 +1987,16 @@ function WatchdogContent({ card }: { card: unknown }) {
   )
 }
 
+/** plainDriftSummary — the watch runner's summaries arrive prefixed with the
+ *  watch row's own id ("w-localllama: …"), which put a raw id at the head of
+ *  every notice face (GF2 F4). The known prefix shape is stripped for display
+ *  — a derivation over the one known producer shape, the sourceLabel move —
+ *  and the raw summary stays whole in the technical fold's record. A summary
+ *  not wearing the prefix renders verbatim. */
+export function plainDriftSummary(summary: string): string {
+  return summary.replace(/^w-[a-z0-9][\w-]*:\s+/i, '')
+}
+
 /** The outside-world drift card: the producer's summary, and how often the
  *  same incident has hit. `hits` is a served count, never a computation. */
 function DriftContent({ card }: { card: unknown }) {
@@ -1915,13 +2008,15 @@ function DriftContent({ card }: { card: unknown }) {
   return (
     <div className="ask-card" data-card-kind="drift_card">
       <p className="restatement wrap-anywhere">
-        {summary ?? <Absent reason="the finding carries no summary" />}
+        {summary !== null ? plainDriftSummary(summary) : <Absent reason="the finding carries no summary" />}
       </p>
       <p className="muted">
         {source !== null && <>Noticed watching {source}. </>}
         {typeof hits === 'number' && hits > 1 && <>The same incident has hit {String(hits)} times. </>}
         {classified === false && <>The local pass could not judge it — this card is here for a person&apos;s eyes. </>}
-        Dismissing records that a person has read it; it changes nothing outside this queue.
+        {/* Plain words for the clear (GF2 F3): what the served dismiss verb
+            records, said the way the drawer's own button says it. */}
+        Clearing it just records that you&apos;ve seen it; it changes nothing outside this queue.
       </p>
       {note !== null && <p className="muted">{note}</p>}
     </div>
@@ -2129,12 +2224,13 @@ function ApprovalCard({ snap, expanded }: { snap: AskSnapshot; expanded: boolean
       <Bullets title="Coverage gaps you accepted" items={l1.uncovered} />
       <Bullets title="Open findings" items={l1.open_findings} />
 
-      <p className="muted">
-        {l1.cost_time ?? 'no cost or time line on this card'}
-        {l1.clearance !== undefined && <> · clearance {String(l1.clearance)}</>}
-        {l1.size_class && <> · {l1.size_class}</>}
+      {/* The cost line in plain words (GF2 F7). The clearance measure, the
+          bare size class and the cite-carrying size note are routing
+          mechanics, not decision inputs — they moved whole into the
+          Technical details fold (PlanMechanics). */}
+      <p className="muted" data-plan-cost>
+        {l1.cost_time !== undefined && l1.cost_time !== '' ? plainCostLine(l1.cost_time) : 'no cost or time line on this card'}
       </p>
-      {l1.size_note && <p className="muted">{l1.size_note}</p>}
       <Help help={l1.help} />
 
       <Expandable title="The detail behind this" open={expanded}>
@@ -2564,7 +2660,7 @@ function Acts({
   if (!item.answerable) {
     return (
       <p className="acts" data-acts="read-only">
-        <Absent reason={item.not_answerable_reason ?? 'this card is not yours to answer'} />
+        <Absent reason={plainReason(item.not_answerable_reason ?? 'this card is not yours to answer')} />
         {/* The missing sentence (W2-4): under the dev fallback every card is
             read-only, and a card with no verbs and no way forward posed as a
             dead end. Who can act, and how to become them, is said here. */}
