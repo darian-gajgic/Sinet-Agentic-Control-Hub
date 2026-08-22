@@ -137,19 +137,28 @@ var taxonomyTitles = map[intake.Family]string{
 	intake.FamilyGeneric:  "Interview must-know taxonomy — generic fallback family (B2-2 seed)",
 }
 
-// taxonomyContent renders one family's in-code seed as the strict JSON the
-// governed file holds — the SAME form intake.LoadTaxonomy parses, so the
-// governed file IS the operator-editable override input (CONVENTIONS §17).
-func taxonomyContent(fam intake.Family) (string, error) {
-	tax, ok := intake.SeedTaxonomies()[fam]
-	if !ok {
-		return "", fmt.Errorf("memory: no in-code taxonomy seed for the %s family", fam)
+// taxonomyContentOf renders one question set as the strict JSON the governed
+// file holds — the SAME form intake.LoadTaxonomy parses, so the governed file
+// IS the operator-editable override input (CONVENTIONS §17).
+func taxonomyContentOf(fam intake.Family, tax *intake.Taxonomy) (string, error) {
+	if tax == nil {
+		return "", fmt.Errorf("memory: no taxonomy content for the %s family", fam)
 	}
 	raw, err := json.MarshalIndent(tax, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("memory: marshal %s taxonomy: %w", fam, err)
 	}
 	return string(raw) + "\n", nil
+}
+
+// taxonomyContent renders the RW-12-RATIFIED content of one family — the
+// frozen snapshot, never the live seed (rw12taxonomy_v2.go). This function used
+// to read intake.SeedTaxonomies(), which made every RW-12 governed entry a
+// pointer at whatever the code says today; P3-GF3-BE1 revises two of those sets,
+// so the pointer would now write v3 content under this packet's ratification
+// record. The v3 content enters as its own supersession instead (gf3seeds.go).
+func taxonomyContent(fam intake.Family) (string, error) {
+	return taxonomyContentOf(fam, rw12TaxonomySnapshot()[fam])
 }
 
 func taxonomyDraft(fam intake.Family, content string) Draft {
@@ -225,6 +234,28 @@ func (g *Gate) committedContentHash(ctx context.Context, entryID string) (string
 		return "", false, nil // the row is there; its body is not
 	}
 	return hash.String, true, nil
+}
+
+// rw12PredecessorContent renders what THIS packet's supersession replaces: the
+// content the B2 gate ratified, rendered exactly as EnsureB2SeedGovernance
+// writes it.
+//
+// A supersession trigger of "the active content is not mine" is right for the
+// first boot and wrong for every boot after a LATER packet has moved the topic
+// on: this Ensure would find v3 unequal to its v2 and write v2 back, the later
+// one would write v3 again, and every boot would mint two versions forever. So
+// an Ensure moves the record forward from the content it was written against,
+// and leaves anything it does not recognize to whichever record owns it. The
+// same rule keeps a boot from silently reverting an operator's own governed
+// edit, which the content-only trigger did.
+func rw12PredecessorContent(fam intake.Family) (string, error) {
+	switch fam {
+	case intake.FamilySoftware:
+		return taxonomyContentOf(fam, b2SoftwareTaxonomyV1())
+	case intake.FamilyGeneric:
+		return taxonomyContentOf(fam, b2GenericTaxonomyV1())
+	}
+	return "", fmt.Errorf("memory: no B2-ratified content for the %s family", fam)
 }
 
 // repairGovernedFile rewrites a governed file to the content its row is
@@ -323,6 +354,13 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (TaxonomyGovern
 			return res, err
 		}
 		want := contentHash(content)
+		// What this packet's supersession replaces: the content the B2 gate
+		// ratified. Anything else active on this topic belongs to a record that
+		// is not this one — see supersedable.
+		previous, err := rw12PredecessorContent(fam)
+		if err != nil {
+			return res, err
+		}
 
 		// DECIDE FROM THE ROW, NEVER FROM THE FILE (drain r1, F4 — see
 		// committedContentHash). HouseObject fills Content from disk, and disk
@@ -343,24 +381,31 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (TaxonomyGovern
 			continue
 		}
 		onDisk := contentHash(cur.Content)
-		if committed != onDisk {
-			// The bytes on disk are not the bytes this row was committed
-			// with. Count it so a boot says so out loud.
-			res.Repaired++
-			if committed == want {
-				// The RECORD is already right and only the disk is wrong, so
-				// there is nothing to supersede — repair the file to what the
-				// row attests and move on.
+		if committed == want {
+			// The RECORD is already this packet's. Nothing to supersede; a
+			// disk that disagrees is repaired to what the row attests, which
+			// mints no version because nothing about the record changed.
+			if committed != onDisk {
+				res.Repaired++
 				if err := g.repairGovernedFile(cur, content); err != nil {
 					return res, err
 				}
-				continue
 			}
-			// Otherwise the supersession below rewrites the file anyway,
-			// which resolves the divergence and records it as a version.
-		}
-		if committed == want {
 			continue
+		}
+		if committed != contentHash(previous) {
+			// Not this packet's to move: the active version holds content
+			// neither this record nor the one it replaces attests to — a later
+			// packet's supersession, or an operator's own governed edit. Both
+			// stand; superseding here would revert them at every boot.
+			continue
+		}
+		if committed != onDisk {
+			// The bytes on disk are not the bytes this row was committed
+			// with. Count it so a boot says so out loud; the supersession
+			// below rewrites the file anyway, which resolves the divergence
+			// and records it as a version.
+			res.Repaired++
 		}
 		// The new version reuses the canonical file name, so the file at
 		// house/intake-taxonomy-<family>.json always holds the CURRENT
