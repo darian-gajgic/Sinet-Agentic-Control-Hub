@@ -1530,7 +1530,10 @@ export type ChatBornTask = {
 
 /** The intake card as the pipeline issued it. Questions carry their own option
  *  values, and an answer quotes those values back — the vocabulary is the
- *  card's, never the surface's. */
+ *  card's, never the surface's. The GF3-BE1 decorations (`why`, `suggested`,
+ *  `suggested_option`, `clearance_floor`) ride this same producer shape; the
+ *  full journey surface renders them, and this mirror carries them so the
+ *  type stays the wire's truth. */
 export type ChatIntakeCard = {
   kind: string
   task_id?: string
@@ -1538,8 +1541,18 @@ export type ChatIntakeCard = {
   version?: number
   issued_ts?: string
   clearance?: number
+  clearance_floor?: number
   tier?: string
-  questions?: { id: string; text: string; phrased?: string; options?: { label: string; value: string }[]; weight?: number }[]
+  questions?: {
+    id: string
+    text: string
+    phrased?: string
+    why?: string
+    suggested?: string
+    suggested_option?: string
+    options?: { label: string; value: string }[]
+    weight?: number
+  }[]
 }
 
 /**
@@ -1610,8 +1623,29 @@ export type IntakeQuestion = {
   id: string
   text: string
   phrased?: string
+  /** The taxonomy's one-line plain-words why: what this question decides.
+   *  Served with the question (P3-GF3-BE1), rendered as the faint line the
+   *  Nexus interview proved out. */
+  why?: string
+  /** The utility seat's task-grounded proposed answer (P3-GF3-BE1 R3): one
+   *  line, folded by slot id under the same containment as `phrased`. Absent
+   *  whenever the seat degrades — the honest no-recommendation, never
+   *  synthesized here. */
+  suggested?: string
+  /** The option VALUE `suggested` corresponds to, when it names one of THIS
+   *  question's own options (containment enforced producer-side: a value that
+   *  names no option is dropped there, so this field is trustworthy as a key
+   *  into `options`). A suggestion without it is a recommended pre-fill for
+   *  the free-text field, not a chip. */
+  suggested_option?: string
   options?: { label: string; value: string }[]
   weight?: number
+  /** On the S06.9 review card only (P3-GF3-BE1 R8, "Change my answers"): how
+   *  this slot is CURRENTLY settled — the platform's own record, the same
+   *  shape the understood block carries. Absent on a normal interview round,
+   *  and absent on a review row that is still open. Its presence is what
+   *  tells this client to render review-and-adjust instead of asking blind. */
+  resolution?: IntakeUnderstoodItem
 }
 
 /** One resolved must-know, as the platform recorded it (P3-RW-12 R8 —
@@ -1726,6 +1760,11 @@ export type IntakeCard = {
   issued_ts?: string
   /** The S06.5 clearance measure the platform computed — served, never derived. */
   clearance?: number
+  /** The tier's ⚙ clearance floor, served beside the measure from the one
+   *  card-issue site (P3-GF3-BE1 R11): where the questions stop for work like
+   *  this. Served, never derived — the meter renders it, nothing recomputes
+   *  it. Absent on cards issued before the field existed. */
+  clearance_floor?: number
   tier?: string
   questions?: IntakeQuestion[]
   decision?: IntakeDecision
@@ -1757,7 +1796,13 @@ export type IntakeTaskView = {
  * fields mirror the card, and every value quotes the card's own vocabulary.
  */
 export type IntakeAnswerBody = {
-  answers?: { id: string; value: string }[]
+  /** One entry per question, quoting the card's own vocabulary. Exactly one
+   *  arm per entry: `value` answers the slot; `skip: true` (P3-GF3-BE1 R6,
+   *  with NO value beside it — the server refuses a body carrying both) is
+   *  the per-question "take the recommendation and move on", which converts
+   *  THAT slot to an explicit assumption carrying the suggestion the card
+   *  served. A skipped slot is resolved, so it is never re-asked. */
+  answers?: { id: string; value?: string; skip?: boolean }[]
   assume?: { id: string; value: string }[]
   force_proceed?: boolean
   text?: string
@@ -1765,13 +1810,24 @@ export type IntakeAnswerBody = {
   criteria?: string[]
   facts?: { rule_id: string; fact: string }[]
   action?: string
+  /** The legacy single contest (kept byte-compatible server-side). New sends
+   *  use `contests` — one send may name any number of targets. */
   contest?: { target: string; note?: string }
-  /** The person's one-line why, riding a cancel-shaped answer (P3-RW-19).
-   *  The field is reachable on every intake card because one Answer type
-   *  serves them all, but the platform honors it ONLY on the two
-   *  cancel-shaped answers — `{action:"cancel"}` on the approval card and
-   *  `{choice:"rethink"}` on the SPEC-DOUBT card (ratified OQ2) — so this
-   *  client sends it only there. */
+  /** The S06.9 multi-contest Re-plan entry (P3-GF3-BE1 R10): every contested
+   *  step, criterion or assumption in ONE send, each key quoted from the
+   *  card's own vocabulary. All of them, plus the top-level `note`, merge
+   *  into one bounded delta re-plan — one revision, not one per item. */
+  contests?: { target: string; note?: string }[]
+  /** The person's own words, riding the same channel the verify/ladder cards
+   *  carry (P3-RW-19 R6). The platform honors it on exactly three answers
+   *  (the P3-GF3-BE1 ruling, which EXTENDS the ratified OQ2 reading): the two
+   *  cancel-shaped ones — `{action:"cancel"}` on the approval card and
+   *  `{choice:"rethink"}` on the SPEC-DOUBT card, where it becomes the
+   *  cancel's recorded reason — and `{action:"replan"}`, where it is the
+   *  free-text contest channel ("what I want different, in my words") and
+   *  becomes a target-less finding on the one bounded delta re-plan; a
+   *  note-only re-plan is legal. Everywhere else it is ignored, so this
+   *  client sends it only on those three. */
   note?: string
 }
 

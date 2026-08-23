@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CircleAlert, FolderOpen, Sparkles, X } from 'lucide-react'
+import { Check, CircleAlert, CornerDownRight, FolderOpen, Pencil, Sparkles, X } from 'lucide-react'
 
 import {
   ApiError,
@@ -27,11 +27,14 @@ import { Button, Chip } from './ui'
  * The give-work door (map §3 v3; Spec S06.5–S06.9 through the landed intake
  * routes) — the journey that kills finding 5.
  *
- * One plain ask box → the interview as a FORM (cards of up to 4 questions,
- * labeled options + free text, a live clearance meter) → the plan card (what I
- * understood · what you'll get · numbered steps with done-when · what I will
- * NOT do · assumptions front-and-center · cost/time) → Approve / Re-plan /
- * Re-interview / Cancel.
+ * One plain ask box → the interview as a GUIDED SEQUENCE (P3-GF3-FE: one
+ * decision in view at a time, each with the served recommendation as a
+ * one-click take, a per-question skip riding {id,skip:true}, answered/skipped
+ * state on every row, the self-explaining must-knows meter with its served
+ * floor) → the plan card (what I understood · what you'll get · numbered
+ * steps with done-when · what I will NOT do · assumptions front-and-center ·
+ * cost/time) → Approve / Change the plan… (multi-contest + own words) /
+ * Change my answers… (the review card) / Cancel.
  *
  * THE SUBMIT CONTRACT THAT KILLS FINDING 5: every primary act on this surface
  * is either visibly enabled, or visibly disabled WITH ITS REASON PRINTED
@@ -391,18 +394,22 @@ function AskForm({
 
 /* ── the journey: card after card until approved ─────────────────────────── */
 
-/** What each card kind asks of the person, in one line under the header. */
+/** What each card kind asks of the person, in one line under the header.
+ *  The interview line IS the up-front contract (design §2.F): what this is,
+ *  that every question carries a one-click recommendation, and what skipping
+ *  does — said before the first question, not discovered one screen late. */
 const kindLine: Record<string, string> = {
-  interview: 'Its questions — pick an option or answer in your own words. What you skip, it will assume out loud.',
-  clarification: 'The drafted spec has open markers. Approval opens once these are answered.',
+  interview:
+    'A few questions, each with a recommendation you can take in one click. Skip any of them: what you skip becomes a listed assumption, shown on the plan before anything runs or spends money.',
+  clarification: 'Its draft still has open points only you can settle. The plan opens once these are answered.',
   escalation: 'One question it cannot proceed without.',
-  'decision.coverage': 'The plan cannot cover everything you asked. Decide what happens to the gap.',
-  'decision.research': 'It is missing a fact it would otherwise have to research. Supply it, or send it to re-plan.',
-  'decision.spec_doubt': 'It doubts the spec captures what you meant. This card is never skipped.',
+  'decision.coverage': 'The plan cannot cover everything you asked. Decide what happens to the part it cannot cover.',
+  'decision.research': 'It is missing a fact it would otherwise have to research. Supply it, or send it back to planning.',
+  'decision.spec_doubt': 'It is not sure it understood you correctly. Read its doubt and decide; this card is never skipped.',
   'decision.family':
     'One question before the interview: what KIND of work is this? The questions it asks next, and who does the work, follow from your answer.',
   approval: 'The plan. Nothing runs and nothing spends until you approve it.',
-  'approval.delta': 'The plan changed after your approval. Exactly what changed is below — nothing else moved.',
+  'approval.delta': 'The plan changed after your approval. Exactly what changed is below; nothing else moved.',
 }
 
 function Journey({
@@ -632,8 +639,11 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
             measures how settled the must-knows are, so before the first
             question and after the questions end it measures nothing a reader
             can act on — at the plan stage the card's own open markers speak,
-            and a full meter beside them read as a contradiction. */}
-        {clearance !== undefined && (view.open_card?.questions ?? []).length > 0 && <ClearanceMeter value={clearance} />}
+            and a full meter beside them read as a contradiction. The floor is
+            the card's own served figure (P3-GF3-BE1 R11), never derived. */}
+        {clearance !== undefined && (view.open_card?.questions ?? []).length > 0 && (
+          <ClearanceMeter value={clearance} floor={view.open_card?.clearance_floor} />
+        )}
       </div>
     </header>
   )
@@ -652,27 +662,39 @@ function stakesWords(tier: string): string {
 }
 
 /** The served S06.5 clearance: how settled the must-knows are, on the
- *  platform's own 0–100 scale. The figure prints as served; only the fill
- *  width is scaled onto the track. */
-function ClearanceMeter({ value }: { value: number }) {
+ *  platform's own 0–100 scale, with the tier's served stopping point beside
+ *  it (P3-GF3-BE1 R11) — the meter that explains itself (design §2.F): what
+ *  it measures, where the questions stop, and what happens to the rest. Both
+ *  figures print as served; only the fill width is scaled onto the track. */
+export function ClearanceMeter({ value, floor }: { value: number; floor?: number }) {
   const ratio = Math.max(0, Math.min(1, value > 1 ? value / 100 : value))
   // Display precision, not a different fact: the platform serves the measure
   // at float precision ("12.121212…"), and a meter is read at whole points.
-  // The exact served value stays on data-clearance.
+  // The exact served values stay on data-clearance / data-clearance-floor.
   const shown = Math.round(value > 1 ? value : value * 100)
+  const stopAt = floor !== undefined && floor > 0 ? Math.round(floor > 1 ? floor : floor * 100) : undefined
+  const stopRatio = stopAt !== undefined ? Math.max(0, Math.min(1, stopAt / 100)) : undefined
   return (
     <div
       className="clearance"
-      title="Clearance — how much of what it must know before planning is settled, out of 100. The platform computes it; answering raises it. A full meter is not approval: open markers on the drafted spec can still hold the plan until they are answered."
+      title={
+        stopAt !== undefined
+          ? `How settled the must-knows are, from 0 to 100. Answering raises it; a skip settles its point as a listed assumption. The questions stop once it reaches ${String(stopAt)} for work like this; whatever is still open then becomes listed assumptions on the plan.`
+          : 'How settled the must-knows are, from 0 to 100. Answering raises it. The questions stop once enough is settled for work like this; whatever is still open then becomes listed assumptions on the plan.'
+      }
       data-clearance={String(value)}
+      data-clearance-floor={floor !== undefined ? String(floor) : undefined}
     >
-      <span className="clearance-label">Clearance</span>
+      <span className="clearance-label">Must-knows</span>
       <span className="clearance-track" aria-hidden="true">
         <span className="clearance-fill" style={{ width: `${String(ratio * 100)}%` }} />
+        {stopRatio !== undefined && <i className="clearance-stop" style={{ insetInlineStart: `${String(stopRatio * 100)}%` }} />}
       </span>
       <b className="mono">
         {String(shown)}
-        <span className="clearance-unit">/100 settled</span>
+        <span className="clearance-unit">
+          {stopAt !== undefined ? ` of the ${String(stopAt)} needed` : '/100 settled'}
+        </span>
       </b>
     </div>
   )
@@ -734,6 +756,16 @@ function originSlots(origin: string): string[] {
  *  Raw slot ids never surface (blocker #15). */
 function humanSlot(id: string): string {
   return id.replace(/[_-]+/g, ' ').trim()
+}
+
+/** An answer VALUE in reader's words. An option answer is recorded under the
+ *  card's machine value (`keep_both_flag`), and the option list that carried
+ *  its label is not on the approval card — so a value that is shaped like a
+ *  machine token renders with its separators spaced (the humanSlot precedent,
+ *  blocker #15; found on pixels, GF3 walk). Real prose passes through
+ *  untouched, and the transformation never changes the words themselves. */
+export function humanValue(v: string): string {
+  return /^[a-z0-9]+(?:[_-][a-z0-9]+)+$/.test(v) ? v.replace(/[_-]+/g, ' ') : v
 }
 
 /**
@@ -815,7 +847,7 @@ export function UnderstoodPanel({
       key: `${it.slot_id}:${it.how}`,
       names: [it.name],
       slots: [it.slot_id],
-      value: stated === '' ? '—' : assumptionRemainder(it.name, stated),
+      value: stated === '' ? '—' : humanValue(assumptionRemainder(it.name, stated)),
       how: it.how,
     })
   }
@@ -1076,8 +1108,17 @@ function CardPanel({
         <ComposingFace mode={composing} />
       ) : (
         <>
-          {kind === 'interview' && <QuestionForm card={card} busy={busy} allowAssume onAnswer={answer} />}
-          {kind === 'clarification' && <QuestionForm card={card} busy={busy} allowAssume={false} onAnswer={answer} />}
+          {kind === 'interview' &&
+            // The S06.9 review card ("Change my answers") is the same interview
+            // kind carrying per-question resolutions — its presence is the
+            // signal to render review-and-adjust instead of asking blind
+            // (P3-GF3-BE1 R8; design §2.D).
+            ((card.questions ?? []).some((q) => q.resolution !== undefined) ? (
+              <ReviewForm card={card} busy={busy} onAnswer={answer} />
+            ) : (
+              <InterviewForm card={card} busy={busy} onAnswer={answer} />
+            ))}
+          {kind === 'clarification' && <QuestionForm card={card} busy={busy} onAnswer={answer} />}
           {kind === 'escalation' && <EscalationForm card={card} busy={busy} onAnswer={answer} />}
           {(kind === 'decision.coverage' || kind === 'decision.research' || kind === 'decision.spec_doubt') && (
             <DecisionForm card={card} busy={busy} onAnswer={answer} />
@@ -1088,9 +1129,7 @@ function CardPanel({
           {fallbackForm === 'approval' && <PlanCard view={view} card={card} busy={busy} onAnswer={answer} />}
           {fallbackForm === 'delta' && <DeltaForm card={card} busy={busy} onAnswer={answer} />}
           {fallbackForm === 'decision' && <DecisionForm card={card} busy={busy} onAnswer={answer} />}
-          {fallbackForm === 'questions' && (
-            <QuestionForm card={card} busy={busy} allowAssume={false} onAnswer={answer} />
-          )}
+          {fallbackForm === 'questions' && <QuestionForm card={card} busy={busy} onAnswer={answer} />}
           {fallbackForm === 'none' && !known && (
             <p className="muted">
               This card carries a shape this page cannot answer.{' '}
@@ -1264,34 +1303,622 @@ function JourneyFoot({ view, onView, busy }: { view: IntakeTaskView; onView: (v:
   )
 }
 
-/* ── interview / clarification: the real form ────────────────────────────── */
+/* ── the guided interview (P3-GF3-FE; design §2.F; S06.5) ────────────────── */
 
 /**
- * The interview as a FORM. Each question renders its 2–4 labeled options as
- * real buttons plus an always-present own-words input; the submit row is
- * unmissable — the primary act is enabled the moment one question is
- * answered, the disabled state prints its reason beside it, and the
- * force-proceed arm says exactly what it does with what you skipped.
+ * What one question has been given on this card, in the card's own
+ * vocabulary: an answer value, or the per-question skip — S06.5's
+ * convert-to-assumption arm, riding the wire's `{id, skip: true}`
+ * (P3-GF3-BE1 R6).
  */
-function QuestionForm({
+type Given = { value: string } | { skip: true }
+
+/** A value's words: the served option label when the value names one of the
+ *  question's own options, the value itself otherwise (free text is already
+ *  the person's own words). */
+function optionLabel(q: IntakeQuestion, value: string): string {
+  return (q.options ?? []).find((o) => o.value === value)?.label ?? value
+}
+
+/** The phrased wording when the utility seat answered, the canonical taxonomy
+ *  text otherwise (P3-RW-12 R6) — the producer's own display rule. The
+ *  clarification marker's internal token never surfaces (#17). */
+function questionWording(q: IntakeQuestion): string {
+  return (q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text).replace(/^NEEDS-CLARIFICATION:\s*/, '')
+}
+
+/**
+ * The interview as a GUIDED SEQUENCE (design §2.F; GOV.UK one-decision-in-view,
+ * chosen over the grouped form because the grouped form is what a non-IT
+ * operator bounced off three times: F1/F3/F4).
+ *
+ * One question is open at a time; the others stay on screen as compact rows
+ * wearing their state — answered ✓ with the answer, skipped with what the skip
+ * means, open with "not yet" (the Nexus ✓-dimming idea, kept navigable: any
+ * row reopens on tap). Every question offers the served recommendation as a
+ * one-click take, its option chips with the recommended one starred, free text
+ * always beside them, and a per-question skip that takes the recommendation as
+ * a LISTED assumption. One send per card, armed when every question is either
+ * answered or skipped; the stop-the-questions arm below is the whole-interview
+ * escape hatch (force-proceed), unchanged in meaning.
+ */
+export function InterviewForm({
   card,
   busy,
-  allowAssume,
   onAnswer,
 }: {
   card: IntakeCard
   busy: boolean
-  allowAssume: boolean
   onAnswer: (b: IntakeAnswerBody) => void
 }) {
-  // Interview rounds are the phrased kind (P3-RW-12 R6); clarification cards
-  // are never phrased BY DESIGN, so marking their standard wording would be
-  // noise about an absence that is not a fallback. The honesty marker (#6)
-  // rides only where phrased-vs-stock is a real distinction — and when the
-  // WHOLE round is stock (the phrasing seat did not answer at all), one line
-  // says it once instead of stamping every question (the #15 lesson).
-  const phrasable = card.kind === 'interview'
-  const allStock = phrasable && (card.questions ?? []).every((q) => q.phrased === undefined || q.phrased === '')
+  const questions = card.questions ?? []
+  // When the WHOLE round is stock (the phrasing seat did not answer at all),
+  // one line says it once instead of stamping every question (the #15 lesson);
+  // a single unphrased question inside a phrased round keeps its own marker.
+  const allStock = questions.every((q) => q.phrased === undefined || q.phrased === '')
+  const [given, setGiven] = useState<Record<string, Given>>({})
+  const [cursor, setCursor] = useState(0)
+
+  const openCount = questions.filter((q) => given[q.id] === undefined).length
+  const settled = questions.length - openCount
+  const answeredCount = questions.filter((q) => {
+    const g = given[q.id]
+    return g !== undefined && 'value' in g
+  }).length
+  const skippedCount = settled - answeredCount
+  const allSettled = openCount === 0
+
+  // Settle question i and move to the next open one (wrapping), or to none:
+  // when everything is settled the send row is the story.
+  const settle = (i: number, g: Given) => {
+    const next = { ...given, [questions[i].id]: g }
+    setGiven(next)
+    for (let step = 1; step <= questions.length; step++) {
+      const j = (i + step) % questions.length
+      if (next[questions[j].id] === undefined) {
+        setCursor(j)
+        return
+      }
+    }
+    setCursor(-1)
+  }
+
+  const send = (force: boolean) => {
+    const entries = questions
+      .filter((q) => given[q.id] !== undefined)
+      .map((q) => {
+        const g = given[q.id]
+        return 'skip' in g ? { id: q.id, skip: true } : { id: q.id, value: g.value }
+      })
+    onAnswer({ answers: entries, ...(force ? { force_proceed: true } : {}) })
+  }
+
+  return (
+    <div className="q-form" data-interview-guided data-open-count={String(openCount)}>
+      <UnderstoodPanel understood={card.understood} heading="What it understood so far" />
+      {allStock && questions.length > 1 && (
+        <p className="q-stock" data-phrasing="canonical-round">
+          standard wording throughout: this round was not rephrased for your goal
+        </p>
+      )}
+      <ol className="q-seq">
+        {questions.map((q, i) => (
+          <li key={q.id}>
+            {i === cursor ? (
+              <QuestionEditor
+                q={q}
+                head={`${String(i + 1)} of ${String(questions.length)}`}
+                marker={!allStock}
+                initial={given[q.id]}
+                busy={busy}
+                saveLabel="Save and continue"
+                skip
+                onSave={(v) => {
+                  settle(i, { value: v })
+                }}
+                onSkip={() => {
+                  settle(i, { skip: true })
+                }}
+              />
+            ) : (
+              <SettledRow
+                q={q}
+                n={i + 1}
+                state={given[q.id]}
+                onOpen={() => {
+                  setCursor(i)
+                }}
+              />
+            )}
+          </li>
+        ))}
+      </ol>
+
+      <div className="door-acts">
+        <Button
+          variant="primary"
+          disabled={!allSettled || busy}
+          aria-busy={busy}
+          data-interview="send"
+          onClick={() => {
+            send(false)
+          }}
+        >
+          {busy
+            ? 'Sending…'
+            : skippedCount > 0
+              ? `Send: ${String(answeredCount)} answered, ${String(skippedCount)} skipped`
+              : 'Send my answers'}
+        </Button>
+        {!allSettled && !busy && (
+          <span className="door-why">
+            {settled === 0
+              ? 'go through the questions above: pick, type, or skip each one'
+              : `${String(openCount)} to go: answer or skip each question above`}
+          </span>
+        )}
+        {allSettled && !busy && (
+          <span className="door-why">
+            skipped questions become listed assumptions on the plan, still yours to change there
+          </span>
+        )}
+      </div>
+
+      <div className="door-acts q-escape">
+        {/* The whole-interview escape hatch (S06.5 force-proceed, untouched in
+            meaning). The button says what rides with it (W1-10) and what
+            happens to everything else — one screen BEFORE the assumptions
+            appear, not one after. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          data-interview="force"
+          onClick={() => {
+            send(true)
+          }}
+        >
+          {settled > 0
+            ? 'Stop the questions: send what I settled, assume the rest'
+            : 'Stop the questions: go straight to the plan'}
+        </Button>
+        <span className="door-why">
+          every question left open, this round and later ones, becomes a listed assumption you will see on the plan
+          before anything runs or spends
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/** One settled-or-waiting question as a compact row: its state mark, its
+ *  wording, what it was given, and the reopen affordance. The whole row is
+ *  the button (the Nexus dimmed-card idea, kept navigable). */
+function SettledRow({ q, n, state, onOpen }: { q: IntakeQuestion; n: number; state?: Given; onOpen: () => void }) {
+  const answered = state !== undefined && 'value' in state
+  const skipped = state !== undefined && 'skip' in state
+  return (
+    <button
+      type="button"
+      className="q-row"
+      data-question-row={q.id}
+      data-state={answered ? 'answered' : skipped ? 'skipped' : 'open'}
+      onClick={onOpen}
+    >
+      <span className="q-row-mark" aria-hidden="true">
+        {answered ? <Check size={13} strokeWidth={2.5} /> : skipped ? <CornerDownRight size={13} strokeWidth={2} /> : String(n)}
+      </span>
+      <span className="q-row-q">{questionWording(q)}</span>
+      <span className="q-row-a">
+        {answered
+          ? optionLabel(q, state.value)
+          : skipped
+            ? q.suggested !== undefined && q.suggested !== ''
+              ? 'skipped: goes with the recommendation'
+              : 'skipped: it chooses and lists its choice'
+            : 'not yet answered'}
+      </span>
+      <span className="q-row-edit">{state !== undefined ? 'change' : 'answer'}</span>
+    </button>
+  )
+}
+
+/**
+ * One question, open for deciding — the decision card both interview modes
+ * share. It carries, in order: the plain question (with the honest stock
+ * marker when the phrase seat did not answer THIS one), the served why line,
+ * the recommendation (one-click take when it names an option, a pre-fill
+ * offer when it is words alone), the option chips with the recommended one
+ * starred, and the always-present own-words field. The acts row prints its
+ * reason whenever the primary is disabled (the finding-5 contract).
+ */
+function QuestionEditor({
+  q,
+  head,
+  marker,
+  initial,
+  current,
+  busy,
+  saveLabel,
+  skip,
+  onSave,
+  onSkip,
+  onKeep,
+}: {
+  q: IntakeQuestion
+  /** The position words in the number chip: "2 of 4". */
+  head: string
+  /** Whether an unphrased question marks itself (suppressed when the whole
+   *  round already said "standard wording throughout" once). */
+  marker: boolean
+  initial?: Given
+  /** The review editor's current-resolution line: how this stands today. */
+  current?: string
+  busy: boolean
+  saveLabel: string
+  /** Whether the per-question skip arm renders (interview rounds and OPEN
+   *  review rows; a settled review row is changed or kept, never skipped). */
+  skip?: boolean
+  onSave: (value: string) => void
+  onSkip?: () => void
+  /** The review editor's way back: keep this point as it was. */
+  onKeep?: () => void
+}) {
+  const options = q.options ?? []
+  const initialValue = initial !== undefined && 'value' in initial ? initial.value : ''
+  const initialIsOption = options.some((o) => o.value === initialValue)
+  const [pick, setPick] = useState(initialIsOption ? initialValue : '')
+  const [typed, setTyped] = useState(initialIsOption ? '' : initialValue)
+  const recOption =
+    q.suggested_option !== undefined && q.suggested_option !== ''
+      ? options.find((o) => o.value === q.suggested_option)
+      : undefined
+  const suggestedWords = q.suggested !== undefined && q.suggested !== '' ? q.suggested : (recOption?.label ?? '')
+  const hasRec = suggestedWords !== ''
+  const draft = typed.trim() !== '' ? typed.trim() : pick
+  const stock = q.phrased === undefined || q.phrased === ''
+
+  return (
+    <fieldset className="q-card q-live" data-question={q.id}>
+      <legend className="q-legend">
+        <span className="q-n mono">{head}</span> {questionWording(q)}
+        {marker && stock && (
+          <span className="q-stock" data-phrasing="canonical">
+            standard wording: not rephrased for your goal
+          </span>
+        )}
+      </legend>
+      {q.why !== undefined && q.why !== '' && <p className="q-why">{q.why}</p>}
+      {current !== undefined && <p className="q-current">{current}</p>}
+
+      {hasRec && (
+        <div className="q-rec" data-rec={recOption !== undefined ? 'option' : 'prefill'}>
+          <span className="q-rec-star" aria-hidden="true">
+            ★
+          </span>
+          <span className="q-rec-body">
+            <span className="q-rec-head">Recommended for this goal</span>
+            <span className="q-rec-text">{suggestedWords}</span>
+          </span>
+          {recOption !== undefined ? (
+            // The one-click take (design §2.F): the recommendation IS one of
+            // the card's own options, so taking it answers the question in
+            // the card's own vocabulary and moves on.
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              data-rec-take
+              onClick={() => {
+                onSave(recOption.value)
+              }}
+            >
+              Take this
+            </Button>
+          ) : (
+            // Words without an option: a recommended PRE-FILL, never a silent
+            // answer — the words land in the box where they can be edited.
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              data-rec-prefill
+              onClick={() => {
+                setTyped(suggestedWords)
+                setPick('')
+              }}
+            >
+              Start from this
+            </Button>
+          )}
+        </div>
+      )}
+
+      {options.length > 0 && (
+        <div className="q-options" role="group" aria-label={`options for: ${q.text}`}>
+          {options.map((o) => {
+            const active = pick === o.value && typed.trim() === ''
+            const rec = o.value === q.suggested_option
+            return (
+              <button
+                key={o.value}
+                type="button"
+                className="q-option"
+                data-active={active ? 'true' : undefined}
+                data-recommended={rec ? 'true' : undefined}
+                aria-pressed={active}
+                onClick={() => {
+                  setPick((p) => (p === o.value ? '' : o.value))
+                  setTyped('')
+                }}
+              >
+                {active && <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
+                {rec && !active && (
+                  <span className="q-option-star" aria-hidden="true">
+                    ★
+                  </span>
+                )}
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <input
+        className="door-input q-own"
+        type="text"
+        placeholder="or say it in your own words…"
+        value={typed}
+        onChange={(e) => {
+          setTyped(e.target.value)
+        }}
+      />
+
+      <div className="door-acts q-acts">
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={draft === '' || busy}
+          data-q-save
+          onClick={() => {
+            onSave(draft)
+          }}
+        >
+          {saveLabel}
+        </Button>
+        {skip === true && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            data-q-skip
+            onClick={() => {
+              onSkip?.()
+            }}
+          >
+            {hasRec ? 'Skip: go with the recommendation' : 'Skip: let it choose for me'}
+          </Button>
+        )}
+        {onKeep !== undefined && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            data-q-keep
+            onClick={onKeep}
+          >
+            Keep it as it is
+          </Button>
+        )}
+        {draft === '' && !busy && (
+          <span className="door-why">
+            {hasRec
+              ? 'pick an option, type your own words, or take the recommendation'
+              : options.length > 0
+                ? 'pick an option or type your own words'
+                : 'type your answer in the box'}
+          </span>
+        )}
+      </div>
+    </fieldset>
+  )
+}
+
+/* ── the review card: "Change my answers" (P3-GF3-BE1 R8; design §2.D) ───── */
+
+/** The resolution origins in the reader's words, for the review rows. The
+ *  vocabulary is the card's (intake/cards.go); anything new renders as itself
+ *  (§42). */
+function reviewHowWords(how: string): string {
+  switch (how) {
+    case 'answered':
+      return 'your answer'
+    case 'assumption':
+      return 'assumed'
+    case 'registry':
+      return 'from the project record'
+    case 'escalation':
+      return 'you answered its question'
+    default:
+      return how
+  }
+}
+
+/** A review row's current value, in words: the answer (as its option label
+ *  where it names one), or the assumption prose the platform recorded. */
+function resolutionWords(q: IntakeQuestion): string {
+  const r = q.resolution
+  if (r === undefined) return ''
+  if (r.value !== undefined && r.value !== '') return humanValue(optionLabel(q, r.value))
+  return r.assumption ?? ''
+}
+
+/**
+ * Review-and-adjust: EVERY decision on this work, each wearing how it was
+ * settled and what it currently says, each editable — nothing re-asked blind
+ * (operator finding F5). Only what the person changes is sent; the platform
+ * redrafts once with the changes merged and the plan card returns.
+ */
+export function ReviewForm({
+  card,
+  busy,
+  onAnswer,
+}: {
+  card: IntakeCard
+  busy: boolean
+  onAnswer: (b: IntakeAnswerBody) => void
+}) {
+  const questions = card.questions ?? []
+  const [changes, setChanges] = useState<Record<string, Given>>({})
+  const [editing, setEditing] = useState<string | null>(null)
+  const n = Object.keys(changes).length
+
+  const save = () => {
+    const entries = questions
+      .filter((q) => changes[q.id] !== undefined)
+      .map((q) => {
+        const g = changes[q.id]
+        return 'skip' in g ? { id: q.id, skip: true } : { id: q.id, value: g.value }
+      })
+    onAnswer({ answers: entries })
+  }
+
+  return (
+    <div className="q-form" data-interview-review>
+      <div className="review-head">
+        <p className="decision-summary">Your decisions on this work, all in one place.</p>
+        <p className="review-sub">
+          Each point shows how it was settled and what it says now. Open any of them to change it; what you leave
+          alone stays exactly as it is. Saving redrafts the plan with your changes and brings the plan card back.
+        </p>
+      </div>
+      <ol className="q-seq" data-review-count={String(questions.length)}>
+        {questions.map((q, i) => (
+          <li key={q.id}>
+            {editing === q.id ? (
+              <QuestionEditor
+                q={q}
+                head={`${String(i + 1)} of ${String(questions.length)}`}
+                marker={false}
+                initial={changes[q.id] ?? (q.resolution?.how === 'answered' ? { value: q.resolution.value ?? '' } : undefined)}
+                current={
+                  q.resolution !== undefined
+                    ? `Now: ${resolutionWords(q)} (${reviewHowWords(q.resolution.how)})`
+                    : 'Still open: nobody has settled this one yet.'
+                }
+                busy={busy}
+                saveLabel="Save this change"
+                skip={q.resolution === undefined}
+                onSave={(v) => {
+                  setChanges((c) => ({ ...c, [q.id]: { value: v } }))
+                  setEditing(null)
+                }}
+                onSkip={() => {
+                  setChanges((c) => ({ ...c, [q.id]: { skip: true } }))
+                  setEditing(null)
+                }}
+                onKeep={() => {
+                  setChanges((c) => {
+                    const rest = { ...c }
+                    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+                    delete rest[q.id]
+                    return rest
+                  })
+                  setEditing(null)
+                }}
+              />
+            ) : (
+              <ReviewRow
+                q={q}
+                change={changes[q.id]}
+                onOpen={() => {
+                  setEditing(q.id)
+                }}
+              />
+            )}
+          </li>
+        ))}
+      </ol>
+      <div className="door-acts">
+        <Button
+          variant="primary"
+          disabled={n === 0 || busy}
+          aria-busy={busy}
+          data-review="save"
+          onClick={save}
+        >
+          {busy
+            ? 'Redrafting…'
+            : n === 0
+              ? 'Save changes: redraft the plan'
+              : `Save ${String(n)} change${n === 1 ? '' : 's'}: redraft the plan`}
+        </Button>
+        {n === 0 && !busy && (
+          <span className="door-why">nothing changed yet: open a point above to change it, or Cancel below stops the task</span>
+        )}
+        {n > 0 && !busy && (
+          <span className="door-why">only what you changed moves; the fresh plan card shows the result</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** One reviewed decision as a compact row: its state, its wording, what it
+ *  says now (or what it will change to), and the change affordance. */
+function ReviewRow({ q, change, onOpen }: { q: IntakeQuestion; change?: Given; onOpen: () => void }) {
+  const r = q.resolution
+  const changed = change !== undefined
+  return (
+    <button
+      type="button"
+      className="q-row"
+      data-review-row={q.id}
+      data-state={changed ? 'changed' : (r?.how ?? 'open')}
+      onClick={onOpen}
+    >
+      <span className="q-row-mark" aria-hidden="true">
+        {changed ? <Pencil size={12} strokeWidth={2} /> : r !== undefined ? <Check size={13} strokeWidth={2.5} /> : '·'}
+      </span>
+      <span className="q-row-q">{questionWording(q)}</span>
+      <span className="q-row-a">
+        {changed ? (
+          'skip' in change ? (
+            'changes to: take the recommendation'
+          ) : (
+            `changes to: ${optionLabel(q, change.value)}`
+          )
+        ) : r !== undefined ? (
+          <>
+            {resolutionWords(q)}
+            <span className="q-row-how"> · {reviewHowWords(r.how)}</span>
+          </>
+        ) : (
+          'still open: the planner decides if you leave it'
+        )}
+      </span>
+      <span className="q-row-edit">change</span>
+    </button>
+  )
+}
+
+/* ── clarification: the open points that hold the plan ───────────────────── */
+
+/**
+ * The clarification (and unknown-kind fallback) form: every open point on one
+ * card, options where served, free text always. Clarification cards are never
+ * phrased BY DESIGN, so no stock marker rides here — marking an absence that
+ * is not a fallback would be noise (#6).
+ */
+function QuestionForm({
+  card,
+  busy,
+  onAnswer,
+}: {
+  card: IntakeCard
+  busy: boolean
+  onAnswer: (b: IntakeAnswerBody) => void
+}) {
   const questions = card.questions ?? []
   const [picked, setPicked] = useState<Record<string, string>>({})
   const [own, setOwn] = useState<Record<string, string>>({})
@@ -1306,41 +1933,15 @@ function QuestionForm({
   const answered = questions.filter((q) => valueOf(q) !== '')
   const openCount = questions.length - answered.length
 
-  const send = (force: boolean) => {
-    onAnswer({
-      answers: answered.map((q) => ({ id: q.id, value: valueOf(q) })),
-      ...(force ? { force_proceed: true } : {}),
-    })
-  }
-
   return (
     <div className="q-form">
       <UnderstoodPanel understood={card.understood} heading="What it understood so far" />
-      {allStock && questions.length > 1 && (
-        <p className="q-stock" data-phrasing="canonical-round">
-          standard wording throughout — this round was not rephrased for your request
-        </p>
-      )}
       {questions.map((q, i) => (
         <fieldset className="q-card" key={q.id} data-question={q.id}>
           <legend className="q-legend">
-            {/* The phrased wording when the utility seat answered, the
-                canonical taxonomy text otherwise (P3-RW-12 R6) — the
-                producer's own display rule. The fallback ADMITS itself
-                (review #6): a stock question and a phrased one read
-                differently, and pretending they are the same voice is a
-                small lie. */}
-            <span className="q-n mono">{String(i + 1)}</span>{' '}
-            {/* The marker's internal token never surfaces (#17): the kind line
-                above already says these are the spec's open markers, so the
-                words that follow the token are the question. */}
-            {(q.phrased !== undefined && q.phrased !== '' ? q.phrased : q.text).replace(/^NEEDS-CLARIFICATION:\s*/, '')}
-            {phrasable && !(allStock && questions.length > 1) && (q.phrased === undefined || q.phrased === '') && (
-              <span className="q-stock" data-phrasing="canonical">
-                standard wording — this one was not rephrased for your request
-              </span>
-            )}
+            <span className="q-n mono">{String(i + 1)}</span> {questionWording(q)}
           </legend>
+          {q.why !== undefined && q.why !== '' && <p className="q-why">{q.why}</p>}
           <div className="q-options" role="group" aria-label={`options for: ${q.text}`}>
             {(q.options ?? []).map((o) => {
               const active = picked[q.id] === o.value && (own[q.id] ?? '').trim() === ''
@@ -1381,7 +1982,7 @@ function QuestionForm({
           aria-busy={busy}
           data-interview="send"
           onClick={() => {
-            send(false)
+            onAnswer({ answers: answered.map((q) => ({ id: q.id, value: valueOf(q) })) })
           }}
         >
           {busy
@@ -1391,40 +1992,9 @@ function QuestionForm({
               : 'Send my answers'}
         </Button>
         {answered.length === 0 && !busy && (
-          <span className="door-why">
-            {allowAssume
-              ? 'answer at least one question — or proceed below and it will assume the rest, out loud'
-              : 'these markers block approval — answer at least one to move'}
-          </span>
-        )}
-        {answered.length > 0 && openCount > 0 && !busy && allowAssume && (
-          <span className="door-why">it will ask again about the {String(openCount)} you skipped</span>
+          <span className="door-why">these open points hold the plan: answer at least one to move</span>
         )}
       </div>
-
-      {allowAssume && (
-        <div className="door-acts">
-          {/* The button SAYS what happens to typed answers (W1-10): the next
-              screen used to be the first place that admitted Proceed kept
-              them, which is one screen too late for the person deciding. */}
-          <Button
-            variant="secondary"
-            disabled={busy}
-            data-interview="force"
-            onClick={() => {
-              send(true)
-            }}
-          >
-            {answered.length > 0
-              ? `Proceed — keep my ${String(answered.length)} answer${answered.length === 1 ? '' : 's'}, assume the rest`
-              : 'Proceed — turn open questions into assumptions'}
-          </Button>
-          <span className="door-why">
-            {answered.length > 0 ? 'your typed answers are sent with it; ' : ''}
-            what you don&apos;t answer becomes a LISTED assumption on the plan card, where you can still contest it
-          </span>
-        </div>
-      )}
     </div>
   )
 }
@@ -1701,15 +2271,25 @@ function FamilyForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolean;
 
 /* ── the plan card (Stage-4 approval, map §3 anatomy) ────────────────────── */
 
+/** The S06.9 verbs in plain names (design §2.F): what each one is called, and
+ *  under it what it DOES — the consequence said where the button is, not one
+ *  screen later. The ids stay the card's frozen vocabulary. */
 const planActionLabels: Record<string, string> = {
-  approve: 'Approve — start the work',
-  replan: 'Re-plan…',
-  reinterview: 'Re-interview',
+  approve: 'Approve: start the work',
+  replan: 'Change the plan…',
+  reinterview: 'Change my answers…',
   cancel: 'Cancel the task',
   compose: 'Compose a specialist for this…',
 }
 
-function PlanCard({
+const planActionWhy: Record<string, string> = {
+  approve: 'locks this plan in and begins. Nothing spends before this.',
+  replan: 'tap what is wrong, as many things as you like, and say it in your words. It redrafts once and shows exactly what changed.',
+  reinterview: 'reopens every question with your current answers filled in. Change what you want; the rest stays.',
+  cancel: 'stops here. Nothing runs, nothing is spent, the task keeps its record.',
+}
+
+export function PlanCard({
   view,
   card,
   busy,
@@ -1722,7 +2302,9 @@ function PlanCard({
 }) {
   const a = card.approval
   const [contesting, setContesting] = useState(false)
-  const [target, setTarget] = useState('')
+  // Multi-contest (P3-GF3-BE1 R10; design §2.E): ANY number of the plan's own
+  // keys, plus the always-present own-words note — one send, one redraft.
+  const [targets, setTargets] = useState<string[]>([])
   const [note, setNote] = useState('')
   // The cancel's two-step (P3-RW-19): pressing Cancel flips into the same
   // inline pane Re-plan uses, where the why is asked for — optional, the
@@ -1737,21 +2319,29 @@ function PlanCard({
   const estimate = a.layer2?.estimate
   const actions = a.actions ?? ['approve', 'replan', 'reinterview', 'cancel']
 
-  // Re-plan's structured entry (S06.9): tap the step, criterion or assumption
-  // being contested. The targets are the card's own keys.
-  const contestTargets: { key: string; label: string }[] = [
-    ...steps.map((s) => ({ key: s.id, label: `${s.id} — ${s.title}` })),
-    ...acs.map((ac) => ({ key: `AC-${String(ac.n)}`, label: `AC-${String(ac.n)} — ${ac.plain}` })),
-    ...(l1.assumptions ?? []).map((as) => ({ key: `assumption:${as.text}`, label: `assumption — ${as.text}` })),
-  ]
+  // The structured entry (S06.9): tap the steps, checks and assumptions being
+  // contested — any number of them (the S06.9 structure is named targets, not
+  // a cardinality of one). The keys are the card's own vocabulary; the group
+  // headings say what each key family IS in plain words.
+  const contestGroups: { name: string; items: { key: string; label: string }[] }[] = [
+    { name: 'The steps', items: steps.map((s) => ({ key: s.id, label: `${s.id} · ${s.title}` })) },
+    {
+      name: 'The finish-line checks (what "done" means)',
+      items: acs.map((ac) => ({ key: `AC-${String(ac.n)}`, label: `AC-${String(ac.n)} · ${ac.plain}` })),
+    },
+    {
+      name: 'The assumptions',
+      items: (l1.assumptions ?? []).map((as) => ({ key: `assumption:${as.text}`, label: as.text })),
+    },
+  ].filter((g) => g.items.length > 0)
 
   return (
     <div className="plan-card">
       {a.stale_flag === true && (
         <p className="plan-stale" role="alert">
           <CircleAlert size={14} strokeWidth={2} aria-hidden="true" /> Assumptions may be stale:{' '}
-          {(a.stale_reasons ?? []).join(' · ') || 'the world moved since this card was drafted'} — re-plan refreshes it, and
-          approving anyway is still yours to choose.
+          {(a.stale_reasons ?? []).join(' · ') || 'the world moved since this card was drafted'}. &quot;Change the
+          plan&quot; refreshes it; approving anyway is still yours to choose.
         </p>
       )}
 
@@ -1923,55 +2513,67 @@ function PlanCard({
       <HelpNote help={l1.help} />
 
       {!contesting && !cancelling ? (
-        <div className="door-acts plan-acts">
+        <div className="plan-verbs" data-plan-verbs>
           {actions.includes('approve') && (
-            <Button
-              variant="primary"
-              disabled={busy}
-              aria-busy={busy}
-              data-plan-act="approve"
-              onClick={() => {
-                onAnswer({ action: 'approve' })
-              }}
-            >
-              {busy ? 'Approving…' : planActionLabels.approve}
-            </Button>
+            <div className="plan-verb">
+              <Button
+                variant="primary"
+                disabled={busy}
+                aria-busy={busy}
+                data-plan-act="approve"
+                onClick={() => {
+                  onAnswer({ action: 'approve' })
+                }}
+              >
+                {busy ? 'Approving…' : planActionLabels.approve}
+              </Button>
+              <span className="plan-verb-why">{planActionWhy.approve}</span>
+            </div>
           )}
           {actions.includes('replan') && (
-            <Button
-              variant="secondary"
-              disabled={busy}
-              data-plan-act="replan"
-              onClick={() => {
-                setContesting(true)
-              }}
-            >
-              {planActionLabels.replan}
-            </Button>
+            <div className="plan-verb">
+              <Button
+                variant="secondary"
+                disabled={busy}
+                data-plan-act="replan"
+                onClick={() => {
+                  setContesting(true)
+                }}
+              >
+                {planActionLabels.replan}
+              </Button>
+              <span className="plan-verb-why">{planActionWhy.replan}</span>
+            </div>
           )}
           {actions.includes('reinterview') && (
-            <Button
-              variant="secondary"
-              disabled={busy}
-              data-plan-act="reinterview"
-              onClick={() => {
-                onAnswer({ action: 'reinterview' })
-              }}
-            >
-              {planActionLabels.reinterview}
-            </Button>
+            <div className="plan-verb">
+              <Button
+                variant="secondary"
+                disabled={busy}
+                data-plan-act="reinterview"
+                onClick={() => {
+                  onAnswer({ action: 'reinterview' })
+                }}
+              >
+                {planActionLabels.reinterview}
+              </Button>
+              <span className="plan-verb-why">{planActionWhy.reinterview}</span>
+            </div>
           )}
           {actions.includes('cancel') && (
-            <Button
-              variant="danger"
-              disabled={busy}
-              data-plan-act="cancel"
-              onClick={() => {
-                setCancelling(true)
-              }}
-            >
-              {planActionLabels.cancel}
-            </Button>
+            <div className="plan-verb">
+              <Button
+                variant="danger"
+                disabled={busy}
+                data-plan-act="cancel"
+                onClick={() => {
+                  setCancelling(true)
+                }}
+              >
+                {planActionLabels.cancel}
+              </Button>
+              <span className="plan-verb-why">{planActionWhy.cancel}</span>
+            </div>
           )}
         </div>
       ) : cancelling ? (
@@ -2021,32 +2623,45 @@ function PlanCard({
         </div>
       ) : (
         <div className="contest" data-plan="contest">
-          <h3 className="plan-h">Re-plan — tap what you&apos;re contesting</h3>
-          <div className="q-options">
-            {contestTargets.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                className="q-option contest-target"
-                data-active={target === t.key ? 'true' : undefined}
-                aria-pressed={target === t.key}
-                onClick={() => {
-                  setTarget(t.key)
-                }}
-              >
-                {target === t.key && <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <h3 className="plan-h">Change the plan</h3>
+          <p className="contest-sub">
+            Tap everything that is not right, as many things as you like, and say what you want below. It redrafts
+            once with all of it and then shows you exactly what changed.
+          </p>
+          {contestGroups.map((g) => (
+            <div className="contest-group" key={g.name}>
+              <p className="contest-group-name">{g.name}</p>
+              <div className="q-options">
+                {g.items.map((t) => {
+                  const active = targets.includes(t.key)
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      className="q-option contest-target"
+                      data-active={active ? 'true' : undefined}
+                      aria-pressed={active}
+                      onClick={() => {
+                        setTargets((ts) => (ts.includes(t.key) ? ts.filter((k) => k !== t.key) : [...ts, t.key]))
+                      }}
+                    >
+                      {active && <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
+                      {t.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
           <label className="door-field">
             <span className="door-label">
-              What&apos;s wrong with it <span className="door-optional">optional, but it plans better with words</span>
+              What should be different? <span className="door-optional">your own words are enough, tapped items or not</span>
             </span>
-            <input
-              className="door-input"
-              type="text"
+            <textarea
+              className="door-text"
+              rows={2}
               value={note}
+              data-field="contest-note"
               onChange={(e) => {
                 setNote(e.target.value)
               }}
@@ -2055,26 +2670,36 @@ function PlanCard({
           <div className="door-acts">
             <Button
               variant="primary"
-              disabled={target === '' || busy}
+              disabled={(targets.length === 0 && note.trim() === '') || busy}
               aria-busy={busy}
               data-plan-act="send-replan"
               onClick={() => {
-                onAnswer({ action: 'replan', contest: { target, ...(note.trim() !== '' ? { note: note.trim() } : {}) } })
+                onAnswer({
+                  action: 'replan',
+                  ...(targets.length > 0 ? { contests: targets.map((t) => ({ target: t })) } : {}),
+                  ...(note.trim() !== '' ? { note: note.trim() } : {}),
+                })
               }}
             >
-              {busy ? 'Sending…' : 'Send it back to plan'}
+              {busy
+                ? 'Redrafting…'
+                : targets.length > 0
+                  ? `Redraft the plan (${String(targets.length)} tapped${note.trim() !== '' ? ' + your words' : ''})`
+                  : 'Redraft the plan'}
             </Button>
             <Button
               variant="ghost"
               disabled={busy}
               onClick={() => {
                 setContesting(false)
-                setTarget('')
+                setTargets([])
               }}
             >
               Back to the plan
             </Button>
-            {target === '' && !busy && <span className="door-why">pick the step, criterion or assumption you&apos;re contesting</span>}
+            {targets.length === 0 && note.trim() === '' && !busy && (
+              <span className="door-why">tap what is wrong above, or say it in words: either is enough</span>
+            )}
           </div>
         </div>
       )}
@@ -2124,7 +2749,7 @@ function AssumptionList({ assumptions }: { assumptions: { text: string; origin?:
       {skipped.length > 0 && (
         <li data-assume-skipped={String(skipped.length)}>
           {skipped.join(' · ')} — skipped in the interview, so it goes ahead on sensible defaults it has not spelled
-          out. Contest any of these via Re-plan if that is not what you meant.
+          out. If that is not what you meant, tap it under &quot;Change the plan&quot; below.
           <span className="assume-origin"> · assumed because you chose to proceed</span>
         </li>
       )}
@@ -2149,6 +2774,27 @@ export function originWords(origin: string): string {
   return origin
 }
 
+/** The delta card's origin tokens in the reader's words (jargon sweep, design
+ *  §2.F). The tokens are the wire's own vocabulary (intake/cards.go); an
+ *  unknown one renders as itself — forward tolerance over silence (§42). */
+export function deltaOriginWords(origin?: string): string {
+  switch (origin) {
+    case 'contested_card':
+      return 'you asked for changes'
+    case 'freshness_revalidation':
+      return 'the world moved since your approval, so it re-checked its plan'
+    case 'sibling_collision':
+      return 'other accepted work in this project touched the same things'
+    case 'confinement_widening':
+      return 'it needs to touch more than it first said'
+    case undefined:
+    case '':
+      return 'the cause was not recorded'
+    default:
+      return origin
+  }
+}
+
 function DeltaForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolean; onAnswer: (b: IntakeAnswerBody) => void }) {
   const d = card.delta
   if (d === undefined) return <p className="muted">This delta card carried no body — answer it from its inbox card.</p>
@@ -2157,7 +2803,8 @@ function DeltaForm({ card, busy, onAnswer }: { card: IntakeCard; busy: boolean; 
     <div className="q-form">
       <div className="q-card">
         <p className="decision-summary">
-          Origin: {d.origin ?? 'unrecorded'} — only the items below changed. Everything else you approved stands.
+          Why it changed: {deltaOriginWords(d.origin)}. Only the items below changed; everything else you approved
+          stands.
         </p>
         <ul className="delta-items">
           {(d.items ?? []).map((it) => (

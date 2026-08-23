@@ -2872,8 +2872,10 @@ const plainVerbs: Record<string, string> = {
   approve: 'Approve',
   reject: 'Reject',
   deny: 'Deny',
-  replan: 'Send it back to plan',
-  reinterview: 'Re-open the interview',
+  // The journey door's plain names for the same frozen verbs (P3-GF3-FE):
+  // one verb, one name, on every surface that shows it.
+  replan: 'Change the plan',
+  reinterview: 'Change my answers',
   cancel: 'Cancel the task',
   compose: 'Compose a specialist',
   force_proceed: 'Proceed — open questions become assumptions',
