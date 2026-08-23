@@ -272,6 +272,11 @@ func TestZAINamedCodesAgainstBanAndLimitText(t *testing.T) {
 		emptyText  = ""
 		unrelated  = "the service may be temporarily overloaded, please try again later"
 		revocation = "API access revoked for this organization"
+		// Ordinary limit/overload prose that happens to contain "policy" or
+		// "terminated" — stems looksLikeRevocation deliberately excludes:
+		// promoting these into a freeze is the healthy-lane failure R13 names.
+		policyProse = "Rate limit reached for requests. See our rate limit policy for details."
+		termProse   = "The upstream connection was terminated due to overload; retry shortly."
 	)
 	transient := []string{"1302", "1305"}
 	limits := []string{"1308", "1310", "1315", "1113"}
@@ -290,7 +295,7 @@ func TestZAINamedCodesAgainstBanAndLimitText(t *testing.T) {
 	// 1302/1305 + band or ordinary limit text ⇒ Class 1, whatever the
 	// credential assurance: the band's own word is not a revocation.
 	for _, code := range transient {
-		for _, body := range []string{bandText, limitText, emptyText, unrelated} {
+		for _, body := range []string{bandText, limitText, emptyText, unrelated, policyProse, termProse} {
 			for _, valid := range []bool{false, true} {
 				got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: code, HTTPStatus: 429,
 					EndpointVerified: true, BodyText: body, OnValidCredentials: valid}, cfg)

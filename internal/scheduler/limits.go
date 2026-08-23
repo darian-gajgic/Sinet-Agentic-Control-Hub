@@ -444,9 +444,14 @@ func isDepletionNoSignal(sig LimitSignal) bool {
 // wire that stem is LIMIT vocabulary, not revocation vocabulary. Reading it as
 // a ban is exactly the mistake that froze healthy lanes before drain r1; only
 // words a limit message has no reason to use may promote a shed into a freeze.
+// "policy" and "terminated" fail that same criterion ("rate limit policy",
+// "connection terminated due to overload" are ordinary limit/overload prose)
+// and are excluded too; a missed revocation falls through to a recoverable
+// verdict and is caught by the auth codes, the 401/403 status rule, or the
+// P-T17-1 canary — the authoritative detectors.
 func looksLikeRevocation(body string) bool {
 	low := strings.ToLower(body)
-	for _, kw := range []string{"suspend", "banned", "revoke", "prohibit", "deactivat", "terminated", "policy"} {
+	for _, kw := range []string{"suspend", "banned", "revoke", "prohibit", "deactivat"} {
 		if strings.Contains(low, kw) {
 			return true
 		}
