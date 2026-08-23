@@ -163,7 +163,7 @@ func (a *Adapter) Resume(ctx context.Context, rec adapters.ParkRecord, ans *adap
 		return nil, err
 	}
 	if ans != nil && ans.AskID != "" {
-		if err := writeAnswer(l.ctlDir, ans.AskID, ans.UpdatedInput); err != nil {
+		if err := stageResumeAnswer(l.ctlDir, ans); err != nil {
 			return nil, fmt.Errorf("claudecli: stage answer: %w", err)
 		}
 	}

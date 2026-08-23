@@ -1,0 +1,91 @@
+{
+  "lane": "zai",
+  "provider_id": "zai-coding-plan",
+  "npm": "@ai-sdk/openai-compatible",
+  "display_name": "Z.AI GLM Coding Plan",
+  "verified_on": "2026-08-23",
+  "source": "https://docs.z.ai/devpack/tool/others",
+  "base_url": "https://api.z.ai/api/coding/paas/v4",
+  "endpoint_marker": "/api/coding/paas/v4",
+  "endpoint_note": "The subscription (coding-plan) endpoint. The general /api/paas/v4 endpoint is documented as NOT interchangeable: a request sent there does not draw on the coding-plan subscription at all and spends pay-as-you-go balance instead, which on a plan-only account is $0 and surfaces as error 1113.",
+  "recorded_endpoints": [
+    {
+      "protocol": "openai-general",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "wired": false,
+      "verified_on": "2026-08-23",
+      "note": "The general platform endpoint. Recorded so the self-check has the wrong-endpoint case by name; never wired."
+    },
+    {
+      "protocol": "anthropic",
+      "base_url": "https://api.z.ai/api/anthropic",
+      "wired": false,
+      "verified_on": "2026-08-23",
+      "note": "Documented for Claude Code and Goose. Sinet's zai lane rides opencode as OpenAI-compatible, so this variant is a recorded dated fact and no second path is built."
+    }
+  ],
+  "credential": {
+    "profile": "zai-coding-plan",
+    "env_var": "ZAI_API_KEY",
+    "note": "A broker engine-cred auth-profile NAME. The worker record holds this reference; the material is resolved fresh at spawn and never stored, logged, or persisted."
+  },
+  "models": [
+    {
+      "id": "glm-5.3",
+      "name": "GLM-5.3",
+      "verified_on": "2026-08-23",
+      "billing": "flat",
+      "overflow_mode": "park",
+      "region_model_gate": "none"
+    },
+    {
+      "id": "glm-5-turbo",
+      "name": "GLM-5-Turbo",
+      "verified_on": "2026-08-23",
+      "billing": "flat",
+      "overflow_mode": "park",
+      "region_model_gate": "none"
+    },
+    {
+      "id": "glm-4.7",
+      "name": "GLM-4.7",
+      "verified_on": "2026-08-23",
+      "billing": "flat",
+      "overflow_mode": "park",
+      "region_model_gate": "none"
+    }
+  ],
+  "model_routing_note": "Requests for previous models (GLM-5.2 / GLM-5.1) are automatically routed to GLM-5.3 by the plan itself (verified 2026-08-23). These seed ids are DATA with a date, never the authority: the account's own observed model list is.",
+  "eco_options": {
+    "thinking": { "type": "disabled", "clear_thinking": false }
+  },
+  "eco_options_verified_on": "2026-08-23",
+  "reasoning_effort": {
+    "wired": false,
+    "verified_on": "2026-08-23",
+    "values": ["max", "xhigh", "high", "medium", "low", "minimal", "none"],
+    "note": "Real and newly verified on the general chat-completion reference (default max; GLM-5.3 accepts only low/high/max; effective only while thinking is enabled). No page confirms the CODING endpoint honors it and no named spec section sanctions it, so it is recorded as a dated fact and deliberately not wired."
+  },
+  "reset_marker": "reset at",
+  "signals": [
+    { "code": "1000", "http_status": 401, "verified_on": "2026-08-23", "message": "Authentication Failed" },
+    { "code": "1001", "http_status": 401, "verified_on": "2026-08-23", "message": "Authentication parameter not received in Header, unable to authenticate" },
+    { "code": "1003", "http_status": 401, "verified_on": "2026-08-23", "message": "Authentication Token expired, please regenerate/obtain" },
+    { "code": "1113", "http_status": 429, "verified_on": "2026-08-23", "message": "Insufficient balance or no resource package. Please recharge." },
+    { "code": "1211", "http_status": 400, "verified_on": "2026-08-23", "message": "Unknown Model, please check the model code." },
+    { "code": "1220", "http_status": 403, "verified_on": "2026-08-23", "message": "You do not have permission to access ${API_name}" },
+    { "code": "1302", "http_status": 429, "verified_on": "2026-08-23", "message": "Rate limit reached for requests" },
+    { "code": "1305", "http_status": 429, "verified_on": "2026-08-23", "message": "The service may be temporarily overloaded, please try again later" },
+    { "code": "1308", "http_status": 429, "verified_on": "2026-08-23", "message": "Usage limit reached for `{number}` `{unit}`. Your limit will reset at `{next_flush_time}`" },
+    { "code": "1310", "http_status": 429, "verified_on": "2026-08-23", "message": "Weekly/Monthly Limit Exhausted. Your limit will reset at `{next_flush_time}`" },
+    {
+      "code_from": "1311",
+      "code_to": "1321",
+      "http_status": 429,
+      "verified_on": "2026-08-23",
+      "message": "Various subscription/usage limit violations",
+      "semantics_verified": false,
+      "note": "The api-code page collapses this band to one row, so the individual meanings are UNVERIFIED. The status is recorded so the band classifies in the safe direction on signal rather than on code."
+    }
+  ]
+}

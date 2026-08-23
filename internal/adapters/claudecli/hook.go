@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 // The PreToolUse gate hook (S03.4): `defer` is the Anthropic lane's
@@ -273,15 +275,46 @@ func writeCtlConfig(ctlDir, fallback string) error {
 	return os.WriteFile(filepath.Join(ctlDir, "config.json"), raw, 0o600)
 }
 
-// writeAnswer persists the platform's answer for a tool_use_id before a
-// resume (adapter side).
+// answerFile is <ctl>/answers/<id>.json. UpdatedInput leads so an APPROVE
+// marshals byte-identically to the shape that predates the decision member.
+type answerFile struct {
+	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
+	// Decision is empty for an approve (the zero value approves, shared
+	// adapters.Answer) and "deny" for a first-class rejection.
+	Decision string `json:"decision,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// hookDecisionDeny is the engine's own refusal verdict. The mechanism is the
+// one serialize-by-deny already relies on, so a first-class reject is wiring an
+// existing engine capability rather than inventing one (S03.4/S03.5).
+const hookDecisionDeny = "deny"
+
+// writeAnswer persists the platform's APPROVAL for a tool_use_id before a
+// resume (adapter side): allow, optionally with replacement input.
 func writeAnswer(ctlDir, toolUseID string, updatedInput json.RawMessage) error {
+	return stageAnswer(ctlDir, toolUseID, answerFile{UpdatedInput: updatedInput})
+}
+
+// writeDenyAnswer persists a first-class REJECTION with its reason. The hook
+// turns it into permissionDecision "deny": a refusal that arrived as an
+// approve-shaped file would run the very call a human refused.
+func writeDenyAnswer(ctlDir, toolUseID, reason string) error {
+	return stageAnswer(ctlDir, toolUseID, answerFile{Decision: hookDecisionDeny, Reason: reason})
+}
+
+// stageResumeAnswer maps a platform Answer onto the control dir before a
+// resume. A decision this lane cannot express is refused LOUDLY: the tempting
+// fallback is the approve-shaped file, and that turns a refusal into consent.
+func stageResumeAnswer(ctlDir string, ans *adapters.Answer) error {
+	return writeAnswer(ctlDir, ans.AskID, ans.UpdatedInput)
+}
+
+func stageAnswer(ctlDir, toolUseID string, a answerFile) error {
 	if err := os.MkdirAll(filepath.Join(ctlDir, "answers"), 0o700); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(struct {
-		UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
-	}{updatedInput})
+	raw, err := json.Marshal(a)
 	if err != nil {
 		return err
 	}

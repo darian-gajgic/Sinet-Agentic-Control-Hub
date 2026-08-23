@@ -109,6 +109,13 @@ var (
 	// ErrInstanceUnavailable reports that no per-user serve endpoint could be
 	// obtained for this invocation.
 	ErrInstanceUnavailable = errors.New("opencode: no serve instance available")
+
+	// ErrLaneNotCommissioned reports that a run asked for a lane this user has
+	// not been commissioned on — no provider entry, or no credential behind
+	// the one that is configured. It is a NAMED, surfaced state on purpose: a
+	// missing credential must never become a panic, a silent unauthenticated
+	// call, or a fabricated success.
+	ErrLaneNotCommissioned = errors.New("opencode: lane not commissioned for this user")
 )
 
 // ProviderConfig is the lane's provider block, compiled into the engine config
@@ -127,9 +134,12 @@ type ProviderEntry struct {
 	Models  map[string]ModelEntry `json:"models,omitempty"`
 }
 
-// ModelEntry is one model under a provider entry.
+// ModelEntry is one model under a provider entry. Options are the per-model
+// provider options the engine passes to the SDK — the channel the S10.6 effort
+// ladder's per-lane lever rides (R18).
 type ModelEntry struct {
-	Name string `json:"name,omitempty"`
+	Name    string                     `json:"name,omitempty"`
+	Options map[string]json.RawMessage `json:"options,omitempty"`
 }
 
 // Adapter is the opencode-substrate implementation of the D3 contract
@@ -142,8 +152,22 @@ type Adapter struct {
 	Instances Instances
 
 	// Providers is the lane provider block compiled into every invocation's
-	// config. Lane values are DATA, never compiled-in identifiers.
+	// config. Lane values are DATA, never compiled-in identifiers. It is the
+	// single-user/default case: ProvidersFor overrides it per person.
 	Providers ProviderConfig
+
+	// ProvidersFor resolves THIS USER's provider block (S03.6: "a provider
+	// entry per user"; S03.2: one instance per user). The credential and the
+	// model set are per-person facts, so the lane config cannot be one value
+	// serving everybody. Nil = every user gets Providers.
+	ProvidersFor func(userID string) (ProviderConfig, error)
+
+	// Lanes are the commissioning documents for the lanes this adapter may
+	// carry (S03.6). A model whose provider id names a lane listed here must
+	// be commissioned — a provider entry AND its credential — or the run is
+	// refused by name. A provider not named here is not a lane and is left
+	// alone (the LN-1 fixture posture).
+	Lanes []LaneConfig
 
 	// Root is the platform-owned parent of the per-user XDG roots (0700 each).
 	// A request's OwnerCredRef overrides it for that user (D2: the credential

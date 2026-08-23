@@ -178,6 +178,12 @@ type parser struct {
 	// BEFORE the event leaves, so the durable row carries the full snapshot.
 	onAsk func(ask *adapters.Ask, raw json.RawMessage)
 
+	// lane is the commissioning document of the provider this invocation runs
+	// against, when the provider names a lane. Nil means the turn is not on a
+	// commissioned lane and no provider-specific signal extraction applies —
+	// the parser then behaves exactly as it did before lanes existed.
+	lane *LaneConfig
+
 	// cursor + terminal facts.
 	directory     string
 	finalText     string

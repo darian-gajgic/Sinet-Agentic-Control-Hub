@@ -52,6 +52,16 @@ const (
 	LaneLocal     = "local"
 )
 
+// Effort modes (Spec S10.6): policy bundles, each a depletion ladder whose
+// steps are DISCLOSED STATES — a mode change is a visible state, never a log
+// line. The names are the spec's own; the per-lane levers each rung selects
+// are the lanes' business (StartRequest.EffortMode).
+const (
+	EffortEco      = "eco"
+	EffortBalanced = "balanced"
+	EffortSmart    = "smart"
+)
+
 // EventKind enumerates the closed platform event set of Spec S03.1:
 // event ∈ {message, usage, rate_limit, gate_ask, tool_result, done}.
 //
@@ -250,6 +260,13 @@ type StartRequest struct {
 	// Model is chosen per invocation by the platform.
 	Model string
 
+	// EffortMode is the run's S10.6 effort mode — a policy bundle, not a
+	// vendor parameter. Empty means the lane's own default (no rung
+	// selected), which is what every caller predating this member supplies.
+	// A lane wires it only where the engine actually exposes a lever; a lane
+	// with none leaves it inert rather than faking a rung.
+	EffortMode string
+
 	// OwnerCredRef is the per-run owner credential REFERENCE (D2): the
 	// credential rides the engine process, never the sandbox, and never
 	// passes through this package as material — on the Anthropic lane it
@@ -397,15 +414,45 @@ type CompiledWorker struct {
 	PromptSchemaVersion string
 }
 
+// AnswerDecision is the first-class approve/reject verdict on a gated call
+// (S03.4). It is a SHARED type because both substrates owe the same semantics
+// from opposite directions: the Claude lane answers through a PreToolUse
+// decision (allow | deny), opencode through `permission.reply` ({once |
+// reject}, message).
+//
+// The ZERO VALUE APPROVES. That is not a convenience — it is what lets every
+// construction site that predates this member keep its exact meaning with no
+// edit and no behavior change, on a type whose misreading executes a call a
+// human refused.
+//
+// A value that is neither of the two below is NOT a default: it is a decision
+// the substrate cannot express, and every adapter refuses it loudly rather
+// than degrading it to consent (the fail-closed precedent, CONVENTIONS §12).
+type AnswerDecision string
+
+const (
+	// DecisionApprove is the zero value: run the gated call.
+	DecisionApprove AnswerDecision = ""
+	// DecisionReject refuses the gated call, carrying Answer.Reason as the
+	// feedback the engine hands the model (opencode: CorrectedError; Claude
+	// lane: the deny reason).
+	DecisionReject AnswerDecision = "reject"
+)
+
 // Answer carries the human/platform answer that unparks a run
 // (Adapter.Resume input).
 type Answer struct {
 	// AskID names the ask being answered (must match the park record's
 	// deferred call on the gate path).
 	AskID string
+	// Decision is the approve/reject verdict (S03.4). Zero value = approve.
+	Decision AnswerDecision
+	// Reason is the human-facing rejection message. Ignored on approve.
+	Reason string
 	// UpdatedInput, when set, replaces the gated call's input wholesale
 	// (S03.4: the hook returns allow + updatedInput). Nil approves the
-	// original input unchanged.
+	// original input unchanged. A substrate with no input-substitution
+	// channel REFUSES it rather than dropping it silently.
 	UpdatedInput json.RawMessage
 	// Continuation is the user-turn body for resuming a pause-park (a
 	// gate-defer resume needs no prompt at all — S03.4).

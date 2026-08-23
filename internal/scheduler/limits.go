@@ -75,7 +75,36 @@ type LimitSignal struct {
 	// EngineBudgetExhausted is Sinet's OWN engine backstop tripping
 	// (error_max_budget_usd / budget_exhausted) — Class 5 (S10.5, S10.8).
 	EngineBudgetExhausted bool
+
+	// EndpointVerified reports that the lane's CONFIGURED endpoint was checked
+	// and is the subscription endpoint (S10.5's Class-3 row: "Z.AI 1113 after
+	// endpoint self-check"). It is an INPUT, never a lookup: Classify stays
+	// pure and total, so the fact is established by whoever owns the lane
+	// config and handed here as data.
+	//
+	// It matters because one code carries two unrelated meanings. On the
+	// subscription endpoint, "insufficient balance" means the plan is spent —
+	// park and probe. On the general endpoint, the subscription does not apply
+	// at all and the same code means the lane is MISCONFIGURED; parking that
+	// on a probe schedule would wait forever for a balance nobody is going to
+	// top up (P-T08-2's failure class).
+	EndpointVerified bool
 }
+
+// SurfaceKind names a NON-limit condition worth an operator's attention. The
+// five classes are for limit events; these are not limit events, schedule
+// nothing, and exist so a real defect is not silently indistinguishable from a
+// healthy "carry on".
+type SurfaceKind string
+
+const (
+	SurfaceNone SurfaceKind = ""
+	// SurfaceEndpointDefect: the lane is pointed at the wrong endpoint.
+	SurfaceEndpointDefect SurfaceKind = "endpoint-misconfigured"
+	// SurfaceModelDrift: the provider does not know the model that was asked
+	// for — the P-T17-3 drift symptom, and the model-list canary's input.
+	SurfaceModelDrift SurfaceKind = "model-drift"
+)
 
 // Action is the classifier's verdict: the class and the fixed scheduling
 // action, with the ⚙-derived parameters the action needs.
@@ -83,6 +112,10 @@ type Action struct {
 	Class  LimitClass
 	Kind   ActionKind
 	Reason string
+
+	// Surface names a non-limit condition to show an operator (see
+	// SurfaceKind). Empty on every limit event.
+	Surface SurfaceKind
 
 	// Class 1 (retry in place): full jitter within the per-request cap and the
 	// per-lane retry budget (Spec S10.5). The live retry loop + circuit
