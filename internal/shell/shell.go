@@ -36,6 +36,7 @@ import (
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/opencode"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/buildinfo"
@@ -552,6 +553,17 @@ func Run(ctx context.Context, opts Options) error {
 		// leg is operator-installed config, not a runtime goroutine.
 		localSurf.startGameMode(ctx)
 
+		engineRegistry := engineAdapters(engineAdapterDeps{
+			Settings: reg,
+			Logger:   logger,
+			StateDir: stateDir,
+			// No lane is commissioned at v0: provider entries and their
+			// credentials arrive through the operator's key ceremony, never
+			// from a default (S03.6, S11.5).
+			Commissioned: map[string]opencode.ProviderConfig{},
+		})
+		defer closeEngineAdapters(engineRegistry, logger)
+
 		sk, err := stage.New(stage.Config{
 			DB:          db,
 			Log:         log,
@@ -580,12 +592,12 @@ func Run(ctx context.Context, opts Options) error {
 			// lane's pinned engine version keying validation records.
 			ComposerPlaybook: composerPlaybook(memStore),
 			EnginePin:        claudecli.Pin,
-			Adapters: map[string]adapters.Adapter{
-				// The Anthropic lane (Spec S03.2): the pinned `claude` CLI
-				// resolved via PATH; conformance vs the components.lock pin
-				// is the adapter suite's duty (S03.3).
-				adapters.SubstrateClaudeCLI: &claudecli.Adapter{Settings: reg, Log: logger},
-			},
+			// Both D3 substrates (Spec S03.2), built in engineadapters.go:
+			// the Anthropic lane on `claude`, and opencode carrying its lanes
+			// as config DATA. Registering the second one is what makes a
+			// second paid agentic lane dispatchable at all — no lane is
+			// COMMISSIONED by it (see that file).
+			Adapters:     engineRegistry,
 			Confiner:     engineConfiner,
 			ArtifactRoot: filepath.Join(stateDir, "artifacts"),
 			RunRoot:      filepath.Join(stateDir, "runs"),

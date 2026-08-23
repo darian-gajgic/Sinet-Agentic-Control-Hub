@@ -118,11 +118,22 @@ func RunHook(stdin io.Reader, stdout io.Writer, ctlDir string) error {
 	if ans, ok, err := readAnswer(ctlDir, in.ToolUseID); err != nil {
 		return err
 	} else if ok {
+		// An answered call is not automatically an allowed one. Until LN-2A
+		// this branch could only ever say "allow", which made a human's
+		// refusal unrepresentable on this lane; a first-class reject reaches
+		// the engine through the deny verdict serialize-by-deny already uses.
+		if ans.Decision == hookDecisionDeny {
+			return writeDecision(stdout, hookDecision{
+				HookEventName:            "PreToolUse",
+				PermissionDecision:       hookDecisionDeny,
+				PermissionDecisionReason: answerDenyReason(ans.Reason),
+			})
+		}
 		return writeDecision(stdout, hookDecision{
 			HookEventName:            "PreToolUse",
 			PermissionDecision:       "allow",
 			PermissionDecisionReason: "sinet gate: answered (S03.4 resume re-supply)",
-			UpdatedInput:             ans,
+			UpdatedInput:             ans.UpdatedInput,
 		})
 	}
 
@@ -178,24 +189,32 @@ func appendFire(ctlDir string, in hookInput) (firstOfTurn bool, err error) {
 	return st.Size() == 0, nil
 }
 
-func readAnswer(ctlDir, toolUseID string) (json.RawMessage, bool, error) {
+func readAnswer(ctlDir, toolUseID string) (answerFile, bool, error) {
 	if toolUseID == "" {
-		return nil, false, nil
+		return answerFile{}, false, nil
 	}
 	raw, err := os.ReadFile(answerPath(ctlDir, toolUseID))
 	if os.IsNotExist(err) {
-		return nil, false, nil
+		return answerFile{}, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("engine-hook: read answer: %w", err)
+		return answerFile{}, false, fmt.Errorf("engine-hook: read answer: %w", err)
 	}
-	var a struct {
-		UpdatedInput json.RawMessage `json:"updatedInput"`
-	}
+	var a answerFile
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, false, fmt.Errorf("engine-hook: parse answer file: %w", err)
+		return answerFile{}, false, fmt.Errorf("engine-hook: parse answer file: %w", err)
 	}
-	return a.UpdatedInput, true, nil
+	return a, true, nil
+}
+
+// answerDenyReason is what the engine hands the model when a gated call is
+// refused. The human's own words lead; the platform prefix is what tells the
+// model this was a decision rather than a tool failure.
+func answerDenyReason(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		return "sinet gate: the call was refused"
+	}
+	return reason
 }
 
 func readCtlConfig(ctlDir string) (gateCtlConfig, error) {
@@ -307,7 +326,21 @@ func writeDenyAnswer(ctlDir, toolUseID, reason string) error {
 // resume. A decision this lane cannot express is refused LOUDLY: the tempting
 // fallback is the approve-shaped file, and that turns a refusal into consent.
 func stageResumeAnswer(ctlDir string, ans *adapters.Answer) error {
-	return writeAnswer(ctlDir, ans.AskID, ans.UpdatedInput)
+	switch ans.Decision {
+	case adapters.DecisionApprove:
+		return writeAnswer(ctlDir, ans.AskID, ans.UpdatedInput)
+	case adapters.DecisionReject:
+		if len(ans.UpdatedInput) > 0 {
+			// A refusal that also edits the call is two answers at once, and
+			// obeying either half would execute something nobody chose.
+			return fmt.Errorf("engine-hook: answer %q rejects the call AND supplies replacement input; "+
+				"a refusal has nothing to substitute into (S03.4)", ans.AskID)
+		}
+		return writeDenyAnswer(ctlDir, ans.AskID, ans.Reason)
+	}
+	return fmt.Errorf("engine-hook: answer %q carries decision %q, which this lane cannot express — refusing "+
+		"the whole answer rather than defaulting it, because the only default available is consent (S03.4)",
+		ans.AskID, ans.Decision)
 }
 
 func stageAnswer(ctlDir, toolUseID string, a answerFile) error {

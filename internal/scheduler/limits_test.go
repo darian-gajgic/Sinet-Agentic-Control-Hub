@@ -35,7 +35,10 @@ func TestClassifyPerLaneFixtures(t *testing.T) {
 		{"opencode retry.next", LimitSignal{Lane: "opencode", ResetAt: reset}, ClassDepletionSignal, ActionParkQuota},
 
 		// Class 3 — depletion WITHOUT signal (park + probe schedule).
-		{"zai 1113 self-check", LimitSignal{Lane: laneZAI, ErrorCode: "1113"}, ClassDepletionNoSignal, ActionParkProbe},
+		// The self-check is now an INPUT rather than a name (LN-2A/R11): the
+		// same code on an unverified endpoint is a configuration defect, so
+		// the depletion case has to say which one it is.
+		{"zai 1113 self-check", LimitSignal{Lane: laneZAI, ErrorCode: "1113", EndpointVerified: true}, ClassDepletionNoSignal, ActionParkProbe},
 		{"anthropic rejected no reset", LimitSignal{Lane: laneAnthropic, RateLimitStatus: "rejected"}, ClassDepletionNoSignal, ActionParkProbe},
 
 		// Class 4 — auth / policy (lane freeze, NEVER retry-park; P-T08-2).
@@ -85,7 +88,7 @@ func TestClassifyCarriesRatifiedParameters(t *testing.T) {
 		t.Errorf("class-2 resume = %v, want the provider signal %v", a2.ResumeAt, reset)
 	}
 	// Class 3 carries the probe interval cap.
-	a3 := Classify(LimitSignal{Lane: laneZAI, ErrorCode: "1113"}, cfg)
+	a3 := Classify(LimitSignal{Lane: laneZAI, ErrorCode: "1113", EndpointVerified: true}, cfg)
 	if a3.ProbeIntervalMax != 30*time.Minute {
 		t.Errorf("class-3 probe cap = %v, want 30m", a3.ProbeIntervalMax)
 	}

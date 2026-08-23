@@ -262,10 +262,14 @@ func TestZAIProviderChangeRestartsOnlyThatUsersServe(t *testing.T) {
 		return entries[userID], nil
 	}
 
+	// One stable cwd per user: the cwd is part of the instance identity by
+	// design (§61(a)), so it must be held still to isolate the provider entry
+	// as the thing that moved.
+	base := t.TempDir()
 	identity := func(user string, c LaneConfig) string {
 		t.Helper()
 		req := withUser(laneRequest(t, c), user)
-		req.Cwd = filepath.Join(t.TempDir(), "cwd-"+user)
+		req.Cwd = filepath.Join(base, "cwd-"+user)
 		if err := os.MkdirAll(req.Cwd, 0o700); err != nil {
 			t.Fatalf("cwd: %v", err)
 		}
@@ -378,6 +382,36 @@ func TestZAICredentialNeverLeaves(t *testing.T) {
 		}
 		if strings.Contains(string(raw), sentinel) {
 			t.Errorf("the database file%s contains the credential", suffix)
+		}
+	}
+}
+
+// TestZAIRotatedCredentialReachesAFreshInstance pins §61(a) for this lane:
+// the injected environment is folded into the instance identity as a DIGEST,
+// so a rotated credential can only reach the engine through a restart — never
+// a live serve still running on the revoked one.
+func TestZAIRotatedCredentialReachesAFreshInstance(t *testing.T) {
+	const sentinel = "SINET-TEST-SECRET-rotation"
+	seed := seedZAI(t)
+	a := laneAdapter(t, seed)
+	req := laneRequest(t, seed)
+	l := mustLower(t, a, req)
+
+	withCred := func(value string) InstanceSpec {
+		env := append(append([]string(nil), l.env...), seed.Credential.EnvVar+"="+value)
+		return a.instanceSpec(req, l, env)
+	}
+	before, after := withCred(sentinel), withCred(sentinel+"-rotated")
+	if identityOf(before) == identityOf(after) {
+		t.Error("a rotated zai credential does not move the instance identity — the live serve would keep " +
+			"running on the old one (S11.5: credentials are delivered at spawn)")
+	}
+	if identityOf(before) != identityOf(withCred(sentinel)) {
+		t.Error("identity is unstable for an unchanged credential — every run would restart the serve")
+	}
+	for _, id := range []string{identityOf(before), identityOf(after)} {
+		if strings.Contains(id, sentinel) || strings.Contains(id, seed.Credential.EnvVar) {
+			t.Errorf("the identity key carries raw environment content: %q", id)
 		}
 	}
 }

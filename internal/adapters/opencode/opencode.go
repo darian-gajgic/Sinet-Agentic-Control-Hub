@@ -61,28 +61,6 @@ const cancelGrace = 5 * time.Second
 // a health blip; more would be a supervisor, which this adapter is not.
 const streamReconnects = 1
 
-// decisionKey carries a gate decision through adapters.Answer.UpdatedInput.
-//
-// The shared Answer struct has no approve/reject member: on the Claude lane the
-// answer is always an allow (optionally with replacement input), so rejection
-// never needed a field. This substrate's `permission.reply` takes {reply,
-// message} and has NO input-substitution channel at all, which makes
-// UpdatedInput unusable for its Claude-lane meaning here and free to carry the
-// decision instead. Use ApproveAnswer / RejectAnswer rather than building the
-// envelope by hand. A raw replacement input is REFUSED (ErrUpdatedInputUnsupported):
-// silently dropping a human's edit would execute the parked call unreviewed,
-// which is the exact S03.4 failure the park exists to prevent.
-const decisionKey = "sinet.decision"
-
-const (
-	decisionApprove = "approve"
-	decisionReject  = "reject"
-	// decisionUnencodable is the fail-closed sentinel of RejectAnswer: it
-	// decodes to no decision at all, so the answer is refused rather than
-	// silently downgraded to an approve.
-	decisionUnencodable = "unencodable"
-)
-
 // Errors callers branch on.
 var (
 	// ErrConfinementUnsupported refuses a per-RUN sandbox on this substrate.
@@ -101,6 +79,11 @@ var (
 	// ErrUpdatedInputUnsupported refuses an answer carrying replacement tool
 	// input: 1.18.3's permission.reply cannot substitute a gated call's input.
 	ErrUpdatedInputUnsupported = errors.New("opencode: this engine cannot substitute a gated call's input on resume")
+
+	// ErrUnsupportedDecision refuses an answer whose verdict this substrate
+	// cannot express. It fails CLOSED by construction: the refusal is the
+	// whole answer, never a downgrade to the approve the zero value means.
+	ErrUnsupportedDecision = errors.New("opencode: this engine cannot express that gate decision")
 
 	// ErrNoEngineSession refuses a resume from a park record that never
 	// recorded an engine session id.
@@ -373,6 +356,18 @@ func (a *Adapter) prepare(ctx context.Context, req adapters.StartRequest) (*lowe
 		}
 		env = injected
 	}
+	// The lane's credential must have ARRIVED, and the check is here — after
+	// injection, before any process exists. A missing credential is a named,
+	// surfaced state: never a panic, never an unauthenticated call the
+	// provider answers with an auth error the classifier then has to
+	// disentangle, and never a fabricated success (R9).
+	if l.lane != nil && l.lane.Credential.EnvVar != "" {
+		if v, ok := lookupEnv(env, l.lane.Credential.EnvVar); !ok || v == "" {
+			return nil, Instance{}, fmt.Errorf("%w: lane %q needs the broker engine-cred auth profile %q "+
+				"delivered as %s at spawn (S11.5), and nothing resolved it for user %q — the lane is configured, not commissioned",
+				ErrLaneNotCommissioned, l.lane.Lane, l.lane.Credential.Profile, l.lane.Credential.EnvVar, req.UserID)
+		}
+	}
 	if a.Instances == nil {
 		return nil, Instance{}, fmt.Errorf("%w: adapter has no instance provider", ErrInstanceUnavailable)
 	}
@@ -393,56 +388,44 @@ func ApproveAnswer(askID string) *adapters.Answer {
 
 // RejectAnswer builds the reject-with-feedback decision: `reply:"reject"` plus
 // the message the engine hands the model as a CorrectedError.
+//
+// LN-1 had to smuggle this through UpdatedInput in a JSON decision envelope,
+// because the shared Answer had no place to say "no". It has one now, so the
+// envelope is retired and with it the encoding failure its fail-closed
+// sentinel existed to survive: a typed member cannot fail to marshal, so a
+// refusal cannot become consent on the way to the wire.
 func RejectAnswer(askID, feedback string) *adapters.Answer {
-	env, err := json.Marshal(map[string]string{decisionKey: decisionReject, "message": feedback})
-	if err != nil {
-		// FAIL CLOSED. This signature cannot return an error, and the tempting
-		// fallback — an Answer with no envelope — is read as APPROVE, so an
-		// encoding failure would turn a human's refusal into consent. The
-		// sentinel decodes to nothing, so Resume refuses the whole answer
-		// loudly instead. Practically unreachable; the direction of the failure
-		// is the point.
-		return &adapters.Answer{AskID: askID, UpdatedInput: json.RawMessage(`{"` + decisionKey + `":"` + decisionUnencodable + `"}`)}
-	}
-	return &adapters.Answer{AskID: askID, UpdatedInput: env}
+	return &adapters.Answer{AskID: askID, Decision: adapters.DecisionReject, Reason: feedback}
 }
 
 // decodeDecision maps an Answer onto the two replies this adapter may send.
+//
+// Two refusals are load-bearing and both predate the typed member:
+//
+//   - a RAW replacement input is refused, because 1.18.3's permission.reply has
+//     no input-substitution channel at all and silently dropping a human's edit
+//     would execute the parked call unreviewed — the exact S03.4 failure the
+//     park exists to prevent;
+//   - a decision that is neither approve nor reject is refused LOUDLY rather
+//     than treated as a default, because the only available default is consent.
 func decodeDecision(ans *adapters.Answer) (reply, message string, err error) {
 	if ans == nil || ans.AskID == "" {
 		return "", "", nil
 	}
-	if len(ans.UpdatedInput) == 0 {
+	if len(ans.UpdatedInput) > 0 {
+		return "", "", fmt.Errorf("%w: the answer carries replacement tool input, which this engine cannot "+
+			"substitute — honoring the decision while dropping the edit would execute a call the human did not approve (S03.4)",
+			ErrUpdatedInputUnsupported)
+	}
+	switch ans.Decision {
+	case adapters.DecisionApprove:
 		return replyOnce, "", nil
+	case adapters.DecisionReject:
+		return replyReject, ans.Reason, nil
 	}
-	var members map[string]json.RawMessage
-	if uerr := json.Unmarshal(ans.UpdatedInput, &members); uerr == nil {
-		// A valid decision envelope that ALSO carries tool input is the
-		// dangerous shape: honoring the decision and dropping the edit executes
-		// something other than what the human approved. Only the two decision
-		// members may ride here; anything else is refused.
-		for k := range members {
-			if k != decisionKey && k != "message" {
-				return "", "", fmt.Errorf("%w: the answer carries %q alongside its decision, and this engine cannot substitute a gated call's input — "+
-					"honoring the decision while dropping %q would execute a call the human did not approve (S03.4)",
-					ErrUpdatedInputUnsupported, k, k)
-			}
-		}
-		var env struct {
-			Decision string `json:"sinet.decision"`
-			Message  string `json:"message"`
-		}
-		if json.Unmarshal(ans.UpdatedInput, &env) == nil {
-			switch env.Decision {
-			case decisionApprove:
-				return replyOnce, "", nil
-			case decisionReject:
-				return replyReject, env.Message, nil
-			}
-		}
-	}
-	return "", "", fmt.Errorf("%w: use ApproveAnswer/RejectAnswer — dropping the edit silently would execute the parked call unreviewed (S03.4)",
-		ErrUpdatedInputUnsupported)
+	return "", "", fmt.Errorf("%w: answer %q carries decision %q, which this substrate cannot express — "+
+		"refusing the whole answer rather than defaulting it, because the only default available is consent (S03.4)",
+		ErrUnsupportedDecision, ans.AskID, ans.Decision)
 }
 
 // heldAsk diffs the platform ask-record against the engine's flat pending array
@@ -555,6 +538,10 @@ func (a *Adapter) newSession(req adapters.StartRequest, l *lowered, c *client, s
 		// parks with zero progress, which is safe (P-T01-4).
 		atBoundary: true,
 	}
+	// The lane's own wire vocabulary, and the endpoint verdict the classifier
+	// needs as an input. Nil lane = the LN-1 posture, byte for byte.
+	s.p.lane = l.lane
+	s.p.endpointVerified = l.endpointVerified
 	s.cursor = adapters.Cursor{
 		Substrate: adapters.SubstrateOpencode,
 		// The engine mints and REPORTS its own session id; the platform never
@@ -928,8 +915,13 @@ func (s *session) parkRecord(cur adapters.Cursor, reason string, deferred json.R
 
 func (s *session) donePayload(out adapters.Outcome) json.RawMessage {
 	payload, err := json.Marshal(struct {
-		Outcome   string `json:"outcome"`
-		Finish    string `json:"finish,omitempty"`
+		Outcome string `json:"outcome"`
+		Finish  string `json:"finish,omitempty"`
+		// Effort is the S10.6 mode this turn actually ran under. It rides the
+		// durable terminal event because a mode is a DISCLOSED STATE, not a log
+		// line: a degradation nobody can see on the record is the silent
+		// fallback the ladder exists to prevent.
+		Effort    string `json:"effort,omitempty"`
 		PaidCalls int64  `json:"paid_calls"`
 		Detail    string `json:"detail,omitempty"`
 		// TransientError is an engine error the turn RECOVERED from: demoted
@@ -939,7 +931,7 @@ func (s *session) donePayload(out adapters.Outcome) json.RawMessage {
 		// RepliesObserved counts permission.replied events resolved by
 		// requestID, including the siblings one always-class reply fans out to.
 		RepliesObserved int `json:"replies_observed,omitempty"`
-	}{string(out.Kind), s.p.lastFinish, s.p.paidCalls, out.Detail,
+	}{string(out.Kind), s.p.lastFinish, s.req.EffortMode, s.p.paidCalls, out.Detail,
 		s.p.transientErr, len(s.p.replied)})
 	if err != nil {
 		return json.RawMessage("{}")

@@ -126,6 +126,15 @@ type lowered struct {
 	prompt       string
 	model        modelRef
 	fingerprint  string // S02.4(e), config-only and session-id-independent
+
+	// lane is the commissioning document behind this invocation's provider,
+	// when the provider names one; nil for a provider that is not a lane.
+	lane *LaneConfig
+	// endpointVerified is the R11 self-check verdict for THIS user's entry —
+	// established here, where the config is, and forwarded as an input to the
+	// S10.5 classifier, which stays pure and does no lookups of its own.
+	endpointVerified bool
+	endpointReason   string
 }
 
 // lower compiles a StartRequest into the exact invocation the engine receives.
@@ -158,13 +167,24 @@ func (a *Adapter) lower(req adapters.StartRequest) (*lowered, error) {
 	if err != nil {
 		return nil, err
 	}
+	providers, err := a.providersFor(req.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("opencode: resolve the provider entry of user %q (S03.6): %w", req.UserID, err)
+	}
+	lane := a.laneFor(model.ProviderID)
+	entry, configured := providers[model.ProviderID]
+	if lane != nil && !configured {
+		return nil, fmt.Errorf("%w: lane %q (provider %q) has no provider entry for user %q — a lane is a "+
+			"provider entry per person, and this person has none (S03.6)",
+			ErrLaneNotCommissioned, lane.Lane, lane.ProviderID, req.UserID)
+	}
 	cfg := engineConfig{
 		Schema: configSchemaURL,
 		// The blanket native-spawn denial rides the top level as well as every
 		// agent: a worker body can never be the only thing standing between the
 		// model and its own spawn tool.
 		Permission: map[string]string{nativeSpawnTool: permDeny},
-		Provider:   a.Providers,
+		Provider:   withEffortOptions(providers, lane, req.EffortMode),
 		Agent:      agents,
 	}
 	configJSON, err := json.Marshal(cfg)
@@ -179,9 +199,87 @@ func (a *Adapter) lower(req adapters.StartRequest) (*lowered, error) {
 		systemAppend: req.Worker.SystemPromptAppend,
 		prompt:       req.Worker.Prompt,
 		model:        model,
+		lane:         lane,
+	}
+	if lane != nil {
+		l.endpointVerified, l.endpointReason = lane.VerifyEndpoint(entry)
+		if !l.endpointVerified {
+			// Loud, not fatal. A wrong endpoint spends the wrong balance and
+			// then reports it as a depletion; the run still goes out, and the
+			// classifier is handed the fact so the symptom cannot be mistaken
+			// for the disease (R11).
+			a.warnf("opencode: %s", l.endpointReason)
+		}
 	}
 	l.fingerprint = fingerprint(configJSON, req)
 	return l, nil
+}
+
+// providersFor resolves this user's provider block. The single-value
+// Adapter.Providers is the default/single-user case, so no caller that
+// predates per-user resolution changes behavior.
+func (a *Adapter) providersFor(userID string) (ProviderConfig, error) {
+	if a.ProvidersFor == nil {
+		return a.Providers, nil
+	}
+	return a.ProvidersFor(userID)
+}
+
+// laneFor reports the commissioning document behind a provider id, if any.
+func (a *Adapter) laneFor(providerID string) *LaneConfig {
+	for i := range a.Lanes {
+		if a.Lanes[i].ProviderID == providerID {
+			return &a.Lanes[i]
+		}
+	}
+	return nil
+}
+
+// withEffortOptions applies the S10.6 effort rung's per-lane lever.
+//
+// The lever rides the compiled config because that is the only channel 1.18.3
+// exposes for provider options — which means an effort change is
+// STARTUP-BOUND like every other config change and restarts that user's serve
+// (§61(a)). That is a real cost, honestly incurred: the alternative is
+// inventing a per-request field this engine does not have.
+//
+// The input is never mutated: a resolver's config belongs to the resolver.
+func withEffortOptions(providers ProviderConfig, lane *LaneConfig, effort string) ProviderConfig {
+	if lane == nil || effort != adapters.EffortEco || len(lane.EcoOptions) == 0 {
+		return providers
+	}
+	entry, ok := providers[lane.ProviderID]
+	if !ok {
+		return providers
+	}
+	models := make(map[string]ModelEntry, len(entry.Models))
+	for id, m := range entry.Models {
+		opts := make(map[string]json.RawMessage, len(m.Options)+len(lane.EcoOptions))
+		for k, v := range m.Options {
+			opts[k] = v
+		}
+		for k, v := range lane.EcoOptions {
+			opts[k] = v
+		}
+		models[id] = ModelEntry{Name: m.Name, Options: opts}
+	}
+	entry.Models = models
+	out := make(ProviderConfig, len(providers))
+	for id, e := range providers {
+		out[id] = e
+	}
+	out[lane.ProviderID] = entry
+	return out
+}
+
+// lookupEnv reads one variable out of a lowered environment.
+func lookupEnv(env []string, name string) (string, bool) {
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // userRoot resolves and materializes the platform-owned per-user root. Every

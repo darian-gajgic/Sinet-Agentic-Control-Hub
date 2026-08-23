@@ -372,17 +372,21 @@ func TestDecisionEnvelopeRefusesSmuggledInput(t *testing.T) {
 }
 
 func TestRejectAnswerFailsClosed(t *testing.T) {
-	// A reject whose envelope cannot be encoded must never decode as an
-	// APPROVE: an empty UpdatedInput is exactly that, so the fallback carries a
-	// sentinel the decoder refuses instead.
-	sentinel := &adapters.Answer{AskID: fixtureAskID,
-		UpdatedInput: json.RawMessage(`{"` + decisionKey + `":"` + decisionUnencodable + `"}`)}
-	reply, _, err := decodeDecision(sentinel)
+	// Migrated at LN-2A with the decision envelope it was written against: the
+	// guarantee is unchanged and now structural. A verdict this substrate
+	// cannot express must never decode as an APPROVE — and since the typed
+	// member cannot fail to marshal, the encoding failure the old sentinel
+	// stood in for no longer exists at all.
+	unencodable := &adapters.Answer{AskID: fixtureAskID, Decision: adapters.AnswerDecision("unencodable")}
+	reply, _, err := decodeDecision(unencodable)
 	if err == nil {
-		t.Fatalf("the fail-closed sentinel decoded to reply %q — a refusal became consent", reply)
+		t.Fatalf("an inexpressible decision decoded to reply %q — a refusal became consent", reply)
 	}
 	if reply == replyOnce {
-		t.Fatal("the fail-closed sentinel approved")
+		t.Fatal("an inexpressible decision approved")
+	}
+	if RejectAnswer(fixtureAskID, "no").Decision != adapters.DecisionReject {
+		t.Fatal("RejectAnswer no longer carries a refusal")
 	}
 }
 

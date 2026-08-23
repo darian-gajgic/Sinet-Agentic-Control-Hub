@@ -183,6 +183,11 @@ type parser struct {
 	// commissioned lane and no provider-specific signal extraction applies —
 	// the parser then behaves exactly as it did before lanes existed.
 	lane *LaneConfig
+	// endpointVerified is the lowering's R11 verdict, carried onto every
+	// signal this parser forwards.
+	endpointVerified bool
+	// signalled dedupes the lane signal of a message the engine re-emits.
+	signalled map[string]bool
 
 	// cursor + terminal facts.
 	directory     string
@@ -223,6 +228,7 @@ func newParser(sessionID string, logf func(string, ...any)) *parser {
 		replied:      map[string]string{},
 		emittedAsks:  map[string]bool{},
 		runningTools: map[string]bool{},
+		signalled:    map[string]bool{},
 		seenUsage:    map[string]bool{},
 		partText:     map[string]string{},
 		partOrder:    map[string][]string{},
@@ -310,7 +316,13 @@ func (p *parser) feedStatus(raw json.RawMessage) []adapters.Event {
 		p.markIdle()
 	case "retry":
 		// Limit signals ride the contract as DATA (D4); the five-class taxonomy
-		// and park scheduling are Spec S10's, never this adapter's (S03.1).
+		// and park scheduling are Spec S10's, never this adapter's (S03.1). On a
+		// commissioned lane the provider's own error body is lifted out of the
+		// retry message first, because a normalized signal is still data — it is
+		// the same facts, named the way the classifier reads them.
+		if ev, ok := p.laneSignalEvent(sp.Status.Message, 0); ok {
+			return []adapters.Event{ev}
+		}
 		payload, err := json.Marshal(sp.Status)
 		if err != nil {
 			return nil
@@ -332,8 +344,20 @@ func (p *parser) feedMessage(raw json.RawMessage) []adapters.Event {
 		return nil
 	}
 	errored := len(m.Error) > 0 && string(m.Error) != "null"
+	var laneEvents []adapters.Event
 	if errored {
 		p.errDetail = describeEngineError(m.Error)
+		// The provider's own limit signal, forwarded as data. It is emitted
+		// from the FIRST observation of the failure rather than from the
+		// completion gate below: a message the engine never marks completed
+		// still carried the signal, and dropping it would lose the one fact
+		// the scheduler needs to react instead of retrying blind.
+		if !p.signalled[m.ID] {
+			if ev, ok := p.laneSignalEvent(p.errDetail, 0); ok {
+				p.signalled[m.ID] = true
+				laneEvents = append(laneEvents, ev)
+			}
+		}
 	}
 	// One paid call completes exactly once: the engine re-emits the completed
 	// message several times, and grouping by message id is what keeps D7 at one
@@ -344,7 +368,7 @@ func (p *parser) feedMessage(raw json.RawMessage) []adapters.Event {
 	// and D7 checkpoints paid calls, not successful ones. What it must NOT do
 	// is claim the turn's answer or its finish reason.
 	if m.Time.Completed == 0 || p.seenUsage[m.ID] {
-		return nil
+		return laneEvents
 	}
 	p.seenUsage[m.ID] = true
 	p.paidCalls++
@@ -370,7 +394,7 @@ func (p *parser) feedMessage(raw json.RawMessage) []adapters.Event {
 		modelID = m.ProviderID + "/" + modelID
 	}
 
-	var evs []adapters.Event
+	evs := laneEvents
 	excerpt, truncated := excerptOf(text)
 	if payload, err := json.Marshal(struct {
 		MessageID string `json:"message_id"`
@@ -590,6 +614,34 @@ func usageFromTokens(raw json.RawMessage, modelID, messageID string, index int64
 		}
 	}
 	return u
+}
+
+// laneSignalEvent lifts this lane's wire signal out of an engine-surfaced
+// error and forwards it as a rate_limit event.
+//
+// Forward tolerance is the whole posture here: an unrecognised code is LOGGED
+// and forwarded with its facts intact — never dropped, never fatal, and never
+// minted as a new platform kind. The taxonomy is Spec S10.5's, and a code this
+// adapter cannot name is exactly the case where guessing would be worst.
+func (p *parser) laneSignalEvent(text string, observedStatus int) (adapters.Event, bool) {
+	if p.lane == nil || text == "" {
+		return adapters.Event{}, false
+	}
+	sig, ok := p.lane.ExtractSignal(text, observedStatus)
+	if !ok {
+		return adapters.Event{}, false
+	}
+	sig.EndpointVerified = p.endpointVerified
+	if !sig.Known {
+		p.logf("opencode: forwarding an unrecognised %s provider error code %q as data — the signal set does "+
+			"not name it, so it classifies on its signal and never on a guess (S03.1)", sig.Lane, sig.ErrorCode)
+	}
+	payload, err := json.Marshal(sig)
+	if err != nil {
+		p.logf("opencode: could not encode the %s limit signal for code %q: %v", sig.Lane, sig.ErrorCode, err)
+		return adapters.Event{}, false
+	}
+	return adapters.Event{Kind: adapters.KindRateLimit, Payload: bounded(payload)}, true
 }
 
 func describeEngineError(raw json.RawMessage) string {

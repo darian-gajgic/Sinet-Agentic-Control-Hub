@@ -24,6 +24,20 @@ const (
 	laneLocal     = "local"
 )
 
+// The Z.AI wire codes the taxonomy names (Spec S10.5's signal set). They are
+// the classifier's own vocabulary, not lane configuration: the endpoint and the
+// model ids are DATA with dates because they move, while these are the fixed
+// points S10.5 sorts on. Everything the set does NOT name classifies on its
+// SIGNAL instead — see isDepletion/isDepletionNoSignal.
+const (
+	zaiRateLimit          = "1302" // rate limit reached for requests
+	zaiOverloaded         = "1305" // service temporarily overloaded
+	zaiUsageLimit         = "1308" // usage limit reached, with next_flush_time
+	zaiPeriodLimit        = "1310" // weekly/monthly limit exhausted, with next_flush_time
+	zaiInsufficientCredit = "1113" // insufficient balance / no resource package
+	zaiUnknownModel       = "1211" // unknown model — drift, not depletion
+)
+
 // LimitClass is one of the five wire-observable failure kinds (Spec S10.5).
 type LimitClass int
 
@@ -193,6 +207,30 @@ func Classify(sig LimitSignal, cfg LimitConfig) Action {
 			Reason: "engine budget/ceiling backstop tripped — died-at-gate handling (S10.8)"}
 	}
 
+	// Two Z.AI codes that are NOT limit events, checked before the depletion
+	// ladder because both would otherwise be absorbed by it and disappear.
+	if sig.Lane == laneZAI {
+		// 1113 on a lane that is not pointed at the subscription endpoint.
+		// "Insufficient balance" is then the documented symptom of the
+		// MISCONFIGURATION, not of a spent plan: the subscription does not
+		// apply on the general endpoint, so the pay-as-you-go balance answers
+		// instead. Probe-parking that would wait forever for a top-up nobody
+		// is going to make — the P-T08-2 failure class exactly (S10.5, R11).
+		if sig.ErrorCode == zaiInsufficientCredit && !sig.EndpointVerified {
+			return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceEndpointDefect,
+				Reason: "this lane reported insufficient balance and its configured endpoint is NOT the " +
+					"verified subscription endpoint — a configuration defect, not a limit event: fix the endpoint, " +
+					"do not retry and do not park (S10.5 Class-3 self-check)"}
+		}
+		// An unknown MODEL is drift, not depletion. Parking a run because the
+		// provider renamed a model would hide the one fact worth acting on.
+		if sig.ErrorCode == zaiUnknownModel {
+			return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceModelDrift,
+				Reason: "the provider does not recognise the requested model — model drift, not a limit event: " +
+					"the account's observed model list is the authority (P-T17-3)"}
+		}
+	}
+
 	// Class 1: transient shed — retry in place, never park, never count
 	// against quota (S10.5).
 	if isTransient(sig) {
@@ -232,7 +270,11 @@ func isTransient(sig LimitSignal) bool {
 			return true
 		}
 	case laneZAI:
-		return sig.ErrorCode == "1302" || sig.ErrorCode == "1305"
+		// Only the two codes the set NAMES as transient may retry. A code the
+		// set does not name never lands here: retrying an unknown 429 against
+		// a plan that may be depleted is the one direction with no safe
+		// failure (R13).
+		return sig.ErrorCode == zaiRateLimit || sig.ErrorCode == zaiOverloaded
 	}
 	return false
 }
@@ -243,7 +285,15 @@ func isDepletion(sig LimitSignal) bool {
 	case laneAnthropic:
 		return sig.RateLimitStatus == "rejected" || sig.HTTPStatus == 429
 	case laneZAI:
-		return sig.ErrorCode == "1308" || sig.ErrorCode == "1310"
+		if sig.ErrorCode == zaiUsageLimit || sig.ErrorCode == zaiPeriodLimit {
+			return true
+		}
+		// The signal-based fallback for codes the set does not name (the
+		// provider documents a whole band only collectively). The CLASS is
+		// defined by the signal, not by the code: a 429 that carries a
+		// parseable resume time IS depletion-with-signal, whatever its number.
+		// 1113 is excluded because its resume story is the probe schedule.
+		return sig.HTTPStatus == 429 && sig.ErrorCode != zaiInsufficientCredit
 	default:
 		// opencode/other: a bare retry.next reset is a depletion signal.
 		return true
@@ -254,7 +304,12 @@ func isDepletion(sig LimitSignal) bool {
 func isDepletionNoSignal(sig LimitSignal) bool {
 	switch sig.Lane {
 	case laneZAI:
-		return sig.ErrorCode == "1113"
+		// 1113 after the endpoint self-check passed (the defect case returned
+		// long before this), plus any other 429 the set does not name and that
+		// carried no resume time. Both park; neither retries and neither
+		// freezes — the safe direction on a lane whose undocumented codes the
+		// provider publishes only as a band.
+		return sig.ErrorCode == zaiInsufficientCredit || sig.HTTPStatus == 429
 	}
 	// A rejected/429 depletion with no reset time is depletion-without-signal
 	// on any lane (undocumented concurrency caps).
