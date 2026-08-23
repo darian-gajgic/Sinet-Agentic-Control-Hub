@@ -347,7 +347,9 @@ func (m *Manager) spawn(ctx context.Context, spec InstanceSpec) (*instanceProc, 
 func (m *Manager) awaitListening(ctx context.Context, p *instanceProc) (string, error) {
 	deadline := time.Now().Add(m.bootTimeout())
 	for {
-		if url := parseListenURL(p.out.String()); url != "" {
+		// raw(), not String(): the trimmed form drops the very line terminator
+		// that proves the announcement finished arriving.
+		if url := parseListenURL(p.out.raw()); url != "" {
 			return url, nil
 		}
 		select {
@@ -530,7 +532,13 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *boundedBuffer) String() string {
+	return strings.TrimSpace(b.raw())
+}
+
+// raw returns the retained output UNTRIMMED. Line-completeness checks must read
+// this, not String: trimming removes the terminator they test for.
+func (b *boundedBuffer) raw() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return strings.TrimSpace(string(b.buf))
+	return string(b.buf)
 }
