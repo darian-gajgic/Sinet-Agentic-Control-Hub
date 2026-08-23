@@ -70,9 +70,6 @@ func (p *fakeProvider) toolsOffered() []string {
 
 func (p *fakeProvider) route(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		p.mu.Lock()
-		p.calls = append(p.calls, fakeProviderCall{Auth: r.Header.Get("Authorization")})
-		p.mu.Unlock()
 		writeJSON(w, map[string]any{"object": "list", "data": []any{
 			map[string]any{"id": "fakemodel", "object": "model", "owned_by": "fake"}}})
 		return

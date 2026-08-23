@@ -253,3 +253,79 @@ func TestAuthNeverReachesARetryPark(t *testing.T) {
 		}
 	}
 }
+
+// TestZAINamedCodesAgainstBanAndLimitText is drain r2 / N1: the property over
+// the NAMED codes, where a transient verdict and a revocation are competing
+// readings of one signal.
+//
+// Both directions are pinned because both have a named failure. A policy
+// signal reaching a retry is P-T08-2's worst case; a lane frozen because the
+// provider's own usage-limit band says "violations" is the mirror image, and
+// the reason the revocation test excludes that stem.
+func TestZAINamedCodesAgainstBanAndLimitText(t *testing.T) {
+	cfg := ln2Config()
+	const (
+		bandText   = "Various subscription/usage limit violations"
+		limitText  = "Usage limit reached for `20000` `credits`"
+		banText    = "your account has been suspended for a policy violation"
+		plainBan   = "this account is banned"
+		emptyText  = ""
+		unrelated  = "the service may be temporarily overloaded, please try again later"
+		revocation = "API access revoked for this organization"
+	)
+	transient := []string{"1302", "1305"}
+	limits := []string{"1308", "1310", "1315", "1113"}
+
+	// 1302/1305 + explicit revocation on VALID credentials ⇒ Class 4 freeze.
+	for _, code := range transient {
+		for _, body := range []string{banText, plainBan, revocation} {
+			got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: code, HTTPStatus: 429,
+				EndpointVerified: true, BodyText: body, OnValidCredentials: true}, cfg)
+			if got.Class != ClassAuthPolicy || got.Kind != ActionLaneFreeze {
+				t.Errorf("zai %s + %q on valid credentials = class %d / %q, want the Class-4 freeze — a policy "+
+					"signal must never reach a retry (P-T08-2)", code, body, got.Class, got.Kind)
+			}
+		}
+	}
+	// 1302/1305 + band or ordinary limit text ⇒ Class 1, whatever the
+	// credential assurance: the band's own word is not a revocation.
+	for _, code := range transient {
+		for _, body := range []string{bandText, limitText, emptyText, unrelated} {
+			for _, valid := range []bool{false, true} {
+				got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: code, HTTPStatus: 429,
+					EndpointVerified: true, BodyText: body, OnValidCredentials: valid}, cfg)
+				if got.Class != ClassTransientShed || got.Kind != ActionRetryInPlace {
+					t.Errorf("zai %s + %q (valid=%v) = class %d / %q, want class 1 / retry-in-place",
+						code, body, valid, got.Class, got.Kind)
+				}
+			}
+		}
+	}
+	// The limit codes never freeze on TEXT alone, including explicit ban text:
+	// their class comes from the code and the signal, and the auth canary is
+	// the authoritative revocation detector (S03.6, S14.6).
+	for _, code := range limits {
+		for _, body := range []string{bandText, limitText, banText, plainBan, revocation, emptyText} {
+			for _, valid := range []bool{false, true} {
+				got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: code, HTTPStatus: 429,
+					EndpointVerified: true, BodyText: body, OnValidCredentials: valid}, cfg)
+				if got.Class == ClassAuthPolicy || got.Kind == ActionLaneFreeze {
+					t.Errorf("zai %s + %q (valid=%v) froze the lane on text alone", code, body, valid)
+				}
+				if got.Kind != ActionParkQuota && got.Kind != ActionParkProbe {
+					t.Errorf("zai %s + %q (valid=%v) = %q, want a park", code, body, valid, got.Kind)
+				}
+			}
+		}
+	}
+	// The auth codes still outrank everything, and the codeless case still
+	// reaches the general policy-ban heuristic unchanged.
+	if got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: "1000", HTTPStatus: 401,
+		BodyText: bandText, OnValidCredentials: true}, cfg); got.Class != ClassAuthPolicy {
+		t.Errorf("zai 1000 = class %d, want the Class-4 freeze", got.Class)
+	}
+	if got := Classify(LimitSignal{Lane: laneZAI, HTTPStatus: 429,
+		BodyText: banText, OnValidCredentials: true}, cfg); got.Class != ClassAuthPolicy {
+		t.Errorf("codeless zai + ban text = class %d, want the Class-4 freeze", got.Class)
+	}
+}

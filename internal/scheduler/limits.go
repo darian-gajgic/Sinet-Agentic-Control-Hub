@@ -337,6 +337,19 @@ func classifyZAICode(sig LimitSignal, cfg LimitConfig) (Action, bool) {
 				"do not retry and do not park (S10.5 Class-3 self-check)"}, true
 
 	case sig.ErrorCode == zaiRateLimit || sig.ErrorCode == zaiOverloaded:
+		// A policy signal must NEVER reach a retry (P-T08-2's named worst
+		// case), and this is the only zai branch where that is reachable —
+		// every other verdict below is a park. So the revocation test is
+		// folded in AHEAD of the transient verdict rather than left to run
+		// after the coded taxonomy: a lane that has been suspended does not
+		// become healthy because the provider also happened to shed the
+		// request.
+		if sig.OnValidCredentials && sig.BodyText != "" && looksLikeRevocation(sig.BodyText) {
+			return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
+				Reason: fmt.Sprintf("zai %s is a transient code, but its body carries explicit revocation text on "+
+					"VALID credentials — lane freeze, never retry (S10.5 Class 4 outranks Class 1; P-T08-2)",
+					sig.ErrorCode)}, true
+		}
 		return Action{Class: ClassTransientShed, Kind: ActionRetryInPlace,
 			RetryCap: cfg.RetryCap, RetryBudgetRatio: cfg.RetryBudgetRatio,
 			Reason: "transient shed — retry in place with full jitter (S10.5)"}, true
@@ -420,6 +433,25 @@ func isDepletionNoSignal(sig LimitSignal) bool {
 	// A rejected/429 depletion with no reset time is depletion-without-signal
 	// on any lane (undocumented concurrency caps).
 	return sig.RateLimitStatus == "rejected" || sig.HTTPStatus == 429
+}
+
+// looksLikeRevocation is the NARROW test used where a limit code and a
+// revocation are competing readings of one signal (the zai transient branch).
+//
+// The bare "violat" stem that looksLikePolicyBan accepts is deliberately
+// ABSENT here, and that omission is the whole point: Z.AI documents its own
+// usage-limit band as "Various subscription/usage limit violations", so on this
+// wire that stem is LIMIT vocabulary, not revocation vocabulary. Reading it as
+// a ban is exactly the mistake that froze healthy lanes before drain r1; only
+// words a limit message has no reason to use may promote a shed into a freeze.
+func looksLikeRevocation(body string) bool {
+	low := strings.ToLower(body)
+	for _, kw := range []string{"suspend", "banned", "revoke", "prohibit", "deactivat", "terminated", "policy"} {
+		if strings.Contains(low, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // looksLikePolicyBan is a conservative match for policy-ban text arriving on
