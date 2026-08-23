@@ -145,33 +145,49 @@ func DefaultDutyMap() DutyMap {
 // different answer in each caller.
 type AlternateSeats map[string][]Seat
 
-// DefaultAlternateSeats is the shipped alternate-seat data (S08.8 step 3;
-// S03.6 — a lane is configuration, never code).
+// LaneSeat is one lane's execution-seat facts as its commissioning document
+// states them — the input AlternateSeatsFor turns into duty-map seats.
+type LaneSeat struct {
+	Lane  string
+	Model string
+	// WindowTokens is the model's context window when the provider publishes
+	// one; 0 takes the platform floor.
+	WindowTokens int64
+}
+
+// AlternateSeatsFor builds the alternate-seat map from commissioned lanes.
 //
-// EXECUTION ONLY, deliberately. The zai lane is commissioned at P3-LN-2 and
-// serves glm-5.3 as its coding flagship (verified 2026-08-23 against
-// docs.z.ai/devpack/overview; the seed ids are DATA with a date and the
-// account's own observed list is the authority — P-T17-3). Planning and judge
-// keep their anthropic-only seats: the B3 gate ratified that seat mix from
-// measured research, the judge seat additionally carries the S07.5 bar of
-// capability ≥ the executor AND a different model than the executor it judges,
-// and nobody has measured a zai model against either bar. Seating one here
-// would be inventing a ratification, so an owner who holds only zai gets the
-// unchanged 2.7 subscription-gap advice for those duties, which is the honest
-// answer.
+// EXECUTION ONLY, deliberately. Planning and judge keep their anthropic-only
+// seats: the B3 gate ratified that seat mix from measured research, the judge
+// seat additionally carries S07.5's capability-≥-executor bar AND the
+// different-model-than-the-executor rule, and nobody has measured a second
+// lane's models against either. Seating one would be inventing a ratification,
+// so an owner holding only that lane gets the unchanged 2.7 subscription-gap
+// advice for those duties — the honest answer.
 //
-// WindowTokens is the platform floor rather than a per-model fact: the
-// provider publishes no input-context figure for these models on either
-// primary page (checked 2026-08-24 — docs.z.ai/devpack/overview and the
-// chat-completion reference state a 128K maximum OUTPUT and no input window).
-// Understating a window only splits stages earlier, which is safe; minting an
-// unverified one would disarm overflow protection. A measured uplift is an S14
-// recalibration, and the model-list canary is where observed model facts will
-// arrive from.
-func DefaultAlternateSeats() AlternateSeats {
-	return AlternateSeats{
-		DutyExecution: {{Model: "glm-5.3", Lane: "zai", WindowTokens: DefaultWindowTokens}},
+// No model id appears in this package. Which model a lane fronts is the lane
+// DOCUMENT's fact (S03.6), it carries its own verified-on date, and three of
+// the Z.AI seed's rows moved inside five weeks — a constant here would go stale
+// invisibly while a dated row goes stale visibly.
+func AlternateSeatsFor(seats ...LaneSeat) AlternateSeats {
+	out := AlternateSeats{}
+	for _, s := range seats {
+		if s.Lane == "" || s.Model == "" {
+			continue
+		}
+		window := s.WindowTokens
+		if window <= 0 {
+			// The platform floor. Understating a window only splits stages
+			// earlier, which is safe; minting an unverified one would disarm
+			// overflow protection.
+			window = DefaultWindowTokens
+		}
+		out[DutyExecution] = append(out[DutyExecution], Seat{Model: s.Model, Lane: s.Lane, WindowTokens: window})
 	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Coverage is the subscription-coverage view binding every choice (Spec
@@ -212,14 +228,36 @@ type TieBreaker interface {
 	Break(ctx context.Context, q RouteQuery, candidates []Candidate) (pick int, reason string, err error)
 }
 
+// LanePressure is one lane's consumption pressure as the D5 comparison needs
+// it: a RATIO of consumption to the operator's declared budget for that lane,
+// in that lane's own unit.
+//
+// A ratio is the only cross-lane comparable quantity here, and this type exists
+// because a raw figure is not one. Anthropic consumption is counted in weighted
+// tokens and Z.AI's in plan credits; ordering two lanes by their raw counts
+// compares a token against a credit, and with no budget declared it compares
+// two unbounded LIFETIME totals — under which a newly added lane holds the
+// smaller number forever and therefore wins every dispatch, however hard it is
+// actually being worked. Applicable says whether a denominator was declared at
+// all, so its absence is a fact the caller must handle rather than a zero it
+// cannot tell apart from an idle lane.
+type LanePressure struct {
+	// Ratio is consumption ÷ the declared budget, valid only when Applicable.
+	Ratio float64
+	// Applicable reports that a budget was declared for this (owner, lane).
+	Applicable bool
+	// Unit names what was counted, for the plain reason.
+	Unit string
+}
+
 // PressureReader is the D5 lane-ordering input among multiple covered
 // flat-rate lanes: consumption pressure, never dollars (Spec S08.8 step 3;
 // S10 owns the gauge). Nil, or a single covered lane, short-circuits to
 // the configured lane order.
 type PressureReader interface {
-	// Pressure returns a comparable consumption-pressure figure for the
-	// owner on the lane (higher = more consumed).
-	Pressure(ctx context.Context, owner, lane string) (float64, error)
+	// Pressure returns the owner's normalized consumption pressure on the
+	// lane (higher = more of the declared budget consumed).
+	Pressure(ctx context.Context, owner, lane string) (LanePressure, error)
 }
 
 // RouteQuery is one selection request. The inputs are PLATFORM facts (plan
@@ -731,7 +769,7 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 		return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty and no consumption gauge is wired, so the configured order stands (never dollars — D5).",
 			len(covered))
 	}
-	best, bestP, measured := covered[0], 0.0, false
+	best, bestP := covered[0], 0.0
 	for i, c := range covered {
 		p, err := r.Pressure.Pressure(ctx, owner, c.Lane)
 		if err != nil {
@@ -739,16 +777,22 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 			// rather than failing the dispatch, and says so.
 			return covered[0], fmt.Sprintf("Consumption pressure was unavailable (%v), so the configured lane order stands (never dollars — D5).", err)
 		}
-		if i == 0 || p < bestP {
-			best, bestP = c, p
+		if !p.Applicable {
+			// No declared budget on a lane means no comparable ratio for it.
+			// The alternative — ordering by raw consumption — compares a token
+			// count against a credit count and hands every dispatch to
+			// whichever lane was added most recently, forever. A stable,
+			// STATED order is the honest answer to "we cannot tell yet".
+			return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty but lane %s has no declared automation budget, "+
+				"so there is no comparable consumption pressure and the deterministic duty-map order stands (S10.4; never dollars — D5).",
+				len(covered), c.Lane)
 		}
-		measured = true
+		if i == 0 || p.Ratio < bestP {
+			best, bestP = c, p.Ratio
+		}
 	}
-	if !measured {
-		return covered[0], ""
-	}
-	return best, fmt.Sprintf("Chosen among %d covered flat-rate lanes on consumption pressure — %s was the least consumed (D5: never dollars).",
-		len(covered), best.Lane)
+	return best, fmt.Sprintf("Chosen among %d covered flat-rate lanes on consumption pressure — %s sits at %.0f%% of its declared automation budget, the least consumed (D5: never dollars).",
+		len(covered), best.Lane, bestP*100)
 }
 
 // modelCovered: the model rides a covered flat-rate lane. v0 lane facts

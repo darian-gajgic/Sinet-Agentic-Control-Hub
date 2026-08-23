@@ -19,6 +19,12 @@ import (
 // (Spec S05.3 fresh-context-per-stage).
 type SessionInput struct {
 	RunID string
+	// Lane is the LANE the routing decision settled on, when the caller has
+	// one. It selects the substrate through Config.LaneSubstrates: a decision
+	// that seats a model on a lane must run on the engine that serves that
+	// lane, and before this existed the lane died in the dispatch path while
+	// the substrate came from a process-wide default (drain r1 D4).
+	Lane string
 	// Stage names the pipeline stage; for execute sessions it is the plan
 	// step id, so the ledger assembly's Plan source injects that step's
 	// contract (Spec S05.4 Sources.Plan; intake.PlanSource selection).
@@ -140,14 +146,17 @@ func (s *Skeleton) Session(ctx context.Context, in SessionInput) (SessionResult,
 	if err != nil {
 		return SessionResult{}, err
 	}
-	// Substrate: the run's own where set (execute/verify runs, created by
-	// the skeleton); the configured ceremony substrate otherwise — the
-	// intake run predates engine selection (Spec S06.10 puts the ceremony
-	// duty map on the platform, per-person overrides at S08/B3).
-	substrate := r.Substrate
-	if substrate == "" {
-		substrate = s.cfg.Substrate
-	}
+	// Substrate, in priority order: the LANE the selection settled on, then
+	// the run's own where set (execute/verify runs, created by the skeleton),
+	// then the configured ceremony substrate — the intake run predates engine
+	// selection (Spec S06.10 puts the ceremony duty map on the platform,
+	// per-person overrides at S08/B3).
+	//
+	// The lane leads because the run row is stamped at CREATION, before
+	// routing has run: honoring the row over the decision would dispatch a
+	// zai-seated run to the Anthropic CLI (drain r1 D4). A lane with no
+	// mapping changes nothing, which is every lane until one is commissioned.
+	substrate := s.substrateFor(in.Lane, r)
 	adapter, ok := s.cfg.Adapters[substrate]
 	if !ok {
 		return SessionResult{}, fmt.Errorf("stage: no adapter registered for substrate %q (run %s)", substrate, r.ID)
@@ -365,6 +374,32 @@ func sanitizePathComponent(s string) string {
 // judge, revise) are S06.10 planning-model duties; the judge in particular
 // is the ratified planning-model class (Spec S07.5). Selection of the
 // EXECUTION model never lands here — dispatch passes it explicitly.
+// substrateFor resolves which D3 substrate serves a session, in priority
+// order: the LANE the selection settled on, then the run's own substrate where
+// set, then the configured ceremony substrate.
+//
+// The lane leads because the run row is stamped at CREATION — launchRole
+// copies Config.Substrate onto it before the run is even enqueued, which is
+// long before routing has chosen anything. Honoring the row over the decision
+// would dispatch a run seated on a second lane to the FIRST lane's engine, and
+// meter it as that lane, with nothing anywhere contradicting it (drain r1 D4).
+// A lane with no mapping changes nothing, which is every lane until one is
+// commissioned.
+func (s *Skeleton) substrateFor(decisionLane string, r run.Run) string {
+	substrate := r.Substrate
+	if substrate == "" {
+		substrate = s.cfg.Substrate
+	}
+	lane := decisionLane
+	if lane == "" {
+		lane = r.Lane
+	}
+	if mapped, ok := s.cfg.LaneSubstrates[lane]; ok && mapped != "" {
+		return mapped
+	}
+	return substrate
+}
+
 func (s *Skeleton) modelFor(override string) string {
 	if override != "" {
 		return override

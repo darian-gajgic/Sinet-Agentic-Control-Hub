@@ -42,6 +42,17 @@ type Receipt struct {
 	// provider signal"), computed from the run's park/resume transitions.
 	ParkHistory []ParkEpisode `json:"park_history,omitempty"`
 
+	// RequestIDs are the provider request ids the run's calls carried, in call
+	// order — the S03.7 reconciliation key to an operator's provider dashboard
+	// (the TBD-OPERATOR plan-unit calibration recipe).
+	//
+	// They sit on the RECEIPT rather than on a line item because a line
+	// aggregates every call for a {model, lane, purpose}: one id there could
+	// only ever name one of them, which invites exactly the wrong
+	// reconciliation. Omitted entirely for a run whose calls carried none —
+	// most lanes publish no per-call id, and an absent key is absent.
+	RequestIDs []string `json:"request_ids,omitempty"`
+
 	// Mode is the S10.6 mode/degradation seam. Empty at B1-2: the downgrade
 	// ladder (flat-lane switch → in-lane demotion → effort reduction → local
 	// fallback → park) needs routing (Spec S08, B3) and the local tier (Spec
@@ -131,6 +142,10 @@ func (rc *Receipts) MaterializeTx(ctx context.Context, tx *sql.Tx, runID string)
 	if err != nil {
 		return Receipt{}, err
 	}
+	requestIDs, err := rc.ledger.RequestIDsTx(ctx, tx, runID)
+	if err != nil {
+		return Receipt{}, err
+	}
 
 	r := Receipt{
 		RunID:              cons.RunID,
@@ -142,6 +157,7 @@ func (rc *Receipts) MaterializeTx(ctx context.Context, tx *sql.Tx, runID string)
 		TotalUnpricedCalls: cons.TotalUnpricedCalls,
 		WorstTier:          cons.WorstTier,
 		ParkHistory:        parks,
+		RequestIDs:         requestIDs,
 		Mode: ModeSummary{
 			Note: "no mode change (S10.6 downgrade ladder lands with routing S08/local tier S12)",
 		},

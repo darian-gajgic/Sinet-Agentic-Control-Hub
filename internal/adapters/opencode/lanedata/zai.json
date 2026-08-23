@@ -1,6 +1,7 @@
 {
   "lane": "zai",
   "provider_id": "zai-coding-plan",
+  "substrate": "opencode",
   "npm": "@ai-sdk/openai-compatible",
   "display_name": "Z.AI GLM Coding Plan",
   "verified_on": "2026-08-23",
@@ -55,6 +56,8 @@
       "region_model_gate": "none"
     }
   ],
+  "default_model": "glm-5.3",
+  "default_model_note": "The model this lane's execution seat takes when routing selects the lane (S08.8 step 3). DATA, like every other id here: which model a lane fronts is a per-lane fact that moves, and the account's observed list is the authority (P-T17-3).",
   "model_routing_note": "Requests for previous models (GLM-5.2 / GLM-5.1) are automatically routed to GLM-5.3 by the plan itself (verified 2026-08-23). These seed ids are DATA with a date, never the authority: the account's own observed model list is.",
   "eco_options": {
     "thinking": { "type": "disabled", "clear_thinking": false }

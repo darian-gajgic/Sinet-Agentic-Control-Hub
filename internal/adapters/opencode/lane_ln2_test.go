@@ -50,6 +50,7 @@ func otherLaneDoc(t *testing.T) LaneConfig {
 	t.Helper()
 	c, err := LoadLaneConfig([]byte(`{
 	  "lane": "zai",
+	  "substrate": "opencode",
 	  "provider_id": "elsewhere-plan",
 	  "npm": "@ai-sdk/openai-compatible",
 	  "display_name": "Elsewhere Plan",
@@ -893,7 +894,7 @@ func TestZAIObservedHTTPStatusIsLiftedFromTheWire(t *testing.T) {
 // onboarding gate. Each case is a document that must NOT load.
 func TestLaneDocumentValidationRefusesWhatTheSpecRequires(t *testing.T) {
 	base := map[string]any{
-		"lane": "zai", "provider_id": "p", "verified_on": "2026-08-23",
+		"lane": "zai", "substrate": "opencode", "provider_id": "p", "verified_on": "2026-08-23",
 		"base_url": "https://example.test/api/coding/paas/v4", "endpoint_marker": "/api/coding/paas/v4",
 		"credential": map[string]any{"profile": "p", "env_var": "P_KEY"},
 		"models": []any{map[string]any{"id": "m", "verified_on": "2026-08-23",

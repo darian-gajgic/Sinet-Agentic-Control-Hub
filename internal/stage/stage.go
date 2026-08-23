@@ -188,6 +188,27 @@ type Config struct {
 	// onto a lane that has no credential (R9's "not commissioned" state).
 	CommissionedLanes []string
 
+	// LaneSubstrates maps a LANE to the D3 substrate that serves it, for the
+	// lanes an operator has actually commissioned (P3-LN-2B drain r1 D4).
+	//
+	// Substrate selection used to be a process-wide default: every run row was
+	// stamped with Config.Substrate at creation, which happens BEFORE routing
+	// runs, so a decision that seated a zai model still dispatched to the
+	// Anthropic CLI and metered as anthropic. Registering a second adapter did
+	// not fix that on its own — nothing anywhere mapped a lane to an engine.
+	//
+	// Empty at v0 (nothing commissioned), under which every dispatch takes the
+	// unchanged Config.Substrate path. Each value is validated against the
+	// registered adapter set at New: a lane pointing at an unregistered
+	// substrate is a configuration error, never a silent fallback.
+	LaneSubstrates map[string]string
+
+	// AlternateSeats are the extra flat-rate execution seats commissioned
+	// lanes bring (S08.8 step 3). Composed at the composition root from the
+	// lane documents, because a model id is a lane's own dated fact and never
+	// a routing constant. Nil = the single-lane world.
+	AlternateSeats worker.AlternateSeats
+
 	// LocalAvailable reports the S12 local serving stack is configured (B4-5):
 	// the effective DutyMap gains the utility seat and Coverage.LocalAvailable
 	// flips true, so a class-(a) engine dispatch onto duty utility degrades to

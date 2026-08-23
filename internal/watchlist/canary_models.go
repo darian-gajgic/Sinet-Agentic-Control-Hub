@@ -42,11 +42,18 @@ type ModelListCanary struct {
 	// Lanes are the accounts to diff.
 	Lanes []string
 	// Configured is the per-lane CONFIGURED model list — the S03.6 "config"
-	// side of the diff. It is empty at v0: no per-account model configuration
-	// is registered anywhere yet, and the canary says so on its record rather
-	// than pretending an empty config means every model was removed. With no
-	// config the comparison falls back to the previous OBSERVATION, which is
-	// still model-list drift and still names real model ids.
+	// side of the diff.
+	//
+	// CORRECTED 2026-08-24 (P3-LN-2B drain r1 D8): this said it was empty at
+	// v0 because "no per-account model configuration is registered anywhere",
+	// which stopped being true when lanes gained commissioning DOCUMENTS. The
+	// composition root now fills it from those documents, which carry each
+	// model id with its own verified-on date. It is still empty for a lane
+	// with no document.
+	//
+	// With no config the comparison falls back to the previous OBSERVATION,
+	// which is still model-list drift and still names real model ids — never
+	// to pretending an empty config means every model was removed.
 	Configured map[string][]string
 }
 

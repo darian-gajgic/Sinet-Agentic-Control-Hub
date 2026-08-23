@@ -43,6 +43,7 @@ func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRou
 			PermissionMode: execPermissionMode,
 			PriorOverflows: prior,
 			Model:          er.Decision.Model,
+			Lane:           er.Decision.Lane,
 			WindowTokens:   er.Decision.WindowTokens,
 		}
 		if er.Decision.TemplateID != "" && s.cfg.Workers != nil {

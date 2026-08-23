@@ -194,16 +194,19 @@ func TestZAIHasBehavioralCanaryAndNoLogprobCanary(t *testing.T) {
 		t.Error("no behavioral canary result for lane zai")
 	}
 
-	// The refusal is structural, not incidental.
-	if _, err := c.Logprob.Run(ctx, c, watchlist.LaneZAI); !errors.Is(err, watchlist.ErrLaneNotLocal) {
-		t.Errorf("the logprob canary accepted lane zai (err = %v)", err)
-	}
-	// And the reason is written down where a reader will find it.
-	src := readWatchlistSource(t, "canary_logprob.go")
-	for _, needle := range []string{"S03.7", "logprob"} {
-		if !strings.Contains(src, needle) {
-			t.Errorf("canary_logprob.go does not record %q as the reason zai has no logprob canary", needle)
+	// The refusal is STRUCTURAL, and that is the substance: the canary refuses
+	// every paid lane by name, and accepts the local one. Asserting the file
+	// merely mentions "logprob" would pass on a file that had nothing to do
+	// with the rule (drain r1 D9).
+	for _, lane := range watchlist.PaidLanes() {
+		if _, err := c.Logprob.Run(ctx, c, lane); !errors.Is(err, watchlist.ErrLaneNotLocal) {
+			t.Errorf("the logprob canary accepted paid lane %s (err = %v) — a logprob canary on a lane that "+
+				"publishes none can only ever fabricate a reading", lane, err)
 		}
+	}
+	// The control: the refusal is about the LANE, not about everything.
+	if _, err := c.Logprob.Run(ctx, c, watchlist.LaneLocal); errors.Is(err, watchlist.ErrLaneNotLocal) {
+		t.Error("the logprob canary refused the LOCAL lane as non-local — the refusal would be vacuous")
 	}
 }
 
@@ -232,6 +235,17 @@ func TestZAIWatchRowURLsVerified(t *testing.T) {
 		}
 		if u.Host != wantURL[0] || u.Path != wantURL[1] {
 			t.Errorf("row %s points at %s%s, want the verified %s%s", r.ID, u.Host, u.Path, wantURL[0], wantURL[1])
+		}
+		// For the keyword feed the QUERY is the watch: a correct host and path
+		// with the wrong search term watches somebody else's news.
+		if r.ID == "t4-hn-zai" {
+			q := u.Query()
+			if kw := q.Get("q"); !strings.Contains(strings.ToLower(kw), "z.ai") && !strings.Contains(strings.ToLower(kw), "glm") {
+				t.Errorf("row %s searches for %q, which names neither the provider nor its models", r.ID, kw)
+			}
+			if q.Get("points") == "" {
+				t.Errorf("row %s carries no points threshold — the feed is unfiltered noise without one", r.ID)
+			}
 		}
 		if r.Lane != watchlist.LaneZAI {
 			t.Errorf("row %s carries lane %q, want zai", r.ID, r.Lane)

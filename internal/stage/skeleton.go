@@ -93,6 +93,14 @@ func New(cfg Config) (*Skeleton, error) {
 	if _, ok := cfg.Adapters[cfg.Substrate]; !ok {
 		return nil, fmt.Errorf("stage: configured substrate %q has no registered adapter", cfg.Substrate)
 	}
+	// A commissioned lane must name a substrate that actually exists here.
+	// Falling back to the default instead would run the lane's work on the
+	// wrong engine, which is precisely the failure this map was added to end.
+	for lane, sub := range cfg.LaneSubstrates {
+		if _, ok := cfg.Adapters[sub]; !ok {
+			return nil, fmt.Errorf("stage: lane %q names substrate %q, which has no registered adapter (S03.2)", lane, sub)
+		}
+	}
 	s := &Skeleton{cfg: cfg, cancels: newLiveSessions()}
 	s.dutyMap = cfg.DutyMap
 	if s.dutyMap == nil {
@@ -112,7 +120,7 @@ func New(cfg Config) (*Skeleton, error) {
 		s.router = &worker.Router{
 			Store:      cfg.Workers,
 			DutyMap:    s.dutyMap,
-			Alternates: worker.DefaultAlternateSeats(),
+			Alternates: cfg.AlternateSeats,
 			// LocalAvailable flips true when the S12 local stack is configured
 			// (B4-5): the utility seat joins the effective DutyMap (built at
 			// the composition root) and a class-(a) dispatch onto it degrades

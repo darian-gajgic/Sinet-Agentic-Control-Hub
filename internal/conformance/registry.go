@@ -218,7 +218,7 @@ func SeedRows() []Row {
 				{Handle: "go test ./internal/adapters/opencode/ -run TestPinMatchesLock (pin↔components.lock coupling)", Pkg: "internal/adapters/opencode", Run: "TestPinMatchesLock"},
 				{Handle: "go test ./internal/adapters/opencode/ -run TestRealServeBindAuthIsolation (tier R: real serve, 127.0.0.1 bind + Basic auth on every endpoint + disjoint XDG, zero provider cost; SANCTIONED SKIP when the binary is absent)", Pkg: "internal/adapters/opencode", Run: "TestRealServeBindAuthIsolation"},
 				{Handle: "go test ./internal/adapters/opencode/ -run TestRealServePermissionRoundTripFakeProvider (tier R: the live S03.4 park + REST answer against a loopback fake provider, $0)", Pkg: "internal/adapters/opencode", Run: "TestRealServePermissionRoundTripFakeProvider"},
-				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/opencode/ -run TestLiveSmoke (tier L: one minimal paid call — DEFINED, and structurally unreachable until a lane is commissioned at LN-2)", Pkg: "internal/adapters/opencode", Run: "TestLiveSmoke"},
+				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/opencode/ -run TestLiveSmoke (tier L: one minimal paid call — DEFINED, and structurally unreachable until a credential is placed)", Pkg: "internal/adapters/opencode", Run: "TestLiveSmoke"},
 			},
 			TriggerSet:  []string{TriggerEngineBump, TriggerWeekly},
 			Schedule:    "on any engine/CLI version change + weekly",

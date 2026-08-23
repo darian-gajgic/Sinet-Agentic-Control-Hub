@@ -35,6 +35,7 @@ func TestRealServeResolvesTheCredentialEnvReference(t *testing.T) {
 	// loopback fake provider. No real endpoint, no real key.
 	lane, err := LoadLaneConfig([]byte(`{
 	  "lane": "zai",
+	  "substrate": "opencode",
 	  "provider_id": "probe-plan",
 	  "npm": "@ai-sdk/openai-compatible",
 	  "display_name": "Probe Plan",

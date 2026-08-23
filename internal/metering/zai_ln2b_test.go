@@ -9,6 +9,7 @@ package metering
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // zaiPeak is a Wednesday inside the documented peak window (14:00-18:00 in
@@ -61,7 +64,7 @@ func TestZAITokenRowIsTier1AndGaugeIsTier3(t *testing.T) {
 			gauge.Tier, TierMeasured)
 	}
 
-	plan, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, PlanQuotaWindow, zaiPeak.Add(time.Hour))
+	plan, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, UndeclaredPlanBudget(), zaiPeak.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ReadPlanUnits: %v", err)
 	}
@@ -89,6 +92,107 @@ func TestZAITokenRowIsTier1AndGaugeIsTier3(t *testing.T) {
 	}
 	if plan.VerifiedOn == "" {
 		t.Error("the plan reading carries no verified-on date")
+	}
+}
+
+// D1 · The denominator is Sinet's own budget, NEVER the provider's published
+// allowance (S10.4 verbatim: "never an inferred provider window (D4)").
+func TestZAIPlanPressureNeedsADeclaredBudget(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.runningRun(t, "rz", "bob", "zai", "opencode")
+	e.datedCheckpoint(t, "rz", "bob", "glm-5.3", `{"input_tokens":10,"output_tokens":5}`, zaiPeak)
+
+	doc, ok := PlanDocFor("zai")
+	if !ok {
+		t.Fatal("no plan document for lane zai")
+	}
+	g := NewPressureGauge(e.db, e.reg)
+
+	// No budget: consumption is still reported, pressure is not claimed.
+	none, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, UndeclaredPlanBudget(), zaiPeak.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ReadPlanUnits(undeclared): %v", err)
+	}
+	if none.Applicable {
+		t.Error("no budget is declared, yet the reading claims a denominator — the provider's published allowance is NOT a denominator (S10.4/D4)")
+	}
+	if none.Pressure != 0 {
+		t.Errorf("pressure = %v with no declared budget, want 0", none.Pressure)
+	}
+	if none.BackgroundCeiling != 0 {
+		t.Errorf("background ceiling = %v with no declared budget, want 0", none.BackgroundCeiling)
+	}
+	if none.Consumed == 0 {
+		t.Error("the reading reports no consumption at all — the observability figure survives an undeclared budget")
+	}
+
+	// A proposal is a conservative FRACTION of the published allowance, and it
+	// is the operator's to declare — never applied on their behalf.
+	budget, err := g.ProposePlanBudget(doc, PlanQuotaWindow, zaiPeak.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ProposePlanBudget: %v", err)
+	}
+	if budget.PeriodUnits != 28000*0.5 {
+		t.Errorf("proposed budget = %v units, want the published allowance at ⚙ budget.background_window_fraction (28000 × 0.5)", budget.PeriodUnits)
+	}
+	if budget.Fraction != 0.5 || budget.SeededFrom != PlanQuotaWindow {
+		t.Errorf("proposal provenance = %v/%q, want 0.5/%q", budget.Fraction, budget.SeededFrom, PlanQuotaWindow)
+	}
+
+	declared, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, budget, zaiPeak.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ReadPlanUnits(declared): %v", err)
+	}
+	if !declared.Applicable {
+		t.Fatal("a declared budget did not make the reading applicable")
+	}
+	if want := declared.Consumed / budget.PeriodUnits; declared.Pressure != want {
+		t.Errorf("pressure = %v, want %v (consumption ÷ the DECLARED budget)", declared.Pressure, want)
+	}
+	// The published allowance rides along as provenance, and is not the divisor.
+	if declared.SeedAllowance != 28000 {
+		t.Errorf("seed allowance = %v, want the published 28000 recorded as provenance", declared.SeedAllowance)
+	}
+	if declared.Pressure == declared.Consumed/declared.SeedAllowance {
+		t.Error("pressure divides by the PROVIDER's allowance — that is the inferred provider window D4 bars")
+	}
+}
+
+// D6 · A checkpoint whose timestamp cannot be parsed is COUNTED, at the plan's
+// standard rate. Dropping it under-reports consumption; charging it at the
+// off-peak discount (which covers most of the week) does too.
+func TestZAIUnparseableStampIsCountedAtStandardRate(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.runningRun(t, "rz", "bob", "zai", "opencode")
+	e.datedCheckpoint(t, "rz", "bob", "glm-5.3", `{"input_tokens":10,"output_tokens":5}`, zaiOffPeak)
+
+	// Corrupt the stamp exactly as the drain probe did.
+	if err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE checkpoints SET created_ts = ? WHERE run_id = ?`, "not-a-timestamp", "rz")
+		return err
+	}); err != nil {
+		t.Fatalf("corrupt the stamp: %v", err)
+	}
+
+	doc, ok := PlanDocFor("zai")
+	if !ok {
+		t.Fatal("no plan document for lane zai")
+	}
+	g := NewPressureGauge(e.db, e.reg)
+	r, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, UndeclaredPlanBudget(), zaiOffPeak.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ReadPlanUnits: %v", err)
+	}
+	if r.Calls != 1 {
+		t.Fatalf("calls = %d, want 1 — an unreadable stamp must not make a call VANISH from the total", r.Calls)
+	}
+	if want := doc.StandardMultiplier(); r.Consumed != want {
+		t.Errorf("consumed = %v, want the standard rate %v — not the off-peak discount that covers most of the week", r.Consumed, want)
+	}
+	if r.Consumed == 0.5 {
+		t.Error("the unreadable-stamp call was charged at the off-peak discount")
 	}
 }
 
@@ -145,6 +249,66 @@ func TestZAIUnpricedWithoutMeteredRow(t *testing.T) {
 	}
 }
 
+// D9(c) · Checklist 21's unasserted leg: a zai run that PARKED on a limit
+// event renders its park history, its tier, its UNPRICED state and its
+// reconciliation keys on one receipt.
+func TestZAIParkedRunReceiptRendersHonestly(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.runningRun(t, "rz", "bob", "zai", "opencode")
+	e.datedCheckpoint(t, "rz", "bob", "glm-5.3",
+		`{"input_tokens":800,"output_tokens":200,"request_id":"req-zai-park"}`, zaiPeak)
+
+	// The Class-2 shape: park on the provider's depletion signal, resume when
+	// it said the window reopens.
+	if _, err := e.runs.Transition(ctx, "rz", run.StateParked,
+		run.TransitionOptions{Reason: "blocked_quota (S10.5 Class 2)", Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	if _, err := e.runs.Transition(ctx, "rz", run.StateRunning,
+		run.TransitionOptions{Reason: "resume at the provider-signalled time", Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if _, err := e.runs.Transition(ctx, "rz", run.StateCompleted,
+		run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	led := NewLedger(e.db, NewEffectiveDatedTable("empty"), NoMeteredExceptions(), e.reg)
+	rcpt, err := NewReceipts(e.db, led, NoMeteredExceptions()).Materialize(ctx, "rz")
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if len(rcpt.ParkHistory) != 1 {
+		t.Fatalf("park history = %+v, want one episode — a run that waited on a limit event says so (S10.10)", rcpt.ParkHistory)
+	}
+	ep := rcpt.ParkHistory[0]
+	if ep.Ongoing {
+		t.Error("the park episode is still open on a completed run")
+	}
+	if ep.ParkReason == "" {
+		t.Error("the park episode carries no reason")
+	}
+	if ep.ResumedAt.IsZero() {
+		t.Error("the park episode records no resume")
+	}
+	// The rest of the honest line, on the same receipt.
+	if rcpt.Items[0].Tier != TierMeasured {
+		t.Errorf("tier = %d, want measured", rcpt.Items[0].Tier)
+	}
+	if rcpt.TotalUnpricedCalls != 1 || rcpt.TotalPricedUSD != 0 {
+		t.Errorf("priced=%v unpriced=%d, want UNPRICED", rcpt.TotalPricedUSD, rcpt.TotalUnpricedCalls)
+	}
+	if rcpt.Currency != CurrencyAPIEquiv {
+		t.Errorf("currency = %q, want api-equivalent", rcpt.Currency)
+	}
+	// D2 · The reconciliation key is VISIBLE on the receipt, not merely
+	// queryable from the ledger.
+	if len(rcpt.RequestIDs) != 1 || rcpt.RequestIDs[0] != "req-zai-park" {
+		t.Errorf("receipt request ids = %v, want [req-zai-park] (S03.7 dashboard key)", rcpt.RequestIDs)
+	}
+}
+
 // spec 17 — the pricestore's zero-row refusal is intact and this packet adds no
 // $0 zai row anywhere.
 func TestZAIZeroPriceRowRefused(t *testing.T) {
@@ -181,15 +345,19 @@ func TestZAIMultipliersAreConfigNotConstants(t *testing.T) {
 		t.Fatal("no seed plan document for lane zai")
 	}
 
-	base, err := g.ReadPlanUnits(ctx, "bob", "zai", seed, PlanQuotaWindow, zaiOffPeak.Add(time.Hour))
+	seedBudget, err := g.ProposePlanBudget(seed, PlanQuotaWindow, zaiOffPeak.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ProposePlanBudget(seed): %v", err)
+	}
+	base, err := g.ReadPlanUnits(ctx, "bob", "zai", seed, seedBudget, zaiOffPeak.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ReadPlanUnits(seed): %v", err)
 	}
 	if base.Multiplier != 0.5 {
 		t.Errorf("off-peak multiplier = %v, want 0.5 (verified 2026-08-23: \"charged at 50%% of the standard credit rate\")", base.Multiplier)
 	}
-	if base.QuotaUnits != 28000 {
-		t.Errorf("rolling-window quota = %v, want 28000 credits (GLM Coding Max, verified 2026-08-23)", base.QuotaUnits)
+	if base.SeedAllowance != 28000 {
+		t.Errorf("rolling-window allowance = %v, want 28000 credits (GLM Coding Max, verified 2026-08-23)", base.SeedAllowance)
 	}
 
 	// Now edit the DATA and nothing else.
@@ -207,7 +375,11 @@ func TestZAIMultipliersAreConfigNotConstants(t *testing.T) {
 			}
 		}
 	})
-	moved, err := g.ReadPlanUnits(ctx, "bob", "zai", edited, PlanQuotaWindow, zaiOffPeak.Add(time.Hour))
+	editedBudget, err := g.ProposePlanBudget(edited, PlanQuotaWindow, zaiOffPeak.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ProposePlanBudget(edited): %v", err)
+	}
+	moved, err := g.ReadPlanUnits(ctx, "bob", "zai", edited, editedBudget, zaiOffPeak.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ReadPlanUnits(edited): %v", err)
 	}

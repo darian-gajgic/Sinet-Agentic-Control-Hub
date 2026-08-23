@@ -25,6 +25,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/opencode"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // engineAdapterDeps are the platform-owned inputs the registration needs.
@@ -230,4 +231,55 @@ func laneConfiguredModels(lanes []opencode.LaneConfig) map[string][]string {
 		return nil
 	}
 	return out
+}
+
+// laneSubstrates maps each COMMISSIONED lane to the substrate its document
+// names — the S03.2 dispatch input that did not exist before P3-LN-2B drain r1.
+//
+// Only commissioned lanes appear. A lane nobody holds a provider entry for
+// cannot be seated by routing, so mapping it would be describing a dispatch
+// that cannot happen; and the anthropic lane is deliberately absent because its
+// substrate IS the configured ceremony default, which the stage keeps using
+// unchanged. With nothing commissioned this returns nil and every dispatch
+// takes exactly its pre-LN-2 path.
+func laneSubstrates(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) map[string]string {
+	live := map[string]bool{}
+	for _, lane := range commissionedLanes(lanes, commissioned) {
+		live[lane] = true
+	}
+	if len(live) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, l := range lanes {
+		if live[l.Lane] && l.Substrate != "" {
+			out[l.Lane] = l.Substrate
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// laneAlternateSeats renders the commissioned lanes' execution seats from
+// their documents (S08.8 step 3; P3-LN-2B drain r1 D5).
+//
+// The document is the only written record of which model a lane fronts, and it
+// carries that fact's verified-on date — so the seat is composed here, at the
+// root that already reads those documents, rather than written as a constant
+// in the routing package where it would go stale invisibly.
+func laneAlternateSeats(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) worker.AlternateSeats {
+	live := map[string]bool{}
+	for _, lane := range commissionedLanes(lanes, commissioned) {
+		live[lane] = true
+	}
+	var seats []worker.LaneSeat
+	for _, l := range lanes {
+		if !live[l.Lane] || l.DefaultModel == "" {
+			continue
+		}
+		seats = append(seats, worker.LaneSeat{Lane: l.Lane, Model: l.DefaultModel})
+	}
+	return worker.AlternateSeatsFor(seats...)
 }

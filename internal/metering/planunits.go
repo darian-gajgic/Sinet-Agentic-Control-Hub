@@ -123,13 +123,22 @@ type PlanReading struct {
 	VerifiedOn  string
 	Source      string
 
-	// Quota names the allowance window this reading measured against.
-	Quota       string
-	QuotaUnits  float64
-	WindowHours float64
+	// SeedQuota / SeedAllowance / SeedWindowHours record the PROVIDER's
+	// published allowance this lane's budget was proposed from. They are
+	// PROVENANCE and never the denominator: S10.4 is explicit that the
+	// denominator is Sinet's own operator-declared budget and "NEVER an
+	// inferred provider window (D4)". Reporting them lets a person see what a
+	// budget was seeded from without the reading resting on it.
+	SeedQuota       string
+	SeedAllowance   float64
+	SeedWindowHours float64
 
-	// Calls is the number of requests in the window — the proxy's input.
-	// Consumed is those requests with each one's multiplier applied.
+	// Budget is the operator-declared denominator. Undeclared ⇒ Applicable is
+	// false and Pressure is 0, exactly as the token gauge behaves.
+	Budget PlanBudget
+
+	// Calls is the number of requests in the budget's period — the proxy's
+	// input. Consumed is those requests with each one's multiplier applied.
 	Calls    int64
 	Consumed float64
 
@@ -138,13 +147,49 @@ type PlanReading struct {
 	Multiplier       float64
 	MultiplierWindow string
 
-	// Pressure is Consumed/QuotaUnits; BackgroundCeiling is
-	// ⚙ budget.background_window_fraction of the allowance — background work's
-	// own ceiling on this lane (S10.4).
+	// Pressure is Consumed/Budget.PeriodUnits, valid only when Applicable;
+	// BackgroundCeiling is ⚙ budget.background_window_fraction of the declared
+	// budget — background work's own ceiling on this lane (S10.4).
 	Pressure          float64
 	BackgroundCeiling float64
 	Applicable        bool
 }
+
+// PlanBudget is the operator-declared automation budget for one (person, lane)
+// in the PLAN's own unit — the D5 flat-rate denominator of the tier-3 reading,
+// exactly as Budget is for the tier-1 token gauge.
+//
+// It exists because the provider's published allowance is the WRONG
+// denominator, and S10.4 says so by name: the denominator is Sinet's own
+// budget, "NEVER an inferred provider window (D4)". Dividing by the vendor's
+// number would produce a pressure figure that moves when the vendor changes
+// its marketing, and would quietly re-import the provider's own opinion of how
+// much a person may work — the exact import D4 refuses.
+//
+// The allowance still has a job: it SEEDS a proposal (ProposePlanBudget) at a
+// conservative fraction of itself, which an operator accepts, edits or
+// ignores. Until somebody declares one, the reading is honestly inapplicable.
+type PlanBudget struct {
+	// PeriodUnits is the budget in the plan's own unit — NOT the provider's
+	// published allowance.
+	PeriodUnits float64
+	// PeriodStart is the instant consumption is summed from; PeriodHours is
+	// the length the operator declared it for. This is Sinet's period, not the
+	// provider's cycle: the provider's weekly window is order-anchored per
+	// account and stays a recorded dated fact, never a period used here.
+	PeriodStart time.Time
+	PeriodHours float64
+	Declared    bool
+
+	// SeededFrom and Fraction record which allowance row a proposal came from
+	// and what share of it was taken — provenance for a person reading their
+	// own budget, never an input to the arithmetic.
+	SeededFrom string
+	Fraction   float64
+}
+
+// UndeclaredPlanBudget is the v0 posture: no operator plan budget (S10.4).
+func UndeclaredPlanBudget() PlanBudget { return PlanBudget{} }
 
 // SeedPlanDocs returns the plan documents that ship with the platform. They are
 // seed DATA with dates — a starting point an operator's own rows replace — and
@@ -310,24 +355,56 @@ func (m PlanMultiplier) covers(t time.Time) bool {
 	return h >= m.FromHour && h < m.ToHour
 }
 
-// ReadPlanUnits derives the tier-3 plan-unit reading for (userID, lane) over a
-// named allowance window ending at now.
+// ProposePlanBudget turns a provider allowance row into a PROPOSED per-person
+// automation budget: a conservative ⚙ budget.background_window_fraction of the
+// published allowance, in the plan's own unit, labeled assumed by the document
+// it came from.
+//
+// This is the only sanctioned use of the published allowance, and it is a
+// PROPOSAL. Nothing on a read path calls it: the platform never declares a
+// budget on somebody's behalf, because a denominator nobody chose is exactly
+// the inferred provider window D4 bars. An operator accepts, edits or ignores
+// it through the 13.4 surface, and until one is declared every reading is
+// honestly inapplicable.
+func (g *PressureGauge) ProposePlanBudget(doc PlanDoc, quota string, start time.Time) (PlanBudget, error) {
+	q, ok := doc.Quota(quota)
+	if !ok {
+		return PlanBudget{}, fmt.Errorf("%w (lane %q): no quota row %q", ErrPlanDoc, doc.Lane, quota)
+	}
+	fraction, err := g.settings.Float(keyBgWindowFraction)
+	if err != nil {
+		return PlanBudget{}, fmt.Errorf("metering: read ⚙ %s: %w", keyBgWindowFraction, err)
+	}
+	return PlanBudget{
+		PeriodUnits: q.Units * fraction,
+		PeriodStart: start,
+		PeriodHours: q.WindowHours,
+		Declared:    true,
+		SeededFrom:  q.Name,
+		Fraction:    fraction,
+	}, nil
+}
+
+// ReadPlanUnits derives the tier-3 plan-unit reading for (userID, lane)
+// against the operator's declared plan budget.
+//
+// The denominator is the BUDGET and never the provider's published allowance
+// (S10.4, verbatim: "never an inferred provider window (D4)"). The allowance
+// rides the reading as provenance so a person can see what their budget was
+// proposed from; with no budget declared the reading reports its consumption
+// and says Applicable=false, which is what the token gauge does one file over
+// and for the same reason.
 //
 // The proxy is the REQUEST, because that is what the plan meters and what the
 // platform can count exactly; each request is charged at the multiplier in
 // force when it was made, not at the one in force now, because a window that
 // closed mid-run charged what it charged.
-func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, doc PlanDoc, quota string, now time.Time) (PlanReading, error) {
-	q, ok := doc.Quota(quota)
-	if !ok {
-		return PlanReading{}, fmt.Errorf("%w (lane %q): no quota row %q", ErrPlanDoc, doc.Lane, quota)
-	}
+func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, doc PlanDoc, budget PlanBudget, now time.Time) (PlanReading, error) {
 	bgFraction, err := g.settings.Float(keyBgWindowFraction)
 	if err != nil {
 		return PlanReading{}, fmt.Errorf("metering: read ⚙ %s: %w", keyBgWindowFraction, err)
 	}
-	since := now.Add(-time.Duration(q.WindowHours * float64(time.Hour)))
-	calls, consumed, err := g.planUnits(ctx, userID, lane, doc, since, now)
+	calls, consumed, err := g.planUnits(ctx, userID, lane, doc, budget.PeriodStart, budget.Declared)
 	if err != nil {
 		return PlanReading{}, err
 	}
@@ -341,25 +418,34 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		VerifiedOn:  doc.VerifiedOn,
 		Source:      doc.Source,
 
-		Quota: q.Name, QuotaUnits: q.Units, WindowHours: q.WindowHours,
-		Calls: calls, Consumed: consumed,
+		Budget: budget,
+		Calls:  calls, Consumed: consumed,
 		Multiplier: factor, MultiplierWindow: window,
 	}
-	if q.Units > 0 {
+	// The allowance the budget was proposed from, reported as provenance.
+	if q, ok := doc.Quota(budget.SeededFrom); ok {
+		r.SeedQuota, r.SeedAllowance, r.SeedWindowHours = q.Name, q.Units, q.WindowHours
+	}
+	if budget.Declared && budget.PeriodUnits > 0 {
 		r.Applicable = true
-		r.Pressure = consumed / q.Units
-		r.BackgroundCeiling = bgFraction * q.Units
+		r.Pressure = consumed / budget.PeriodUnits
+		r.BackgroundCeiling = bgFraction * budget.PeriodUnits
 	}
 	return r, nil
 }
 
-// planUnits counts the person's requests on the lane inside the window and
-// charges each at its own instant's rate.
-func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc PlanDoc, since, until time.Time) (int64, float64, error) {
+// planUnits counts the person's requests on the lane in the budget's period
+// and charges each at its own instant's rate.
+//
+// The period filter runs in GO, not in SQL. A string comparison on created_ts
+// silently drops any row whose stamp is not the expected shape — the call
+// simply vanishes from the total, which UNDER-reports consumption, the one
+// direction a consumption gauge must never fail in. Parsing every candidate
+// costs a scan of one person's rows and cannot lose one.
+func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc PlanDoc, since time.Time, sincePinned bool) (int64, float64, error) {
 	rows, err := g.db.QueryContext(ctx,
 		`SELECT c.usage_json, r.lane, c.created_ts FROM checkpoints c JOIN runs r ON r.run_id = c.run_id
-		  WHERE r.user_id = ? AND c.created_ts >= ? AND c.created_ts <= ?`,
-		userID, since.UTC().Format(time.RFC3339Nano), until.UTC().Format(time.RFC3339Nano))
+		  WHERE r.user_id = ?`, userID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("metering: read plan-unit consumption for %q/%s: %w", userID, lane, err)
 	}
@@ -378,14 +464,39 @@ func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc 
 		}
 		at, perr := time.Parse(time.RFC3339Nano, ts)
 		if perr != nil {
-			// An unreadable stamp charges at the standard rate rather than at
-			// the discount: the safe direction for a consumption gauge is to
-			// over-report, never to under-report an allowance.
-			at = until
+			// An unreadable stamp cannot be placed in or out of the period, so
+			// the call is COUNTED and charged at the plan's standard (most
+			// expensive) rate. Both halves are the safe direction: excluding it
+			// would hide consumption, and charging it at the discount would
+			// under-report it — and the discount applies to most of the week,
+			// so "whatever rate is in force now" is the wrong default.
+			calls++
+			consumed += doc.StandardMultiplier()
+			continue
+		}
+		if sincePinned && !since.IsZero() && at.Before(since) {
+			continue
 		}
 		factor, _ := doc.MultiplierAt(at)
 		calls++
 		consumed += factor
 	}
 	return calls, consumed, rows.Err()
+}
+
+// StandardMultiplier is the plan's most expensive published rate — the rate a
+// discount is expressed as a fraction OF. It is derived from the rows rather
+// than assumed to be 1.0, because which row is "standard" is the document's
+// fact and not this file's.
+func (d PlanDoc) StandardMultiplier() float64 {
+	standard := 0.0
+	for _, m := range d.Multipliers {
+		if m.Factor > standard {
+			standard = m.Factor
+		}
+	}
+	if standard == 0 {
+		return 1
+	}
+	return standard
 }

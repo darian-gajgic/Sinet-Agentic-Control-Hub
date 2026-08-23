@@ -589,13 +589,19 @@ func Run(ctx context.Context, opts Options) error {
 			Utility:        localSurf.Utility,
 			Phraser:        localSurf.Phraser,
 			SpotCheck:      localSurf.SpotCheck,
-			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg)},
+			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg), b: metering.NewBudgets(db)},
 			// The flat-rate lanes beyond the configured one: the lanes an
 			// operator has actually commissioned a provider entry for. Empty
 			// until the key ceremony, and empty is what keeps the S08.8
 			// flat-lane rule inert rather than routing onto a lane with no
 			// credential (P3-LN-2B R21/R22).
 			CommissionedLanes: commissionedLanes(engineLanes(logger), engineCommissioned),
+			// Which ENGINE serves each commissioned lane (S03.2). Without it
+			// a zai-seated decision would dispatch to the Anthropic CLI.
+			LaneSubstrates: laneSubstrates(engineLanes(logger), engineCommissioned),
+			// The commissioned lanes' execution seats, composed from their
+			// documents (no model id is a constant in the routing package).
+			AlternateSeats: laneAlternateSeats(engineLanes(logger), engineCommissioned),
 			// The S08.6 composer's policy-input seams: the current approved
 			// composer playbook (the governed S09.10 house object) and the
 			// lane's pinned engine version keying validation records.
@@ -1546,17 +1552,44 @@ func memoryCitedEntryVersions(s *memory.Store) func(ctx context.Context, keys []
 // consumption pressure, never dollars). Dev-mode budget posture is
 // undeclared (S10.4), under which the weighted consumption itself is the
 // comparable figure.
-type routePressure struct{ g *metering.PressureGauge }
+type routePressure struct {
+	g *metering.PressureGauge
+	b *metering.Budgets
+}
 
-func (p routePressure) Pressure(ctx context.Context, owner, lane string) (float64, error) {
-	gauge, err := p.g.Read(ctx, owner, lane, metering.UndeclaredBudget())
+// Pressure returns the lane's NORMALIZED pressure: consumption over the
+// operator's declared budget, in that lane's own unit.
+//
+// It reads the right gauge for the lane. A lane with a plan document is
+// metered in the plan's own units and answers from the tier-3 plan reading;
+// every other lane answers from the tier-1 token gauge. Both denominate
+// against a DECLARED budget and both report Applicable=false when there is
+// none — at which point routing falls back to its deterministic order rather
+// than comparing two raw, unbounded and mutually meaningless totals.
+func (p routePressure) Pressure(ctx context.Context, owner, lane string) (worker.LanePressure, error) {
+	if doc, ok := metering.PlanDocFor(lane); ok {
+		// No plan-budget surface exists yet, so this is honestly undeclared;
+		// the 13.4 surface is where an operator will declare one from the
+		// document's own proposal (metering.ProposePlanBudget).
+		r, err := p.g.ReadPlanUnits(ctx, owner, lane, doc, metering.UndeclaredPlanBudget(), time.Now())
+		if err != nil {
+			return worker.LanePressure{}, err
+		}
+		return worker.LanePressure{Ratio: r.Pressure, Applicable: r.Applicable, Unit: r.Unit}, nil
+	}
+	budget := metering.UndeclaredBudget()
+	if p.b != nil {
+		declared, err := p.b.Budget(ctx, owner, lane)
+		if err != nil {
+			return worker.LanePressure{}, err
+		}
+		budget = declared
+	}
+	gauge, err := p.g.Read(ctx, owner, lane, budget)
 	if err != nil {
-		return 0, err
+		return worker.LanePressure{}, err
 	}
-	if gauge.Applicable {
-		return gauge.Pressure, nil
-	}
-	return gauge.WeightedConsumption, nil
+	return worker.LanePressure{Ratio: gauge.Pressure, Applicable: gauge.Applicable, Unit: "weighted tokens"}, nil
 }
 
 // budgetAdapter adapts the S10.4 budget store to the api.BudgetStore seam
@@ -1669,6 +1702,34 @@ func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.Lane
 		CacheReadWeight:     g.CacheReadWeight,
 		Assumed:             g.Assumed,
 		BudgetDeclared:      g.Budget.Declared,
+		Tier:                int(g.Tier),
+	}
+	// The tier-3 plan-unit reading, for a lane whose plan meters in its own
+	// unit. It rides ALONGSIDE the token figures and is never folded into
+	// them: they are different quantities in different units at different
+	// tiers (S10.1).
+	if doc, ok := metering.PlanDocFor(lane); ok {
+		// No plan-budget surface exists yet, so the budget is honestly
+		// undeclared and the reading reports consumption without claiming a
+		// pressure. The denominator is never the provider's allowance (D4).
+		pr, perr := m.gauge.ReadPlanUnits(ctx, userID, lane, doc, metering.UndeclaredPlanBudget(), time.Now())
+		if perr != nil {
+			return api.LaneMeter{}, perr
+		}
+		plan := &api.LanePlanMeter{
+			Unit: pr.Unit, Tier: int(pr.Tier),
+			Assumed: pr.Assumed, AssumedNote: pr.AssumedNote,
+			Consumed: pr.Consumed, Calls: pr.Calls,
+			Multiplier: pr.Multiplier, MultiplierWindow: pr.MultiplierWindow,
+			BudgetDeclared: pr.Budget.Declared,
+			SeedAllowance:  pr.SeedAllowance, SeedQuota: pr.SeedQuota,
+			VerifiedOn: pr.VerifiedOn,
+		}
+		if pr.Applicable {
+			p := pr.Pressure
+			plan.Pressure = &p
+		}
+		lm.Plan = plan
 	}
 	if g.Applicable { // a budget is declared → utilization + remaining are meaningful
 		u := g.Pressure

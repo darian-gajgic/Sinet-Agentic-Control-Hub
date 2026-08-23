@@ -13,15 +13,27 @@ import (
 	"testing"
 )
 
-// fixedPressure is the D5 ordering input: consumption, never dollars.
+// fixedPressure is the D5 ordering input: normalized consumption, never
+// dollars. A negative value stands for "no budget declared on this lane".
 type fixedPressure map[string]float64
 
-func (p fixedPressure) Pressure(_ context.Context, _, lane string) (float64, error) {
+func (p fixedPressure) Pressure(_ context.Context, _, lane string) (LanePressure, error) {
 	v, ok := p[lane]
 	if !ok {
-		return 0, fmt.Errorf("no pressure reading for lane %q", lane)
+		return LanePressure{}, fmt.Errorf("no pressure reading for lane %q", lane)
 	}
-	return v, nil
+	if v < 0 {
+		return LanePressure{Applicable: false}, nil
+	}
+	return LanePressure{Ratio: v, Applicable: true, Unit: "test units"}, nil
+}
+
+// zaiSeats is the alternate-seat data a commissioned zai lane contributes. It
+// is built HERE from literals because that is exactly the point: seats are
+// data the composition root reads out of a lane document, not a constant the
+// routing package ships.
+func zaiSeats() AlternateSeats {
+	return AlternateSeatsFor(LaneSeat{Lane: "zai", Model: "glm-5.3"})
 }
 
 // spec 24 — a zai seat resolves under coverage; without it the 2.7 gap advice
@@ -31,7 +43,7 @@ func TestZAISeatResolvesUnderCoverage(t *testing.T) {
 
 	covered := &Router{
 		DutyMap:    DefaultDutyMap(),
-		Alternates: DefaultAlternateSeats(),
+		Alternates: zaiSeats(),
 		Coverage:   Coverage{FlatRateLanes: []string{"zai"}},
 	}
 	seat, _, reason, gap, err := covered.resolveSeat(ctx, RouteQuery{}, ExecutionProfile{Duty: DutyExecution})
@@ -57,7 +69,7 @@ func TestZAISeatResolvesUnderCoverage(t *testing.T) {
 	// An owner with the anthropic subscription only keeps the old seat exactly.
 	anthropicOnly := &Router{
 		DutyMap:    DefaultDutyMap(),
-		Alternates: DefaultAlternateSeats(),
+		Alternates: zaiSeats(),
 		Coverage:   Coverage{FlatRateLanes: []string{"anthropic"}},
 	}
 	seat, _, _, gap, err = anthropicOnly.resolveSeat(ctx, RouteQuery{}, ExecutionProfile{Duty: DutyExecution})
@@ -71,7 +83,7 @@ func TestZAISeatResolvesUnderCoverage(t *testing.T) {
 	// An owner with neither lane still gets the 2.7 advice, unchanged.
 	none := &Router{
 		DutyMap:    DefaultDutyMap(),
-		Alternates: DefaultAlternateSeats(),
+		Alternates: zaiSeats(),
 		Coverage:   Coverage{},
 	}
 	_, _, _, gap, err = none.resolveSeat(ctx, RouteQuery{}, ExecutionProfile{Duty: DutyExecution})
@@ -98,7 +110,7 @@ func TestFlatLaneSelectionIgnoresDollars(t *testing.T) {
 		{"anthropic is the more consumed lane", fixedPressure{"anthropic": 0.91, "zai": 0.10}, "zai"},
 		{"zai is the more consumed lane", fixedPressure{"anthropic": 0.10, "zai": 0.91}, "anthropic"},
 	} {
-		r := &Router{DutyMap: DefaultDutyMap(), Alternates: DefaultAlternateSeats(),
+		r := &Router{DutyMap: DefaultDutyMap(), Alternates: zaiSeats(),
 			Coverage: both, Pressure: tc.pressure}
 		seat, _, reason, gap, err := r.resolveSeat(ctx, RouteQuery{}, ExecutionProfile{Duty: DutyExecution})
 		if err != nil || gap != "" {
@@ -110,6 +122,30 @@ func TestFlatLaneSelectionIgnoresDollars(t *testing.T) {
 		}
 		if !strings.Contains(strings.ToLower(reason), "pressure") {
 			t.Errorf("%s: the plain reason does not say the choice was made on consumption pressure: %q", tc.name, reason)
+		}
+	}
+
+	// No declared budget on a lane ⇒ deterministic duty-map order, never a
+	// raw count (drain r1 D3: a raw lifetime total hands every dispatch to
+	// whichever lane was added most recently, forever).
+	for _, tc := range []struct {
+		name     string
+		pressure fixedPressure
+	}{
+		{"neither lane has a budget", fixedPressure{"anthropic": -1, "zai": -1}},
+		{"only the alternate has one", fixedPressure{"anthropic": -1, "zai": 0.01}},
+	} {
+		r := &Router{DutyMap: DefaultDutyMap(), Alternates: zaiSeats(),
+			Coverage: both, Pressure: tc.pressure}
+		seat, _, reason, gap, err := r.resolveSeat(ctx, RouteQuery{}, ExecutionProfile{Duty: DutyExecution})
+		if err != nil || gap != "" {
+			t.Fatalf("%s: err=%v gap=%q", tc.name, err, gap)
+		}
+		if seat.Lane != DefaultDutyMap()[DutyExecution].Lane {
+			t.Errorf("%s: chose %q, want the deterministic duty-map seat when no comparable ratio exists", tc.name, seat.Lane)
+		}
+		if !strings.Contains(reason, "no declared automation budget") {
+			t.Errorf("%s: the reason does not say WHY the order was deterministic: %q", tc.name, reason)
 		}
 	}
 
@@ -135,6 +171,38 @@ func TestFlatLaneSelectionIgnoresDollars(t *testing.T) {
 	}
 }
 
+// D5 · No lane value is a Go constant OUTSIDE the lane document — the scan the
+// opencode package runs on itself, extended to the packages that consume lane
+// data. A model id in routing goes stale invisibly; a dated row does not.
+func TestNoLaneValueIsAConstantInRoutingOrShell(t *testing.T) {
+	scanned := 0
+	for _, dir := range []string{".", "../shell"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			n := e.Name()
+			if e.IsDir() || !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") {
+				continue
+			}
+			scanned++
+			body, err := os.ReadFile(dir + "/" + n)
+			if err != nil {
+				t.Fatalf("read %s/%s: %v", dir, n, err)
+			}
+			for _, banned := range []string{"glm-", "api.z.ai", "zai-coding-plan"} {
+				if strings.Contains(string(body), banned) {
+					t.Errorf("%s/%s hardcodes %q — lane values live in the lane DOCUMENT with their verified-on dates (S03.6)", dir, n, banned)
+				}
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("the lane-constant scan read no files — it would pass vacuously")
+	}
+}
+
 // spec 26 — the utility duty still degrades to the paid seat, with the
 // CORRECTED reason: a second adapter now exists; what is absent is a
 // commissioned local provider entry.
@@ -143,7 +211,7 @@ func TestUtilityDutyStillDegradesWithCorrectedReason(t *testing.T) {
 	for _, localUp := range []bool{true, false} {
 		r := &Router{
 			DutyMap:    DefaultDutyMap(),
-			Alternates: DefaultAlternateSeats(),
+			Alternates: zaiSeats(),
 			Coverage:   Coverage{FlatRateLanes: []string{"anthropic"}, LocalAvailable: localUp},
 		}
 		seat, _, reason, gap, err := r.resolveSeat(ctx, RouteQuery{}, ExecutionProfile{Duty: DutyUtility})
@@ -173,8 +241,16 @@ func TestUtilityDutyStillDegradesWithCorrectedReason(t *testing.T) {
 	}
 }
 
-// moneyMembers reports the money-shaped exported members of a struct type.
+// moneyMembers reports the money-shaped exported members of a type.
+//
+// It follows maps, slices and pointers to the struct underneath (drain r1 D10:
+// scanning DutyMap/AlternateSeats as bare map kinds found nothing at all, which
+// is a scan that passes because it looked nowhere).
 func moneyMembers(t reflect.Type) []string {
+	for t.Kind() == reflect.Map || t.Kind() == reflect.Slice ||
+		t.Kind() == reflect.Array || t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
 	if t.Kind() != reflect.Struct {
 		return nil
 	}

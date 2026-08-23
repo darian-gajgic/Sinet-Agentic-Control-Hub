@@ -55,6 +55,32 @@ type MeterLane struct {
 	// limit marker on its parked runs ("parked until…", S15.5 fleet). nil when
 	// nothing in the lane is parked or no marker carries a reset time.
 	ParkedUntil *string `json:"parked_until"`
+
+	// Tier stamps the approximation tier of the token figures above (S10.1).
+	Tier int `json:"tier,omitempty"`
+	// Plan is the lane's tier-3 plan-unit reading when its plan has one.
+	// Omitted entirely for lanes without a flat plan — an absent reading is
+	// absent, never a zero (S10.1).
+	Plan *MeterLanePlan `json:"plan,omitempty"`
+}
+
+// MeterLanePlan is a flat plan's own-unit reading as the meters read serves it
+// (S10.1 tier 3; S10.4). Separate from the token figures, in its own unit, at
+// its own tier — the two are never added.
+type MeterLanePlan struct {
+	Unit             string   `json:"unit"`
+	Tier             int      `json:"tier"`
+	Assumed          bool     `json:"assumed"`
+	AssumedNote      string   `json:"assumed_note,omitempty"`
+	Consumed         float64  `json:"consumed"`
+	Calls            int64    `json:"calls"`
+	Multiplier       float64  `json:"multiplier"`
+	MultiplierWindow string   `json:"multiplier_window,omitempty"`
+	Pressure         *float64 `json:"pressure"`
+	BudgetDeclared   bool     `json:"budget_declared"`
+	SeedAllowance    float64  `json:"seed_allowance,omitempty"`
+	SeedQuota        string   `json:"seed_quota,omitempty"`
+	VerifiedOn       string   `json:"verified_on,omitempty"`
 }
 
 // AutomationState is one person's S10.4 pause switch as this read serves it:
@@ -256,6 +282,18 @@ func (p *projector) meterLanes(ctx context.Context, scope ownerScope, person, la
 				out[i].PressureApplicable = m.Utilization != nil
 				out[i].Pressure = m.Utilization
 				out[i].BudgetRemaining = m.BudgetRemaining
+				out[i].Tier = m.Tier
+				if m.Plan != nil {
+					out[i].Plan = &MeterLanePlan{
+						Unit: m.Plan.Unit, Tier: m.Plan.Tier,
+						Assumed: m.Plan.Assumed, AssumedNote: m.Plan.AssumedNote,
+						Consumed: m.Plan.Consumed, Calls: m.Plan.Calls,
+						Multiplier: m.Plan.Multiplier, MultiplierWindow: m.Plan.MultiplierWindow,
+						Pressure: m.Plan.Pressure, BudgetDeclared: m.Plan.BudgetDeclared,
+						SeedAllowance: m.Plan.SeedAllowance, SeedQuota: m.Plan.SeedQuota,
+						VerifiedOn: m.Plan.VerifiedOn,
+					}
+				}
 			}
 		}
 		if out[i].ParkedRuns > 0 {

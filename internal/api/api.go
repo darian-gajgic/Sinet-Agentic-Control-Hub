@@ -90,6 +90,48 @@ type LaneMeter struct {
 	// budget is persisted anywhere, so it is false and the ABSENCE (with its
 	// reason) is what the meters surface serves — never a zero (S10.1).
 	BudgetDeclared bool
+
+	// Tier is the approximation tier of the figures above: measured per-call
+	// usage (S10.1 tier 1). Stamped because a lane may ALSO carry a derived
+	// plan-unit reading at a different tier, and an unstamped number is one a
+	// reader can mistake for the other kind.
+	Tier int
+	// Plan is the lane's tier-3 plan-unit reading, when its plan publishes an
+	// allowance in its own unit (a flat subscription like the Z.AI coding
+	// plan). Nil for lanes with no such plan — most of them — which is why it
+	// is a pointer: an absent reading is absent, never a zero.
+	Plan *LanePlanMeter
+}
+
+// LanePlanMeter is a flat plan's own-unit consumption reading (S10.1 tier 3;
+// S10.4 requests-as-proxy). It is a SEPARATE member from the token figures
+// above, in a different unit and at a different tier, and it is never folded
+// into them.
+type LanePlanMeter struct {
+	// Unit is the plan's own unit ("credits"), carried so a reader never has
+	// to guess what was counted.
+	Unit string
+	// Tier is always 3: the reading is a proxy by construction.
+	Tier int
+	// Assumed + AssumedNote carry the S10.4 label and its reason.
+	Assumed     bool
+	AssumedNote string
+	// Consumed is the derived plan-unit total; Calls is the proxy's input.
+	Consumed float64
+	Calls    int64
+	// Multiplier / MultiplierWindow are the charging rate in force now.
+	Multiplier       float64
+	MultiplierWindow string
+	// Pressure is nil unless an operator declared a plan budget: the
+	// denominator is Sinet's own budget, NEVER the provider's published
+	// allowance (S10.4/D4).
+	Pressure       *float64
+	BudgetDeclared bool
+	// SeedAllowance / SeedQuota record the published allowance a budget would
+	// be proposed FROM — provenance, never the divisor.
+	SeedAllowance float64
+	SeedQuota     string
+	VerifiedOn    string
 }
 
 // MeterReader is the narrow metering read-seam for the S14.3 snapshots: the

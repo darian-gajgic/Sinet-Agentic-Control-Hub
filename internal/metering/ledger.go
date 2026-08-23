@@ -106,20 +106,28 @@ type RunConsumption struct {
 func (l *Ledger) RequestIDs(ctx context.Context, runID string) ([]string, error) {
 	var out []string
 	err := l.db.WriteTx(ctx, func(tx *sql.Tx) error {
-		rows, err := l.readCheckpointsTx(ctx, tx, runID)
-		if err != nil {
-			return err
-		}
-		out = out[:0]
-		for _, r := range rows {
-			if id := normalize(r.usageJSON).RequestID; id != "" {
-				out = append(out, id)
-			}
-		}
-		return nil
+		var err error
+		out, err = l.RequestIDsTx(ctx, tx, runID)
+		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// RequestIDsTx is RequestIDs inside the caller's transaction, so a receipt can
+// carry the keys atomically with the rollup it was materialized from.
+func (l *Ledger) RequestIDsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
+	rows, err := l.readCheckpointsTx(ctx, tx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range rows {
+		if id := normalize(r.usageJSON).RequestID; id != "" {
+			out = append(out, id)
+		}
 	}
 	return out, nil
 }

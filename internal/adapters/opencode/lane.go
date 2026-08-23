@@ -33,7 +33,17 @@ type LaneConfig struct {
 	// Lane is the platform lane name (runs.lane); ProviderID is the provider
 	// key inside opencode's own config, and the first half of the platform
 	// model string `<providerID>/<modelID>`.
-	Lane        string `json:"lane"`
+	Lane string `json:"lane"`
+	// Substrate names the D3 engine substrate this lane runs ON.
+	//
+	// It is on the DOCUMENT because a lane is the only thing that knows it:
+	// "adding a lane is a provider entry per user" (S03.6), and which engine
+	// serves that entry is part of the entry. Without it the platform can seat
+	// a model on lane zai and still dispatch the run to whichever substrate
+	// happened to be the process default — the run would execute on the wrong
+	// engine and meter against the wrong lane, with nothing anywhere
+	// contradicting it.
+	Substrate   string `json:"substrate"`
 	ProviderID  string `json:"provider_id"`
 	NPM         string `json:"npm"`
 	DisplayName string `json:"display_name"`
@@ -53,6 +63,11 @@ type LaneConfig struct {
 
 	Credential LaneCredential `json:"credential"`
 	Models     []LaneModel    `json:"models"`
+
+	// DefaultModel is the model this lane's execution seat takes (S08.8).
+	// On the document because the lane owns its own model facts.
+	DefaultModel     string `json:"default_model"`
+	DefaultModelNote string `json:"default_model_note,omitempty"`
 
 	ModelRoutingNote string `json:"model_routing_note"`
 
@@ -243,6 +258,9 @@ func (c LaneConfig) validate() error {
 	switch {
 	case c.Lane == "":
 		return fmt.Errorf("%w: no lane name", ErrLaneConfig)
+	case c.Substrate == "":
+		return fmt.Errorf("%w (lane %q): no substrate — a lane that does not name the engine it runs on can be "+
+			"seated by routing and then dispatched to whichever substrate is the process default (S03.6)", ErrLaneConfig, c.Lane)
 	case c.ProviderID == "":
 		return fmt.Errorf("%w (lane %q): no provider id", ErrLaneConfig, c.Lane)
 	case c.BaseURL == "":
@@ -295,6 +313,11 @@ func (c LaneConfig) validate() error {
 				"per model (P-T17-3)", ErrLaneConfig, c.Lane, m.ID)
 		}
 		seen[m.ID] = true
+	}
+	// A default model that is not in the model list would seat routing on a
+	// model this lane does not declare — a seat pointing at nothing.
+	if c.DefaultModel != "" && !seen[c.DefaultModel] {
+		return fmt.Errorf("%w (lane %q): default_model %q is not one of the lane's models", ErrLaneConfig, c.Lane, c.DefaultModel)
 	}
 	// A lane with no credential reference cannot be commissioned, and a
 	// document that omits it would sail past the spawn-time check and let the
