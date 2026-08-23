@@ -119,6 +119,12 @@ really renders differently per browser does this become a defect.
 
 ---
 
+> **Round 5 (same date, later): `b6-gate-operator-findings-r5-2026-08-23.md` DEEPENS F2+F3 below
+> with verbatim transcript evidence and a live Nexus benchmark, settles the raw-plan-editing
+> ruling (operator wants editable understanding), and records an escalation stake (operator
+> considering replacing the Sinet frontend with Nexus's). Items 3 and 4 below are subsumed by
+> r5's W1–W4. F1 stays first — unchanged.**
+
 ## Ordered next-session sequence
 
 1. **F1a + F1b — the blocker, first and alone.** Amendment executed (S00.9 record), backend packet
