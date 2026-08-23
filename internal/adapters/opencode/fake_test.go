@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,7 +59,6 @@ type fakeServe struct {
 	sessions    []string
 	status      map[string]json.RawMessage
 	promptCount int
-	aborted     bool
 
 	// onPrompt runs (synchronously, before the 204) when a prompt lands.
 	onPrompt func(f *fakeServe, n int)
@@ -206,9 +206,6 @@ func (f *fakeServe) route(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasSuffix(r.URL.Path, "/abort") && r.Method == http.MethodPost:
-		f.mu.Lock()
-		f.aborted = true
-		f.mu.Unlock()
 		writeJSON(w, true)
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -330,12 +327,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func readAllLimited(r *http.Request) ([]byte, error) {
-	buf := make([]byte, 1<<20)
-	n, err := r.Body.Read(buf)
-	if n > 0 {
-		return buf[:n], nil
-	}
-	return nil, err
+	return io.ReadAll(io.LimitReader(r.Body, 8<<20))
 }
 
 // basicHeader is the Authorization value the adapter must send on every call.

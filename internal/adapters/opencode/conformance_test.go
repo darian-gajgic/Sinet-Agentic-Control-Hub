@@ -886,9 +886,21 @@ func TestNeverAlwaysProperty(t *testing.T) {
 				t.Fatalf("iteration %d: the adapter sent reply %q, outside {once,reject}", i, r.Reply)
 			}
 		}
+		// The invariant is about the reply VERB, not about the bytes: a
+		// rejection's feedback is human text and may legitimately contain the
+		// word "always", so the wire body is decoded rather than searched.
 		for _, req := range f.requests() {
-			if strings.HasSuffix(req.Path, "/reply") && strings.Contains(req.Body, `"always"`) {
-				t.Fatalf("iteration %d: an always reply body reached the wire: %s", i, req.Body)
+			if !strings.HasSuffix(req.Path, "/reply") {
+				continue
+			}
+			var body struct {
+				Reply string `json:"reply"`
+			}
+			if err := json.Unmarshal([]byte(req.Body), &body); err != nil {
+				t.Fatalf("iteration %d: reply body is not JSON: %s", i, req.Body)
+			}
+			if body.Reply == "always" {
+				t.Fatalf("iteration %d: an always reply reached the wire: %s", i, req.Body)
 			}
 		}
 		cancel()

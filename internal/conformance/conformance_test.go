@@ -160,11 +160,15 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	find(t, states, conformance.RowRegressionSweep)
 	// The S15.1 scheduled SPA dependency pass (B6-4), co-scheduled with S16.7.
 	find(t, states, "frontend-dependency-pass")
-	if len(states) != 12 {
-		t.Fatalf("seed produced %d rows, want 12 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass)", len(states))
+	// The opencode SUBSTRATE row (P3-LN-1): the B5-4 seed's own note said "Its
+	// row lands with its adapter", and the adapter has landed.
+	find(t, states, "adapter-opencode")
+	if len(states) != 13 {
+		t.Fatalf("seed produced %d rows, want 13 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate)", len(states))
 	}
 
-	// The zai lane is OMITTED (R7): no row claims it, and the reason is recorded.
+	// The zai LANE is still OMITTED (R7): no row claims a commissioned lane on
+	// the opencode substrate before LN-2, and the reason is recorded.
 	for _, s := range states {
 		if strings.Contains(s.ID, "zai") {
 			t.Errorf("a zai adapter row exists (%q) — the zai lane has NO suite and must not be registered (R7)", s.ID)
@@ -458,10 +462,13 @@ func TestBumpGatingSetSurfacesBLimbReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The engine_bump set is exactly the five engine-bump-triggered rows.
+	// The engine_bump set is exactly the engine-bump-triggered rows.
 	want := map[string]bool{
 		"adapter-anthropic": true, "adapter-local": true, "no-engine-sse-replay": true,
 		"d6-violation-attempts": true, "compaction-canary": true,
+		// The opencode substrate battery (P3-LN-1): a pin bump on that engine
+		// gates on it exactly as the other per-lane suites do (S03.3).
+		"adapter-opencode": true,
 		// The S14.8 regression sweep carries engine_bump because it is where
 		// limb (b) — the before/after quality probe — records (B5-5 OQ2(a)).
 		conformance.RowRegressionSweep: true,
@@ -509,8 +516,8 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 12 {
-		t.Fatalf("never-run: %d rows due, want all 12", len(due))
+	if len(due) != 13 {
+		t.Fatalf("never-run: %d rows due, want all 13", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).

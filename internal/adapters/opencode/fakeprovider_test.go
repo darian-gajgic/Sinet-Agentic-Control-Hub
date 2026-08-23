@@ -7,6 +7,7 @@ package opencode
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,9 +70,10 @@ func (p *fakeProvider) route(w http.ResponseWriter, r *http.Request) {
 			} `json:"function"`
 		} `json:"tools"`
 	}
-	raw := make([]byte, 1<<20)
-	n, _ := r.Body.Read(raw)
-	_ = json.Unmarshal(raw[:n], &body)
+	// The engine's real request body is several KB of system prompt and tool
+	// schemas; a single Read would truncate it and silently hide the toolset.
+	raw, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	_ = json.Unmarshal(raw, &body)
 
 	tools := make([]string, 0, len(body.Tools))
 	for _, t := range body.Tools {
@@ -84,7 +86,7 @@ func (p *fakeProvider) route(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.mu.Lock()
-	p.calls = append(p.calls, fakeProviderCall{Tools: tools, Msgs: string(raw[:n])})
+	p.calls = append(p.calls, fakeProviderCall{Tools: tools, Msgs: string(raw)})
 	p.mu.Unlock()
 
 	usage := map[string]any{

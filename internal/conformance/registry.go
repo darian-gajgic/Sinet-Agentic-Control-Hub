@@ -201,7 +201,30 @@ func SeedRows() []Row {
 			Schedule:    "on any engine/CLI version change + weekly",
 			Cadence:     CadenceWeekly,
 			AffectClass: AffectLane,
-			Notes:       "the local lane (the S12.10 deliberate-bump battery, the F17 one-named-run-handle TestBumpProcedure*). The zai lane is OMITTED and has NO row: internal/adapters holds only claudecli and S12.1 class (a) has no v0 consumer — a row claiming a nonexistent suite would fake (R7; the honest-dormancy discipline). Its row lands with its adapter. Lane-affecting ⇒ flag-now." + bumpGateNote,
+			Notes:       "the local lane (the S12.10 deliberate-bump battery, the F17 one-named-run-handle TestBumpProcedure*). The zai LANE is still OMITTED and has NO row of its own: no lane is commissioned on the opencode substrate until LN-2, and a row claiming a live lane would fake (R7; the honest-dormancy discipline). Its SUBSTRATE row landed with its adapter at P3-LN-1 — see adapter-opencode; the zai lane canary rows complete at LN-2. Lane-affecting ⇒ flag-now." + bumpGateNote,
+		},
+		{
+			// Adapter per-substrate — opencode [S03.1/S03.4/S03.5]. The B5-4
+			// seed omitted this with the note "Its row lands with its adapter";
+			// the adapter landed at P3-LN-1, so the row lands with it.
+			ID:            "adapter-opencode",
+			OwningSection: "S03.1/S03.4/S03.5",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/adapters/opencode/ -run TestParseHappyFixture (tier F: D3 verb behavior + the recorded v1 /event shapes and VALUES on fixtures; always run, CI has no engine)", Pkg: "internal/adapters/opencode", Run: "TestParseHappyFixture"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestPermissionReplyOnceNeverAlways (S03.4 round-trip: once/reject via permission.reply, and `always` never on the wire)", Pkg: "internal/adapters/opencode", Run: "TestPermissionReplyOnceNeverAlways"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestRestartAskLossReconcile (restart-ask-loss containment: diff the ask record against permission.list, re-prompt the surviving session)", Pkg: "internal/adapters/opencode", Run: "TestRestartAskLossReconcile"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestLoweringRefusesNativeSpawnEnable (native-spawn-disabled probe, S03.5 sole-controller)", Pkg: "internal/adapters/opencode", Run: "TestLoweringRefusesNativeSpawnEnable"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestLoweringConfigChannels (per-channel leak: attempt-the-leak, assert the decoy did NOT take effect)", Pkg: "internal/adapters/opencode", Run: "TestLoweringConfigChannels"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestPinMatchesLock (pin↔components.lock coupling)", Pkg: "internal/adapters/opencode", Run: "TestPinMatchesLock"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestRealServeBindAuthIsolation (tier R: real serve, 127.0.0.1 bind + Basic auth on every endpoint + disjoint XDG, zero provider cost; SANCTIONED SKIP when the binary is absent)", Pkg: "internal/adapters/opencode", Run: "TestRealServeBindAuthIsolation"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestRealServePermissionRoundTripFakeProvider (tier R: the live S03.4 park + REST answer against a loopback fake provider, $0)", Pkg: "internal/adapters/opencode", Run: "TestRealServePermissionRoundTripFakeProvider"},
+				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/opencode/ -run TestLiveSmoke (tier L: one minimal paid call — DEFINED, and structurally unreachable until a lane is commissioned at LN-2)", Pkg: "internal/adapters/opencode", Run: "TestLiveSmoke"},
+			},
+			TriggerSet:  []string{TriggerEngineBump, TriggerWeekly},
+			Schedule:    "on any engine/CLI version change + weekly",
+			Cadence:     CadenceWeekly,
+			AffectClass: AffectLane,
+			Notes:       "the opencode SUBSTRATE (the internal/adapters/opencode battery), landed at P3-LN-1. HONEST SCOPE: this row proves the substrate, not a lane — at LN-1 there is no provider entry, no credential and no commissioned lane on it, so tier L is defined and structurally unreachable and the lane canary rows (auth + behavioral; the Z.AI coding endpoint exposes no logprobs, S03.7) land at LN-2 with the lane. Tier R runs for real whenever the pinned binary is installed and costs $0: the permission round-trip drives a REAL serve against a loopback fake OpenAI-compatible provider. The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// The no-engine-SSE-replay standing assertion [S14.3 ¶3; S14.5] — a

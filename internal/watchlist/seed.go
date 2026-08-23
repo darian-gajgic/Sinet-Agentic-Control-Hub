@@ -33,6 +33,7 @@ var LockEntryNames = []string{
 	"SQLite via pure-Go driver",
 	"golang.org/x/crypto",
 	"claude CLI (engine)",
+	"opencode-ai (engine)",
 	"sandbox-runtime",
 	"OS mechanisms: bubblewrap/seccomp/Landlock/netns+nftables",
 	"PDF text extraction",

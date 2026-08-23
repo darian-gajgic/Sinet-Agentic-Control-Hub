@@ -13,6 +13,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -326,7 +328,89 @@ func probeBody(ctx context.Context, inst Instance, path string) ([]byte, int, er
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	buf := make([]byte, 1<<20)
-	n, _ := resp.Body.Read(buf)
-	return buf[:n], resp.StatusCode, nil
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	return raw, resp.StatusCode, err
+}
+
+// TestRealServeProviderTreeIsolation records WHERE a PROVIDER-CONFIGURED
+// instance actually writes. SPIKE G1-S3 F1's "zero strays" was measured on the
+// auth-free serve path with NO provider block, so it says nothing about the
+// per-user provider dependency install (~62 MB, network once) that F1 separately
+// reports — and that install is the one thing on this substrate that can write
+// outside the XDG quartet, because it follows HOME, which XDG isolation
+// deliberately leaves alone (S03.5).
+//
+// It asserts what MUST hold — the engine's own state lives in the per-user root
+// and no opencode state dir appears at its default HOME location — and REPORTS
+// the footprint rather than asserting a number, because the install is
+// CONDITIONAL: it did not reproduce in this hermetic battery at all (see the
+// logged figures), while a shell probe of the same configuration on this host
+// did fetch it. Reporting keeps that visible at every tier-R run; asserting
+// either outcome would encode a guess.
+func TestRealServeProviderTreeIsolation(t *testing.T) {
+	bin := enginePath(t)
+	prov := newFakeProvider(t)
+	m := realManager(t, bin, 150*time.Second)
+	a, home := realAdapter(t, m, testProviders(prov.baseURL()))
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+	defer cancel()
+
+	req := testRequest(t)
+	sess, err := a.Start(ctx, req)
+	if err != nil {
+		t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): real serve unavailable within the boot budget: %v", err)
+	}
+	for range sess.Events() {
+	}
+	if _, err := sess.Wait(ctx); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	root := filepath.Join(a.Root, req.UserID)
+	rootBytes := treeSize(t, root)
+	if rootBytes == 0 {
+		t.Errorf("the per-user root %q holds nothing — the XDG quartet did not take effect", root)
+	}
+	// The engine's own state dirs must NOT appear at their default HOME
+	// locations (the G1-S3 F1 containment claim, re-asserted at the pin).
+	for _, stray := range []string{
+		".config/opencode", ".local/share/opencode", ".local/state/opencode", ".cache/opencode",
+	} {
+		if _, err := os.Stat(filepath.Join(home, stray)); err == nil {
+			t.Errorf("engine state escaped the per-user root: %s", filepath.Join(home, stray))
+		}
+	}
+	// What else landed under HOME, reported as a dated measurement.
+	var outside []string
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatalf("read synthetic HOME: %v", err)
+	}
+	for _, e := range entries {
+		p := filepath.Join(home, e.Name())
+		outside = append(outside, fmt.Sprintf("%s=%dB", e.Name(), treeSize(t, p)))
+	}
+	t.Logf("provider-configured instance footprint at pin %s: per-user XDG root %d bytes; "+
+		"entries under the synthetic HOME (empty means the provider dependency install did not "+
+		"fire on this run): %v. Whatever the package manager writes follows HOME, not the XDG "+
+		"quartet, so the per-user jail the D6 ceremony composes must bound HOME too (LN-2/D6 scope)",
+		Pin, rootBytes, outside)
+}
+
+func treeSize(t *testing.T, root string) int64 {
+	t.Helper()
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0
+	}
+	return total
 }
