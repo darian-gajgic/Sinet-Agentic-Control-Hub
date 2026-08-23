@@ -1,0 +1,8 @@
+: the engine's OWN error report on an assistant message (AssistantMessage.error, 1.18.3 GET /doc):
+: no "finish", the session still goes idle. An engine-reported failure is crashed, never a minted one.
+data: {"id":"evt_err00000000000000000001","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_err00000000000000000002","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"error":{"name":"ProviderAuthError","data":{"providerID":"sinetfake","message":"no credential for provider"}},"time":{"created":1787503947683}}}}
+
+data: {"id":"evt_err00000000000000000003","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+

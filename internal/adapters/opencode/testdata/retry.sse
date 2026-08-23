@@ -1,0 +1,10 @@
+: SPIKE G1-S3 (2026-07-17): GET /session/status "retry" variant — attempt, message, next and an
+: optional provider "action" object. Forwarded as KindRateLimit DATA; the five-class taxonomy is S10's.
+data: {"id":"evt_rtr00000000000000000001","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_rtr00000000000000000002","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"retry","attempt":2,"message":"rate limited by provider","next":1787504400000,"action":{"reason":"rate_limit","provider":"zai-coding-plan","title":"Rate limited","message":"5-hour window exhausted","label":"Open dashboard","link":"https://z.ai"}}}}
+
+data: {"id":"evt_rtr00000000000000000003","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_rtr00000000000000000004","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+

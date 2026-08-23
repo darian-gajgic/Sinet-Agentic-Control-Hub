@@ -1,0 +1,20 @@
+: forward tolerance (S03.1 MUST): unknown types, a malformed frame, BOTH event generations in one
+: stream (SPIKE P2-S1 Probe 6-B: the v2 PermissionV2* schemas exist at 1.18.3), an SSE comment
+: keepalive, and an oversized-value frame. The paid call and the idle still land.
+data: {"id":"evt_unk00000000000000000001","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_unk00000000000000000002","type":"plugin.added","properties":{"name":"some-plugin"}}
+
+data: {"id":"evt_unk00000000000000000003","type":"catalog.updated","properties":{}}
+
+data: {"id":"evt_unk00000000000000000004","type":"permission.v2.asked","properties":{"data":{"id":"prq_v2000000000000000000001","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","action":"bash","resources":["echo v2"],"save":[],"source":"agent"}}}
+
+data: {"id":"evt_unk0000000000000000000
+: ^ that frame was truncated mid-JSON by the capture — a malformed line, skipped, never fatal
+
+data: not json at all
+
+data: {"id":"evt_unk00000000000000000006","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_unk00000000000000000007","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+

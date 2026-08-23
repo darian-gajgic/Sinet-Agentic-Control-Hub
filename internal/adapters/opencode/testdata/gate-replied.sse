@@ -1,0 +1,13 @@
+: live re-record 2026-08-23; the frames that follow POST /permission/{id}/reply {"reply":"once"}
+data: {"id":"evt_02f89af9b001PvI34OhcrEyHEx","type":"permission.replied","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","requestID":"per_02f89ad800013Uga1M33kAythZ","reply":"once"}}
+
+data: {"id":"evt_02f89af9d001HazrGi3vMltkFo","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_02f89ad2d001RPZvPBgnAWnWQN","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_fake1","state":{"status":"completed","input":{"command":"echo hello-from-fake"},"output":"hello-from-fake\n","metadata":{"exit":0},"time":{"start":1787503947057,"end":1787503947677}}},"time":1787503947677}}
+
+data: {"id":"evt_02f89afa0001OSw4u1dZ0I4313","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89ac6a0013cPhtKFQIODXeZ","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"finish":"tool-calls","time":{"created":1787503946858,"completed":1787503947682}}}}
+
+data: {"id":"evt_02f89afb600251f2RaX1mXL1jq","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_02f89afb50012qnTKRpNYbwrsg","messageID":"msg_02f89afa3001vbkNkRCafdi6dy","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"text","text":"recovery-ok","time":{"start":1787503947701,"end":1787503947702}},"time":1787503947702}}
+
+data: {"id":"evt_02f89afb80015ZQunLSLbpVDUw","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_02f89afbb002NFNS2JRtTpr1cS","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+

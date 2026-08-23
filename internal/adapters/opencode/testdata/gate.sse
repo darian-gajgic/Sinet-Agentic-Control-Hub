@@ -1,0 +1,9 @@
+: live re-record 2026-08-23; the turn parks on permission.asked at zero further cost (S03.4)
+data: {"id":"evt_02f89ab78002M4XTVJLFXW32N2","type":"session.created","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"ses_fd0765487ffeqQo1T87YKoDdXI","directory":"/srv/sinet/work/u1","title":"New session"}}}
+
+data: {"id":"evt_02f89ac68001W3mrAMXj5uO5xe","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_02f89ad31001IscZ5SnRfKs2x0","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_02f89ad2d001RPZvPBgnAWnWQN","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_fake1","state":{"status":"running","input":{"command":"echo hello-from-fake"},"time":{"start":1787503947057}}},"time":1787503947057}}
+
+data: {"id":"evt_02f89ad80002UVjunDTr0Uzupm","type":"permission.asked","properties":{"id":"per_02f89ad800013Uga1M33kAythZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","permission":"bash","patterns":["echo hello-from-fake"],"metadata":{"command":"echo hello-from-fake"},"always":["echo *"],"tool":{"messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","callID":"call_fake1"}}}
+

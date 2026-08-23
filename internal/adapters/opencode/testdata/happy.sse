@@ -1,0 +1,19 @@
+: live re-record 2026-08-23 against installed opencode 1.18.3 (== pin), fake loopback provider, $0
+data: {"id":"evt_02f89a801001Cw6XJ7IRtw5SgX","type":"server.connected","properties":{}}
+
+data: {"id":"evt_02f89ab78002M4XTVJLFXW32N2","type":"session.created","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"ses_fd0765487ffeqQo1T87YKoDdXI","slug":"silent-star","version":"1.18.3","projectID":"global","directory":"/srv/sinet/work/u1","title":"New session"}}}
+
+data: {"id":"evt_02f89ac68001W3mrAMXj5uO5xe","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_02f89ac6a0017YPmiIYWDagiiu","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","mode":"sinet_w","agent":"sinet_w","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1787503947683}}}}
+
+data: {"id":"evt_02f89afb600251f2RaX1mXL1jq","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_02f89afb50012qnTKRpNYbwrsg","messageID":"msg_02f89afa3001vbkNkRCafdi6dy","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"text","text":"fake-done","time":{"start":1787503947701,"end":1787503947702}},"time":1787503947702}}
+
+data: {"id":"evt_02f89afb80015ZQunLSLbpVDUw","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","mode":"sinet_w","agent":"sinet_w","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":1,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_02f89afb9001iYn6FoTw1Bq0W3","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","mode":"sinet_w","agent":"sinet_w","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":1,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_02f89afbb001XOu5SyOr37qnZX","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"idle"}}}
+
+data: {"id":"evt_02f89afbb002NFNS2JRtTpr1cS","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+

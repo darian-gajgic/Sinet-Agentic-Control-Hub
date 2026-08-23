@@ -1,0 +1,21 @@
+: SPIKE P2-S1 Probe 6 (2026-07-18): three parallel bash calls parked simultaneously as a flat array;
+: ONE reply fanned out to THREE permission.replied events, one per requestID. The adapter never SENDS
+: "always" (Probe 6-A) — it must still parse the fan-out an operator-era rule can produce.
+data: {"id":"evt_fan00000000000000000001","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_fan00000000000000000002","type":"permission.asked","properties":{"id":"per_02f89ad800013Uga1M33kAythZA","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","permission":"bash","patterns":["echo one"],"metadata":{"command":"echo one"},"always":["echo *"],"tool":{"messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","callID":"call_fan1"}}}
+
+data: {"id":"evt_fan00000000000000000003","type":"permission.asked","properties":{"id":"per_02f89ad800013Uga1M33kAythZB","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","permission":"bash","patterns":["echo two"],"metadata":{"command":"echo two"},"always":["echo *"],"tool":{"messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","callID":"call_fan2"}}}
+
+data: {"id":"evt_fan00000000000000000004","type":"permission.asked","properties":{"id":"per_02f89ad800013Uga1M33kAythZC","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","permission":"bash","patterns":["echo three"],"metadata":{"command":"echo three"},"always":["echo *"],"tool":{"messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","callID":"call_fan3"}}}
+
+data: {"id":"evt_fan00000000000000000005","type":"permission.replied","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","requestID":"per_02f89ad800013Uga1M33kAythZA","reply":"always"}}
+
+data: {"id":"evt_fan00000000000000000006","type":"permission.replied","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","requestID":"per_02f89ad800013Uga1M33kAythZB","reply":"always"}}
+
+data: {"id":"evt_fan00000000000000000007","type":"permission.replied","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","requestID":"per_02f89ad800013Uga1M33kAythZC","reply":"always"}}
+
+data: {"id":"evt_fan00000000000000000008","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_fan00000000000000000009","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+
