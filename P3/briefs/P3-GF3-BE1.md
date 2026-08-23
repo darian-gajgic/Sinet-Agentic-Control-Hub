@@ -1,5 +1,8 @@
 # P3-GF3-BE1 — the guided interview's served substrate (grounding brief)
 
+**EXPIRED at landing 2026-08-23 (amendment D): single-use artifact — after the drain it no
+longer matches the code; later grounding must never read it as truth.**
+
 Grounded 2026-08-23 on main @ c80c2d0. Binding contract: `Spec/core-architecture-v1.md` with
 `Spec/drafts/` canonical — S06.5, S06.6, S06.9, S06.10 read in full this session — plus the
 operator-ordered design contract `P3/design/gf3-planning-rework-design-2026-08-23.md` (its §1
