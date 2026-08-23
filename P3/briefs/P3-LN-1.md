@@ -1,3 +1,5 @@
+# ⚠️ EXPIRED 2026-08-23 — single-use artifact; landed with drain r1 (`9e61c7d`) + coordinator-inline residuals; the code no longer matches this text. Later grounding must never read this as truth (amendment D).
+
 # P3-LN-1 — the opencode substrate adapter (`internal/adapters/opencode`) behind the existing D3 contract
 
 **Grounded:** 2026-08-23, against `Spec/drafts/S03-engines-adapters.md` (S03.1–S03.7), S01 (§S01.2/S01.3 posture), S02 (S02.3–S02.4), S16 (S16.2–S16.4), `P3/CONVENTIONS.md` (§1–§5, §10 incl. package map at line 99, §12 confinement seam, §60 completion doctrine, consumer-class split at line 288, no-engine-SSE-replay at line 349), and the live code: `internal/adapters/adapters.go`, `internal/adapters/driver.go`, `internal/adapters/claudecli/*` (the reference substrate, ~5.5k lines w/ tests), `internal/conformance/registry.go`, `components.lock`, `internal/settings/index.go`. STATE queue row: `P3/STATE.md` "LN lane-expansion packet queue", P3-LN-1 row.

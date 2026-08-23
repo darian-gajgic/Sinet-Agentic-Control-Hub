@@ -30,3 +30,5 @@ are SSE comments (the engine's keepalive shape) and are skipped by the parser.
 | `unknown.sse` | forward tolerance: an unknown type, a malformed line, a v2-generation frame, an SSE comment — the paid call and the idle still land |
 | `retry.sse` | the `GET /session/status` `retry` variant on the bus (`attempt`/`next`/provider `action`) — a limit signal forwarded as DATA |
 | `crash.sse` | the engine's own error report on an assistant message (`error` set, no `finish`) |
+| `error-then-success.sse` | drain r1 D1 — an error mid-turn the turn RECOVERS from; COMPOSED from recorded shapes (crash.sse's error object on a message the engine also completes with its token row), not a fresh recording — see the inline header |
+| `parallel-tools.sse` | drain r1 D5 — three bash calls in flight at once (SPIKE P2-S1 Probe 6 recorded three simultaneous parks); one sibling completing must not declare a safe boundary (P-T01-4) — see the inline header |

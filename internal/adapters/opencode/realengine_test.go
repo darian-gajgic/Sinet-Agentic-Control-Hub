@@ -393,12 +393,14 @@ func TestRealServeProviderTreeIsolation(t *testing.T) {
 	// does not replace it. Both must be in the system message the model sees.
 	if calls := prov.toolsOffered(); calls != nil {
 		var body string
+		prov.mu.Lock()
 		for _, c := range prov.calls {
 			if len(c.Tools) > 0 {
 				body = c.Msgs
 				break
 			}
 		}
+		prov.mu.Unlock()
 		if !strings.Contains(body, req.Worker.SystemPromptAppend) {
 			t.Errorf("the per-turn system append never reached the model: %q missing", req.Worker.SystemPromptAppend)
 		}
