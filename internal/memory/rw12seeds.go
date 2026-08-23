@@ -236,6 +236,31 @@ func (g *Gate) committedContentHash(ctx context.Context, entryID string) (string
 	return hash.String, true, nil
 }
 
+// decisionRecorded reports whether some version of this topic already carries
+// originRef — whether this Ensure's decision is already IN the entry's version
+// history, active or long since superseded.
+//
+// LATER DECISIONS STAND. An Ensure applies its packet's decision once; after
+// that, whatever the record holds is the result of a decision made after it,
+// and re-applying would overrule a human. The case that forced this: the
+// operator refuses v3 at the ratification gate, governance supersedes back to
+// the byte-exact frozen v2 content, and a content-comparing boot reads that
+// revert as "the predecessor content, unrevised" and re-applies the revision
+// the operator just refused. Any governed edit that byte-equals a snapshot has
+// the same shape, so the guard is the version history, never the bytes.
+//
+// It also carries idempotence on its own: a second boot finds this Ensure's own
+// version and stops.
+func (g *Gate) decisionRecorded(ctx context.Context, topicKey, originRef string) (bool, error) {
+	var n int
+	if err := g.s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM knowledge_entries WHERE topic_key = ? AND origin_ref = ?`,
+		topicKey, originRef).Scan(&n); err != nil {
+		return false, fmt.Errorf("memory: read governance history for %s: %w", topicKey, err)
+	}
+	return n > 0, nil
+}
+
 // rw12PredecessorContent renders what THIS packet's supersession replaces: the
 // content the B2 gate ratified, rendered exactly as EnsureB2SeedGovernance
 // writes it.
@@ -356,7 +381,7 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (TaxonomyGovern
 		want := contentHash(content)
 		// What this packet's supersession replaces: the content the B2 gate
 		// ratified. Anything else active on this topic belongs to a record that
-		// is not this one — see supersedable.
+		// is not this one.
 		previous, err := rw12PredecessorContent(fam)
 		if err != nil {
 			return res, err
@@ -384,13 +409,25 @@ func (g *Gate) EnsureRW12TaxonomyGovernance(ctx context.Context) (TaxonomyGovern
 		if committed == want {
 			// The RECORD is already this packet's. Nothing to supersede; a
 			// disk that disagrees is repaired to what the row attests, which
-			// mints no version because nothing about the record changed.
+			// mints no version because nothing about the record changed. This
+			// runs whatever the version history says: a torn file is not a
+			// decision.
 			if committed != onDisk {
 				res.Repaired++
 				if err := g.repairGovernedFile(cur, content); err != nil {
 					return res, err
 				}
 			}
+			continue
+		}
+		// Applied once, and later decisions stand (see decisionRecorded): an
+		// operator revert to the B2 content is a decision, not an un-revised
+		// predecessor, and must not be re-applied at the next boot.
+		recorded, err := g.decisionRecorded(ctx, taxonomyTopicKey(fam), originRef)
+		if err != nil {
+			return res, err
+		}
+		if recorded {
 			continue
 		}
 		if committed != contentHash(previous) {

@@ -153,6 +153,20 @@ func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error
 	for _, q := range card.Questions {
 		asked[q.ID] = q
 	}
+	// One slot, ONE arm. The per-entry check below refuses a single entry that
+	// carries both a value and a skip; this refuses the same contradiction
+	// spread across two entries, which is the shape a surface actually produces
+	// (a chip toggled, then the box typed into). Both are the same rule: a body
+	// that answers a question and skips it says two different things about it,
+	// and the platform must not pick one. It runs BEFORE anything is applied, so
+	// a refused body changes nothing at all.
+	arm := make(map[string]bool, len(ans.Answers))
+	for _, a := range ans.Answers {
+		if prior, seen := arm[a.ID]; seen && prior != a.Skip {
+			return fmt.Errorf("%w: slot %q is answered in one entry and skipped in another; a skip takes the recommendation instead of an answer", ErrBadAnswer, a.ID)
+		}
+		arm[a.ID] = a.Skip
+	}
 	var skipped []SlotResolution
 	for _, a := range ans.Answers {
 		question, onCard := asked[a.ID]
@@ -171,7 +185,7 @@ func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error
 			// carrying both says two different things about the same slot and
 			// the platform must not pick one.
 			if a.Value != "" {
-				return fmt.Errorf("%w: slot %q carries both an answer and a skip — a skip takes the recommendation instead of an answer", ErrBadAnswer, a.ID)
+				return fmt.Errorf("%w: slot %q carries both an answer and a skip; a skip takes the recommendation instead of an answer", ErrBadAnswer, a.ID)
 			}
 			r := SlotResolution{
 				SlotID: a.ID, How: ResolvedAssumption,

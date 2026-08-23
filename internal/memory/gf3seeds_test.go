@@ -12,6 +12,7 @@ package memory_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -172,6 +173,110 @@ func TestGF3GovernanceBootsAreIdempotent(t *testing.T) {
 	}
 	if after := versions(); !reflect.DeepEqual(before, after) {
 		t.Errorf("versions moved across three boots: %v then %v", before, after)
+	}
+}
+
+// TestGF3GateRefusalStands (drain r1 F1, the evaluator's probe): ratification
+// is PENDING, so the gate may REFUSE v3 — and the refusal is executed as a
+// supersession back to the byte-exact content RW-12 ratified. The next boot
+// must leave that standing.
+//
+// A content-comparing Ensure could not: the refusal restores exactly the
+// predecessor content it was written against, so it reads as "not revised yet"
+// and the boot re-applies the revision the operator just rejected. Any governed
+// edit that byte-equals a snapshot has the same shape, which is why the guard
+// is the entry's version history rather than its bytes.
+func TestGF3GateRefusalStands(t *testing.T) {
+	ctx := context.Background()
+	f := newFix(t)
+	f.user("darian", "operator")
+	bootTaxonomyGovernance(t, f)
+
+	// The gate refuses: the operator supersedes back to the frozen v2 content.
+	cur, err := f.store.HouseObject(ctx, "intake/taxonomy/software")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused, err := json.MarshalIndent(memory.RW12SoftwareTaxonomyForTest(), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := memory.Draft{
+		Scope: memory.ScopeHouse, Kind: memory.KindTaxonomy, Title: cur.Title,
+		Content: string(refused) + "\n", TopicKey: cur.TopicKey, Selectors: cur.Selectors,
+		FileBacked: true, FileName: filepath.Base(cur.FilePath),
+	}
+	refusal, err := f.gate.NewVersion(ctx, "darian", cur.ID, draft)
+	if err != nil {
+		t.Fatalf("execute the gate refusal: %v", err)
+	}
+
+	// Two more boots: neither Ensure may touch it.
+	for boot := 0; boot < 2; boot++ {
+		if res, err := f.gate.EnsureRW12TaxonomyGovernance(ctx); err != nil || res.Superseded != 0 {
+			t.Fatalf("boot %d after the refusal, RW-12: %+v err=%v", boot+1, res, err)
+		}
+		res, err := f.gate.EnsureGF3TaxonomyGovernance(ctx)
+		if err != nil {
+			t.Fatalf("boot %d after the refusal, GF3: %v", boot+1, err)
+		}
+		if res.Superseded != 0 {
+			t.Fatalf("boot %d re-applied the revision the operator refused (superseded=%d) — the gate's decision must stand",
+				boot+1, res.Superseded)
+		}
+	}
+	after, err := f.store.HouseObject(ctx, "intake/taxonomy/software")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ID != refusal.ID {
+		t.Fatalf("the active version is %q, want the operator's refusal %q", after.ID, refusal.ID)
+	}
+	if !strings.Contains(after.Content, `"version": "v2"`) {
+		t.Error("the active content is not the v2 the refusal restored")
+	}
+	got, err := intake.LoadTaxonomy(filepath.Join(f.root, "house", "intake-taxonomy-software.json"))
+	if err != nil {
+		t.Fatalf("the governed file after a refusal fails LoadTaxonomy: %v", err)
+	}
+	if !reflect.DeepEqual(got, memory.RW12SoftwareTaxonomyForTest()) {
+		t.Error("the governed file does not hold the refused-back-to content")
+	}
+}
+
+// TestGF3EachEnsureMintsExactlyOneVersion (drain r1 F1(b)): across repeated
+// boots each record appears exactly once in the chain — the version history is
+// a list of decisions, not a boot counter.
+func TestGF3EachEnsureMintsExactlyOneVersion(t *testing.T) {
+	ctx := context.Background()
+	f := newFix(t)
+	f.user("darian", "operator")
+	bootTaxonomyGovernance(t, f)
+	for boot := 0; boot < 3; boot++ {
+		if _, err := f.gate.EnsureRW12TaxonomyGovernance(ctx); err != nil {
+			t.Fatalf("boot %d RW-12: %v", boot+2, err)
+		}
+		if _, err := f.gate.EnsureGF3TaxonomyGovernance(ctx); err != nil {
+			t.Fatalf("boot %d GF3: %v", boot+2, err)
+		}
+	}
+	for _, fam := range gf3Revised {
+		for _, packet := range []string{"P3-RW-12", "P3-GF3-BE1"} {
+			var n int
+			if err := f.db.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM knowledge_entries WHERE topic_key = ? AND origin_ref LIKE ?`,
+				"intake/taxonomy/"+string(fam), "%"+packet+"%").Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			// Generic was unchanged by RW-12, so that record legitimately minted
+			// nothing for it; nobody may mint more than one.
+			if n > 1 {
+				t.Errorf("%s carries %d versions under %s — an Ensure applies its decision once", fam, n, packet)
+			}
+			if packet == "P3-GF3-BE1" && n != 1 {
+				t.Errorf("%s carries %d versions under %s, want exactly 1", fam, n, packet)
+			}
+		}
 	}
 }
 

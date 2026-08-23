@@ -162,6 +162,66 @@ func TestGF3SuggestionsNeverEscapeTheAskedSet(t *testing.T) {
 	}
 }
 
+// TestGF3AnswerAndSkipOfTheSameSlotRefuses (drain r1 F3): the two arms are
+// exclusive across the WHOLE answer body, not merely inside one entry.
+//
+// The per-entry check was the easy half. The shape a surface actually produces
+// is two entries — a chip toggled, then the box typed into, or the reverse —
+// and taking the skip there would discard the answer the requester actually
+// wrote and record an assumption in its place. Neither order may be picked.
+func TestGF3AnswerAndSkipOfTheSameSlotRefuses(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		entries func(id string) []intake.SlotAnswer
+	}{
+		{"answer then skip", func(id string) []intake.SlotAnswer {
+			return []intake.SlotAnswer{{ID: id, Value: "my real answer"}, {ID: id, Skip: true}}
+		}},
+		{"skip then answer", func(id string) []intake.SlotAnswer {
+			return []intake.SlotAnswer{{ID: id, Skip: true}, {ID: id, Value: "my real answer"}}
+		}},
+		{"both in one entry", func(id string) []intake.SlotAnswer {
+			return []intake.SlotAnswer{{ID: id, Value: "my real answer", Skip: true}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFix(t)
+			st := f.start(stdRequest())
+			f.admit(st.RunID)
+			f.advance(st.TaskID)
+			askID, card := f.openAsk(st.RunID)
+			id := card.Questions[0].ID
+			raw, err := json.Marshal(intake.Answer{Answers: tc.entries(id)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := f.p.Answer(ctx, "u1", askID, raw)
+			if !errors.Is(err, intake.ErrBadAnswer) {
+				t.Fatalf("answered %v, want ErrBadAnswer — a slot answered and skipped says two things and the platform must not pick one", err)
+			}
+			if after != nil {
+				t.Errorf("a refused answer returned state: %+v", after)
+			}
+			// And the refusal changed nothing: the card is still open and the
+			// slot is still unresolved.
+			reopened, still := f.openAsk(st.RunID)
+			if reopened != askID || len(still.Questions) != len(card.Questions) {
+				t.Errorf("the refused answer disturbed the open card: %q vs %q", reopened, askID)
+			}
+			live, err := f.p.LoadState(ctx, st.TaskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range live.Resolutions {
+				if r.SlotID == id {
+					t.Errorf("the refused body still resolved %q as %+v", id, r)
+				}
+			}
+		})
+	}
+}
+
 // ---- T10: pre-GF3 snapshots ----
 
 // TestGF3PreSnapshotsDecodeAndAnswer: everything this packet adds is additive

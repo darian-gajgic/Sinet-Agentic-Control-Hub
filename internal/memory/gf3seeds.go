@@ -169,12 +169,28 @@ func (g *Gate) EnsureGF3TaxonomyGovernance(ctx context.Context) (TaxonomyGoverna
 		}
 		onDisk := contentHash(cur.Content)
 		if committed == want {
+			// The record already holds this packet's content; only the disk may
+			// still need putting right. The repair runs whatever the version
+			// history says, because a torn file is not a decision.
 			if committed != onDisk {
 				res.Repaired++
 				if err := g.repairGovernedFile(cur, content); err != nil {
 					return res, err
 				}
 			}
+			continue
+		}
+		// Applied once, and later decisions stand (see decisionRecorded). This
+		// is the leg that needs it most: ratification is PENDING, so the operator
+		// may REFUSE v3 at the gate, and the refusal is executed as a supersession
+		// back to the byte-exact frozen v2 content. Comparing content alone, the
+		// next boot would read that refusal as an un-revised predecessor and
+		// re-apply the revision it rejected.
+		recorded, err := g.decisionRecorded(ctx, taxonomyTopicKey(fam), originRef)
+		if err != nil {
+			return res, err
+		}
+		if recorded {
 			continue
 		}
 		if committed != contentHash(previous) {
