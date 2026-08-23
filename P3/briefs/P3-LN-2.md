@@ -440,4 +440,19 @@ If the coordinator prefers one packet, the checklist in §7 is already ordered s
 
 ---
 
+## 12. Coordinator dispositions (2026-08-23, pre-executor — binding for executors and evaluation)
+
+- **SPLIT ACCEPTED: 2A/2B as §10 recommends.** One brief serves both (the B6-2 precedent). 2A = R1–R13, R18, R24–R26, R28, R29, R30 (checklist items 1–8, 13, 20, 22a, 23–25); 2B = R14–R17, R19–R23, R27, R31 (the rest). 2B follows 2A sequentially.
+- **C-1/C-2 RESOLVED — the live values bind, per the spec's own text.** S10.1/S10.4 mandate the multipliers and denominators be applied *as data* with "assumed" labels; the stale parentheticals are provenance notes, not bindings. Implement the V5/V6/V7 live values as dated data (R15, 2B). Receipts and gauge labels say **credits**, honestly (the unit changed). ONE cosmetic S00.9 changelog entry (Z.AI plan re-denomination prompts→credits, off-peak 0.5×, prose examples generalized — no ⚙ default/clamp change, no S18 sweep) is QUEUED TO THE GATE BATCH for operator approval; the packet does not block on it.
+- **C-3 NOTED FOR THE OPERATOR** (one line at the gate + in the coordinator's report): the ordered "GLM 5.2 lane" is served as GLM-5.3 by the plan itself (5.2 auto-routes); seed config uses the live ids; the observed-list canary (P-T17-3) is the standing authority.
+- **C-4 → R23 as written. C-5 acknowledged — coordinator slip, the brief's §-map is correct.**
+- **OQ-1 RESOLVED: proxy SPLIT OUT, as recommended.** The broker's existing `engine-cred` delivery is the v0 dev-posture-correct path (S11.5's D2 invariant guards the TASK sandbox; the serve process is not one). The TLS-terminating injection proxy + P-T01-2 pin canary batches with the D6/host ceremony alongside the jail — recorded in the STATE deferred ledger; §5's wire-facts stub is its handoff.
+- **OQ-2 RESOLVED: per-user jail → D6/host batch** (consistent with LN-1's Q1 disposition; #5529 watch stands).
+- **OQ-3 RESOLVED — the safe fallback is sanctioned, signal-based per S10.5's own class definitions:** an unknown zai 429 code WITH a parseable `next_flush_time` ⇒ Class 2 (depletion + signal — the class is defined by the signal, not the code); without ⇒ Class 3 probe-park. Never Class 1, never Class 4 (the R13 property). The 1311–1321 band joins the watch so a future doc expansion is caught. No amendment — a clearly-implied reading, logged here.
+- **OQ-4 RESOLVED: `reasoning_effort` NOT wired.** Recorded as a dated fact (V9); revisit with live coding-endpoint confirmation at/after LN-CEREMONY via an S00.9 note if wanted.
+- **OQ-5 RESOLVED: leave `modelCovered` untightened**; revisit when the model-list canary produces observed data.
+- **Red tests:** specs 33/35 stay spec-only as §9 argues; the 2A executor materializes ALL its specs red-first per Amendment A, settling R2's resolver signature itself.
+
+---
+
 *Grounded 2026-08-23. Provider facts in §1 are DATA verified on that date against primary `docs.z.ai` sources, never constants and never the authority — the account's observed model list is (P-T17-3).*
