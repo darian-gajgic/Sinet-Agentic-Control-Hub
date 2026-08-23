@@ -139,3 +139,95 @@ GF3 v3 taxonomy ratification (incl. eval-F6: the `behavior` slot's options are l
 categories); the raw-plan-editing question (operator ruling owed); the GF3-BE2 test-harness
 identity packet (blocked at the permission layer — operator decision owed); the GF3 exit
 gauntlet's own review/cold-walk findings when they land.
+
+---
+
+# Appendix A — GF3-FE live design review (2026-08-23, world :8486, commit `0c33825`)
+
+Fresh-context reviewer, real Chrome, on the operator's own inherited session. Three journeys driven
+end to end: `salon-booking` project + "A booking page for my hair salon" (software, HIGH — contest
+and change-answers correctly PIN-walled, so the reviewer stood down rather than authenticate), an
+"hours & prices page" task (content, LOW — full contest/redraft/review-card flows driven PIN-free),
+and a "photo renamer" task at 390px. **Verdict: SHIP-BAR NOT MET — 3 blocking, all honesty-class on
+this round's own flagship surfaces.** Grades: Design Quality A-, Originality A-, Craft B,
+Functionality B+.
+
+## Confirmed working live (the operator's r3 complaints answered)
+
+The contract is stated up front and repeated at every spend-adjacent surface; the guided interview
+runs one decision in view with "N of 4" chips, plain v3 questions with strong why-lines, options
+everywhere, own-words always, settled rows dimmed with "change", a counting send ("Send: 3
+answered, 1 skipped") and a force-proceed that relabels itself by state. Live recommendations work
+with one-click "Take this" and adaptive skip wording. **The honest-degrade posture was witnessed
+twice**: with the local seat 500ing, cards shipped "standard wording throughout" matching the
+control.log WARNs, and real phrasing returned on recovery — no surface pretended. Multi-contest
+merged faithfully (3 taps + note consumed in ONE redraft), the review card reconciled a change
+without regressing the other decisions, and PIN step-up armed on HIGH and stayed silent on LOW.
+
+## Blocking (RA-1..RA-3)
+
+- **RA-1 (HIGH) — no what-changed view after a redraft; the button's printed promise is broken.**
+  The verb's caption says "It redrafts once and shows exactly what changed", but the redraft renders
+  as a fresh full plan: no delta block, steps and criteria rewritten silently (a tapped AC
+  disappeared without trace), the only change-traces being two origin-tagged assumption lines. This
+  breaks design §2.E/§2.F AND the honesty rule — the caption states something the product does not
+  do. (The builder's own note says the literal `approval.delta` card kind is post-approval-only;
+  then either the caption must stop promising it pre-approval, or the FE must render a
+  changed-summary of its own.) **This is the operator's F4/"see what changed" expectation.**
+- **RA-2 (MED-HIGH) — every fresh task's first paint wears a false "STAKES: HIGH … approving asks
+  for your PIN" chip.** Three of three fresh tasks painted HIGH; the real band (often LOW/STANDARD)
+  arrived only on re-read. The family chip does the same ("generic" first for software goals). A
+  lying surface on the journey's first screen that cries wolf about the PIN ceremony.
+- **RA-3 (MED-HIGH) — the review card shows stale pre-contest state while claiming "what it says
+  now".** After an accepted contest changed tone to "plain and factual" and an answered open point
+  settled "no images", the review card still presented the OLD values as current. The backend
+  reconciles correctly on save (verified, no regression) — the display contradicts the settled plan.
+
+## Medium — same family as the operator's original complaint
+
+- **RA-4 — the post-draft "open points" card regresses to exactly the pre-GF3 pattern the operator
+  rejected**: prose-only mandatory questions with NO options, NO skip, NO recommendation, holding
+  the plan ("these open points hold the plan: answer at least one to move"), a placeholder reading
+  "or answer in your own words…" with nothing above it, a raw machine token prefix
+  ("NEEDS-CLARIFICATION:"), and technical phrasing ("fixed config"). Hit on BOTH tasks — including a
+  literal yes/no ("confirm the page should have no images") offered only as free text. It also
+  collides with force-proceed's promise to "go straight to the plan". The questions themselves were
+  substantively excellent (a real conflict catch, a real gap) — it is the surface that regresses.
+- **RA-5 — origin labels leak machine tokens on the assumptions centerpiece**: "resolution: marker-1
+  (availability source)", "interview: ordering_atomicity (assumption)", "requester (contested tone;
+  replan_contest)" — mixed with genuinely plain ones. Jargon exactly where contest decisions get made.
+- **RA-6 — "WHO DOES IT" is spec-ref soup on a requester surface**: "generalist-with-injected-
+  knowledge (the default for one-offs, S08.8)… (D5)… (S08.8 step 4)", plus a leaked irrelevant
+  candidate evaluation ("'release-notes-writer' cannot write it"); the cost tail carries "(2.5)".
+  Wire-served text riding this round's flagship card.
+- **RA-7 — understood-panel values are tokens, not the chosen words** ("merge newest", "simplest",
+  "web", "new capability"), sometimes under a mismatched label (a duplicates rule labelled as a
+  tracked-things list), plus a label-duplication quirk on assumed rows.
+- **RA-8 — the meter's self-explanation is hover-only** (`title` tooltip): invisible on touch and to
+  screen readers; the visible "0 of the 75 needed" invites reading as 75 questions. The served floor
+  and tick DO render (the §2.F wire requirement is met).
+
+## Low / cosmetic
+
+RA-9 390px shell overflow (shell measures 404px in a 390 viewport; "Sign out" clips mid-word) ·
+RA-10 "Take this" button overhangs its recommendation banner at 390 · RA-11 contest list duplicates
+a decision (plan assumption chip AND interview skip-record chip) · RA-12 stand-down discards armed
+taps+note · RA-13 spec tokens on adjacent surfaces ("(D10)", "(D2)", "(Spec S13.6)", set notation
+"∩ −", "AC-N" prefixes) · RA-14 plan header inconsistently drops the stakes/meter row · RA-15 a few
+unnamed buttons in the interview a11y tree (plan/review surfaces audit clean) · RA-16 keyboard
+traversal not drivable under CDP — **reserved for the operator's real-keyboard pass at the gate**.
+
+## RA-17 — host condition, matters for the next round
+
+The phrase seat crashed mid-journey (llama-swap "upstream command exited prematurely", 2 WARNs) and
+recovered unaided. Likely cause: **an `ollama` daemon holding 9.7 of 12.2 GiB VRAM alongside the
+pinned stack**, evicting it. Not an FE defect (the honest posture handled it perfectly), but it will
+corrupt a cold walk if it recurs — free the VRAM before the next live round.
+
+## Where these join the queue
+
+RA-1..RA-3 are contained FE fixes and belong in the same round as operator F4 (per-item contest
+notes); RA-4 is the operator's own F1-class complaint recurring on a surface GF3 did not cover and
+should be treated as part of F2/F3 work; RA-5..RA-7 extend the standing wire-side spec-ref jargon
+family and should finally be cleared on these cards. **None of them outrank F1 (the verification
+dead end): the platform must be able to finish a task before its planning polish matters.**
