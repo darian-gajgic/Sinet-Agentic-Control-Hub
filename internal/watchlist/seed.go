@@ -209,7 +209,9 @@ func tier1Rows() []Row {
 		page("t1-anthropic-pricing", "https://claude.com/pricing", "anthropic",
 			"Anthropic pricing/plan page; provider support articles and pricing pages are ground zero for drift and sometimes the only record"),
 		page("t1-zai-devpack", "https://docs.z.ai/devpack/overview", "zai",
-			"Z.AI coding-plan overview (GLM plan quota mechanics)"),
+			"Z.AI coding-plan overview (GLM plan quota mechanics). URL RE-VERIFIED 2026-08-23 at the "+
+				"lane commissioning: live, and the source of record for the plan's credit allowances and "+
+				"charging multipliers, three of which moved inside five weeks"),
 		page("t1-openai-pricing", "https://learn.chatgpt.com/docs/pricing", "openai",
 			"OpenAI plan pricing docs (watch-only candidate lane)"),
 		page("t1-minimax-plans", "https://platform.minimax.io/", "minimax",
@@ -240,7 +242,11 @@ func tier1Rows() []Row {
 		page("t1-codex-changelog", "https://developers.openai.com/codex/changelog", "openai",
 			"Codex changelog"),
 		page("t1-zai-release-notes", "https://docs.z.ai/release-notes/new-released", "zai",
-			"Z.AI release notes — GLM plan-quota mechanics appear here"),
+			"Z.AI release notes — GLM plan-quota mechanics appear here. URL RE-VERIFIED 2026-08-23 at the "+
+				"lane commissioning: live and carrying dated entries. The sibling path docs.z.ai/devpack/"+
+				"release-notes answers 404 and is NOT this row's source — a dead watch announces itself "+
+				"(S14.6 decay; the fetch-fail streak is the announcer), so the pointer is recorded rather "+
+				"than quietly retargeted"),
 		page("t1-minimax-release-notes", "https://platform.minimax.io/docs/release-notes/models", "minimax",
 			"MiniMax model release notes (candidate)"),
 		page("t1-cerebras-changelog", "https://inference-docs.cerebras.ai/support/change-log", "cerebras",
@@ -338,11 +344,17 @@ func tier4Rows() []Row {
 			Notes: "hnrss.org keyword feed, points-threshold filtered. HN is same-day for anything Anthropic/OpenAI-shaped. Consumed as HOSTED — hnrss is never self-hosted (no license file) — " + report02Cite,
 		}
 	}
+	// zaiHN stamps the zai keyword feed with the date its query was re-checked
+	// at the lane commissioning, so all three zai rows carry one.
+	zaiHN := func(r Row) Row {
+		r.Notes = "Z.AI/GLM keyword feed. QUERY RE-VERIFIED 2026-08-23 at the lane commissioning. " + r.Notes
+		return r
+	}
 	return []Row{
 		hn("t4-hn-anthropic", "Anthropic", "anthropic"),
 		hn("t4-hn-claude", "Claude+Code", "anthropic"),
 		hn("t4-hn-openai", "OpenAI", "openai"),
-		hn("t4-hn-zai", "Z.ai+GLM", "zai"),
+		zaiHN(hn("t4-hn-zai", "Z.ai+GLM", "zai")),
 		{
 			ID: "t4-localllama", Kind: KindFeed, URL: "https://www.reddit.com/r/LocalLLaMA/.rss",
 			// Reddit serves ATOM at /.rss despite the path (verified at the

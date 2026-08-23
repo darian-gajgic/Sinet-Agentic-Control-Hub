@@ -105,14 +105,22 @@ func New(cfg Config) (*Skeleton, error) {
 		// MeteredAllowed stays nil so the metered branch structurally
 		// refuses. Pressure orders multiple flat lanes (D5: consumption
 		// pressure, never dollars) — moot with one lane, wired regardless.
+		// Alternates carry the second flat-rate lane's seats (P3-LN-2B R21).
+		// They select only under coverage, and coverage grows only when a
+		// lane is actually COMMISSIONED — so with nothing commissioned this
+		// is the pre-LN-2 single-lane path exactly.
 		s.router = &worker.Router{
-			Store:   cfg.Workers,
-			DutyMap: s.dutyMap,
+			Store:      cfg.Workers,
+			DutyMap:    s.dutyMap,
+			Alternates: worker.DefaultAlternateSeats(),
 			// LocalAvailable flips true when the S12 local stack is configured
 			// (B4-5): the utility seat joins the effective DutyMap (built at
 			// the composition root) and a class-(a) dispatch onto it degrades
 			// to the paid seat with the refined reason (R22).
-			Coverage: worker.Coverage{FlatRateLanes: []string{cfg.Lane}, LocalAvailable: cfg.LocalAvailable},
+			Coverage: worker.Coverage{
+				FlatRateLanes:  append([]string{cfg.Lane}, cfg.CommissionedLanes...),
+				LocalAvailable: cfg.LocalAvailable,
+			},
 			TieBreak: cfg.TieBreak,
 			Pressure: cfg.RoutePressure,
 		}

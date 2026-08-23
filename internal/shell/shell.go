@@ -590,6 +590,12 @@ func Run(ctx context.Context, opts Options) error {
 			Phraser:        localSurf.Phraser,
 			SpotCheck:      localSurf.SpotCheck,
 			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg)},
+			// The flat-rate lanes beyond the configured one: the lanes an
+			// operator has actually commissioned a provider entry for. Empty
+			// until the key ceremony, and empty is what keeps the S08.8
+			// flat-lane rule inert rather than routing onto a lane with no
+			// credential (P3-LN-2B R21/R22).
+			CommissionedLanes: commissionedLanes(engineLanes(logger), engineCommissioned),
 			// The S08.6 composer's policy-input seams: the current approved
 			// composer playbook (the governed S09.10 house object) and the
 			// lane's pinned engine version keying validation records.

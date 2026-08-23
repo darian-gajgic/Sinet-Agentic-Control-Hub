@@ -45,6 +45,17 @@ type Gauge struct {
 	UserID string
 	Lane   string
 
+	// Tier is the approximation tier of THIS reading's numbers, and it is
+	// always TierMeasured: WeightedConsumption is summed from measured
+	// per-call token counts (S10.1 tier 1).
+	//
+	// It is stamped explicitly rather than left implicit because a lane also
+	// has a DERIVED plan-unit reading at tier 3 (PlanReading, planunits.go),
+	// and the two are routinely read side by side. An unstamped reading is one
+	// a caller can mistake for the other, and adding them together produces a
+	// number that is wrong in both units.
+	Tier ApproximationTier
+
 	// WeightedConsumption folds the period's tokens with cache reads down-
 	// weighted by ⚙ pressure.cache_read_weight (S10.4); the single most
 	// impactful gauge assumption on cache-heavy work (P-T08-5).
@@ -93,6 +104,7 @@ func (g *PressureGauge) Read(ctx context.Context, userID, lane string, budget Bu
 	gauge := Gauge{
 		UserID:              userID,
 		Lane:                lane,
+		Tier:                TierMeasured, // measured per-call usage (S10.1)
 		WeightedConsumption: consumption,
 		CacheReadWeight:     weight,
 		Assumed:             true, // S10.4: labeled "assumed" until quota semantics publish

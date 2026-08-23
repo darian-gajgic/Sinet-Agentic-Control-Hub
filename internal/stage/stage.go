@@ -175,6 +175,19 @@ type Config struct {
 	// TieBreak is the S12 local-duty tie-break seam (B4-5; nil = the
 	// deterministic degraded order with the absence recorded).
 	TieBreak worker.TieBreaker
+	// CommissionedLanes are the ADDITIONAL flat-rate lanes this person holds
+	// beyond Lane — the lanes an operator has actually placed a provider entry
+	// and a credential for (S03.6: a lane is a provider entry per user plus
+	// billing flags). Empty at v0, because no lane is commissioned until the
+	// key ceremony, and empty means Coverage is exactly what it was before
+	// P3-LN-2B: the one configured lane.
+	//
+	// It is a coverage input rather than a routing one: registering a second
+	// adapter made a second lane DISPATCHABLE, and only a commissioned
+	// provider entry makes one SELECTABLE. Conflating the two would route work
+	// onto a lane that has no credential (R9's "not commissioned" state).
+	CommissionedLanes []string
+
 	// LocalAvailable reports the S12 local serving stack is configured (B4-5):
 	// the effective DutyMap gains the utility seat and Coverage.LocalAvailable
 	// flips true, so a class-(a) engine dispatch onto duty utility degrades to

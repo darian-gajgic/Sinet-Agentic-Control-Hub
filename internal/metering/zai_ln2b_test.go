@@ -203,7 +203,7 @@ func TestZAIMultipliersAreConfigNotConstants(t *testing.T) {
 		for _, raw := range m["quotas"].([]any) {
 			row := raw.(map[string]any)
 			if row["name"] == PlanQuotaWindow {
-				row["units"] = 14000.0
+				row["units"] = 7000.0
 			}
 		}
 	})

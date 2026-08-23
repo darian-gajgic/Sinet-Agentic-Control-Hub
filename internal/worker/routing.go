@@ -134,6 +134,46 @@ func DefaultDutyMap() DutyMap {
 	}
 }
 
+// AlternateSeats are the additional flat-rate seats a duty may resolve to when
+// the owner holds more than one flat-rate lane (S08.8 step 3). Keyed by duty
+// class; the DutyMap seat is the configured first choice and these follow it in
+// order.
+//
+// It is a second map rather than a longer Seat list on DutyMap because every
+// consumer of DutyMap resolves a duty to exactly ONE seat, and widening that
+// type would have made "which seat did this duty get" a question with a
+// different answer in each caller.
+type AlternateSeats map[string][]Seat
+
+// DefaultAlternateSeats is the shipped alternate-seat data (S08.8 step 3;
+// S03.6 — a lane is configuration, never code).
+//
+// EXECUTION ONLY, deliberately. The zai lane is commissioned at P3-LN-2 and
+// serves glm-5.3 as its coding flagship (verified 2026-08-23 against
+// docs.z.ai/devpack/overview; the seed ids are DATA with a date and the
+// account's own observed list is the authority — P-T17-3). Planning and judge
+// keep their anthropic-only seats: the B3 gate ratified that seat mix from
+// measured research, the judge seat additionally carries the S07.5 bar of
+// capability ≥ the executor AND a different model than the executor it judges,
+// and nobody has measured a zai model against either bar. Seating one here
+// would be inventing a ratification, so an owner who holds only zai gets the
+// unchanged 2.7 subscription-gap advice for those duties, which is the honest
+// answer.
+//
+// WindowTokens is the platform floor rather than a per-model fact: the
+// provider publishes no input-context figure for these models on either
+// primary page (checked 2026-08-24 — docs.z.ai/devpack/overview and the
+// chat-completion reference state a 128K maximum OUTPUT and no input window).
+// Understating a window only splits stages earlier, which is safe; minting an
+// unverified one would disarm overflow protection. A measured uplift is an S14
+// recalibration, and the model-list canary is where observed model facts will
+// arrive from.
+func DefaultAlternateSeats() AlternateSeats {
+	return AlternateSeats{
+		DutyExecution: {{Model: "glm-5.3", Lane: "zai", WindowTokens: DefaultWindowTokens}},
+	}
+}
+
 // Coverage is the subscription-coverage view binding every choice (Spec
 // S08.8 step 3; Operating reality; D5): which lanes the owner holds
 // flat-rate, and the metered-exception surface. The v0 shape is static
@@ -285,9 +325,13 @@ type Decision struct {
 
 // Router is the S08.8 selection engine over the worker store.
 type Router struct {
-	Store    *Store
-	DutyMap  DutyMap
-	Coverage Coverage
+	Store   *Store
+	DutyMap DutyMap
+	// Alternates are the extra flat-rate seats a duty may take when the owner
+	// holds more than one flat-rate lane. Nil = the single-lane world, in
+	// which selection takes exactly its pre-LN-2 path.
+	Alternates AlternateSeats
+	Coverage   Coverage
 	// TieBreak is the S12 local-duty seam (nil = absent at v0, degraded
 	// deterministic order).
 	TieBreak TieBreaker
@@ -550,18 +594,27 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	// reading 3): the local tier's PLATFORM DUTY calls (class (b): intake
 	// seams, tie-break) consume it directly through the S12.4 alias registry
 	// (internal/local, B4-5), but the local ENGINE lane (class (a): a run
-	// dispatching onto a local model via the opencode adapter) has NO v0
-	// consumer in this cut — no second adapter exists. So a template/helper
-	// demanding duty utility/mechanical (an engine dispatch) resolves to the
-	// paid execution seat either way, never a fake dispatch onto a lane with
-	// no adapter, never an error (absent duties degrade, never faked —
-	// S08.8/CONVENTIONS §19).
+	// dispatching onto a local model) still has NO v0 consumer.
+	//
+	// CORRECTED 2026-08-24 (P3-LN-2B R23). Until P3-LN-1 this clause read "no
+	// second adapter exists in this cut", and that was true then and is false
+	// now: the opencode substrate landed at LN-1 and is registered alongside
+	// claudecli at LN-2A. The CONCLUSION is unchanged and the REASON is not —
+	// what is missing is no longer an adapter but a commissioned local
+	// PROVIDER ENTRY, which is a separate lane commissioning and not this
+	// packet's. Stating it the old way would have a future reader believe the
+	// platform still has one adapter.
+	//
+	// So a template/helper demanding duty utility/mechanical (an engine
+	// dispatch) resolves to the paid execution seat either way, never a fake
+	// dispatch onto a lane nothing is commissioned on, never an error (absent
+	// duties degrade, never faked — S08.8/CONVENTIONS §19).
 	localNote := ""
 	if q.Mechanical || duty == DutyUtility {
 		if r.Coverage.LocalAvailable {
-			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is serving; its engine lane carries no v0 consumer (S12.1 class (a) — platform duty calls ride it directly), so this dispatch rides the paid seat.", duty)
+			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is serving; its engine lane carries no v0 consumer because no local provider entry is commissioned (S12.1 class (a) — platform duty calls ride the tier directly), so this dispatch rides the paid seat.", duty)
 		} else {
-			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is not configured (S12); riding the paid seat instead.", duty)
+			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is not configured (S12) and has no commissioned provider entry; riding the paid seat instead.", duty)
 		}
 		duty = DutyExecution
 	}
@@ -589,6 +642,15 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 		pinNote = fmt.Sprintf(" Model pinned by the template (%s).", p.ModelPinReason)
 	}
 
+	// Among the flat-rate lanes the owner actually holds, the choice is the
+	// consumption gauge's. A pinned model skips this entirely: the template
+	// asked for one model, and offering it a different lane's model would not
+	// be honoring the pin.
+	laneNote := ""
+	if p.ModelPin == "" {
+		seat, laneNote = r.chooseFlatLane(ctx, q.Requester, duty, seat)
+	}
+
 	if !r.Coverage.laneCovered(seat.Lane) {
 		if r.Coverage.MeteredAllowed != nil && r.Coverage.MeteredAllowed(seat.Model) {
 			// Unreachable in production: the metered-exception list is EMPTY
@@ -612,11 +674,81 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	if q.Research {
 		reason += " Research nodes route on the search-capable lane (S08.8 step 4)."
 	}
+	if laneNote != "" {
+		reason += " " + laneNote
+	}
 	if localNote != "" {
 		reason = localNote + " " + reason
 	}
 	reason += pinNote
 	return seat, effort, reason, "", nil
+}
+
+// chooseFlatLane picks among the flat-rate seats the owner holds for a duty:
+// the duty-map seat plus any alternates registered for it.
+//
+// D5, verbatim (S08.8; S10.2): "Dollar-based routing between flat-rate lanes is
+// a D5 violation and NEVER done." The ordering input is CONSUMPTION PRESSURE —
+// the lane a person has spent less of goes first — and no price, cost or
+// dollar figure is available to this function to reason with even if somebody
+// wanted to. That is a structural property, not a discipline: nothing in this
+// package's selection inputs carries money (see the head comment).
+//
+// It returns the seat unchanged when nothing better applies, so the pre-LN-2
+// single-lane world takes exactly its old path: one covered candidate, no
+// gauge read, no note.
+func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Seat) (Seat, string) {
+	alts := r.Alternates[duty]
+	if len(alts) == 0 {
+		return seat, ""
+	}
+	// Configured order: the duty-map seat first, then its alternates. This is
+	// the tie-break and the fallback, so the choice is deterministic when the
+	// gauge cannot separate two lanes.
+	covered := make([]Seat, 0, 1+len(alts))
+	if r.Coverage.laneCovered(seat.Lane) {
+		covered = append(covered, seat)
+	}
+	for _, a := range alts {
+		if a.Lane != seat.Lane && r.Coverage.laneCovered(a.Lane) {
+			covered = append(covered, a)
+		}
+	}
+	switch len(covered) {
+	case 0:
+		// Nothing covered: hand back the duty-map seat so the caller's 2.7
+		// subscription-gap leg fires with its unchanged wording.
+		return seat, ""
+	case 1:
+		if covered[0].Lane == seat.Lane {
+			return covered[0], ""
+		}
+		return covered[0], fmt.Sprintf("The %s duty seat's own lane is not held flat-rate; %s is the one covered alternative.",
+			duty, covered[0].Lane)
+	}
+
+	if r.Pressure == nil {
+		return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty and no consumption gauge is wired, so the configured order stands (never dollars — D5).",
+			len(covered))
+	}
+	best, bestP, measured := covered[0], 0.0, false
+	for i, c := range covered {
+		p, err := r.Pressure.Pressure(ctx, owner, c.Lane)
+		if err != nil {
+			// A gauge that cannot answer degrades to the configured order
+			// rather than failing the dispatch, and says so.
+			return covered[0], fmt.Sprintf("Consumption pressure was unavailable (%v), so the configured lane order stands (never dollars — D5).", err)
+		}
+		if i == 0 || p < bestP {
+			best, bestP = c, p
+		}
+		measured = true
+	}
+	if !measured {
+		return covered[0], ""
+	}
+	return best, fmt.Sprintf("Chosen among %d covered flat-rate lanes on consumption pressure — %s was the least consumed (D5: never dollars).",
+		len(covered), best.Lane)
 }
 
 // modelCovered: the model rides a covered flat-rate lane. v0 lane facts

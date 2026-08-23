@@ -113,6 +113,12 @@ func conformanceRowLane(rowID string) string {
 		return LaneAnthropic
 	case "adapter-local":
 		return LaneLocal
+	case "adapter-zai":
+		// The zai LANE row, landed at P3-LN-2B. Its sibling adapter-opencode
+		// row is deliberately absent from this map: that one proves the
+		// SUBSTRATE, and a substrate is not a lane — mapping it would file a
+		// substrate result under whichever lane happened to be listed first.
+		return LaneZAI
 	}
 	return ""
 }

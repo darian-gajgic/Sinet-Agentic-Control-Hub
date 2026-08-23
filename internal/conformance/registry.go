@@ -189,7 +189,7 @@ func SeedRows() []Row {
 			Notes:       "the Anthropic lane (claudecli battery). The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
-			// Adapter per-lane — local [S03.2/S12.10]. The zai lane is OMITTED.
+			// Adapter per-lane — local [S03.2/S12.10].
 			ID:            "adapter-local",
 			OwningSection: "S03.2/S12.10",
 			Fixtures: []Fixture{
@@ -201,7 +201,7 @@ func SeedRows() []Row {
 			Schedule:    "on any engine/CLI version change + weekly",
 			Cadence:     CadenceWeekly,
 			AffectClass: AffectLane,
-			Notes:       "the local lane (the S12.10 deliberate-bump battery, the F17 one-named-run-handle TestBumpProcedure*). The zai LANE is still OMITTED and has NO row of its own: no lane is commissioned on the opencode substrate until LN-2, and a row claiming a live lane would fake (R7; the honest-dormancy discipline). Its SUBSTRATE row landed with its adapter at P3-LN-1 — see adapter-opencode; the zai lane canary rows complete at LN-2. Lane-affecting ⇒ flag-now." + bumpGateNote,
+			Notes:       "the local lane (the S12.10 deliberate-bump battery, the F17 one-named-run-handle TestBumpProcedure*). The zai lane's own row landed at P3-LN-2B — see adapter-zai; this row no longer speaks for it. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// Adapter per-substrate — opencode [S03.1/S03.4/S03.5]. The B5-4
@@ -224,7 +224,32 @@ func SeedRows() []Row {
 			Schedule:    "on any engine/CLI version change + weekly",
 			Cadence:     CadenceWeekly,
 			AffectClass: AffectLane,
-			Notes:       "the opencode SUBSTRATE (the internal/adapters/opencode battery), landed at P3-LN-1. HONEST SCOPE: this row proves the substrate, not a lane — at LN-1 there is no provider entry, no credential and no commissioned lane on it, so tier L is defined and structurally unreachable and the lane canary rows (auth + behavioral; the Z.AI coding endpoint exposes no logprobs, S03.7) land at LN-2 with the lane. Tier R runs for real whenever the pinned binary is installed and costs $0: the permission round-trip drives a REAL serve against a loopback fake OpenAI-compatible provider. The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now." + bumpGateNote,
+			Notes:       "the opencode SUBSTRATE (the internal/adapters/opencode battery), landed at P3-LN-1. HONEST SCOPE: this row proves the substrate, not a lane — the lane that rides it has its own row (adapter-zai, P3-LN-2B), and this one stays silent about lanes so a green substrate is never read as a working lane. Tier L is defined here and stays structurally unreachable until a credential is placed. Tier R runs for real whenever the pinned binary is installed and costs $0: the permission round-trip drives a REAL serve against a loopback fake OpenAI-compatible provider. The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now." + bumpGateNote,
+		},
+		{
+			// Adapter per-lane — zai [S03.2/S03.6/S10]. registry.go promised this
+			// row would land with the lane, and P3-LN-2B is where it does.
+			ID:            "adapter-zai",
+			OwningSection: "S03.2/S03.6/S10.4",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/adapters/opencode/ -run TestZAIProviderEntryIsData (tier F: the endpoint and model ids flow end-to-end as DATA — no lane value is a Go constant)", Pkg: "internal/adapters/opencode", Run: "TestZAIProviderEntryIsData"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestZAIMissingCredentialIsNamedState (tier F: an uncommissioned lane refuses BY NAME — never a panic, never an unauthenticated call)", Pkg: "internal/adapters/opencode", Run: "TestZAIMissingCredentialIsNamedState"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestZAICredentialNeverLeaves (tier F: the sentinel appears in no event, row, park record, identity key or log)", Pkg: "internal/adapters/opencode", Run: "TestZAICredentialNeverLeaves"},
+				{Handle: "go test ./internal/scheduler/ -run TestClassify1113RequiresEndpointSelfCheck (tier F: the wrong-endpoint case is a surfaced defect, never a probe-park)", Pkg: "internal/scheduler", Run: "TestClassify1113RequiresEndpointSelfCheck"},
+				{Handle: "go test ./internal/scheduler/ -run TestClassifyZAIUnknown429AlwaysParks (tier F: the safe-direction property over the unnamed code band)", Pkg: "internal/scheduler", Run: "TestClassifyZAIUnknown429AlwaysParks"},
+				{Handle: "go test ./internal/metering/ -run TestZAITokenRowIsTier1AndGaugeIsTier3 (tier F: the tier-1 token row and the tier-3 plan-unit gauge, never conflated)", Pkg: "internal/metering", Run: "TestZAITokenRowIsTier1AndGaugeIsTier3"},
+				{Handle: "go test ./internal/metering/ -run TestZAIUnpricedWithoutMeteredRow (tier F: a flat lane never prices from a $0 row)", Pkg: "internal/metering", Run: "TestZAIUnpricedWithoutMeteredRow"},
+				{Handle: "go test ./internal/watchlist/ -run TestZAIHasBehavioralCanaryAndNoLogprobCanary (tier F: behavioral-eval-only, with the reason)", Pkg: "internal/watchlist", Run: "TestZAIHasBehavioralCanaryAndNoLogprobCanary"},
+				{Handle: "go test ./internal/watchlist/ -run TestZAIModelListCanaryRegisteredAndToleratesAbsence (tier F: an absent /models is reported, never fabricated)", Pkg: "internal/watchlist", Run: "TestZAIModelListCanaryRegisteredAndToleratesAbsence"},
+				{Handle: "go test ./internal/worker/ -run TestFlatLaneSelectionIgnoresDollars (tier F: the D5 property — a price difference changes selection not at all)", Pkg: "internal/worker", Run: "TestFlatLaneSelectionIgnoresDollars"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestRealServeResolvesTheCredentialEnvReference (tier R: a REAL serve resolves the {env:…} credential reference against a loopback fake provider, $0)", Pkg: "internal/adapters/opencode", Run: "TestRealServeResolvesTheCredentialEnvReference"},
+				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/opencode/ -run TestLiveSmoke (tier L: one minimal paid call on this lane — DEFINED, and structurally unreachable until the operator places a credential)", Pkg: "internal/adapters/opencode", Run: "TestLiveSmoke"},
+			},
+			TriggerSet:  []string{TriggerEngineBump, TriggerWeekly},
+			Schedule:    "on any engine/CLI version change + weekly",
+			Cadence:     CadenceWeekly,
+			AffectClass: AffectLane,
+			Notes:       "the zai LANE on the opencode substrate (P3-LN-2). HONEST SCOPE, both halves. What it proves: the lane as CONFIGURATION — a dated provider entry per person, its credential resolved only through the broker, its wire signals classified through the five-class taxonomy, its consumption tiered and labeled, its receipts UNPRICED rather than $0, and its drift watched by the auth/behavioral/model-list canaries. What it does NOT prove: that a paid call on this lane works, because no credential exists in the system — every leg above terminates on fixtures or a loopback fake provider at $0, the real-request canary legs stay disarmed, and tier L is defined and structurally unreachable until LN-CEREMONY places a key. The SUBSTRATE beneath it is a separate row (adapter-opencode): a green substrate is not a working lane. There is no logprob canary here and that is deliberate — the coding endpoint exposes none (S03.7). Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
 			// The no-engine-SSE-replay standing assertion [S14.3 ¶3; S14.5] — a

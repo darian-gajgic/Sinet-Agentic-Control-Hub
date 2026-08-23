@@ -10,9 +10,15 @@
 // the control plane invokes S12.4 duty aliases directly with no engine
 // session involved (intake triage, tie-break, utility drafting). The
 // class-(a) local ENGINE lane (runs executing on local models via the
-// opencode adapter, S03.2) has NO v0 consumer in this cut — the local
-// lane exists as metering/routing vocabulary and nothing dispatches onto
-// it here (P3/STATE binding reading).
+// opencode adapter, S03.2) has NO v0 consumer — the local lane exists as
+// metering/routing vocabulary and nothing dispatches onto it here
+// (P3/STATE binding reading).
+//
+// CORRECTED 2026-08-24 (P3-LN-2B R23): the reason changed even though the
+// fact did not. This clause used to rest on "no second adapter exists";
+// the opencode adapter landed at P3-LN-1 and is registered at LN-2A, so
+// what is actually absent is a commissioned local PROVIDER ENTRY — a
+// separate lane commissioning, not a missing substrate.
 //
 // Import wall (brief R24, CONVENTIONS §26): this package imports
 // storage/eventlog/gates/settings-interface + stdlib ONLY. It NEVER

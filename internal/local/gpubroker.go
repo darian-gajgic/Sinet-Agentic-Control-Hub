@@ -42,7 +42,10 @@ import (
 //     (R5, side-channel reduction).
 //
 // SEAM (BINDING): S12.1 class (a) — a run executing ON a local model via the
-// opencode adapter — has NO v0 consumer (no second engine adapter this cut).
+// opencode adapter — has NO v0 consumer. CORRECTED 2026-08-24 (P3-LN-2B R23):
+// this used to say "no second engine adapter this cut", which the P3-LN-1
+// opencode adapter made false; the absent thing is a commissioned local
+// provider entry, which is its own lane commissioning.
 // So NOTHING mints a token from a real spawn and the sandboxed plane has no
 // live consumer: it is delivered as a designed, HERMETICALLY-TESTED seam, never
 // a live-exercised path (faking a consumer would violate the BINDING reading +

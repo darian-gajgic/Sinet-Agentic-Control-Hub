@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/opencode"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/conformance"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/evals"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -104,7 +105,7 @@ func buildWatchlistSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 	emitter.Logger = logger
 
 	cdio := watchlist.DiscoverCDIO(nil)
-	canaries, armed := buildCanaryLayer(db, log, reg, duty, meter, emitter, conf, logger)
+	canaries, armed := buildCanaryLayer(db, log, reg, duty, meter, emitter, conf, logger, engineLanes(logger))
 	return &watchlistSurface{
 		Store: store,
 		Exec: watchlist.New(watchlist.Deps{
@@ -122,15 +123,19 @@ func buildWatchlistSurface(ctx context.Context, db *storage.DB, log *eventlog.Lo
 // nil (drain D1).
 const (
 	// canaryNoCredentialedEndpoint is the honest state of the auth and
-	// model-list legs on THIS tree. Both v0 paid lanes ride wrapped CLIs
-	// (claude-cli, opencode) — there is no per-lane HTTP endpoint and no
-	// broker credential accessor composed anywhere yet, and inventing either
-	// would be new structural config this packet has no mandate for. The
-	// probes themselves are built and stub-tested
-	// (watchlist.HTTPAuthProbe / HTTPModelListProbe); what is missing is
-	// gate-time material, so composing them is a B5-gate item.
-	canaryNoCredentialedEndpoint = "no credentialed per-lane endpoint is composed: the endpoint set and the " +
-		"broker credential accessor are B5-gate install material (D2/S11.5); the probe itself is built and stub-tested"
+	// model-list legs on THIS tree, and the reason NARROWED at P3-LN-2B.
+	//
+	// It used to be "no per-lane HTTP endpoint exists". Half of that is no
+	// longer true: the zai lane's document carries its endpoint as dated data,
+	// and the CONFIG side of the model-list diff is composed from those
+	// documents below. What is still missing is the other half — a CREDENTIAL.
+	// No lane is commissioned, so there is nothing to authenticate with and no
+	// broker accessor composed to fetch it, and a probe dialling a provider
+	// with no credential would report an auth failure that says nothing about
+	// the lane's actual standing. Placing the key is LN-CEREMONY's.
+	canaryNoCredentialedEndpoint = "no lane is commissioned, so there is no credential to probe with: the lane " +
+		"documents now carry the endpoints, but the broker credential accessor is B5-gate install material and " +
+		"the key itself is the operator's ceremony (D2/S11.5); the probe is built and stub-tested"
 	// canaryNoPinnedRunner is the carried B5-5 dependency.
 	canaryNoPinnedRunner = "no pinned runner is installed (" + evals.PromptfooPathEnv +
 		" or PATH): the exact-version install is a B5-gate HOST act"
@@ -157,7 +162,7 @@ const (
 // by the arm — it is wired whenever the local stack is.
 func buildCanaryLayer(db *storage.DB, log *eventlog.Log, reg *settings.Registry,
 	duty *local.Duty, meter stage.AdvisoryMeter, emitter *watchlist.Emitter,
-	conf *conformance.Store, logger *slog.Logger) (*watchlist.Canaries, bool) {
+	conf *conformance.Store, logger *slog.Logger, lanes []opencode.LaneConfig) (*watchlist.Canaries, bool) {
 
 	c := watchlist.NewCanaries(db, log, reg)
 	c.Emitter = emitter
@@ -167,11 +172,21 @@ func buildCanaryLayer(db *storage.DB, log *eventlog.Log, reg *settings.Registry,
 	}
 	c.Conformance = watchlist.NewConformanceCanary(conf)
 
+	// The CONFIG side of the P-T17-3 diff (S03.6: "diffs each account's
+	// observed model list against config"). It comes from the lane documents,
+	// which is the only place a model id is written down, and it is supplied
+	// whether or not the leg is armed: a disarmed leg that is later armed must
+	// already know what it is diffing against, and an empty config side would
+	// silently demote the diff to observation-vs-observation, which cannot
+	// catch a model the account never served in the first place.
+	configuredModels := laneConfiguredModels(lanes)
+
 	armed := watchlist.CanaryArmed()
 	if !armed {
 		reason := watchlist.DisarmedReasonNotArmed
 		c.Auth = watchlist.DisarmedAuthCanary(reason)
 		c.ModelList = watchlist.DisarmedModelListCanary(reason)
+		c.ModelList.Configured = configuredModels
 		c.Behavioral = watchlist.DisarmedBehavioralCanary(reason)
 		logger.Info("watchlist: API canary layer wired, real-request legs DISARMED (B5-6B)",
 			"arm_with", watchlist.CanaryArmEnv,
@@ -184,6 +199,7 @@ func buildCanaryLayer(db *storage.DB, log *eventlog.Log, reg *settings.Registry,
 	uncomposed := []string{}
 	c.Auth = watchlist.DisarmedAuthCanary(canaryNoCredentialedEndpoint)
 	c.ModelList = watchlist.DisarmedModelListCanary(canaryNoCredentialedEndpoint)
+	c.ModelList.Configured = configuredModels
 	uncomposed = append(uncomposed, "auth ("+canaryNoCredentialedEndpoint+")",
 		"model-list ("+canaryNoCredentialedEndpoint+")")
 

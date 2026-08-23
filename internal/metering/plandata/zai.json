@@ -1,0 +1,51 @@
+{
+  "lane": "zai",
+  "plan": "GLM Coding Max",
+  "unit": "credits",
+  "verified_on": "2026-08-23",
+  "source": "https://docs.z.ai/devpack/overview",
+  "assumed_note": "ASSUMED. The plan publishes a credit allowance and a charging multiplier; it publishes no per-request credit counter, so a run's credit consumption is DERIVED from its requests with the documented multiplier applied (S10.1 tier 3, S10.4 requests-as-proxy). Every number below is a dated row an operator may edit, never a platform constant, and the reading it produces is labeled assumed on every surface.",
+  "unit_note": "The plan was denominated in PROMPTS when S10.4 was written and is denominated in CREDITS as of the verified-on date. Receipts and gauges say credits, because the unit changed and saying otherwise would be a quiet lie about what was counted.",
+  "weekly_reset": "order-anchored",
+  "weekly_reset_note": "The weekly window starts counting from the time the order was placed and refreshes on a 7-day cycle, per account — it is not a calendar week. Verified 2026-08-23.",
+  "multipliers": [
+    {
+      "name": "peak",
+      "factor": 1.0,
+      "days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+      "from_hour": 14,
+      "to_hour": 18,
+      "utc_offset_minutes": 480,
+      "default": false,
+      "verified_on": "2026-08-23",
+      "source": "https://docs.z.ai/devpack/overview",
+      "note": "The published peak window, in the provider's own timezone. Usage inside it is charged at the standard credit rate."
+    },
+    {
+      "name": "off-peak",
+      "factor": 0.5,
+      "default": true,
+      "verified_on": "2026-08-23",
+      "source": "https://docs.z.ai/devpack/overview",
+      "note": "Verbatim: model usage outside the peak window is charged at 50% of the standard credit rate. This is the DEFAULT row: every instant the peak window does not claim is off-peak."
+    }
+  ],
+  "quotas": [
+    {
+      "name": "rolling-5h",
+      "units": 28000,
+      "window_hours": 5,
+      "verified_on": "2026-08-23",
+      "source": "https://docs.z.ai/devpack/overview",
+      "note": "The GLM Coding Max rolling allowance."
+    },
+    {
+      "name": "weekly",
+      "units": 140000,
+      "window_hours": 168,
+      "verified_on": "2026-08-23",
+      "source": "https://docs.z.ai/devpack/overview",
+      "note": "The GLM Coding Max weekly allowance. Its window is order-anchored per account (see weekly_reset), so this length is the cycle, not a calendar week."
+    }
+  ]
+}

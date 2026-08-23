@@ -19,8 +19,16 @@ import (
 // audit-trailed approver acknowledgement is the only way past a flag).
 
 // The v0 tool vocabulary. Names are the Sinet-granted tool identifiers the
-// S03.5 lowering hands to the engine allowlist; at v0 they coincide with
-// the Anthropic-lane names (the one agentic lane wired, CONVENTIONS §10).
+// S03.5 lowering hands to the engine allowlist.
+//
+// CORRECTED 2026-08-24 (P3-LN-2B R23). This read "the one agentic lane
+// wired", which stopped being true at P3-LN-2A: internal/shell registers two
+// substrates now, and "one agentic lane" was never a rule in code — it was the
+// single entry in that map. The names below still coincide with the
+// Anthropic-lane names, and the ceiling table is keyed by (domain, family)
+// with no lane dimension, so nothing about this table changes; if a lane's
+// granted-tool vocabulary ever diverges, KnownTools is the closed set that
+// would need one (CONVENTIONS §10).
 const (
 	ToolRead  = "Read"
 	ToolGrep  = "Grep"

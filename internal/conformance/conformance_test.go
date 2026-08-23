@@ -163,25 +163,40 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	// The opencode SUBSTRATE row (P3-LN-1): the B5-4 seed's own note said "Its
 	// row lands with its adapter", and the adapter has landed.
 	find(t, states, "adapter-opencode")
-	if len(states) != 13 {
-		t.Fatalf("seed produced %d rows, want 13 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate)", len(states))
+	// The zai LANE row (P3-LN-2B): the lane is commissioned as configuration on
+	// that substrate, so the row its siblings promised now exists.
+	find(t, states, "adapter-zai")
+	if len(states) != 14 {
+		t.Fatalf("seed produced %d rows, want 14 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate + the P3-LN-2B zai lane)", len(states))
 	}
 
-	// The zai LANE is still OMITTED (R7): no row claims a commissioned lane on
-	// the opencode substrate before LN-2, and the reason is recorded.
+	// The zai lane's row is the ONLY zai row, and it is honest about the half
+	// it does not prove.
+	//
+	// This assertion is the INVERSE of the one it replaces, and deliberately so.
+	// Until P3-LN-2 it read "a zai adapter row must NOT exist", because no lane
+	// was commissioned and a row claiming a live lane would have faked one. The
+	// lane is commissioned now, so the same honesty rule points the other way:
+	// what must not exist is a row that claims more than the lane has. It is
+	// still a wall, not a relaxation — a green row here must never be readable
+	// as "a paid call on this lane works".
+	zaiRows := 0
 	for _, s := range states {
-		if strings.Contains(s.ID, "zai") {
-			t.Errorf("a zai adapter row exists (%q) — the zai lane has NO suite and must not be registered (R7)", s.ID)
+		if !strings.Contains(s.ID, "zai") {
+			continue
+		}
+		zaiRows++
+		if s.ID != "adapter-zai" {
+			t.Errorf("unexpected zai row %q — the lane has exactly one row", s.ID)
+		}
+		for _, needle := range []string{"LN-CEREMONY", "$0"} {
+			if !strings.Contains(s.Notes, needle) {
+				t.Errorf("the zai row's notes never mention %q — the row must say what it does NOT prove: %q", needle, s.Notes)
+			}
 		}
 	}
-	zaiReasonRecorded := false
-	for _, s := range states {
-		if strings.Contains(s.Notes, "zai") {
-			zaiReasonRecorded = true
-		}
-	}
-	if !zaiReasonRecorded {
-		t.Error("the zai-omission reason is not recorded in any row's notes (R7 honest-dormancy)")
+	if zaiRows != 1 {
+		t.Errorf("%d zai rows registered, want exactly 1 (adapter-zai)", zaiRows)
 	}
 }
 
@@ -469,6 +484,10 @@ func TestBumpGatingSetSurfacesBLimbReference(t *testing.T) {
 		// The opencode substrate battery (P3-LN-1): a pin bump on that engine
 		// gates on it exactly as the other per-lane suites do (S03.3).
 		"adapter-opencode": true,
+		// The zai LANE battery (P3-LN-2B): an engine bump on the substrate this
+		// lane rides gates on the lane's own suite too, because a substrate that
+		// still passes can carry a lane that no longer does.
+		"adapter-zai": true,
 		// The S14.8 regression sweep carries engine_bump because it is where
 		// limb (b) — the before/after quality probe — records (B5-5 OQ2(a)).
 		conformance.RowRegressionSweep: true,
@@ -516,8 +535,8 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 13 {
-		t.Fatalf("never-run: %d rows due, want all 13", len(due))
+	if len(due) != 14 {
+		t.Fatalf("never-run: %d rows due, want all 14", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).

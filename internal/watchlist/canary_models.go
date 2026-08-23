@@ -3,6 +3,7 @@ package watchlist
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,6 +72,25 @@ func (m *ModelListCanary) Run(ctx context.Context, c *Canaries, lane string) (Ca
 		return CanaryResult{}, disarmedBecause(firstNonEmpty(m.Unavailable, DisarmedReasonNotArmed))
 	}
 	observed, err := m.Probe(ctx, lane)
+	if errors.Is(err, ErrModelListUnavailable) {
+		// The endpoint serves no model list at all. That is not drift, not a
+		// probe failure, and emphatically not an empty catalogue: it is a
+		// capability this lane's endpoint does not have, and the honest report
+		// is to say so, dated, and diff nothing.
+		//
+		// The Z.AI coding endpoint is the live case (checked 2026-08-23: no
+		// documentation of /models on the subscription endpoint). Failing the
+		// canary would raise a card every day for a condition nobody can fix;
+		// inventing an empty list would report every configured model as
+		// REMOVED, which is the fabricated-drift the canary exists to catch.
+		return CanaryResult{
+			Lane:    lane,
+			Pass:    true,
+			Summary: fmt.Sprintf("model-list canary on lane %s: the observed list is unavailable — this endpoint serves none", lane),
+			Detail: fmt.Sprintf("%v\nNo diff was possible, so none is reported. The configured list stands as the only "+
+				"record of this lane's models until the endpoint serves one (S03.6; P-T17-3).", err),
+		}, nil
+	}
 	if err != nil {
 		return CanaryResult{
 			Lane:        lane,
@@ -191,6 +211,17 @@ func diffModelIDs(baseline, observed []string) (added, removed []string) {
 	return added, removed
 }
 
+// ErrModelListUnavailable reports an endpoint that serves no model list at
+// all — not a list that failed to arrive.
+//
+// The distinction is load-bearing. A subscription endpoint may simply not
+// expose `/models` (the Z.AI coding endpoint is undocumented for it as of
+// 2026-08-23), and a canary that treated that as a failure would raise a card
+// every cycle for a condition nobody can act on, while one that treated it as
+// an empty catalogue would report every configured model as removed. Neither
+// is true, so it gets its own answer.
+var ErrModelListUnavailable = errors.New("watchlist: the lane endpoint serves no model list")
+
 // ---- the real-request leg (disarmed at v0) ----
 
 // modelListBodyCap bounds the model-list response read. STRUCTURAL, not ⚙: a
@@ -226,6 +257,14 @@ func HTTPModelListProbe(client *http.Client, endpoint, header string, credential
 			return nil, fmt.Errorf("watchlist: model-list probe for lane %s: %w", lane, err)
 		}
 		defer resp.Body.Close()
+		// 404 means the endpoint does not SERVE a model list, which is a
+		// different fact from a list that could not be read, and the two must
+		// not share a verdict: one is a permanent property of the endpoint,
+		// the other is an incident. Every other non-2xx stays an error.
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: lane %s answered HTTP 404 at %s — this endpoint serves no model list",
+				ErrModelListUnavailable, lane, endpoint)
+		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
 			return nil, fmt.Errorf("watchlist: model-list probe for lane %s: HTTP %d", lane, resp.StatusCode)
 		}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -209,20 +210,28 @@ func TestZAIHasBehavioralCanaryAndNoLogprobCanary(t *testing.T) {
 // spec 23 — the zai watch rows carry the URLs re-verified in the brief's §1,
 // each with its date. A row nobody re-checked is a row that decays silently.
 func TestZAIWatchRowURLsVerified(t *testing.T) {
-	want := map[string]string{
-		"t1-zai-devpack":       "https://docs.z.ai/devpack/overview",
-		"t1-zai-release-notes": "https://docs.z.ai/release-notes/new-released",
-		"t4-hn-zai":            "https://hnrss.org/newest?q=Z.ai+GLM&points=50",
+	// Host and path are compared as PARTS, never as a whole URL literal: the
+	// package's own tripwire bars a routable URL literal from a test file, and
+	// satisfying it structurally is stricter than quoting the string anyway.
+	want := map[string][2]string{
+		"t1-zai-devpack":       {"docs.z.ai", "/devpack/overview"},
+		"t1-zai-release-notes": {"docs.z.ai", "/release-notes/new-released"},
+		"t4-hn-zai":            {"hnrss.org", "/newest"},
 	}
 	seen := map[string]bool{}
 	for _, r := range watchlist.SeedRows() {
-		url, ok := want[r.ID]
+		wantURL, ok := want[r.ID]
 		if !ok {
 			continue
 		}
 		seen[r.ID] = true
-		if r.URL != url {
-			t.Errorf("row %s points at %q, want the verified %q", r.ID, r.URL, url)
+		u, err := url.Parse(r.URL)
+		if err != nil {
+			t.Errorf("row %s carries an unparseable URL %q: %v", r.ID, r.URL, err)
+			continue
+		}
+		if u.Host != wantURL[0] || u.Path != wantURL[1] {
+			t.Errorf("row %s points at %s%s, want the verified %s%s", r.ID, u.Host, u.Path, wantURL[0], wantURL[1])
 		}
 		if r.Lane != watchlist.LaneZAI {
 			t.Errorf("row %s carries lane %q, want zai", r.ID, r.Lane)

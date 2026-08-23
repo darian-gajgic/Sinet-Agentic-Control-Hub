@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
@@ -163,4 +164,70 @@ func closeEngineAdapters(reg map[string]adapters.Adapter, logger *slog.Logger) {
 	if err := mgr.Close(); err != nil {
 		logger.Warn("opencode: reaping the per-user serve instances failed", "err", fmt.Sprint(err))
 	}
+}
+
+// commissionedLanes reports the lane names an operator has actually
+// commissioned across every person — the S08.8 coverage input beyond the
+// configured lane (P3-LN-2B R21).
+//
+// Registering a substrate made a second lane DISPATCHABLE; only a provider
+// entry with a credential behind it makes one SELECTABLE, and routing work
+// onto the difference is exactly the "not commissioned" state the lane
+// documents exist to surface by name. So the answer is derived from what is
+// actually placed, never from what ships: with the empty v0 map this returns
+// nothing and coverage is unchanged.
+//
+// Coverage is per-owner in S08.8 and the Router is built once per control
+// plane, so this is the union. That is the honest over-approximation at v0
+// (one household, one operator placing keys); per-person coverage arrives with
+// the per-person duty-map surface (1.10, B6/v1).
+func commissionedLanes(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) []string {
+	byProvider := map[string]string{}
+	for _, l := range lanes {
+		byProvider[l.ProviderID] = l.Lane
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, entries := range commissioned {
+		for providerID := range entries {
+			lane, ok := byProvider[providerID]
+			if !ok || seen[lane] {
+				continue
+			}
+			seen[lane] = true
+			out = append(out, lane)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// laneConfiguredModels renders the lane documents as the CONFIG side of the
+// S03.6 model-list diff, keyed by lane (P3-LN-2B R19).
+//
+// The documents are the only written record of which models a lane is
+// configured for, and they carry their own verified-on dates — which is
+// exactly what P-T17-3 wants on the config side of the comparison. They are
+// NOT the authority: the account's observed list is, and the canary exists to
+// find the day the two disagree.
+func laneConfiguredModels(lanes []opencode.LaneConfig) map[string][]string {
+	if len(lanes) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(lanes))
+	for _, l := range lanes {
+		ids := make([]string, 0, len(l.Models))
+		for _, m := range l.Models {
+			ids = append(ids, m.ID)
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		sort.Strings(ids)
+		out[l.Lane] = ids
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

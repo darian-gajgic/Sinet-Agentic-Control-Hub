@@ -58,14 +58,21 @@ func validPurpose(tag PurposeTag) bool {
 //
 //	1 measured per-call usage (the normal case, both v0 subscription lanes + local)
 //	2 engine-computed aggregates (cross-check tier; divergence alarm)
-//	3 derived plan units (Z.AI prompts — requests-as-prompt-proxy)
+//	3 derived plan units (a flat plan's own units — requests-as-proxy)
 //	4 tokenizer estimates (pre-run cost gates only, never a ledger fact)
 //	5 unknown → flagged UNPRICED, never a silent zero (P-T08-1)
 //
-// At B1-2 the ledger stamps tier 1 when the checkpoint carries measured token
-// counts, tier 5 when it does not. Tiers 2-4 attach when their sources exist:
-// tier 2 at the divergence cross-check (below), tier 3 with the Z.AI lane,
-// tier 4 at the intake cost gate (Spec S06).
+// The ledger stamps tier 1 when the checkpoint carries measured token counts,
+// tier 5 when it does not. Tiers 2-4 attach at their own sources: tier 2 at
+// the divergence cross-check (below), tier 3 at the plan-unit gauge
+// (planunits.go — landed with the Z.AI lane at P3-LN-2B), tier 4 at the intake
+// cost gate (Spec S06).
+//
+// Tier 3's unit is the PLAN's, and it is data: S10.1 wrote "Z.AI prompts"
+// while that plan was denominated in prompts, and the plan is denominated in
+// CREDITS as of 2026-08-23. The tier is unchanged — a derived plan unit is a
+// derived plan unit — but nothing here names the unit, because the document
+// that carries the numbers carries the unit too.
 type ApproximationTier int
 
 const (
@@ -97,6 +104,14 @@ type EngineUsage struct {
 	CacheCreation            map[string]int64 `json:"cache_creation"` // by TTL bucket
 	ThinkingTokens           int64            `json:"thinking_tokens"`
 	ServerToolUse            *serverToolUse   `json:"server_tool_use"`
+
+	// RequestID is the provider's own id for the call, carried through as the
+	// reconciliation key to an operator's provider dashboard (Spec S03.7 names
+	// it for the TBD-OPERATOR plan-unit calibration recipe). It is a
+	// RECONCILIATION key and never a billing input: nothing here prices from
+	// it, and a block that carries none carries none — an absent key is absent
+	// (S10.1's honest-absence rule), never invented.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // serverToolUse counts priced-per-use server tools (web search/fetch), which
@@ -128,6 +143,10 @@ type Accounting struct {
 	// Measured reports whether the block carried recognizable token counts —
 	// the tier-1 vs tier-5 discriminator (S10.1).
 	Measured bool
+	// RequestID is the provider's reconciliation key for this call (S03.7),
+	// carried through the normalization unchanged. Empty when the block
+	// carried none.
+	RequestID string
 }
 
 // normalize decodes and normalizes an engine usage block. An empty or
@@ -146,6 +165,7 @@ func normalize(usageJSON json.RawMessage) Accounting {
 		CacheReadTokens:     eu.CacheReadInputTokens,
 		CacheCreationTokens: eu.CacheCreationInputTokens,
 		CacheCreationByTTL:  eu.CacheCreation,
+		RequestID:           eu.RequestID,
 	}
 	if eu.ServerToolUse != nil {
 		a.ServerToolCalls = eu.ServerToolUse.WebSearchRequests + eu.ServerToolUse.WebFetchRequests

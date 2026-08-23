@@ -91,6 +91,39 @@ type RunConsumption struct {
 	WorstTier ApproximationTier
 }
 
+// RequestIDs returns the provider request ids the run's ledger rows carry, in
+// call order — the S03.7 reconciliation key for the
+// TBD-OPERATOR(plan-unit calibration) recipe, which compares what the platform
+// metered against what the provider's own dashboard shows.
+//
+// It is deliberately NOT a member of LineItem: a receipt line aggregates every
+// call for a {model, lane, purpose}, so one id could only ever name one of
+// them, and a line carrying one id out of eleven invites exactly the wrong
+// reconciliation. The ids are a per-call fact and are read as a per-call list.
+//
+// A run whose blocks carry no id returns none. That is the honest answer for
+// the lanes that publish no per-call id, not a defect to paper over.
+func (l *Ledger) RequestIDs(ctx context.Context, runID string) ([]string, error) {
+	var out []string
+	err := l.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		rows, err := l.readCheckpointsTx(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		out = out[:0]
+		for _, r := range rows {
+			if id := normalize(r.usageJSON).RequestID; id != "" {
+				out = append(out, id)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // checkpointRow is one ledger source row read back from the checkpoints table
 // joined to its run's lane (the lane lives on runs, Spec S02.2).
 type checkpointRow struct {
