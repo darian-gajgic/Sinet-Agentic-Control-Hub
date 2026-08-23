@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -142,15 +143,40 @@ type instanceProc struct {
 	watch     *HealthWatch
 }
 
-// identity is what makes a running instance REUSABLE for a spec. It is not the
-// S02.4(e) fingerprint: that one is a config fingerprint by spec, and two more
-// things are startup-bound on this engine and cannot be changed on a live
-// server — the per-user root the XDG quartet points at, and the process cwd,
-// which is what a session reports as its `directory` (1.18.3's stable
-// `POST /session` has no per-session directory member). Leaving either out of
-// the identity would silently run a run in a PREVIOUS run's workspace.
+// identity is what makes a running instance REUSABLE for a spec: a digest over
+// exactly the STARTUP-BOUND inputs, and nothing else.
+//
+// It is deliberately NOT the S02.4(e) fingerprint. That fingerprint tracks the
+// whole invocation config — including the MODEL, which rides per-message on
+// `prompt_async` and therefore needs no restart at all. Keying reuse on it made
+// a model switch tear down a healthy server and kill every ask it was holding,
+// which is real damage bought for nothing.
+//
+// What genuinely cannot change on a live server, and so belongs here:
+//
+//   - the compiled config body (agent map, permission map, provider block) —
+//     resolved once at startup, with no inline per-request agent definition;
+//   - the per-user root the XDG quartet points at;
+//   - the process cwd, which is what a session reports as its `directory`
+//     (1.18.3's stable POST /session has no per-session directory member), so
+//     reuse across cwds would run a run inside a PREVIOUS run's workspace;
+//   - the ENVIRONMENT, as a digest — this is the credential channel. Broker
+//     injection (S11.5) transforms the serve env at spawn, so a rotated or
+//     freshly resolved credential reaches the engine ONLY through a restart;
+//     without it, an already-live instance would keep serving on a stale one.
+//     A digest, never the raw env: an identity key is compared, logged around,
+//     and held in memory, and a secret belongs in none of those.
 func identityOf(spec InstanceSpec) string {
-	return spec.Fingerprint + "\x00" + spec.Root + "\x00" + spec.Cwd
+	h := sha256.New()
+	for _, part := range [][]byte{spec.ConfigJSON, []byte(spec.Root), []byte(spec.Cwd)} {
+		h.Write(part)
+		h.Write([]byte{0})
+	}
+	for _, kv := range spec.Env {
+		h.Write([]byte(kv))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (m *Manager) bootTimeout() time.Duration {
@@ -220,8 +246,14 @@ func (m *Manager) Acquire(ctx context.Context, spec InstanceSpec) (Instance, err
 			return p.inst, nil
 		}
 		m.log().Info("opencode: replacing per-user serve instance",
-			"user", spec.UserID, "reason", stopReason(p, want))
-		m.reap(p)
+			"user", spec.UserID, "reason", stopReason(p, want), "fingerprint", spec.Fingerprint)
+		if err := m.reap(p); err != nil {
+			// The replacement proceeds — but a process group that survived TERM
+			// and KILL is holding this user's ports and XDG tree, and swallowing
+			// that would leave the operator with a mystery.
+			m.log().Warn("opencode: reaping the replaced serve instance failed",
+				"user", spec.UserID, "pgid", p.pgid, "err", err)
+		}
 		delete(m.live, spec.UserID)
 	}
 	p, err := m.spawn(ctx, spec)
@@ -356,7 +388,10 @@ func (m *Manager) awaitListening(ctx context.Context, p *instanceProc) (string, 
 		case <-p.exited:
 			return "", fmt.Errorf("opencode: serve exited during boot: %s", p.out.String())
 		case <-ctx.Done():
-			return "", fmt.Errorf("%w: %v", ErrBootTimeout, ctx.Err())
+			// The CALLER went away. That is not the engine failing to boot, and
+			// conflating the two let a cancellation wear the skip-worthy error's
+			// name; callers branch with errors.Is, never on the message text.
+			return "", fmt.Errorf("opencode: serve boot abandoned by the caller: %w", ctx.Err())
 		default:
 		}
 		if time.Now().After(deadline) {

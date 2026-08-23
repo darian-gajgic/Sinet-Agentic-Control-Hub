@@ -61,6 +61,34 @@ func realAdapter(t *testing.T, m *Manager, providers ProviderConfig) (*Adapter, 
 	}, home
 }
 
+// failOrSkipBoot decides, for a tier-R boot failure, between the ONE sanctioned
+// skip and a hard failure — and it refuses the skip in the case that matters.
+//
+// The rule exists because of a defect this packet shipped and then hid: a boot
+// parse that read a trimmed buffer could not see a listen line the engine HAD
+// printed, so every tier-R probe burned its budget and took the sanctioned
+// skip while the package still reported `ok`. The skip message quoted the very
+// line it had refused. So: if the retained boot output already contains the
+// listen line, the engine booted and this package failed to read it — that is a
+// parse defect and it FAILS, loudly. A skip class that exists for an honest
+// absence will absorb a defect just as quietly unless something makes it
+// impossible.
+func failOrSkipBoot(t *testing.T, err error) {
+	t.Helper()
+	if strings.Contains(err.Error(), listenLine) {
+		t.Fatalf("TIER R REFUSES TO SKIP: the retained boot output already contains %q, so the engine "+
+			"announced its listener and the adapter did not see it — a parse defect in this package, "+
+			"not an absent engine: %v", listenLine, err)
+	}
+	if errors.Is(err, ErrBootTimeout) {
+		t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): the real `opencode serve` did not announce a "+
+			"listening URL within its boot budget and printed no listen line at all — tier-R "+
+			"real-serve conformance not run on this host: %v", err)
+	}
+	t.Fatalf("acquiring a real serve instance failed for a reason that is neither an absent engine "+
+		"nor a boot budget: %v", err)
+}
+
 func TestRealServeBindAuthIsolation(t *testing.T) {
 	bin := enginePath(t)
 	// No provider block: this probe stays OFF provider-touching paths, so the
@@ -81,11 +109,7 @@ func TestRealServeBindAuthIsolation(t *testing.T) {
 		}
 		inst, err := m.Acquire(ctx, a.instanceSpec(req, l, l.env))
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "boot") {
-				t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): real `opencode serve` did not report a listening "+
-					"URL within the %s boot budget for user %q (%v) — tier-R real-serve conformance not run", m.BootTimeout, user, err)
-			}
-			t.Fatalf("acquire(%s): %v", user, err)
+			failOrSkipBoot(t, err)
 		}
 		insts[user] = inst
 	}
@@ -199,14 +223,7 @@ func TestRealServePermissionRoundTripFakeProvider(t *testing.T) {
 	req := testRequest(t)
 	sess, err := a.Start(ctx, req)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "boot") {
-			t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): the real 1.18.3 serve could not complete a hermetic "+
-				"provider bootstrap within %s (the per-user provider dependency tree needs network once, "+
-				"SPIKE G1-S3 F1): %v — the S03.4 round-trip stays covered by the tier-F fixtures "+
-				"(TestPermissionAskParksWithDurableAskRecord / TestPermissionReplyOnceNeverAlways / "+
-				"TestAlwaysClassFanoutResolvedByRequestID), and the gap is REPORTED, never faked", m.BootTimeout, err)
-		}
-		t.Fatalf("Start: %v", err)
+		failOrSkipBoot(t, err)
 	}
 	var asked *adapters.Ask
 	for ev := range sess.Events() {
@@ -219,21 +236,13 @@ func TestRealServePermissionRoundTripFakeProvider(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 	if out.Kind != adapters.OutcomeParked || out.Ask == nil {
-		// The §7 F20 sanctioned fallback, applied to the TURN as well as the
-		// boot: if the budget genuinely ran out, the honest report is a named
-		// skip plus the tier-F coverage that still stands — never a pass, and
-		// never a failure blamed on the adapter for a bootstrap it does not
-		// control. Anything else here is a real regression and fails.
-		if ctx.Err() != nil {
-			t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): the real 1.18.3 serve did not reach a permission park "+
-				"within the %s budget (outcome %q: %s; provider calls=%d tools=%v) — the per-user provider "+
-				"bootstrap needs network once (SPIKE G1-S3 F1). The S03.4 round-trip stays covered by the tier-F "+
-				"fixtures (TestPermissionAskParksWithDurableAskRecord / TestPermissionReplyOnceNeverAlways / "+
-				"TestAlwaysClassFanoutResolvedByRequestID), and the gap is REPORTED, never faked",
-				m.BootTimeout, out.Kind, out.Detail, prov.callCount(), prov.toolsOffered())
-		}
-		t.Fatalf("outcome = %q (%s), want a live permission park; provider calls=%d tools=%v",
-			out.Kind, out.Detail, prov.callCount(), prov.toolsOffered())
+		// No deadline hatch here, deliberately (drain r1 D2c). A serve that
+		// BOOTED and then failed to park inside a four-minute budget is a
+		// failure to report, not an absence to excuse: the engine is present,
+		// the provider is loopback, and the only thing left to blame is this
+		// package. Skipping it would re-open exactly the hole D2 closed.
+		t.Fatalf("outcome = %q (%s), want a live permission park; provider calls=%d tools=%v; ctx=%v",
+			out.Kind, out.Detail, prov.callCount(), prov.toolsOffered(), ctx.Err())
 	}
 	if asked == nil || asked.ID != out.Ask.ID {
 		t.Errorf("the gate_ask event and the Outcome disagree on the ask: %+v vs %+v", asked, out.Ask)
@@ -306,7 +315,7 @@ func TestRealServeConfigIsTheOnlyConfig(t *testing.T) {
 	}
 	inst, err := m.Acquire(ctx, a.instanceSpec(req, l, l.env))
 	if err != nil {
-		t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): real serve unavailable within the boot budget: %v", err)
+		failOrSkipBoot(t, err)
 	}
 	body, code, err := probeBody(ctx, inst, "/config")
 	if err != nil || code != http.StatusOK {
@@ -371,12 +380,31 @@ func TestRealServeProviderTreeIsolation(t *testing.T) {
 	req := testRequest(t)
 	sess, err := a.Start(ctx, req)
 	if err != nil {
-		t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): real serve unavailable within the boot budget: %v", err)
+		failOrSkipBoot(t, err)
 	}
 	for range sess.Events() {
 	}
 	if _, err := sess.Wait(ctx); err != nil {
 		t.Fatalf("Wait: %v", err)
+	}
+
+	// Drain-r1 nit (d), trivial from this turn's captured provider request: the
+	// per-turn `system` member APPENDS to the agent's own compiled prompt, it
+	// does not replace it. Both must be in the system message the model sees.
+	if calls := prov.toolsOffered(); calls != nil {
+		var body string
+		for _, c := range prov.calls {
+			if len(c.Tools) > 0 {
+				body = c.Msgs
+				break
+			}
+		}
+		if !strings.Contains(body, req.Worker.SystemPromptAppend) {
+			t.Errorf("the per-turn system append never reached the model: %q missing", req.Worker.SystemPromptAppend)
+		}
+		if !strings.Contains(body, "be terse") {
+			t.Errorf("the per-turn system append REPLACED the compiled agent prompt instead of appending to it")
+		}
 	}
 
 	root := filepath.Join(a.Root, req.UserID)

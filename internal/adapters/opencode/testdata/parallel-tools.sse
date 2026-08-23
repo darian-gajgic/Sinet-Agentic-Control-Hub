@@ -1,0 +1,17 @@
+: drain r1 D5 — a PARALLEL tool turn: three bash calls in flight at once (SPIKE P2-S1 Probe 6 recorded
+: three simultaneous parks). One sibling completing must NOT declare a safe interrupt boundary while
+: the others are still executing (P-T01-4: never interrupt mid-tool-call).
+data: {"id":"evt_par00000000000000000001","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_par00000000000000000002","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_par1","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_par1","state":{"status":"running","input":{"command":"echo one"},"time":{"start":1787503947057}}},"time":1787503947057}}
+
+data: {"id":"evt_par00000000000000000003","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_par2","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_par2","state":{"status":"running","input":{"command":"echo two"},"time":{"start":1787503947058}}},"time":1787503947058}}
+
+data: {"id":"evt_par00000000000000000004","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_par3","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_par3","state":{"status":"running","input":{"command":"echo three"},"time":{"start":1787503947059}}},"time":1787503947059}}
+
+data: {"id":"evt_par00000000000000000005","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_par1","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_par1","state":{"status":"completed","input":{"command":"echo one"},"output":"one\n","metadata":{"exit":0},"time":{"start":1787503947057,"end":1787503947200}}},"time":1787503947200}}
+
+data: {"id":"evt_par00000000000000000006","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_par2","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_par2","state":{"status":"completed","input":{"command":"echo two"},"output":"two\n","metadata":{"exit":0},"time":{"start":1787503947058,"end":1787503947210}}},"time":1787503947210}}
+
+data: {"id":"evt_par00000000000000000007","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_par3","messageID":"msg_02f89ac6a0013cPhtKFQIODXeZ","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"tool","tool":"bash","callID":"call_par3","state":{"status":"completed","input":{"command":"echo three"},"output":"three\n","metadata":{"exit":0},"time":{"start":1787503947059,"end":1787503947220}}},"time":1787503947220}}
+

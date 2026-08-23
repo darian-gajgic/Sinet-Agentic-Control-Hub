@@ -77,6 +77,10 @@ const decisionKey = "sinet.decision"
 const (
 	decisionApprove = "approve"
 	decisionReject  = "reject"
+	// decisionUnencodable is the fail-closed sentinel of RejectAnswer: it
+	// decodes to no decision at all, so the answer is refused rather than
+	// silently downgraded to an approve.
+	decisionUnencodable = "unencodable"
 )
 
 // Errors callers branch on.
@@ -368,7 +372,13 @@ func ApproveAnswer(askID string) *adapters.Answer {
 func RejectAnswer(askID, feedback string) *adapters.Answer {
 	env, err := json.Marshal(map[string]string{decisionKey: decisionReject, "message": feedback})
 	if err != nil {
-		return &adapters.Answer{AskID: askID}
+		// FAIL CLOSED. This signature cannot return an error, and the tempting
+		// fallback — an Answer with no envelope — is read as APPROVE, so an
+		// encoding failure would turn a human's refusal into consent. The
+		// sentinel decodes to nothing, so Resume refuses the whole answer
+		// loudly instead. Practically unreachable; the direction of the failure
+		// is the point.
+		return &adapters.Answer{AskID: askID, UpdatedInput: json.RawMessage(`{"` + decisionKey + `":"` + decisionUnencodable + `"}`)}
 	}
 	return &adapters.Answer{AskID: askID, UpdatedInput: env}
 }
@@ -381,16 +391,30 @@ func decodeDecision(ans *adapters.Answer) (reply, message string, err error) {
 	if len(ans.UpdatedInput) == 0 {
 		return replyOnce, "", nil
 	}
-	var env struct {
-		Decision string `json:"sinet.decision"`
-		Message  string `json:"message"`
-	}
-	if uerr := json.Unmarshal(ans.UpdatedInput, &env); uerr == nil {
-		switch env.Decision {
-		case decisionApprove:
-			return replyOnce, "", nil
-		case decisionReject:
-			return replyReject, env.Message, nil
+	var members map[string]json.RawMessage
+	if uerr := json.Unmarshal(ans.UpdatedInput, &members); uerr == nil {
+		// A valid decision envelope that ALSO carries tool input is the
+		// dangerous shape: honoring the decision and dropping the edit executes
+		// something other than what the human approved. Only the two decision
+		// members may ride here; anything else is refused.
+		for k := range members {
+			if k != decisionKey && k != "message" {
+				return "", "", fmt.Errorf("%w: the answer carries %q alongside its decision, and this engine cannot substitute a gated call's input — "+
+					"honoring the decision while dropping %q would execute a call the human did not approve (S03.4)",
+					ErrUpdatedInputUnsupported, k, k)
+			}
+		}
+		var env struct {
+			Decision string `json:"sinet.decision"`
+			Message  string `json:"message"`
+		}
+		if json.Unmarshal(ans.UpdatedInput, &env) == nil {
+			switch env.Decision {
+			case decisionApprove:
+				return replyOnce, "", nil
+			case decisionReject:
+				return replyReject, env.Message, nil
+			}
 		}
 	}
 	return "", "", fmt.Errorf("%w: use ApproveAnswer/RejectAnswer — dropping the edit silently would execute the parked call unreviewed (S03.4)",
@@ -727,7 +751,7 @@ func (s *session) enumeratePendingAsks(ctx context.Context) {
 // checkPauseBoundary fires a pending pause at the first safe boundary.
 func (s *session) checkPauseBoundary(ctx context.Context) {
 	s.mu.Lock()
-	s.atBoundary = !s.p.toolRunning
+	s.atBoundary = len(s.p.runningTools) == 0
 	fire := s.paused && s.atBoundary && s.cancelStage == 0 && !s.pauseAborted
 	if fire {
 		s.pauseAborted = true
@@ -884,7 +908,15 @@ func (s *session) donePayload(out adapters.Outcome) json.RawMessage {
 		Finish    string `json:"finish,omitempty"`
 		PaidCalls int64  `json:"paid_calls"`
 		Detail    string `json:"detail,omitempty"`
-	}{string(out.Kind), s.p.lastFinish, s.p.paidCalls, out.Detail})
+		// TransientError is an engine error the turn RECOVERED from: demoted
+		// out of the Outcome so a later success is not reported as a crash, but
+		// never erased — an operator can still see the engine misbehaved.
+		TransientError string `json:"transient_error,omitempty"`
+		// RepliesObserved counts permission.replied events resolved by
+		// requestID, including the siblings one always-class reply fans out to.
+		RepliesObserved int `json:"replies_observed,omitempty"`
+	}{string(out.Kind), s.p.lastFinish, s.p.paidCalls, out.Detail,
+		s.p.transientErr, len(s.p.replied)})
 	if err != nil {
 		return json.RawMessage("{}")
 	}

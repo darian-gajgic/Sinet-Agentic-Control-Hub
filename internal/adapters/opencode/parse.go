@@ -188,7 +188,7 @@ type parser struct {
 	unknownFrames int
 	sawBusy       bool
 	sawIdle       bool
-	toolRunning   bool
+	transientErr  string
 
 	// ask is the observed gate ask the turn parked on (the Outcome carries
 	// one; siblings of a parallel park still get their own durable rows).
@@ -197,8 +197,9 @@ type parser struct {
 
 	// replied records every resolved requestID — one reply can fan out to N
 	// permission.replied events.
-	replied     map[string]string
-	emittedAsks map[string]bool
+	replied      map[string]string
+	emittedAsks  map[string]bool
+	runningTools map[string]bool
 
 	// per-message accumulation.
 	seenUsage map[string]bool
@@ -211,13 +212,14 @@ func newParser(sessionID string, logf func(string, ...any)) *parser {
 		logf = func(string, ...any) {}
 	}
 	return &parser{
-		sessionID:   sessionID,
-		logf:        logf,
-		replied:     map[string]string{},
-		emittedAsks: map[string]bool{},
-		seenUsage:   map[string]bool{},
-		partText:    map[string]string{},
-		partOrder:   map[string][]string{},
+		sessionID:    sessionID,
+		logf:         logf,
+		replied:      map[string]string{},
+		emittedAsks:  map[string]bool{},
+		runningTools: map[string]bool{},
+		seenUsage:    map[string]bool{},
+		partText:     map[string]string{},
+		partOrder:    map[string][]string{},
 	}
 }
 
@@ -323,25 +325,40 @@ func (p *parser) feedMessage(raw json.RawMessage) []adapters.Event {
 	if !p.mine(mp.SessionID) || m.Role != "assistant" || m.ID == "" {
 		return nil
 	}
-	if len(m.Error) > 0 && string(m.Error) != "null" {
+	errored := len(m.Error) > 0 && string(m.Error) != "null"
+	if errored {
 		p.errDetail = describeEngineError(m.Error)
-		return nil
 	}
 	// One paid call completes exactly once: the engine re-emits the completed
 	// message several times, and grouping by message id is what keeps D7 at one
 	// checkpoint per paid call rather than one per frame.
+	//
+	// An ERRORED message still books its tokens when the engine reports it
+	// completed: the call was paid for whether or not it produced an answer,
+	// and D7 checkpoints paid calls, not successful ones. What it must NOT do
+	// is claim the turn's answer or its finish reason.
 	if m.Time.Completed == 0 || p.seenUsage[m.ID] {
 		return nil
 	}
 	p.seenUsage[m.ID] = true
 	p.paidCalls++
-	p.lastFinish = m.Finish
-	p.lastCompleted = m.ID
 
-	text := p.textFor(m.ID)
-	if text != "" {
-		p.finalText = text
+	if !errored {
+		p.lastFinish = m.Finish
+		p.lastCompleted = m.ID
+		// A completion the engine reports as SUCCESSFUL outranks an earlier
+		// error: the turn recovered, so the run is not crashed and its real
+		// answer is not thrown away. The error is demoted, never erased — it
+		// rides the terminal event so an operator can still see it happened.
+		if p.errDetail != "" {
+			p.transientErr = p.errDetail
+			p.errDetail = ""
+		}
+		if text := p.textFor(m.ID); text != "" {
+			p.finalText = text
+		}
 	}
+	text := p.textFor(m.ID)
 	modelID := m.ModelID
 	if m.ProviderID != "" && modelID != "" {
 		modelID = m.ProviderID + "/" + modelID
@@ -409,13 +426,20 @@ func (p *parser) feedPart(raw json.RawMessage) []adapters.Event {
 		if len(part.State) > 0 {
 			_ = json.Unmarshal(part.State, &st)
 		}
+		key := part.CallID
+		if key == "" {
+			key = part.ID
+		}
 		switch st.Status {
 		case "running", "pending":
-			// Mid-tool-call: never a safe interrupt boundary (P-T01-4).
-			p.toolRunning = true
+			// Mid-tool-call: never a safe interrupt boundary (P-T01-4). A
+			// parallel turn has SEVERAL calls in flight at once (the fan-out is
+			// recorded live), so this is a SET: one sibling finishing does not
+			// make the turn interruptible while another is still executing.
+			p.runningTools[key] = true
 			return nil
 		case "completed", "error":
-			p.toolRunning = false
+			delete(p.runningTools, key)
 			body := st.Output
 			if st.Status == "error" {
 				body = st.Error
@@ -444,7 +468,7 @@ func (p *parser) feedAsked(raw json.RawMessage) []adapters.Event {
 		p.logf("opencode: skipping unparsable permission.asked frame: %v", err)
 		return nil
 	}
-	if !p.mine(pr.SessionID) || pr.ID == "" {
+	if !p.mine(pr.SessionID) {
 		return nil
 	}
 	return p.emitAsk(pr, raw)
@@ -453,6 +477,16 @@ func (p *parser) feedAsked(raw json.RawMessage) []adapters.Event {
 // emitAsk turns one PermissionRequest into the platform's durable ask input.
 // Everything is keyed by requestID (S03.4); re-observation is idempotent.
 func (p *parser) emitAsk(pr permissionRequest, raw json.RawMessage) []adapters.Event {
+	// An entry without a requestID is unanswerable and unrecordable: the Driver
+	// refuses an ask with no id, and refusing it MID-PUMP would abandon the
+	// event loop before the FSM transition, wedging the run in `running`. Both
+	// callers route through here — the frame path and the pull-based
+	// GET /permission enumeration — so the guard lives here, not at one of them.
+	if pr.ID == "" {
+		p.unknownFrames++
+		p.logf("opencode: skipping a pending permission entry with no requestID — unanswerable and unrecordable (S03.4 keys everything by requestID)")
+		return nil
+	}
 	if p.emittedAsks[pr.ID] {
 		return nil
 	}

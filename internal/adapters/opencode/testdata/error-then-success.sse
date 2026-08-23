@@ -1,0 +1,16 @@
+: drain r1 D1 — an engine error mid-turn that the turn RECOVERS from. Shape composed from the two
+: recorded shapes already in this directory: the AssistantMessage.error object of crash.sse, on a
+: message the engine ALSO reports completed with its token row (the call was paid for whether or not
+: it produced an answer), followed by the clean second paid call of happy.sse.
+data: {"id":"evt_ets00000000000000000001","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"busy"}}}
+
+data: {"id":"evt_ets00000000000000000002","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89ac6a0013cPhtKFQIODXeZ","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"error":{"name":"APIError","data":{"message":"provider returned 503"}},"time":{"created":1787503946858,"completed":1787503947000}}}}
+
+data: {"id":"evt_ets00000000000000000003","type":"message.part.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","part":{"id":"prt_ets0000000000000000001","messageID":"msg_02f89afa3001vbkNkRCafdi6dy","sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","type":"text","text":"recovered-answer","time":{"start":1787503947701,"end":1787503947702}},"time":1787503947702}}
+
+data: {"id":"evt_ets00000000000000000004","type":"message.updated","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","info":{"id":"msg_02f89afa3001vbkNkRCafdi6dy","role":"assistant","modelID":"fakemodel","providerID":"sinetfake","cost":0,"tokens":{"total":18,"input":8,"output":5,"reasoning":2,"cache":{"write":0,"read":3}},"finish":"stop","time":{"created":1787503947683,"completed":1787503947705}}}}
+
+data: {"id":"evt_ets00000000000000000005","type":"session.status","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI","status":{"type":"idle"}}}
+
+data: {"id":"evt_ets00000000000000000006","type":"session.idle","properties":{"sessionID":"ses_fd0765487ffeqQo1T87YKoDdXI"}}
+
