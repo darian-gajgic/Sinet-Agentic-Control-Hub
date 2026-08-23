@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -120,6 +121,56 @@ const (
 	SurfaceModelDrift SurfaceKind = "model-drift"
 )
 
+// WirePayload is the shape an adapter forwards on a rate_limit event (S03.1:
+// adapters forward the raw signals as DATA; the taxonomy lives here).
+//
+// It exists as its own type, with its own tags and an EXPLICIT conversion,
+// rather than as json tags on LimitSignal, because the two are not the same
+// thing: LimitSignal also carries facts no adapter can know (OnValidCredentials
+// is the auth canary's, EngineBudgetExhausted is Sinet's own backstop). Letting
+// a decode fill the whole struct would silently zero those — and a zeroed
+// EndpointVerified turns a genuine depletion into an "endpoint misconfigured"
+// verdict, which is exactly the mistranslation this type is here to prevent.
+type WirePayload struct {
+	Lane             string `json:"lane"`
+	ErrorCode        string `json:"error_code"`
+	HTTPStatus       int    `json:"http_status"`
+	ResetAt          string `json:"reset_at"`
+	BodyText         string `json:"body_text"`
+	EndpointVerified bool   `json:"endpoint_verified"`
+	Known            bool   `json:"known"`
+}
+
+// SignalFromPayload decodes one forwarded rate_limit payload into a signal.
+// The caller adds what only it knows (OnValidCredentials, EngineBudgetExhausted)
+// before classifying. An absent reset_at means NO signalled resume time —
+// never a zero time presented as one.
+func SignalFromPayload(raw []byte) (LimitSignal, error) {
+	var w WirePayload
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return LimitSignal{}, fmt.Errorf("scheduler: decode forwarded limit signal: %w", err)
+	}
+	sig := LimitSignal{
+		Lane:             w.Lane,
+		ErrorCode:        w.ErrorCode,
+		HTTPStatus:       w.HTTPStatus,
+		BodyText:         w.BodyText,
+		EndpointVerified: w.EndpointVerified,
+	}
+	if w.ResetAt != "" {
+		t, err := time.Parse(time.RFC3339, w.ResetAt)
+		if err != nil {
+			// A resume time nobody can read is no resume time: the signal is
+			// still forwarded and classifies in the safe direction (a probe
+			// park), rather than the whole event being discarded.
+			return sig, fmt.Errorf("scheduler: forwarded limit signal for lane %q carries an unparseable reset_at %q: %w",
+				w.Lane, w.ResetAt, err)
+		}
+		sig.ResetAt = t
+	}
+	return sig, nil
+}
+
 // Action is the classifier's verdict: the class and the fixed scheduling
 // action, with the ⚙-derived parameters the action needs.
 type Action struct {
@@ -196,39 +247,32 @@ func Classify(sig LimitSignal, cfg LimitConfig) Action {
 		return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
 			Reason: fmt.Sprintf("auth/policy HTTP %d — lane freeze, never retry-park (P-T08-2)", sig.HTTPStatus)}
 	}
-	if sig.OnValidCredentials && sig.BodyText != "" && looksLikePolicyBan(sig.BodyText) {
-		return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
-			Reason: "policy-ban text on valid credentials — lane freeze, never retry-park (P-T08-2)"}
-	}
-
 	// Class 5: Sinet's own engine ceiling backstop tripped (S10.5, S10.8).
 	if sig.EngineBudgetExhausted {
 		return Action{Class: ClassEngineCeiling, Kind: ActionDiedAtGate,
 			Reason: "engine budget/ceiling backstop tripped — died-at-gate handling (S10.8)"}
 	}
 
-	// Two Z.AI codes that are NOT limit events, checked before the depletion
-	// ladder because both would otherwise be absorbed by it and disappear.
-	if sig.Lane == laneZAI {
-		// 1113 on a lane that is not pointed at the subscription endpoint.
-		// "Insufficient balance" is then the documented symptom of the
-		// MISCONFIGURATION, not of a spent plan: the subscription does not
-		// apply on the general endpoint, so the pay-as-you-go balance answers
-		// instead. Probe-parking that would wait forever for a top-up nobody
-		// is going to make — the P-T08-2 failure class exactly (S10.5, R11).
-		if sig.ErrorCode == zaiInsufficientCredit && !sig.EndpointVerified {
-			return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceEndpointDefect,
-				Reason: "this lane reported insufficient balance and its configured endpoint is NOT the " +
-					"verified subscription endpoint — a configuration defect, not a limit event: fix the endpoint, " +
-					"do not retry and do not park (S10.5 Class-3 self-check)"}
+	// The zai lane's CODED signals are classified from the code, and they run
+	// BEFORE the policy-ban text heuristic below. That order is load-bearing:
+	// the provider ships the word "violations" inside the documented message
+	// of its own usage-limit band (1311-1321, "Various subscription/usage
+	// limit violations"), so a keyword scan would read an ordinary depletion
+	// as a revocation and freeze a lane that is merely out of credits — the
+	// mirror image of P-T08-2 and just as wrong.
+	if sig.Lane == laneZAI && sig.ErrorCode != "" {
+		if act, ok := classifyZAICode(sig, cfg); ok {
+			return act
 		}
-		// An unknown MODEL is drift, not depletion. Parking a run because the
-		// provider renamed a model would hide the one fact worth acting on.
-		if sig.ErrorCode == zaiUnknownModel {
-			return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceModelDrift,
-				Reason: "the provider does not recognise the requested model — model drift, not a limit event: " +
-					"the account's observed model list is the authority (P-T17-3)"}
-		}
+	}
+
+	// Policy-ban text on VALID credentials. It stays a heuristic and stays
+	// narrow: a false negative falls through to depletion handling, which is
+	// recoverable, and the P-T17-1 auth canary is the authoritative freeze
+	// trigger either way (S10.5, S03.6).
+	if sig.OnValidCredentials && sig.BodyText != "" && looksLikePolicyBan(sig.BodyText) {
+		return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
+			Reason: "policy-ban text on valid credentials — lane freeze, never retry-park (P-T08-2)"}
 	}
 
 	// Class 1: transient shed — retry in place, never park, never count
@@ -257,6 +301,74 @@ func Classify(sig LimitSignal, cfg LimitConfig) Action {
 	return Action{Class: ClassNone, Kind: ActionContinue, Reason: "not a limit event"}
 }
 
+// zaiAuthCodes are the lane's authentication/permission codes. They are
+// classified by CODE as well as by status, because the status is a fact the
+// engine may not have surfaced — and an auth event that arrives without one
+// must still freeze rather than fall through to a park (P-T08-2).
+var zaiAuthCodes = map[string]bool{"1000": true, "1001": true, "1003": true, "1220": true}
+
+// classifyZAICode is the whole of the zai lane's code-driven taxonomy, in one
+// place and ahead of every text heuristic. It reports ok=false only when the
+// code says nothing at all, and then the general ladder applies.
+func classifyZAICode(sig LimitSignal, cfg LimitConfig) (Action, bool) {
+	switch {
+	case zaiAuthCodes[sig.ErrorCode]:
+		return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
+			Reason: fmt.Sprintf("zai %s is an authentication/permission code — lane freeze, never retry-park (P-T08-2)",
+				sig.ErrorCode)}, true
+
+	case sig.ErrorCode == zaiUnknownModel:
+		// An unknown MODEL is drift, not depletion. Parking a run because the
+		// provider renamed a model would hide the one fact worth acting on.
+		return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceModelDrift,
+			Reason: "the provider does not recognise the requested model — model drift, not a limit event: " +
+				"the account's observed model list is the authority (P-T17-3)"}, true
+
+	case sig.ErrorCode == zaiInsufficientCredit && !sig.EndpointVerified:
+		// "Insufficient balance" on a lane that is not pointed at the
+		// subscription endpoint is the documented symptom of the
+		// MISCONFIGURATION, not of a spent plan: the subscription does not
+		// apply on the general endpoint, so the pay-as-you-go balance answers
+		// instead. Probe-parking that would wait forever for a top-up nobody
+		// is going to make — the P-T08-2 failure class exactly (R11).
+		return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceEndpointDefect,
+			Reason: "this lane reported insufficient balance and its configured endpoint is NOT the " +
+				"verified subscription endpoint — a configuration defect, not a limit event: fix the endpoint, " +
+				"do not retry and do not park (S10.5 Class-3 self-check)"}, true
+
+	case sig.ErrorCode == zaiRateLimit || sig.ErrorCode == zaiOverloaded:
+		return Action{Class: ClassTransientShed, Kind: ActionRetryInPlace,
+			RetryCap: cfg.RetryCap, RetryBudgetRatio: cfg.RetryBudgetRatio,
+			Reason: "transient shed — retry in place with full jitter (S10.5)"}, true
+
+	case sig.ErrorCode == zaiInsufficientCredit:
+		return Action{Class: ClassDepletionNoSignal, Kind: ActionParkProbe, ProbeIntervalMax: cfg.ProbeIntervalMax,
+			Reason: "insufficient plan balance on the verified subscription endpoint — park, jittered probe " +
+				"schedule (S10.5 Class 3, after the endpoint self-check)"}, true
+
+	case !sig.ResetAt.IsZero():
+		// Depletion WITH a provider signal, whatever the code number: the
+		// class is defined by the signal, not by a number the provider may
+		// not have published yet (S10.5's own class definitions).
+		return Action{Class: ClassDepletionSignal, Kind: ActionParkQuota, ResumeAt: sig.ResetAt,
+			Reason: "depletion with provider signal — park blocked_quota, resume at signal (S10.5)"}, true
+	}
+
+	// Everything else this lane can say. A code the taxonomy does not name —
+	// including one Z.AI adds after this seed's verified-on date, and one whose
+	// HTTP status the engine never surfaced — parks on the bounded probe
+	// schedule. Never Class 1 (a retry storm against a plan that may be spent)
+	// and never Class 4 (freezing a lane that is merely out of credits): the
+	// two directions with no safe failure. The indistinguishable case — an
+	// unnamed code that is REALLY a revocation — is exactly what the P-T17-1
+	// auth canary exists to catch, and it is the authoritative freeze trigger
+	// (S03.6, S14.6).
+	return Action{Class: ClassDepletionNoSignal, Kind: ActionParkProbe, ProbeIntervalMax: cfg.ProbeIntervalMax,
+		Reason: fmt.Sprintf("zai %s is not in the taxonomy's signal set — parking on the probe schedule, the "+
+			"safe direction for an unnamed code; the auth canary remains the revocation detector (S10.5, P-T08-2)",
+			sig.ErrorCode)}, true
+}
+
 // isTransient matches Class-1 wire signals per lane (Spec S10.5).
 func isTransient(sig LimitSignal) bool {
 	switch sig.Lane {
@@ -270,11 +382,12 @@ func isTransient(sig LimitSignal) bool {
 			return true
 		}
 	case laneZAI:
-		// Only the two codes the set NAMES as transient may retry. A code the
-		// set does not name never lands here: retrying an unknown 429 against
-		// a plan that may be depleted is the one direction with no safe
-		// failure (R13).
-		return sig.ErrorCode == zaiRateLimit || sig.ErrorCode == zaiOverloaded
+		// Every CODED zai signal was already decided by classifyZAICode, so
+		// only a codeless one reaches here — a bare 429 from a probe or a
+		// canary, with no code to say it is transient. Retrying that against a
+		// plan that may be spent is the one direction with no safe failure, so
+		// it falls through to the depletion ladder instead (R13).
+		return false
 	}
 	return false
 }
@@ -285,15 +398,10 @@ func isDepletion(sig LimitSignal) bool {
 	case laneAnthropic:
 		return sig.RateLimitStatus == "rejected" || sig.HTTPStatus == 429
 	case laneZAI:
-		if sig.ErrorCode == zaiUsageLimit || sig.ErrorCode == zaiPeriodLimit {
-			return true
-		}
-		// The signal-based fallback for codes the set does not name (the
-		// provider documents a whole band only collectively). The CLASS is
-		// defined by the signal, not by the code: a 429 that carries a
-		// parseable resume time IS depletion-with-signal, whatever its number.
-		// 1113 is excluded because its resume story is the probe schedule.
-		return sig.HTTPStatus == 429 && sig.ErrorCode != zaiInsufficientCredit
+		// Coded signals never reach here (classifyZAICode owns them). A
+		// codeless zai 429 that nonetheless carries a resume time is still
+		// depletion-with-signal: the CLASS follows the signal.
+		return sig.HTTPStatus == 429
 	default:
 		// opencode/other: a bare retry.next reset is a depletion signal.
 		return true
@@ -304,12 +412,10 @@ func isDepletion(sig LimitSignal) bool {
 func isDepletionNoSignal(sig LimitSignal) bool {
 	switch sig.Lane {
 	case laneZAI:
-		// 1113 after the endpoint self-check passed (the defect case returned
-		// long before this), plus any other 429 the set does not name and that
-		// carried no resume time. Both park; neither retries and neither
-		// freezes — the safe direction on a lane whose undocumented codes the
-		// provider publishes only as a band.
-		return sig.ErrorCode == zaiInsufficientCredit || sig.HTTPStatus == 429
+		// Codeless again: a bare 429 with no resume time parks on the probe
+		// schedule rather than being read as "not a limit event", which is
+		// what a canary-shaped signal (status only, no body code) produces.
+		return sig.HTTPStatus == 429
 	}
 	// A rejected/429 depletion with no reset time is depletion-without-signal
 	// on any lane (undocumented concurrency caps).

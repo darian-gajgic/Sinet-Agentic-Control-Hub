@@ -553,14 +553,17 @@ func Run(ctx context.Context, opts Options) error {
 		// leg is operator-installed config, not a runtime goroutine.
 		localSurf.startGameMode(ctx)
 
+		// No lane is commissioned at v0: provider entries and their
+		// credentials arrive through the operator's key ceremony, never from a
+		// default (S03.6, S11.5). The map is the seam that ceremony fills, and
+		// it feeds BOTH the adapter registration and the credential injector,
+		// so a lane can never be dispatchable without its credential path.
+		engineCommissioned := map[string]opencode.ProviderConfig{}
 		engineRegistry := engineAdapters(engineAdapterDeps{
-			Settings: reg,
-			Logger:   logger,
-			StateDir: stateDir,
-			// No lane is commissioned at v0: provider entries and their
-			// credentials arrive through the operator's key ceremony, never
-			// from a default (S03.6, S11.5).
-			Commissioned: map[string]opencode.ProviderConfig{},
+			Settings:     reg,
+			Logger:       logger,
+			StateDir:     stateDir,
+			Commissioned: engineCommissioned,
 		})
 		defer closeEngineAdapters(engineRegistry, logger)
 
@@ -597,7 +600,13 @@ func Run(ctx context.Context, opts Options) error {
 			// as config DATA. Registering the second one is what makes a
 			// second paid agentic lane dispatchable at all — no lane is
 			// COMMISSIONED by it (see that file).
-			Adapters:     engineRegistry,
+			Adapters: engineRegistry,
+			// The S11.5 spawn-time credential path (S01.6 "engines receive
+			// credentials at start"): per user, the broker resolves each
+			// commissioned lane's engine-cred auth profile and delivers it as
+			// the variable that lane's document names. Nil for anyone with
+			// nothing commissioned — the unchanged dev posture.
+			CredInject:   laneCredInjector(stateDir, engineLanes(logger), engineCommissioned),
 			Confiner:     engineConfiner,
 			ArtifactRoot: filepath.Join(stateDir, "artifacts"),
 			RunRoot:      filepath.Join(stateDir, "runs"),

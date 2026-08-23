@@ -26,6 +26,21 @@ type fakeProvider struct {
 type fakeProviderCall struct {
 	Tools []string
 	Msgs  string
+	// Auth is the Authorization header the engine actually sent. It is what
+	// makes the credential path observable at $0: the proof that a config
+	// naming an env var resolves to its VALUE on the wire (LN-2A/D13).
+	Auth string
+}
+
+// authHeaders reports every Authorization header this provider was sent.
+func (p *fakeProvider) authHeaders() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, 0, len(p.calls))
+	for _, c := range p.calls {
+		out = append(out, c.Auth)
+	}
+	return out
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -55,6 +70,9 @@ func (p *fakeProvider) toolsOffered() []string {
 
 func (p *fakeProvider) route(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
+		p.mu.Lock()
+		p.calls = append(p.calls, fakeProviderCall{Auth: r.Header.Get("Authorization")})
+		p.mu.Unlock()
 		writeJSON(w, map[string]any{"object": "list", "data": []any{
 			map[string]any{"id": "fakemodel", "object": "model", "owned_by": "fake"}}})
 		return
@@ -86,7 +104,7 @@ func (p *fakeProvider) route(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.mu.Lock()
-	p.calls = append(p.calls, fakeProviderCall{Tools: tools, Msgs: string(raw)})
+	p.calls = append(p.calls, fakeProviderCall{Tools: tools, Msgs: string(raw), Auth: r.Header.Get("Authorization")})
 	p.mu.Unlock()
 
 	usage := map[string]any{

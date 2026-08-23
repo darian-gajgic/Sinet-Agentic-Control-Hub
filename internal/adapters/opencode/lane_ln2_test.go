@@ -9,6 +9,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -57,8 +58,8 @@ func otherLaneDoc(t *testing.T) LaneConfig {
 	  "endpoint_marker": "/api/coding/paas/v9",
 	  "credential": {"profile": "elsewhere", "env_var": "ELSEWHERE_API_KEY"},
 	  "models": [
-	    {"id": "mdl-alpha", "name": "Alpha", "verified_on": "2026-08-23", "billing": "flat", "overflow_mode": "park"},
-	    {"id": "mdl-beta",  "name": "Beta",  "verified_on": "2026-08-23", "billing": "flat", "overflow_mode": "park"}
+	    {"id": "mdl-alpha", "name": "Alpha", "verified_on": "2026-08-23", "billing": "flat", "overflow_mode": "hard-stop", "region_model_gate": "none"},
+	    {"id": "mdl-beta",  "name": "Beta",  "verified_on": "2026-08-23", "billing": "flat", "overflow_mode": "opt-in-credits", "region_model_gate": "none"}
 	  ],
 	  "eco_options": {"thinking": {"type": "disabled"}},
 	  "reset_marker": "reset at",
@@ -490,11 +491,29 @@ func TestThinkingDisabledOnEcoOnly(t *testing.T) {
 	if thinking["type"] != "disabled" {
 		t.Errorf("Eco thinking.type = %v, want disabled (S10.6)", thinking["type"])
 	}
-	for _, effort := range []string{adapters.EffortSmart, adapters.EffortBalanced, ""} {
-		opts := optionsFor(effort)
-		if _, present := opts["thinking"]; present {
-			t.Errorf("effort %q carries the Eco thinking lever: %v", effort, opts)
+	// WHICH efforts take the lever is the document's call — the spec calls it
+	// an "Eco/Balanced rung" without settling whether Balanced takes it by
+	// default, so the assertion is that the MAPPING IS HONORED, whatever the
+	// document says, not that one particular reading of it is right.
+	for _, effort := range []string{adapters.EffortSmart, adapters.EffortBalanced, "", "made-up"} {
+		_, present := optionsFor(effort)["thinking"]
+		if want := seed.EcoOptionApplies(effort); present != want {
+			t.Errorf("effort %q: thinking lever present = %v, want %v per the lane document's %v",
+				effort, present, want, seed.EcoOptionEfforts)
 		}
+	}
+	// And a document that says otherwise is obeyed, without a code change.
+	balanced := seed
+	balanced.EcoOptionEfforts = []string{adapters.EffortEco, adapters.EffortBalanced}
+	if !balanced.EcoOptionApplies(adapters.EffortBalanced) || !balanced.EcoOptionApplies(adapters.EffortEco) {
+		t.Error("a document naming Balanced does not get the lever on Balanced")
+	}
+	if balanced.EcoOptionApplies(adapters.EffortSmart) {
+		t.Error("a document that does not name Smart still got the lever on Smart")
+	}
+	var empty LaneConfig
+	if !empty.EcoOptionApplies(adapters.EffortEco) || empty.EcoOptionApplies(adapters.EffortBalanced) {
+		t.Error("the empty default is not Eco-only")
 	}
 	// reasoning_effort is a recorded dated fact, deliberately NOT wired (OQ-4).
 	for _, effort := range []string{adapters.EffortEco, adapters.EffortSmart} {
@@ -727,6 +746,232 @@ func TestOpenCodeCostNeverPricesZAI(t *testing.T) {
 			if strings.Contains(src, sym) {
 				t.Errorf("%s references %q — this adapter must never meter dollars (S03.7)", name, sym)
 			}
+		}
+	}
+}
+
+// ── drain r1 ─────────────────────────────────────────────────────────────────
+
+// TestLaneSignalOmitsAnAbsentResetTime is D2. `omitempty` is inert on a
+// time.Time, so the default encoding would put "0001-01-01T00:00:00Z" on every
+// signal that carries no resume time — and a consumer reading a park horizon
+// out of that member shows a person a wait until the year 1.
+func TestLaneSignalOmitsAnAbsentResetTime(t *testing.T) {
+	seed := seedZAI(t)
+	sig, ok := seed.ExtractSignal(zaiBody("1113", "Insufficient balance or no resource package."), 0)
+	if !ok {
+		t.Fatal("no signal extracted")
+	}
+	if !sig.ResetAt.IsZero() {
+		t.Fatalf("fixture carries a reset time: %v", sig.ResetAt)
+	}
+	blob, err := json.Marshal(sig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(blob, &members); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := members["reset_at"]; present {
+		t.Errorf("a signal with no resume time still serialized reset_at: %s", blob)
+	}
+	if strings.Contains(string(blob), "0001-01-01") {
+		t.Errorf("the zero time reached the wire: %s", blob)
+	}
+	// A signal that DOES carry one still serializes it.
+	withReset, ok := seed.ExtractSignal(
+		zaiBody("1308", "Usage limit reached for `1` `credit`. Your limit will reset at `2026-08-23T18:00:00Z`"), 0)
+	if !ok || withReset.ResetAt.IsZero() {
+		t.Fatalf("fixture lost its reset time: %+v", withReset)
+	}
+	blob2, err := json.Marshal(withReset)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(blob2), `"reset_at":"2026-08-23T18:00:00Z"`) {
+		t.Errorf("a signalled resume time did not survive: %s", blob2)
+	}
+}
+
+// TestLaneSignalCarriesTheRawEngineRetry is D11: normalizing must not cost the
+// engine's own account of what happened (S03.1 forward-as-data).
+func TestLaneSignalCarriesTheRawEngineRetry(t *testing.T) {
+	seed := seedZAI(t)
+	a := laneAdapter(t, seed)
+	req := laneRequest(t, seed)
+	s := &session{a: a, req: req, low: mustLower(t, a, req), p: newParser(fixtureSessionID, t.Logf)}
+	s.p.lane = &seed
+	s.p.endpointVerified = true
+
+	body := zaiBody("1308", "Usage limit reached for `20000` `credits`. Your limit will reset at `2026-08-23T18:00:00Z`")
+	status, err := json.Marshal(map[string]any{
+		"type": "session.status",
+		"properties": map[string]any{
+			"sessionID": fixtureSessionID,
+			"status": map[string]any{
+				"type": "retry", "attempt": 2, "next": 1787504400000, "message": body,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("frame: %v", err)
+	}
+	evs := s.p.feed(status)
+	if len(evs) != 1 || evs[0].Kind != adapters.KindRateLimit {
+		t.Fatalf("events = %v, want one rate_limit", kindsOf(evs))
+	}
+	var got LaneSignal
+	if err := json.Unmarshal(evs[0].Payload, &got); err != nil {
+		t.Fatalf("payload: %v (%s)", err, evs[0].Payload)
+	}
+	if got.ErrorCode != "1308" || got.ResetAt.IsZero() {
+		t.Errorf("normalized members lost: %+v", got)
+	}
+	var raw struct {
+		Type    string `json:"type"`
+		Attempt int64  `json:"attempt"`
+		Next    int64  `json:"next"`
+	}
+	if err := json.Unmarshal(got.EngineRetry, &raw); err != nil {
+		t.Fatalf("engine_retry: %v (%s)", err, got.EngineRetry)
+	}
+	if raw.Type != "retry" || raw.Attempt != 2 || raw.Next != 1787504400000 {
+		t.Errorf("the engine's own retry facts were discarded: %+v", raw)
+	}
+}
+
+// TestZAIObservedHTTPStatusIsLiftedFromTheWire is D7's first half: a code the
+// seed table has never seen still gets a class, because the status the engine
+// surfaced is read rather than assumed.
+func TestZAIObservedHTTPStatusIsLiftedFromTheWire(t *testing.T) {
+	seed := seedZAI(t)
+	a := laneAdapter(t, seed)
+	req := laneRequest(t, seed)
+	s := &session{a: a, req: req, low: mustLower(t, a, req), p: newParser(fixtureSessionID, t.Logf)}
+	s.p.lane = &seed
+
+	// A post-seed code, wrapped the way the AI SDK wraps a provider failure.
+	frame, err := json.Marshal(map[string]any{
+		"type": "message.updated",
+		"properties": map[string]any{
+			"sessionID": fixtureSessionID,
+			"info": map[string]any{
+				"id": "msg_post_seed", "sessionID": fixtureSessionID, "role": "assistant",
+				"modelID": seed.Models[0].ID, "providerID": seed.ProviderID,
+				"time": map[string]any{"created": 1, "completed": 2},
+				"error": map[string]any{"name": "AI_APICallError", "data": map[string]any{
+					"statusCode": 429,
+					"message":    zaiBody("1400", "a limit nobody has documented yet"),
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("frame: %v", err)
+	}
+	var sig LaneSignal
+	for _, ev := range s.p.feed(frame) {
+		if ev.Kind == adapters.KindRateLimit {
+			if err := json.Unmarshal(ev.Payload, &sig); err != nil {
+				t.Fatalf("payload: %v", err)
+			}
+		}
+	}
+	if sig.ErrorCode != "1400" {
+		t.Fatalf("code = %q, want the post-seed code forwarded as data", sig.ErrorCode)
+	}
+	if sig.HTTPStatus != 429 {
+		t.Errorf("http status = %d, want 429 lifted from the engine's error object", sig.HTTPStatus)
+	}
+	if sig.Known {
+		t.Error("a post-seed code was reported as known")
+	}
+}
+
+// TestLaneDocumentValidationRefusesWhatTheSpecRequires is D1/D5/D9: the
+// onboarding gate. Each case is a document that must NOT load.
+func TestLaneDocumentValidationRefusesWhatTheSpecRequires(t *testing.T) {
+	base := map[string]any{
+		"lane": "zai", "provider_id": "p", "verified_on": "2026-08-23",
+		"base_url": "https://example.test/api/coding/paas/v4", "endpoint_marker": "/api/coding/paas/v4",
+		"credential": map[string]any{"profile": "p", "env_var": "P_KEY"},
+		"models": []any{map[string]any{"id": "m", "verified_on": "2026-08-23",
+			"billing": "flat", "overflow_mode": "hard-stop", "region_model_gate": "none"}},
+		"signals": []any{map[string]any{"code": "1", "http_status": 429, "verified_on": "2026-08-23"}},
+	}
+	doc := func(mutate func(map[string]any)) []byte {
+		d := map[string]any{}
+		for k, v := range base {
+			d[k] = v
+		}
+		mutate(d)
+		raw, err := json.Marshal(d)
+		if err != nil {
+			t.Fatalf("fixture: %v", err)
+		}
+		return raw
+	}
+	model := func(m map[string]any) []any {
+		out := map[string]any{"id": "m", "verified_on": "2026-08-23", "billing": "flat",
+			"overflow_mode": "hard-stop", "region_model_gate": "none"}
+		for k, v := range m {
+			out[k] = v
+		}
+		return []any{out}
+	}
+
+	if _, err := LoadLaneConfig(doc(func(map[string]any) {})); err != nil {
+		t.Fatalf("the baseline document must load: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		mutate func(map[string]any)
+		want   string
+	}{
+		"invented overflow vocabulary": {func(d map[string]any) { d["models"] = model(map[string]any{"overflow_mode": "park"}) }, "overflow_mode"},
+		"auto-metered unproven":        {func(d map[string]any) { d["models"] = model(map[string]any{"overflow_mode": "auto-metered"}) }, "proven metered"},
+		"no region_model_gate":         {func(d map[string]any) { d["models"] = model(map[string]any{"region_model_gate": ""}) }, "region_model_gate"},
+		"no credential block":          {func(d map[string]any) { delete(d, "credential") }, "credential reference"},
+		"credential without env var":   {func(d map[string]any) { d["credential"] = map[string]any{"profile": "p"} }, "credential reference"},
+		"no endpoint marker":           {func(d map[string]any) { d["endpoint_marker"] = "" }, "endpoint_marker"},
+		"signal row undated":           {func(d map[string]any) { d["signals"] = []any{map[string]any{"code": "1", "http_status": 429}} }, "verified-on"},
+		"signal row bad date": {func(d map[string]any) {
+			d["signals"] = []any{map[string]any{"code": "1", "verified_on": "August 2026"}}
+		}, "verified-on"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadLaneConfig(doc(tc.mutate))
+			if err == nil {
+				t.Fatalf("the document loaded — a lane that cannot be described honestly must be refused at onboarding")
+			}
+			if !errors.Is(err, ErrLaneConfig) {
+				t.Errorf("err = %v, want ErrLaneConfig", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to name %q", err, tc.want)
+			}
+		})
+	}
+	// The two other ratified overflow modes DO load; `auto-metered` loads only
+	// with the proven disable.
+	for _, mode := range []string{OverflowHardStop, OverflowOptInCredits} {
+		if _, err := LoadLaneConfig(doc(func(d map[string]any) {
+			d["models"] = model(map[string]any{"overflow_mode": mode})
+		})); err != nil {
+			t.Errorf("ratified overflow_mode %q was refused: %v", mode, err)
+		}
+	}
+	if _, err := LoadLaneConfig(doc(func(d map[string]any) {
+		d["models"] = model(map[string]any{"overflow_mode": OverflowAutoMetered, "metered_disable_proven": true})
+	})); err != nil {
+		t.Errorf("auto-metered with a proven disable was refused: %v", err)
+	}
+	// The shipped seed uses the ratified vocabulary.
+	for _, m := range seedZAI(t).Models {
+		switch m.OverflowMode {
+		case OverflowHardStop, OverflowOptInCredits, OverflowAutoMetered:
+		default:
+			t.Errorf("seed model %q uses overflow_mode %q, outside the ratified enum", m.ID, m.OverflowMode)
 		}
 	}
 }

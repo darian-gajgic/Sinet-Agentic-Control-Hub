@@ -717,6 +717,17 @@ func (p *projector) taskListRun(ctx context.Context, taskID string) (TaskListRun
 		out.EffortMode = firstString(pay, "effort", "effort_mode")
 		out.DowngradeNote = firstString(pay, "downgrade_note", "downgrade", "effort_downgrade")
 	}
+	// A mode change is a DISCLOSED STATE, not a log line (S10.6), so the card
+	// must show the mode the engine actually ran under. The routing decision
+	// is the usual source, but a lane can be dispatched without one — and an
+	// adapter that stamps the effort on its own terminal event is then the
+	// only honest witness. It fills in, and never overwrites: where a routing
+	// decision exists it is the record of what was chosen.
+	if out.EffortMode == "" {
+		if pay, ok := p.latestPayload(ctx, it.RunID, "engine.done"); ok {
+			out.EffortMode = firstString(pay, "effort", "effort_mode")
+		}
+	}
 	// The recorded drag order. The JOIN is read-only: the scheduler owns every
 	// write to this column and its claim-loop semantics are untouched.
 	var rank int64

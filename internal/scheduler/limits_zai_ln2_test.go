@@ -81,36 +81,101 @@ func TestClassifyZAIUnknown429AlwaysParks(t *testing.T) {
 	named := map[string]bool{"1302": true, "1305": true, "1308": true, "1310": true, "1113": true}
 	reset := time.Now().Add(2 * time.Hour)
 
+	// The band's OWN shipped message contains "violations", and the auth
+	// canary sets OnValidCredentials — so a text heuristic running ahead of
+	// the coded taxonomy would read an ordinary depletion as a revocation and
+	// freeze a healthy lane. Both are varied here for exactly that reason (D6).
+	bodies := []string{
+		"",
+		"Various subscription/usage limit violations",
+		"Usage limit reached for `20000` `credits`",
+		"your account has been suspended for a policy violation",
+	}
+	// The status is varied too: an engine that never surfaced one leaves 0,
+	// and a code Z.AI adds after this seed's date is not in any table (D7).
+	statuses := []int{0, 429}
+	codes := []string{}
 	for code := 1300; code <= 1399; code++ {
-		s := fmt.Sprint(code)
-		if named[s] {
-			continue
+		if s := fmt.Sprint(code); !named[s] {
+			codes = append(codes, s)
 		}
+	}
+	codes = append(codes, "1315", "1321", "1400", "9999", "2000")
+
+	for _, s := range codes {
 		for _, withReset := range []bool{false, true} {
-			sig := LimitSignal{Lane: laneZAI, ErrorCode: s, HTTPStatus: 429, EndpointVerified: true}
-			if withReset {
-				sig.ResetAt = reset
-			}
-			got := Classify(sig, cfg)
-			if got.Kind == ActionRetryInPlace {
-				t.Fatalf("zai %s (reset=%v) retries in place — a retry storm against a depleted plan", s, withReset)
-			}
-			if got.Kind == ActionLaneFreeze {
-				t.Fatalf("zai %s (reset=%v) freezes a healthy lane", s, withReset)
-			}
-			if got.Kind != ActionParkQuota && got.Kind != ActionParkProbe {
-				t.Fatalf("zai %s (reset=%v) = %q, want a park", s, withReset, got.Kind)
-			}
-			// The sanctioned signal-based fallback: the CLASS follows the
-			// signal, not the code (S10.5's own class definitions).
-			wantClass := ClassDepletionNoSignal
-			if withReset {
-				wantClass = ClassDepletionSignal
-			}
-			if got.Class != wantClass {
-				t.Fatalf("zai %s (reset=%v) = class %d, want %d", s, withReset, got.Class, wantClass)
+			for _, body := range bodies {
+				for _, valid := range []bool{false, true} {
+					for _, status := range statuses {
+						sig := LimitSignal{Lane: laneZAI, ErrorCode: s, HTTPStatus: status,
+							EndpointVerified: true, BodyText: body, OnValidCredentials: valid}
+						if withReset {
+							sig.ResetAt = reset
+						}
+						got := Classify(sig, cfg)
+						ctx := fmt.Sprintf("zai %s (reset=%v status=%d valid=%v body=%q)", s, withReset, status, valid, body)
+						if got.Kind == ActionRetryInPlace {
+							t.Fatalf("%s retries in place — a retry storm against a plan that may be spent", ctx)
+						}
+						if got.Kind == ActionLaneFreeze || got.Class == ClassAuthPolicy {
+							t.Fatalf("%s freezes the lane — an unnamed limit code is not a revocation, and the "+
+								"auth canary is the revocation detector (D6/R13)", ctx)
+						}
+						if got.Kind != ActionParkQuota && got.Kind != ActionParkProbe {
+							t.Fatalf("%s = %q, want a park — never 'not a limit event' (D7)", ctx, got.Kind)
+						}
+						// The sanctioned signal-based fallback: the CLASS
+						// follows the signal, not the code (S10.5's own class
+						// definitions).
+						wantClass := ClassDepletionNoSignal
+						if withReset {
+							wantClass = ClassDepletionSignal
+						}
+						if got.Class != wantClass {
+							t.Fatalf("%s = class %d, want %d", ctx, got.Class, wantClass)
+						}
+					}
+				}
 			}
 		}
+	}
+}
+
+// TestClassifyZAIAuthCodesFreezeWithoutAStatus is D7's other half: the engine
+// may not surface an HTTP status at all, and an auth code that arrives without
+// one must still freeze rather than fall into the unnamed-code park.
+func TestClassifyZAIAuthCodesFreezeWithoutAStatus(t *testing.T) {
+	cfg := ln2Config()
+	for _, code := range []string{"1000", "1001", "1003", "1220"} {
+		got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: code, HTTPStatus: 0, EndpointVerified: true}, cfg)
+		if got.Class != ClassAuthPolicy || got.Kind != ActionLaneFreeze {
+			t.Errorf("zai %s with no surfaced status = class %d / %q, want the Class-4 freeze", code, got.Class, got.Kind)
+		}
+	}
+}
+
+// TestClassifyBareZAI429Parks is D17: the canary-shaped signal — a status and
+// a body, no provider error code at all (internal/watchlist/canary_auth.go's
+// probe shape). It must park, not fall through to "not a limit event".
+func TestClassifyBareZAI429Parks(t *testing.T) {
+	cfg := ln2Config()
+	got := Classify(LimitSignal{Lane: laneZAI, HTTPStatus: 429,
+		BodyText: "Too Many Requests", OnValidCredentials: true}, cfg)
+	if got.Class != ClassDepletionNoSignal || got.Kind != ActionParkProbe {
+		t.Errorf("bare zai 429 = class %d / %q, want class 3 / park-probe", got.Class, got.Kind)
+	}
+	reset := time.Now().Add(time.Hour)
+	withSignal := Classify(LimitSignal{Lane: laneZAI, HTTPStatus: 429, ResetAt: reset, OnValidCredentials: true}, cfg)
+	if withSignal.Class != ClassDepletionSignal || !withSignal.ResumeAt.Equal(reset) {
+		t.Errorf("bare zai 429 + reset = class %d resume %v, want class 2 at the signalled time",
+			withSignal.Class, withSignal.ResumeAt)
+	}
+	// A genuine policy ban with no code still freezes: the heuristic is not
+	// removed, it is merely ordered after the coded taxonomy.
+	ban := Classify(LimitSignal{Lane: laneZAI, HTTPStatus: 429, OnValidCredentials: true,
+		BodyText: "this account is suspended for a policy violation"}, cfg)
+	if ban.Class != ClassAuthPolicy || ban.Kind != ActionLaneFreeze {
+		t.Errorf("codeless policy-ban text = class %d / %q, want the Class-4 freeze", ban.Class, ban.Kind)
 	}
 }
 

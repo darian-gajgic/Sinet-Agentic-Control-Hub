@@ -306,7 +306,7 @@ type answerFile struct {
 
 // hookDecisionDeny is the engine's own refusal verdict. The mechanism is the
 // one serialize-by-deny already relies on, so a first-class reject is wiring an
-// existing engine capability rather than inventing one (S03.4/S03.5).
+// existing engine capability rather than inventing one (S03.4; S02.8).
 const hookDecisionDeny = "deny"
 
 // writeAnswer persists the platform's APPROVAL for a tool_use_id before a

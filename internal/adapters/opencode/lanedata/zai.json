@@ -35,7 +35,7 @@
       "name": "GLM-5.3",
       "verified_on": "2026-08-23",
       "billing": "flat",
-      "overflow_mode": "park",
+      "overflow_mode": "hard-stop",
       "region_model_gate": "none"
     },
     {
@@ -43,7 +43,7 @@
       "name": "GLM-5-Turbo",
       "verified_on": "2026-08-23",
       "billing": "flat",
-      "overflow_mode": "park",
+      "overflow_mode": "hard-stop",
       "region_model_gate": "none"
     },
     {
@@ -51,7 +51,7 @@
       "name": "GLM-4.7",
       "verified_on": "2026-08-23",
       "billing": "flat",
-      "overflow_mode": "park",
+      "overflow_mode": "hard-stop",
       "region_model_gate": "none"
     }
   ],
@@ -60,6 +60,8 @@
     "thinking": { "type": "disabled", "clear_thinking": false }
   },
   "eco_options_verified_on": "2026-08-23",
+  "thinking_disabled_efforts": ["eco"],
+  "thinking_disabled_efforts_note": "S10.6 calls this lever an Eco/Balanced rung and does not settle whether Balanced takes it by default. Seeded conservatively as Eco-only; adding \"balanced\" here is a data edit, not a code change, and is the operator's call.",
   "reasoning_effort": {
     "wired": false,
     "verified_on": "2026-08-23",

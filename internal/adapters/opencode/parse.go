@@ -162,11 +162,36 @@ type permissionReplied struct {
 }
 
 // engineErrorInfo is the AssistantMessage.error shape.
+//
+// The status members are read TOLERANTLY and from several places, because the
+// engine wraps a provider's HTTP failure in its own error object and the
+// status is the one fact the platform cannot re-derive: without it a provider
+// error code the seed table has not seen yet has no class at all. Every
+// spelling below is optional; absent means absent, never zero-as-a-status.
 type engineErrorInfo struct {
-	Name string `json:"name"`
-	Data struct {
-		Message string `json:"message"`
+	Name       string `json:"name"`
+	StatusCode int    `json:"statusCode"`
+	Status     int    `json:"status"`
+	Data       struct {
+		Message    string `json:"message"`
+		StatusCode int    `json:"statusCode"`
+		Status     int    `json:"status"`
+		Response   struct {
+			Status     int `json:"status"`
+			StatusCode int `json:"statusCode"`
+		} `json:"response"`
 	} `json:"data"`
+}
+
+// httpStatus reports the observed HTTP status the engine surfaced, or 0.
+func (e engineErrorInfo) httpStatus() int {
+	for _, s := range []int{e.Data.StatusCode, e.Data.Status, e.Data.Response.Status,
+		e.Data.Response.StatusCode, e.StatusCode, e.Status} {
+		if s > 0 {
+			return s
+		}
+	}
+	return 0
 }
 
 // parser folds v1 event frames into contract events plus terminal facts.
@@ -320,12 +345,15 @@ func (p *parser) feedStatus(raw json.RawMessage) []adapters.Event {
 		// commissioned lane the provider's own error body is lifted out of the
 		// retry message first, because a normalized signal is still data — it is
 		// the same facts, named the way the classifier reads them.
-		if ev, ok := p.laneSignalEvent(sp.Status.Message, 0); ok {
-			return []adapters.Event{ev}
-		}
 		payload, err := json.Marshal(sp.Status)
 		if err != nil {
 			return nil
+		}
+		// The raw retry facts ride ALONGSIDE the normalized signal, never
+		// instead of it: normalizing must not cost an operator the engine's
+		// own account of what happened (S03.1).
+		if ev, ok := p.laneSignalEvent(sp.Status.Message, 0, payload); ok {
+			return []adapters.Event{ev}
 		}
 		return []adapters.Event{{Kind: adapters.KindRateLimit, Payload: bounded(payload)}}
 	}
@@ -353,7 +381,7 @@ func (p *parser) feedMessage(raw json.RawMessage) []adapters.Event {
 		// still carried the signal, and dropping it would lose the one fact
 		// the scheduler needs to react instead of retrying blind.
 		if !p.signalled[m.ID] {
-			if ev, ok := p.laneSignalEvent(p.errDetail, 0); ok {
+			if ev, ok := p.laneSignalEvent(p.errDetail, observedStatus(m.Error), nil); ok {
 				p.signalled[m.ID] = true
 				laneEvents = append(laneEvents, ev)
 			}
@@ -623,15 +651,16 @@ func usageFromTokens(raw json.RawMessage, modelID, messageID string, index int64
 // and forwarded with its facts intact — never dropped, never fatal, and never
 // minted as a new platform kind. The taxonomy is Spec S10.5's, and a code this
 // adapter cannot name is exactly the case where guessing would be worst.
-func (p *parser) laneSignalEvent(text string, observedStatus int) (adapters.Event, bool) {
+func (p *parser) laneSignalEvent(text string, status int, engineRetry json.RawMessage) (adapters.Event, bool) {
 	if p.lane == nil || text == "" {
 		return adapters.Event{}, false
 	}
-	sig, ok := p.lane.ExtractSignal(text, observedStatus)
+	sig, ok := p.lane.ExtractSignal(text, status)
 	if !ok {
 		return adapters.Event{}, false
 	}
 	sig.EndpointVerified = p.endpointVerified
+	sig.EngineRetry = boundedOrEmpty(engineRetry)
 	if !sig.Known {
 		p.logf("opencode: forwarding an unrecognised %s provider error code %q as data — the signal set does "+
 			"not name it, so it classifies on its signal and never on a guess (S03.1)", sig.Lane, sig.ErrorCode)
@@ -642,6 +671,16 @@ func (p *parser) laneSignalEvent(text string, observedStatus int) (adapters.Even
 		return adapters.Event{}, false
 	}
 	return adapters.Event{Kind: adapters.KindRateLimit, Payload: bounded(payload)}, true
+}
+
+// observedStatus reports the HTTP status the engine's error object carried, or
+// 0 when it carried none.
+func observedStatus(raw json.RawMessage) int {
+	var e engineErrorInfo
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return 0
+	}
+	return e.httpStatus()
 }
 
 func describeEngineError(raw json.RawMessage) string {

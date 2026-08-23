@@ -237,6 +237,12 @@ func (a *Adapter) laneFor(providerID string) *LaneConfig {
 
 // withEffortOptions applies the S10.6 effort rung's per-lane lever.
 //
+// WHICH efforts take the lever is the lane document's call, not this
+// function's (LaneConfig.EcoOptionEfforts): the spec names the Z.AI thinking
+// lever an "Eco/Balanced rung" without settling whether Balanced takes it, and
+// that is a quality-for-consumption trade an operator owns rather than a
+// constant an implementation picks.
+//
 // The lever rides the compiled config because that is the only channel 1.18.3
 // exposes for provider options — which means an effort change is
 // STARTUP-BOUND like every other config change and restarts that user's serve
@@ -245,7 +251,7 @@ func (a *Adapter) laneFor(providerID string) *LaneConfig {
 //
 // The input is never mutated: a resolver's config belongs to the resolver.
 func withEffortOptions(providers ProviderConfig, lane *LaneConfig, effort string) ProviderConfig {
-	if lane == nil || effort != adapters.EffortEco || len(lane.EcoOptions) == 0 {
+	if lane == nil || len(lane.EcoOptions) == 0 || !lane.EcoOptionApplies(effort) {
 		return providers
 	}
 	entry, ok := providers[lane.ProviderID]

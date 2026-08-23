@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
 //go:embed lanedata/zai.json
@@ -54,10 +56,20 @@ type LaneConfig struct {
 
 	ModelRoutingNote string `json:"model_routing_note"`
 
-	// EcoOptions are the provider options the S10.6 Eco rung adds to this
-	// lane's models. Data, because the lever is the vendor's shape.
+	// EcoOptions are the provider options this lane's low-consumption rung
+	// adds to its models. Data, because the lever is the vendor's shape.
 	EcoOptions           map[string]json.RawMessage `json:"eco_options"`
 	EcoOptionsVerifiedOn string                     `json:"eco_options_verified_on"`
+
+	// EcoOptionEfforts names the S10.6 effort modes that get EcoOptions.
+	//
+	// It is DATA rather than a rule in code because the spec calls the Z.AI
+	// thinking lever "an Eco/Balanced rung" and does not settle whether
+	// Balanced takes it by default — a judgement about how much quality a
+	// person trades for consumption, which belongs to the operator and to a
+	// data row they can change, not to a constant an executor picked. Empty
+	// defaults to Eco alone, the conservative reading.
+	EcoOptionEfforts []string `json:"thinking_disabled_efforts"`
 
 	// ReasoningEffort is a RECORDED, unwired vendor knob (see the type).
 	ReasoningEffort RecordedKnob `json:"reasoning_effort"`
@@ -118,12 +130,19 @@ const (
 	BillingMetered = "metered"
 )
 
-// Overflow modes (S03.6).
+// Overflow modes — the ratified S03.6 enum, verbatim (Spec S03.6; S18.3's
+// per-model attribute row). The set is fixed by the spec, not by this lane:
+// inventing a vocabulary here would make a document that validates against
+// Sinet and means nothing to anyone reading the spec.
 const (
-	// OverflowPark stops at the plan's own ceiling and parks.
-	OverflowPark = "park"
-	// OverflowAutoMetered spills to metered usage — permitted only with a
-	// proven disable/zero balance, refused at onboarding otherwise.
+	// OverflowHardStop stops at the plan's own ceiling.
+	OverflowHardStop = "hard-stop"
+	// OverflowOptInCredits spends further credits only on an explicit
+	// per-use opt-in (3.10: metered spending is never a default).
+	OverflowOptInCredits = "opt-in-credits"
+	// OverflowAutoMetered spills to per-token billing automatically —
+	// acceptable ONLY with a proven disable/zero balance, refused at
+	// onboarding otherwise (P-T17-2).
 	OverflowAutoMetered = "auto-metered"
 )
 
@@ -166,6 +185,33 @@ type LaneSignal struct {
 	// Known reports whether the lane's signal table names this code. An
 	// unknown code is forwarded as data, never dropped and never fatal.
 	Known bool `json:"known"`
+	// EngineRetry is the engine's OWN retry context, verbatim, when the signal
+	// was lifted out of one (type/attempt/next). Normalizing a signal must not
+	// cost the raw facts it was normalized from: the platform classifies from
+	// the normalized members and an operator still sees what the engine said
+	// (S03.1 forward-as-data).
+	EngineRetry json.RawMessage `json:"engine_retry,omitempty"`
+}
+
+// MarshalJSON omits a zero ResetAt ENTIRELY.
+//
+// `omitempty` does nothing for a time.Time — it is a struct, never "empty" —
+// so the default encoding puts "0001-01-01T00:00:00Z" on the wire for every
+// signal that carries no resume time. A consumer that reads a park horizon out
+// of that member (internal/api's string-fallback read does exactly this) would
+// then show a person a park until the year 1 where the honest answer is "no
+// resume time was signalled". Absent has to mean absent.
+func (s LaneSignal) MarshalJSON() ([]byte, error) {
+	// laneSignalWire has no methods, so marshalling it cannot recurse.
+	type laneSignalWire LaneSignal
+	if s.ResetAt.IsZero() {
+		return json.Marshal(struct {
+			laneSignalWire
+			// Shadows the embedded member at depth 0 and encodes to nothing.
+			ResetAt json.RawMessage `json:"reset_at,omitempty"`
+		}{laneSignalWire: laneSignalWire(s)})
+	}
+	return json.Marshal(laneSignalWire(s))
 }
 
 // SeedLaneConfigs returns the lane documents that ship with the platform.
@@ -232,19 +278,98 @@ func (c LaneConfig) validate() error {
 		// which is the one thing the flat-rate posture exists to prevent.
 		if m.OverflowMode == OverflowAutoMetered && !m.MeteredDisableProven {
 			return fmt.Errorf("%w (lane %q): model %q declares overflow_mode %q without a proven metered "+
-				"disable or zero balance — refused at onboarding (S03.6)", ErrLaneConfig, c.Lane, m.ID, m.OverflowMode)
+				"disable or zero balance — refused at onboarding (S03.6, P-T17-2)", ErrLaneConfig, c.Lane, m.ID, m.OverflowMode)
 		}
-		if m.OverflowMode != OverflowPark && m.OverflowMode != OverflowAutoMetered {
-			return fmt.Errorf("%w (lane %q): model %q declares overflow_mode %q, want %q or %q",
-				ErrLaneConfig, c.Lane, m.ID, m.OverflowMode, OverflowPark, OverflowAutoMetered)
+		switch m.OverflowMode {
+		case OverflowHardStop, OverflowOptInCredits, OverflowAutoMetered:
+		default:
+			return fmt.Errorf("%w (lane %q): model %q declares overflow_mode %q, want one of %q/%q/%q (S03.6)",
+				ErrLaneConfig, c.Lane, m.ID, m.OverflowMode, OverflowHardStop, OverflowOptInCredits, OverflowAutoMetered)
+		}
+		// region_model_gate is the OTHER required per-model attribute (S03.6):
+		// the model list is region- and account-dependent, so a model that
+		// declares no gate state cannot be diffed against what the account
+		// actually serves (P-T17-3).
+		if m.RegionModelGate == "" {
+			return fmt.Errorf("%w (lane %q): model %q declares no region_model_gate, which S03.6 requires "+
+				"per model (P-T17-3)", ErrLaneConfig, c.Lane, m.ID)
 		}
 		seen[m.ID] = true
+	}
+	// A lane with no credential reference cannot be commissioned, and a
+	// document that omits it would sail past the spawn-time check and let the
+	// engine authenticate as nobody — the silent unauthenticated call this
+	// lane's whole commissioning posture exists to prevent (S11.5).
+	if c.Credential.EnvVar == "" || c.Credential.Profile == "" {
+		return fmt.Errorf("%w (lane %q): no credential reference — a lane document must name the broker "+
+			"auth profile and the environment variable its injection fills, or nothing can prove the lane "+
+			"is commissioned (S11.5)", ErrLaneConfig, c.Lane)
+	}
+	if c.EndpointMarker == "" {
+		// Without a marker every endpoint self-check answers "unverified",
+		// which turns every 1113 into a configuration defect and hides real
+		// depletion behind a permanent false alarm (R11).
+		return fmt.Errorf("%w (lane %q): no endpoint_marker — the subscription-endpoint self-check would "+
+			"answer 'unverified' for every signal and mask real depletion (S10.5)", ErrLaneConfig, c.Lane)
+	}
+	for _, row := range c.Signals {
+		name := row.Code
+		if name == "" {
+			name = row.CodeFrom + "-" + row.CodeTo
+		}
+		if row.VerifiedOn == "" {
+			return fmt.Errorf("%w (lane %q): signal row %q carries no verified-on date", ErrLaneConfig, c.Lane, name)
+		}
+		if _, err := time.Parse(dateLayout, row.VerifiedOn); err != nil {
+			return fmt.Errorf("%w (lane %q): signal row %q verified-on %q is not a %s date",
+				ErrLaneConfig, c.Lane, name, row.VerifiedOn, dateLayout)
+		}
 	}
 	return nil
 }
 
 // dateLayout is the verified-on date shape. A mechanic, not a ⚙ value.
 const dateLayout = "2006-01-02"
+
+// EcoOptionApplies reports whether an effort mode takes this lane's
+// low-consumption options. The document decides; empty means Eco alone.
+func (c LaneConfig) EcoOptionApplies(effort string) bool {
+	if len(c.EcoOptionEfforts) == 0 {
+		return effort == adapters.EffortEco
+	}
+	for _, e := range c.EcoOptionEfforts {
+		if e == effort {
+			return true
+		}
+	}
+	return false
+}
+
+// CredentialInjectionFacts records what the S11.5 credential-injection proxy
+// will need when it is built, so the packet that builds it does not re-derive
+// provider wire facts from scratch. DEFERRED, by coordinator disposition
+// (OQ-1): the proxy does not exist, and the broker's existing spawn-time
+// engine-cred delivery is the v0 dev-posture-correct path, because S11.5's D2
+// invariant guards the TASK sandbox and a per-user serve is not one.
+//
+// The facts, verified 2026-08-23 alongside this lane's document:
+//
+//   - inject ONLY on the coding endpoint's completion path
+//     (<base_url>/chat/completions); every other request passes untouched;
+//   - the header is `Authorization: Bearer <token>`;
+//   - CA trust is PER-PROCESS via NODE_EXTRA_CA_CERTS — the system trust
+//     store is never touched;
+//   - the P-T01-2 pin-regression canary asserts, per engine version, that a
+//     trusted-CA terminating proxy on the model path still yields 200; on
+//     regression, ⚙ sandbox.model_egress_tls_terminate = false for that lane
+//     falls back to pattern-2 scoped egress;
+//   - SPIKE P2-S3 demonstrated a Z.AI 401→200 from proxy-side substitution
+//     alone, so the mechanism is proven for this provider;
+//   - Z.AI publishes NO x-ratelimit-* headers, so the proxy's second purpose
+//     on the Anthropic lane — harvesting anthropic-ratelimit-unified-* — has
+//     no analogue here. This lane's limit state rides error-code BODIES, which
+//     is what ExtractSignal reads.
+const CredentialInjectionFacts = "S11.5 injection proxy: deferred to the D6/host batch (OQ-1); see the doc comment on this constant"
 
 // Providers renders the lane as the provider block opencode compiles into its
 // config: one entry, keyed by the provider id.
