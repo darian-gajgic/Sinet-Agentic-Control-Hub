@@ -390,3 +390,11 @@ Committed with this brief, in `internal/shell/planbudget_ln6_test.go`, package `
 ## 8. Non-goals
 
 No `web/src` application source. No 13.4 settings UI. No per-person duty-map surface. No C5 enforcement. No canary changes. No changes to registered BENCH-REG numbers. No spawn-gate or per-checkpoint budget enforcement. No period rollover timer. No observed-state overlay. No edits to `plandata`/`lanedata`. No new dependency. No live provider call.
+
+---
+
+## Coordinator dispositions (appended 2026-08-25, before executor launch)
+
+**OQ-1 — PRE-EXISTING double duty; consume as ratified, split at the gate.** The `budget.background_window_fraction` double duty (allowance-proposal fraction at planunits.go:501 vs background-ceiling fraction at :569/pressure.go:96) predates this packet — LN-2B ratified `ProposePlanBudget` consuming it, and this packet merely makes that function reachable. The compounding direction is conservative (a proposal-seeded budget gives background f² of the advertised allowance — it spends LESS, never more) and every seeded row is "assumed"/operator-editable by design. The executor consumes the fraction exactly as the code already does: NO new ⚙ key minted, NEITHER use changed. **Gate item recorded:** an S00.9 amendment proposal to split the knob into two registry keys (seeding fraction / background ceiling) with its S18 sweep — presented at the LN gate batch, decided there.
+
+**OQ-2 — MAX-BINDS RATIFIED as the packet reading.** A lane's selection ratio is the maximum across its windows: the most-constrained window binds. This is the reading S10.4's headroom rule implies — a lane near exhaustion in ANY window must report high pressure so routing steers away; averaging or min would let an exhausted 5h window hide behind a fresh weekly one, which is the overrun class S10 exists to prevent. Reversal stays confined to the one aggregation function + its test, as the brief specifies. The gate sees the choice and the two alternatives by name.
