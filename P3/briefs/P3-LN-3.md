@@ -1,3 +1,5 @@
+# ⚠️ EXPIRED 2026-08-24 — single-use artifact; landed with drains r1 (`2b07746`) + r2 (`fc9b2e2`) + coordinator-inline provenance residuals; the code no longer matches this text (notably: three §2 seed values were graded unverified-primary — the brief's own citations were the error; the audit stands). Later grounding must never read this as truth (amendment D).
+
 # P3-LN-3 — the Kimi (Moonshot) lane: onboarding via the report-02 §5 checklist
 
 Grounded 2026-08-24 against `Spec/drafts/` (canonical, spec-v1), `P3/CONVENTIONS.md` §61/§62/§63, and the tree at `cdeceaf`. Single-use: this brief expires when the packet lands.
