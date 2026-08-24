@@ -152,6 +152,36 @@ no skip). Both records now point at the same defect from two independent witness
   then form the merged F2+F3 act — they subsume r4's items 3 (F3) and 4 (F2) — ahead of F6/F7/F5.
   r4-F4 (per-item contest notes) and the RA-1..RA-3 honesty fixes ride in the same FE rounds.
 
+## D.1 — HARVEST CONSTRAINT (operator directive, 2026-08-24, binding on W1–W4)
+
+**The Nexus harvest is a PATTERN harvest, never a code or architecture harvest.** Operator's
+ruling, in substance verbatim:
+
+- Sinet's architecture is different from and better than Nexus's — that is the whole reason Sinet
+  was started fresh (Nexus had architecture mistakes and was not performing well; see
+  `Docs/nexus-post-mortem.md`).
+- Copy ONLY frontend features that are **coherent with Sinet's architecture**. If a good Nexus
+  feature does not fit Sinet's architecture, **modify it to fit BEFORE implementing — or do not
+  copy it at all.**
+- **No mistakes and no bad code from Nexus may be copied into Sinet.** No Nexus source code is
+  ported; what crosses over is the UX pattern (what the surface shows, asks, and lets the user
+  edit), re-implemented on Sinet's own wire, ledger, and spec machinery.
+
+Mechanics this imposes on the work:
+
+- **W1's deliverable is a harvest LIST with a per-item architecture verdict**, not a feature list:
+  each harvested pattern gets FIT-AS-IS / FIT-WITH-MODIFICATION (stating the modification) /
+  REJECT (stating the conflict). The coordinator triages the list against the spec (S06, S15,
+  FC-v1) before anything is built; contested items go to the operator.
+- Known fit-check examples already visible: Nexus's editable spec is a plain mutable document —
+  Sinet's plan artifact lives under ledger/immutability and contest/replan mechanics, so W3
+  re-expresses "editable understanding" through Sinet's own artifact + replan wire, not as
+  free-text mutation of a served plan. Nexus's 3-question minimalism is itself one of its
+  weaknesses (Section B.5) — the coverage meter and slot machinery stay.
+- This is the existing harvest-map discipline (ADOPT/PORT/PATTERN/STUDY) applied to the frontend:
+  Nexus is a STUDY source. The post-mortem's failure analysis outranks Nexus's mechanisms —
+  a pattern that exists in Nexus is not evidence the pattern is right.
+
 ## E. Coordinator notes
 
 - The `comparison_rules` ambiguity (search vs default view) is a real content defect: the option
