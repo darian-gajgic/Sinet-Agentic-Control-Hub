@@ -350,8 +350,10 @@ func tier2Rows() []Row {
 			Notes: "models.dev's kimi-for-coding provider record — provider id, npm package, base URL and model " +
 				"ids. The audit names it as this lane's tier-2 canary, and it carries the LANE where the generic " +
 				"t3-modelsdev-api row does not: drift in the record the opencode provider entry is built from " +
-				"must flag NOW rather than land in a digest. The installed engine's own cached copy of this data " +
-				"was read at onboarding and agreed on every field except one display name. VERIFIED 2026-08-24 — " + report02Cite,
+				"must flag NOW rather than land in a digest. The record EMBEDDED in the npm-shipped opencode 1.18.3 " +
+				"binary was read at onboarding and AGREES with this page on the provider id, env var, npm package " +
+				"and base URL — and DISAGREES on the model list, which is precisely the drift this row watches. " +
+				"VERIFIED 2026-08-24 — " + report02Cite,
 			MigrateBias: true,
 		},
 	}

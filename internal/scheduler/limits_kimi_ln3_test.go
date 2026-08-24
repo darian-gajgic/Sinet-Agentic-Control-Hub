@@ -292,3 +292,86 @@ func TestUnknownDocumentedClassIsInert(t *testing.T) {
 		}
 	}
 }
+
+// ── drain r2 C4 · the belt is pinned in the scheduler's OWN suite ────────────
+//
+// It was only pinned through internal/shell's round-trip before, so deleting
+// the belt left this package green. A guard whose deletion its own package
+// cannot see is a guard nobody is holding.
+func TestExemptsAuthStatusFreezeIsBelted(t *testing.T) {
+	cfg := ln2Config()
+
+	// The exemption fires for a clean documented depletion / model-drift row.
+	for _, class := range []string{DocumentedDepletion, DocumentedModelDrift} {
+		if !exemptsAuthStatusFreeze(LimitSignal{Lane: laneKimi, HTTPStatus: 403, DocumentedClass: class,
+			BodyText: "You've reached your usage limit for this billing cycle"}) {
+			t.Errorf("class %q on a 403 does not exempt — the whole point of the guard is gone", class)
+		}
+	}
+	// And NOT for anything else: a non-auth status, a class outside the
+	// exemption pair, or no class at all.
+	for _, tc := range []struct {
+		status int
+		class  string
+	}{
+		{429, DocumentedDepletion}, {404, DocumentedModelDrift},
+		{403, DocumentedTransient}, {403, DocumentedEndpointDefect},
+		{401, ""}, {403, "auth"}, {402, "made-up"},
+	} {
+		if exemptsAuthStatusFreeze(LimitSignal{Lane: laneKimi, HTTPStatus: tc.status, DocumentedClass: tc.class}) {
+			t.Errorf("status %d + class %q exempts the Class-4 rule and must not", tc.status, tc.class)
+		}
+	}
+
+	// THE BELT. Revocation- or policy-ban-shaped text defeats the exemption
+	// whatever row matched, on either exempting class, at either credential
+	// assurance. These bodies all carry a real depletion or entitlement phrase
+	// too — that is the point: a real body is not one phrase.
+	for _, body := range []string{
+		"Access terminated. Your account was suspended; you have also reached your usage limit for this billing cycle.",
+		"Your account has been suspended for a policy violation and does not have access to this service.",
+		// drain r2 C2, verbatim: "terminated" is Kimi's own revocation verb,
+		// and without it on the documented path this body PARKED.
+		"Your access was terminated. You have reached your usage limit for this billing cycle.",
+		"You've reached your usage limit for this billing cycle. This API key was revoked.",
+		"Your current subscription does not have access to k3. The account is deactivated.",
+	} {
+		for _, class := range []string{DocumentedDepletion, DocumentedModelDrift} {
+			for _, status := range []int{401, 403} {
+				sig := LimitSignal{Lane: laneKimi, HTTPStatus: status, DocumentedClass: class, BodyText: body}
+				if exemptsAuthStatusFreeze(sig) {
+					t.Errorf("the belt let a revocation-shaped body through (status %d, class %q): %q", status, class, body)
+				}
+				// End to end: it reaches the Class-4 freeze, never a park.
+				got := Classify(sig, cfg)
+				if got.Class != ClassAuthPolicy || got.Kind != ActionLaneFreeze {
+					t.Errorf("status %d class %q body %q = %+v, want the Class-4 freeze", status, class, body, got)
+				}
+			}
+		}
+	}
+
+	// INVERSE CONTROLS — the belt must not be "freeze on everything".
+	for _, body := range []string{
+		"You've reached your usage limit for this billing cycle.",
+		"You've reached your usage limit for this billing cycle. Your quota refreshes automatically every 7 days.",
+		"Your current subscription does not have access to k3",
+	} {
+		if !exemptsAuthStatusFreeze(LimitSignal{Lane: laneKimi, HTTPStatus: 403,
+			DocumentedClass: DocumentedDepletion, BodyText: body}) {
+			t.Errorf("the belt swallowed an ordinary documented body, which re-opens the weekly false freeze: %q", body)
+		}
+	}
+
+	// The zai lane's own documented transient prose is UNCHANGED by the wider
+	// documented-path test: "terminated" is overload vocabulary on that wire.
+	zaiBody := "The upstream connection was terminated due to overload; retry shortly."
+	for _, code := range []string{zaiRateLimit, zaiOverloaded} {
+		got := Classify(LimitSignal{Lane: laneZAI, ErrorCode: code, HTTPStatus: 429,
+			BodyText: zaiBody, OnValidCredentials: true, EndpointVerified: true}, cfg)
+		if got.Class != ClassTransientShed || got.Kind != ActionRetryInPlace {
+			t.Errorf("zai %s + %q = %+v, want the unchanged Class-1 retry — the stem's meaning is a per-wire fact",
+				code, zaiBody, got)
+		}
+	}
+}

@@ -191,10 +191,20 @@ type LaneCredential struct {
 type LaneCatalogueRecord struct {
 	VerifiedOn string `json:"verified_on,omitempty"`
 	Source     string `json:"source,omitempty"`
-	Agrees     string `json:"agrees,omitempty"`
-	Diverges   string `json:"diverges,omitempty"`
-	Additional string `json:"additional,omitempty"`
-	Note       string `json:"note,omitempty"`
+	// ModelsVerbatim is the engine record's model id list, exactly as read.
+	// It is the field that makes the rest checkable: a claim about what an
+	// engine accepts is worth what its source listing is worth.
+	ModelsVerbatim     []string `json:"models_verbatim,omitempty"`
+	ModelsVerbatimNote string   `json:"models_verbatim_note,omitempty"`
+	Agrees             string   `json:"agrees,omitempty"`
+	Diverges           string   `json:"diverges,omitempty"`
+	Limits             string   `json:"limits,omitempty"`
+	ReasoningOptions   string   `json:"reasoning_options,omitempty"`
+	// SecondSourceDisagrees records another record on the same host that
+	// contradicts this one, dated, rather than picking a winner.
+	SecondSourceDisagrees string `json:"second_source_disagrees,omitempty"`
+	Additional            string `json:"additional,omitempty"`
+	Note                  string `json:"note,omitempty"`
 }
 
 // LaneModel is one model's per-model attribute row (S03.6/S18.3: a data-valued
@@ -212,6 +222,12 @@ type LaneModel struct {
 	// audit's own captures — the packet's brief, or a secondary source — so a
 	// later reader never mistakes it for a primary quote.
 	NoteGrade string `json:"note_grade,omitempty"`
+	// ObservationGrade marks an id this document declares that the pinned
+	// engine's own record does NOT carry. It is not a deletion: the id stays,
+	// flagged, because the account's observed list is what settles it
+	// (P-T17-3) and dropping a documented id on an engine's say-so would lose
+	// a fact the vendor publishes.
+	ObservationGrade string `json:"observation_grade,omitempty"`
 	// MeteredDisableProven records that the account's pay-as-you-go spill has
 	// been proven disabled (or its balance proven zero). Only such a model may
 	// declare overflow_mode auto-metered.

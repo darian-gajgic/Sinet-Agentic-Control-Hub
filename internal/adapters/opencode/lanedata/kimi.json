@@ -1,7 +1,7 @@
 {
   "lane": "kimi",
   "provider_id": "kimi-for-coding",
-  "provider_id_note": "SEED. The models.dev provider URL resolves under this id and the installed opencode 1.18.3 provider catalogue names it verbatim (id `kimi-for-coding`, read locally 2026-08-24 off the installed engine's own provider catalogue — models.dev data the engine fetches at boot into its per-user cache, NOT a file bundled in the npm package; $0, no live provider call); one audit read also offered `moonshotai` as an inference, which the same catalogue shows is a DIFFERENT provider (the metered platform, `@ai-sdk/openai-compatible`, api.moonshot.ai/v1). The installed opencode's own provider list is the authority and this is confirmed against the account at bring-up (P-T17-3).",
+  "provider_id_note": "SEED. The models.dev provider URL resolves under this id and the installed opencode 1.18.3 provider catalogue names it verbatim (id `kimi-for-coding`, read locally 2026-08-24 out of the record EMBEDDED in the npm-shipped opencode 1.18.3 platform binary — not a cached file, and not fetched; $0, no live provider call); one audit read also offered `moonshotai` as an inference, which the same catalogue shows is a DIFFERENT provider (the metered platform, `@ai-sdk/openai-compatible`, api.moonshot.ai/v1). The embedded provider list is authoritative for what THIS pinned engine accepts — see installed_catalogue_record, including a second record on the same host that disagrees about the MODEL ids — and the ACCOUNT's observed list is what settles the lane at bring-up (P-T17-3).",
   "substrate": "opencode",
   "npm": "@ai-sdk/anthropic",
   "npm_note": "The structural difference from the zai lane: this lane rides opencode on the ANTHROPIC protocol, zai on OpenAI-compatible. The field exists precisely so that difference is DATA and not a second code path.",
@@ -37,7 +37,7 @@
   "credential": {
     "profile": "kimi-code",
     "env_var": "KIMI_API_KEY",
-    "note": "A broker engine-cred auth-profile NAME plus the variable its spawn-time injection fills. The variable name was READ OFF the installed opencode 1.18.3 provider record for `kimi-for-coding` on 2026-08-24 ($0, local, no live provider call) — never guessed; the audit's U-register left it unverified because models.dev's page carried no env field. The material is resolved fresh at spawn and never stored, logged, or persisted."
+    "note": "A broker engine-cred auth-profile NAME plus the variable its spawn-time injection fills. The variable name was READ OFF the record embedded in the npm-shipped opencode 1.18.3 binary for `kimi-for-coding` on 2026-08-24 ($0, local, no live provider call) — never guessed; the audit's U-register left it unverified because models.dev's page carried no env field. The material is resolved fresh at spawn and never stored, logged, or persisted."
   },
   "data_policy": {
     "constraint": "no-household-personal-data",
@@ -66,7 +66,8 @@
       "billing": "flat",
       "overflow_mode": "opt-in-credits",
       "region_model_gate": "none",
-      "note": "256K-context variant. Vendor: \"available to Moderato members and above\"."
+      "note": "256K-context variant. Vendor: \"available to Moderato members and above\". SEED-ONLY, PENDING OBSERVATION (drain r2): this id is ABSENT from the opencode 1.18.3 engine record — 0 occurrences across all five shipped binaries for `k3-256k`, and `kimi-for-coding` appears there only as the PROVIDER key. It is NOT dropped: the audit supports the 256K variant's existence from the vendor's own docs and error strings, and a runtime models.dev snapshot on this host lists both. The account's observed model list decides at the ceremony (P-T17-3); until then routing must not assume this id resolves.",
+      "observation_grade": "seed-only-pending-observation"
     },
     {
       "id": "kimi-for-coding",
@@ -75,8 +76,9 @@
       "billing": "flat",
       "overflow_mode": "opt-in-credits",
       "region_model_gate": "none",
-      "note": "Tier availability \"available to all members\" — PROVENANCE: the packet brief, NOT the audit. The Gate A-C audit quotes the Moderato gate for k3/k3-256k and the 401 entitlement strings, and captured NO tier-availability line for this model. Grade: UNVERIFIED at primary source. It closes from the operator's own observed tier and model list at bring-up, which P-T17-3 makes the authority anyway.",
-      "note_grade": "unverified-primary"
+      "note": "Tier availability \"available to all members\" — PROVENANCE: the packet brief, NOT the audit. The Gate A-C audit quotes the Moderato gate for k3/k3-256k and the 401 entitlement strings, and captured NO tier-availability line for this model. Grade: UNVERIFIED at primary source. It closes from the operator's own observed tier and model list at bring-up, which P-T17-3 makes the authority anyway. SEED-ONLY, PENDING OBSERVATION (drain r2): this id is ABSENT from the opencode 1.18.3 engine record — 0 occurrences across all five shipped binaries for `k3-256k`, and `kimi-for-coding` appears there only as the PROVIDER key. It is NOT dropped: the audit supports the 256K variant's existence from the vendor's own docs and error strings, and a runtime models.dev snapshot on this host lists both. The account's observed model list decides at the ceremony (P-T17-3); until then routing must not assume this id resolves.",
+      "note_grade": "unverified-primary",
+      "observation_grade": "seed-only-pending-observation"
     },
     {
       "id": "kimi-for-coding-highspeed",
@@ -96,17 +98,32 @@
   "reasoning_effort": {
     "wired": false,
     "verified_on": "2026-08-24",
-    "values": ["low", "high", "max"],
-    "note": "K3 documents thinking efforts but NO disable, so the Z.AI thinking:{type:disabled} lever has no Kimi equivalent and no eco_options are declared. THE VALUE LIST IS UNVERIFIED AT PRIMARY SOURCE — PROVENANCE: the packet brief, NOT the audit, which records no effort vocabulary for this model at all. It is carried unwired and dated precisely so nothing is built on it; the ceremony or the operator's console closes it. Recorded as a dated unwired fact rather than wiring an S10.6 rung nothing sanctions.",
+    "values": [
+      "low",
+      "high",
+      "max"
+    ],
+    "note": "THE VALUE LIST AND THE NO-DISABLE CLAIM ARE BOTH UNVERIFIED AT PRIMARY SOURCE. PROVENANCE: the packet brief, NOT the audit, which records no effort vocabulary for this model at all. The opencode 1.18.3 engine record contradicts both halves (read 2026-08-24): it gives k3 `reasoning_options` [{type:\"toggle\"},{type:\"effort\",values:[\"max\"]}] — effort values [\"max\"] alone, and a `toggle` type, where this note previously asserted Kimi publishes NO disable and that the Z.AI thinking:{type:disabled} lever has no Kimi equivalent. Both are therefore carried unwired and graded, precisely so nothing is built on them; no eco_options are declared and no S10.6 rung is invented. The ceremony or the operator's console closes it.",
     "values_grade": "unverified-primary"
   },
   "installed_catalogue_record": {
     "verified_on": "2026-08-24",
-    "source": "the installed opencode 1.18.3 provider catalogue — models.dev data the ENGINE fetches at boot into its per-user cache (the npm package `opencode-ai@1.18.3` ships no such file; verified by inspecting the installed package). Read locally, $0, no live provider call.",
-    "agrees": "provider id `kimi-for-coding`; npm `@ai-sdk/anthropic`; base URL `https://api.kimi.com/coding/v1`; env var `KIMI_API_KEY`; and ALL FOUR model ids this document declares — k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed. No declared id is absent from the installed record.",
-    "diverges": "The catalogue's DISPLAY NAME for model `kimi-for-coding` is \"Kimi K2.7 Code\", where this document carries \"Kimi For Coding\" from the vendor's own product docs. Recorded as a dated discrepancy rather than silently resolved, exactly as the `/coding/` vs `/coding/v1` Anthropic-base divergence above is — the id is what dispatches, the name is cosmetic, and the account's observed list is the authority (P-T17-3).",
-    "additional": "The catalogue also publishes per-model context limits the audit did not capture (k3 1,048,576; k3-256k, kimi-for-coding and kimi-for-coding-highspeed 262,144) and prices every model at $0.00 — the S03.7 corollary, so this lane's dollars come from Sinet's own metered rows and NEVER from the engine.",
-    "note": "The catalogue is a SEED like everything else here. It is the installed engine's own record, which makes it authoritative over documentation for what the engine will accept, and still not authoritative over the ACCOUNT, whose observed model list the model-list canary reads."
+    "source": "The provider record EMBEDDED in the npm-shipped opencode 1.18.3 platform binary — NOT a cached file. Corrected at drain r2 after this record's first cut was overturned by execution. opencode-ai@1.18.3 ships five platform binaries (bin/opencode.exe plus node_modules/opencode-linux-x64{,-baseline,-baseline-musl,-musl}/bin/opencode); `grep -ac \"kimi-for-coding\"` returns 3 on EVERY one of the five, and ~/.cache/opencode/bin is EMPTY. Read this round with a balanced-brace extraction over node_modules/opencode-linux-x64/bin/opencode. $0, local, no live provider call.",
+    "models_verbatim": [
+      "k2p5",
+      "k2p7",
+      "kimi-k2-thinking",
+      "kimi-for-coding-highspeed",
+      "k3",
+      "k2p6"
+    ],
+    "models_verbatim_note": "The engine record's model ids, verbatim and complete: SIX. (An earlier report of a seventh id `crossmodel` did not reproduce — `'crossmodel' in record` is False on this host; it is not in this provider's record.) Each carries name/limit/reasoning_options; the ids above are what the engine will accept.",
+    "agrees": "provider id `kimi-for-coding`; env var `KIMI_API_KEY`; npm `@ai-sdk/anthropic`; base URL `https://api.kimi.com/coding/v1`; and TWO of the four model ids this document declares — `k3` and `kimi-for-coding-highspeed`.",
+    "diverges": "THREE divergences, each recorded rather than reconciled away. (1) `k3-256k` is ABSENT from the engine record — 0 occurrences across all five shipped binaries, not merely absent from one. (2) `kimi-for-coding` is the PROVIDER KEY, never a model id: the engine's model ids are the six listed above. (3) The name `Kimi For Coding` is the PROVIDER's display name; `Kimi K2.7 Code` is model `k2p7`'s name. This record's first cut conflated (3) and attributed real 262,144 context limits to the two ids in (1) and (2), which do not exist in the engine record — that conflation is removed and the limits are re-attributed below.",
+    "limits": "Attributed to the ids that actually carry them: `k3` context 1,048,576 / output 131,072; `k2p5`, `k2p7`, `kimi-k2-thinking`, `kimi-for-coding-highspeed` and `k2p6` context 262,144 / output 32,768. Every model is priced $0.00 in the record — the S03.7 corollary, so this lane's dollars come from Sinet's own metered rows and NEVER from the engine.",
+    "reasoning_options": "`k3` declares reasoning_options `[{type:\"toggle\"},{type:\"effort\",values:[\"max\"]}]`. TWO consequences, both dated 2026-08-24. (a) The engine record's effort vocabulary for k3 is `[\"max\"]` ALONE, which corroborates this document's unverified-primary grading of the brief-sourced `[\"low\",\"high\",\"max\"]`. (b) A `toggle` type EXISTS, which contradicts this document's claim that Kimi publishes no thinking disable and that the Z.AI `thinking:{type:disabled}` lever has no equivalent — that claim is therefore also graded unverified-primary and left unwired. Nothing is built on either; the ceremony and the account's observed list decide.",
+    "second_source_disagrees": "A DIFFERENT record exists on this host and disagrees: a runtime-fetched models.dev snapshot written by a real `opencode serve` at 2026-08-23 19:45 into a per-user XDG cache (models.json, 4.3 MB) lists this provider's models as `k3`, `k3-256k`, `kimi-for-coding`, `kimi-for-coding-highspeed`. That file is where this record's first cut came from, and reading it as 'the installed engine's record' was the error. Recorded as a dated fact rather than resolved: two sources disagree, the engine binary is what this pinned version will accept, and NEITHER is the authority over the ACCOUNT — which is exactly what the model-list canary exists to settle (P-T17-3).",
+    "note": "The engine record is a SEED like everything else here. It is authoritative over documentation for what this pinned engine accepts, and still not authoritative over the account's observed model list."
   },
   "reset_marker": "",
   "reset_marker_note": "DELIBERATELY EMPTY. The audit found no documented reset-time signal (U4): the error reference publishes no reset timestamp and states reset times live in the Console. An empty marker is the honest seed — it routes depletion to Class 3 probe-park rather than to a fabricated Class 2. A live header probe at bring-up may populate it.",

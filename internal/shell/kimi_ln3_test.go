@@ -246,6 +246,15 @@ func TestKimiSignalRoundTripsFromTheDocumentIntoTheClassifier(t *testing.T) {
 				wantFreeze: true,
 			},
 			{
+				// drain r2 C2, verbatim: "terminated" is Kimi's own documented
+				// revocation verb, and this body PARKED before the documented
+				// path learned it.
+				name:       "access terminated, with a depletion phrase after (evaluator probe, verbatim)",
+				body:       "Your access was terminated. You have reached your usage limit for this billing cycle.",
+				status:     403,
+				wantFreeze: true,
+			},
+			{
 				name:       "a revoked key described in the provider's own words",
 				body:       "Your current plan supports only kimi-k3 up to 256K context. This API key was revoked.",
 				status:     401,

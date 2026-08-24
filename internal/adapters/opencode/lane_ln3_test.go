@@ -184,7 +184,7 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 	if seed.Credential.EnvVar == "" {
 		t.Error("the credential variable is empty; if that is the OQ4 outcome the note must say so and R11's named-missing state is what carries it")
 	}
-	if !strings.Contains(strings.ToLower(seed.Credential.Note), "installed opencode") {
+	if !strings.Contains(strings.ToLower(seed.Credential.Note), "npm-shipped opencode") {
 		t.Errorf("the credential note does not record where the variable name came from — a name with no provenance is a guess wearing a date: %q", seed.Credential.Note)
 	}
 	if !strings.Contains(seed.Credential.Note, "2026-08-24") {
@@ -237,19 +237,67 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 	// declared ids ARE in it — the finding's premise that two were absent does
 	// not hold — but its display name for one model diverges, and a divergence
 	// is recorded rather than reconciled away.
+	// drain r2 C1 · the record is a read of what the PINNED ENGINE embeds, and
+	// the verbatim id list is what makes every other claim in it checkable.
 	cat := seed.InstalledCatalogue
 	if cat.VerifiedOn != "2026-08-24" {
 		t.Errorf("the installed-catalogue record carries verified_on %q, want 2026-08-24", cat.VerifiedOn)
 	}
-	if !strings.Contains(cat.Agrees, "ALL FOUR") {
-		t.Errorf("the catalogue record does not say which ids the installed engine agrees on: %q", cat.Agrees)
+	wantIDs := []string{"k2p5", "k2p7", "kimi-k2-thinking", "kimi-for-coding-highspeed", "k3", "k2p6"}
+	if len(cat.ModelsVerbatim) != len(wantIDs) {
+		t.Fatalf("models_verbatim = %v, want the engine record's own six ids %v", cat.ModelsVerbatim, wantIDs)
 	}
-	if !strings.Contains(cat.Diverges, "Kimi K2.7 Code") {
-		t.Errorf("the catalogue record does not name the display-name divergence it found: %q", cat.Diverges)
+	for i, id := range wantIDs {
+		if cat.ModelsVerbatim[i] != id {
+			t.Errorf("models_verbatim[%d] = %q, want %q", i, cat.ModelsVerbatim[i], id)
+		}
 	}
-	if !strings.Contains(cat.Source, "npm package") {
-		t.Errorf("the catalogue record does not say where the file actually comes from — a cache the engine "+
-			"fetches is not a file the package ships, and the difference is the whole provenance: %q", cat.Source)
+	// The record is EMBEDDED in the shipped binary. It is not a cache, and the
+	// difference is the whole provenance — reading a runtime-fetched snapshot
+	// as "the installed engine's record" is exactly the error this replaces.
+	if !strings.Contains(cat.Source, "EMBEDDED") || !strings.Contains(cat.Source, "binar") {
+		t.Errorf("the catalogue record does not say the record is embedded in the shipped binary: %q", cat.Source)
+	}
+	if strings.Contains(strings.ToLower(cat.Source), "cached file") && !strings.Contains(cat.Source, "NOT a cached file") {
+		t.Errorf("the catalogue record still calls the source a cached file: %q", cat.Source)
+	}
+	if !strings.Contains(cat.SecondSourceDisagrees, "models.dev") {
+		t.Errorf("the record does not carry the second, disagreeing source it was first written from: %q", cat.SecondSourceDisagrees)
+	}
+	// The two ids the engine record does NOT carry are flagged, not dropped.
+	graded := map[string]string{}
+	for _, m := range seed.Models {
+		graded[m.ID] = m.ObservationGrade
+	}
+	for _, id := range []string{"k3-256k", "kimi-for-coding"} {
+		if graded[id] != "seed-only-pending-observation" {
+			t.Errorf("model %q carries observation_grade %q — it is ABSENT from the pinned engine's own record "+
+				"and must say so; the account's observed list settles it, and silently dropping it would lose a "+
+				"fact the vendor publishes", id, graded[id])
+		}
+	}
+	for _, id := range []string{"k3", "kimi-for-coding-highspeed"} {
+		if graded[id] != "" {
+			t.Errorf("model %q is flagged %q, but the engine record carries it", id, graded[id])
+		}
+	}
+	// The engine record contradicts BOTH halves of the brief-sourced thinking
+	// claim, so both are graded and neither is wired.
+	for _, needle := range []string{`values:["max"]`, "toggle"} {
+		if !strings.Contains(cat.ReasoningOptions, needle) {
+			t.Errorf("the catalogue record does not carry the k3 reasoning fact %q: %q", needle, cat.ReasoningOptions)
+		}
+	}
+	if !strings.Contains(seed.ReasoningEffort.Note, "toggle") {
+		t.Errorf("the thinking-effort note does not record the engine's `toggle` type, which contradicts its own "+
+			"no-disable claim: %q", seed.ReasoningEffort.Note)
+	}
+	if seed.ReasoningEffort.Wired {
+		t.Error("the thinking lever is wired despite both halves of its evidence being graded unverified")
+	}
+	// The limits belong to the ids that carry them.
+	if !strings.Contains(cat.Limits, "1,048,576") || !strings.Contains(cat.Limits, "262,144") {
+		t.Errorf("the catalogue record does not attribute the context limits: %q", cat.Limits)
 	}
 
 	// Every signal row is dated AND marked documented-not-observed (§4's

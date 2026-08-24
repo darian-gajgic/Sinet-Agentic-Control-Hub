@@ -409,7 +409,7 @@ func exemptsAuthStatusFreeze(sig LimitSignal) bool {
 	if sig.DocumentedClass != DocumentedDepletion && sig.DocumentedClass != DocumentedModelDrift {
 		return false
 	}
-	if sig.BodyText != "" && (looksLikeRevocation(sig.BodyText) || looksLikePolicyBan(sig.BodyText)) {
+	if looksLikeDocumentedRevocation(sig.BodyText) {
 		return false
 	}
 	return true
@@ -455,7 +455,7 @@ func classifyDocumentedSignal(sig LimitSignal, cfg LimitConfig) (Action, bool) {
 		// revocation belt is folded in AHEAD of it — a lane that has been
 		// suspended does not become healthy because the provider also happened
 		// to shed the request (S10.5 Class 4 outranks Class 1; P-T08-2).
-		if sig.OnValidCredentials && sig.BodyText != "" && looksLikeRevocation(sig.BodyText) {
+		if sig.OnValidCredentials && looksLikeDocumentedRevocation(sig.BodyText) {
 			return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
 				Reason: "a documented transient message whose body carries explicit revocation text on VALID " +
 					"credentials — lane freeze, never retry (S10.5 Class 4 outranks Class 1; P-T08-2)"}, true
@@ -618,11 +618,19 @@ func isDepletionNoSignal(sig LimitSignal) bool {
 // wire that stem is LIMIT vocabulary, not revocation vocabulary. Reading it as
 // a ban is exactly the mistake that froze healthy lanes before drain r1; only
 // words a limit message has no reason to use may promote a shed into a freeze.
-// "policy" and "terminated" fail that same criterion ("rate limit policy",
-// "connection terminated due to overload" are ordinary limit/overload prose)
-// and are excluded too; a missed revocation falls through to a recoverable
-// verdict and is caught by the auth codes, the 401/403 status rule, or the
-// P-T17-1 canary — the authoritative detectors.
+// "policy" fails that same criterion ("rate limit policy" is ordinary limit
+// prose) and is excluded too; a missed revocation falls through to a
+// recoverable verdict and is caught by the auth codes, the 401/403 status rule,
+// or the P-T17-1 canary — the authoritative detectors.
+//
+// "terminat" stays OUT OF THIS FUNCTION for that same reason, and the reason is
+// now measured rather than argued: `TestZAINamedCodesAgainstBanAndLimitText`
+// pins the body "The upstream connection was terminated due to overload; retry
+// shortly." as a zai 1302/1305 that must RETRY, and adding the stem here turned
+// both into lane freezes. The stem's meaning is a per-WIRE fact — which is the
+// whole premise of a message-keyed taxonomy — so it lives on the documented
+// path instead (looksLikeDocumentedRevocation), where Kimi publishes "Access
+// terminated" as its literal revocation string.
 func looksLikeRevocation(body string) bool {
 	low := strings.ToLower(body)
 	for _, kw := range []string{"suspend", "banned", "revoke", "prohibit", "deactivat"} {
@@ -631,6 +639,33 @@ func looksLikeRevocation(body string) bool {
 		}
 	}
 	return false
+}
+
+// looksLikeDocumentedRevocation is the revocation test for the MESSAGE-KEYED
+// path — the belt on the auth-status exemption, and the documented-transient
+// branch.
+//
+// It is deliberately WIDER than looksLikeRevocation, and the extra width is one
+// stem: "terminat". Z.AI documents "connection terminated due to overload" as
+// ordinary transient prose, and a pinned test holds it to a retry; Kimi
+// documents "Access terminated" as its literal account-suspension string. The
+// same word is limit vocabulary on one wire and revocation vocabulary on the
+// other, so it cannot be a global rule — which is exactly the argument this
+// lane's whole taxonomy rests on. Scoping it here keeps the zai path byte
+// identical while closing "Your access was terminated. You have reached your
+// usage limit…", which parked a suspended account.
+//
+// It also folds in looksLikePolicyBan, because on this path a false positive
+// merely DECLINES an exemption — handing the signal to the Class-4 rule, a
+// recoverable freeze — while a false negative parks a revoked lane.
+func looksLikeDocumentedRevocation(body string) bool {
+	if body == "" {
+		return false
+	}
+	if looksLikeRevocation(body) || looksLikePolicyBan(body) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(body), "terminat")
 }
 
 // looksLikePolicyBan is a conservative match for policy-ban text arriving on
