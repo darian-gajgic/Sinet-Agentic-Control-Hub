@@ -309,6 +309,41 @@ func TestZAIParkedRunReceiptRendersHonestly(t *testing.T) {
 	}
 }
 
+// R2 · A future-dated checkpoint cannot count into the current period. Moving
+// the period filter into Go for the unreadable-stamp case dropped the upper
+// bound SQL had been enforcing; a clock skew or a restored backup would then
+// inflate the reading.
+func TestZAIFutureDatedCheckpointIsOutsideThePeriod(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.runningRun(t, "rz", "bob", "zai", "opencode")
+	e.datedCheckpoint(t, "rz", "bob", "glm-5.3", `{"input_tokens":10,"output_tokens":5}`, zaiOffPeak)
+	// A row stamped a week ahead of the reading.
+	e.datedCheckpoint(t, "rz", "bob", "glm-5.3", `{"input_tokens":10,"output_tokens":5}`,
+		zaiOffPeak.Add(7*24*time.Hour))
+
+	doc, ok := PlanDocFor("zai")
+	if !ok {
+		t.Fatal("no plan document for lane zai")
+	}
+	g := NewPressureGauge(e.db, e.reg)
+	r, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, UndeclaredPlanBudget(), zaiOffPeak.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ReadPlanUnits: %v", err)
+	}
+	if r.Calls != 1 {
+		t.Errorf("calls = %d, want 1 — a checkpoint dated after the reading is not in the period", r.Calls)
+	}
+	// And it comes back once the reading catches up to it.
+	later, err := g.ReadPlanUnits(ctx, "bob", "zai", doc, UndeclaredPlanBudget(), zaiOffPeak.Add(8*24*time.Hour))
+	if err != nil {
+		t.Fatalf("ReadPlanUnits(later): %v", err)
+	}
+	if later.Calls != 2 {
+		t.Errorf("calls = %d at a later reading, want 2 — the row is excluded by DATE, not discarded", later.Calls)
+	}
+}
+
 // spec 17 — the pricestore's zero-row refusal is intact and this packet adds no
 // $0 zai row anywhere.
 func TestZAIZeroPriceRowRefused(t *testing.T) {

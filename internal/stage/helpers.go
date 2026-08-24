@@ -485,6 +485,7 @@ func (s *Skeleton) runHelper(ctx context.Context, r run.Run, req SpawnRequest, d
 		Class:        req.Brief.Class,
 		Tools:        req.Brief.Tools,
 		Model:        decision.Model,
+		Lane:         decision.Lane,
 		WindowTokens: decision.WindowTokens,
 	})
 

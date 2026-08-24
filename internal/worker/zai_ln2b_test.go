@@ -176,7 +176,7 @@ func TestFlatLaneSelectionIgnoresDollars(t *testing.T) {
 // data. A model id in routing goes stale invisibly; a dated row does not.
 func TestNoLaneValueIsAConstantInRoutingOrShell(t *testing.T) {
 	scanned := 0
-	for _, dir := range []string{".", "../shell"} {
+	for _, dir := range []string{".", "../shell", "../stage"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)

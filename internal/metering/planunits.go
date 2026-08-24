@@ -404,7 +404,7 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 	if err != nil {
 		return PlanReading{}, fmt.Errorf("metering: read ⚙ %s: %w", keyBgWindowFraction, err)
 	}
-	calls, consumed, err := g.planUnits(ctx, userID, lane, doc, budget.PeriodStart, budget.Declared)
+	calls, consumed, err := g.planUnits(ctx, userID, lane, doc, budget.PeriodStart, budget.Declared, now)
 	if err != nil {
 		return PlanReading{}, err
 	}
@@ -442,7 +442,7 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 // simply vanishes from the total, which UNDER-reports consumption, the one
 // direction a consumption gauge must never fail in. Parsing every candidate
 // costs a scan of one person's rows and cannot lose one.
-func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc PlanDoc, since time.Time, sincePinned bool) (int64, float64, error) {
+func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc PlanDoc, since time.Time, sincePinned bool, now time.Time) (int64, float64, error) {
 	rows, err := g.db.QueryContext(ctx,
 		`SELECT c.usage_json, r.lane, c.created_ts FROM checkpoints c JOIN runs r ON r.run_id = c.run_id
 		  WHERE r.user_id = ?`, userID)
@@ -475,6 +475,14 @@ func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc 
 			continue
 		}
 		if sincePinned && !since.IsZero() && at.Before(since) {
+			continue
+		}
+		// The period has an UPPER bound too. Moving the filter into Go for the
+		// unreadable-stamp case dropped the one SQL was enforcing, and a
+		// future-dated row — a clock skew, a restored backup, a bad import —
+		// would then count against a period it does not belong to and inflate
+		// the current reading (drain r2 R2).
+		if !now.IsZero() && at.After(now) {
 			continue
 		}
 		factor, _ := doc.MultiplierAt(at)

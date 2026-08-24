@@ -13,7 +13,8 @@
       "total_runs": 6,
       "active_runs": 5,
       "parked_runs": 2,
-      "parked_until": null
+      "parked_until": null,
+      "tier": 1
     },
     {
       "owner": "op",
@@ -28,7 +29,8 @@
       "total_runs": 1,
       "active_runs": 1,
       "parked_runs": 0,
-      "parked_until": null
+      "parked_until": null,
+      "tier": 1
     },
     {
       "owner": "alice",
@@ -43,7 +45,8 @@
       "total_runs": 1,
       "active_runs": 1,
       "parked_runs": 0,
-      "parked_until": null
+      "parked_until": null,
+      "tier": 1
     },
     {
       "owner": "bob",
@@ -58,7 +61,23 @@
       "total_runs": 2,
       "active_runs": 2,
       "parked_runs": 2,
-      "parked_until": null
+      "parked_until": null,
+      "tier": 1,
+      "plan": {
+        "unit": "credits",
+        "tier": 3,
+        "assumed": true,
+        "assumed_note": "derived plan units: the plan publishes no per-request counter, so consumption is a request proxy with the documented multiplier applied",
+        "consumed": 3.5,
+        "calls": 5,
+        "multiplier": 0.5,
+        "multiplier_window": "off-peak",
+        "pressure": null,
+        "budget_declared": false,
+        "seed_allowance": 28000,
+        "seed_quota": "rolling-5h",
+        "verified_on": "2026-08-23"
+      }
     }
   ],
   "automation": {

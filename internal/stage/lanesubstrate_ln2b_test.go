@@ -10,18 +10,26 @@ package stage
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // laneAdapter is a $0 stand-in that reports the substrate it represents.
@@ -155,5 +163,187 @@ func TestLaneSubstrateMustHaveARegisteredAdapter(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "zai") || !strings.Contains(err.Error(), adapters.SubstrateOpencode) {
 		t.Errorf("the refusal does not name the lane and the substrate: %v", err)
+	}
+}
+
+// ── drain r2 R1: the guard belongs at the CALL SITES ────────────────────────
+//
+// substrateFor was already correct and already tested. What was wrong is that
+// two of the eight SessionInput construction sites never passed it the lane —
+// and they were the two fed by an EXECUTION-seat decision, the only duty that
+// ever seats a second lane. A test of the resolver in isolation cannot see a
+// dropped argument, so these drive the real call sites.
+
+// recordingAdapter reports which substrate dispatch actually reached. It never
+// starts an engine: the lookup and the Start call are the observation, and
+// failing immediately afterwards keeps the test at $0.
+type recordingAdapter struct {
+	name string
+	seen *[]string
+	mu   *sync.Mutex
+}
+
+func (a recordingAdapter) Substrate() string { return a.name }
+func (a recordingAdapter) Start(context.Context, adapters.StartRequest) (adapters.Session, error) {
+	a.mu.Lock()
+	*a.seen = append(*a.seen, a.name)
+	a.mu.Unlock()
+	return nil, errors.New("recording adapter starts no engine ($0)")
+}
+func (a recordingAdapter) Resume(context.Context, adapters.ParkRecord, *adapters.Answer) (adapters.Session, error) {
+	return nil, errors.New("recording adapter starts no engine ($0)")
+}
+
+type callSiteEnv struct {
+	sk   *Skeleton
+	db   *storage.DB
+	log  *eventlog.Log
+	runs *run.Store
+	seen []string
+	mu   sync.Mutex
+}
+
+func newCallSiteEnv(t *testing.T) *callSiteEnv {
+	t.Helper()
+	ctx := context.Background()
+	reg := settings.New()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	log := eventlog.New(db, reg)
+	runs := run.NewStore(db, log)
+	e := &callSiteEnv{db: db, log: log, runs: runs}
+	root := t.TempDir()
+	sk, err := New(Config{
+		DB: db, Log: log, Runs: runs, Checkpoints: gates.NewCheckpoints(db, log),
+		Ledger: ledger.NewStore(db, log), Settings: reg,
+		Substrate: adapters.SubstrateClaudeCLI, Lane: adapters.LaneAnthropic,
+		Adapters: map[string]adapters.Adapter{
+			adapters.SubstrateClaudeCLI: recordingAdapter{adapters.SubstrateClaudeCLI, &e.seen, &e.mu},
+			adapters.SubstrateOpencode:  recordingAdapter{adapters.SubstrateOpencode, &e.seen, &e.mu},
+		},
+		// The commissioned world: zai is served by opencode.
+		LaneSubstrates: map[string]string{adapters.LaneZAI: adapters.SubstrateOpencode},
+		ArtifactRoot:   filepath.Join(root, "artifacts"),
+		RunRoot:        filepath.Join(root, "runs"),
+	})
+	if err != nil {
+		t.Fatalf("stage.New: %v", err)
+	}
+	e.sk = sk
+	return e
+}
+
+// seedRun creates a coordinator run whose ROW says claude-cli/anthropic — the
+// stamp launchRole applies at creation, before routing has run.
+func (e *callSiteEnv) seedRun(t *testing.T, taskID string) run.Run {
+	t.Helper()
+	ctx := context.Background()
+	if err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO tasks (task_id, user_id, title, created_ts) VALUES (?, 'u1', 'call-site harness', ?)`,
+			taskID, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	runID := taskID + ".execute"
+	if _, err := e.runs.Create(ctx, run.NewRun{
+		ID: runID, UserID: "u1", TaskID: taskID,
+		Substrate: adapters.SubstrateClaudeCLI, Lane: adapters.LaneAnthropic,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+		if _, err := e.runs.Transition(ctx, runID, st, run.TransitionOptions{
+			Reason: "test admission", Actor: run.ActorPlatform}); err != nil {
+			t.Fatalf("admit: %v", err)
+		}
+	}
+	r, err := e.runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func (e *callSiteEnv) reached(t *testing.T) string {
+	t.Helper()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.seen) == 0 {
+		t.Fatal("no adapter was reached at all — the call site never dispatched")
+	}
+	return e.seen[len(e.seen)-1]
+}
+
+// R1 · The HELPER spawn call site forwards the decision's lane.
+func TestHelperSpawnDispatchesOnTheDecisionsLane(t *testing.T) {
+	for _, tc := range []struct{ lane, want string }{
+		{adapters.LaneZAI, adapters.SubstrateOpencode},
+		{adapters.LaneAnthropic, adapters.SubstrateClaudeCLI},
+	} {
+		t.Run(tc.lane, func(t *testing.T) {
+			e := newCallSiteEnv(t)
+			r := e.seedRun(t, "t-helper-"+tc.lane)
+			req := SpawnRequest{
+				RunID:   r.ID,
+				Trigger: TriggerParallel,
+				Reason:  "a lane-dispatch guard, not a real search",
+				Brief: HelperBrief{
+					Objective:      "Trawl the notes archive for entries about SQLite.",
+					OutputContract: "FINDINGS / EVIDENCE / GAPS",
+					Class:          "C1",
+					Tools:          []string{"read"},
+				},
+			}
+			decision := worker.Decision{Model: "some-model", Lane: tc.lane, WindowTokens: 200000}
+			// The helper session errors (the adapter starts nothing); the
+			// dispatch it made on the way is the assertion.
+			_, _ = e.sk.runHelper(context.Background(), r, req, decision, 1, 0)
+			if got := e.reached(t); got != tc.want {
+				t.Errorf("helper on lane %s reached the %q adapter, want %q — the spawn site dropped the decision's lane",
+					tc.lane, got, tc.want)
+			}
+		})
+	}
+}
+
+// R1 · The REVISE call site forwards the lane of the RECORDED S08.8 selection.
+func TestReviseDispatchesOnTheRecordedSelectionsLane(t *testing.T) {
+	for _, tc := range []struct{ lane, want string }{
+		{adapters.LaneZAI, adapters.SubstrateOpencode},
+		{adapters.LaneAnthropic, adapters.SubstrateClaudeCLI},
+	} {
+		t.Run(tc.lane, func(t *testing.T) {
+			e := newCallSiteEnv(t)
+			taskID := "t-revise-" + tc.lane
+			r := e.seedRun(t, taskID)
+			// The recorded execution selection this task's rework rides.
+			state := fmt.Sprintf(`{"routing":{"cause":"test","model":"some-model","lane":%q,"window_tokens":200000,"plain_reason":"seeded"}}`, tc.lane)
+			if _, err := e.log.Append(context.Background(), eventlog.Append{
+				RunID: r.ID, Generation: r.Generation, UserID: "u1",
+				Type: intake.EventState, SchemaVersion: 1,
+				Payload: json.RawMessage(state),
+			}); err != nil {
+				t.Fatalf("seed pipeline state: %v", err)
+			}
+
+			_, _ = e.sk.engineRevise(context.Background(), verify.RetryPackage{
+				Round: 1,
+				Deliverable: verify.Deliverable{
+					TaskID: taskID, RunID: r.ID,
+				},
+			})
+			if got := e.reached(t); got != tc.want {
+				t.Errorf("revise on lane %s reached the %q adapter, want %q — the revise site dropped the recorded selection's lane",
+					tc.lane, got, tc.want)
+			}
+		})
 	}
 }

@@ -675,9 +675,12 @@ func (s *Skeleton) engineRevise(ctx context.Context, pkg verify.RetryPackage) (v
 	// Rework regenerates the DELIVERABLE — it rides the task's recorded
 	// S08.8 selection (the execution seat), not the ceremony seat; absent a
 	// record (test posture) modelFor falls through as documented.
-	reviseModel, reviseWindow := "", int64(0)
+	// The lane rides along with the model: they are two halves of ONE recorded
+	// selection, and taking the model without it dispatches that model to
+	// whichever engine the run row was stamped with at creation (drain r2 R1).
+	reviseModel, reviseLane, reviseWindow := "", "", int64(0)
 	if st, err := s.pipe.LoadState(ctx, pkg.Deliverable.TaskID); err == nil && st.Routing != nil {
-		reviseModel, reviseWindow = st.Routing.Model, st.Routing.WindowTokens
+		reviseModel, reviseLane, reviseWindow = st.Routing.Model, st.Routing.Lane, st.Routing.WindowTokens
 	}
 	res, err := s.Session(ctx, SessionInput{
 		RunID:        pkg.Deliverable.RunID,
@@ -687,6 +690,7 @@ func (s *Skeleton) engineRevise(ctx context.Context, pkg verify.RetryPackage) (v
 		Kind:         markerRevise,
 		Class:        "C1",
 		Model:        reviseModel,
+		Lane:         reviseLane,
 		WindowTokens: reviseWindow,
 	})
 	if err != nil {

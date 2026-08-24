@@ -13,7 +13,8 @@
       "total_runs": 6,
       "active_runs": 5,
       "parked_runs": 2,
-      "parked_until": null
+      "parked_until": null,
+      "tier": 1
     },
     {
       "owner": "alice",
@@ -28,7 +29,8 @@
       "total_runs": 1,
       "active_runs": 1,
       "parked_runs": 0,
-      "parked_until": null
+      "parked_until": null,
+      "tier": 1
     }
   ],
   "automation": {

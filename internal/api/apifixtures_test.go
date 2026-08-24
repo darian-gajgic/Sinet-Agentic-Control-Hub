@@ -114,8 +114,35 @@ func (fixtureMeter) RunMeter(_ context.Context, runID string) (api.RunMeter, err
 	return api.RunMeter{}, os.ErrNotExist
 }
 
-func (fixtureMeter) LaneMeter(context.Context, string, string) (api.LaneMeter, error) {
-	return api.LaneMeter{WeightedConsumption: 12.5, CacheReadWeight: 0.1, Assumed: true}, nil
+func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter, error) {
+	m := api.LaneMeter{
+		WeightedConsumption: 12.5, CacheReadWeight: 0.1, Assumed: true,
+		// The tier of the token figures above: measured per-call usage.
+		Tier: 1,
+	}
+	// A flat-subscription lane also carries a tier-3 reading in the PLAN's own
+	// unit. It is populated for exactly one lane here so the committed body
+	// carries the shape both languages read — a member no fixture exercises is
+	// a contract neither side is held to.
+	//
+	// Pressure stays nil: no operator plan budget is declared in this world,
+	// and the denominator is Sinet's own budget and never the provider's
+	// published allowance (S10.4/D4), which rides along as seed provenance.
+	if lane == "zai" {
+		m.Plan = &api.LanePlanMeter{
+			Unit: "credits", Tier: 3, Assumed: true,
+			AssumedNote:      "derived plan units: the plan publishes no per-request counter, so consumption is a request proxy with the documented multiplier applied",
+			Consumed:         3.5,
+			Calls:            5,
+			Multiplier:       0.5,
+			MultiplierWindow: "off-peak",
+			BudgetDeclared:   false,
+			SeedAllowance:    28000,
+			SeedQuota:        "rolling-5h",
+			VerifiedOn:       "2026-08-23",
+		}
+	}
+	return m, nil
 }
 
 // fixtureWorld seeds the deterministic world the committed bodies are taken
