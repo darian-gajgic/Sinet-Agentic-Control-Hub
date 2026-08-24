@@ -337,3 +337,13 @@ The headline is *"a placed key = a routable lane."* Decomposed into what is conc
 **OQ2 — the store-root override.** `sinet broker --store-dir` can point the store somewhere the control plane's `<stateDir>/broker-store` derivation will never look. Accept the recommended file read with that stated limitation (the ceremony computes the same default), or spend the robustness budget on the socket dial and accept that a broker that is down at control-plane start silently uncommissions every lane? §5 recommends the former.
 
 **OQ3 — `live_smoke_test.go`'s mirrored predicate.** Once `internal/broker` exports the reader, the tier-L file's `placedEngineCreds`/`brokerStoreRoot` mirror becomes a second definition of the same thing. Reduce it to a call in this packet, or leave it and carry the duplication to the LN gate batch? Reducing it is cheap and is the whole argument for R3's recommended home.
+
+---
+
+## 10. Coordinator dispositions (appended 2026-08-24, before executor launch)
+
+**OQ1 — RATIFIED as the packet's reading, gate item preserved.** Key the map by the broker `who`. It is the only injection-consistent choice and the code clearly implies it: the broker derives socket name AND store directory from one `who` (`mode.go:43-54`), and `laneCredInjector` dials that socket — any other key breaks injection by construction. The R10 startup line makes the person strings visible. The household-era reconciliation (OS name vs `auth.User.ID` vs the `buildAcceptSurface` env read) is NOT settled by the spec and goes to the LN gate batch as an open item (checklist 24) — the executor must not invent a mapping.
+
+**OQ2 — FILE READ, as §5 recommends.** Startup commissioning must be deterministic and disk-truth-based: a startup-time socket probe that silently uncommissions every lane on a transient broker outage is the dishonest-absence failure class this platform refuses everywhere else. The `--store-dir` override limitation is stated in §65 as a recorded cost (the ceremony computes the same default; `StoreRoot(stateDir)` collapses the three definitions to one). If an override knob is ever wanted, that is an S00.9 amendment adding an S18 row — never minted here (R13).
+
+**OQ3 — REDUCE the tier-L mirror in this packet.** `live_smoke_test.go`'s `placedEngineCreds`/`brokerStoreRoot` mirror becomes a call into the exported reader. Sanctioned: same file this campaign already edits, and the duplication is exactly the drift R3's home choice exists to prevent. Constraint: tier-L behavior stays outcome-identical — same gates, same sanctioned-skip texts, proven by the before/after suite.
