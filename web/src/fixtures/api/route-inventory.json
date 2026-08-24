@@ -178,6 +178,11 @@
     },
     {
       "method": "POST",
+      "path": "/api/meters/plan-budget",
+      "session_required": true
+    },
+    {
+      "method": "POST",
       "path": "/api/meters/pause",
       "session_required": true
     },

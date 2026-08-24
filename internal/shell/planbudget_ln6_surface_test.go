@@ -255,9 +255,16 @@ func ln6Route(t *testing.T, r *worker.Router, taskID string) worker.Decision {
 func TestLN6CommissionedLaneWinsAndLosesOnConsumption(t *testing.T) {
 	// The two runs differ in NOTHING but consumption: same budgets, same
 	// coverage, same seats, same query.
+	//
+	// The figures are chosen so the outcome holds under EITHER of the zai
+	// plan's charging rates. The reading is taken at wall-clock time and the
+	// plan charges 1.0× inside its peak window and 0.5× outside it, so a
+	// margin narrower than 2× would make this test pass or fail by the hour.
+	// 18 calls put the loaded lane between 45% and 90% of its plan budget and
+	// the loaded token lane at 90%; 2 calls put either between 5% and 10%.
 	const (
-		tokenBudget = 20000
-		planBudget  = 1000
+		tokenBudget = 30000
+		planBudget  = 20
 	)
 	for _, tc := range []struct {
 		name           string
@@ -282,8 +289,14 @@ func TestLN6CommissionedLaneWinsAndLosesOnConsumption(t *testing.T) {
 				t.Fatalf("selection seated lane %q, want %q — between covered flat lanes the ordering input is "+
 					"CONSUMPTION PRESSURE (S08.8; D5: never dollars).\nreason: %s", d.Lane, tc.wantLane, d.PlainReason)
 			}
-			if !strings.Contains(d.PlainReason, "consumption pressure") {
-				t.Errorf("the reason does not record what the choice was made on: %q", d.PlainReason)
+			// "Chosen among" is emitted ONLY by the branch that actually
+			// compared two ratios. Asserting "consumption pressure" alone is
+			// not enough: the honest-absence branch says "no comparable
+			// consumption pressure", which contains it — so a reverted
+			// production reader would leave this direction green while proving
+			// the opposite of what it claims.
+			if !strings.Contains(d.PlainReason, "Chosen among") || !strings.Contains(d.PlainReason, "consumption pressure") {
+				t.Errorf("the reason does not record that two ratios were compared: %q", d.PlainReason)
 			}
 			if !strings.Contains(d.PlainReason, tc.wantLane) {
 				t.Errorf("the reason does not name the lane it chose: %q", d.PlainReason)

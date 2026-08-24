@@ -112,11 +112,12 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	// 0018 is B6-2C's (the BENCH-REG §2 direct-arm capture column) and 0019 is
 	// B6-3A's (the S10.3 price table's durable home), 0022 is P3-RW-3's
 	// (the pre-approval project-attribution view re-create), 0023 is
-	// P3-RW-7's (the onboarding arm on the same edge) and 0024 is P3-RW-11's
-	// (the capture's task family).
+	// P3-RW-7's (the onboarding arm on the same edge), 0024 is P3-RW-11's
+	// (the capture's task family) and 0025 is P3-LN-6's (the S10.4 plan-unit
+	// automation budget, per (person, lane, window)).
 	// A floor would let an unnoticed migration slip in.
-	if v != 24 {
-		t.Fatalf("user_version = %d, want 24 (migrations through 0024 applied contiguously)", v)
+	if v != 25 {
+		t.Fatalf("user_version = %d, want 25 (migrations through 0025 applied contiguously)", v)
 	}
 	var n int
 	if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM conformance_registry`).Scan(&n); err != nil {

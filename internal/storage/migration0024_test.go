@@ -25,6 +25,26 @@ import (
 // migrateThrough applies the committed migration files up to and including
 // version `through`, exactly as the runner does (one transaction each, with its
 // own user_version bump), leaving the database at that older schema.
+// migrationCount is how many migration files the tree ships — the version a
+// full Migrate leaves behind.
+func migrationCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join("migrations"))
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	n := 0
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") {
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatal("no migration files found — a count derived from nothing would pin nothing")
+	}
+	return n
+}
+
 func migrateThrough(t *testing.T, db *storage.DB, through int) {
 	t.Helper()
 	ctx := context.Background()
@@ -96,11 +116,16 @@ func TestMigration0024Additive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate to 0024: %v", err)
 	}
-	if applied != 1 {
-		t.Fatalf("Migrate applied %d migrations, want exactly 1 (0024)", applied)
+	// 0024 is the first migration this run applies, and every later packet's
+	// rides behind it. The count is READ from the tree rather than written
+	// down, so the pin stays EXACT as later migrations land instead of rotting
+	// into an inequality (§63/§64: exact numbers, never floors).
+	head := migrationCount(t)
+	if want := head - 23; applied != want {
+		t.Fatalf("Migrate applied %d migrations, want exactly %d (0024 and every later packet's)", applied, want)
 	}
-	if v, err := db.UserVersion(ctx); err != nil || v != 24 {
-		t.Fatalf("user_version = %d err=%v, want 24", v, err)
+	if v, err := db.UserVersion(ctx); err != nil || v != head {
+		t.Fatalf("user_version = %d err=%v, want %d", v, err, head)
 	}
 
 	// The old row reads back honest absence, never NULL and never a guess.

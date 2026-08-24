@@ -12,16 +12,19 @@ import (
 )
 
 // meters_verbs.go — the S10.4 meters MUTATIONS (P3-B6-2B): the budget edit, the
-// pause-my-automation switch, and the S15.5 board-drag priority hint.
+// pause-my-automation switch, and the S15.5 board-drag priority hint. Joined at
+// P3-LN-6 by the PLAN-budget declaration — the same act for a lane whose plan
+// meters in its own units, at the (person, lane, window) grain those units need.
 //
 // The rule meters.go is built around holds here unchanged and is the reason this
 // file is separate from it: NO MONEY IS COMPUTED IN internal/api. A budget is
-// declared in the S10.4 gauge's OWN unit — weighted-consumption units — and
-// never in dollars, because a flat-rate lane has no per-token price and
-// budgeting one in currency is the D5 inversion the metering layer exists to
-// prevent. Nothing in this file multiplies, prices, or converts anything.
+// declared in its GAUGE'S OWN unit — weighted-consumption units for the token
+// gauge, the window's own plan unit for the tier-3 one — and never in dollars,
+// because a flat-rate lane has no per-token price and budgeting one in currency
+// is the D5 inversion the metering layer exists to prevent. Nothing in this file
+// multiplies, prices, or converts anything.
 //
-// All three verbs are control-plane-internal state acts (R22): none performs an
+// All four verbs are control-plane-internal state acts (R22): none performs an
 // outward effect, and none is reachable except through an authenticated
 // session (§9). The pause verb in particular PARKS and stops admitting — it
 // never cancels anything, and it touches no cancel entry point.
@@ -84,7 +87,7 @@ type PlanBudgetRecord struct {
 	// it was taken from and what share of it. Absent on an operator-set row,
 	// and never an input to any arithmetic.
 	SeededFrom string    `json:"seeded_from,omitempty"`
-	Fraction   float64   `json:"fraction,omitempty"`
+	Fraction   float64   `json:"seed_share,omitempty"`
 	DeclaredTS time.Time `json:"declared_ts"`
 	DeclaredBy string    `json:"declared_by"`
 }
@@ -331,6 +334,199 @@ type PlanBudgetDeclared struct {
 	Budget PlanBudgetRecord  `json:"budget"`
 	Prior  *PlanBudgetRecord `json:"prior,omitempty"`
 	Detail string            `json:"detail"`
+}
+
+func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request) {
+	if !s.projReady(w) {
+		return
+	}
+	if s.planBudgets == nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
+			Msg: "the S10.4 plan-budget store is not wired in this process"})
+		return
+	}
+	raw, ok := s.readBody(w, r)
+	if !ok {
+		return
+	}
+	var body planBudgetBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_body", Msg: err.Error()})
+		return
+	}
+	scope := s.readScope(r)
+	// The same authority as the token budget (OQ4): own + operator-any, with
+	// every declaration recording its actor either way.
+	owner := strings.TrimSpace(body.Person)
+	if owner == "" {
+		owner = scope.UserID
+	}
+	if owner != scope.UserID && !scope.Operator {
+		s.writeSurface(w, nil, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
+			Msg: "declaring another person's automation budget is the operator's (S15.2 \"budget edits (own)\"; D10)"})
+		return
+	}
+	if !s.requirePerson(w, r, owner) {
+		return
+	}
+	lane := strings.TrimSpace(body.Lane)
+	window := strings.TrimSpace(body.Window)
+	switch {
+	case lane == "":
+		s.writeSurface(w, nil, badRequest(`missing "lane": a plan budget is declared per (person, lane, window) — the grain the tier-3 reading denominates at (S18.3)`))
+		return
+	case window == "":
+		s.writeSurface(w, nil, badRequest(`missing "window": a plan's windows are separate allowances in possibly different units, so a budget for "the lane" is a budget in no particular unit`))
+		return
+	}
+	// The window must be one the LANE's own plan declares, and that is a
+	// question about this request's input — so it is answered here, at the
+	// boundary that admits it (CONVENTIONS §30). internal/api cannot see a plan
+	// document, so the seam hands over the lane's declared windows (§11).
+	windows, err := s.planBudgets.PlanWindows(r.Context(), lane)
+	if err != nil {
+		s.writeSurface(w, nil, fmt.Errorf("read plan windows: %w", err))
+		return
+	}
+	if len(windows) == 0 {
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+			"lane %q meters in no plan units, so it has no plan budget to declare. Its automation budget is the "+
+				"weighted-consumption one (POST /api/meters/budget)", lane)))
+		return
+	}
+	declared, ok := planWindowNamed(windows, window)
+	if !ok {
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+			"lane %q declares no window %q. Its windows are: %s", lane, window, planWindowNames(windows))))
+		return
+	}
+	now := time.Now().UTC()
+	start := now
+	if v := strings.TrimSpace(body.PeriodStart); v != "" {
+		t, perr := time.Parse(time.RFC3339, v)
+		if perr != nil {
+			s.writeSurface(w, nil, badRequest(fmt.Sprintf("bad period_start %q: want an RFC3339 timestamp", v)))
+			return
+		}
+		start = t.UTC()
+	}
+
+	var rec PlanBudgetRecord
+	if body.FromProposal {
+		if declared.AllowanceUnverified {
+			// There is nothing to take a fraction OF. Proposing from a window
+			// whose allowance nobody published would mint the denominator out
+			// of thin air, which is worse than having none: an operator would
+			// accept a number that looks sourced (S10.4/D4). It is the caller's
+			// answer, not a platform fault.
+			s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+				"lane %q publishes no allowance for window %q at primary-source grade, so no budget can be proposed "+
+					"from it — declare a figure from your own account console instead (P-T17-3)", lane, window)))
+			return
+		}
+		proposed, perr := s.planBudgets.ProposePlanBudget(r.Context(), owner, lane, window, start)
+		if perr != nil {
+			s.writeSurface(w, nil, fmt.Errorf("propose plan budget: %w", perr))
+			return
+		}
+		rec = proposed
+		rec.DeclaredTS, rec.DeclaredBy = now, scope.UserID
+	} else {
+		switch {
+		case body.PeriodUnits <= 0:
+			s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+				`bad "period_units" %v: a plan budget is a positive figure in %s, this window's own unit. To take the `+
+					`platform's proposal instead, send {"from_proposal": true}. To stop automation entirely, pause it `+
+					`(POST /api/meters/pause)`, body.PeriodUnits, declared.Unit)))
+			return
+		case body.PeriodHours <= 0:
+			s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+				`bad "period_hours" %v: a period is a start plus a length, and this window is %v hours long`,
+				body.PeriodHours, declared.WindowHours)))
+			return
+		}
+		rec = PlanBudgetRecord{
+			Owner: owner, Lane: lane, Window: window,
+			PeriodUnits: body.PeriodUnits, Unit: declared.Unit,
+			PeriodStart: start, PeriodHours: body.PeriodHours,
+			Source:     planBudgetOperatorSet,
+			DeclaredTS: now, DeclaredBy: scope.UserID,
+		}
+	}
+
+	prior, existed, err := s.planBudgets.DeclarePlanBudget(r.Context(), rec)
+	if err != nil {
+		s.writeSurface(w, nil, fmt.Errorf("declare plan budget: %w", err))
+		return
+	}
+	// The audit row lands AFTER the store act (the part-A drain-D6 principle): a
+	// record of an edit that never committed would be a record of something that
+	// did not happen.
+	out := PlanBudgetDeclared{Budget: rec,
+		Detail: fmt.Sprintf("declared: the S10.4 tier-3 reading measures this person's %s consumption in the %s window "+
+			"against it immediately, in %s. Nothing is enforced by it — it is what makes the lane's pressure comparable "+
+			"when routing picks between flat-rate lanes (S08.8)", lane, window, rec.Unit)}
+	if existed {
+		out.Prior = &prior
+	}
+	if err := s.recordDecision(r.Context(), decisionPayload{
+		Actor: scope.UserID, ActorIsOperator: scope.Operator,
+		CardID:   cardTypePlanBudget + ":" + owner + ":" + lane + ":" + window,
+		CardType: cardTypePlanBudget,
+		Decision: "declare", Subject: owner + ":" + lane + ":" + window, Reason: body.Reason,
+		Old: planBudgetSnapshot(prior, existed), New: planBudgetSnapshot(rec, true),
+		Ref: "S10.4 operator-declared automation budget, in the plan's own units; S18.3 per-person automation budgets",
+	}, owner, now); err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	s.writeReadJSON(w, out)
+}
+
+// planBudgetOperatorSet is the provenance of a figure the operator declared
+// themselves, as this transport speaks it. The vocabulary itself is the store's
+// and is CHECK-constrained there; this is the one value the verb produces.
+const planBudgetOperatorSet = "operator-set"
+
+func planWindowNamed(windows []PlanWindowRecord, name string) (PlanWindowRecord, bool) {
+	for _, w := range windows {
+		if w.Name == name {
+			return w, true
+		}
+	}
+	return PlanWindowRecord{}, false
+}
+
+func planWindowNames(windows []PlanWindowRecord) string {
+	names := make([]string, 0, len(windows))
+	for _, w := range windows {
+		names = append(names, fmt.Sprintf("%q (in %s, over %v hours)", w.Name, w.Unit, w.WindowHours))
+	}
+	return strings.Join(names, ", ")
+}
+
+// planBudgetSnapshot renders one side of the old→new audit. An absent prior is
+// the explicit "undeclared" object rather than a missing member: "there was no
+// budget" is a fact about the edit, not a gap in the record.
+func planBudgetSnapshot(rec PlanBudgetRecord, declared bool) json.RawMessage {
+	if !declared {
+		return json.RawMessage(`{"declared":false}`)
+	}
+	b, err := json.Marshal(struct {
+		Declared    bool    `json:"declared"`
+		Lane        string  `json:"lane"`
+		Window      string  `json:"window"`
+		PeriodUnits float64 `json:"period_units"`
+		Unit        string  `json:"unit"`
+		PeriodStart string  `json:"period_start"`
+		PeriodHours float64 `json:"period_hours"`
+		Source      string  `json:"source"`
+	}{true, rec.Lane, rec.Window, rec.PeriodUnits, rec.Unit,
+		rec.PeriodStart.UTC().Format(time.RFC3339Nano), rec.PeriodHours, rec.Source})
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // ── POST /api/meters/pause — pause / resume my automation ───────────────────

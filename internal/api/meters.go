@@ -104,9 +104,12 @@ type MeterPlanBudget struct {
 	PeriodHours float64 `json:"period_hours,omitempty"`
 	Source      string  `json:"source"`
 	// SeededFrom / Fraction are the proposal provenance, absent on a row the
-	// operator set themselves.
+	// operator set themselves. The wire name is `seed_share` rather than a bare
+	// `fraction`: this is the share of the PUBLISHED ALLOWANCE a proposal took,
+	// and a bare `fraction` on a read shape is a progress key by every other
+	// reading in this codebase (§30 R10 bans it by name).
 	SeededFrom string  `json:"seeded_from,omitempty"`
-	Fraction   float64 `json:"fraction,omitempty"`
+	Fraction   float64 `json:"seed_share,omitempty"`
 	DeclaredBy string  `json:"declared_by"`
 	DeclaredTS string  `json:"declared_ts,omitempty"`
 }
@@ -362,6 +365,7 @@ func (p *projector) meterLanes(ctx context.Context, scope ownerScope, person, la
 						Consumed: m.Plan.Consumed, Calls: m.Plan.Calls,
 						Multiplier: m.Plan.Multiplier, MultiplierWindow: m.Plan.MultiplierWindow,
 						Pressure: m.Plan.Pressure, BudgetDeclared: m.Plan.BudgetDeclared,
+						Budget:        meterPlanBudget(m.Plan.Budget),
 						SeedAllowance: m.Plan.SeedAllowance, SeedQuota: m.Plan.SeedQuota,
 						VerifiedOn: m.Plan.VerifiedOn,
 						Windows:    meterPlanWindows(m.Plan.Windows),

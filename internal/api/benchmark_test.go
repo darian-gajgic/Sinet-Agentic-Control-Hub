@@ -650,8 +650,8 @@ func TestPartCCountersArePinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 24 {
-		t.Errorf("user_version = %d, want 24 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's, 0020 is B6-7's, 0021 is B6-9's, 0022 is P3-RW-3's, 0023 is P3-RW-7's, 0024 is P3-RW-11's)", v)
+	if v != 25 {
+		t.Errorf("user_version = %d, want 25 (0001–0017 untouched, 0018 is this packet's, 0019 is B6-3A's, 0020 is B6-7's, 0021 is B6-9's, 0022 is P3-RW-3's, 0023 is P3-RW-7's, 0024 is P3-RW-11's, 0025 is P3-LN-6's)", v)
 	}
 	// 0018 is the ONLY migration this packet adds; 0019 is B6-3A's (the S10.3
 	// price table's durable home) and moves this sentinel in lockstep, as do
@@ -663,8 +663,8 @@ func TestPartCCountersArePinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range sqls {
-		if filepath.Base(p) > "0024_zzz" {
-			t.Errorf("unexpected migration %q — part C adds exactly 0018, B6-3A exactly 0019, B6-7 exactly 0020, P3-RW-3 exactly 0022, P3-RW-7 exactly 0023 and P3-RW-11 exactly 0024", filepath.Base(p))
+		if filepath.Base(p) > "0025_zzz" {
+			t.Errorf("unexpected migration %q — part C adds exactly 0018, B6-3A exactly 0019, B6-7 exactly 0020, P3-RW-3 exactly 0022, P3-RW-7 exactly 0023, P3-RW-11 exactly 0024 and P3-LN-6 exactly 0025", filepath.Base(p))
 		}
 	}
 }

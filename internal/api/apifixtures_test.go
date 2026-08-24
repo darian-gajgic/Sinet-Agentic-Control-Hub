@@ -84,6 +84,12 @@ const (
 	fxT4 = "2026-07-20T09:04:00Z"
 )
 
+// fxZAIPlanBudget is the fixture world's declared plan budget on the zai lane:
+// half the published 28 000-credit rolling allowance, which is what the S10.4
+// proposal offers. It is named rather than repeated so the body's `pressure`
+// and its `budget.period_units` cannot drift apart.
+const fxZAIPlanBudget = 14000.0
+
 // fixtureMeter is the metering seam for the fixture world. It answers a per-run
 // figure so the card face carries a real cost, and it produces BOTH honest nils
 // the views have to render without turning either into a zero (§37):
@@ -154,6 +160,15 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 		return m, nil
 	}
 	if lane == "zai" {
+		// The DECLARED shape (P3-LN-6). A plan budget is what makes a plan
+		// lane's pressure comparable at all, so the committed body has to carry
+		// one somewhere or neither language is held to the member — and the
+		// undeclared shape stays exercised on the kimi lane above. The
+		// denominator is the operator's own figure, seeded from the published
+		// allowance at ⚙ budget.background_window_fraction and never equal to
+		// it (S10.4/D4), so `pressure` here is 3.5 ÷ 14000 and emphatically not
+		// 3.5 ÷ 28000.
+		pressure := 3.5 / fxZAIPlanBudget
 		m.Plan = &api.LanePlanMeter{
 			Unit: "credits", Tier: 3, Assumed: true,
 			AssumedNote:      "derived plan units: the plan publishes no per-request counter, so consumption is a request proxy with the documented multiplier applied",
@@ -161,10 +176,17 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 			Calls:            5,
 			Multiplier:       0.5,
 			MultiplierWindow: "off-peak",
-			BudgetDeclared:   false,
-			SeedAllowance:    28000,
-			SeedQuota:        "rolling-5h",
-			VerifiedOn:       "2026-08-23",
+			Pressure:         &pressure,
+			BudgetDeclared:   true,
+			Budget: &api.LanePlanBudget{
+				PeriodUnits: fxZAIPlanBudget, Unit: "credits", Window: "rolling-5h",
+				PeriodStart: fxT0, PeriodHours: 5,
+				Source: "proposal-seeded", SeededFrom: "rolling-5h", Fraction: 0.5,
+				DeclaredBy: "bob", DeclaredTS: fxT0,
+			},
+			SeedAllowance: 28000,
+			SeedQuota:     "rolling-5h",
+			VerifiedOn:    "2026-08-23",
 			// The declared windows, each with its own unit. Populated here for
 			// the same reason the plan block itself is: a member no fixture
 			// exercises is a contract neither language is held to.

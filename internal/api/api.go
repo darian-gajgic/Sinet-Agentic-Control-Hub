@@ -615,6 +615,7 @@ func (s *Server) Handler() http.Handler {
 	// owner-scoped server-side, fail-closed, no direct outward effect, no
 	// version prefix (S15.2 additive-first).
 	protected("POST /api/meters/budget", s.handleBudgetDeclare)
+	protected("POST /api/meters/plan-budget", s.handlePlanBudgetDeclare)
 	protected("POST /api/meters/pause", s.handlePauseSet)
 	protected("POST /api/tasks/{task}/priority-hint", s.handlePriorityHint)
 	protected("POST /api/watchdog/flags/suppress", s.handleFlagSuppress)

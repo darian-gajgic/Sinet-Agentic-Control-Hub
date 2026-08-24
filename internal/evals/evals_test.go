@@ -33,10 +33,11 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	// B6-2C's (the BENCH-REG §2 direct-arm capture column), 0019 is B6-3A's
 	// (the S10.3 price table's durable home), 0022 is P3-RW-3's (the
 	// pre-approval project-attribution view re-create), 0023 is P3-RW-7's
-	// (the onboarding arm on the same edge) and 0024 is P3-RW-11's (the
-	// capture's task family). A floor would let an unnoticed migration slip in.
-	if v != 24 {
-		t.Fatalf("user_version = %d, want 24 (migrations through 0024 applied contiguously)", v)
+	// (the onboarding arm on the same edge), 0024 is P3-RW-11's (the
+	// capture's task family) and 0025 is P3-LN-6's (the S10.4 plan-unit
+	// automation budget). A floor would let an unnoticed migration slip in.
+	if v != 25 {
+		t.Fatalf("user_version = %d, want 25 (migrations through 0025 applied contiguously)", v)
 	}
 	for _, table := range []string{"eval_floors", "revalidation_stamps"} {
 		var n int

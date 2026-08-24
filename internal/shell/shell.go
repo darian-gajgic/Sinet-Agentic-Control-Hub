@@ -311,6 +311,11 @@ func Run(ctx context.Context, opts Options) error {
 	// HTTP verbs — and a store that some of them had and others did not would be
 	// a switch that half-worked.
 	budgetStore := metering.NewBudgets(db)
+	// The tier-3 sibling (migration 0025, P3-LN-6), composed unconditionally
+	// for the same reason: the router, the meters read and the declaration verb
+	// must read ONE store, and a process where only some of them had it would
+	// route against a denominator its own meter denies.
+	planBudgetStore := metering.NewPlanBudgets(db)
 	pauseStore := metering.NewPause(db)
 	// The S10.3 price table, made durable at migration 0019 (B6-3A). Composed
 	// unconditionally for the budget store's reason: the pricing path and the
@@ -338,7 +343,8 @@ func Run(ctx context.Context, opts Options) error {
 	if admission == nil {
 		exceptions := metering.NoMeteredExceptions()
 		meterLedger := metering.NewLedger(db, priceTable, exceptions, reg)
-		meterReader = projMeter{ledger: meterLedger, gauge: metering.NewPressureGauge(db, reg), budgets: budgetStore}
+		meterReader = projMeter{ledger: meterLedger, gauge: metering.NewPressureGauge(db, reg),
+			budgets: budgetStore, planBudgets: planBudgetStore}
 		// The S11 composer probes the host once at startup (probe-at-
 		// compose, S16.3) and logs the result. ENGINE spawns run through it
 		// only OUTSIDE dev posture: a confined engine holds a credential
@@ -602,7 +608,7 @@ func Run(ctx context.Context, opts Options) error {
 			Utility:        localSurf.Utility,
 			Phraser:        localSurf.Phraser,
 			SpotCheck:      localSurf.SpotCheck,
-			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg), b: metering.NewBudgets(db)},
+			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg), b: budgetStore, pb: planBudgetStore},
 			// The flat-rate lanes beyond the configured one: the lanes an
 			// operator has actually placed a credential for (corrected
 			// 2026-08-24, P3-LN-4 — this used to be empty by construction).
@@ -974,11 +980,15 @@ func Run(ctx context.Context, opts Options) error {
 		// board drag, and the two oversight verbs over landed internals. wd is
 		// nil under injected admission, which leaves the suppress route at 503
 		// rather than pretending a watchdog is running.
-		Budgets:  budgetAdapter{b: budgetStore},
-		Pause:    pauseStore,
-		Hints:    hintSurface,
-		Watchdog: watchdogSuppressSeam(wd),
-		Resume:   resumeSurface,
+		Budgets: budgetAdapter{b: budgetStore},
+		// The S10.4 PLAN budget (P3-LN-6): the (person, lane, window) denominator
+		// for a lane whose plan meters in its own units, plus the gauge the
+		// proposal is derived through.
+		PlanBudgets: planBudgetAdapter{pb: planBudgetStore, gauge: metering.NewPressureGauge(db, reg)},
+		Pause:       pauseStore,
+		Hints:       hintSurface,
+		Watchdog:    watchdogSuppressSeam(wd),
+		Resume:      resumeSurface,
 		// The B6-2C verdict backend (benchmark_verbs.go): the blind form, the
 		// §3.3 one-act verdict, the §4.2.5 decline, the §12 alarm disposition
 		// and the §4.2.1 consent flip. nil under injected admission, which
@@ -1563,9 +1573,15 @@ func memoryCitedEntryVersions(s *memory.Store) func(ctx context.Context, keys []
 
 // routePressure adapts the S10.4 consumption-pressure gauge to the S08.8
 // flat-lane ordering seam (D5: among flat-rate lanes selection uses
-// consumption pressure, never dollars). Dev-mode budget posture is
-// undeclared (S10.4), under which the weighted consumption itself is the
-// comparable figure.
+// consumption pressure, never dollars).
+//
+// Both readings denominate against an operator-DECLARED budget — tokens from
+// the 0017 store, plan units from the 0025 one — and both report
+// Applicable=false when none is declared, at which point selection keeps its
+// deterministic order. (Corrected 2026-08-25, P3-LN-6: this comment used to say
+// an undeclared posture made "the weighted consumption itself the comparable
+// figure", which stopped being true at §63 D3 — a raw lifetime total is not a
+// ratio and comparing one across lanes compares a token against a credit.)
 type routePressure struct {
 	g *metering.PressureGauge
 	b *metering.Budgets
@@ -1586,10 +1602,11 @@ type routePressure struct {
 // than comparing two raw, unbounded and mutually meaningless totals.
 func (p routePressure) Pressure(ctx context.Context, owner, lane string) (worker.LanePressure, error) {
 	if doc, ok := metering.PlanDocFor(lane); ok {
-		// No plan-budget surface exists yet, so this is honestly undeclared;
-		// the 13.4 surface is where an operator will declare one from the
-		// document's own proposal (metering.ProposePlanBudget).
-		r, err := p.g.ReadPlanUnits(ctx, owner, lane, doc, metering.UndeclaredPlanBudget(), time.Now())
+		// The denominator is what the operator DECLARED for this lane's windows,
+		// read from the store the plan-budget verb writes (P3-LN-6). With none
+		// declared the reading says so and selection falls to its deterministic
+		// order — which is what happens on a host where nobody has declared one.
+		r, _, err := bindingPlanReading(ctx, p.g, p.pb, owner, lane, doc, time.Now())
 		if err != nil {
 			return worker.LanePressure{}, err
 		}
@@ -1664,6 +1681,32 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 	return best, window, nil
 }
 
+// planBudgetRowFor renders the declaration that BOUND a lane's reading, for the
+// meters surface. It converts and nothing else: the unit stays the window's own
+// on both sides, and nothing here multiplies, prices or rescales anything (D5).
+// A window with no row renders nothing, which is how an undeclared lane serves
+// exactly the bytes it served before this member existed.
+func planBudgetRowFor(ctx context.Context, pb *metering.PlanBudgets, userID, lane, window string) (*api.LanePlanBudget, error) {
+	rows, err := pb.Rows(ctx, userID, lane)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.Window != window {
+			continue
+		}
+		return &api.LanePlanBudget{
+			PeriodUnits: row.PeriodUnits, Unit: row.Unit, Window: row.Window,
+			PeriodStart: row.PeriodStart.UTC().Format(time.RFC3339Nano),
+			PeriodHours: row.PeriodHours,
+			Source:      row.Source, SeededFrom: row.SeededFrom, Fraction: row.Fraction,
+			DeclaredBy: row.DeclaredBy,
+			DeclaredTS: row.DeclaredTS.UTC().Format(time.RFC3339Nano),
+		}, nil
+	}
+	return nil, nil
+}
+
 // budgetAdapter adapts the S10.4 budget store to the api.BudgetStore seam
 // (B6-2B). The transport speaks its own record type so internal/api never
 // imports internal/metering — the same wall projMeter keeps below, for the same
@@ -1697,6 +1740,92 @@ func budgetRecord(row metering.BudgetRow) api.BudgetRecord {
 	return api.BudgetRecord{
 		Owner: row.UserID, Lane: row.Lane, PeriodTokens: row.PeriodTokens,
 		PeriodStart: row.PeriodStart, PeriodDays: row.PeriodDays,
+		DeclaredTS: row.DeclaredTS, DeclaredBy: row.DeclaredBy,
+	}
+}
+
+// planBudgetAdapter adapts the S10.4 PLAN budget store to the
+// api.PlanBudgetStore seam (P3-LN-6), on the budgetAdapter precedent above and
+// for the same reason: internal/api never imports internal/metering, and it
+// cannot see a plan document at all (§11).
+//
+// It converts and nothing else. The unit stays the WINDOW's own unit on both
+// sides, and nothing here multiplies, prices or rescales anything — a plan unit
+// is never a dollar (D5).
+type planBudgetAdapter struct {
+	pb    *metering.PlanBudgets
+	gauge *metering.PressureGauge
+}
+
+func (a planBudgetAdapter) DeclarePlanBudget(ctx context.Context, rec api.PlanBudgetRecord) (api.PlanBudgetRecord, bool, error) {
+	prior, existed, err := a.pb.Declare(ctx, metering.PlanBudgetRow{
+		UserID: rec.Owner, Lane: rec.Lane, Window: rec.Window,
+		PeriodUnits: rec.PeriodUnits, Unit: rec.Unit,
+		PeriodStart: rec.PeriodStart, PeriodHours: rec.PeriodHours,
+		Source: rec.Source, SeededFrom: rec.SeededFrom, Fraction: rec.Fraction,
+		DeclaredTS: rec.DeclaredTS, DeclaredBy: rec.DeclaredBy,
+	})
+	if err != nil {
+		return api.PlanBudgetRecord{}, false, err
+	}
+	return planBudgetRecord(prior), existed, nil
+}
+
+func (a planBudgetAdapter) PlanBudget(ctx context.Context, userID, lane, window string) (api.PlanBudgetRecord, bool, error) {
+	row, ok, err := a.pb.Row(ctx, userID, lane, window)
+	if err != nil || !ok {
+		return api.PlanBudgetRecord{}, false, err
+	}
+	return planBudgetRecord(row), true, nil
+}
+
+// PlanWindows hands the boundary the lane's own declared windows, which is what
+// lets the verb refuse an unknown window name as INPUT (400) rather than as a
+// store defect (500) — CONVENTIONS §30. A lane with no plan document declares
+// no windows, and that is an empty list rather than an error.
+func (a planBudgetAdapter) PlanWindows(_ context.Context, lane string) ([]api.PlanWindowRecord, error) {
+	doc, ok := metering.PlanDocFor(lane)
+	if !ok {
+		return nil, nil
+	}
+	out := make([]api.PlanWindowRecord, 0, len(doc.Quotas))
+	for _, q := range doc.Quotas {
+		out = append(out, api.PlanWindowRecord{
+			Name: q.Name, Unit: doc.QuotaUnit(q.Name), WindowHours: q.WindowHours,
+			Allowance: q.Units, AllowanceUnverified: q.AllowanceUnverified,
+		})
+	}
+	return out, nil
+}
+
+// ProposePlanBudget is the production consumer the ratified LN-2B proposal had
+// never had: the published allowance at ⚙ budget.background_window_fraction, in
+// the window's own unit, offered for an operator to declare. The actor and the
+// declaration timestamp are the transport's and are filled by the verb.
+func (a planBudgetAdapter) ProposePlanBudget(_ context.Context, userID, lane, window string, start time.Time) (api.PlanBudgetRecord, error) {
+	doc, ok := metering.PlanDocFor(lane)
+	if !ok {
+		return api.PlanBudgetRecord{}, fmt.Errorf("shell: lane %q has no plan document to propose from", lane)
+	}
+	budget, err := a.gauge.ProposePlanBudget(doc, window, start)
+	if err != nil {
+		return api.PlanBudgetRecord{}, err
+	}
+	return api.PlanBudgetRecord{
+		Owner: userID, Lane: lane, Window: window,
+		PeriodUnits: budget.PeriodUnits, Unit: doc.QuotaUnit(window),
+		PeriodStart: budget.PeriodStart, PeriodHours: budget.PeriodHours,
+		Source:     metering.PlanBudgetProposalSeeded,
+		SeededFrom: budget.SeededFrom, Fraction: budget.Fraction,
+	}, nil
+}
+
+func planBudgetRecord(row metering.PlanBudgetRow) api.PlanBudgetRecord {
+	return api.PlanBudgetRecord{
+		Owner: row.UserID, Lane: row.Lane, Window: row.Window,
+		PeriodUnits: row.PeriodUnits, Unit: row.Unit,
+		PeriodStart: row.PeriodStart, PeriodHours: row.PeriodHours,
+		Source: row.Source, SeededFrom: row.SeededFrom, Fraction: row.Fraction,
 		DeclaredTS: row.DeclaredTS, DeclaredBy: row.DeclaredBy,
 	}
 }
@@ -1786,10 +1915,11 @@ func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.Lane
 	// them: they are different quantities in different units at different
 	// tiers (S10.1).
 	if doc, ok := metering.PlanDocFor(lane); ok {
-		// No plan-budget surface exists yet, so the budget is honestly
-		// undeclared and the reading reports consumption without claiming a
-		// pressure. The denominator is never the provider's allowance (D4).
-		pr, perr := m.gauge.ReadPlanUnits(ctx, userID, lane, doc, metering.UndeclaredPlanBudget(), time.Now())
+		// Against the SAME declared rows the router reads, through the same
+		// aggregation. A hardcoded undeclared read here would make this surface
+		// contradict the routing decision beside it (P3-LN-6 R6, the drain-D2
+		// self-contradiction the token path documents against itself above).
+		pr, window, perr := bindingPlanReading(ctx, m.gauge, m.planBudgets, userID, lane, doc, time.Now())
 		if perr != nil {
 			return api.LaneMeter{}, perr
 		}
@@ -1813,6 +1943,15 @@ func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.Lane
 		if pr.Applicable {
 			p := pr.Pressure
 			plan.Pressure = &p
+		}
+		// The declaration the pressure was measured against, so a person reading
+		// their own meter can see the denominator rather than take it on trust.
+		if window != "" {
+			row, perr := planBudgetRowFor(ctx, m.planBudgets, userID, lane, window)
+			if perr != nil {
+				return api.LaneMeter{}, perr
+			}
+			plan.Budget = row
 		}
 		lm.Plan = plan
 	}
