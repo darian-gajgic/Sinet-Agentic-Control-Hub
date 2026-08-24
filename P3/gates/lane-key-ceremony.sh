@@ -20,6 +20,11 @@
 # Steps: preflight  zai-key  kimi-key  smoke  kimi-wire  zai-calibration
 #        model-list  summary
 #
+# WHERE IT WRITES. This host's own broker store by default: ~/.local/state/sinet
+# under the OS user. STATE_DIRECTORY moves the state root and SINET_CEREMONY_USER
+# moves the person — which is how P3/gates/lane-test-door.sh points the ceremony
+# at a throwaway world and at the person you sign into that world as.
+#
 # SECRET POSTURE. A key is read with `read -rs` (never shown), handed to the
 # placement tool on STDIN through a shell builtin, and unset immediately. It
 # never reaches a command line, an environment variable, a log, this script's
@@ -63,7 +68,16 @@ state_dir() {
   else printf '%s' "$HOME/.local/state/sinet"; fi
 }
 STORE_ROOT="$(state_dir)/broker-store"
-STORE_USER="$(id -un)"
+# The PERSON this ceremony writes under. The OS user is the right default: at a
+# single-operator host it is the one name the broker daemon, the store directory
+# and the platform's own person id all coincide on (the unsettled namespace
+# question is gate-batch item 3 below). A throwaway WORLD does not coincide —
+# it carries its own seeded people, commissioning is keyed by the broker store's
+# person, and the adapter asks ProvidersFor(userID) for whoever's session made
+# the run. So a key placed under the OS user there commissions for a userID
+# nobody can sign in as. SINET_CEREMONY_USER points this ceremony at that
+# person instead; nothing else about placement changes (P3-LN-5).
+STORE_USER="${SINET_CEREMONY_USER:-$(id -un)}"
 
 BIN=""            # the placement tool, built into a temp dir by need_tool
 TOOLDIR=""
@@ -273,6 +287,19 @@ smoke_lane() {
 
 do_smoke() {
   step "4/8  Tier-L smoke — one minimal paid call per lane"
+  # The smoke inherits STATE_DIRECTORY from this shell, so it reads the same
+  # store ROOT this ceremony wrote to. It resolves the store PERSON from the OS
+  # user in Go and has no env seam for it, so under SINET_CEREMONY_USER it looks
+  # somewhere else and says so rather than calling. Named here because a paid
+  # step that silently answers about another store is worse than one that skips.
+  if [ "$STORE_USER" != "$(id -un)" ]; then
+    note "STORE PERSON MISMATCH for this step, and it is not a lane failure."
+    info "This run places under person '$STORE_USER', but the tier-L smoke resolves"
+    info "its store person from the OS user (live_smoke_test.go), so it will look in"
+    info "$STORE_ROOT/$(id -un) and print a SANCTIONED SKIP instead of calling."
+    info "Decline below: a paid call proves the KEY, and the key is already proven"
+    info "by the round-trip through the broker in the placement step."
+  fi
   info "Tier L is the ratified paid tier: it runs only under SINET_LIVE_SMOKE=1"
   info "and only against a lane whose credential is actually placed. Each lane"
   info "is asked for separately, below."
