@@ -113,6 +113,13 @@ type LaneConfig struct {
 	// produces (S03.6; the DeepSeek precedent, R02 §4).
 	DataPolicy LaneDataPolicy `json:"data_policy,omitempty"`
 
+	// InstalledCatalogue records what the INSTALLED engine's own provider
+	// catalogue says about this lane, and where it diverges from the document.
+	// The engine's record is authoritative over documentation for what the
+	// engine will accept, and still not authoritative over the ACCOUNT — that
+	// is the model-list canary's job (P-T17-3).
+	InstalledCatalogue LaneCatalogueRecord `json:"installed_catalogue_record,omitempty"`
+
 	Signals []LaneSignalRow `json:"signals"`
 }
 
@@ -161,7 +168,10 @@ type RecordedKnob struct {
 	Wired      bool     `json:"wired"`
 	VerifiedOn string   `json:"verified_on"`
 	Values     []string `json:"values"`
-	Note       string   `json:"note"`
+	// ValuesGrade is the evidence grade of Values, same meaning as
+	// LaneModel.NoteGrade: an unverified list stays unwired AND says so.
+	ValuesGrade string `json:"values_grade,omitempty"`
+	Note        string `json:"note"`
 }
 
 // LaneCredential names the broker auth-profile and the environment variable
@@ -173,6 +183,20 @@ type LaneCredential struct {
 	Note    string `json:"note"`
 }
 
+// LaneCatalogueRecord is a dated read of the installed engine's own provider
+// catalogue: what it AGREES with, what it DIVERGES on, and what it adds. A
+// divergence is recorded rather than silently resolved, the same treatment the
+// endpoint discrepancies get — a fact somebody quietly reconciled is a fact
+// nobody can re-check.
+type LaneCatalogueRecord struct {
+	VerifiedOn string `json:"verified_on,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Agrees     string `json:"agrees,omitempty"`
+	Diverges   string `json:"diverges,omitempty"`
+	Additional string `json:"additional,omitempty"`
+	Note       string `json:"note,omitempty"`
+}
+
 // LaneModel is one model's per-model attribute row (S03.6/S18.3: a data-valued
 // settings surface with no dotted key).
 type LaneModel struct {
@@ -182,6 +206,12 @@ type LaneModel struct {
 	Billing         string `json:"billing"`
 	OverflowMode    string `json:"overflow_mode"`
 	RegionModelGate string `json:"region_model_gate"`
+	Note            string `json:"note,omitempty"`
+	// NoteGrade is the evidence grade of Note. "unverified-primary" marks a
+	// line that reached this document from something other than the onboarding
+	// audit's own captures — the packet's brief, or a secondary source — so a
+	// later reader never mistakes it for a primary quote.
+	NoteGrade string `json:"note_grade,omitempty"`
 	// MeteredDisableProven records that the account's pay-as-you-go spill has
 	// been proven disabled (or its balance proven zero). Only such a model may
 	// declare overflow_mode auto-metered.
@@ -720,20 +750,43 @@ func (c LaneConfig) hasMessageRows() bool {
 // because the status is half the key: the same words on a different status are
 // a different event on this wire, and matching across statuses would let a
 // documented depletion exempt an undocumented auth failure.
+//
+// UNCLASSED ROWS WIN (P3-LN-3 drain r1). A real body is not one phrase, so more
+// than one same-status row can match it — and a first-match-wins scan in
+// DOCUMENT ORDER then decides a genuine revocation by where somebody happened to
+// put a line in a JSON file. "Access terminated. Your account was suspended; you
+// have also reached your usage limit for this billing cycle." matches both the
+// 403 revocation row and the 403 depletion row; the depletion row is listed
+// first, so the scan reported an exemption for an account suspension.
+//
+// A row carrying NO documented class is one that classifies on its status —
+// which on 401/402/403 means it FREEZES. Preferring those is therefore the safe
+// resolution of an ambiguous body, and it is where the tie-break belongs: at the
+// document layer, before any verdict exists. It is a first line, not the net —
+// the net is the scheduler's belt, which does not care which row won.
 func (c LaneConfig) messageRowFor(status int, message string) (LaneSignalRow, bool) {
 	if status <= 0 || message == "" {
 		return LaneSignalRow{}, false
 	}
 	low := strings.ToLower(message)
-	for _, row := range c.Signals {
-		if row.MessageContains == "" || row.HTTPStatus != status {
-			continue
+	match := func(wantClassed bool) (LaneSignalRow, bool) {
+		for _, row := range c.Signals {
+			if row.MessageContains == "" || row.HTTPStatus != status {
+				continue
+			}
+			if (row.DocumentedClass != "") != wantClassed {
+				continue
+			}
+			if strings.Contains(low, strings.ToLower(row.MessageContains)) {
+				return row, true
+			}
 		}
-		if strings.Contains(low, strings.ToLower(row.MessageContains)) {
-			return row, true
-		}
+		return LaneSignalRow{}, false
 	}
-	return LaneSignalRow{}, false
+	if row, ok := match(false); ok {
+		return row, true
+	}
+	return match(true)
 }
 
 // providerError is the verbatim provider error envelope.

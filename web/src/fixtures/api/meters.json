@@ -33,6 +33,51 @@
       "tier": 1
     },
     {
+      "owner": "bob",
+      "lane": "kimi",
+      "weighted_consumption": 12.5,
+      "cache_read_weight": 0.1,
+      "assumed": true,
+      "pressure_applicable": false,
+      "pressure": null,
+      "budget_declared": false,
+      "budget_remaining": null,
+      "total_runs": 1,
+      "active_runs": 1,
+      "parked_runs": 0,
+      "parked_until": null,
+      "tier": 1,
+      "plan": {
+        "unit": "requests",
+        "tier": 3,
+        "assumed": true,
+        "assumed_note": "derived plan units, and a LOWER BOUND: the quota is shared across every signed-in device and the API key, so this count is one consumer's, never the pool's",
+        "consumed": 4,
+        "calls": 4,
+        "multiplier": 1,
+        "multiplier_window": "standard",
+        "pressure": null,
+        "budget_declared": false,
+        "seed_allowance": 300,
+        "seed_quota": "rolling-5h",
+        "verified_on": "2026-08-24",
+        "windows": [
+          {
+            "name": "rolling-5h",
+            "unit": "requests",
+            "allowance": 300,
+            "window_hours": 5
+          },
+          {
+            "name": "weekly",
+            "unit": "credits",
+            "window_hours": 168,
+            "allowance_unverified": true
+          }
+        ]
+      }
+    },
+    {
       "owner": "alice",
       "lane": "local",
       "weighted_consumption": 12.5,
@@ -286,8 +331,8 @@
         ],
         [
           "bob",
-          2,
-          2,
+          3,
+          3,
           null,
           "UNPRICED",
           0,

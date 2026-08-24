@@ -128,6 +128,31 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 	// Pressure stays nil: no operator plan budget is declared in this world,
 	// and the denominator is Sinet's own budget and never the provider's
 	// published allowance (S10.4/D4), which rides along as seed provenance.
+	// The kimi lane's plan is the reason per-window units exist: its rolling
+	// 5-hour window counts REQUESTS and its 7-day window counts CREDITS, and
+	// nobody publishes an allowance for the second one. Both shapes reach the
+	// committed body here, because `allowance_unverified` is precisely the
+	// member a surface is most likely to render wrongly — a 0 that means
+	// "unknown", never "none".
+	if lane == "kimi" {
+		m.Plan = &api.LanePlanMeter{
+			Unit: "requests", Tier: 3, Assumed: true,
+			AssumedNote:      "derived plan units, and a LOWER BOUND: the quota is shared across every signed-in device and the API key, so this count is one consumer's, never the pool's",
+			Consumed:         4,
+			Calls:            4,
+			Multiplier:       1,
+			MultiplierWindow: "standard",
+			BudgetDeclared:   false,
+			SeedAllowance:    300,
+			SeedQuota:        "rolling-5h",
+			VerifiedOn:       "2026-08-24",
+			Windows: []api.LanePlanWindow{
+				{Name: "rolling-5h", Unit: "requests", Allowance: 300, WindowHours: 5},
+				{Name: "weekly", Unit: "credits", WindowHours: 168, AllowanceUnverified: true},
+			},
+		}
+		return m, nil
+	}
 	if lane == "zai" {
 		m.Plan = &api.LanePlanMeter{
 			Unit: "credits", Tier: 3, Assumed: true,
@@ -146,11 +171,9 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 			//
 			// Both windows are credits because this fixture lane IS zai, whose
 			// windows share a unit — the shape stays honest rather than
-			// demonstrating a variety this lane does not have. The
-			// `allowance_unverified` member is therefore NOT exercised by the
-			// snapshot; the lane that has one (kimi's weekly window) has no
-			// runs in this world, and inventing one here would put a figure on
-			// the wire that no plan document says.
+			// demonstrating a variety this lane does not have. The lane that
+			// carries a differently-denominated window, and the one unverified
+			// allowance, is kimi above.
 			Windows: []api.LanePlanWindow{
 				{Name: "rolling-5h", Unit: "credits", Allowance: 28000, WindowHours: 5},
 				{Name: "weekly", Unit: "credits", Allowance: 140000, WindowHours: 168},
@@ -284,6 +307,11 @@ func fixtureWorldOn(t *testing.T, b *backend, root string) *backend {
 		{"r-stall", "bob", "t-stall", "parked", "zai", fxT4},
 		{"r-claim", "alice", "t-claim", "claimed", "anthropic", fxT4},
 		{"r-ops", "op", "t-ops", "queued", "anthropic", fxT4},
+		// A run on the KIMI lane, so the meters projection serves a kimi row
+		// and the plan block's per-window units reach the committed body with
+		// the shape only this lane has: a requests window beside a credits
+		// window whose allowance nobody published (drain r1 F7).
+		{"r-kimi", "bob", "t-stall", "queued", "kimi", fxT4},
 	} {
 		exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
 		            VALUES (?,?,?,?,?,0,?,?)`, r.id, r.owner, r.task, r.state, r.lane, r.created, r.created)

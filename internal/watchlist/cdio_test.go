@@ -531,7 +531,8 @@ func TestEveryHeldRegionFilterNamesASeededPageRow(t *testing.T) {
 		"t1-kimi-error-reference": true, "t1-kimi-whats-new": true,
 		"t1-kimi-benefits": true, "t1-kimi-extra-usage": true,
 		"t1-kimi-price-k3": true, "t1-kimi-tos-platform": true,
-		"t1-kimi-tos-assistant": true,
+		"t1-kimi-tos-assistant": true, "t1-kimi-membership-pricing": true,
+		"t1-kimi-plan-pricing": true, "t2-modelsdev-kimi-provider": true,
 	}
 	held := 0
 	for _, r := range watchlist.SeedRows() {

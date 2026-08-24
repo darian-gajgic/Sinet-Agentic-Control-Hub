@@ -228,6 +228,17 @@ func tier1Rows() []Row {
 		// fetched live 2026-08-24 for the Gate A-C audit
 		// (P3/measurements/2026-08-24-kimi-lane-gate-audit.md) and rendered in
 		// full — unlike the JS shell above, these carry real text to diff.
+		page("t1-kimi-membership-pricing", "https://www.kimi.com/en/help/membership/membership-pricing", "kimi",
+			"Kimi membership tiers in the HELP CENTRE — the page that actually renders where the plan pages do "+
+				"not. It serves the ¥ (RMB) plan set (Andante ¥49 / Moderato ¥99 / Allegretto ¥199 / Allegro "+
+				"¥699 per month), NOT the international USD set, so it is the tier→price row this lane really "+
+				"has: audit A1 leaves the USD mapping UNVERIFIED and it closes from the operator's own console. "+
+				"VERIFIED 2026-08-24"),
+		page("t1-kimi-plan-pricing", "https://www.kimi.com/membership/pricing", "kimi",
+			"The international USD tier→price page. RE-CONFIRMED 2026-08-24: a JavaScript shell to a plain fetch "+
+				"— only the page title rendered, no tiers, no prices, no quotas. Seeded because the audit's C4 "+
+				"list names it and a page that starts rendering is itself the signal, but an EMPTY DIFF HERE IS "+
+				"NOT 'NO CHANGE' — it is low-signal by construction, exactly like t1-kimi-coding"),
 		page("t1-kimi-error-reference", "https://www.kimi.com/code/docs/en/kimi-code/error-reference.html", "kimi",
 			"Kimi Code error reference — THE LIMIT CLASSIFIER'S SOURCE OF TRUTH, and the highest-value row in "+
 				"this set. The lane's taxonomy is (HTTP status x message string), so a wording change here can "+
@@ -332,6 +343,17 @@ func tier2Rows() []Row {
 			"xai-org/grok-build commits (candidate)"),
 		feed("t2-modelsdev-commits", "https://github.com/anomalyco/models.dev/commits.atom", "",
 			"models.dev commits — new provider/model rows appear as TOML commits before they reach the API"),
+		{
+			ID: "t2-modelsdev-kimi-provider", Kind: KindPage,
+			URL: "https://models.dev/providers/kimi-for-coding", Lane: "kimi", Tier: 2,
+			Cadence: CadenceWeekly, Enabled: true, Group: GroupReport02,
+			Notes: "models.dev's kimi-for-coding provider record — provider id, npm package, base URL and model " +
+				"ids. The audit names it as this lane's tier-2 canary, and it carries the LANE where the generic " +
+				"t3-modelsdev-api row does not: drift in the record the opencode provider entry is built from " +
+				"must flag NOW rather than land in a digest. The installed engine's own cached copy of this data " +
+				"was read at onboarding and agreed on every field except one display name. VERIFIED 2026-08-24 — " + report02Cite,
+			MigrateBias: true,
+		},
 	}
 }
 

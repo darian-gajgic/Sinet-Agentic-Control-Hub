@@ -212,6 +212,46 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 		t.Errorf("the enforcement note does not state plainly that the rider is not machine-enforced: %q", seed.DataPolicy.EnforcementNote)
 	}
 
+	// drain r1 F3 · three seed values reached this document from the BRIEF and
+	// not from the audit, which never captured them. The packet cannot re-fetch
+	// (scope wall) and the audit is not retro-edited with quotes it never took,
+	// so each says whose word it is and what grade that is.
+	for _, m := range seed.Models {
+		if m.ID != "kimi-for-coding" && m.ID != "kimi-for-coding-highspeed" {
+			continue
+		}
+		if m.NoteGrade != "unverified-primary" {
+			t.Errorf("model %q carries a tier-availability note at grade %q — the audit captured no tier line for "+
+				"it, so the note is the brief's word and must say so", m.ID, m.NoteGrade)
+		}
+		if !strings.Contains(m.Note, "PROVENANCE") {
+			t.Errorf("model %q's note names no provenance: %q", m.ID, m.Note)
+		}
+	}
+	if seed.ReasoningEffort.ValuesGrade != "unverified-primary" {
+		t.Errorf("the thinking-effort values carry grade %q — the audit records no effort vocabulary for this "+
+			"model at all, so the list is the brief's word", seed.ReasoningEffort.ValuesGrade)
+	}
+
+	// drain r1 F4 · the installed engine's own catalogue, read dated. All four
+	// declared ids ARE in it — the finding's premise that two were absent does
+	// not hold — but its display name for one model diverges, and a divergence
+	// is recorded rather than reconciled away.
+	cat := seed.InstalledCatalogue
+	if cat.VerifiedOn != "2026-08-24" {
+		t.Errorf("the installed-catalogue record carries verified_on %q, want 2026-08-24", cat.VerifiedOn)
+	}
+	if !strings.Contains(cat.Agrees, "ALL FOUR") {
+		t.Errorf("the catalogue record does not say which ids the installed engine agrees on: %q", cat.Agrees)
+	}
+	if !strings.Contains(cat.Diverges, "Kimi K2.7 Code") {
+		t.Errorf("the catalogue record does not name the display-name divergence it found: %q", cat.Diverges)
+	}
+	if !strings.Contains(cat.Source, "npm package") {
+		t.Errorf("the catalogue record does not say where the file actually comes from — a cache the engine "+
+			"fetches is not a file the package ships, and the difference is the whole provenance: %q", cat.Source)
+	}
+
 	// Every signal row is dated AND marked documented-not-observed (§4's
 	// non-negotiable): these are published message strings, not wire bodies.
 	if len(seed.Signals) == 0 {
@@ -380,6 +420,45 @@ func TestMessageKeyedSignalRowsAreAdditive(t *testing.T) {
 	}
 	if unmatched.DocumentedClass != "" {
 		t.Errorf("an undocumented message carries documented_class %q — the guard is an EXEMPTION LIST and must never fire on a row nobody published", unmatched.DocumentedClass)
+	}
+
+	// drain r1 F1, the document-layer half: when a body matches BOTH a classed
+	// and an unclassed same-status row, the UNCLASSED one wins — the row that
+	// classifies on its status, which on 401/403 means it freezes.
+	//
+	// Pinned here rather than only through the classifier because the
+	// scheduler's belt would catch these bodies anyway; without this assertion
+	// the tie-break is a branch nothing reads, which is exactly the class of
+	// dead wiring this codebase keeps finding.
+	for _, tc := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{
+			name:   "revocation phrase before the depletion phrase",
+			body:   "Access terminated. Your account was suspended; you have also reached your usage limit for this billing cycle.",
+			status: 403,
+		},
+		{
+			name:   "depletion phrase before the revocation phrase",
+			body:   "You've reached your usage limit for this billing cycle. Access terminated: this account is suspended.",
+			status: 403,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := kimi.ExtractSignal(`{"error":{"message":"`+tc.body+`"}}`, tc.status)
+			if !ok {
+				t.Fatal("no signal was produced")
+			}
+			if !got.Known {
+				t.Error("the body matches documented rows yet is reported unknown")
+			}
+			if got.DocumentedClass != "" {
+				t.Errorf("documented_class = %q, want empty — an ambiguous body must resolve to the row that "+
+					"FREEZES, never to whichever row the JSON happened to list first", got.DocumentedClass)
+			}
+		})
 	}
 
 	// Raw engine prose (no JSON envelope at all) still keys on the message.

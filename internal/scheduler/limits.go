@@ -372,18 +372,47 @@ func Classify(sig LimitSignal, cfg LimitConfig) Action {
 // exemptsAuthStatusFreeze reports whether a documented row lifts the Class-4
 // status rule for this signal.
 //
-// Two narrowings carry the whole safety argument. Only an AUTH-SHAPED status is
-// ever exempted, and only by a row naming DEPLETION or MODEL DRIFT — a
-// documented transient or endpoint-defect row on a 401/403 is deliberately NOT
-// enough, because those are not the readings a provider publishes for an
-// auth-shaped status and accepting them would widen the hole for nothing.
+// THREE narrowings carry the whole safety argument, and the third is a BELT
+// added at P3-LN-3 drain r1 after a probe defeated the first two.
+//
+//  1. Only an AUTH-SHAPED status is ever exempted.
+//  2. And only by a row naming DEPLETION or MODEL DRIFT — a documented
+//     transient or endpoint-defect row on a 401/403 is deliberately not
+//     enough, because those are not readings a provider publishes for an
+//     auth-shaped status and accepting them would widen the hole for nothing.
+//  3. And only when the body carries NO revocation- or policy-ban-shaped
+//     text, whatever row matched.
+//
+// (3) exists because a real body is not one phrase. A provider that suspends an
+// account can say so in a sentence that ALSO contains an ordinary depletion or
+// entitlement phrase — "Access terminated. Your account was suspended; you have
+// also reached your usage limit for this billing cycle." — and a substring match
+// over the whole body then hands a genuine revocation an exemption. Probed
+// through the real shipped document, that body parked instead of freezing, and
+// "…has been suspended for a policy violation and does not have access to this
+// service." classified as model drift and simply continued. Reordering document
+// rows fixes one of those and not the other; only a belt on the EXEMPTION
+// ITSELF is a net, because it does not care which row won.
+//
+// The belt has no OnValidCredentials precondition, deliberately: it only
+// DECLINES an exemption, handing the signal back to the ratified Class-4 status
+// rule, which is itself unconditional. Requiring the auth canary to have run
+// first would leave the hole open exactly when nothing else is watching. Its
+// false-positive direction is a freeze on a lane that was merely depleted —
+// recoverable, operator-visible, and the safe half of P-T08-2.
 func exemptsAuthStatusFreeze(sig LimitSignal) bool {
 	switch sig.HTTPStatus {
 	case 401, 402, 403:
 	default:
 		return false
 	}
-	return sig.DocumentedClass == DocumentedDepletion || sig.DocumentedClass == DocumentedModelDrift
+	if sig.DocumentedClass != DocumentedDepletion && sig.DocumentedClass != DocumentedModelDrift {
+		return false
+	}
+	if sig.BodyText != "" && (looksLikeRevocation(sig.BodyText) || looksLikePolicyBan(sig.BodyText)) {
+		return false
+	}
+	return true
 }
 
 // classifyDocumentedSignal is the whole of a message-keyed lane's taxonomy: the

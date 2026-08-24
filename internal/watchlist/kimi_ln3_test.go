@@ -36,10 +36,16 @@ func TestKimiAuthCanaryRegisteredAndFreezesOnAuthShape(t *testing.T) {
 		t.Fatal("the auth canary does not carry lane kimi — a paid lane whose sanction can be revoked is not probed")
 	}
 
-	// The documented account-suspension shape: 403 "Access terminated". It is
-	// the ONE 403 on this lane that is genuinely an auth event, and the auth
-	// canary is the authoritative revocation detector for whatever the message
-	// grammar misses (P-T17-1).
+	// DOCUMENTED-NOT-OBSERVED (§8 (iv)). The body below is the vendor's
+	// PUBLISHED account-suspension string as captured in the 2026-08-24 audit,
+	// wrapped in a plausible envelope — not a response this platform has seen.
+	// The audit could not verify the JSON shape of a Kimi error body or whether
+	// it carries a code field (U3), so the ceremony's live single-request probe
+	// is what turns this fixture into an observation.
+	//
+	// It is the ONE 403 on this lane that is genuinely an auth event, and the
+	// auth canary is the authoritative revocation detector for whatever the
+	// message grammar misses (P-T17-1).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, `{"error":{"message":"Access terminated"}}`)
@@ -249,19 +255,24 @@ func TestKimiBehavioralCanaryAndNoLogprobCanary(t *testing.T) {
 func TestKimiWatchRowsVerified(t *testing.T) {
 	// Host and path as PARTS, never a routable literal (the package tripwire).
 	want := map[string][2]string{
-		"t1-kimi-coding":          {"kimi.com", "/coding"},
-		"t1-kimi-error-reference": {"www.kimi.com", "/code/docs/en/kimi-code/error-reference.html"},
-		"t1-kimi-whats-new":       {"www.kimi.com", "/code/docs/en/kimi-code/whats-new.html"},
-		"t1-kimi-benefits":        {"www.kimi.com", "/en/help/kimi-code/benefits"},
-		"t1-kimi-extra-usage":     {"www.kimi.com", "/en/help/membership/membership-extra-usage"},
-		"t1-kimi-price-k3":        {"platform.kimi.ai", "/docs/pricing/chat-k3"},
-		"t1-kimi-tos-platform":    {"platform.kimi.ai", "/docs/agreement/modeluse"},
-		"t1-kimi-tos-assistant":   {"www.kimi.com", "/user/agreement/modelUse"},
-		"t4-hn-kimi":              {"hnrss.org", "/newest"},
+		"t1-kimi-coding":             {"kimi.com", "/coding"},
+		"t1-kimi-membership-pricing": {"www.kimi.com", "/en/help/membership/membership-pricing"},
+		"t1-kimi-plan-pricing":       {"www.kimi.com", "/membership/pricing"},
+		"t2-modelsdev-kimi-provider": {"models.dev", "/providers/kimi-for-coding"},
+		"t1-kimi-error-reference":    {"www.kimi.com", "/code/docs/en/kimi-code/error-reference.html"},
+		"t1-kimi-whats-new":          {"www.kimi.com", "/code/docs/en/kimi-code/whats-new.html"},
+		"t1-kimi-benefits":           {"www.kimi.com", "/en/help/kimi-code/benefits"},
+		"t1-kimi-extra-usage":        {"www.kimi.com", "/en/help/membership/membership-extra-usage"},
+		"t1-kimi-price-k3":           {"platform.kimi.ai", "/docs/pricing/chat-k3"},
+		"t1-kimi-tos-platform":       {"platform.kimi.ai", "/docs/agreement/modeluse"},
+		"t1-kimi-tos-assistant":      {"www.kimi.com", "/user/agreement/modelUse"},
+		"t4-hn-kimi":                 {"hnrss.org", "/newest"},
 	}
 	// The JS-shell rows: a text diff on a shell is near-empty and must never be
 	// read as "no change". The audit RE-CONFIRMED both shells on 2026-08-24.
-	jsShell := map[string]bool{"t1-kimi-coding": true}
+	// Both were RE-CONFIRMED as JavaScript shells on 2026-08-24. A near-empty
+	// diff on a shell must never be read as "no change".
+	jsShell := map[string]bool{"t1-kimi-coding": true, "t1-kimi-plan-pricing": true}
 
 	seen := map[string]bool{}
 	for _, r := range watchlist.SeedRows() {
@@ -307,6 +318,17 @@ func TestKimiWatchRowsVerified(t *testing.T) {
 		if !seen[id] {
 			t.Errorf("the seed carries no kimi watch row %q", id)
 		}
+	}
+	// The lane's row COUNT is pinned so prose about it cannot drift from the
+	// seed: 10 tier-1 pages, the tier-2 provider record, and the keyword feed.
+	lane := 0
+	for _, r := range watchlist.SeedRows() {
+		if r.Lane == watchlist.LaneKimi {
+			lane++
+		}
+	}
+	if lane != 12 {
+		t.Errorf("%d rows carry lane kimi, want 12 — every row in `want` above plus none unaccounted for", lane)
 	}
 
 	// The classifier's constrained-decoding grammar must be able to EMIT the

@@ -203,6 +203,101 @@ func TestKimiSignalRoundTripsFromTheDocumentIntoTheClassifier(t *testing.T) {
 		})
 	}
 
+	// ── drain r1 F1 · a real body is not one phrase ──────────────────────────
+	//
+	// The evaluator's probes, run through this same real document, defeated the
+	// original guard: a body carrying BOTH a revocation phrase and an ordinary
+	// depletion phrase matched the depletion row (listed first) and parked
+	// instead of freezing, and a suspension sentence containing the five generic
+	// words "does not have access to" classified as model drift and continued.
+	// Two fixes ride these: unclassed rows now win the document-layer tie-break,
+	// and revocation-shaped text defeats the exemption whatever row matched.
+	//
+	// The first two bodies are the evaluator's own, verbatim.
+	t.Run("multi-phrase bodies never buy an exemption", func(t *testing.T) {
+		for _, tc := range []struct {
+			name       string
+			body       string
+			status     int
+			wantFreeze bool
+		}{
+			{
+				name:       "revocation first, depletion phrase after (evaluator probe, verbatim)",
+				body:       "Access terminated. Your account was suspended; you have also reached your usage limit for this billing cycle.",
+				status:     403,
+				wantFreeze: true,
+			},
+			{
+				name:       "suspension wrapped around the entitlement phrase (evaluator probe, verbatim)",
+				body:       "Your account has been suspended for a policy violation and does not have access to this service.",
+				status:     401,
+				wantFreeze: true,
+			},
+			{
+				name:       "depletion phrase first, revocation after",
+				body:       "You've reached your usage limit for this billing cycle. Access terminated: this account is suspended.",
+				status:     403,
+				wantFreeze: true,
+			},
+			{
+				name:       "entitlement phrase first, revocation after",
+				body:       "Your current subscription does not have access to k3. Your account has been deactivated for a policy violation.",
+				status:     401,
+				wantFreeze: true,
+			},
+			{
+				name:       "a revoked key described in the provider's own words",
+				body:       "Your current plan supports only kimi-k3 up to 256K context. This API key was revoked.",
+				status:     401,
+				wantFreeze: true,
+			},
+			// THE INVERSE CONTROLS. Without these the fix could be "freeze on
+			// everything", which is the other direction with no safe failure:
+			// a pure documented depletion phrase must still park, and a pure
+			// entitlement phrase must still surface drift.
+			{
+				name:       "inverse control — a pure weekly-depletion body still parks",
+				body:       "You've reached your usage limit for this billing cycle.",
+				status:     403,
+				wantFreeze: false,
+			},
+			{
+				name:       "inverse control — a multi-phrase depletion body with no revocation words still parks",
+				body:       "You've reached your usage limit for this billing cycle. Your quota refreshes automatically every 7 days.",
+				status:     403,
+				wantFreeze: false,
+			},
+			{
+				name:       "inverse control — a pure tier-gate body still surfaces drift",
+				body:       "Your current subscription does not have access to k3",
+				status:     401,
+				wantFreeze: false,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, valid := range []bool{false, true} {
+					got := classify(t, envelope(tc.body), tc.status, valid)
+					froze := got.Class == scheduler.ClassAuthPolicy || got.Kind == scheduler.ActionLaneFreeze
+					if froze != tc.wantFreeze {
+						t.Fatalf("valid=%v: froze=%v want %v — %+v", valid, froze, tc.wantFreeze, got)
+					}
+					if tc.wantFreeze {
+						// A revocation must never reach a park or a retry —
+						// P-T08-2's named worst case, and the reason the belt
+						// sits on the exemption rather than on one branch.
+						if got.Kind == scheduler.ActionParkProbe || got.Kind == scheduler.ActionParkQuota ||
+							got.Kind == scheduler.ActionRetryInPlace {
+							t.Errorf("valid=%v: a suspended account reached %q", valid, got.Kind)
+						}
+						if got.Surface != scheduler.SurfaceNone {
+							t.Errorf("valid=%v: a suspended account was surfaced as %q instead of frozen", valid, got.Surface)
+						}
+					}
+				}
+			})
+		}
+	})
+
 	// The zai document, through the same path, is unchanged.
 	zai := laneByName(t, seedLanes(t), adapters.LaneZAI)
 	zaiBody := `{"error":{"code":"1308","message":` +
