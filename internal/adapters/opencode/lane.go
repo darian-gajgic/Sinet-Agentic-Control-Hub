@@ -648,6 +648,19 @@ func (c LaneConfig) ProviderEntry() ProviderEntry {
 	}
 }
 
+// Commissionable reports whether this document CAN be commissioned at all: it
+// must name both an auth profile to resolve and an environment variable to
+// deliver the material as.
+//
+// It is one predicate on purpose. The spawn-time injector refuses to build on
+// exactly this conjunction, and commissioning must refuse on the same one — a
+// lane registered as held whose credential path is missing gets seated by
+// routing and then authenticates as nobody. Two spellings of the same rule in
+// two packages is that failure waiting for one of them to be edited.
+func (c LaneConfig) Commissionable() bool {
+	return c.Credential.Profile != "" && c.Credential.EnvVar != ""
+}
+
 // Commission composes the provider entries each person actually holds, from
 // the lane documents and what that person has PLACED (S03.6: "adding a lane is
 // a provider entry per user"; S11.5).
@@ -669,7 +682,7 @@ func Commission(lanes []LaneConfig, placed map[string]map[string]bool) map[strin
 	for who, profiles := range placed {
 		entries := ProviderConfig{}
 		for _, l := range lanes {
-			if l.Credential.Profile == "" || l.Credential.EnvVar == "" {
+			if !l.Commissionable() {
 				continue
 			}
 			if profiles[l.Credential.Profile] {
@@ -679,6 +692,88 @@ func Commission(lanes []LaneConfig, placed map[string]map[string]bool) map[strin
 		if len(entries) > 0 {
 			out[who] = entries
 		}
+	}
+	return out
+}
+
+// CommissionedLanes reports the lane names commissioned across every person,
+// sorted — the S08.8 coverage input.
+//
+// Coverage is per-owner in S08.8 and a Router is built once per control plane,
+// so this is the UNION: the honest over-approximation at v0 (one household, one
+// operator placing keys), with per-person coverage arriving on the per-person
+// duty-map surface (1.10, B6/v1).
+func CommissionedLanes(lanes []LaneConfig, commissioned map[string]ProviderConfig) []string {
+	byProvider := make(map[string]string, len(lanes))
+	for _, l := range lanes {
+		byProvider[l.ProviderID] = l.Lane
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, entries := range commissioned {
+		for providerID := range entries {
+			lane, ok := byProvider[providerID]
+			if !ok || seen[lane] {
+				continue
+			}
+			seen[lane] = true
+			out = append(out, lane)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CommissionedSubstrates maps each commissioned lane to the substrate its own
+// document names (S03.2) — which engine actually serves the work.
+//
+// Only commissioned lanes appear: mapping a lane nobody holds would describe a
+// dispatch that cannot happen. With nothing commissioned this is nil and every
+// dispatch takes its pre-commissioning path.
+func CommissionedSubstrates(lanes []LaneConfig, commissioned map[string]ProviderConfig) map[string]string {
+	live := map[string]bool{}
+	for _, lane := range CommissionedLanes(lanes, commissioned) {
+		live[lane] = true
+	}
+	if len(live) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, l := range lanes {
+		if live[l.Lane] && l.Substrate != "" {
+			out[l.Lane] = l.Substrate
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// CommissionedSeat is one commissioned lane's execution seat: the model that
+// lane fronts, as its own document records it (with that fact's verified-on
+// date beside it). The routing package's seat type is composed FROM these at
+// the composition root, so no model id is ever a constant there.
+type CommissionedSeat struct {
+	Lane  string
+	Model string
+}
+
+// CommissionedSeats reports the execution seat of every commissioned lane, in
+// document order. A lane whose document ships no default_model has no seat —
+// a lane may ship without one, and refusing that would make the gate about
+// something other than correctness.
+func CommissionedSeats(lanes []LaneConfig, commissioned map[string]ProviderConfig) []CommissionedSeat {
+	live := map[string]bool{}
+	for _, lane := range CommissionedLanes(lanes, commissioned) {
+		live[lane] = true
+	}
+	var out []CommissionedSeat
+	for _, l := range lanes {
+		if !live[l.Lane] || l.DefaultModel == "" {
+			continue
+		}
+		out = append(out, CommissionedSeat{Lane: l.Lane, Model: l.DefaultModel})
 	}
 	return out
 }

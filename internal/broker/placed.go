@@ -36,11 +36,16 @@ import (
 // recordPath). It is the file-layout mechanic, not an operator choice.
 const recordExt = ".cred"
 
-// StoreRoot reports the per-person credential-store root under a state dir. It
-// mirrors the default `sinet broker` computes for itself (mode.go), and is the
-// ONE place that default lives: the daemon, the control plane and the key
-// ceremony must all name the same directory, or a placed key is invisible to
-// whichever of them looked somewhere else.
+// StoreRoot reports the per-person credential-store root under a state dir.
+//
+// It is where that default LIVES, not a mirror of it: `sinet broker` calls this
+// for its own --store-dir default (mode.go), so the daemon that writes a
+// credential and the control plane that reads one cannot name different
+// directories. They could before, and a probe proved the cost — changing the
+// daemon's literal left every test in the tree green while every placed key
+// became invisible to commissioning. The key ceremony computes the same default
+// in shell and is the remaining third spelling, held by the ceremony's own
+// step-8 output rather than by the compiler.
 //
 // A broker started with an explicit --store-dir points somewhere this
 // derivation will never look; that limitation is recorded rather than papered
@@ -52,6 +57,14 @@ func StoreRoot(stateDir string) string {
 // StorePeople lists the people who have a store under root, sorted. A root that
 // does not exist is not an error: it is a host where nobody has placed
 // anything.
+//
+// Every directory is reported, including one whose name this package would
+// refuse to open a store for (validProfile). Filtering those here would drop a
+// person's whole store in silence; reported, they reach PlacedEngineCreds,
+// which refuses BY NAME and gives the caller something to say out loud. No
+// writer in this platform can create such a directory — OpenStore applies the
+// same check — so it means somebody made it by hand, which is exactly the case
+// worth a warning rather than a shrug.
 func StorePeople(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -63,9 +76,6 @@ func StorePeople(root string) ([]string, error) {
 	var out []string
 	for _, e := range entries {
 		if !e.IsDir() {
-			continue
-		}
-		if validProfile(e.Name()) != nil {
 			continue
 		}
 		out = append(out, e.Name())
@@ -107,7 +117,12 @@ func PlacedEngineCreds(root, user string) (map[string]bool, error) {
 		if err != nil {
 			continue
 		}
-		var rec profileRecord
+		// A KIND-ONLY view, deliberately: decoding into the full record would
+		// pull the nonce and the ciphertext into a process whose whole posture
+		// is that it holds no credential material, encrypted or otherwise.
+		var rec struct {
+			Kind string `json:"kind"`
+		}
 		if json.Unmarshal(blob, &rec) != nil || rec.Kind != KindEngineCred {
 			continue
 		}

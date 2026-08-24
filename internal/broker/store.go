@@ -269,7 +269,7 @@ func (s *Store) aad(profile, kind string) []byte {
 }
 
 func (s *Store) recordPath(profile string) string {
-	return filepath.Join(s.dir, profile+".cred")
+	return filepath.Join(s.dir, profile+recordExt)
 }
 
 // validProfile rejects names that could escape the store directory or collide

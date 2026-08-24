@@ -75,26 +75,6 @@ func ln4Commissioned(t *testing.T, stateDir string) ([]opencode.LaneConfig, map[
 	return lanes, opencode.Commission(lanes, placed)
 }
 
-// ln4Substrates is the lane→substrate input stage.Config takes, derived from
-// the commissioned map exactly as internal/shell's laneSubstrates derives it.
-// It is restated here rather than imported because internal/stage cannot import
-// internal/shell — shell composes the stage, so the dependency only runs one
-// way. What matters for this test is that the FILL above is production.
-func ln4Substrates(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) map[string]string {
-	out := map[string]string{}
-	for _, l := range lanes {
-		for _, entries := range commissioned {
-			if _, held := entries[l.ProviderID]; held && l.Substrate != "" {
-				out[l.Lane] = l.Substrate
-			}
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 // T9 · a placed credential produces a lane the REAL call sites dispatch to.
 func TestLN4CommissionedLaneIsDispatchedThroughTheRealCallSites(t *testing.T) {
 	stateDir := t.TempDir()
@@ -106,7 +86,7 @@ func TestLN4CommissionedLaneIsDispatchedThroughTheRealCallSites(t *testing.T) {
 		ln4Place(t, stateDir, "me", l.Credential.Profile, broker.KindEngineCred)
 	}
 	lanes, commissioned := ln4Commissioned(t, stateDir)
-	subs := ln4Substrates(lanes, commissioned)
+	subs := opencode.CommissionedSubstrates(lanes, commissioned)
 	if len(subs) != len(lanes) {
 		t.Fatalf("the fill mapped %v from %d placed credentials — the dispatch assertions below would be "+
 			"testing an empty map", subs, len(lanes))
@@ -172,7 +152,7 @@ func TestLN4NothingPlacedDispatchesExactlyAsBefore(t *testing.T) {
 	if len(commissioned) != 0 {
 		t.Fatalf("an empty state dir commissioned %v", commissioned)
 	}
-	subs := ln4Substrates(lanes, commissioned)
+	subs := opencode.CommissionedSubstrates(lanes, commissioned)
 	if subs != nil {
 		t.Fatalf("laneSubstrates = %v with nothing placed, want nil", subs)
 	}

@@ -149,15 +149,44 @@ func commissionEngineLanes(stateDir string, lanes []opencode.LaneConfig, logger 
 	for _, who := range people {
 		profiles, err := broker.PlacedEngineCreds(root, who)
 		if err != nil {
-			logger.Warn("lanes: a person's broker store could not be read, so their lanes stay uncommissioned this start",
-				"user", who, "err", fmt.Sprint(err))
+			// Includes a store directory whose NAME the broker refuses. Nothing
+			// this platform writes can create one, so it was made by hand — and
+			// dropping a person's whole store in silence is how an operator
+			// spends an afternoon on a lane that was never going to commission.
+			logger.Warn("lanes: a broker store directory could not be read, so that person's lanes stay uncommissioned this start",
+				"dir", filepath.Join(root, who), "err", fmt.Sprint(err))
 			continue
 		}
 		placed[who] = profiles
 	}
 	commissioned := opencode.Commission(lanes, placed)
-	logCommissioned(logger, lanes, commissioned)
+	logCommissioned(logger, lanes, placed, commissioned)
 	return commissioned
+}
+
+// unmatchedProfiles reports the engine-cred profiles a person has placed that
+// NO shipped lane document names, sorted.
+//
+// This is the difference between "you placed nothing" and "you placed something
+// under a name nothing reads", and without it the two produce a character-
+// identical startup line — which would defeat the whole reason the line exists.
+// A typo'd profile is the likeliest way a key ceremony ends with a lane that
+// never commissions.
+func unmatchedProfiles(lanes []opencode.LaneConfig, profiles map[string]bool) []string {
+	known := make(map[string]bool, len(lanes))
+	for _, l := range lanes {
+		if l.Credential.Profile != "" {
+			known[l.Credential.Profile] = true
+		}
+	}
+	var out []string
+	for profile := range profiles {
+		if !known[profile] {
+			out = append(out, profile)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // logCommissioned is the one startup line that says what a placed key actually
@@ -166,21 +195,26 @@ func commissionEngineLanes(stateDir string, lanes []opencode.LaneConfig, logger 
 // silently is one where an operator cannot tell a placed key from a typo'd
 // profile name.
 func logCommissioned(logger *slog.Logger, lanes []opencode.LaneConfig,
-	commissioned map[string]opencode.ProviderConfig) {
-	people := make([]string, 0, len(commissioned))
-	for who := range commissioned {
+	placed map[string]map[string]bool, commissioned map[string]opencode.ProviderConfig) {
+	people := make([]string, 0, len(placed))
+	for who := range placed {
 		people = append(people, who)
 	}
 	sort.Strings(people)
 	perPerson := make([]string, 0, len(people))
+	var stray []string
 	for _, who := range people {
 		held := commissionedLanes(lanes, map[string]opencode.ProviderConfig{who: commissioned[who]})
 		perPerson = append(perPerson, who+"="+strings.Join(held, "+"))
+		for _, profile := range unmatchedProfiles(lanes, placed[who]) {
+			stray = append(stray, who+":"+profile)
+		}
 	}
 	logger.Info("lanes: commissioned from the credentials placed in each person's broker store",
 		"people", len(commissioned),
 		"lanes", strings.Join(commissionedLanes(lanes, commissioned), ","),
 		"per_person", strings.Join(perPerson, " "),
+		"placed_matching_no_lane_document", strings.Join(stray, " "),
 		"note", "startup-bound: a credential placed later is picked up at the next control-plane start")
 }
 
@@ -225,7 +259,7 @@ func engineAdapters(deps engineAdapterDeps) map[string]adapters.Adapter {
 // the key ceremony's only job is to put the material behind the profile and
 // the entry in the commissioned map.
 func laneCredInject(socket string, lane opencode.LaneConfig) func(base []string) ([]string, error) {
-	if socket == "" || lane.Credential.Profile == "" || lane.Credential.EnvVar == "" {
+	if socket == "" || !lane.Commissionable() {
 		return nil
 	}
 	return broker.EnvInjector(socket, lane.Credential.Profile, lane.Credential.EnvVar)
@@ -253,35 +287,17 @@ func closeEngineAdapters(reg map[string]adapters.Adapter, logger *slog.Logger) {
 // configured lane (P3-LN-2B R21).
 //
 // Registering a substrate made a second lane DISPATCHABLE; only a provider
-// entry with a credential behind it makes one SELECTABLE, and routing work
-// onto the difference is exactly the "not commissioned" state the lane
-// documents exist to surface by name. So the answer is derived from what is
-// actually placed, never from what ships: on a host where nothing is placed
-// this returns nothing and coverage is unchanged.
+// entry with a credential behind it makes one SELECTABLE, and routing work onto
+// the difference is exactly the "not commissioned" state the lane documents
+// exist to surface by name.
 //
-// Coverage is per-owner in S08.8 and the Router is built once per control
-// plane, so this is the union. That is the honest over-approximation at v0
-// (one household, one operator placing keys); per-person coverage arrives with
-// the per-person duty-map surface (1.10, B6/v1).
+// The derivation itself lives beside the lane documents it reads
+// (opencode.CommissionedLanes), because internal/stage's dispatch guards must
+// reach the same function this composition root uses and cannot import this
+// package. These three wrappers are the shell-side names their consumers and
+// their existing tests already know.
 func commissionedLanes(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) []string {
-	byProvider := map[string]string{}
-	for _, l := range lanes {
-		byProvider[l.ProviderID] = l.Lane
-	}
-	seen := map[string]bool{}
-	var out []string
-	for _, entries := range commissioned {
-		for providerID := range entries {
-			lane, ok := byProvider[providerID]
-			if !ok || seen[lane] {
-				continue
-			}
-			seen[lane] = true
-			out = append(out, lane)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return opencode.CommissionedLanes(lanes, commissioned)
 }
 
 // laneConfiguredModels renders the lane documents as the CONFIG side of the
@@ -317,50 +333,23 @@ func laneConfiguredModels(lanes []opencode.LaneConfig) map[string][]string {
 // laneSubstrates maps each COMMISSIONED lane to the substrate its document
 // names — the S03.2 dispatch input that did not exist before P3-LN-2B drain r1.
 //
-// Only commissioned lanes appear. A lane nobody holds a provider entry for
-// cannot be seated by routing, so mapping it would be describing a dispatch
-// that cannot happen; and the anthropic lane is deliberately absent because its
-// substrate IS the configured ceremony default, which the stage keeps using
-// unchanged. With nothing commissioned this returns nil and every dispatch
-// takes exactly its pre-LN-2 path.
+// The anthropic lane is deliberately absent: its substrate IS the configured
+// ceremony default, which the stage keeps using unchanged.
 func laneSubstrates(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) map[string]string {
-	live := map[string]bool{}
-	for _, lane := range commissionedLanes(lanes, commissioned) {
-		live[lane] = true
-	}
-	if len(live) == 0 {
-		return nil
-	}
-	out := map[string]string{}
-	for _, l := range lanes {
-		if live[l.Lane] && l.Substrate != "" {
-			out[l.Lane] = l.Substrate
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return opencode.CommissionedSubstrates(lanes, commissioned)
 }
 
 // laneAlternateSeats renders the commissioned lanes' execution seats from
 // their documents (S08.8 step 3; P3-LN-2B drain r1 D5).
 //
 // The document is the only written record of which model a lane fronts, and it
-// carries that fact's verified-on date — so the seat is composed here, at the
-// root that already reads those documents, rather than written as a constant
-// in the routing package where it would go stale invisibly.
+// carries that fact's verified-on date, so no model id is a constant in the
+// routing package. This is the type adaptation only: which lanes have a seat,
+// and which model each fronts, is opencode.CommissionedSeats' answer.
 func laneAlternateSeats(lanes []opencode.LaneConfig, commissioned map[string]opencode.ProviderConfig) worker.AlternateSeats {
-	live := map[string]bool{}
-	for _, lane := range commissionedLanes(lanes, commissioned) {
-		live[lane] = true
-	}
 	var seats []worker.LaneSeat
-	for _, l := range lanes {
-		if !live[l.Lane] || l.DefaultModel == "" {
-			continue
-		}
-		seats = append(seats, worker.LaneSeat{Lane: l.Lane, Model: l.DefaultModel})
+	for _, s := range opencode.CommissionedSeats(lanes, commissioned) {
+		seats = append(seats, worker.LaneSeat{Lane: s.Lane, Model: s.Model})
 	}
 	return worker.AlternateSeatsFor(seats...)
 }

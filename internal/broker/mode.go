@@ -50,7 +50,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	sroot := *storeDir
 	if sroot == "" {
-		sroot = filepath.Join(*stateDir, "broker-store")
+		sroot = StoreRoot(*stateDir)
 	}
 
 	log := slog.New(slog.NewTextHandler(stderr, nil))
