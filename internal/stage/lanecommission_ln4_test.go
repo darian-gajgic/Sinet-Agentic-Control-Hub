@@ -68,7 +68,12 @@ func ln4Commissioned(t *testing.T, stateDir string) ([]opencode.LaneConfig, map[
 	for _, who := range people {
 		creds, err := broker.PlacedEngineCreds(root, who)
 		if err != nil {
-			t.Fatalf("PlacedEngineCreds(%q): %v", who, err)
+			// Production WARNs and carries on: one unreadable store directory
+			// must not take the whole household's commissioning down with it.
+			// The helper mirrors that rather than failing, so this harness
+			// behaves like the thing it stands in for (drain r2 R3).
+			t.Logf("PlacedEngineCreds(%q): %v — that person stays uncommissioned, as production would have it", who, err)
+			continue
 		}
 		placed[who] = creds
 	}

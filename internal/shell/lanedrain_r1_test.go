@@ -178,7 +178,12 @@ func TestLN4CompositionRootPassesTheHoistedLaneSet(t *testing.T) {
 	if !hoist.MatchString(src) {
 		t.Error("shell.go no longer loads the lane documents ONCE into a shared value")
 	}
-	passed := regexp.MustCompile(`(?s)engineAdapters\(engineAdapterDeps\{[^}]*Lanes:\s*engineLaneDocs\b`)
+	// Matched anywhere in the file, not inside a brace-bounded window: a
+	// composite literal in an earlier FIELD (`&slog.HandlerOptions{}` in the
+	// logger, say) ends a `[^}]*` window early, and the guard then reports
+	// that Lanes is not passed while it sits there untouched. A guard whose
+	// failure message can be the opposite of the truth is worse than none.
+	passed := regexp.MustCompile(`Lanes:\s*engineLaneDocs\b`)
 	if !passed.MatchString(src) {
 		t.Error("the composition root does not pass the hoisted lane set into engineAdapterDeps.Lanes.\n" +
 			"engineAdapters falls back to loading the documents itself, so this omission is SILENT: the " +
@@ -198,8 +203,12 @@ func TestLN4CompositionRootPassesTheHoistedLaneSet(t *testing.T) {
 			t.Errorf("the composition root does not feed the hoisted lane set to %q", consumer)
 		}
 	}
-	if strings.Count(src, "engineLanes(logger)") != 1 {
-		t.Errorf("shell.go calls engineLanes(logger) %d times, want exactly one — five reads of the same "+
-			"documents can disagree with each other", strings.Count(src, "engineLanes(logger)"))
+	// Counted by CALL, not by the identifier that happens to be passed:
+	// `lg := logger; engineLanes(lg)` is still a call, and a count keyed to
+	// the literal `engineLanes(logger)` reads a renamed variable as zero
+	// calls — green for a file that loads the documents five times.
+	if n := strings.Count(src, "engineLanes("); n != 1 {
+		t.Errorf("shell.go calls engineLanes( %d times, want exactly one — five reads of the same "+
+			"documents can disagree with each other", n)
 	}
 }
