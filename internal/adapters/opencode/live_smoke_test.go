@@ -62,39 +62,21 @@ func brokerStoreUser() string {
 	return "uid-" + strconv.Itoa(os.Getuid())
 }
 
-func brokerStoreRoot() string { return filepath.Join(brokerStateDir(), "broker-store") }
+func brokerStoreRoot() string { return broker.StoreRoot(brokerStateDir()) }
 
 // placedEngineCreds reports which auth profiles this person's broker store
 // holds an ENGINE-CRED under.
 //
-// It is a presence check and stays one: it reads the record's plaintext `kind`
-// — the same secret-free field the broker's own `kindOf` reads to derive a
-// posture — and never opens the store, never decrypts, and never creates the
-// master key. A gate that had to write to answer would change the host every
-// time somebody ran the suite with nothing commissioned.
+// It is the production reader (P3-LN-4): the control plane asks the same
+// question at startup to decide which lanes a person holds, and this file used
+// to carry a second copy of the answer. A presence check that drifts from the
+// one production uses is a gate answering about a store nobody routes on. The
+// posture is unchanged and belongs to the reader — the record's plaintext
+// `kind` only, no decrypt, no store opened, no master key created, no write.
 func placedEngineCreds() map[string]bool {
-	dir := filepath.Join(brokerStoreRoot(), brokerStoreUser())
-	entries, err := os.ReadDir(dir)
+	placed, err := broker.PlacedEngineCreds(brokerStoreRoot(), brokerStoreUser())
 	if err != nil {
 		return nil
-	}
-	placed := map[string]bool{}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || filepath.Ext(name) != ".cred" {
-			continue
-		}
-		blob, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			continue
-		}
-		var rec struct {
-			Kind string `json:"kind"`
-		}
-		if json.Unmarshal(blob, &rec) != nil || rec.Kind != broker.KindEngineCred {
-			continue
-		}
-		placed[name[:len(name)-len(".cred")]] = true
 	}
 	return placed
 }

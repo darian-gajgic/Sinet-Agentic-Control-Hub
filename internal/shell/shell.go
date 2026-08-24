@@ -36,7 +36,6 @@ import (
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
-	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/opencode"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/buildinfo"
@@ -553,16 +552,30 @@ func Run(ctx context.Context, opts Options) error {
 		// leg is operator-installed config, not a runtime goroutine.
 		localSurf.startGameMode(ctx)
 
-		// No lane is commissioned at v0: provider entries and their
-		// credentials arrive through the operator's key ceremony, never from a
-		// default (S03.6, S11.5). The map is the seam that ceremony fills, and
-		// it feeds BOTH the adapter registration and the credential injector,
+		// The lane documents, loaded ONCE and shared by every consumer below
+		// as well as by the commissioning read: the map and the lane set it was
+		// derived from must be the same set, or a document that stops loading
+		// between two calls desynchronises them silently.
+		engineLaneDocs := engineLanes(logger)
+		// A lane is COMMISSIONED by a credential and made SELECTABLE by a
+		// provider entry (S03.6, S11.5). The operator's key ceremony does the
+		// first; this composes the second from what it finds placed in each
+		// person's broker store — a secret-free read of the record's plaintext
+		// kind that never decrypts, never writes and never creates a key. The
+		// map feeds BOTH the adapter registration and the credential injector,
 		// so a lane can never be dispatchable without its credential path.
-		engineCommissioned := map[string]opencode.ProviderConfig{}
+		//
+		// Composed HERE, before the registration, and never mutated after: four
+		// of its five consumers SNAPSHOT it, so a later refill would leave the
+		// adapter believing a lane is held while the router had never heard of
+		// it. A credential placed while the control plane is running is
+		// therefore picked up at its next start.
+		engineCommissioned := commissionEngineLanes(stateDir, engineLaneDocs, logger)
 		engineRegistry := engineAdapters(engineAdapterDeps{
 			Settings:     reg,
 			Logger:       logger,
 			StateDir:     stateDir,
+			Lanes:        engineLaneDocs,
 			Commissioned: engineCommissioned,
 		})
 		defer closeEngineAdapters(engineRegistry, logger)
@@ -591,17 +604,18 @@ func Run(ctx context.Context, opts Options) error {
 			SpotCheck:      localSurf.SpotCheck,
 			RoutePressure:  routePressure{g: metering.NewPressureGauge(db, reg), b: metering.NewBudgets(db)},
 			// The flat-rate lanes beyond the configured one: the lanes an
-			// operator has actually commissioned a provider entry for. Empty
-			// until the key ceremony, and empty is what keeps the S08.8
-			// flat-lane rule inert rather than routing onto a lane with no
-			// credential (P3-LN-2B R21/R22).
-			CommissionedLanes: commissionedLanes(engineLanes(logger), engineCommissioned),
+			// operator has actually placed a credential for (corrected
+			// 2026-08-24, P3-LN-4 — this used to be empty by construction).
+			// On a host where nothing is placed it is still empty, which is
+			// what keeps the S08.8 flat-lane rule inert rather than routing
+			// onto a lane with no credential (P3-LN-2B R21/R22).
+			CommissionedLanes: commissionedLanes(engineLaneDocs, engineCommissioned),
 			// Which ENGINE serves each commissioned lane (S03.2). Without it
 			// a zai-seated decision would dispatch to the Anthropic CLI.
-			LaneSubstrates: laneSubstrates(engineLanes(logger), engineCommissioned),
+			LaneSubstrates: laneSubstrates(engineLaneDocs, engineCommissioned),
 			// The commissioned lanes' execution seats, composed from their
 			// documents (no model id is a constant in the routing package).
-			AlternateSeats: laneAlternateSeats(engineLanes(logger), engineCommissioned),
+			AlternateSeats: laneAlternateSeats(engineLaneDocs, engineCommissioned),
 			// The S08.6 composer's policy-input seams: the current approved
 			// composer playbook (the governed S09.10 house object) and the
 			// lane's pinned engine version keying validation records.
@@ -618,7 +632,7 @@ func Run(ctx context.Context, opts Options) error {
 			// commissioned lane's engine-cred auth profile and delivers it as
 			// the variable that lane's document names. Nil for anyone with
 			// nothing commissioned — the unchanged dev posture.
-			CredInject:   laneCredInjector(stateDir, engineLanes(logger), engineCommissioned),
+			CredInject:   laneCredInjector(stateDir, engineLaneDocs, engineCommissioned),
 			Confiner:     engineConfiner,
 			ArtifactRoot: filepath.Join(stateDir, "artifacts"),
 			RunRoot:      filepath.Join(stateDir, "runs"),

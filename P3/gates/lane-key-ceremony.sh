@@ -416,15 +416,22 @@ do_summary() {
   done
 
   printf '\n'
-  note "WHAT PLACING A KEY DOES NOT DO — read this before expecting a lane to run."
+  note "WHAT PLACING A KEY DOES, AND WHEN — read this before expecting a lane to run."
   info "A lane is COMMISSIONED by a credential and made SELECTABLE by a provider"
-  info "entry. This ceremony does the first. The second lives in the control"
-  info "plane's commissioned map (internal/shell/shell.go), which is still"
-  info "constructed EMPTY at v0. Until a packet fills it from what is placed,"
-  info "the lanes are credentialled and the control plane will still not route"
-  info "work to them. The tier-L smoke in step 4 goes around that map on"
-  info "purpose — it drives the adapter directly — which is exactly why a green"
-  info "smoke proves the KEY and not the routing."
+  info "entry. This ceremony does the first. The second is composed by the"
+  info "control plane at STARTUP: it reads each person's broker store and gives"
+  info "that person a provider entry for every lane whose credential it finds"
+  info "placed there (P3-LN-4). So a key placed here does make its lane"
+  info "routable — at the control plane's NEXT START."
+  printf '\n'
+  note "A control plane that was already running when you placed this key will"
+  note "not send work to the lane until you restart it. Commissioning is"
+  info "startup-bound: coverage, the lane-to-substrate map and the alternate"
+  info "seats are composed once, at startup, and are never refilled live."
+  printf '\n'
+  info "The tier-L smoke in step 4 goes around that map on purpose — it drives"
+  info "the adapter directly — which is exactly why a green smoke proves the"
+  info "KEY and not the routing."
 
   printf '\n'
   note "SINET_CANARY_ARM stays an operator gate decision, and this script did not touch it."
@@ -440,8 +447,13 @@ do_summary() {
   info "  2. Reconcile the observed model lists and the Kimi membership tier"
   info "     against the seeded model ids, including the two flagged"
   info "     seed-only-pending-observation."
-  info "  3. Fill the control plane's commissioned map from what is placed, so a"
-  info "     commissioned lane becomes selectable by routing."
+  info "  3. Settle the person-namespace question. The broker keys its store"
+  info "     directory and its socket by an OS-level user name; the platform"
+  info "     carries its own person ids (runs.user_id / auth). Commissioning is"
+  info "     keyed by the broker name — the only choice that makes injection"
+  info "     dial the right socket — and the startup log line names the people"
+  info "     it commissioned so a mismatch is visible. At one operator the two"
+  info "     coincide; the household case needs a ratified reading."
   info "  4. Run the Z.AI dashboard calibration (step 6) and record the"
   info "     prompts-per-request mapping it yields."
   info "  5. Decide SINET_CANARY_ARM at the gate."

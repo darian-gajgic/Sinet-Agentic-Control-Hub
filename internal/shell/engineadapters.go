@@ -9,17 +9,21 @@ package shell
 // wiring detail: two paid agentic engine lanes become reachable and the S08.8
 // flat-lane pressure rule becomes live for the first time.
 //
-// What does NOT change: no lane is COMMISSIONED by this. A lane exists when a
-// person holds a provider entry and its credential, and both are placed by the
-// operator's key ceremony. Until then the second adapter is present, selected
-// by nothing, and refuses by name if something asks it to run an
-// uncommissioned lane.
+// What registration does NOT do: it commissions nothing. A lane exists for a
+// person when that person holds a provider entry AND its credential. The
+// ceremony places the credential; commissionEngineLanes below composes the
+// entries from what it finds placed, at startup (corrected 2026-08-24, P3-LN-4
+// — the map used to be constructed empty at the composition root, which made a
+// credentialled lane unroutable). A lane nobody has placed a credential for
+// leaves the second adapter present, selected by nothing, refusing by name if
+// something asks it to run.
 
 import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
@@ -34,9 +38,17 @@ type engineAdapterDeps struct {
 	Logger   *slog.Logger
 	// StateDir roots the per-user engine trees (0700 each, one per person).
 	StateDir string
-	// Commissioned maps user → that person's lane provider entries. EMPTY at
-	// v0, and empty is the honest state rather than a gap: see the file
-	// comment. The map is the seam the key ceremony fills.
+	// Lanes are the shipped lane documents, loaded ONCE at the composition root
+	// and shared by every consumer of the commissioned map. The commissioning
+	// read and the four consumers that SNAPSHOT the map must see the same lane
+	// set, or a document that stops loading between two calls desynchronises
+	// them silently. A zero value loads them here, for a caller that wants the
+	// registration alone.
+	Lanes []opencode.LaneConfig
+	// Commissioned maps user → that person's lane provider entries, composed by
+	// commissionEngineLanes from the credentials actually placed in each
+	// person's broker store (corrected 2026-08-24, P3-LN-4: this was EMPTY at
+	// v0). Empty stays the honest state for a host where nothing is placed.
 	Commissioned map[string]opencode.ProviderConfig
 }
 
@@ -106,9 +118,78 @@ func laneCredInjector(stateDir string, lanes []opencode.LaneConfig,
 	}
 }
 
+// commissionEngineLanes composes the commissioned map: for every person who has
+// a broker store, every shipped lane document whose credential is actually
+// placed in that person's store under the document's own auth profile, as that
+// lane's provider entry (S03.6, S11.5).
+//
+// The read is secret-free by construction — broker.PlacedEngineCreds answers
+// from the record's plaintext kind and never decrypts, never writes and never
+// creates the master key — and the entries come from the documents themselves,
+// so no endpoint and no model id is composed here.
+//
+// The map is keyed by the broker `who`: the broker derives its socket name AND
+// its store directory from one name, and laneCredInjector dials that socket, so
+// any other key would dial a socket for a person the store knows nothing about.
+// The startup line below names those strings, because the platform's own person
+// ids are a different namespace and at v0 they merely coincide (LN gate item).
+//
+// Commissioning is STARTUP-BOUND. Four of the map's five consumers snapshot it
+// at composition, so a key placed while the control plane is running is picked
+// up on its NEXT start; refilling live would produce a control plane whose
+// adapter believes a lane is held and whose router never heard of it.
+func commissionEngineLanes(stateDir string, lanes []opencode.LaneConfig, logger *slog.Logger) map[string]opencode.ProviderConfig {
+	root := broker.StoreRoot(stateDir)
+	people, err := broker.StorePeople(root)
+	if err != nil {
+		logger.Warn("lanes: the broker store root could not be listed, so nothing is commissioned this start",
+			"root", root, "err", fmt.Sprint(err))
+	}
+	placed := make(map[string]map[string]bool, len(people))
+	for _, who := range people {
+		profiles, err := broker.PlacedEngineCreds(root, who)
+		if err != nil {
+			logger.Warn("lanes: a person's broker store could not be read, so their lanes stay uncommissioned this start",
+				"user", who, "err", fmt.Sprint(err))
+			continue
+		}
+		placed[who] = profiles
+	}
+	commissioned := opencode.Commission(lanes, placed)
+	logCommissioned(logger, lanes, commissioned)
+	return commissioned
+}
+
+// logCommissioned is the one startup line that says what a placed key actually
+// bought (S14.1). Auth profiles and lane names ship in the lane documents and
+// are not secrets; nothing else appears. A control plane that commissioned
+// silently is one where an operator cannot tell a placed key from a typo'd
+// profile name.
+func logCommissioned(logger *slog.Logger, lanes []opencode.LaneConfig,
+	commissioned map[string]opencode.ProviderConfig) {
+	people := make([]string, 0, len(commissioned))
+	for who := range commissioned {
+		people = append(people, who)
+	}
+	sort.Strings(people)
+	perPerson := make([]string, 0, len(people))
+	for _, who := range people {
+		held := commissionedLanes(lanes, map[string]opencode.ProviderConfig{who: commissioned[who]})
+		perPerson = append(perPerson, who+"="+strings.Join(held, "+"))
+	}
+	logger.Info("lanes: commissioned from the credentials placed in each person's broker store",
+		"people", len(commissioned),
+		"lanes", strings.Join(commissionedLanes(lanes, commissioned), ","),
+		"per_person", strings.Join(perPerson, " "),
+		"note", "startup-bound: a credential placed later is picked up at the next control-plane start")
+}
+
 // engineAdapters builds the registration map.
 func engineAdapters(deps engineAdapterDeps) map[string]adapters.Adapter {
-	lanes := engineLanes(deps.Logger)
+	lanes := deps.Lanes
+	if lanes == nil {
+		lanes = engineLanes(deps.Logger)
+	}
 	commissioned := deps.Commissioned
 	return map[string]adapters.Adapter{
 		// The Anthropic lane (Spec S03.2): the pinned `claude` CLI resolved
@@ -175,8 +256,8 @@ func closeEngineAdapters(reg map[string]adapters.Adapter, logger *slog.Logger) {
 // entry with a credential behind it makes one SELECTABLE, and routing work
 // onto the difference is exactly the "not commissioned" state the lane
 // documents exist to surface by name. So the answer is derived from what is
-// actually placed, never from what ships: with the empty v0 map this returns
-// nothing and coverage is unchanged.
+// actually placed, never from what ships: on a host where nothing is placed
+// this returns nothing and coverage is unchanged.
 //
 // Coverage is per-owner in S08.8 and the Router is built once per control
 // plane, so this is the union. That is the honest over-approximation at v0

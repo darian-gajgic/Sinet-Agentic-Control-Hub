@@ -648,6 +648,41 @@ func (c LaneConfig) ProviderEntry() ProviderEntry {
 	}
 }
 
+// Commission composes the provider entries each person actually holds, from
+// the lane documents and what that person has PLACED (S03.6: "adding a lane is
+// a provider entry per user"; S11.5).
+//
+// placed maps a person to the auth profiles that person has an engine
+// credential under — a placement fact and never a secret, so nothing on this
+// path can hold credential material. The result is person → (providerID →
+// entry): the map a control plane hands to the adapter registration and to the
+// spawn-time credential injector, so a lane can never be dispatchable without
+// its credential path.
+//
+// A document declaring no auth profile or no environment variable is not
+// commissionable and never enters the map, whatever is placed. That is the same
+// conjunction the spawn-time injector refuses to build on: a lane registered as
+// held with no credential path would be seated by routing and then authenticate
+// as nobody, which is the state ErrLaneNotCommissioned exists to make visible.
+func Commission(lanes []LaneConfig, placed map[string]map[string]bool) map[string]ProviderConfig {
+	out := map[string]ProviderConfig{}
+	for who, profiles := range placed {
+		entries := ProviderConfig{}
+		for _, l := range lanes {
+			if l.Credential.Profile == "" || l.Credential.EnvVar == "" {
+				continue
+			}
+			if profiles[l.Credential.Profile] {
+				entries[l.ProviderID] = l.ProviderEntry()
+			}
+		}
+		if len(entries) > 0 {
+			out[who] = entries
+		}
+	}
+	return out
+}
+
 // VerifyEndpoint is the R11 self-check: does the entry a user actually holds
 // point at the SUBSCRIPTION endpoint? A lane that declares no marker cannot
 // answer, and says so rather than claiming a verification it never made.
