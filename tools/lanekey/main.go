@@ -1,12 +1,17 @@
 // Command lanekey is the LN-CEREMONY credential tool: the ONE place a lane's
 // API key is handled during the guided key-placement ceremony.
 //
-// WHY IT EXISTS. No `sinet` verb places an engine-cred. `sinet broker` is the
-// DAEMON mode only, and its socket `store` op is dev-gated behind
-// --allow-store; broker.Store.Put is an in-package admin/setup call whose own
-// doc comment names this exact moment — "the operator migrating a key into the
-// broker at a future gate". This tool is that gate's hands and nothing else: a
-// read-write TOOL under tools/, never a platform change.
+// WHY IT EXISTS — the determination, recorded so it can be re-checked. No
+// `sinet` verb places an engine-cred. The binary's modes are control, broker,
+// portpool, run-launch, snapshot, restore-drill, units, local, engine-hook and
+// version/help (internal/cli); `sinet broker` is the DAEMON mode only —
+// broker.Main parses flags and serves, and has no sub-verb. The wire does carry
+// an admin `store` op, but it is dev-gated behind --allow-store and NO CLI verb
+// sends it, so it is unreachable from the command line. broker.Store.Put is an
+// in-package admin/setup call whose own doc comment names this exact moment:
+// "the operator migrating a key into the broker at a future gate". This tool is
+// that gate's hands and nothing else — a TOOL under tools/, never a platform
+// change.
 //
 // SECRET POSTURE — the rules it enforces on itself:
 //
@@ -15,13 +20,10 @@
 //   - A secret is NEVER printed, logged, or written anywhere except the broker
 //     store. What is printed is a per-run SALTED fingerprint: it is not
 //     comparable across runs and not comparable to any stored hash.
-//   - put / verify / wire401 spawn NO child process at all.
-//   - exec is the ONE sanctioned env-injection path, and it mirrors the
-//     platform's own spawn mechanism (broker.EnvInjector: material resolved
-//     from the broker at spawn INTO the process environment, while the config
-//     the engine reads names the variable only). It REFUSES if the value would
-//     land in the child's argv, and REFUSES if the variable is already set in
-//     its own environment.
+//   - No verb spawns a child process, so no secret can reach one's argv or
+//     environment. Spawn-time injection is the PLATFORM's job through
+//     broker.EnvInjector, and duplicating it here would have been a second
+//     credential path to audit for no gain.
 //
 // Every lane fact — provider id, base URL, endpoint marker, credential profile,
 // env var, default model, wire protocol — is read from the lane DOCUMENT
@@ -32,7 +34,6 @@
 //
 //	lanekey put     --store-dir D --user U --lane L   # secret on stdin
 //	lanekey verify  --store-dir D --user U --lane L
-//	lanekey exec    --store-dir D --user U --lane L -- cmd args...
 //	lanekey wire401 --lane L --out FILE               # invalid key, on purpose
 //	lanekey show    --lane L                          # derived facts, no secret
 package main
@@ -52,7 +53,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -72,9 +72,9 @@ const invalidProbeKey = "INVALID-KEY-FOR-CEREMONY-WIRE-CAPTURE-0000"
 // another CLI fails loudly here instead of leaking into the process table.
 var secretFlagNames = []string{"secret", "key", "api-key", "apikey", "value", "token", "password", "pass"}
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := refuseSecretsInArgv(args); err != nil {
 		fmt.Fprintf(stderr, "lanekey: %v\n", err)
 		return 2
@@ -87,11 +87,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch verb {
 	case "put":
-		err = cmdPut(rest, stdout)
+		err = cmdPut(rest, stdin, stdout)
 	case "verify":
 		err = cmdVerify(rest, stdout)
-	case "exec":
-		return cmdExec(rest, stdout, stderr)
 	case "wire401":
 		err = cmdWire401(rest, stdout)
 	case "show":
@@ -114,8 +112,6 @@ const usage = `lanekey — LN-CEREMONY credential tool (secrets: stdin only, nev
 
   lanekey put     --store-dir D --user U --lane L    place a key (stdin) + round-trip verify
   lanekey verify  --store-dir D --user U --lane L    round-trip verify through the broker
-  lanekey exec    --store-dir D --user U --lane L -- cmd args...
-                                                     resolve and run cmd with the lane's env var set
   lanekey wire401 --lane L --out FILE                capture one real error body (INVALID key, on purpose)
   lanekey show    --lane L                           print the lane's derived facts (no secret)
 
@@ -270,7 +266,7 @@ func newSalt() ([]byte, error) {
 
 // ─── put ────────────────────────────────────────────────────────────────────
 
-func cmdPut(args []string, out io.Writer) error {
+func cmdPut(args []string, stdin io.Reader, out io.Writer) error {
 	fs := newFlags("put")
 	storeDir := fs.String("store-dir", "", "broker store root")
 	user := fs.String("user", "", "person whose store this is")
@@ -287,7 +283,7 @@ func cmdPut(args []string, out io.Writer) error {
 		return err
 	}
 
-	secret, err := readSecretStdin()
+	secret, err := readSecretStdin(stdin)
 	if err != nil {
 		return err
 	}
@@ -370,82 +366,6 @@ func cmdVerify(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "   PASS: profile %q resolves through the broker as an %s (per-run fingerprint %s)\n",
 		lane.profile, broker.KindEngineCred, fp)
 	return nil
-}
-
-// ─── exec ───────────────────────────────────────────────────────────────────
-
-// cmdExec is the ONE sanctioned env-injection path. It is the shape the
-// platform itself uses at spawn (broker.EnvInjector), narrowed to one child and
-// guarded in both directions.
-func cmdExec(args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("exec")
-	storeDir := fs.String("store-dir", "", "broker store root")
-	user := fs.String("user", "", "person whose store this is")
-	lanePath := fs.String("lane", "", "path to the lane document")
-	socket := fs.String("socket", "", "resolve through this live broker socket")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	child := fs.Args()
-	if len(child) == 0 {
-		fmt.Fprintln(stderr, "lanekey exec: no command given (use `-- cmd args...`)")
-		return 2
-	}
-	lane, err := loadLane(*lanePath, "")
-	if err != nil {
-		fmt.Fprintf(stderr, "lanekey exec: %v\n", err)
-		return 1
-	}
-	if err := requireStore(*storeDir, *user); err != nil {
-		fmt.Fprintf(stderr, "lanekey exec: %v\n", err)
-		return 1
-	}
-	// The variable must not already be set: an inherited value would shadow
-	// the broker's, and the run would prove nothing about what was placed.
-	if _, ok := os.LookupEnv(lane.envVar); ok {
-		fmt.Fprintf(stderr, "lanekey exec: REFUSED: %s is already set in this environment — "+
-			"the broker's value would be indistinguishable from an inherited one\n", lane.envVar)
-		return 1
-	}
-
-	code := 1
-	err = withBroker(*storeDir, *user, *socket, func(c *broker.Client) error {
-		secret, kind, err := c.Resolve(lane.profile)
-		if err != nil {
-			return fmt.Errorf("broker resolve %q: %w", lane.profile, err)
-		}
-		if kind != broker.KindEngineCred {
-			return fmt.Errorf("profile %q resolved as %q", lane.profile, kind)
-		}
-		// The guard that gives this verb its name: the value may travel in the
-		// child's ENVIRONMENT (owner-readable /proc/<pid>/environ) and never in
-		// its ARGV (world-readable process table).
-		for _, a := range child {
-			if strings.Contains(a, secret) {
-				return errors.New("REFUSED: the resolved credential appears in the child's argv")
-			}
-		}
-		for _, kv := range os.Environ() {
-			if i := strings.IndexByte(kv, '='); i >= 0 && kv[i+1:] == secret {
-				return fmt.Errorf("REFUSED: the resolved credential is already exported as %s", kv[:i])
-			}
-		}
-		cmd := exec.Command(child[0], child[1:]...)
-		cmd.Env = append(os.Environ(), lane.envVar+"="+secret)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
-		runErr := cmd.Run()
-		code = cmd.ProcessState.ExitCode()
-		var ee *exec.ExitError
-		if runErr != nil && !errors.As(runErr, &ee) {
-			return runErr
-		}
-		return nil
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "lanekey exec: %v\n", err)
-		return 1
-	}
-	return code
 }
 
 // ─── wire401 ────────────────────────────────────────────────────────────────
@@ -643,8 +563,8 @@ func requireStore(dir, user string) error {
 // readSecretStdin reads the credential from stdin and nowhere else. Only a
 // trailing newline is stripped: a key is taken exactly as the operator's
 // clipboard held it, minus the newline their Enter added.
-func readSecretStdin() ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<16))
+func readSecretStdin(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, 1<<16))
 	if err != nil {
 		return nil, fmt.Errorf("read secret from stdin: %w", err)
 	}
