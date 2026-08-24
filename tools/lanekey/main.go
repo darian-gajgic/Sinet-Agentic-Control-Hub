@@ -426,7 +426,7 @@ func cmdWire401(args []string, out io.Writer) error {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s lane — live wire capture (invalid-credential probe)\n\n", lane.cfg.Lane)
-	fmt.Fprintf(&b, "Captured %s by `P3/gates/lane-key-ceremony.sh` step 6 (LN-CEREMONY).\n\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "Captured %s by `P3/gates/lane-key-ceremony.sh` step 5 (LN-CEREMONY).\n\n", time.Now().UTC().Format(time.RFC3339))
 	b.WriteString("This closes the DOCUMENTED-NOT-OBSERVED label on the lane's signal table with ONE\n")
 	b.WriteString("real body. The credential sent was the literal constant `" + invalidProbeKey + "`;\n")
 	b.WriteString("no valid key material was resolved, held, or transmitted on this path.\n\n")
