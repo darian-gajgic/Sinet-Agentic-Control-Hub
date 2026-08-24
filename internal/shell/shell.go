@@ -1569,6 +1569,10 @@ func memoryCitedEntryVersions(s *memory.Store) func(ctx context.Context, keys []
 type routePressure struct {
 	g *metering.PressureGauge
 	b *metering.Budgets
+	// pb is the S10.4 PLAN budget store (migration 0025), the denominator for a
+	// lane whose plan meters in its own units. Nil is a process with no such
+	// store, which reads exactly as it did before the surface existed.
+	pb *metering.PlanBudgets
 }
 
 // Pressure returns the lane's NORMALIZED pressure: consumption over the
@@ -1604,6 +1608,60 @@ func (p routePressure) Pressure(ctx context.Context, owner, lane string) (worker
 		return worker.LanePressure{}, err
 	}
 	return worker.LanePressure{Ratio: gauge.Pressure, Applicable: gauge.Applicable, Unit: "weighted tokens"}, nil
+}
+
+// bindingPlanReading is the tier-3 reading for a plan-metered lane, taken
+// against the operator's DECLARED plan budgets, and the ONE place a lane's
+// several windows are aggregated. It returns the reading and the name of the
+// window that bound it (empty when none is declared).
+//
+// THE AGGREGATION RULE IS MAX-BINDS: the most-constrained window binds the
+// lane. A plan's windows are separate allowances — the zai plan meters a
+// five-hour window beside a weekly one — and S10.4's headroom rule stops
+// background admission at a fraction of the budget. A lane sitting at 90% of
+// its five-hour window has no headroom whatever its weekly window says, so a
+// minimum or a mean would admit work into an exhausted window and interactive
+// use is CRITICAL_PLUS. No spec section states an aggregation rule across
+// windows by name; this reading was ratified for the packet (P3-LN-6 OQ-2) with
+// the alternatives — narrowest window only, or an operator-designated routing
+// window — recorded, and it is confined to this function so a reversal touches
+// nothing else.
+//
+// With no row on any window the reading is the honest absence and is
+// byte-identical to the one this lane served before the surface existed: the
+// denominator is the operator's budget and NEVER the provider's published
+// allowance (S10.4/D4). A nil store is a process with no plan-budget table,
+// which reads the same way.
+func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *metering.PlanBudgets,
+	userID, lane string, doc metering.PlanDoc, now time.Time) (metering.PlanReading, string, error) {
+	if pb == nil {
+		r, err := g.ReadPlanUnits(ctx, userID, lane, doc, metering.UndeclaredPlanBudget(), now)
+		return r, "", err
+	}
+	var (
+		best   metering.PlanReading
+		window string
+	)
+	for i, q := range doc.Quotas {
+		// The store is the only producer of the undeclared posture, so no
+		// caller here can invent a denominator (D4).
+		budget, err := pb.PlanBudget(ctx, userID, lane, q.Name)
+		if err != nil {
+			return metering.PlanReading{}, "", err
+		}
+		r, err := g.ReadPlanUnits(ctx, userID, lane, doc, budget, now)
+		if err != nil {
+			return metering.PlanReading{}, "", err
+		}
+		switch {
+		case r.Applicable && (window == "" || r.Pressure > best.Pressure):
+			best, window = r, q.Name
+		case window == "" && i == 0:
+			// The honest absence, held only until a declared window replaces it.
+			best = r
+		}
+	}
+	return best, window, nil
 }
 
 // budgetAdapter adapts the S10.4 budget store to the api.BudgetStore seam
@@ -1676,6 +1734,11 @@ type projMeter struct {
 	ledger  *metering.Ledger
 	gauge   *metering.PressureGauge
 	budgets *metering.Budgets
+	// planBudgets is the tier-3 sibling of budgets, for the same reason: with
+	// the router reading declared plan budgets, a hardcoded undeclared read
+	// here would make GET /api/meters contradict the lane it routes to. Nil
+	// keeps the pre-0025 posture.
+	planBudgets *metering.PlanBudgets
 }
 
 func (m projMeter) RunMeter(ctx context.Context, runID string) (api.RunMeter, error) {

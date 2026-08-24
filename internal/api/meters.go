@@ -78,13 +78,51 @@ type MeterLanePlan struct {
 	MultiplierWindow string   `json:"multiplier_window,omitempty"`
 	Pressure         *float64 `json:"pressure"`
 	BudgetDeclared   bool     `json:"budget_declared"`
-	SeedAllowance    float64  `json:"seed_allowance,omitempty"`
-	SeedQuota        string   `json:"seed_quota,omitempty"`
-	VerifiedOn       string   `json:"verified_on,omitempty"`
+	// Budget is the declaration `pressure` was measured against — the binding
+	// window's row, in that window's own unit. Absent while nobody has declared
+	// one, which is what keeps an undeclared lane serving exactly the bytes it
+	// served before this member existed. There is no dollar member and none may
+	// be added (D5).
+	Budget        *MeterPlanBudget `json:"budget,omitempty"`
+	SeedAllowance float64          `json:"seed_allowance,omitempty"`
+	SeedQuota     string           `json:"seed_quota,omitempty"`
+	VerifiedOn    string           `json:"verified_on,omitempty"`
 	// Windows are the plan's declared allowance windows with their OWN units,
 	// so a lane whose short window counts requests and whose long window counts
 	// credits cannot be rendered in one. Omitted for a plan that declares none.
 	Windows []MeterPlanWindow `json:"windows,omitempty"`
+}
+
+// MeterPlanBudget is the operator's declared plan budget on the meters wire:
+// the denominator behind `pressure`, in the binding window's own unit, with the
+// provenance that says where the figure came from (S10.4). Never dollars.
+type MeterPlanBudget struct {
+	PeriodUnits float64 `json:"period_units"`
+	Unit        string  `json:"unit"`
+	Window      string  `json:"window"`
+	PeriodStart string  `json:"period_start,omitempty"`
+	PeriodHours float64 `json:"period_hours,omitempty"`
+	Source      string  `json:"source"`
+	// SeededFrom / Fraction are the proposal provenance, absent on a row the
+	// operator set themselves.
+	SeededFrom string  `json:"seeded_from,omitempty"`
+	Fraction   float64 `json:"fraction,omitempty"`
+	DeclaredBy string  `json:"declared_by"`
+	DeclaredTS string  `json:"declared_ts,omitempty"`
+}
+
+// meterPlanBudget renders the declared budget onto the wire. Nil in, nil out:
+// a lane with no declaration serves no `budget` member at all.
+func meterPlanBudget(b *LanePlanBudget) *MeterPlanBudget {
+	if b == nil {
+		return nil
+	}
+	return &MeterPlanBudget{
+		PeriodUnits: b.PeriodUnits, Unit: b.Unit, Window: b.Window,
+		PeriodStart: b.PeriodStart, PeriodHours: b.PeriodHours,
+		Source: b.Source, SeededFrom: b.SeededFrom, Fraction: b.Fraction,
+		DeclaredBy: b.DeclaredBy, DeclaredTS: b.DeclaredTS,
+	}
 }
 
 // MeterPlanWindow is one allowance window on the meters wire.

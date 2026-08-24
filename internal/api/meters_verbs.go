@@ -59,6 +59,78 @@ type BudgetStore interface {
 	Budget(ctx context.Context, userID, lane string) (BudgetRecord, bool, error)
 }
 
+// PlanBudgetRecord is one declared (person, lane, window) PLAN budget as this
+// transport speaks it.
+//
+// PeriodUnits is in the WINDOW's own plan unit — credits, requests — which is
+// why Unit rides the record. There is no dollar field here and none may be
+// added: a flat-rate lane has no per-unit price, and pricing a plan unit is the
+// D5 inversion this whole file is written against.
+type PlanBudgetRecord struct {
+	Owner string `json:"owner"`
+	Lane  string `json:"lane"`
+	// Window is the plan document's own quota name ("rolling-5h", "weekly").
+	// The grain is (person, lane, window) because a lane's windows can be
+	// denominated differently, and one lane-wide figure cannot describe that.
+	Window      string    `json:"window"`
+	PeriodUnits float64   `json:"period_units"`
+	Unit        string    `json:"unit"`
+	PeriodStart time.Time `json:"period_start"`
+	PeriodHours float64   `json:"period_hours"`
+	// Source is how the figure came to exist: seeded from the plan's published
+	// allowance, or set by the operator.
+	Source string `json:"source"`
+	// SeededFrom / Fraction are the proposal's provenance — which allowance row
+	// it was taken from and what share of it. Absent on an operator-set row,
+	// and never an input to any arithmetic.
+	SeededFrom string    `json:"seeded_from,omitempty"`
+	Fraction   float64   `json:"fraction,omitempty"`
+	DeclaredTS time.Time `json:"declared_ts"`
+	DeclaredBy string    `json:"declared_by"`
+}
+
+// PlanWindowRecord is one allowance window a lane's plan declares, as the
+// boundary sees it.
+//
+// It exists so the VERB can validate the window name against the lane's own
+// document: input validation belongs at the boundary that admits a person's
+// input (CONVENTIONS §30), and internal/api cannot see a plan document (§11).
+// Without it the check would either move into the store — a defect check
+// standing in for an input check — or surface a typo as a 500.
+type PlanWindowRecord struct {
+	Name        string  `json:"name"`
+	Unit        string  `json:"unit"`
+	WindowHours float64 `json:"window_hours"`
+	// Allowance is the PUBLISHED figure a budget is proposed FROM. It is
+	// provenance and never a denominator (S10.4/D4).
+	Allowance float64 `json:"allowance,omitempty"`
+	// AllowanceUnverified says nobody published an allowance for this window,
+	// so Allowance is 0 and means "unknown" rather than "none". Nothing can be
+	// proposed from such a window: a fraction of a number nobody published is
+	// the inferred provider window D4 bars.
+	AllowanceUnverified bool `json:"allowance_unverified,omitempty"`
+}
+
+// PlanBudgetStore is the S10.4 durable PLAN-budget seam (migration 0025). The
+// shell adapts *metering.PlanBudgets to it; nil leaves the plan-budget verb
+// answering 503.
+type PlanBudgetStore interface {
+	// DeclarePlanBudget upserts the budget, returning the row it replaced so
+	// the edit's audit row can carry old→new.
+	DeclarePlanBudget(ctx context.Context, rec PlanBudgetRecord) (prior PlanBudgetRecord, existed bool, err error)
+	// PlanBudget reads one declared window; the bool is false when none is
+	// declared (the honest absence, never a zero).
+	PlanBudget(ctx context.Context, userID, lane, window string) (PlanBudgetRecord, bool, error)
+	// PlanWindows lists the allowance windows the lane's plan declares. An
+	// empty list is a lane whose plan meters in no windows of its own.
+	PlanWindows(ctx context.Context, lane string) ([]PlanWindowRecord, error)
+	// ProposePlanBudget derives the S10.4 proposal for a window: the published
+	// allowance at ⚙ budget.background_window_fraction, in the window's own
+	// unit. It is a PROPOSAL — the operator's to accept — and this verb is its
+	// first production consumer.
+	ProposePlanBudget(ctx context.Context, userID, lane, window string, start time.Time) (PlanBudgetRecord, error)
+}
+
 // PauseStore is the S10.4 pause-my-automation seam (migration 0017).
 // *metering.Pause satisfies it; nil leaves the pause verb answering 503.
 type PauseStore interface {
@@ -79,9 +151,10 @@ type HintSurface interface {
 // the ACT, so an inventory walk over the decision log can tell a budget edit
 // from a pause flip from a drag without reading prose.
 const (
-	cardTypeBudget = "budget"
-	cardTypePause  = "automation_pause"
-	cardTypeHint   = "priority_hint"
+	cardTypeBudget     = "budget"
+	cardTypePlanBudget = "plan_budget"
+	cardTypePause      = "automation_pause"
+	cardTypeHint       = "priority_hint"
 )
 
 // hintRankBound bounds the S15.5 drag rank. Structural, not ⚙ (S18 ratifies no
@@ -225,6 +298,39 @@ func budgetSnapshot(rec BudgetRecord, declared bool) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// ── POST /api/meters/plan-budget — declare a PLAN lane's budget ─────────────
+
+// planBudgetBody is the declaration. `person` is optional and defaults to the
+// caller. There is no dollar member and a request may not express one (D5).
+type planBudgetBody struct {
+	Person string `json:"person,omitempty"`
+	Lane   string `json:"lane"`
+	// Window is the plan document's own quota name. It is required because a
+	// plan's windows are denominated differently and a budget for "the lane" is
+	// a budget in no particular unit.
+	Window string `json:"window"`
+	// PeriodUnits is in the window's own plan unit. Ignored — and not required
+	// — when FromProposal asks the platform to derive it.
+	PeriodUnits float64 `json:"period_units"`
+	PeriodHours float64 `json:"period_hours"`
+	PeriodStart string  `json:"period_start,omitempty"`
+	// FromProposal takes the S10.4 proposal for this window instead of a
+	// figure: the published allowance at ⚙ budget.background_window_fraction.
+	// It is still the OPERATOR's act — the platform never declares a budget on
+	// somebody's behalf, because a denominator nobody chose is the inferred
+	// provider window D4 bars.
+	FromProposal bool   `json:"from_proposal,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+// PlanBudgetDeclared is the response: the plan budget now in force, plus what
+// it replaced.
+type PlanBudgetDeclared struct {
+	Budget PlanBudgetRecord  `json:"budget"`
+	Prior  *PlanBudgetRecord `json:"prior,omitempty"`
+	Detail string            `json:"detail"`
 }
 
 // ── POST /api/meters/pause — pause / resume my automation ───────────────────

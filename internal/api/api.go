@@ -127,6 +127,10 @@ type LanePlanMeter struct {
 	// allowance (S10.4/D4).
 	Pressure       *float64
 	BudgetDeclared bool
+	// Budget is the declaration Pressure was measured against — the BINDING
+	// window's row. Nil when no plan budget is declared, which is why it is a
+	// pointer: an absent declaration is absent, never a zero budget.
+	Budget *LanePlanBudget
 	// SeedAllowance / SeedQuota record the published allowance a budget would
 	// be proposed FROM — provenance, never the divisor.
 	SeedAllowance float64
@@ -137,6 +141,27 @@ type LanePlanMeter struct {
 	// in credits, and a surface handed one scalar would print one under the
 	// other's label.
 	Windows []LanePlanWindow
+}
+
+// LanePlanBudget is the operator's declared plan budget for the window that
+// BINDS the lane's pressure — the denominator, in that window's own unit, with
+// the provenance that says where the figure came from. It is never dollars, and
+// no member of it is ever multiplied by a price (D5).
+type LanePlanBudget struct {
+	PeriodUnits float64
+	Unit        string
+	// Window is the plan document's own quota name this budget denominates.
+	Window      string
+	PeriodStart string
+	PeriodHours float64
+	// Source, SeededFrom and Fraction say how the figure came to exist: a
+	// proposal taken from the published allowance at ⚙
+	// budget.background_window_fraction, or a figure the operator set.
+	Source     string
+	SeededFrom string
+	Fraction   float64
+	DeclaredBy string
+	DeclaredTS string
 }
 
 // LanePlanWindow is one declared allowance window as this read serves it.
@@ -274,11 +299,15 @@ type Config struct {
 	// carries the S15.5 board drag onto the scheduler's queue row; Watchdog
 	// routes the landed S14.4 Suppress; Resume takes the ratified S02.3
 	// parked→running edge for a person.
-	Budgets  BudgetStore
-	Pause    PauseStore
-	Hints    HintSurface
-	Watchdog SuppressSurface
-	Resume   ResumeSurface
+	Budgets BudgetStore
+	// PlanBudgets persists the S10.4 automation budget for a PLAN-metered lane
+	// (migration 0025), at the (person, lane, window) grain a plan's own
+	// windows need. Nil leaves the plan-budget verb answering 503.
+	PlanBudgets PlanBudgetStore
+	Pause       PauseStore
+	Hints       HintSurface
+	Watchdog    SuppressSurface
+	Resume      ResumeSurface
 	// Benchmark is the S14.7 / BENCH-REG practice behind the B6-2C verdict
 	// backend (benchmark.go): the blind form's data, the §3.3 one-act verdict,
 	// the §4.2.5 decline, the §12 alarm disposition and the §4.2.1 consent flip.
@@ -377,11 +406,12 @@ type Server struct {
 	// cancel is the S02.3 cancel choreography behind the 4.5 cancel verbs.
 	cancel CancelSurface
 	// The B6-2B decision-plane seams (meters_verbs.go, oversight.go).
-	budgets  BudgetStore
-	pause    PauseStore
-	hints    HintSurface
-	watchdog SuppressSurface
-	resume   ResumeSurface
+	budgets     BudgetStore
+	planBudgets PlanBudgetStore
+	pause       PauseStore
+	hints       HintSurface
+	watchdog    SuppressSurface
+	resume      ResumeSurface
 	// benchmark is the S14.7 practice behind the B6-2C verdict backend.
 	benchmark BenchmarkSurface
 	// preview is the S13.8 preview surface behind the preview verbs (B6-3B).
@@ -445,40 +475,41 @@ func (s *Server) record(pattern string, session bool) {
 // New assembles the Server.
 func New(cfg Config) *Server {
 	s := &Server{
-		log:        cfg.Log,
-		sessions:   cfg.Sessions,
-		devPosture: cfg.DevPosture,
-		auth:       cfg.Auth,
-		settings:   cfg.Settings,
-		registry:   cfg.Registry,
-		prices:     cfg.Prices,
-		healthFn:   cfg.HealthFn,
-		stopping:   cfg.Stopping,
-		poll:       cfg.PollInterval,
-		logger:     cfg.Logger,
-		nudge:      newBroadcast(),
-		intake:     cfg.Intake,
-		onboard:    cfg.Onboard,
-		review:     cfg.Review,
-		accept:     cfg.Accept,
-		followUp:   cfg.FollowUp,
-		preview:    cfg.Preview,
-		memory:     cfg.Memory,
-		memGate:    cfg.MemoryGate,
-		history:    cfg.History,
-		chat:       cfg.Chat,
-		push:       cfg.Push,
-		pushSender: cfg.PushSender,
-		workforce:  cfg.Workforce,
-		effects:    cfg.Effects,
-		cancel:     cfg.Cancel,
-		clock:      cfg.Now,
-		budgets:    cfg.Budgets,
-		pause:      cfg.Pause,
-		hints:      cfg.Hints,
-		watchdog:   cfg.Watchdog,
-		resume:     cfg.Resume,
-		benchmark:  cfg.Benchmark,
+		log:         cfg.Log,
+		sessions:    cfg.Sessions,
+		devPosture:  cfg.DevPosture,
+		auth:        cfg.Auth,
+		settings:    cfg.Settings,
+		registry:    cfg.Registry,
+		prices:      cfg.Prices,
+		healthFn:    cfg.HealthFn,
+		stopping:    cfg.Stopping,
+		poll:        cfg.PollInterval,
+		logger:      cfg.Logger,
+		nudge:       newBroadcast(),
+		intake:      cfg.Intake,
+		onboard:     cfg.Onboard,
+		review:      cfg.Review,
+		accept:      cfg.Accept,
+		followUp:    cfg.FollowUp,
+		preview:     cfg.Preview,
+		memory:      cfg.Memory,
+		memGate:     cfg.MemoryGate,
+		history:     cfg.History,
+		chat:        cfg.Chat,
+		push:        cfg.Push,
+		pushSender:  cfg.PushSender,
+		workforce:   cfg.Workforce,
+		effects:     cfg.Effects,
+		cancel:      cfg.Cancel,
+		clock:       cfg.Now,
+		budgets:     cfg.Budgets,
+		planBudgets: cfg.PlanBudgets,
+		pause:       cfg.Pause,
+		hints:       cfg.Hints,
+		watchdog:    cfg.Watchdog,
+		resume:      cfg.Resume,
+		benchmark:   cfg.Benchmark,
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter, now: s.clock}
