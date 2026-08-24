@@ -1,0 +1,647 @@
+package opencode
+
+// lane_ln3_test.go — P3-LN-3 §6 specs 1-5 + 22-24 (S03.6, S03.1, S10.5, D2).
+//
+// The Kimi (Moonshot) lane, onboarded via the report-02 §5 checklist. Every
+// value asserted here traces to a quoted line in
+// P3/measurements/2026-08-24-kimi-lane-gate-audit.md — the packet's only source
+// of provider facts. Hermetic and $0: no live provider call, no credential
+// material, every turn terminating on the loopback fake serve.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"os"
+	"strings"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
+)
+
+const (
+	kimiProviderID   = "kimi-for-coding"
+	kimiCodingBase   = "https://api.kimi.com/coding/v1"
+	kimiMeteredIntl  = "https://api.moonshot.ai/v1"
+	kimiMeteredCN    = "https://api.moonshot.cn/v1"
+	kimiAnthropicNPM = "@ai-sdk/anthropic"
+)
+
+// kimiSeedBytes reads the SHIPPED kimi lane document off disk rather than out
+// of the embed, so the negative table below can edit it by one field. The
+// package's tests run with the package directory as their cwd.
+func kimiSeedBytes(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("lanedata/kimi.json")
+	if err != nil {
+		t.Fatalf("read the shipped kimi lane document: %v", err)
+	}
+	return raw
+}
+
+// kimiDocWith renders the shipped kimi seed with one field edited, so each
+// negative differs from a KNOWN-GOOD document by exactly one thing (the
+// laneDocWith idiom, pointed at this lane's seed).
+func kimiDocWith(t *testing.T, edit func(map[string]any)) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(kimiSeedBytes(t), &m); err != nil {
+		t.Fatalf("decode the kimi seed document: %v", err)
+	}
+	edit(m)
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("re-encode: %v", err)
+	}
+	return out
+}
+
+func seedKimi(t *testing.T) LaneConfig {
+	t.Helper()
+	seeds, err := SeedLaneConfigs()
+	if err != nil {
+		t.Fatalf("SeedLaneConfigs: %v", err)
+	}
+	for _, c := range seeds {
+		if c.Lane == adapters.LaneKimi {
+			return c
+		}
+	}
+	t.Fatalf("no seed lane document for %q (lanes: %d)", adapters.LaneKimi, len(seeds))
+	return LaneConfig{}
+}
+
+// ── spec 1 · the shipped document loads, with the audit's own values ─────────
+
+func TestKimiLaneDocumentLoads(t *testing.T) {
+	seed := seedKimi(t)
+
+	if seed.ProviderID != kimiProviderID {
+		t.Errorf("provider id = %q, want %q (the models.dev provider URL and the installed opencode provider record both resolve under it)", seed.ProviderID, kimiProviderID)
+	}
+	if seed.Substrate != adapters.SubstrateOpencode {
+		t.Errorf("substrate = %q, want %q — a lane is never a new substrate (S03.6)", seed.Substrate, adapters.SubstrateOpencode)
+	}
+	if seed.NPM != kimiAnthropicNPM {
+		t.Errorf("npm = %q, want %q — this lane rides opencode on the ANTHROPIC protocol where zai rides it OpenAI-compatible, and the field exists so that difference is DATA", seed.NPM, kimiAnthropicNPM)
+	}
+	if seed.BaseURL != kimiCodingBase {
+		t.Errorf("endpoint = %q, want the Kimi Code membership endpoint %q", seed.BaseURL, kimiCodingBase)
+	}
+	if seed.EndpointMarker != "/coding/v1" {
+		t.Errorf("endpoint marker = %q, want /coding/v1 — the substring both the vendor docs and models.dev agree on", seed.EndpointMarker)
+	}
+	if seed.VerifiedOn != "2026-08-24" {
+		t.Errorf("verified_on = %q, want the audit's access date 2026-08-24", seed.VerifiedOn)
+	}
+	if seed.DefaultModel != "k3" {
+		t.Errorf("default_model = %q, want k3 — the operator's stated reason for the lane", seed.DefaultModel)
+	}
+	// The vendor's own endpoint warning is quoted, AND the honest limit is
+	// stated: Moonshot does not publish what a membership key does against the
+	// metered endpoint (audit U5), so nothing here may imply a guarantee.
+	if !strings.Contains(seed.EndpointNote, "different Base URLs") {
+		t.Errorf("the endpoint note does not carry the vendor's own warning: %q", seed.EndpointNote)
+	}
+	if !strings.Contains(strings.ToLower(seed.EndpointNote), "does not publish") {
+		t.Errorf("the endpoint note claims more than the vendor published — the unpublished wrong-endpoint behavior (U5) must be stated, not implied away: %q", seed.EndpointNote)
+	}
+
+	wantModels := map[string]bool{"k3": false, "k3-256k": false, "kimi-for-coding": false, "kimi-for-coding-highspeed": false}
+	for _, m := range seed.Models {
+		if _, ok := wantModels[m.ID]; ok {
+			wantModels[m.ID] = true
+		}
+		if m.VerifiedOn != "2026-08-24" {
+			t.Errorf("model %q verified_on = %q, want 2026-08-24", m.ID, m.VerifiedOn)
+		}
+		if m.Billing != BillingFlat {
+			t.Errorf("model %q billing = %q, want flat — the membership is a flat subscription", m.ID, m.Billing)
+		}
+		if m.OverflowMode != OverflowOptInCredits {
+			t.Errorf("model %q overflow_mode = %q, want %q — Extra Usage is off by default with a PROVEN disable (C1/P-T17-2)", m.ID, m.OverflowMode, OverflowOptInCredits)
+		}
+		// The gate is by MEMBERSHIP TIER, not by region: the model-list-diff
+		// canary handles it, and no tier_model_gate attribute is invented.
+		if m.RegionModelGate != "none" {
+			t.Errorf("model %q region_model_gate = %q, want none — Kimi's gate is by tier, and the tier gate is the model-list canary's job (P-T17-3)", m.ID, m.RegionModelGate)
+		}
+	}
+	for id, seen := range wantModels {
+		if !seen {
+			t.Errorf("seed model %q missing", id)
+		}
+	}
+	if !strings.Contains(strings.ToLower(seed.ModelRoutingNote), "tier") {
+		t.Errorf("the model-routing note never says the gate is by tier rather than by region: %q", seed.ModelRoutingNote)
+	}
+
+	// Both metered platform bases are RECORDED and not wired, so the endpoint
+	// self-check owns the wrong-endpoint case by name (B5, the BytePlus lesson).
+	recorded := map[string]bool{}
+	for _, e := range seed.RecordedEndpoints {
+		recorded[e.BaseURL] = true
+		if e.Wired {
+			t.Errorf("recorded endpoint %q is marked wired — it must be recorded, never wired", e.BaseURL)
+		}
+		if e.VerifiedOn != "2026-08-24" {
+			t.Errorf("recorded endpoint %q carries verified_on %q, want 2026-08-24", e.BaseURL, e.VerifiedOn)
+		}
+	}
+	for _, want := range []string{kimiMeteredIntl, kimiMeteredCN, "https://api.kimi.com/coding/"} {
+		if !recorded[want] {
+			t.Errorf("the endpoint %q is not recorded as a dated fact", want)
+		}
+	}
+
+	// The reset marker is DELIBERATELY empty: the audit found no documented
+	// reset-time signal (U4), and an invented one would fabricate a Class 2.
+	if seed.ResetMarker != "" {
+		t.Errorf("reset_marker = %q, want empty — no reset-time signal is documented (U4), and depletion must route to the Class-3 probe park rather than to a fabricated Class 2", seed.ResetMarker)
+	}
+	// No Eco lever: K3 documents thinking efforts but NO disable, so the Z.AI
+	// thinking:{type:disabled} rung has no equivalent and none is invented.
+	if len(seed.EcoOptions) != 0 {
+		t.Errorf("eco_options = %v, want none — Kimi publishes no thinking DISABLE, so wiring an S10.6 rung here would invent one", seed.EcoOptions)
+	}
+	if len(seed.EcoOptionEfforts) != 0 {
+		t.Errorf("thinking_disabled_efforts = %v, want none for this lane", seed.EcoOptionEfforts)
+	}
+	if seed.ReasoningEffort.Wired {
+		t.Error("reasoning_effort is marked wired — the efforts are a recorded dated fact, not a wired lever")
+	}
+
+	// The credential is a NAME plus a variable name — never material.
+	if seed.Credential.Profile == "" {
+		t.Error("the document names no broker auth profile")
+	}
+	if strings.Contains(strings.ToLower(seed.Credential.Note), "guess") {
+		t.Errorf("the credential note admits a guessed variable name: %q", seed.Credential.Note)
+	}
+
+	// The C5 routing rider rides the document as DATA, and is honest that it is
+	// recorded rather than machine-enforced (OQ3).
+	if seed.DataPolicy.Constraint != "no-household-personal-data" {
+		t.Errorf("data_policy.constraint = %q, want no-household-personal-data — the C5 rider is mandatory for this lane", seed.DataPolicy.Constraint)
+	}
+	if seed.DataPolicy.Enforced {
+		t.Error("the data-policy row claims enforcement; no per-lane data-policy enforcement point exists, and claiming one would let a reader assume the code stops it")
+	}
+	if seed.DataPolicy.VerifiedOn != "2026-08-24" {
+		t.Errorf("data_policy verified_on = %q, want 2026-08-24", seed.DataPolicy.VerifiedOn)
+	}
+	if !strings.Contains(seed.DataPolicy.Audit, "2026-08-24-kimi-lane-gate-audit.md") {
+		t.Errorf("the data-policy row does not cite the audit document: %q", seed.DataPolicy.Audit)
+	}
+	if strings.Contains(strings.ToLower(seed.DataPolicy.EnforcementNote), "applied") {
+		t.Errorf("the enforcement note says the rider is 'applied' — it is recorded and surfaced, NOT machine-enforced: %q", seed.DataPolicy.EnforcementNote)
+	}
+	if !strings.Contains(seed.DataPolicy.EnforcementNote, "NOT MACHINE-ENFORCED") {
+		t.Errorf("the enforcement note does not state plainly that the rider is not machine-enforced: %q", seed.DataPolicy.EnforcementNote)
+	}
+
+	// Every signal row is dated AND marked documented-not-observed (§4's
+	// non-negotiable): these are published message strings, not wire bodies.
+	if len(seed.Signals) == 0 {
+		t.Fatal("the kimi document declares no signal rows")
+	}
+	for _, row := range seed.Signals {
+		if row.VerifiedOn != "2026-08-24" {
+			t.Errorf("signal row %q verified_on = %q, want 2026-08-24", row.MessageContains, row.VerifiedOn)
+		}
+		if row.MessageContains == "" {
+			t.Errorf("signal row on HTTP %d carries no message_contains — this lane's taxonomy is (status x message), and a status-only row cannot key it", row.HTTPStatus)
+		}
+	}
+	if !strings.Contains(seed.SignalsNote, "DOCUMENTED-NOT-OBSERVED") {
+		t.Errorf("the signal table is not marked DOCUMENTED-NOT-OBSERVED: %q", seed.SignalsNote)
+	}
+	if !strings.Contains(strings.ToLower(seed.SignalsNote), "probe") {
+		t.Errorf("the signal note does not name the ceremony's live probe as the thing that closes it: %q", seed.SignalsNote)
+	}
+}
+
+// ── spec 2 · duplicate lane / duplicate provider id are refused BY NAME ──────
+
+func TestLaneSeedRefusesDuplicateLaneOrProvider(t *testing.T) {
+	doc := func(lane, provider string) string {
+		return `{
+		  "lane": "` + lane + `",
+		  "substrate": "opencode",
+		  "provider_id": "` + provider + `",
+		  "npm": "@ai-sdk/openai-compatible",
+		  "display_name": "D",
+		  "verified_on": "2026-08-24",
+		  "base_url": "https://api.example.invalid/v1",
+		  "endpoint_marker": "/v1",
+		  "credential": {"profile": "p", "env_var": "V"},
+		  "models": [{"id": "m", "name": "M", "verified_on": "2026-08-24", "billing": "flat", "overflow_mode": "hard-stop", "region_model_gate": "none"}]
+		}`
+	}
+
+	// The control: two documents with distinct lane names AND distinct provider
+	// ids load, and come back sorted by lane name.
+	ok := fstest.MapFS{
+		"lanedata/beta.json":  {Data: []byte(doc("beta", "beta-plan"))},
+		"lanedata/alpha.json": {Data: []byte(doc("alpha", "alpha-plan"))},
+	}
+	got, err := loadLaneDocs(ok, "lanedata")
+	if err != nil {
+		t.Fatalf("two distinct documents did not load: %v", err)
+	}
+	if len(got) != 2 || got[0].Lane != "alpha" || got[1].Lane != "beta" {
+		t.Fatalf("loaded %+v, want both documents sorted by lane name", got)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		fsys  fstest.MapFS
+		wants []string
+	}{
+		{
+			name: "two documents claiming the same lane",
+			fsys: fstest.MapFS{
+				"lanedata/a.json": {Data: []byte(doc("alpha", "alpha-plan"))},
+				"lanedata/b.json": {Data: []byte(doc("alpha", "other-plan"))},
+			},
+			wants: []string{"alpha"},
+		},
+		{
+			name: "two documents claiming the same provider id",
+			fsys: fstest.MapFS{
+				"lanedata/a.json": {Data: []byte(doc("alpha", "shared-plan"))},
+				"lanedata/b.json": {Data: []byte(doc("beta", "shared-plan"))},
+			},
+			wants: []string{"shared-plan"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadLaneDocs(tc.fsys, "lanedata")
+			if err == nil {
+				t.Fatal("the duplicate loaded — laneFor takes the FIRST provider-id match and laneConfiguredModels overwrites by lane, so a config-only lane system whose failure mode is silent shadowing is not one")
+			}
+			if !errors.Is(err, ErrLaneConfig) {
+				t.Errorf("error = %v, want it to wrap ErrLaneConfig", err)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not name %q — an unnamed refusal is one nobody can act on: %v", want, err)
+				}
+			}
+		})
+	}
+
+	// And the SHIPPED set loads: two lanes, sorted, no duplicate.
+	shipped, err := SeedLaneConfigs()
+	if err != nil {
+		t.Fatalf("SeedLaneConfigs: %v", err)
+	}
+	if len(shipped) != 2 {
+		t.Fatalf("the platform ships %d lane documents, want 2 (kimi + zai)", len(shipped))
+	}
+	if shipped[0].Lane != adapters.LaneKimi || shipped[1].Lane != adapters.LaneZAI {
+		t.Errorf("shipped lanes = %q/%q, want them sorted by lane name (kimi, zai)", shipped[0].Lane, shipped[1].Lane)
+	}
+}
+
+// ── spec 4 · message-keyed rows are ADDITIVE — zai is byte-identical ─────────
+
+func TestMessageKeyedSignalRowsAreAdditive(t *testing.T) {
+	zai := seedZAI(t)
+
+	// The control that proves the extension changed nothing: the UNMODIFIED
+	// zai seed still extracts exactly what it extracted before, and a document
+	// with no message_contains row behaves exactly as it did.
+	for _, tc := range []struct {
+		code, status string
+		body         string
+		wantCode     string
+		wantKnown    bool
+	}{
+		{code: "1308", body: zaiBody("1308", "Usage limit reached for `20` `credits`"), wantCode: "1308", wantKnown: true},
+		{code: "1113", body: zaiBody("1113", "Insufficient balance or no resource package."), wantCode: "1113", wantKnown: true},
+		{code: "9999", body: zaiBody("9999", "who knows"), wantCode: "9999", wantKnown: false},
+	} {
+		sig, ok := zai.ExtractSignal(tc.body, 0)
+		if !ok {
+			t.Fatalf("the zai seed stopped extracting %q — the message_contains extension must be additive", tc.code)
+		}
+		if sig.ErrorCode != tc.wantCode || sig.Known != tc.wantKnown {
+			t.Errorf("zai %s: code=%q known=%v, want %q/%v", tc.code, sig.ErrorCode, sig.Known, tc.wantCode, tc.wantKnown)
+		}
+		if sig.DocumentedClass != "" {
+			t.Errorf("zai %s carries documented_class %q — the zai document declares none, so the member must stay empty and the zai path byte-identical", tc.code, sig.DocumentedClass)
+		}
+	}
+	// A body with no decodable provider envelope still yields NOTHING on a lane
+	// whose taxonomy is code-keyed.
+	if _, ok := zai.ExtractSignal("connection reset by peer", 429); ok {
+		t.Error("the zai lane produced a signal from an undecodable body — a code-keyed lane yields nothing rather than a guess")
+	}
+
+	// Kimi: no code decodes, and the signal comes from (status, message).
+	kimi := seedKimi(t)
+	sig, ok := kimi.ExtractSignal(`{"error":{"message":"You've reached your usage limit for this billing cycle"}}`, 403)
+	if !ok {
+		t.Fatal("the kimi lane produced no signal for a documented 403 message — with no code field, ExtractSignal must still yield one or only a bare status reaches the classifier")
+	}
+	if !sig.Known {
+		t.Error("a documented (403, weekly-depletion) pair is not Known")
+	}
+	if sig.HTTPStatus != 403 {
+		t.Errorf("http status = %d, want 403", sig.HTTPStatus)
+	}
+	if sig.BodyText == "" {
+		t.Error("the codeless signal carries no body text — the message string IS the taxonomy on this lane")
+	}
+	if sig.DocumentedClass != DocumentedDepletion {
+		t.Errorf("documented_class = %q, want %q — this 403 is the weekly window emptying, not an auth event", sig.DocumentedClass, DocumentedDepletion)
+	}
+
+	// A NON-matching message on the same status is honestly unknown.
+	unmatched, ok := kimi.ExtractSignal(`{"error":{"message":"something nobody documented"}}`, 403)
+	if !ok {
+		t.Fatal("an undocumented message on a message-keyed lane produced no signal at all")
+	}
+	if unmatched.Known {
+		t.Error("an undocumented message is reported as Known")
+	}
+	if unmatched.DocumentedClass != "" {
+		t.Errorf("an undocumented message carries documented_class %q — the guard is an EXEMPTION LIST and must never fire on a row nobody published", unmatched.DocumentedClass)
+	}
+
+	// Raw engine prose (no JSON envelope at all) still keys on the message.
+	raw, ok := kimi.ExtractSignal("upstream said: The engine is currently overloaded, please try again later", 429)
+	if !ok || !raw.Known || raw.DocumentedClass != DocumentedTransient {
+		t.Errorf("engine-wrapped prose: ok=%v known=%v class=%q, want a known transient row", ok, raw.Known, raw.DocumentedClass)
+	}
+}
+
+// ── spec 5 · the document's negative table ───────────────────────────────────
+
+func TestKimiLaneDocumentRefusals(t *testing.T) {
+	if _, err := LoadLaneConfig(kimiDocWith(t, func(map[string]any) {})); err != nil {
+		t.Fatalf("the unedited kimi seed must load, or the refusals below prove nothing: %v", err)
+	}
+
+	models := func(m map[string]any) []any {
+		list, _ := m["models"].([]any)
+		if len(list) == 0 {
+			t.Fatal("the seed document has no models to edit")
+		}
+		return list
+	}
+	first := func(m map[string]any) map[string]any {
+		row, _ := models(m)[0].(map[string]any)
+		if row == nil {
+			t.Fatal("the seed's first model row is not an object")
+		}
+		return row
+	}
+
+	for _, tc := range []struct {
+		name  string
+		edit  func(map[string]any)
+		wants []string
+	}{
+		{
+			name:  "an invented overflow mode",
+			edit:  func(m map[string]any) { first(m)["overflow_mode"] = "spill-quietly" },
+			wants: []string{"overflow_mode", "spill-quietly", "k3"},
+		},
+		{
+			name:  "an empty region_model_gate",
+			edit:  func(m map[string]any) { first(m)["region_model_gate"] = "" },
+			wants: []string{"region_model_gate", "k3"},
+		},
+		{
+			name:  "no credential block",
+			edit:  func(m map[string]any) { delete(m, "credential") },
+			wants: []string{"credential", "kimi"},
+		},
+		{
+			name: "an undated signal row",
+			edit: func(m map[string]any) {
+				rows, _ := m["signals"].([]any)
+				row, _ := rows[0].(map[string]any)
+				delete(row, "verified_on")
+			},
+			wants: []string{"signal row", "verified-on"},
+		},
+		{
+			name:  "a malformed date",
+			edit:  func(m map[string]any) { m["verified_on"] = "24 August 2026" },
+			wants: []string{"verified-on", "24 August 2026"},
+		},
+		{
+			name:  "a documented_class outside the narrow exemption vocabulary",
+			edit:  func(m map[string]any) { setSignalClass(t, m, "auth") },
+			wants: []string{"documented_class", "auth"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadLaneConfig(kimiDocWith(t, tc.edit))
+			if err == nil {
+				t.Fatal("the document loaded — the gate does not exist")
+			}
+			if !errors.Is(err, ErrLaneConfig) {
+				t.Errorf("error = %v, want it to wrap ErrLaneConfig", err)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not name %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+func setSignalClass(t *testing.T, m map[string]any, class string) {
+	t.Helper()
+	rows, _ := m["signals"].([]any)
+	if len(rows) == 0 {
+		t.Fatal("the seed declares no signal rows")
+	}
+	row, _ := rows[0].(map[string]any)
+	if row == nil {
+		t.Fatal("the seed's first signal row is not an object")
+	}
+	row["documented_class"] = class
+}
+
+// ── spec 22 · no kimi value is a Go constant in this package ─────────────────
+
+func TestNoKimiLaneValueIsAConstantInTheAdapter(t *testing.T) {
+	for name, src := range packageSources(t) {
+		for _, lit := range []string{"api.kimi.com", "kimi-for-coding", "api.moonshot", "\"k3\""} {
+			if strings.Contains(src, lit) {
+				t.Errorf("%s contains the literal %q — lane values are DATA with dates, never constants (S03.6)", name, lit)
+			}
+		}
+	}
+}
+
+// ── spec 23 · the credential never leaves the broker path ────────────────────
+
+func TestKimiCredentialNeverLeaves(t *testing.T) {
+	const sentinel = "SINET-TEST-SECRET-a41f9c07-2d5e-4b18-93aa-71e0c4b8d2f6"
+	e := newE2E(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	e.claimedRun(t, "r1")
+
+	f := newFakeServe(t)
+	f.onPrompt = func(f *fakeServe, n int) { f.publishFixture("happy.sse") }
+
+	seed := seedKimi(t)
+	logs := &captureWriter{}
+	spy := &spyInstances{inst: f.instance()}
+	a := laneAdapter(t, seed)
+	a.Instances = spy
+	a.Log = slog.New(slog.NewTextHandler(logs, nil))
+
+	req := laneRequest(t, seed)
+	req.CredInject = func(base []string) ([]string, error) {
+		return append(append([]string(nil), base...), seed.Credential.EnvVar+"="+sentinel), nil
+	}
+	var payloads []string
+	req.OnEvent = func(ev adapters.Event) { payloads = append(payloads, string(ev.Payload)) }
+
+	out, err := e.drv.Drive(ctx, a, req)
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if out.Kind != adapters.OutcomeCompleted {
+		t.Fatalf("outcome = %q (%s)", out.Kind, out.Detail)
+	}
+	if len(spy.specs) != 1 {
+		t.Fatalf("instance specs = %d, want 1", len(spy.specs))
+	}
+	if _, ok := envValue(spy.specs[0].Env, seed.Credential.EnvVar); !ok {
+		t.Fatalf("the injected credential never reached the serve environment")
+	}
+	for i, p := range payloads {
+		if strings.Contains(p, sentinel) {
+			t.Errorf("event payload %d carries the credential: %s", i, p)
+		}
+	}
+	if id := identityOf(spy.specs[0]); strings.Contains(id, sentinel) {
+		t.Errorf("the instance identity key carries the credential: %q", id)
+	}
+	if s := logs.String(); strings.Contains(s, sentinel) {
+		t.Error("the ops log carries the credential")
+	}
+	if p := out.Park; p != nil {
+		blob, _ := json.Marshal(p)
+		if strings.Contains(string(blob), sentinel) {
+			t.Error("the park record carries the credential")
+		}
+	}
+	rows, err := e.db.QueryContext(ctx, `SELECT payload FROM run_events WHERE run_id = 'r1'`)
+	if err != nil {
+		t.Fatalf("run_events: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if strings.Contains(payload, sentinel) {
+			t.Errorf("a run_events payload carries the credential: %s", payload)
+		}
+	}
+	if err := e.db.CheckpointTruncate(ctx); err != nil {
+		t.Fatalf("checkpoint truncate: %v", err)
+	}
+	for _, suffix := range []string{"", "-wal"} {
+		raw, err := os.ReadFile(e.db.Path() + suffix)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read db%s: %v", suffix, err)
+		}
+		if strings.Contains(string(raw), sentinel) {
+			t.Errorf("the database file%s contains the credential", suffix)
+		}
+	}
+}
+
+// ── spec 24 · a missing credential is a NAMED state ──────────────────────────
+
+func TestKimiMissingCredentialIsNamedState(t *testing.T) {
+	seed := seedKimi(t)
+	f := newFakeServe(t)
+	spy := &spyInstances{inst: f.instance()}
+	a := laneAdapter(t, seed)
+	a.Instances = spy
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := a.Start(ctx, laneRequest(t, seed))
+	if err == nil {
+		t.Fatal("Start succeeded without a credential — an unauthenticated call is not a success")
+	}
+	if !strings.Contains(err.Error(), "not commissioned") {
+		t.Errorf("error = %v, want a named not-commissioned state", err)
+	}
+	if !strings.Contains(err.Error(), seed.Credential.Profile) {
+		t.Errorf("error = %v, want the auth-profile name so an operator knows what to place", err)
+	}
+	if len(spy.specs) != 0 {
+		t.Errorf("a serve instance was acquired for an uncommissioned lane (%d specs)", len(spy.specs))
+	}
+	if n := len(f.requests()); n != 0 {
+		t.Errorf("the uncommissioned lane made %d engine requests, want 0", n)
+	}
+
+	// The named-missing-credential state is ALSO what carries the OQ4 outcome
+	// if the variable name could never be determined: a document with no
+	// variable is refused at load, so an empty one can never sail past the
+	// spawn-time check and authenticate as nobody.
+	if _, err := LoadLaneConfig(kimiDocWith(t, func(m map[string]any) {
+		cred, _ := m["credential"].(map[string]any)
+		cred["env_var"] = ""
+	})); err == nil {
+		t.Error("a document with an empty credential variable loaded — the spawn-time check would be skipped and the engine would authenticate as nobody (S11.5)")
+	}
+}
+
+// ── R15 · an opt-in-credits lane is distinguishable from a hard-stop lane ────
+
+func TestOverflowRegimeIsDistinguishableAcrossLanes(t *testing.T) {
+	kimi, zai := seedKimi(t), seedZAI(t)
+
+	modes := func(c LaneConfig) map[string]bool {
+		out := map[string]bool{}
+		for _, m := range c.Models {
+			out[m.OverflowMode] = true
+		}
+		return out
+	}
+	k, z := modes(kimi), modes(zai)
+	if !k[OverflowOptInCredits] {
+		t.Errorf("the kimi lane declares %v — Sinet's FIRST non-hard-stop lane must carry opt-in-credits end to end (3.10, C1)", k)
+	}
+	if k[OverflowHardStop] {
+		t.Errorf("a kimi model declares hard-stop; the whole lane spills on opt-in, and a mixed claim would make the regime unreadable: %v", k)
+	}
+	if !z[OverflowHardStop] || z[OverflowOptInCredits] {
+		t.Errorf("the zai lane's regime moved (%v) — it is hard-stop, and this test is the CONTROL that the two are distinguishable", z)
+	}
+	// TBD-S10.2(currency-flip receipts): no surface reads billing regime yet,
+	// so "carried end to end" ends at the validated document. The consuming
+	// section is S10.2's flip mechanics + 3.10's "receipts must visibly change
+	// currency when overflow triggers" (report-01 P-T01-3); building it is out
+	// of scope until that surface lands (the ProposePlanBudget/13.4 precedent).
+	if !strings.Contains(strings.ToUpper(kimi.OverflowNote), "EXTRA USAGE OFF") {
+		t.Errorf("the overflow note does not record the recommended operator posture: %q", kimi.OverflowNote)
+	}
+	if !strings.Contains(kimi.OverflowNote, "turn it off at any time") {
+		t.Errorf("the overflow note does not quote the PROVEN disable that clears 3.10: %q", kimi.OverflowNote)
+	}
+}

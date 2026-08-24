@@ -50,6 +50,12 @@ const (
 	LaneAnthropic = "anthropic"
 	LaneZAI       = "zai"
 	LaneLocal     = "local"
+	// LaneKimi is the Kimi Code (Moonshot) lane, added ahead of its post-v0
+	// slot on the operator's 2026-08-23 order (S00.9 amendment A11). It rides
+	// the SAME opencode substrate as zai — on the Anthropic protocol rather
+	// than the OpenAI-compatible one, which is a data difference in its lane
+	// document and not a second substrate (S03.6).
+	LaneKimi = "kimi"
 )
 
 // Effort modes (Spec S10.6): policy bundles, each a depletion ladder whose

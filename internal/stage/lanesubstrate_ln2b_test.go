@@ -205,6 +205,14 @@ type callSiteEnv struct {
 
 func newCallSiteEnv(t *testing.T) *callSiteEnv {
 	t.Helper()
+	// The commissioned world this file's own guards describe: zai on opencode.
+	return newCallSiteEnvWith(t, map[string]string{adapters.LaneZAI: adapters.SubstrateOpencode})
+}
+
+// newCallSiteEnvWith takes the lane→substrate map, so a second commissioned
+// lane can be driven through the same real call sites (P3-LN-3).
+func newCallSiteEnvWith(t *testing.T, lanes map[string]string) *callSiteEnv {
+	t.Helper()
 	ctx := context.Background()
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
@@ -227,8 +235,7 @@ func newCallSiteEnv(t *testing.T) *callSiteEnv {
 			adapters.SubstrateClaudeCLI: recordingAdapter{adapters.SubstrateClaudeCLI, &e.seen, &e.mu},
 			adapters.SubstrateOpencode:  recordingAdapter{adapters.SubstrateOpencode, &e.seen, &e.mu},
 		},
-		// The commissioned world: zai is served by opencode.
-		LaneSubstrates: map[string]string{adapters.LaneZAI: adapters.SubstrateOpencode},
+		LaneSubstrates: lanes,
 		ArtifactRoot:   filepath.Join(root, "artifacts"),
 		RunRoot:        filepath.Join(root, "runs"),
 	})

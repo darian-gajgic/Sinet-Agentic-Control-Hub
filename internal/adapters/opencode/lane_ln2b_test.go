@@ -12,16 +12,25 @@ package opencode
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
 
 // laneDocWith renders the shipped seed document with one field edited, so the
 // negative cases differ from a KNOWN-GOOD document by exactly one thing.
+//
+// The seed is read off disk rather than out of a per-file embed variable: the
+// lane documents became a DIRECTORY embed at P3-LN-3, so there is no longer one
+// []byte per lane to reach for.
 func laneDocWith(t *testing.T, edit func(map[string]any)) []byte {
 	t.Helper()
+	raw, err := os.ReadFile("lanedata/zai.json")
+	if err != nil {
+		t.Fatalf("read the shipped zai lane document: %v", err)
+	}
 	var m map[string]any
-	if err := json.Unmarshal(zaiLaneSeed, &m); err != nil {
+	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("decode the seed document: %v", err)
 	}
 	edit(m)

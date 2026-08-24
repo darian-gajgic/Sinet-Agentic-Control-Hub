@@ -22,16 +22,20 @@ package metering
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 )
 
-//go:embed plandata/zai.json
-var zaiPlanSeed []byte
+// The plan documents ship as a DIRECTORY embed for the same reason the lane
+// documents do: dropping a document in must genuinely add a lane's plan.
+//
+//go:embed plandata/*.json
+var planSeeds embed.FS
 
 // ErrPlanDoc reports a plan document that cannot be used as a denominator.
 var ErrPlanDoc = errors.New("metering: plan budget document")
@@ -68,6 +72,14 @@ type PlanDoc struct {
 	WeeklyReset     string `json:"weekly_reset,omitempty"`
 	WeeklyResetNote string `json:"weekly_reset_note,omitempty"`
 
+	// MonthlyPoolNote records a window that exists and is deliberately NOT
+	// seeded as a quota row, with the reason.
+	MonthlyPoolNote string `json:"monthly_pool_note,omitempty"`
+	// TierMultiplierNote records per-tier allowance multipliers that are real
+	// and UNVERIFIED at primary-source grade, so nobody later mistakes their
+	// absence for an oversight.
+	TierMultiplierNote string `json:"tier_multiplier_note,omitempty"`
+
 	Multipliers []PlanMultiplier `json:"multipliers"`
 	Quotas      []PlanQuota      `json:"quotas"`
 }
@@ -96,12 +108,41 @@ type PlanMultiplier struct {
 // PlanQuota is one allowance window: how many plan units the account holds
 // over how long.
 type PlanQuota struct {
-	Name        string  `json:"name"`
+	Name string `json:"name"`
+	// Unit is THIS WINDOW's own unit, empty to inherit the document's.
+	//
+	// It is per-quota because one lane's windows are denominated differently:
+	// the Kimi Code plan's rolling 5-hour window counts REQUESTS and its 7-day
+	// window counts CREDITS. A single lane-wide scalar cannot describe that,
+	// and rendering both gauges in one unit would be a quiet lie about what
+	// was counted. Empty inherits, so a document whose windows share a unit
+	// (the zai plan) is expressible exactly as it was.
+	Unit        string  `json:"unit,omitempty"`
 	Units       float64 `json:"units"`
 	WindowHours float64 `json:"window_hours"`
-	VerifiedOn  string  `json:"verified_on"`
-	Source      string  `json:"source,omitempty"`
-	Note        string  `json:"note,omitempty"`
+	// AllowanceUnverified says this window's SHAPE is published and its
+	// ALLOWANCE is not — so Units is 0 and means "nobody published one",
+	// never "the allowance is nothing".
+	//
+	// It exists because that is the honest state of Kimi's 7-day window: the
+	// cycle is published verbatim and the per-tier figures circulate only on
+	// secondary aggregators. The alternative was to seed a number this
+	// platform cannot source, and a budget proposed from an invented allowance
+	// is the inferred provider window S10.4/D4 forbids by name.
+	AllowanceUnverified bool   `json:"allowance_unverified,omitempty"`
+	VerifiedOn          string `json:"verified_on"`
+	Source              string `json:"source,omitempty"`
+	Note                string `json:"note,omitempty"`
+}
+
+// PlanWindow is one declared allowance window as a READING reports it, with its
+// own unit, so no surface can render a credit window in requests.
+type PlanWindow struct {
+	Name                string
+	Unit                string
+	Allowance           float64
+	WindowHours         float64
+	AllowanceUnverified bool
 }
 
 // PlanReading is one tier-3 plan-unit reading for a (person, lane). It is
@@ -146,6 +187,12 @@ type PlanReading struct {
 	// instant, reported so a person can see why the number moves.
 	Multiplier       float64
 	MultiplierWindow string
+
+	// Windows are the plan's declared allowance windows, each with its OWN
+	// unit. A lane whose windows are denominated differently cannot be
+	// rendered from one scalar, and a surface that tried would print credits
+	// under a "requests" label.
+	Windows []PlanWindow
 
 	// Pressure is Consumed/Budget.PeriodUnits, valid only when Applicable;
 	// BackgroundCeiling is ⚙ budget.background_window_fraction of the declared
@@ -195,12 +242,22 @@ func UndeclaredPlanBudget() PlanBudget { return PlanBudget{} }
 // seed DATA with dates — a starting point an operator's own rows replace — and
 // never the authority.
 func SeedPlanDocs() ([]PlanDoc, error) {
-	d, err := LoadPlanDoc(zaiPlanSeed)
-	if err != nil {
-		return nil, err
-	}
-	return []PlanDoc{d}, nil
+	return loadPlanDocs(planSeeds, "plandata")
 }
+
+// loadPlanDocs walks a directory of plan documents, validates each, and returns
+// them SORTED BY LANE NAME.
+//
+// TODO(P3-LN-3 R6): the directory walk, the sort and the duplicate-lane gate.
+func loadPlanDocs(fsys fs.FS, dir string) ([]PlanDoc, error) {
+	return nil, fmt.Errorf("%w: the directory-embed plan loader is not built yet (P3-LN-3 R6)", ErrPlanDoc)
+}
+
+// QuotaUnit is the unit a named window counts in — its own when it declares
+// one, the document's otherwise.
+//
+// TODO(P3-LN-3 OQ2).
+func (d PlanDoc) QuotaUnit(name string) string { return "" }
 
 // PlanDocFor returns the seed plan document for a lane, if one ships.
 func PlanDocFor(lane string) (PlanDoc, bool) {

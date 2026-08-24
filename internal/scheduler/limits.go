@@ -23,6 +23,27 @@ const (
 	laneAnthropic = "anthropic"
 	laneZAI       = "zai"
 	laneLocal     = "local"
+	laneKimi      = "kimi"
+)
+
+// The documented-class vocabulary a lane document may put on a signal (the
+// OQ1(a) exemption set; the same four strings the opencode lane document
+// declares, pinned to agree by internal/shell because neither package may
+// import the other).
+//
+// The set is CLOSED and has no `auth` and no `balance` member on purpose:
+// those are the two directions in which a document edit could suppress a lane
+// freeze. A value outside this set is INERT — it classifies exactly as no
+// class at all, so no document can ever invent a verdict.
+const (
+	// DocumentedTransient: capacity shed — retry in place, never park.
+	DocumentedTransient = "transient"
+	// DocumentedDepletion: an allowance window is spent — park.
+	DocumentedDepletion = "depletion"
+	// DocumentedModelDrift: the account does not serve the model asked for.
+	DocumentedModelDrift = "model-drift"
+	// DocumentedEndpointDefect: the request reached the wrong path.
+	DocumentedEndpointDefect = "endpoint-defect"
 )
 
 // The Z.AI wire codes the taxonomy names (Spec S10.5's signal set). They are
@@ -104,6 +125,19 @@ type LimitSignal struct {
 	// on a probe schedule would wait forever for a balance nobody is going to
 	// top up (P-T08-2's failure class).
 	EndpointVerified bool
+
+	// DocumentedClass is what the LANE DOCUMENT names this exact
+	// (HTTP status, message) pair, resolved by whoever holds the document and
+	// forwarded here as data — never looked up, because Classify is pure and
+	// total (S10.5), exactly as EndpointVerified above.
+	//
+	// It exists because one lane's wire does not sort by status at all. Kimi
+	// publishes quota exhaustion on 403 AND 429 and entitlement failures on
+	// 401, so the unconditional Class-4 status rule would freeze that lane and
+	// page the operator with a suspected policy revocation every time its
+	// weekly window emptied — routine, recurring, and indistinguishable at the
+	// alert from the real thing.
+	DocumentedClass string
 }
 
 // SurfaceKind names a NON-limit condition worth an operator's attention. The
@@ -139,6 +173,7 @@ type WirePayload struct {
 	BodyText         string `json:"body_text"`
 	EndpointVerified bool   `json:"endpoint_verified"`
 	Known            bool   `json:"known"`
+	DocumentedClass  string `json:"documented_class"`
 }
 
 // SignalFromPayload decodes one forwarded rate_limit payload into a signal.
@@ -156,6 +191,7 @@ func SignalFromPayload(raw []byte) (LimitSignal, error) {
 		HTTPStatus:       w.HTTPStatus,
 		BodyText:         w.BodyText,
 		EndpointVerified: w.EndpointVerified,
+		DocumentedClass:  w.DocumentedClass,
 	}
 	if w.ResetAt != "" {
 		t, err := time.Parse(time.RFC3339, w.ResetAt)

@@ -12,18 +12,23 @@ package opencode
 // authority; the account's own observed model list is (P-T17-3).
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
-//go:embed lanedata/zai.json
-var zaiLaneSeed []byte
+// The lane documents ship as a DIRECTORY embed, not one file at a time:
+// S03.6's "adding a lane is config-only" is only true if dropping a document
+// in genuinely adds a lane (the internal/storage/migrate.go precedent).
+//
+//go:embed lanedata/*.json
+var laneSeeds embed.FS
 
 // ErrLaneConfig reports a lane document that cannot be commissioned.
 var ErrLaneConfig = errors.New("opencode: lane configuration")
@@ -91,8 +96,51 @@ type LaneConfig struct {
 
 	// ResetMarker is the verbatim phrase the provider's depletion messages put
 	// before the resume time.
-	ResetMarker string          `json:"reset_marker"`
-	Signals     []LaneSignalRow `json:"signals"`
+	ResetMarker string `json:"reset_marker"`
+
+	// OverflowNote records the lane-wide overflow posture in prose: the proven
+	// disable that clears 3.10, and the operator posture recommended with it.
+	// The per-model enum value is the machine-readable half (LaneModel).
+	OverflowNote string `json:"overflow_note,omitempty"`
+
+	// SignalsNote is the honesty label on the whole signal table — whether its
+	// rows are OBSERVED wire bodies or DOCUMENTED message strings, and what
+	// closes the difference.
+	SignalsNote string `json:"signals_note,omitempty"`
+
+	// DataPolicy is the per-lane routing constraint the report-02 §5 C5 gate
+	// produces (S03.6; the DeepSeek precedent, R02 §4).
+	DataPolicy LaneDataPolicy `json:"data_policy,omitempty"`
+
+	Signals []LaneSignalRow `json:"signals"`
+}
+
+// LaneDataPolicy is a lane's C5 data-routing constraint, carried as DATA with
+// its citation and its enforcement state.
+//
+// Enforced is on the row because the honest answer at v0 is FALSE: no per-lane
+// data-policy enforcement point exists in the tree (grep-verified 2026-08-24),
+// so the constraint is recorded and surfaced to the operator rather than
+// machine-enforced. Inventing an enforcement seam here was out of scope; what
+// this row does is give the routing-policy seam, when it lands, one place to
+// read instead of a sentence in a document nobody parses.
+type LaneDataPolicy struct {
+	// Constraint is the machine-readable constraint name.
+	Constraint string `json:"constraint,omitempty"`
+	// Statement is the rider in the operator's own words.
+	Statement string `json:"statement,omitempty"`
+	// Basis is the primary-sourced finding the constraint rests on.
+	Basis string `json:"basis,omitempty"`
+	// Enforced reports whether anything in the tree ENFORCES this. False is
+	// not a placeholder: it is the state, and saying otherwise would let a
+	// reader assume the code stops what only a person can.
+	Enforced bool `json:"enforced"`
+	// EnforcementNote says plainly what the false above means.
+	EnforcementNote string `json:"enforcement_note,omitempty"`
+	VerifiedOn      string `json:"verified_on,omitempty"`
+	Source          string `json:"source,omitempty"`
+	// Audit is the repo path of the onboarding audit this row came from.
+	Audit string `json:"audit,omitempty"`
 }
 
 // RecordedEndpoint is an endpoint that exists and is not wired, kept dated so
@@ -173,10 +221,54 @@ type LaneSignalRow struct {
 	HTTPStatus int    `json:"http_status"`
 	VerifiedOn string `json:"verified_on"`
 	Message    string `json:"message"`
+	// MessageContains keys a row on a MESSAGE SUBSTRING rather than on a
+	// provider error code, for a lane whose published taxonomy is
+	// (HTTP status x message string) and carries no numeric code at all.
+	// Additive and optional: a document with no such row behaves exactly as it
+	// did before this member existed, and code-keyed rows keep winning.
+	MessageContains string `json:"message_contains,omitempty"`
+	// DocumentedClass is the NARROW OQ1(a) exemption vocabulary. A row may
+	// declare that its (status, message) pair means one of a CLOSED set of
+	// things on this lane's wire — and the set deliberately excludes `auth`
+	// and `balance`, because those are the directions in which a document edit
+	// could suppress a lane freeze. It is an exemption list, never a
+	// re-ordering: a row that declares nothing classifies on its status
+	// exactly as before.
+	DocumentedClass string `json:"documented_class,omitempty"`
 	// SemanticsVerified is false for a band the provider documents only as a
 	// group; the row is honest about what it does not know.
 	SemanticsVerified bool   `json:"semantics_verified"`
 	Note              string `json:"note"`
+}
+
+// The documented-class vocabulary a lane document may declare on a signal row
+// (the OQ1(a) exemption set). It is CLOSED, and it deliberately has no `auth`
+// and no `balance` member: those would let a data edit suppress a lane freeze,
+// and the fuller ratified `semantics` member is the pre-registered later path
+// (OQ1(b), an S00.9 amendment when a third coded lane arrives).
+//
+// The classifier reads the same four strings from its own package, because
+// neither package may import the other; internal/shell is where the two
+// vocabularies are pinned to agree.
+const (
+	// DocumentedTransient: capacity shed — retry in place, never park.
+	DocumentedTransient = "transient"
+	// DocumentedDepletion: an allowance window is spent — park.
+	DocumentedDepletion = "depletion"
+	// DocumentedModelDrift: the account does not serve the model asked for —
+	// surfaced, never parked and never a lane freeze (P-T17-3).
+	DocumentedModelDrift = "model-drift"
+	// DocumentedEndpointDefect: the request reached the wrong path — a
+	// configuration defect, surfaced rather than parked (P-T08-2).
+	DocumentedEndpointDefect = "endpoint-defect"
+)
+
+// documentedClasses is the closed set validation accepts.
+var documentedClasses = map[string]bool{
+	DocumentedTransient:      true,
+	DocumentedDepletion:      true,
+	DocumentedModelDrift:     true,
+	DocumentedEndpointDefect: true,
 }
 
 // LaneSignal is the normalized wire signal this adapter forwards as DATA on a
@@ -200,6 +292,12 @@ type LaneSignal struct {
 	// Known reports whether the lane's signal table names this code. An
 	// unknown code is forwarded as data, never dropped and never fatal.
 	Known bool `json:"known"`
+	// DocumentedClass is the class the lane DOCUMENT names for this exact
+	// (status, message) pair, or empty. It is resolved here, where the document
+	// is, and forwarded as DATA — because the classifier is pure and total and
+	// must never go looking for a document (S10.5; the EndpointVerified
+	// precedent).
+	DocumentedClass string `json:"documented_class,omitempty"`
 	// EngineRetry is the engine's OWN retry context, verbatim, when the signal
 	// was lifted out of one (type/attempt/next). Normalizing a signal must not
 	// cost the raw facts it was normalized from: the platform classifies from
@@ -233,11 +331,15 @@ func (s LaneSignal) MarshalJSON() ([]byte, error) {
 // They are seed DATA — a starting point an operator's configuration replaces
 // per user — not a compiled-in lane.
 func SeedLaneConfigs() ([]LaneConfig, error) {
-	c, err := LoadLaneConfig(zaiLaneSeed)
-	if err != nil {
-		return nil, err
-	}
-	return []LaneConfig{c}, nil
+	return loadLaneDocs(laneSeeds, "lanedata")
+}
+
+// loadLaneDocs walks a directory of lane documents, validates each, and returns
+// them SORTED BY LANE NAME.
+//
+// TODO(P3-LN-3 R6): the directory walk, the sort and the two gates.
+func loadLaneDocs(fsys fs.FS, dir string) ([]LaneConfig, error) {
+	return nil, fmt.Errorf("%w: the directory-embed lane loader is not built yet (P3-LN-3 R6)", ErrLaneConfig)
 }
 
 // LoadLaneConfig parses and VALIDATES one lane document. Validation is the

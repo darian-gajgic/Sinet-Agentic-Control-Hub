@@ -688,6 +688,8 @@ const (
 	LaneAnthropic = "anthropic"
 	LaneZAI       = "zai"
 	LaneLocal     = "local"
+	// LaneKimi is the Kimi Code (Moonshot) lane (S00.9 amendment A11).
+	LaneKimi = "kimi"
 )
 
 // PaidLanes are the two v0 lanes a real-request canary probes. Both are
