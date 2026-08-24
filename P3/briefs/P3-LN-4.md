@@ -1,3 +1,5 @@
+> **EXPIRED at landing (2026-08-25). Single-use artifact: after the r1/r2 drains this brief no longer matches the code. Later grounding must never read it as truth — code + spec only.**
+
 # P3-LN-4 — commissioned-lane activation: a placed key becomes a routable lane
 
 Grounded 2026-08-24 against `Spec/drafts/` (canonical, spec-v1), `P3/CONVENTIONS.md` §10/§61–§64, and the tree at `b842267`. Single-use: this brief expires when the packet lands.
