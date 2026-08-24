@@ -140,6 +140,21 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 			SeedAllowance:    28000,
 			SeedQuota:        "rolling-5h",
 			VerifiedOn:       "2026-08-23",
+			// The declared windows, each with its own unit. Populated here for
+			// the same reason the plan block itself is: a member no fixture
+			// exercises is a contract neither language is held to.
+			//
+			// Both windows are credits because this fixture lane IS zai, whose
+			// windows share a unit — the shape stays honest rather than
+			// demonstrating a variety this lane does not have. The
+			// `allowance_unverified` member is therefore NOT exercised by the
+			// snapshot; the lane that has one (kimi's weekly window) has no
+			// runs in this world, and inventing one here would put a figure on
+			// the wire that no plan document says.
+			Windows: []api.LanePlanWindow{
+				{Name: "rolling-5h", Unit: "credits", Allowance: 28000, WindowHours: 5},
+				{Name: "weekly", Unit: "credits", Allowance: 140000, WindowHours: 168},
+			},
 		}
 	}
 	return m, nil

@@ -178,8 +178,17 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 	if seed.Credential.Profile == "" {
 		t.Error("the document names no broker auth profile")
 	}
-	if strings.Contains(strings.ToLower(seed.Credential.Note), "guess") {
-		t.Errorf("the credential note admits a guessed variable name: %q", seed.Credential.Note)
+	// OQ4: the variable name is READ OFF the installed opencode provider record
+	// ($0, local) or landed empty with the named-missing state — never guessed.
+	// Whichever happened, the document says which.
+	if seed.Credential.EnvVar == "" {
+		t.Error("the credential variable is empty; if that is the OQ4 outcome the note must say so and R11's named-missing state is what carries it")
+	}
+	if !strings.Contains(strings.ToLower(seed.Credential.Note), "installed opencode") {
+		t.Errorf("the credential note does not record where the variable name came from — a name with no provenance is a guess wearing a date: %q", seed.Credential.Note)
+	}
+	if !strings.Contains(seed.Credential.Note, "2026-08-24") {
+		t.Errorf("the credential note carries no date for that reading: %q", seed.Credential.Note)
 	}
 
 	// The C5 routing rider rides the document as DATA, and is honest that it is

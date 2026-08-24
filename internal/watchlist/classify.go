@@ -67,7 +67,10 @@ func WatchlistSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"reason":{"type":"string","description":"brief free-text reasoning — fill this FIRST, before the labels"},` +
 		`"change_class":{"type":"string","enum":["price","terms","limits","models","endpoints","billing-regime","none","unclear"],"description":"what kind of outside-world change this is; none = irrelevant to Sinet; unclear = cannot tell (abstain — NEVER guess)"},` +
-		`"lanes":{"type":"array","items":{"type":"string","enum":["anthropic","zai","local"]},"description":"the Sinet lanes this change affects; empty when it affects none"},` +
+		// The lane enum is a CONSTRAINED-DECODING grammar, not a hint: a lane
+		// missing from it is a lane the local classifier literally cannot emit,
+		// so no hit would ever be attributed to it (kimi added at P3-LN-3).
+		`"lanes":{"type":"array","items":{"type":"string","enum":["anthropic","zai","kimi","local"]},"description":"the Sinet lanes this change affects; empty when it affects none"},` +
 		`"summary":{"type":"string","description":"one-line summary of the change, plain language"}` +
 		`},"required":["reason","change_class","lanes","summary"],"additionalProperties":false}`)
 }

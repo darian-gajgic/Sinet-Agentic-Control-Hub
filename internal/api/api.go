@@ -132,6 +132,23 @@ type LanePlanMeter struct {
 	SeedAllowance float64
 	SeedQuota     string
 	VerifiedOn    string
+	// Windows are the plan's declared allowance windows, each with its OWN
+	// unit. A lane can meter its short window in requests and its long window
+	// in credits, and a surface handed one scalar would print one under the
+	// other's label.
+	Windows []LanePlanWindow
+}
+
+// LanePlanWindow is one declared allowance window as this read serves it.
+type LanePlanWindow struct {
+	Name string
+	Unit string
+	// Allowance is the PUBLISHED allowance — provenance, never the divisor.
+	Allowance   float64
+	WindowHours float64
+	// AllowanceUnverified says nobody published an allowance for this window,
+	// so Allowance is 0 and means "unknown", never "none".
+	AllowanceUnverified bool
 }
 
 // MeterReader is the narrow metering read-seam for the S14.3 snapshots: the

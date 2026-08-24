@@ -294,8 +294,10 @@ func TestKimiWatchRowsVerified(t *testing.T) {
 		if !strings.Contains(r.Notes, "2026-08-24") {
 			t.Errorf("row %s carries no re-verification date in its notes: %q", r.ID, r.Notes)
 		}
-		if strings.Contains(strings.ToLower(r.Notes), "candidate") {
-			t.Errorf("row %s is still stamped a candidate; the lane is onboarded: %q", r.ID, r.Notes)
+		// The STAMP, not the word: a row may explain that it used to be a
+		// watch-only candidate, but it may not still carry the stamp.
+		if strings.Contains(r.Notes, "(candidate)") {
+			t.Errorf("row %s is still stamped (candidate); the lane is onboarded: %q", r.ID, r.Notes)
 		}
 		if jsShell[r.ID] && !strings.Contains(strings.ToLower(r.Notes), "empty diff") {
 			t.Errorf("row %s is a JS shell and its notes do not warn that a near-empty diff is not 'no change': %q", r.ID, r.Notes)

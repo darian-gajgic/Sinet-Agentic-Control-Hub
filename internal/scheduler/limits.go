@@ -276,6 +276,29 @@ func LoadLimitConfig(s Settings) (LimitConfig, error) {
 //	Class 2 (depletion + provider signal) — park with the signaled resume;
 //	Class 3 (depletion, no signal) — park with a probe schedule.
 func Classify(sig LimitSignal, cfg LimitConfig) Action {
+	// The narrow, document-driven EXEMPTION to the Class-4 status rule below.
+	//
+	// It is an exemption LIST and never a re-ordering: it fires only where a
+	// lane's own document explicitly names this exact (status, message) pair as
+	// depletion or model drift, so an unmatched bare 401/402/403 still freezes
+	// and the safe default survives intact. Genuine-revocation rows carry no
+	// documented class at all, which is why they cannot be suppressed by a data
+	// edit — and the vocabulary itself has no `auth` member, so no document can
+	// claim an auth failure is something else.
+	//
+	// It exists because one lane's wire does not sort by status. Kimi publishes
+	// weekly quota exhaustion on 403 and membership-tier gates on 401, so
+	// without this the lane would freeze itself and page the operator with a
+	// suspected policy revocation every time its weekly window emptied —
+	// routine, recurring, and indistinguishable at the alert from the real
+	// thing. (OQ1(a); the fuller ratified `semantics` member is the
+	// pre-registered later path when a third coded lane arrives.)
+	if exemptsAuthStatusFreeze(sig) {
+		if act, ok := classifyDocumentedSignal(sig, cfg); ok {
+			return act
+		}
+	}
+
 	// Class 4: auth / policy. 401/402/403, or policy-ban text on VALID
 	// credentials. NEVER retry-park a lane that is frozen for auth/policy
 	// (S10.5; the P-T17-1 canary drives the freeze).
@@ -300,6 +323,15 @@ func Classify(sig LimitSignal, cfg LimitConfig) Action {
 		if act, ok := classifyZAICode(sig, cfg); ok {
 			return act
 		}
+	}
+
+	// A MESSAGE-keyed lane's documented signals, on every status the exemption
+	// above did not already claim. They run here, in the zai coded branch's
+	// place in the ladder, and for the same reason: a documented row is what the
+	// provider published, and a text heuristic guessing at it afterwards is
+	// strictly worse information arriving later.
+	if act, ok := classifyDocumentedSignal(sig, cfg); ok {
+		return act
 	}
 
 	// Policy-ban text on VALID credentials. It stays a heuristic and stays
@@ -335,6 +367,75 @@ func Classify(sig LimitSignal, cfg LimitConfig) Action {
 
 	// Not a limit event (e.g. an "allowed" rate_limit_event observation).
 	return Action{Class: ClassNone, Kind: ActionContinue, Reason: "not a limit event"}
+}
+
+// exemptsAuthStatusFreeze reports whether a documented row lifts the Class-4
+// status rule for this signal.
+//
+// Two narrowings carry the whole safety argument. Only an AUTH-SHAPED status is
+// ever exempted, and only by a row naming DEPLETION or MODEL DRIFT — a
+// documented transient or endpoint-defect row on a 401/403 is deliberately NOT
+// enough, because those are not the readings a provider publishes for an
+// auth-shaped status and accepting them would widen the hole for nothing.
+func exemptsAuthStatusFreeze(sig LimitSignal) bool {
+	switch sig.HTTPStatus {
+	case 401, 402, 403:
+	default:
+		return false
+	}
+	return sig.DocumentedClass == DocumentedDepletion || sig.DocumentedClass == DocumentedModelDrift
+}
+
+// classifyDocumentedSignal is the whole of a message-keyed lane's taxonomy: the
+// verdict its own document names for this exact (status, message) pair.
+//
+// It reports ok=false for a signal carrying no documented class — including one
+// carrying a value outside the closed vocabulary, which is INERT by
+// construction, so no document edit can ever mint a verdict the classifier does
+// not already define.
+func classifyDocumentedSignal(sig LimitSignal, cfg LimitConfig) (Action, bool) {
+	switch sig.DocumentedClass {
+	case DocumentedModelDrift:
+		// The account does not serve the model asked for — a membership tier
+		// that no longer carries it, or a renamed id. Parking a run for that
+		// waits forever for something nobody is going to change, and freezing
+		// the lane hides the one fact worth acting on: the account's observed
+		// model list is the authority (P-T17-3), and its canary is what acts.
+		return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceModelDrift,
+			Reason: "the provider's own documented message says this account does not serve the requested model — " +
+				"model drift, not a limit event and not a revocation: the observed model list is the authority (P-T17-3)"}, true
+
+	case DocumentedEndpointDefect:
+		return Action{Class: ClassNone, Kind: ActionContinue, Surface: SurfaceEndpointDefect,
+			Reason: "the provider's own documented message says this request reached a path it does not serve — a " +
+				"configuration defect, not a limit event: fix the endpoint, do not retry and do not park (P-T08-2)"}, true
+
+	case DocumentedDepletion:
+		if !sig.ResetAt.IsZero() {
+			return Action{Class: ClassDepletionSignal, Kind: ActionParkQuota, ResumeAt: sig.ResetAt,
+				Reason: "a documented depletion message carrying a provider resume time — park blocked_quota, " +
+					"resume at signal (S10.5 Class 2)"}, true
+		}
+		return Action{Class: ClassDepletionNoSignal, Kind: ActionParkProbe, ProbeIntervalMax: cfg.ProbeIntervalMax,
+			Reason: "a documented depletion message with no published resume time — park, jittered probe schedule " +
+				"(S10.5 Class 3). This lane's allowance windows split across several HTTP statuses, so the message " +
+				"is what says the plan is spent rather than that the credential is bad"}, true
+
+	case DocumentedTransient:
+		// The ONLY branch here from which a retry is reachable, so the
+		// revocation belt is folded in AHEAD of it — a lane that has been
+		// suspended does not become healthy because the provider also happened
+		// to shed the request (S10.5 Class 4 outranks Class 1; P-T08-2).
+		if sig.OnValidCredentials && sig.BodyText != "" && looksLikeRevocation(sig.BodyText) {
+			return Action{Class: ClassAuthPolicy, Kind: ActionLaneFreeze,
+				Reason: "a documented transient message whose body carries explicit revocation text on VALID " +
+					"credentials — lane freeze, never retry (S10.5 Class 4 outranks Class 1; P-T08-2)"}, true
+		}
+		return Action{Class: ClassTransientShed, Kind: ActionRetryInPlace,
+			RetryCap: cfg.RetryCap, RetryBudgetRatio: cfg.RetryBudgetRatio,
+			Reason: "a documented transient-shed message — retry in place with full jitter (S10.5 Class 1)"}, true
+	}
+	return Action{}, false
 }
 
 // zaiAuthCodes are the lane's authentication/permission codes. They are
@@ -437,6 +538,13 @@ func isTransient(sig LimitSignal) bool {
 		// plan that may be spent is the one direction with no safe failure, so
 		// it falls through to the depletion ladder instead (R13).
 		return false
+	case laneKimi:
+		// Every DOCUMENTED kimi signal was already decided above, so only an
+		// unmatched one reaches here — a message this seed's verified-on date
+		// does not name, or a bare status from a probe. Same reasoning as zai:
+		// retrying an unrecognised signal against a plan that may be spent has
+		// no safe failure, so it falls to the depletion ladder.
+		return false
 	}
 	return false
 }
@@ -446,10 +554,11 @@ func isDepletion(sig LimitSignal) bool {
 	switch sig.Lane {
 	case laneAnthropic:
 		return sig.RateLimitStatus == "rejected" || sig.HTTPStatus == 429
-	case laneZAI:
-		// Coded signals never reach here (classifyZAICode owns them). A
-		// codeless zai 429 that nonetheless carries a resume time is still
-		// depletion-with-signal: the CLASS follows the signal.
+	case laneZAI, laneKimi:
+		// Coded (zai) and documented (kimi) signals never reach here — their
+		// own branches own them. A codeless/undocumented 429 that nonetheless
+		// carries a resume time is still depletion-with-signal: the CLASS
+		// follows the signal, not a number or a phrase nobody published yet.
 		return sig.HTTPStatus == 429
 	default:
 		// opencode/other: a bare retry.next reset is a depletion signal.
@@ -460,10 +569,10 @@ func isDepletion(sig LimitSignal) bool {
 // isDepletionNoSignal matches Class-3 signals (no reset) per lane (S10.5).
 func isDepletionNoSignal(sig LimitSignal) bool {
 	switch sig.Lane {
-	case laneZAI:
-		// Codeless again: a bare 429 with no resume time parks on the probe
-		// schedule rather than being read as "not a limit event", which is
-		// what a canary-shaped signal (status only, no body code) produces.
+	case laneZAI, laneKimi:
+		// Codeless/undocumented again: a bare 429 with no resume time parks on
+		// the probe schedule rather than being read as "not a limit event",
+		// which is what a canary-shaped signal (status only, no body) produces.
 		return sig.HTTPStatus == 429
 	}
 	// A rejected/429 depletion with no reset time is depletion-without-signal

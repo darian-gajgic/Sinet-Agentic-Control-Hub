@@ -433,7 +433,11 @@ func TestZAIMultipliersAreConfigNotConstants(t *testing.T) {
 	// No quota number and no multiplier is a Go constant.
 	for _, src := range meteringSources(t) {
 		body := readFile(t, src)
-		for _, banned := range []string{"28000", "140000", "14:00", "Singapore"} {
+		// Extended at P3-LN-3: the kimi plan's numbers are 300 / 168 / 5, all
+		// too generic to ban as substrings, so the LANE NAME stands in for
+		// them. No metering source may name a lane at all — the documents are
+		// keyed by the lane argument the caller passes.
+		for _, banned := range []string{"28000", "140000", "14:00", "Singapore", "kimi"} {
 			if strings.Contains(body, banned) {
 				t.Errorf("%s hardcodes %q — the plan's numbers are dated DATA, never constants (S10.4/S18.3)", src, banned)
 			}

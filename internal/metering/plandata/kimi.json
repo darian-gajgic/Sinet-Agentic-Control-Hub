@@ -1,0 +1,44 @@
+{
+  "lane": "kimi",
+  "plan": "Kimi Code membership",
+  "unit": "requests",
+  "verified_on": "2026-08-24",
+  "source": "https://www.kimi.com/code/docs/en/",
+  "assumed_note": "ASSUMED, and for a reason sharper than the zai lane's. The plan publishes no per-request counter, so consumption is DERIVED from the requests actually made (S10.1 tier 3, S10.4 requests-as-proxy). Beyond that, the vendor states verbatim that \"All signed-in devices and API Key share the same quota\" — Sinet is ONE consumer of a pool the operator also draws on interactively, so Sinet's own count is a LOWER BOUND on consumption and never the pool state. Consumption-pressure routing must not present it as anything else. Every number below is a dated row an operator may edit, never a platform constant.",
+  "unit_note": "THE LANE'S WINDOWS ARE DENOMINATED DIFFERENTLY, and each quota row below carries its OWN unit rather than borrowing one lane-wide scalar: the rolling 5-hour window counts REQUESTS and the 7-day Kimi Code allowance counts CREDITS/tokens. This document-level unit is the DEFAULT a row inherits when it declares none, and it is `requests` because the derived tier-3 reading's proxy is the request. Rendering both gauges in one unit would be a quiet lie about what was counted.",
+  "weekly_reset": "subscription-anchored",
+  "weekly_reset_note": "Verbatim: \"Kimi Code's quota refreshes automatically every 7 days\" from the subscription date, and \"unused credits do not carry over to the next cycle\". It is NOT a calendar week — structurally the same trap as the zai lane's order-anchored weekly window, and modeled the same way. Verified 2026-08-24.",
+  "monthly_pool_note": "A THIRD window exists and is deliberately NOT seeded as a quota row: a monthly membership credit pool shared with the operator's non-Sinet Kimi use, whose depletion arrives as the documented 429 \"You've reached kimi monthly usage limit for this billing cycle\". No primary page publishes its allowance and its reset is the account's billing cycle rather than a fixed number of hours, so seeding a length or an allowance for it would be inventing both. Verified 2026-08-24.",
+  "tier_multiplier_note": "PER-TIER 7-DAY ALLOWANCE MULTIPLIERS ARE UNVERIFIED (audit U2): the 1x/5x/15x/30x figures circulate on secondary aggregators only and no primary page carries them, so they are deliberately NOT seeded. They close from the operator's own account console at bring-up (P-T17-3), which is the runtime authority over anything the docs say.",
+  "multipliers": [
+    {
+      "name": "standard",
+      "factor": 1.0,
+      "default": true,
+      "verified_on": "2026-08-24",
+      "source": "https://www.kimi.com/code/docs/en/",
+      "note": "Kimi publishes NO peak/off-peak charging discount for the Kimi Code plan, so there is exactly one rate and it is the default row: one request charges one request-unit against the 5-hour window. This is a recorded absence of a discount, not an invented one."
+    }
+  ],
+  "quotas": [
+    {
+      "name": "rolling-5h",
+      "unit": "requests",
+      "units": 300,
+      "window_hours": 5,
+      "verified_on": "2026-08-24",
+      "source": "https://www.kimi.com/code/docs/en/",
+      "note": "Verbatim: \"approximately 300-1,200 requests per 5-hour window, with up to 30 concurrent requests\". Seeded at the LOW end of the published range because the per-tier figure is UNVERIFIED and a budget proposal taking a fraction of the smaller allowance is the conservative direction. The operator's own console closes the number (P-T17-3)."
+    },
+    {
+      "name": "weekly",
+      "unit": "credits",
+      "units": 0,
+      "allowance_unverified": true,
+      "window_hours": 168,
+      "verified_on": "2026-08-24",
+      "source": "https://www.kimi.com/en/help/kimi-code/benefits",
+      "note": "The 7-day Kimi Code allowance. Its WINDOW is published verbatim (\"Credits refresh on a 7-day cycle\", subscription-anchored) and its UNIT is credits, but no primary page publishes the allowance figure for any tier (audit U1/U2) — so the row declares its shape and its unit and honestly declares no number. A budget can never be proposed from it until the operator's console supplies one; the rolling-5h row is the seedable one."
+    }
+  ]
+}

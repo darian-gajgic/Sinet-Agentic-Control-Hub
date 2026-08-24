@@ -119,6 +119,11 @@ func conformanceRowLane(rowID string) string {
 		// SUBSTRATE, and a substrate is not a lane — mapping it would file a
 		// substrate result under whichever lane happened to be listed first.
 		return LaneZAI
+	case "adapter-kimi":
+		// The kimi LANE row (P3-LN-3). Two lanes now ride the one opencode
+		// substrate row, which is exactly why that row stays unmapped: a
+		// substrate result belongs to no single lane.
+		return LaneKimi
 	}
 	return ""
 }

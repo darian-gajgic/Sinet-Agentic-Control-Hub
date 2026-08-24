@@ -194,6 +194,12 @@ var activeLanes = map[string]bool{
 	"anthropic": true,
 	"zai":       true,
 	"local":     true,
+	// kimi is an ACTIVE lane as of P3-LN-3 (S00.9 A11). Without this row every
+	// price/terms/limits/models/endpoint hit on it routes to the daily digest
+	// instead of flag-now — and a lane whose terms can change without an alert
+	// is not onboarded, which matters more here than elsewhere because the
+	// vendor's own help centre says a new membership system is coming.
+	"kimi": true,
 }
 
 // severityFor computes the S14.4 alert-routing class for a classified hit

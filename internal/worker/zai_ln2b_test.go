@@ -191,7 +191,13 @@ func TestNoLaneValueIsAConstantInRoutingOrShell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s/%s: %v", dir, n, err)
 			}
-			for _, banned := range []string{"glm-", "api.z.ai", "zai-coding-plan"} {
+			// Extended at P3-LN-3 with the kimi lane's own values. `"k3"` is
+			// matched WITH its quotes: the ban is on a model id compiled in as
+			// a Go constant, not on the two characters appearing in prose.
+			for _, banned := range []string{
+				"glm-", "api.z.ai", "zai-coding-plan",
+				"api.kimi.com", "api.moonshot", "kimi-for-coding", `"k3"`,
+			} {
 				if strings.Contains(string(body), banned) {
 					t.Errorf("%s/%s hardcodes %q — lane values live in the lane DOCUMENT with their verified-on dates (S03.6)", dir, n, banned)
 				}

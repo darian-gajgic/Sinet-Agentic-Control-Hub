@@ -199,33 +199,41 @@ func TestClassify1211IsNotALimitEvent(t *testing.T) {
 
 func TestClassifyStaysPureAndTotal(t *testing.T) {
 	cfg := ln2Config()
-	lanes := []string{laneAnthropic, laneZAI, laneLocal, "opencode", "", "made-up"}
-	statuses := []int{0, 200, 400, 401, 402, 403, 429, 500, 529}
+	lanes := []string{laneAnthropic, laneZAI, laneKimi, laneLocal, "opencode", "", "made-up"}
+	statuses := []int{0, 200, 400, 401, 402, 403, 404, 429, 500, 529}
 	codes := []string{"", "1000", "1113", "1211", "1302", "1308", "1310", "1399", "9999", "not-a-number"}
 	resets := []time.Time{{}, time.Now().Add(time.Hour)}
+	// EXTENDED at P3-LN-3: the document-driven class is a classifier INPUT now,
+	// so totality has to hold over it too — including values outside the closed
+	// vocabulary, which must be inert rather than undefined.
+	classes := []string{"", DocumentedTransient, DocumentedDepletion, DocumentedModelDrift,
+		DocumentedEndpointDefect, "auth", "made-up"}
 
 	for _, lane := range lanes {
 		for _, status := range statuses {
 			for _, code := range codes {
 				for _, reset := range resets {
 					for _, verified := range []bool{false, true} {
-						sig := LimitSignal{Lane: lane, HTTPStatus: status, ErrorCode: code,
-							ResetAt: reset, EndpointVerified: verified}
-						got := Classify(sig, cfg)
-						if got.Kind == "" {
-							t.Fatalf("Classify(%+v) returned no action kind — the classifier is not total", sig)
-						}
-						if got.Reason == "" {
-							t.Fatalf("Classify(%+v) returned no reason", sig)
-						}
-						// Purity: the same input classifies the same way, and
-						// the input is never mutated.
-						again := Classify(sig, cfg)
-						if again != got {
-							t.Fatalf("Classify(%+v) is not deterministic: %+v vs %+v", sig, got, again)
-						}
-						if sig.Lane != lane || sig.ErrorCode != code || sig.HTTPStatus != status {
-							t.Fatalf("Classify mutated its input: %+v", sig)
+						for _, class := range classes {
+							sig := LimitSignal{Lane: lane, HTTPStatus: status, ErrorCode: code,
+								ResetAt: reset, EndpointVerified: verified, DocumentedClass: class}
+							got := Classify(sig, cfg)
+							if got.Kind == "" {
+								t.Fatalf("Classify(%+v) returned no action kind — the classifier is not total", sig)
+							}
+							if got.Reason == "" {
+								t.Fatalf("Classify(%+v) returned no reason", sig)
+							}
+							// Purity: the same input classifies the same way,
+							// and the input is never mutated.
+							again := Classify(sig, cfg)
+							if again != got {
+								t.Fatalf("Classify(%+v) is not deterministic: %+v vs %+v", sig, got, again)
+							}
+							if sig.Lane != lane || sig.ErrorCode != code || sig.HTTPStatus != status ||
+								sig.DocumentedClass != class {
+								t.Fatalf("Classify mutated its input: %+v", sig)
+							}
 						}
 					}
 				}

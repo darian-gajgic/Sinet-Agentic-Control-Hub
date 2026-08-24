@@ -81,6 +81,40 @@ type MeterLanePlan struct {
 	SeedAllowance    float64  `json:"seed_allowance,omitempty"`
 	SeedQuota        string   `json:"seed_quota,omitempty"`
 	VerifiedOn       string   `json:"verified_on,omitempty"`
+	// Windows are the plan's declared allowance windows with their OWN units,
+	// so a lane whose short window counts requests and whose long window counts
+	// credits cannot be rendered in one. Omitted for a plan that declares none.
+	Windows []MeterPlanWindow `json:"windows,omitempty"`
+}
+
+// MeterPlanWindow is one allowance window on the meters wire.
+type MeterPlanWindow struct {
+	Name string `json:"name"`
+	Unit string `json:"unit"`
+	// Allowance is the PUBLISHED figure a budget would be proposed from —
+	// provenance, never the divisor (S10.4/D4).
+	Allowance   float64 `json:"allowance,omitempty"`
+	WindowHours float64 `json:"window_hours,omitempty"`
+	// AllowanceUnverified: nobody published an allowance for this window, so
+	// `allowance` is absent and means unknown rather than none.
+	AllowanceUnverified bool `json:"allowance_unverified,omitempty"`
+}
+
+// meterPlanWindows renders the declared allowance windows onto the wire. A
+// plan with none serves nothing, so the member stays absent for every lane that
+// had no windows to report before it existed.
+func meterPlanWindows(ws []LanePlanWindow) []MeterPlanWindow {
+	if len(ws) == 0 {
+		return nil
+	}
+	out := make([]MeterPlanWindow, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, MeterPlanWindow{
+			Name: w.Name, Unit: w.Unit, Allowance: w.Allowance,
+			WindowHours: w.WindowHours, AllowanceUnverified: w.AllowanceUnverified,
+		})
+	}
+	return out
 }
 
 // AutomationState is one person's S10.4 pause switch as this read serves it:
@@ -292,6 +326,7 @@ func (p *projector) meterLanes(ctx context.Context, scope ownerScope, person, la
 						Pressure: m.Plan.Pressure, BudgetDeclared: m.Plan.BudgetDeclared,
 						SeedAllowance: m.Plan.SeedAllowance, SeedQuota: m.Plan.SeedQuota,
 						VerifiedOn: m.Plan.VerifiedOn,
+						Windows:    meterPlanWindows(m.Plan.Windows),
 					}
 				}
 			}

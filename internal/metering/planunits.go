@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strings"
 	"time"
 )
@@ -246,18 +247,71 @@ func SeedPlanDocs() ([]PlanDoc, error) {
 }
 
 // loadPlanDocs walks a directory of plan documents, validates each, and returns
-// them SORTED BY LANE NAME.
-//
-// TODO(P3-LN-3 R6): the directory walk, the sort and the duplicate-lane gate.
+// them SORTED BY LANE NAME. A duplicate lane is refused BY NAME: PlanDocFor
+// takes the first match, so a second document for one lane would be silently
+// unreachable.
 func loadPlanDocs(fsys fs.FS, dir string) ([]PlanDoc, error) {
-	return nil, fmt.Errorf("%w: the directory-embed plan loader is not built yet (P3-LN-3 R6)", ErrPlanDoc)
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read %s: %w", ErrPlanDoc, dir, err)
+	}
+	var out []PlanDoc
+	byLane := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := dir + "/" + name
+		raw, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read %s: %w", ErrPlanDoc, path, err)
+		}
+		d, err := LoadPlanDoc(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if first, dup := byLane[d.Lane]; dup {
+			return nil, fmt.Errorf("%w: %s and %s both declare lane %q — the plan lookup takes the FIRST match, "+
+				"so the second document would be silently unreachable", ErrPlanDoc, first, path, d.Lane)
+		}
+		byLane[d.Lane] = path
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w: %s holds no plan documents", ErrPlanDoc, dir)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Lane < out[j].Lane })
+	return out, nil
 }
 
-// QuotaUnit is the unit a named window counts in — its own when it declares
-// one, the document's otherwise.
+// QuotaUnit is the unit a named window counts in — its OWN when it declares one,
+// the document's otherwise (OQ2).
 //
-// TODO(P3-LN-3 OQ2).
-func (d PlanDoc) QuotaUnit(name string) string { return "" }
+// The fallback is what keeps a single-unit plan expressible exactly as it was:
+// a document whose windows share a unit declares it once and no row repeats it.
+func (d PlanDoc) QuotaUnit(name string) string {
+	if q, ok := d.Quota(name); ok && q.Unit != "" {
+		return q.Unit
+	}
+	return d.Unit
+}
+
+// windows renders the declared allowance windows with their own units, for a
+// reading to carry onto every surface.
+func (d PlanDoc) windows() []PlanWindow {
+	if len(d.Quotas) == 0 {
+		return nil
+	}
+	out := make([]PlanWindow, 0, len(d.Quotas))
+	for _, q := range d.Quotas {
+		out = append(out, PlanWindow{
+			Name: q.Name, Unit: d.QuotaUnit(q.Name), Allowance: q.Units,
+			WindowHours: q.WindowHours, AllowanceUnverified: q.AllowanceUnverified,
+		})
+	}
+	return out
+}
 
 // PlanDocFor returns the seed plan document for a lane, if one ships.
 func PlanDocFor(lane string) (PlanDoc, bool) {
@@ -338,8 +392,16 @@ func (d PlanDoc) validate() error {
 			return fmt.Errorf("%w (lane %q): a quota row has no name", ErrPlanDoc, d.Lane)
 		case seen[q.Name]:
 			return fmt.Errorf("%w (lane %q): quota %q is listed twice", ErrPlanDoc, d.Lane, q.Name)
-		case q.Units <= 0:
-			return fmt.Errorf("%w (lane %q): quota %q declares %v units — an allowance of nothing is not an allowance", ErrPlanDoc, d.Lane, q.Name, q.Units)
+		case q.Units <= 0 && !q.AllowanceUnverified:
+			return fmt.Errorf("%w (lane %q): quota %q declares %v units — an allowance of nothing is not an allowance; "+
+				"a window whose allowance nobody published says so with allowance_unverified", ErrPlanDoc, d.Lane, q.Name, q.Units)
+		case q.Units > 0 && q.AllowanceUnverified:
+			// Both at once is a contradiction, and the dangerous half is the
+			// number: a figure carried under an "unverified" flag is the one a
+			// surface would print anyway.
+			return fmt.Errorf("%w (lane %q): quota %q declares %v units AND allowance_unverified — one of the two is "+
+				"a lie, and a budget proposed from a number nobody published is the inferred provider window D4 forbids",
+				ErrPlanDoc, d.Lane, q.Name, q.Units)
 		case q.WindowHours <= 0:
 			return fmt.Errorf("%w (lane %q): quota %q declares a %v-hour window", ErrPlanDoc, d.Lane, q.Name, q.WindowHours)
 		}
@@ -428,6 +490,14 @@ func (g *PressureGauge) ProposePlanBudget(doc PlanDoc, quota string, start time.
 	if !ok {
 		return PlanBudget{}, fmt.Errorf("%w (lane %q): no quota row %q", ErrPlanDoc, doc.Lane, quota)
 	}
+	if q.AllowanceUnverified {
+		// There is nothing to take a fraction OF. Proposing from a window whose
+		// allowance nobody published would mint the denominator out of thin air,
+		// which is worse than having none: an operator would accept a number
+		// that looks sourced (S10.4/D4).
+		return PlanBudget{}, fmt.Errorf("%w (lane %q): quota %q publishes no allowance at primary-source grade, so no "+
+			"budget can be proposed from it — the operator's own account console closes it (P-T17-3)", ErrPlanDoc, doc.Lane, quota)
+	}
 	fraction, err := g.settings.Float(keyBgWindowFraction)
 	if err != nil {
 		return PlanBudget{}, fmt.Errorf("metering: read ⚙ %s: %w", keyBgWindowFraction, err)
@@ -466,9 +536,19 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		return PlanReading{}, err
 	}
 	factor, window := doc.MultiplierAt(now)
+	// The reading's unit is the unit of the window it was DERIVED FROM, not one
+	// lane-wide scalar: a lane whose 5-hour window counts requests and whose
+	// weekly window counts credits cannot be described by one (OQ2). With no
+	// budget declared there is no seeded window, and the document's own unit is
+	// the honest fallback.
+	unit := doc.Unit
+	if budget.SeededFrom != "" {
+		unit = doc.QuotaUnit(budget.SeededFrom)
+	}
 	r := PlanReading{
 		UserID: userID, Lane: lane, Plan: doc.Plan,
-		Unit:        doc.Unit,
+		Unit:        unit,
+		Windows:     doc.windows(),
 		Tier:        TierDerived,
 		Assumed:     true,
 		AssumedNote: doc.AssumedNote,

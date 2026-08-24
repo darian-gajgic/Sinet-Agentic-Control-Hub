@@ -216,8 +216,50 @@ func tier1Rows() []Row {
 			"OpenAI plan pricing docs (watch-only candidate lane)"),
 		page("t1-minimax-plans", "https://platform.minimax.io/", "minimax",
 			"MiniMax token-plan pages (candidate); report-02 names the token-plan pages on this host without pinning a path"),
-		page("t1-kimi-coding", "https://kimi.com/coding", "moonshot",
-			"Kimi coding + membership pages (candidate)"),
+		page("t1-kimi-coding", "https://kimi.com/coding", "kimi",
+			"Kimi coding + membership pages. RE-STAMPED to the kimi LANE 2026-08-24 at the lane onboarding "+
+				"(it was a watch-only 'moonshot' candidate), which is what makes its hits flag-now rather "+
+				"than digest. RE-CONFIRMED 2026-08-24: still a JavaScript shell to a plain fetch — only the "+
+				"fragment 'Moderato and higher-tier packages can use the K3 model' rendered, no price table. "+
+				"So an EMPTY DIFF HERE IS NOT 'NO CHANGE': this row is low-signal by construction and the "+
+				"help-centre and docs rows below are where a real change shows up"),
+		// The kimi lane's own tier-1 set, registered at its onboarding (R02 §5:
+		// wire the provider into §6's watchlist BEFORE go-live). Every URL was
+		// fetched live 2026-08-24 for the Gate A-C audit
+		// (P3/measurements/2026-08-24-kimi-lane-gate-audit.md) and rendered in
+		// full — unlike the JS shell above, these carry real text to diff.
+		page("t1-kimi-error-reference", "https://www.kimi.com/code/docs/en/kimi-code/error-reference.html", "kimi",
+			"Kimi Code error reference — THE LIMIT CLASSIFIER'S SOURCE OF TRUTH, and the highest-value row in "+
+				"this set. The lane's taxonomy is (HTTP status x message string), so a wording change here can "+
+				"silently invalidate the message-keyed signal table: quota exhaustion arrives on 403 as well as "+
+				"429, and entitlement failures on 401. VERIFIED 2026-08-24"),
+		page("t1-kimi-whats-new", "https://www.kimi.com/code/docs/en/kimi-code/whats-new.html", "kimi",
+			"Kimi Code changelog — model, plan and Extra-Usage changes land here first (~40 CLI releases between "+
+				"2026-05 and 2026-08-20; K3 launched 2026-07-16; HighSpeed and Extra Usage both 2026-07-09). "+
+				"A fast-moving surface, which is why every seeded value carries a date. VERIFIED 2026-08-24"),
+		page("t1-kimi-benefits", "https://www.kimi.com/en/help/kimi-code/benefits", "kimi",
+			"Kimi Code benefits and billing — carries the shared-quota fact the plan document's assumed-note "+
+				"rests on ('All signed-in devices and API Key share the same quota') AND the notice 'A new "+
+				"membership system is coming soon', which is the highest-value early warning in the audit: the "+
+				"structure this lane is seeded from is announced as changing. VERIFIED 2026-08-24"),
+		page("t1-kimi-extra-usage", "https://www.kimi.com/en/help/membership/membership-extra-usage", "kimi",
+			"Extra Usage Pack — the C1 overflow mechanism. It is what makes this lane opt-in-credits rather "+
+				"than hard-stop, and its any-time disable is the clause that clears 3.10; if that clause moves, "+
+				"the lane's overflow_mode is wrong. VERIFIED 2026-08-24"),
+		page("t1-kimi-price-k3", "https://platform.kimi.ai/docs/pricing/chat-k3", "kimi",
+			"K3 metered price table — the D5 API-equivalent row receipts are priced from ($3.00 in / $15.00 out "+
+				"per M, cache-hit $0.30/M, 1,048,576 ctx). The plan itself is flat and opencode reports $0.00, "+
+				"so these are the only dollar figures this lane has. VERIFIED 2026-08-24"),
+		page("t1-kimi-tos-platform", "https://platform.kimi.ai/docs/agreement/modeluse", "kimi",
+			"Terms of Service for Kimi OpenPlatform — THE GATE-A RE-AUDIT TRIGGER. Read in full 2026-08-24: no "+
+				"automation, unattended-use or interactive-only clause exists (class 2). An interactive-only or "+
+				"no-automation clause appearing here is class 3 and FREEZES the lane before the next run "+
+				"consumes allowance. VERIFIED 2026-08-24"),
+		page("t1-kimi-tos-assistant", "https://www.kimi.com/user/agreement/modelUse", "kimi",
+			"Kimi assistant Terms of Service — the second Gate-A trigger, and the reason there are two: the "+
+				"membership is bought on the assistant property (PRC law) and consumed through the developer "+
+				"surface (Singapore law), and no page states which governs a membership (audit U6). Watching "+
+				"one and not the other would watch half the sanction. VERIFIED 2026-08-24"),
 		page("t1-cerebras-code", "https://cerebras.ai/code", "cerebras",
 			"Cerebras code plan — the sell-out/restock cycle lives here and was a pricing-page-flip-only event"),
 		page("t1-synthetic-pricing", "https://synthetic.new/pricing", "synthetic",
@@ -350,11 +392,18 @@ func tier4Rows() []Row {
 		r.Notes = "Z.AI/GLM keyword feed. QUERY RE-VERIFIED 2026-08-23 at the lane commissioning. " + r.Notes
 		return r
 	}
+	// kimiHN is the same date-stamper for the kimi lane's feed, so all nine of
+	// its rows carry a re-verification date.
+	kimiHN := func(r Row) Row {
+		r.Notes = "Kimi/Moonshot keyword feed. QUERY VERIFIED 2026-08-24 at the lane onboarding. " + r.Notes
+		return r
+	}
 	return []Row{
 		hn("t4-hn-anthropic", "Anthropic", "anthropic"),
 		hn("t4-hn-claude", "Claude+Code", "anthropic"),
 		hn("t4-hn-openai", "OpenAI", "openai"),
 		zaiHN(hn("t4-hn-zai", "Z.ai+GLM", "zai")),
+		kimiHN(hn("t4-hn-kimi", "Kimi+Moonshot", "kimi")),
 		{
 			ID: "t4-localllama", Kind: KindFeed, URL: "https://www.reddit.com/r/LocalLLaMA/.rss",
 			// Reddit serves ATOM at /.rss despite the path (verified at the

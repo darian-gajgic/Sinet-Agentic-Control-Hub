@@ -252,6 +252,40 @@ func SeedRows() []Row {
 			Notes:       "the zai LANE on the opencode substrate (P3-LN-2). HONEST SCOPE, both halves. What it proves: the lane as CONFIGURATION — a dated provider entry per person, its credential resolved only through the broker, its wire signals classified through the five-class taxonomy, its consumption tiered and labeled, its receipts UNPRICED rather than $0, and its drift watched by the auth/behavioral/model-list canaries. What it does NOT prove: that a paid call on this lane works, because no credential exists in the system — every leg above terminates on fixtures or a loopback fake provider at $0, the real-request canary legs stay disarmed, and tier L is defined and structurally unreachable until LN-CEREMONY places a key. The SUBSTRATE beneath it is a separate row (adapter-opencode): a green substrate is not a working lane. There is no logprob canary here and that is deliberate — the coding endpoint exposes none (S03.7). Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
+			// Adapter per-lane — kimi [S03.2/S03.6/S10]. The SECOND lane on the
+			// opencode substrate (P3-LN-3), added ahead of its post-v0 slot on
+			// the operator's 2026-08-23 order (S00.9 amendment A11).
+			ID:            "adapter-kimi",
+			OwningSection: "S03.2/S03.6/S10.5",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/adapters/opencode/ -run TestKimiLaneDocumentLoads (tier F: the endpoint, models, overflow mode and C5 rider load as DATA, every row dated 2026-08-24)", Pkg: "internal/adapters/opencode", Run: "TestKimiLaneDocumentLoads"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestLaneSeedRefusesDuplicateLaneOrProvider (tier F: a duplicate lane or provider id is refused BY NAME — config-only lanes must not fail by silent shadowing)", Pkg: "internal/adapters/opencode", Run: "TestLaneSeedRefusesDuplicateLaneOrProvider"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestMessageKeyedSignalRowsAreAdditive (tier F: message-keyed rows work AND the zai code-keyed seed is byte-identical)", Pkg: "internal/adapters/opencode", Run: "TestMessageKeyedSignalRowsAreAdditive"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestKimiCredentialNeverLeaves (tier F: the sentinel appears in no event, row, park record, identity key, log or the SQLite file)", Pkg: "internal/adapters/opencode", Run: "TestKimiCredentialNeverLeaves"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestKimiMissingCredentialIsNamedState (tier F: an uncommissioned lane refuses BY NAME — never an unauthenticated call)", Pkg: "internal/adapters/opencode", Run: "TestKimiMissingCredentialIsNamedState"},
+				{Handle: "go test ./internal/scheduler/ -run TestKimi403WeeklyDepletionParksAndNeverFreezes (tier F: THE headline — an emptying weekly window parks and never pages the operator with a suspected revocation)", Pkg: "internal/scheduler", Run: "TestKimi403WeeklyDepletionParksAndNeverFreezes"},
+				{Handle: "go test ./internal/scheduler/ -run TestKimi403AccessTerminatedFreezesLane (tier F: the genuine revocation still freezes — the exemption list can never suppress it)", Pkg: "internal/scheduler", Run: "TestKimi403AccessTerminatedFreezesLane"},
+				{Handle: "go test ./internal/scheduler/ -run TestKimi401EntitlementIsModelDriftNotRevocation (tier F: the membership-tier gate surfaces model drift, over the whole entitlement message set)", Pkg: "internal/scheduler", Run: "TestKimi401EntitlementIsModelDriftNotRevocation"},
+				{Handle: "go test ./internal/scheduler/ -run TestKimiUnknownSignalNeverFreezesAndNeverRetries (tier F: the safe-direction property, and the unmatched 401/403 still freezing)", Pkg: "internal/scheduler", Run: "TestKimiUnknownSignalNeverFreezesAndNeverRetries"},
+				{Handle: "go test ./internal/metering/ -run TestKimiPlanWindowsCarryTheirOwnUnits (tier F: the 5-hour window counts requests and the 7-day window counts credits, each in its own unit)", Pkg: "internal/metering", Run: "TestKimiPlanWindowsCarryTheirOwnUnits"},
+				{Handle: "go test ./internal/watchlist/ -run TestKimiModelListCanaryToleratesAbsenceAndCatchesTierGate (tier F: an absent /models is honest, and a tier downgrade is drift not a freeze)", Pkg: "internal/watchlist", Run: "TestKimiModelListCanaryToleratesAbsenceAndCatchesTierGate"},
+				{Handle: "go test ./internal/watchlist/ -run TestKimiWatchRowsVerified (tier F: the R02 §6 tier-1 rows exist, carry the kimi LANE and their re-verification date)", Pkg: "internal/watchlist", Run: "TestKimiWatchRowsVerified"},
+				{Handle: "go test ./internal/shell/ -run TestKimiSignalRoundTripsFromTheDocumentIntoTheClassifier (tier F: the SHIPPED document's own messages, through the wire payload, into the taxonomy)", Pkg: "internal/shell", Run: "TestKimiSignalRoundTripsFromTheDocumentIntoTheClassifier"},
+				{Handle: "go test ./internal/worker/ -run TestFlatLaneSelectionAcrossTwoFlatLanes (tier F: two flat lanes ordered by consumption pressure, with no dollar term anywhere)", Pkg: "internal/worker", Run: "TestFlatLaneSelectionAcrossTwoFlatLanes"},
+				{Handle: "go test ./internal/stage/ -run TestKimiSubstrateDispatchesToOpencode (tier F: a kimi decision reaches the opencode adapter through the real dispatch and the real call sites)", Pkg: "internal/stage", Run: "TestKimiSubstrateDispatchesToOpencode"},
+				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/opencode/ -run TestLiveSmoke (tier L: one minimal paid call on this lane — DEFINED, and structurally unreachable until the operator places a credential)", Pkg: "internal/adapters/opencode", Run: "TestLiveSmoke"},
+			},
+			TriggerSet:  []string{TriggerEngineBump, TriggerWeekly},
+			Schedule:    "on any engine/CLI version change + weekly",
+			Cadence:     CadenceWeekly,
+			AffectClass: AffectLane,
+			Notes: "the kimi LANE on the opencode substrate (P3-LN-3; S00.9 A11). HONEST SCOPE, both halves. What it proves: the lane as CONFIGURATION — a dated provider entry per person on the Anthropic protocol, its credential resolved only through the broker, its MESSAGE-KEYED wire signals classified through the five-class taxonomy without freezing a healthy lane, its two differently-denominated allowance windows each reported in their own unit, and its drift watched by the auth/behavioral/model-list canaries and eight tier-1 watch rows. " +
+				"What it does NOT prove, and this row is sharper about it than its zai sibling: (1) that a paid call on this lane works, because no credential exists in the system — every leg above terminates on fixtures or a loopback fake provider at $0, the real-request canary legs stay disarmed, and tier L is defined and structurally unreachable until LN-CEREMONY places a key; " +
+				"(2) that the signal table matches the WIRE. Every message row is DOCUMENTED-NOT-OBSERVED — quoted from the vendor's published error reference on 2026-08-24, never seen on a response — and the audit could not verify the JSON shape of a Kimi error body, whether it carries a code field, or whether any reset header exists. The ceremony's live single-request probe (one real 401, one real 429, one real 403 body if reachable) is what closes that, and the P-T17-1 auth canary is the authoritative revocation detector until it does; " +
+				"(3) that the C5 no-household-personal-data routing rider is enforced. It is recorded on the lane document and surfaced to the operator; no per-lane data-policy enforcement point exists in the tree. " +
+				"The SUBSTRATE beneath it is a separate row (adapter-opencode), now carrying two lanes: a green substrate is not a working lane. There is no logprob canary here and that is deliberate — the audit found no logprob support on the coding endpoint (the S03.7 paid-lane posture). Lane-affecting ⇒ flag-now." + bumpGateNote,
+		},
+		{
 			// The no-engine-SSE-replay standing assertion [S14.3 ¶3; S14.5] — a
 			// named bullet of the adapter row whose test lives in internal/api,
 			// so it carries its own row (CF2, executor discretion).

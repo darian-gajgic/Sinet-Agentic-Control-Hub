@@ -220,8 +220,8 @@ func TestDisarmedLegsRunNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDue: %v", err)
 	}
-	if sweep.Ran != 0 || sweep.Disarmed != 6 {
-		t.Fatalf("sweep = %+v, want 0 ran and 6 disarmed (3 legs × 2 paid lanes)", sweep)
+	if sweep.Ran != 0 || sweep.Disarmed != 9 {
+		t.Fatalf("sweep = %+v, want 0 ran and 9 disarmed (3 legs × 3 paid lanes)", sweep)
 	}
 	if got := h.canaryEvents(t); len(got) != 0 {
 		t.Errorf("a disarmed layer recorded %d canary results, want 0", len(got))
@@ -385,8 +385,8 @@ func TestDisarmedLegsAreCountedWithNamedReasons(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDue: %v", err)
 	}
-	if sweep.Disarmed != 6 || sweep.Ran != 0 {
-		t.Fatalf("sweep = %+v, want 6 disarmed (3 legs × 2 paid lanes) and 0 ran", sweep)
+	if sweep.Disarmed != 9 || sweep.Ran != 0 {
+		t.Fatalf("sweep = %+v, want 9 disarmed (3 legs × 3 paid lanes) and 0 ran", sweep)
 	}
 	// One named reason per LEG KIND, deduped across lanes.
 	if len(sweep.Reasons) != 3 {
@@ -594,8 +594,8 @@ func TestConformanceCanarySurfacesDueAdapterRowsOncePerWindow(t *testing.T) {
 	// "dueness raises nothing at v0" (OQ5(a)). The opencode substrate row
 	// joined them at P3-LN-1 and the zai LANE row at P3-LN-2B (weekly +
 	// AffectLane, like their siblings).
-	if sweep.Cards != 4 {
-		t.Fatalf("conformance cards = %d, want 4 (adapter-anthropic + adapter-local + adapter-opencode + adapter-zai)", sweep.Cards)
+	if sweep.Cards != 5 {
+		t.Fatalf("conformance cards = %d, want 5 (adapter-anthropic + adapter-local + adapter-opencode + adapter-zai + adapter-kimi)", sweep.Cards)
 	}
 	cards := h.findings(t)
 	seen := map[string]bool{}
@@ -609,7 +609,7 @@ func TestConformanceCanarySurfacesDueAdapterRowsOncePerWindow(t *testing.T) {
 			t.Errorf("row %q change class = %q, want unclear (nothing has been observed)", f.RowID, f.ChangeClass)
 		}
 	}
-	for _, want := range []string{"adapter-anthropic", "adapter-local", "adapter-opencode", "adapter-zai"} {
+	for _, want := range []string{"adapter-anthropic", "adapter-local", "adapter-opencode", "adapter-zai", "adapter-kimi"} {
 		if !seen[want] {
 			t.Errorf("no card for the due weekly lane-affecting row %q", want)
 		}
@@ -631,8 +631,8 @@ func TestConformanceCanarySurfacesDueAdapterRowsOncePerWindow(t *testing.T) {
 	if _, err := c.RunDue(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if after := len(h.findings(t)); after != before+4 {
-		t.Errorf("findings after the window = %d, want %d", after, before+4)
+	if after := len(h.findings(t)); after != before+5 {
+		t.Errorf("findings after the window = %d, want %d", after, before+5)
 	}
 }
 

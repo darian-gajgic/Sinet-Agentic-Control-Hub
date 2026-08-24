@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strings"
 	"time"
 
@@ -197,6 +198,17 @@ const (
 // per-model attribute row). The set is fixed by the spec, not by this lane:
 // inventing a vocabulary here would make a document that validates against
 // Sinet and means nothing to anyone reading the spec.
+//
+// TBD-S10.2(currency-flip receipts): with the kimi lane, Sinet holds its first
+// non-`hard-stop` lane, so 3.10's "receipts must visibly change currency when
+// overflow triggers" (report-01 P-T01-3) stops being theoretical. The value is
+// carried end to end from the document and is distinguishable between lanes at
+// every surface that reads it — but NO surface reads billing regime yet, so
+// "end to end" ends at the validated document, and the currency-changing
+// receipt path belongs to whichever packet lands S10.2's flip mechanics (the
+// ProposePlanBudget/13.4 precedent: build the honest half, name the consumer,
+// do not invent the surface). The flip itself is an operator act through the
+// rehearsed kill-switch, never automatic and never silent (R02 §6).
 const (
 	// OverflowHardStop stops at the plan's own ceiling.
 	OverflowHardStop = "hard-stop"
@@ -337,9 +349,54 @@ func SeedLaneConfigs() ([]LaneConfig, error) {
 // loadLaneDocs walks a directory of lane documents, validates each, and returns
 // them SORTED BY LANE NAME.
 //
-// TODO(P3-LN-3 R6): the directory walk, the sort and the two gates.
+// The sort is not cosmetic: with a single-file embed the order was whatever one
+// call site wrote, and a caller indexing lanes[0] happened to be right. A
+// directory walk has no such luck, so the order is DECLARED — and every caller
+// that cared was moved to select by lane name in the same packet.
+//
+// TWO GATES ride this, and neither existed while one document shipped:
+// a duplicate LANE name and a duplicate PROVIDER ID are refused BY NAME. Both
+// failure modes are silent otherwise — laneFor takes the first provider-id
+// match and laneConfiguredModels overwrites out[l.Lane] — and a config-only
+// lane system whose failure mode is silent shadowing is not one.
 func loadLaneDocs(fsys fs.FS, dir string) ([]LaneConfig, error) {
-	return nil, fmt.Errorf("%w: the directory-embed lane loader is not built yet (P3-LN-3 R6)", ErrLaneConfig)
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read %s: %w", ErrLaneConfig, dir, err)
+	}
+	var out []LaneConfig
+	byLane := map[string]string{}
+	byProvider := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := dir + "/" + name
+		raw, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read %s: %w", ErrLaneConfig, path, err)
+		}
+		c, err := LoadLaneConfig(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if first, dup := byLane[c.Lane]; dup {
+			return nil, fmt.Errorf("%w: %s and %s both declare lane %q — lane resolution takes the FIRST match, "+
+				"so the second document would be silently unreachable (S03.6)", ErrLaneConfig, first, path, c.Lane)
+		}
+		if first, dup := byProvider[c.ProviderID]; dup {
+			return nil, fmt.Errorf("%w: %s and %s both declare provider id %q — a provider id resolves to exactly one "+
+				"lane, so the second would silently shadow the first (S03.6)", ErrLaneConfig, first, path, c.ProviderID)
+		}
+		byLane[c.Lane], byProvider[c.ProviderID] = path, path
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w: %s holds no lane documents", ErrLaneConfig, dir)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Lane < out[j].Lane })
+	return out, nil
 }
 
 // LoadLaneConfig parses and VALIDATES one lane document. Validation is the
@@ -441,6 +498,27 @@ func (c LaneConfig) validate() error {
 		name := row.Code
 		if name == "" {
 			name = row.CodeFrom + "-" + row.CodeTo
+		}
+		if name == "-" && row.MessageContains != "" {
+			name = row.MessageContains
+		}
+		// The exemption vocabulary is CLOSED. A row declaring something outside
+		// it would be inert at the classifier, which is the worst outcome: the
+		// document would look like it said something and nothing would read it.
+		// `auth` and `balance` are absent on purpose — a data edit must never be
+		// able to suppress a lane freeze (OQ1(a) constraint ii).
+		if row.DocumentedClass != "" && !documentedClasses[row.DocumentedClass] {
+			return fmt.Errorf("%w (lane %q): signal row %q declares documented_class %q, want one of %q/%q/%q/%q — "+
+				"the exemption vocabulary is closed, and it carries no auth or balance member by design (S10.5)",
+				ErrLaneConfig, c.Lane, name, row.DocumentedClass,
+				DocumentedTransient, DocumentedDepletion, DocumentedModelDrift, DocumentedEndpointDefect)
+		}
+		// A message-keyed row with no status cannot be keyed at all: this
+		// taxonomy is (status x message), and half of a key is not a key.
+		if row.MessageContains != "" && row.HTTPStatus == 0 {
+			return fmt.Errorf("%w (lane %q): signal row %q keys on a message but names no http_status — "+
+				"a message-keyed taxonomy is (status x message), and a row with only half of that key matches nothing",
+				ErrLaneConfig, c.Lane, name)
 		}
 		if row.VerifiedOn == "" {
 			return fmt.Errorf("%w (lane %q): signal row %q carries no verified-on date", ErrLaneConfig, c.Lane, name)
@@ -581,10 +659,26 @@ func inCodeBand(code, from, to string) bool {
 // observedStatus wins when the surface actually carried one; otherwise the
 // lane's dated signal table supplies it. An unknown code is still returned —
 // forwarded as data, never dropped, never fatal (S03.1).
+// A lane whose taxonomy is MESSAGE-keyed has no code to decode at all, so
+// producing nothing would leave only a bare HTTP status reaching the classifier
+// — and on a wire where quota exhaustion arrives on 403, a bare status is the
+// false-freeze. Such a lane therefore yields a signal from (status, message),
+// and its Known says whether a documented row actually matched.
 func (c LaneConfig) ExtractSignal(text string, observedStatus int) (LaneSignal, bool) {
 	code, message, ok := decodeProviderError(text)
 	if !ok {
-		return LaneSignal{}, false
+		// No decodable envelope. Only a lane that PUBLISHES message-keyed rows
+		// gets a signal out of that — for a code-keyed lane this is unchanged
+		// and still yields nothing rather than a guess.
+		if !c.hasMessageRows() || observedStatus <= 0 {
+			return LaneSignal{}, false
+		}
+		sig := LaneSignal{Lane: c.Lane, HTTPStatus: observedStatus, BodyText: strings.TrimSpace(text)}
+		if row, matched := c.messageRowFor(observedStatus, text); matched {
+			sig.Known, sig.DocumentedClass = true, row.DocumentedClass
+		}
+		sig.ResetAt = c.parseResetAt(text)
+		return sig, true
 	}
 	sig := LaneSignal{
 		Lane:      c.Lane,
@@ -597,8 +691,49 @@ func (c LaneConfig) ExtractSignal(text string, observedStatus int) (LaneSignal, 
 	if observedStatus > 0 {
 		sig.HTTPStatus = observedStatus
 	}
+	// Code-keyed rows keep winning. The message match runs only where the code
+	// table said nothing, which for a code-keyed document is exactly the
+	// unnamed-code case — and those documents declare no message rows, so this
+	// is a no-op for them and their behavior is byte-identical.
+	if !known {
+		if row, matched := c.messageRowFor(sig.HTTPStatus, message); matched {
+			sig.Known, sig.DocumentedClass = true, row.DocumentedClass
+		}
+	}
 	sig.ResetAt = c.parseResetAt(message)
 	return sig, true
+}
+
+// hasMessageRows reports whether this lane's taxonomy is message-keyed at all.
+func (c LaneConfig) hasMessageRows() bool {
+	for _, row := range c.Signals {
+		if row.MessageContains != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// messageRowFor finds the documented row for one (status, message) pair.
+//
+// The match is case-insensitive on the substring and EXACT on the status,
+// because the status is half the key: the same words on a different status are
+// a different event on this wire, and matching across statuses would let a
+// documented depletion exempt an undocumented auth failure.
+func (c LaneConfig) messageRowFor(status int, message string) (LaneSignalRow, bool) {
+	if status <= 0 || message == "" {
+		return LaneSignalRow{}, false
+	}
+	low := strings.ToLower(message)
+	for _, row := range c.Signals {
+		if row.MessageContains == "" || row.HTTPStatus != status {
+			continue
+		}
+		if strings.Contains(low, strings.ToLower(row.MessageContains)) {
+			return row, true
+		}
+	}
+	return LaneSignalRow{}, false
 }
 
 // providerError is the verbatim provider error envelope.

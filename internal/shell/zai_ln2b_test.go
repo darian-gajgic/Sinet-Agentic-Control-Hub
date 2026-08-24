@@ -38,9 +38,12 @@ func seedLanes(t *testing.T) []opencode.LaneConfig {
 
 // commissionedZAI is what the key ceremony leaves behind: one person holding
 // the zai provider entry.
+// It selects by LANE NAME, never by position: the seed set is sorted by lane
+// name and a second document landed at P3-LN-3, so lanes[0] would silently
+// commission whichever lane the alphabet put first while claiming to test zai.
 func commissionedZAI(t *testing.T, lanes []opencode.LaneConfig) map[string]opencode.ProviderConfig {
 	t.Helper()
-	return map[string]opencode.ProviderConfig{"alice": lanes[0].Providers()}
+	return map[string]opencode.ProviderConfig{"alice": laneByName(t, lanes, adapters.LaneZAI).Providers()}
 }
 
 // D7 · The four composition-root derivations, in both states that matter.
@@ -63,10 +66,11 @@ func TestLaneDerivationsAtTheCompositionRoot(t *testing.T) {
 	// The configured model list is supplied REGARDLESS of commissioning: it is
 	// the config side of the P-T17-3 diff, and a canary that is later armed
 	// must already know what it diffs against.
+	zai := laneByName(t, lanes, adapters.LaneZAI)
 	models := laneConfiguredModels(lanes)
 	got := models[adapters.LaneZAI]
-	if len(got) != len(lanes[0].Models) {
-		t.Fatalf("configured models = %v, want all %d of the document's", got, len(lanes[0].Models))
+	if len(got) != len(zai.Models) {
+		t.Fatalf("configured models = %v, want all %d of the document's", got, len(zai.Models))
 	}
 	for i := 1; i < len(got); i++ {
 		if got[i-1] >= got[i] {
@@ -74,7 +78,7 @@ func TestLaneDerivationsAtTheCompositionRoot(t *testing.T) {
 		}
 	}
 	declared := map[string]bool{}
-	for _, m := range lanes[0].Models {
+	for _, m := range zai.Models {
 		declared[m.ID] = true
 	}
 	for _, id := range got {
@@ -99,8 +103,8 @@ func TestLaneDerivationsAtTheCompositionRoot(t *testing.T) {
 	if len(exec) != 1 {
 		t.Fatalf("execution alternates = %v, want exactly one zai seat", exec)
 	}
-	if exec[0].Lane != adapters.LaneZAI || exec[0].Model != lanes[0].DefaultModel {
-		t.Errorf("seat = %+v, want the document's own lane and default model %q", exec[0], lanes[0].DefaultModel)
+	if exec[0].Lane != adapters.LaneZAI || exec[0].Model != zai.DefaultModel {
+		t.Errorf("seat = %+v, want the document's own lane and default model %q", exec[0], zai.DefaultModel)
 	}
 	if exec[0].WindowTokens <= 0 {
 		t.Error("the composed seat carries no context window")

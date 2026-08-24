@@ -76,7 +76,21 @@
         "budget_declared": false,
         "seed_allowance": 28000,
         "seed_quota": "rolling-5h",
-        "verified_on": "2026-08-23"
+        "verified_on": "2026-08-23",
+        "windows": [
+          {
+            "name": "rolling-5h",
+            "unit": "credits",
+            "allowance": 28000,
+            "window_hours": 5
+          },
+          {
+            "name": "weekly",
+            "unit": "credits",
+            "allowance": 140000,
+            "window_hours": 168
+          }
+        ]
       }
     }
   ],

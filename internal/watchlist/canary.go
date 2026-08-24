@@ -692,7 +692,11 @@ const (
 	LaneKimi = "kimi"
 )
 
-// PaidLanes are the two v0 lanes a real-request canary probes. Both are
-// FLAT-RATE subscription lanes (metering.MeteredExceptions is EMPTY at v0,
-// G1 P7), so canary consumption is allowance and pressure, never dollars.
-func PaidLanes() []string { return []string{LaneAnthropic, LaneZAI} }
+// PaidLanes are the lanes a real-request canary probes. All are FLAT-RATE
+// subscription lanes (metering.MeteredExceptions is EMPTY at v0, G1 P7), so
+// canary consumption is allowance and pressure, never dollars.
+//
+// Three, not the two v0 named: kimi joined ahead of its post-v0 slot on the
+// operator's 2026-08-23 order (S00.9 amendment A11), config-only through the
+// report-02 §5 onboarding checklist.
+func PaidLanes() []string { return []string{LaneAnthropic, LaneZAI, LaneKimi} }

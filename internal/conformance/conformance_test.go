@@ -166,8 +166,11 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	// The zai LANE row (P3-LN-2B): the lane is commissioned as configuration on
 	// that substrate, so the row its siblings promised now exists.
 	find(t, states, "adapter-zai")
-	if len(states) != 14 {
-		t.Fatalf("seed produced %d rows, want 14 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate + the P3-LN-2B zai lane)", len(states))
+	// The kimi LANE row (P3-LN-3): the SECOND lane on that one substrate, added
+	// ahead of its post-v0 slot on the operator's 2026-08-23 order (S00.9 A11).
+	find(t, states, "adapter-kimi")
+	if len(states) != 15 {
+		t.Fatalf("seed produced %d rows, want 15 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate + the P3-LN-2B zai lane + the P3-LN-3 kimi lane)", len(states))
 	}
 
 	// The zai lane's row is the ONLY zai row, and it is honest about the half
@@ -488,6 +491,9 @@ func TestBumpGatingSetSurfacesBLimbReference(t *testing.T) {
 		// lane rides gates on the lane's own suite too, because a substrate that
 		// still passes can carry a lane that no longer does.
 		"adapter-zai": true,
+		// The kimi LANE battery (P3-LN-3): a second lane on the same substrate,
+		// and a substrate that still passes can carry either lane failing.
+		"adapter-kimi": true,
 		// The S14.8 regression sweep carries engine_bump because it is where
 		// limb (b) — the before/after quality probe — records (B5-5 OQ2(a)).
 		conformance.RowRegressionSweep: true,
@@ -535,8 +541,8 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 14 {
-		t.Fatalf("never-run: %d rows due, want all 14", len(due))
+	if len(due) != 15 {
+		t.Fatalf("never-run: %d rows due, want all 15", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).

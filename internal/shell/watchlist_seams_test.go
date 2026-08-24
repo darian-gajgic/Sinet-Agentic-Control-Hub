@@ -368,8 +368,8 @@ func TestCanaryLayerShipsDisarmed(t *testing.T) {
 	if sweep.Ran != 0 {
 		t.Errorf("a disarmed layer ran %d canaries, want 0", sweep.Ran)
 	}
-	if sweep.Disarmed != 6 {
-		t.Errorf("disarmed count = %d, want 6 (3 legs × 2 paid lanes) — a skipped leg must still be accounted for", sweep.Disarmed)
+	if sweep.Disarmed != 9 {
+		t.Errorf("disarmed count = %d, want 9 (3 legs × 3 paid lanes) — a skipped leg must still be accounted for", sweep.Disarmed)
 	}
 	if len(sweep.Reasons) != 3 {
 		t.Errorf("sweep reasons = %v, want one per leg kind", sweep.Reasons)
@@ -434,8 +434,8 @@ func TestArmingWiresNoLegWithoutItsDependency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDue: %v", err)
 	}
-	if sweep.Disarmed != 6 {
-		t.Errorf("armed-but-uncomposed disarmed count = %d, want 6", sweep.Disarmed)
+	if sweep.Disarmed != 9 {
+		t.Errorf("armed-but-uncomposed disarmed count = %d, want 9", sweep.Disarmed)
 	}
 }
 

@@ -1725,6 +1725,14 @@ func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.Lane
 			SeedAllowance:  pr.SeedAllowance, SeedQuota: pr.SeedQuota,
 			VerifiedOn: pr.VerifiedOn,
 		}
+		// Each declared allowance window with its OWN unit, so a lane whose
+		// windows are denominated differently is never folded into one scalar.
+		for _, w := range pr.Windows {
+			plan.Windows = append(plan.Windows, api.LanePlanWindow{
+				Name: w.Name, Unit: w.Unit, Allowance: w.Allowance,
+				WindowHours: w.WindowHours, AllowanceUnverified: w.AllowanceUnverified,
+			})
+		}
 		if pr.Applicable {
 			p := pr.Pressure
 			plan.Pressure = &p

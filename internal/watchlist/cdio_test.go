@@ -519,6 +519,19 @@ func TestEveryHeldRegionFilterNamesASeededPageRow(t *testing.T) {
 		"t1-byteplus-codingplan": true, "t1-xai-pricing": true,
 		"t1-alibaba-codingplan":  true,
 		"t1-openai-help-6825453": true, "t1-openai-help-9624314": true,
+
+		// A SECOND reason to carry no filter, and it is not the same reason.
+		// The kimi lane's tier-1 rows (P3-LN-3) were fetched in full for the
+		// Gate A-C audit, so their CONTENT is known — but nobody checked
+		// whether they serve a <main> landmark, and the audit is the packet's
+		// only source of provider facts. An unverified `main` filter is a
+		// guess that fails LOUD (FilterNotFoundInResponse on every poll), so
+		// these rows are diffed WHOLE until somebody looks. They therefore add
+		// nothing to the held count below.
+		"t1-kimi-error-reference": true, "t1-kimi-whats-new": true,
+		"t1-kimi-benefits": true, "t1-kimi-extra-usage": true,
+		"t1-kimi-price-k3": true, "t1-kimi-tos-platform": true,
+		"t1-kimi-tos-assistant": true,
 	}
 	held := 0
 	for _, r := range watchlist.SeedRows() {

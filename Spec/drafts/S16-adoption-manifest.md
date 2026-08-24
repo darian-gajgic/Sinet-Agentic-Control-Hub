@@ -84,6 +84,16 @@ Every future adoption passes this gate; it is the component twin of the provider
 9. **Watch registration.** A drift/canary/feed row registered into S14's executor; protocol touchpoints additionally pin the protocol version with a dated migration trigger [P-T16-3; XREF:S14].
 10. **Lock entry + approval.** Entry written; CI green [S01.11]; the adoption lands as an operator-approved proposal — a platform-level change under D10, matching the precedent that every current entry was gate-ratified [G2 D2.2; G3 D3.3].
 
+#### Lane onboarding records (the S03.6 twin's manifest home)
+
+S03.6 owns the provider/lane onboarding checklist and names [XREF:S16] as its manifest home; a lane addition never forces a new component, so lanes are recorded here rather than in the `components.lock` table above. One row per onboarded lane, dated, with the audit that produced it.
+
+| Lane | Provider / plan | Substrate → protocol | Billing regime | Overflow | API-equivalent price (D5) | Data-routing rider (C5) | Audit | Verified |
+|---|---|---|---|---|---|---|---|---|
+| `kimi` | Moonshot — Kimi Code membership (`kimi-for-coding`) | `opencode` → **`@ai-sdk/anthropic`** (base `https://api.kimi.com/coding/v1`) | **flat** | **`opt-in-credits`** on a PROVEN disable — verbatim: *"You can turn it off at any time: your balance stays in your account and the system pauses spending from it; turn it back on to resume."* **Operator posture: Extra Usage OFF**, under which the lane behaves as a hard stop and the ¥-denominated top-up rails are moot; turning it on is a deliberate, reversible operator act through the rehearsed S10.2 kill-switch, never automatic and never silent (3.10; P-T17-2) | **$3.00** in / **$15.00** out per M tokens, cache-hit **$0.30**/M, USD, 1,048,576 ctx. The plan is flat and opencode prices this provider at $0.00, so receipts price from these rows and never from the engine (the S03.7 corollary) | **`no-household-personal-data`** — approved for code and general technical work only; household personal data, personal correspondence and identity-bearing content must never route to it. RECORDED AND SURFACED, **not machine-enforced**: no per-lane data-policy enforcement point exists yet, and it lands with the routing-policy seam | `P3/measurements/2026-08-24-kimi-lane-gate-audit.md` | 2026-08-24 |
+
+The metered-exception list stays **EMPTY** [G1 P7] — this is a flat subscription lane, and DeepSeek remains the sole pre-registered designated exception. Added by [S00.9 A11].
+
 ### S16.5 Layer C — patterns-only adoptions
 
 Copied shapes, zero dependencies: no lock entries exist because nothing runs or is bundled. Each pattern's normative home is its consuming section; they are listed here so no future session mistakes them for adoptable runtimes [G2 D2.2 Layer C].
