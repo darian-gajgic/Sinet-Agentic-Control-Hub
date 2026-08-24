@@ -1,3 +1,5 @@
+# ⚠️ EXPIRED 2026-08-24 — single-use artifact; served BOTH split halves (2A landed `80a17f3`, 2B landed with drains `ac6b91b`/`5411c74`); the code no longer matches this text (notably: R28's fixture line was set aside by coordinator order for the contract-snapshot regeneration, §63). Later grounding must never read this as truth (amendment D).
+
 # P3-LN-2 — Z.AI/GLM lane commissioning (grounded brief)
 
 **Packet:** P3-LN-2 · **Grounded:** 2026-08-23 · **Substrate:** `internal/adapters/opencode` (landed P3-LN-1, commit `25d41cc`)
