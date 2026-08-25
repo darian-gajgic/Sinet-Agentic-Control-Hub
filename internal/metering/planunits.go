@@ -201,6 +201,15 @@ type PlanReading struct {
 	Pressure          float64
 	BackgroundCeiling float64
 	Applicable        bool
+
+	// InapplicableNote says why a DECLARED budget still produced no ratio.
+	// Empty when the budget applied, and empty when none was declared at all —
+	// that absence has its own answer and needs no sentence here. It exists
+	// because a stored row that cannot denominate this reading must be visibly
+	// refused rather than silently skipped: a row somebody inserted by hand
+	// must never steer dispatch, and a reader must be able to see that it did
+	// not (P3-LN-6 drain r1 D1).
+	InapplicableNote string
 }
 
 // PlanBudget is the operator-declared automation budget for one (person, lane)
@@ -474,6 +483,61 @@ func (m PlanMultiplier) covers(t time.Time) bool {
 	return h >= m.FromHour && h < m.ToHour
 }
 
+// PlanBudgetWindowRefusal reports why a window cannot carry an automation
+// budget, or "" when it can. It is the ONE definition of that rule: the store
+// refuses a row by it, the reading refuses to apply one by it, and the HTTP
+// boundary refuses the input by it through the seam — one predicate rather than
+// three spellings that can drift apart (the §65 D4 lesson).
+//
+// Two conditions, and both are about the ARITHMETIC rather than about taste.
+//
+//  1. The window must be one the document declares. A budget for a window the
+//     plan does not have denominates nothing.
+//
+//  2. The window must count what CONSUMPTION IS COUNTED IN, which is the
+//     document's own unit: planUnits sums each request's charging multiplier,
+//     and those multipliers are expressed in the document's unit. One shipped
+//     plan counts REQUESTS and publishes its 7-day allowance in CREDITS, so a
+//     weekly budget there would divide requests by credits and report the
+//     answer labeled "credits" — a number wrong in both units. Under the
+//     most-constrained-window rule that incoherent ratio could BIND the lane
+//     and steer dispatch, which is why this is refused at every layer rather
+//     than documented as a caveat.
+//
+// The window still rides every reading and every meters payload with its OWN
+// unit (PlanReading.Windows): reporting an allowance is not denominating
+// against it, and this rule narrows only the second.
+func PlanBudgetWindowRefusal(doc PlanDoc, window string) string {
+	q, ok := doc.Quota(window)
+	if !ok {
+		return fmt.Sprintf("the %s plan declares no %q window, so a budget for it denominates nothing", doc.Lane, window)
+	}
+	if unit := doc.QuotaUnit(q.Name); unit != doc.Unit {
+		return fmt.Sprintf("the %s plan's %q window is denominated in %s while this lane's consumption is counted in %s, "+
+			"so a budget on it would divide %s by %s and report the answer in neither — the window's allowance is still "+
+			"reported, it just cannot be a denominator (S10.4/D4)",
+			doc.Lane, q.Name, unit, doc.Unit, doc.Unit, unit)
+	}
+	return ""
+}
+
+// planPeriodEnded reports whether a declared period has run out at `now`.
+//
+// period_hours is the length the operator declared the budget FOR, and a budget
+// whose period has elapsed is not a budget for the current one: counting a
+// month of consumption against a five-hour allowance would report a pressure
+// that only rises, shed background work forever, and call that headroom.
+// Nothing rolls the period over — that would be a timer, and dueness comes from
+// stored state, never from a ticker (CONVENTIONS §34) — so an expired row is
+// honestly inapplicable until the operator declares the next period, exactly as
+// migration 0017 records for the token budget.
+func planPeriodEnded(budget PlanBudget, now time.Time) bool {
+	if budget.PeriodStart.IsZero() || budget.PeriodHours <= 0 || now.IsZero() {
+		return false
+	}
+	return now.After(budget.PeriodStart.Add(time.Duration(budget.PeriodHours * float64(time.Hour))))
+}
+
 // ProposePlanBudget turns a provider allowance row into a PROPOSED per-person
 // automation budget: a conservative ⚙ budget.background_window_fraction of the
 // published allowance, in the plan's own unit, labeled assumed by the document
@@ -536,15 +600,16 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		return PlanReading{}, err
 	}
 	factor, window := doc.MultiplierAt(now)
-	// The reading's unit is the unit of the window it was DERIVED FROM, not one
-	// lane-wide scalar: a lane whose 5-hour window counts requests and whose
-	// weekly window counts credits cannot be described by one (OQ2). With no
-	// budget declared there is no seeded window, and the document's own unit is
-	// the honest fallback.
+	// The reading's unit is the unit CONSUMPTION IS COUNTED IN — the document's
+	// own, which the charging multipliers are expressed in. It used to follow
+	// the budget's window instead, which was only ever the same answer for a
+	// window that can actually denominate this reading, and was a MISLABEL for
+	// one that cannot: a credit-denominated weekly budget on a request-counting
+	// plan made this say "credits" over a
+	// requests count (corrected 2026-08-25, P3-LN-6 drain r1 D1). Each declared
+	// window still rides Windows with its own unit, which is where a surface
+	// reads what each allowance counts.
 	unit := doc.Unit
-	if budget.SeededFrom != "" {
-		unit = doc.QuotaUnit(budget.SeededFrom)
-	}
 	r := PlanReading{
 		UserID: userID, Lane: lane, Plan: doc.Plan,
 		Unit:        unit,
@@ -564,9 +629,22 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		r.SeedQuota, r.SeedAllowance, r.SeedWindowHours = q.Name, q.Units, q.WindowHours
 	}
 	if budget.Declared && budget.PeriodUnits > 0 {
-		r.Applicable = true
-		r.Pressure = consumed / budget.PeriodUnits
-		r.BackgroundCeiling = bgFraction * budget.PeriodUnits
+		// A declared budget still has to be one this reading can divide by. Both
+		// refusals are DEFENCE IN DEPTH: the store and the verb refuse the same
+		// rows, and this leg is what stops a row inserted by any other means
+		// from steering dispatch (drain r1 D1/D6).
+		switch refusal := PlanBudgetWindowRefusal(doc, budget.SeededFrom); {
+		case refusal != "":
+			r.InapplicableNote = refusal
+		case planPeriodEnded(budget, now):
+			r.InapplicableNote = fmt.Sprintf("the declared %v-hour period started %s and has ended, so it is not a budget for the "+
+				"current one; re-declaring is the act that starts the next period (S10.4; nothing rolls one over)",
+				budget.PeriodHours, budget.PeriodStart.UTC().Format(time.RFC3339))
+		default:
+			r.Applicable = true
+			r.Pressure = consumed / budget.PeriodUnits
+			r.BackgroundCeiling = bgFraction * budget.PeriodUnits
+		}
 	}
 	return r, nil
 }

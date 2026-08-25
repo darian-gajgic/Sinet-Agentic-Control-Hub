@@ -21,10 +21,13 @@ import (
 //	    float, because a proposal is a fraction of an allowance.
 //	 2. THE PERIOD SHAPE. `budgets.period_days` cannot express a rolling FIVE
 //	    HOUR window. PlanBudget.PeriodHours already can.
-//	 3. THE KEY. A plan lane's windows are denominated differently — the Kimi
-//	    plan counts requests over five hours and credits over seven days — so
-//	    the grain is (person, lane, window), which is the (person, lane, period)
-//	    grain S18.3 ratified for this surface.
+//	 3. THE KEY. A plan lane declares SEVERAL allowance windows and they are
+//	    separate allowances — the zai plan publishes a five-hour one beside a
+//	    weekly one — so the grain is (person, lane, window), which is the
+//	    (person, lane, period) grain S18.3 ratified for this surface. A window
+//	    counting something other than what the lane's consumption counts cannot
+//	    carry a budget at all (PlanBudgetWindowRefusal); its allowance is still
+//	    reported, it just cannot be a denominator.
 //	 4. THE PACKAGE'S OWN RULE. planunits.go's head comment: the token reading
 //	    and the plan reading "are therefore two readings, each stamped with its
 //	    own tier". One table with a nullable unit column is how somebody later
@@ -62,11 +65,14 @@ type PlanBudgetRow struct {
 	// (S10.4: "never an inferred provider window (D4)").
 	PeriodUnits float64
 	// Unit is the window's own unit, carried on the row so no surface has to
-	// re-derive it and none can render a credit budget as requests.
+	// re-derive it. It is not the caller's to choose: Declare refuses a row
+	// whose unit is not the one the document gives that window, or the stored
+	// row would name one thing and the reading count another.
 	Unit string
 	// PeriodStart is the instant consumption is summed from; PeriodHours is the
-	// length the operator declared it for. Nothing rolls a period over —
-	// re-declaring is the act that starts the next one.
+	// length the operator declared it for, and the reading stops applying once
+	// it has elapsed. Nothing rolls a period over — that would be a timer —
+	// so re-declaring is the act that starts the next one.
 	PeriodStart time.Time
 	PeriodHours float64
 	// Source is the closed vocabulary above.
@@ -87,13 +93,17 @@ type PlanBudgetRow struct {
 // Budget converts the row to the value object ReadPlanUnits takes.
 //
 // SeededFrom carries the row's WINDOW rather than its proposal provenance,
-// because that is the field the reading resolves its unit through
-// (planunits.go: `unit = doc.QuotaUnit(budget.SeededFrom)`). A weekly budget
-// declared by hand on the Kimi plan is in credits, and carrying an empty
-// window here would report it under the document's own "requests" label — the
-// single-scalar lie the per-window grain exists to prevent. The proposal
-// provenance stays on the ROW, where it is read as provenance and never as an
-// input to the arithmetic.
+// because that is the only field on the value object that names WHICH window
+// the budget denominates — the reading resolves the seed allowance through it
+// and, since drain r1 D1, applies PlanBudgetWindowRefusal through it too. The
+// proposal provenance stays on the ROW, where it is read as provenance and
+// never as an input to the arithmetic.
+//
+// (Corrected 2026-08-25: this used to justify itself by the reading taking its
+// UNIT from the window. That reason was wrong in the one case it was written
+// for — a weekly row on a request-counting plan labeled that count "credits" —
+// and the unit now
+// comes from the document, which is what consumption is actually counted in.)
 func (r PlanBudgetRow) Budget() PlanBudget {
 	return PlanBudget{
 		PeriodUnits: r.PeriodUnits,
@@ -132,9 +142,30 @@ func (b *PlanBudgets) Declare(ctx context.Context, row PlanBudgetRow) (prior Pla
 		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s carries no unit — a budget whose unit is unknown cannot be reported honestly (S10.4)", row.UserID, row.Lane, row.Window)
 	case row.DeclaredBy == "":
 		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s needs the declaring actor", row.UserID, row.Lane, row.Window)
+	case row.DeclaredTS.IsZero():
+		// The row's own audit face has to say WHEN, and the period start
+		// defaults to it — a zero stamp would store the year 1 as the instant
+		// consumption is summed from.
+		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s needs the instant it was declared at", row.UserID, row.Lane, row.Window)
 	case row.Source != PlanBudgetProposalSeeded && row.Source != PlanBudgetOperatorSet:
 		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s declares source %q, want one of {%s, %s} — a provenance outside the set would be stored and rendered as if it meant something",
 			row.UserID, row.Lane, row.Window, row.Source, PlanBudgetProposalSeeded, PlanBudgetOperatorSet)
+	}
+	// The row must be one the LANE's own plan can actually be denominated by.
+	// This is the same predicate the reading applies and the same one the HTTP
+	// boundary refuses input by — defence in depth against a row that would
+	// divide one unit by another and then bind routing (drain r1 D1/D4/D5).
+	doc, ok := PlanDocFor(row.Lane)
+	if !ok {
+		return PlanBudgetRow{}, false, fmt.Errorf("metering: lane %q meters in no plan units, so it carries no plan budget — its automation budget is the weighted-consumption one", row.Lane)
+	}
+	if refusal := PlanBudgetWindowRefusal(doc, row.Window); refusal != "" {
+		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s refused: %s", row.UserID, row.Lane, row.Window, refusal)
+	}
+	if want := doc.QuotaUnit(row.Window); row.Unit != want {
+		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s declares unit %q, want %q — the unit is the WINDOW's own and is not the caller's to choose, "+
+			"or the stored row would name one thing and the reading count another",
+			row.UserID, row.Lane, row.Window, row.Unit, want)
 	}
 	if row.PeriodStart.IsZero() {
 		row.PeriodStart = row.DeclaredTS
@@ -158,10 +189,10 @@ func (b *PlanBudgets) Declare(ctx context.Context, row PlanBudgetRow) (prior Pla
 		}
 		prior, existed = p, ok
 		_, eerr := tx.ExecContext(ctx,
-			`INSERT INTO plan_budgets (user_id, lane, window, period_units, unit, period_start, period_hours,
+			`INSERT INTO plan_budgets (user_id, lane, "window", period_units, unit, period_start, period_hours,
 			                           source, seeded_from, fraction, declared_ts, declared_by)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT (user_id, lane, window) DO UPDATE SET
+			 ON CONFLICT (user_id, lane, "window") DO UPDATE SET
 			   period_units = excluded.period_units,
 			   unit         = excluded.unit,
 			   period_start = excluded.period_start,
@@ -196,9 +227,9 @@ func (b *PlanBudgets) Row(ctx context.Context, userID, lane, window string) (Pla
 // name so a surface reading them renders in a stable order.
 func (b *PlanBudgets) Rows(ctx context.Context, userID, lane string) ([]PlanBudgetRow, error) {
 	rows, err := b.db.QueryContext(ctx,
-		`SELECT user_id, lane, window, period_units, unit, period_start, period_hours,
+		`SELECT user_id, lane, "window", period_units, unit, period_start, period_hours,
 		        source, seeded_from, fraction, declared_ts, declared_by
-		   FROM plan_budgets WHERE user_id = ? AND lane = ? ORDER BY window`, userID, lane)
+		   FROM plan_budgets WHERE user_id = ? AND lane = ? ORDER BY "window"`, userID, lane)
 	if err != nil {
 		return nil, fmt.Errorf("metering: read plan budgets %q/%s: %w", userID, lane, err)
 	}
@@ -232,9 +263,9 @@ func (b *PlanBudgets) PlanBudget(ctx context.Context, userID, lane, window strin
 
 func readPlanBudget(ctx context.Context, q rowQuery, userID, lane, window string) (PlanBudgetRow, bool, error) {
 	row, err := scanPlanBudget(q(ctx,
-		`SELECT user_id, lane, window, period_units, unit, period_start, period_hours,
+		`SELECT user_id, lane, "window", period_units, unit, period_start, period_hours,
 		        source, seeded_from, fraction, declared_ts, declared_by
-		   FROM plan_budgets WHERE user_id = ? AND lane = ? AND window = ?`, userID, lane, window).Scan)
+		   FROM plan_budgets WHERE user_id = ? AND lane = ? AND "window" = ?`, userID, lane, window).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PlanBudgetRow{}, false, nil
 	}

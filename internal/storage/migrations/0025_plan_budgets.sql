@@ -42,9 +42,13 @@ CREATE TABLE plan_budgets (
     user_id      TEXT NOT NULL CHECK (user_id <> ''),
     -- lane: the lane the tier-3 reading is taken on (Spec S02.2 runs.lane).
     lane         TEXT NOT NULL CHECK (lane <> ''),
-    -- window: the plan document's own quota name. It is part of the key because
-    -- a lane's windows are separate allowances in possibly different units.
-    window       TEXT NOT NULL CHECK (window <> ''),
+    -- "window": the plan document's own quota name. It is part of the key
+    -- because a lane's windows are separate allowances in possibly different
+    -- units. The identifier is QUOTED at every mention: SQLite still accepts
+    -- WINDOW as a bare column name for backward compatibility, and resting a
+    -- schema on that leniency is a dependency on a parser concession rather
+    -- than on the grammar.
+    "window"     TEXT NOT NULL CHECK ("window" <> ''),
     -- period_units: the budget itself, in the window's own unit. Zero is
     -- refused rather than stored: a zero budget is not a budget, it is a stop,
     -- and the switch for that is users.automation_paused (0017).
@@ -77,5 +81,5 @@ CREATE TABLE plan_budgets (
     -- row itself say who last set it and when, without a join.
     declared_ts  TEXT NOT NULL CHECK (declared_ts <> ''),
     declared_by  TEXT NOT NULL CHECK (declared_by <> ''),
-    PRIMARY KEY (user_id, lane, window)
+    PRIMARY KEY (user_id, lane, "window")
 );

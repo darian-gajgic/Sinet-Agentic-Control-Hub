@@ -69,17 +69,33 @@ func (f *fakePlanBudgetStore) PlanBudget(_ context.Context, userID, lane, window
 	return rec, ok, nil
 }
 
+// PlanWindows mirrors the shipped documents' shapes AND the store's own
+// budgetable verdict, because the boundary check under test is "may this window
+// carry a budget at all" and a fake that said yes to everything would test
+// nothing about it.
+//
+// The kimi weekly row is the drain r1 D1 case: its allowance is in CREDITS
+// while that lane's consumption is counted in REQUESTS, so a budget on it would
+// divide one by the other.
 func (f *fakePlanBudgetStore) PlanWindows(_ context.Context, lane string) ([]api.PlanWindowRecord, error) {
 	switch lane {
 	case "zai":
 		return []api.PlanWindowRecord{
-			{Name: "rolling-5h", Unit: "credits", WindowHours: 5, Allowance: 28000},
-			{Name: "weekly", Unit: "credits", WindowHours: 168, Allowance: 140000},
+			{Name: "rolling-5h", Unit: "credits", WindowHours: 5, Allowance: 28000, Budgetable: true},
+			{Name: "weekly", Unit: "credits", WindowHours: 168, Allowance: 140000, Budgetable: true},
+			// A window in the lane's OWN unit whose allowance nobody published:
+			// budgetable, but nothing can be PROPOSED from it. No shipped
+			// document seeds one today (a monthly pool rides the plan document
+			// as prose rather than as a quota row), and the boundary must still
+			// answer it honestly rather than with a 500.
+			{Name: "monthly", Unit: "credits", WindowHours: 720, AllowanceUnverified: true, Budgetable: true},
 		}, nil
 	case "kimi":
 		return []api.PlanWindowRecord{
-			{Name: "rolling-5h", Unit: "requests", WindowHours: 5, Allowance: 300},
-			{Name: "weekly", Unit: "credits", WindowHours: 168, AllowanceUnverified: true},
+			{Name: "rolling-5h", Unit: "requests", WindowHours: 5, Allowance: 300, Budgetable: true},
+			{Name: "weekly", Unit: "credits", WindowHours: 168, AllowanceUnverified: true,
+				NotBudgetable: "this window is denominated in credits while the lane's consumption is counted in requests, " +
+					"so a budget on it would divide requests by credits and report the answer in neither"},
 		}, nil
 	}
 	return nil, nil
@@ -236,6 +252,8 @@ func TestLN6PlanBudgetVerbAuthorityAndValidation(t *testing.T) {
 			{"no period length", `{"lane":"zai","window":"rolling-5h","period_units":10}`, "period_hours"},
 			{"negative period length", `{"lane":"zai","window":"rolling-5h","period_units":10,"period_hours":-5}`, "period_hours"},
 			{"unknown window", `{"lane":"zai","window":"fortnightly","period_units":10,"period_hours":5}`, "rolling-5h"},
+			// drain r1 D1: the window EXISTS and still cannot be a denominator.
+			{"a window counting something else", `{"lane":"kimi","window":"weekly","period_units":10,"period_hours":168}`, "credits"},
 			{"a lane with no plan", `{"lane":"anthropic","window":"rolling-5h","period_units":10,"period_hours":5}`, "anthropic"},
 			{"bad period start", `{"lane":"zai","window":"rolling-5h","period_units":10,"period_hours":5,"period_start":"yesterday"}`, "period_start"},
 			// A dollar-shaped member has nothing to bind to: the request is
@@ -341,15 +359,27 @@ func TestLN6ProposalPathIsTheProductionConsumer(t *testing.T) {
 
 	// A window whose allowance nobody published cannot be proposed from, and
 	// that is the caller's answer (400), never a platform fault (500).
-	code, body := e.do(t, "alice", `{"lane":"kimi","window":"weekly","from_proposal":true}`)
+	code, body := e.do(t, "alice", `{"lane":"zai","window":"monthly","from_proposal":true}`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("proposing from an unverified allowance: status %d, want 400: %s", code, body)
 	}
 	if !strings.Contains(body, "allowance") {
 		t.Errorf("the refusal does not name the unverified allowance: %s", body)
 	}
+
+	// And a window that cannot carry a budget at all is refused BEFORE the
+	// proposal is ever asked for — the categorical answer comes first
+	// (drain r1 D1).
+	code, body = e.do(t, "alice", `{"lane":"kimi","window":"weekly","from_proposal":true}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("proposing on an incoherent window: status %d, want 400: %s", code, body)
+	}
+	if !strings.Contains(body, "credits") || !strings.Contains(body, "requests") {
+		t.Errorf("the refusal does not name the two units it would have divided: %s", body)
+	}
+
 	if e.planBudgets.count() != 1 {
-		t.Errorf("the refused proposal wrote a row (store holds %d)", e.planBudgets.count())
+		t.Errorf("a refused proposal wrote a row (store holds %d)", e.planBudgets.count())
 	}
 }
 
@@ -432,5 +462,95 @@ func TestLN6WireDeltaIsAdditive(t *testing.T) {
 	}
 	if undeclared == 0 {
 		t.Error("every fixture plan block is declared — the UNDECLARED shape is the one this platform serves today and it must stay exercised")
+	}
+}
+
+// ── D3: the §30 never-percent negative, over every shape this packet adds ───
+
+// TestLN6PlanBudgetShapesNeverPercent extends the never-percent scan
+// (CONVENTIONS §30, extended the same way at §38/§40/§43/§45) over the shapes
+// P3-LN-6 ships: the verb's request and response, the transport record, and the
+// meters plan-budget block.
+//
+// It is not decoration. The plan budget carries a SEEDING SHARE — what fraction
+// of a published allowance a proposal took — and the obvious name for it is in
+// the forbidden set by name. A member called `fraction` on a read shape is a
+// progress key to every other scan in this codebase, so it is `seed_share`, and
+// this test is what keeps it that way.
+func TestLN6PlanBudgetShapesNeverPercent(t *testing.T) {
+	forbidden := map[string]bool{
+		"percent": true, "percentage": true, "percent_complete": true,
+		"fraction": true, "complete_fraction": true, "ratio": true,
+		"progress": true, "pct": true, "complete": true, "completion": true,
+		"eta": true, "eta_s": true, "eta_seconds": true,
+	}
+
+	e := newPlanVerbEnv(t)
+	bodies := []string{
+		e.mustDo(t, "alice", `{"lane":"zai","window":"rolling-5h","period_units":14000,"period_hours":5}`),
+		e.mustDo(t, "alice", `{"lane":"zai","window":"rolling-5h","from_proposal":true}`),
+	}
+	// The meters plan-budget block as it is actually served, and the seam
+	// record the verb speaks — marshalled populated, so an omitempty member
+	// cannot hide from the walk.
+	populated, err := json.Marshal(struct {
+		Budget api.MeterPlanBudget  `json:"budget"`
+		Record api.PlanBudgetRecord `json:"record"`
+		Window api.PlanWindowRecord `json:"window"`
+	}{
+		Budget: api.MeterPlanBudget{PeriodUnits: 1, Unit: "credits", Window: "rolling-5h",
+			PeriodStart: "t", PeriodHours: 5, Source: "operator-set", SeededFrom: "rolling-5h",
+			Fraction: 0.5, DeclaredBy: "alice", DeclaredTS: "t"},
+		Record: api.PlanBudgetRecord{Owner: "alice", Lane: "zai", Window: "rolling-5h",
+			PeriodUnits: 1, Unit: "credits", PeriodHours: 5, Source: "operator-set",
+			SeededFrom: "rolling-5h", Fraction: 0.5, DeclaredBy: "alice"},
+		Window: api.PlanWindowRecord{Name: "rolling-5h", Unit: "credits", WindowHours: 5,
+			Allowance: 1, AllowanceUnverified: true, Budgetable: true, NotBudgetable: "why"},
+	})
+	if err != nil {
+		t.Fatalf("marshal the packet's shapes: %v", err)
+	}
+	// The REQUEST shape too: a body member named `fraction` would be a progress
+	// key an operator could send.
+	requestShape, err := json.Marshal(map[string]any{
+		"person": "", "lane": "", "window": "", "period_units": 0.0,
+		"period_hours": 0.0, "period_start": "", "from_proposal": false, "reason": "",
+	})
+	if err != nil {
+		t.Fatalf("marshal the request shape: %v", err)
+	}
+	bodies = append(bodies, string(populated), string(requestShape))
+
+	checked := 0
+	for _, body := range bodies {
+		var v any
+		if err := json.Unmarshal([]byte(body), &v); err != nil {
+			t.Fatalf("decode: %v: %s", err, body)
+		}
+		var walk func(any)
+		walk = func(n any) {
+			switch x := n.(type) {
+			case map[string]any:
+				for k, sub := range x {
+					checked++
+					lk := strings.ToLower(k)
+					if forbidden[lk] || strings.Contains(lk, "percent") {
+						t.Errorf("a P3-LN-6 shape exposes forbidden progress key %q (§30)", k)
+					}
+					walk(sub)
+				}
+			case []any:
+				for _, sub := range x {
+					walk(sub)
+				}
+			}
+		}
+		walk(v)
+	}
+	if checked == 0 {
+		t.Fatal("the never-percent walk checked nothing — it would pass vacuously")
+	}
+	if !forbidden["fraction"] {
+		t.Fatal("the never-percent walk cannot detect its own probe")
 	}
 }

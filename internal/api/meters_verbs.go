@@ -112,6 +112,15 @@ type PlanWindowRecord struct {
 	// proposed from such a window: a fraction of a number nobody published is
 	// the inferred provider window D4 bars.
 	AllowanceUnverified bool `json:"allowance_unverified,omitempty"`
+	// Budgetable is false when this window cannot carry a budget at all, with
+	// NotBudgetable saying why. The verdict is COMPUTED BY THE STORE'S OWN
+	// predicate and carried here rather than re-derived: internal/api cannot
+	// see a plan document (§11), and a rule spelled twice is a rule that drifts
+	// (§65 D4). A window counting something other than what the lane's
+	// consumption counts is the live case — a budget on it would divide one
+	// unit by another (drain r1 D1).
+	Budgetable    bool   `json:"budgetable"`
+	NotBudgetable string `json:"not_budgetable,omitempty"`
 }
 
 // PlanBudgetStore is the S10.4 durable PLAN-budget seam (migration 0025). The
@@ -398,6 +407,14 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
 			"lane %q declares no window %q. Its windows are: %s", lane, window, planWindowNames(windows))))
+		return
+	}
+	if !declared.Budgetable {
+		// The window exists and still cannot be a denominator. Refused HERE, at
+		// the boundary that admits the input, with the store's own reason
+		// (drain r1 D1).
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+			"lane %q cannot carry a budget on its %q window: %s", lane, window, declared.NotBudgetable)))
 		return
 	}
 	now := time.Now().UTC()

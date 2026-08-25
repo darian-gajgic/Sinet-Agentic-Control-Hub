@@ -398,6 +398,16 @@ func TestLN6NoRowIsIdenticalToTodayAcrossArbitraryHistories(t *testing.T) {
 			t.Fatalf("draw %d (%s, %d calls): with no declared row the reading claims a denominator: %+v",
 				i, pick.lane, calls, got)
 		}
+		// The comparison covers the SEED provenance and the Budget value too
+		// (drain r1 D8): a fabricated SeededFrom on an undeclared lane changes
+		// SeedQuota/SeedAllowance/SeedWindowHours without touching Applicable
+		// or Pressure, so a narrower comparison let that mutation live.
+		if got.SeedQuota != want.SeedQuota || got.SeedAllowance != want.SeedAllowance ||
+			got.SeedWindowHours != want.SeedWindowHours || got.Budget != want.Budget ||
+			got.InapplicableNote != want.InapplicableNote {
+			t.Fatalf("draw %d (%s, %d calls): the seed provenance or the budget moved with no row declared\n got %+v\nwant %+v",
+				i, pick.lane, calls, got, want)
+		}
 		if got.Unit != want.Unit || got.Calls != want.Calls || got.Consumed != want.Consumed ||
 			got.Tier != want.Tier || got.Assumed != want.Assumed || got.AssumedNote != want.AssumedNote ||
 			got.Multiplier != want.Multiplier || got.MultiplierWindow != want.MultiplierWindow ||

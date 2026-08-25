@@ -496,6 +496,11 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     path: '/api/events/open-sql',
     why: 'Layer 2 is reached by the assistant’s escalation control, which posts a chat TURN — the server calls this layer, and the guardrail’s audit row is what makes that the right place for it (§44). A client naming it directly would bypass the turn record.',
   },
+  {
+    method: 'POST',
+    path: '/api/meters/plan-budget',
+    why: 'the 13.4 backend half (P3-LN-6, 2026-08-25): declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need. The S15.9 settings tab consumes it when 13.4 lands — the token budget verb shipped exactly this way in B6-2B, before its editor existed.',
+  },
   // ── REPORTED GAPS: a route exists, a surface does not ───────────────────
   //
   // CLOSED 2026-08-05 (P3-UI-3), SEVEN entries removed rather than annotated:

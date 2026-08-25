@@ -1656,8 +1656,9 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 		return r, "", err
 	}
 	var (
-		best   metering.PlanReading
-		window string
+		best    metering.PlanReading
+		window  string
+		refused string
 	)
 	for i, q := range doc.Quotas {
 		// The store is the only producer of the undeclared posture, so no
@@ -1670,6 +1671,12 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 		if err != nil {
 			return metering.PlanReading{}, "", err
 		}
+		// A declared row the reading REFUSED — an incoherent unit, an elapsed
+		// period — is skipped here and its reason kept, so a lane whose only
+		// row cannot denominate says why rather than looking untouched.
+		if r.InapplicableNote != "" && refused == "" {
+			refused = r.InapplicableNote
+		}
 		switch {
 		case r.Applicable && (window == "" || r.Pressure > best.Pressure):
 			best, window = r, q.Name
@@ -1677,6 +1684,9 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 			// The honest absence, held only until a declared window replaces it.
 			best = r
 		}
+	}
+	if window == "" {
+		best.InapplicableNote = refused
 	}
 	return best, window, nil
 }
@@ -1687,24 +1697,18 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 // A window with no row renders nothing, which is how an undeclared lane serves
 // exactly the bytes it served before this member existed.
 func planBudgetRowFor(ctx context.Context, pb *metering.PlanBudgets, userID, lane, window string) (*api.LanePlanBudget, error) {
-	rows, err := pb.Rows(ctx, userID, lane)
-	if err != nil {
+	row, ok, err := pb.Row(ctx, userID, lane, window)
+	if err != nil || !ok {
 		return nil, err
 	}
-	for _, row := range rows {
-		if row.Window != window {
-			continue
-		}
-		return &api.LanePlanBudget{
-			PeriodUnits: row.PeriodUnits, Unit: row.Unit, Window: row.Window,
-			PeriodStart: row.PeriodStart.UTC().Format(time.RFC3339Nano),
-			PeriodHours: row.PeriodHours,
-			Source:      row.Source, SeededFrom: row.SeededFrom, Fraction: row.Fraction,
-			DeclaredBy: row.DeclaredBy,
-			DeclaredTS: row.DeclaredTS.UTC().Format(time.RFC3339Nano),
-		}, nil
-	}
-	return nil, nil
+	return &api.LanePlanBudget{
+		PeriodUnits: row.PeriodUnits, Unit: row.Unit, Window: row.Window,
+		PeriodStart: row.PeriodStart.UTC().Format(time.RFC3339Nano),
+		PeriodHours: row.PeriodHours,
+		Source:      row.Source, SeededFrom: row.SeededFrom, Fraction: row.Fraction,
+		DeclaredBy: row.DeclaredBy,
+		DeclaredTS: row.DeclaredTS.UTC().Format(time.RFC3339Nano),
+	}, nil
 }
 
 // budgetAdapter adapts the S10.4 budget store to the api.BudgetStore seam
@@ -1790,9 +1794,13 @@ func (a planBudgetAdapter) PlanWindows(_ context.Context, lane string) ([]api.Pl
 	}
 	out := make([]api.PlanWindowRecord, 0, len(doc.Quotas))
 	for _, q := range doc.Quotas {
+		// The budgetable verdict is the STORE's own predicate, carried across
+		// rather than re-derived at the boundary (drain r1 D1).
+		refusal := metering.PlanBudgetWindowRefusal(doc, q.Name)
 		out = append(out, api.PlanWindowRecord{
 			Name: q.Name, Unit: doc.QuotaUnit(q.Name), WindowHours: q.WindowHours,
 			Allowance: q.Units, AllowanceUnverified: q.AllowanceUnverified,
+			Budgetable: refusal == "", NotBudgetable: refusal,
 		})
 	}
 	return out, nil

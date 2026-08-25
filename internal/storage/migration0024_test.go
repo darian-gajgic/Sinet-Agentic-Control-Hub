@@ -22,9 +22,6 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
-// migrateThrough applies the committed migration files up to and including
-// version `through`, exactly as the runner does (one transaction each, with its
-// own user_version bump), leaving the database at that older schema.
 // migrationCount is how many migration files the tree ships — the version a
 // full Migrate leaves behind.
 func migrationCount(t *testing.T) int {
@@ -45,6 +42,9 @@ func migrationCount(t *testing.T) int {
 	return n
 }
 
+// migrateThrough applies the committed migration files up to and including
+// version `through`, exactly as the runner does (one transaction each, with its
+// own user_version bump), leaving the database at that older schema.
 func migrateThrough(t *testing.T, db *storage.DB, through int) {
 	t.Helper()
 	ctx := context.Background()
