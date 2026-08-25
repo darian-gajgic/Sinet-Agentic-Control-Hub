@@ -160,15 +160,22 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 		return m, nil
 	}
 	if lane == "zai" {
-		// The DECLARED shape (P3-LN-6). A plan budget is what makes a plan
-		// lane's pressure comparable at all, so the committed body has to carry
-		// one somewhere or neither language is held to the member — and the
-		// undeclared shape stays exercised on the kimi lane above. The
-		// denominator is the operator's own figure, seeded from the published
-		// allowance at ⚙ budget.background_window_fraction and never equal to
-		// it (S10.4/D4), so `pressure` here is 3.5 ÷ 14000 and emphatically not
-		// 3.5 ÷ 28000.
-		pressure := 3.5 / fxZAIPlanBudget
+		// The DECLARED-AND-EXPIRED shape (P3-LN-6, corrected at drain r2 R7).
+		//
+		// This world is FIXED-CLOCK: every timestamp is a literal, which is what
+		// makes the bytes stable enough to commit. That has a consequence the
+		// first cut of this block got wrong — it served a five-hour budget
+		// starting 2026-07-20 WITH a live pressure, which is a state the reading
+		// stopped producing the moment period_hours became load-bearing (D6),
+		// and no literal instant can ever be inside a five-hour window again.
+		//
+		// So the committed body carries the state those literals actually
+		// produce: the row is declared, the declaration is served, `pressure` is
+		// null, and `inapplicable_note` says why — the COHERENT TRIPLE. It
+		// exercises one member more than the live shape did, and the live shape
+		// is pinned Go-side against the real reading (internal/shell's
+		// TestLN6DeclaredPlanBudgetMakesPressureApplicable and
+		// TestLN6MetersReadAgreesWithTheRouter) where the clock is real.
 		m.Plan = &api.LanePlanMeter{
 			Unit: "credits", Tier: 3, Assumed: true,
 			AssumedNote:      "derived plan units: the plan publishes no per-request counter, so consumption is a request proxy with the documented multiplier applied",
@@ -176,8 +183,10 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 			Calls:            5,
 			Multiplier:       0.5,
 			MultiplierWindow: "off-peak",
-			Pressure:         &pressure,
+			Pressure:         nil,
 			BudgetDeclared:   true,
+			InapplicableNote: "the declared 5-hour period started 2026-07-20T09:00:00Z and has ended, so it is not a budget " +
+				"for the current one; re-declaring is the act that starts the next period (S10.4; nothing rolls one over)",
 			Budget: &api.LanePlanBudget{
 				PeriodUnits: fxZAIPlanBudget, Unit: "credits", Window: "rolling-5h",
 				PeriodStart: fxT0, PeriodHours: 5,

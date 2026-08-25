@@ -471,6 +471,18 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// A period that has ALREADY ELAPSED is dead on arrival: the reading refuses
+	// it the instant it is stored, so accepting it would answer 200 for a
+	// budget that denominates nothing (drain r2 R4).
+	ends := rec.PeriodStart.Add(time.Duration(rec.PeriodHours * float64(time.Hour)))
+	if !ends.After(now) {
+		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
+			"that period is already over: a %v-hour period starting %s ended at %s. A budget is declared for a period "+
+				"that is still running, and re-declaring is what starts the next one — nothing rolls one over (S10.4)",
+			rec.PeriodHours, rec.PeriodStart.UTC().Format(time.RFC3339), ends.UTC().Format(time.RFC3339))))
+		return
+	}
+
 	prior, existed, err := s.planBudgets.DeclarePlanBudget(r.Context(), rec)
 	if err != nil {
 		s.writeSurface(w, nil, fmt.Errorf("declare plan budget: %w", err))
@@ -479,10 +491,18 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 	// The audit row lands AFTER the store act (the part-A drain-D6 principle): a
 	// record of an edit that never committed would be a record of something that
 	// did not happen.
+	// The detail says when this budget STOPS applying, because for the shortest
+	// window that is hours away and it is by design: a rolling-5h budget goes
+	// inapplicable five hours after it is declared, and a lane silently falling
+	// off pressure routing is the surprise this sentence exists to prevent
+	// (drain r2 R4).
 	out := PlanBudgetDeclared{Budget: rec,
 		Detail: fmt.Sprintf("declared: the S10.4 tier-3 reading measures this person's %s consumption in the %s window "+
-			"against it immediately, in %s. Nothing is enforced by it — it is what makes the lane's pressure comparable "+
-			"when routing picks between flat-rate lanes (S08.8)", lane, window, rec.Unit)}
+			"against it immediately, in %s. The period runs %v hours and ends at %s — after that the reading stops "+
+			"applying and this lane returns to the deterministic routing order until you declare the next period; "+
+			"nothing rolls one over. Nothing is enforced by the budget either: it is what makes the lane's pressure "+
+			"comparable when routing picks between flat-rate lanes (S08.8)",
+			lane, window, rec.Unit, rec.PeriodHours, ends.UTC().Format(time.RFC3339))}
 	if existed {
 		out.Prior = &prior
 	}

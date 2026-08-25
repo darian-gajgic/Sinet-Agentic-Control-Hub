@@ -143,6 +143,22 @@ func (e *ln6Env) declarePlan(t *testing.T, owner, lane, window string, units flo
 	}
 }
 
+// expirePlanBudget walks a declared period's start back past its own length,
+// which is what an ordinary clock does to a five-hour budget in five hours. It
+// writes the row through the STORE so nothing here invents a shape the store
+// would not have produced.
+func expirePlanBudget(t *testing.T, e *ln6Env, owner, lane, window string) {
+	t.Helper()
+	row, ok, err := e.pb.Row(context.Background(), owner, lane, window)
+	if err != nil || !ok {
+		t.Fatalf("read the row to expire: ok=%v err=%v", ok, err)
+	}
+	row.PeriodStart = time.Now().UTC().Add(-time.Duration(row.PeriodHours*float64(time.Hour)) - time.Hour)
+	if _, _, err := e.pb.Declare(context.Background(), row); err != nil {
+		t.Fatalf("re-declare the row with an elapsed period: %v", err)
+	}
+}
+
 func (e *ln6Env) declareTokens(t *testing.T, owner, lane string, tokens int64) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -461,8 +477,30 @@ func TestLN6MetersReadAgreesWithTheRouter(t *testing.T) {
 		if p.Applicable && *lm.Plan.Pressure != p.Ratio {
 			t.Errorf("%s: meters pressure %v ≠ router ratio %v for the same (person, lane)", state, *lm.Plan.Pressure, p.Ratio)
 		}
-		if lm.Plan.BudgetDeclared != p.Applicable {
-			t.Errorf("%s: plan budget_declared = %v while the router reports applicable = %v", state, lm.Plan.BudgetDeclared, p.Applicable)
+		// THE COHERENT TRIPLE (drain r2 R2/R3). A DECLARED budget serves either
+		// a pressure or a reason it produced none — never neither, which is
+		// three absences contradicting each other, and never a budget_declared
+		// bit with nothing behind it.
+		if lm.Plan.BudgetDeclared {
+			if lm.Plan.Pressure == nil && lm.Plan.InapplicableNote == "" {
+				t.Errorf("%s: the meters read says a budget is declared and serves neither a pressure nor a reason — "+
+					"a refusal nobody can see is how it comes back", state)
+			}
+			if lm.Plan.Pressure != nil && lm.Plan.InapplicableNote != "" {
+				t.Errorf("%s: the meters read serves a pressure AND a reason it has none: %q", state, lm.Plan.InapplicableNote)
+			}
+			if lm.Plan.Budget == nil {
+				t.Errorf("%s: a declared budget is reported with no declaration behind it", state)
+			}
+		}
+		if !lm.Plan.BudgetDeclared && lm.Plan.Budget != nil {
+			t.Errorf("%s: a budget object is served for a lane reporting nothing declared: %+v", state, lm.Plan.Budget)
+		}
+		// The router's own reason carries the same sentence, so a person
+		// reading a routing decision is not told a budget was never declared
+		// when one was and expired.
+		if !p.Applicable && p.Reason != lm.Plan.InapplicableNote {
+			t.Errorf("%s: the router's reason %q and the meters note %q disagree", state, p.Reason, lm.Plan.InapplicableNote)
 		}
 	}
 
@@ -470,6 +508,31 @@ func TestLN6MetersReadAgreesWithTheRouter(t *testing.T) {
 
 	e.declarePlan(t, "alice", adapters.LaneZAI, metering.PlanQuotaWindow, 1400)
 	agree(t, "declared")
+
+	// THE EXPIRED STATE, which the invariant above did not reach before this
+	// round: only undeclared and fresh were exercised, so a declared-but-
+	// refused row could serve budget_declared:true beside nothing at all and
+	// the suite stayed green (drain r2 R2/R3).
+	expirePlanBudget(t, e, "alice", adapters.LaneZAI, metering.PlanQuotaWindow)
+	agree(t, "expired")
+
+	expired, err := e.meter.LaneMeter(ctx, "alice", adapters.LaneZAI)
+	if err != nil {
+		t.Fatalf("LaneMeter(expired): %v", err)
+	}
+	switch {
+	case expired.Plan.Pressure != nil:
+		t.Errorf("an elapsed period still serves a pressure: %v", *expired.Plan.Pressure)
+	case expired.Plan.Budget == nil:
+		t.Error("an elapsed period hides the declaration it refused — the row still exists and a reader must see it")
+	case !strings.Contains(expired.Plan.InapplicableNote, "re-declaring"):
+		t.Errorf("the expired note does not say what re-opens it: %q", expired.Plan.InapplicableNote)
+	}
+	if p, perr := e.rp.Pressure(ctx, "alice", adapters.LaneZAI); perr != nil {
+		t.Fatalf("Pressure(expired): %v", perr)
+	} else if p.Applicable || p.Reason == "" {
+		t.Errorf("the router's expired reading = %+v, want inapplicable WITH its reason", p)
+	}
 
 	// The declaration itself rides the read, so a person can see the
 	// denominator their pressure was measured against.

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 )
 
 // ── the fake store ──────────────────────────────────────────────────────────
@@ -69,37 +70,50 @@ func (f *fakePlanBudgetStore) PlanBudget(_ context.Context, userID, lane, window
 	return rec, ok, nil
 }
 
-// PlanWindows mirrors the shipped documents' shapes AND the store's own
-// budgetable verdict, because the boundary check under test is "may this window
-// carry a budget at all" and a fake that said yes to everything would test
-// nothing about it.
+// PlanWindows serves the SHIPPED documents' own windows, with the budgetable
+// verdict taken from the production predicate rather than hand-spelled here
+// (drain r2 R6). A fake that re-states the rule tests its own copy of it, which
+// is the twin-maintained hazard the seam exists to avoid; this one is the
+// shell adapter's logic over the real data.
 //
-// The kimi weekly row is the drain r1 D1 case: its allowance is in CREDITS
-// while that lane's consumption is counted in REQUESTS, so a budget on it would
-// divide one by the other.
+// The synthetic window below is the one exception and is named as such.
 func (f *fakePlanBudgetStore) PlanWindows(_ context.Context, lane string) ([]api.PlanWindowRecord, error) {
-	switch lane {
-	case "zai":
-		return []api.PlanWindowRecord{
-			{Name: "rolling-5h", Unit: "credits", WindowHours: 5, Allowance: 28000, Budgetable: true},
-			{Name: "weekly", Unit: "credits", WindowHours: 168, Allowance: 140000, Budgetable: true},
-			// A window in the lane's OWN unit whose allowance nobody published:
-			// budgetable, but nothing can be PROPOSED from it. No shipped
-			// document seeds one today (a monthly pool rides the plan document
-			// as prose rather than as a quota row), and the boundary must still
-			// answer it honestly rather than with a 500.
-			{Name: "monthly", Unit: "credits", WindowHours: 720, AllowanceUnverified: true, Budgetable: true},
-		}, nil
-	case "kimi":
-		return []api.PlanWindowRecord{
-			{Name: "rolling-5h", Unit: "requests", WindowHours: 5, Allowance: 300, Budgetable: true},
-			{Name: "weekly", Unit: "credits", WindowHours: 168, AllowanceUnverified: true,
-				NotBudgetable: "this window is denominated in credits while the lane's consumption is counted in requests, " +
-					"so a budget on it would divide requests by credits and report the answer in neither"},
-		}, nil
+	doc, ok := metering.PlanDocFor(lane)
+	if !ok {
+		return nil, nil
 	}
-	return nil, nil
+	out := make([]api.PlanWindowRecord, 0, len(doc.Quotas)+1)
+	for _, q := range doc.Quotas {
+		refusal := metering.PlanBudgetWindowRefusal(doc, q.Name)
+		out = append(out, api.PlanWindowRecord{
+			Name: q.Name, Unit: doc.QuotaUnit(q.Name), WindowHours: q.WindowHours,
+			Allowance: q.Units, AllowanceUnverified: q.AllowanceUnverified,
+			Budgetable: refusal == "", NotBudgetable: refusal,
+		})
+	}
+	if lane == synthLane {
+		out = append(out, synthUnverifiedWindow)
+	}
+	return out, nil
 }
+
+// synthUnverifiedWindow is a SYNTHETIC window: budgetable (it counts what the
+// lane's consumption counts) with an allowance nobody published.
+//
+// It is synthetic because NO SHIPPED DOCUMENT can reach that combination today,
+// and TestLN6NoShippedDocumentReachesTheProposalRefusal asserts exactly that so
+// the fiction cannot outlive its reason. The one document window whose
+// allowance is unverified is denominated in something else, so the budgetable
+// check refuses it first and the proposal refusal is never consulted. The leg
+// is kept rather than deleted because a future plan document may publish a
+// window in its own unit with no figure, and the boundary must answer that with
+// a 400 rather than let it fall through to a 500.
+var synthUnverifiedWindow = api.PlanWindowRecord{
+	Name: "synthetic-unverified", Unit: "credits", WindowHours: 720,
+	AllowanceUnverified: true, Budgetable: true,
+}
+
+const synthLane = "zai"
 
 func (f *fakePlanBudgetStore) ProposePlanBudget(ctx context.Context, userID, lane, window string, start time.Time) (api.PlanBudgetRecord, error) {
 	windows, _ := f.PlanWindows(ctx, lane)
@@ -240,6 +254,15 @@ func TestLN6PlanBudgetVerbAuthorityAndValidation(t *testing.T) {
 		if got.Budget.Source != "operator-set" {
 			t.Errorf("source = %q, want operator-set for a hand-declared figure", got.Budget.Source)
 		}
+		// drain r2 R4: the confirmation SAYS when this stops applying. For the
+		// shortest window that is hours away and it is by design — a lane
+		// silently falling off pressure routing five hours after a proposal was
+		// accepted is the surprise this sentence exists to prevent.
+		for _, must := range []string{"ends at", "stops applying", "declare the next period", "5 hours"} {
+			if !strings.Contains(got.Detail, must) {
+				t.Errorf("the confirmation does not say %q — it reads as though the budget applies indefinitely: %q", must, got.Detail)
+			}
+		}
 	})
 
 	t.Run("validation refuses what is not a plan budget", func(t *testing.T) {
@@ -260,6 +283,10 @@ func TestLN6PlanBudgetVerbAuthorityAndValidation(t *testing.T) {
 			// refused for want of a plan-unit figure, and no dollar value is
 			// stored, echoed or computed (D5).
 			{"a dollar-shaped body", `{"lane":"zai","window":"rolling-5h","period_usd":25,"period_hours":5}`, "period_units"},
+			// drain r2 R4: a period that has already elapsed is dead on
+			// arrival — the reading refuses it the instant it is stored, so a
+			// 200 would confirm a budget that denominates nothing.
+			{"an already-elapsed period", `{"lane":"zai","window":"rolling-5h","period_units":10,"period_hours":5,"period_start":"2026-07-20T09:00:00Z"}`, "already over"},
 		} {
 			code, out := e.do(t, "alice", tc.body)
 			if code != http.StatusBadRequest {
@@ -359,7 +386,7 @@ func TestLN6ProposalPathIsTheProductionConsumer(t *testing.T) {
 
 	// A window whose allowance nobody published cannot be proposed from, and
 	// that is the caller's answer (400), never a platform fault (500).
-	code, body := e.do(t, "alice", `{"lane":"zai","window":"monthly","from_proposal":true}`)
+	code, body := e.do(t, "alice", `{"lane":"zai","window":"synthetic-unverified","from_proposal":true}`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("proposing from an unverified allowance: status %d, want 400: %s", code, body)
 	}
@@ -400,14 +427,15 @@ func TestLN6WireDeltaIsAdditive(t *testing.T) {
 		t.Fatalf("decode the committed meters body: %v", err)
 	}
 
-	declared, undeclared := 0, 0
+	declared, undeclared, noted := 0, 0, 0
 	for _, lane := range body.Lanes {
 		if lane.Plan == nil {
 			continue
 		}
 		var plan struct {
-			Pressure *float64             `json:"pressure"`
-			Budget   *api.MeterPlanBudget `json:"budget"`
+			Pressure         *float64             `json:"pressure"`
+			Budget           *api.MeterPlanBudget `json:"budget"`
+			InapplicableNote string               `json:"inapplicable_note"`
 			// The pre-existing members: every one must still be present, or the
 			// SPA side was built against a contract that moved.
 			Unit           *string          `json:"unit"`
@@ -447,8 +475,15 @@ func TestLN6WireDeltaIsAdditive(t *testing.T) {
 			continue
 		}
 		declared++
-		if plan.Pressure == nil {
-			t.Errorf("lane %s carries a declared budget and no pressure — a declared denominator is what makes the ratio exist", lane.Lane)
+		// THE COHERENT TRIPLE on the wire (drain r2 R2/R3): a served
+		// declaration carries either the ratio it produced or the reason it
+		// produced none. Never neither — that is a refusal a reader cannot
+		// see — and never both.
+		if plan.Pressure == nil && plan.InapplicableNote == "" {
+			t.Errorf("lane %s serves a declared budget with neither a pressure nor a reason it has none", lane.Lane)
+		}
+		if plan.Pressure != nil && plan.InapplicableNote != "" {
+			t.Errorf("lane %s serves a pressure AND a reason it has none: %q", lane.Lane, plan.InapplicableNote)
 		}
 		if plan.Budget.PeriodUnits <= 0 || plan.Budget.Unit == "" || plan.Budget.Window == "" {
 			t.Errorf("lane %s: the budget object is not populated: %+v", lane.Lane, plan.Budget)
@@ -456,9 +491,16 @@ func TestLN6WireDeltaIsAdditive(t *testing.T) {
 		if plan.Budget.Source == "" || plan.Budget.DeclaredBy == "" {
 			t.Errorf("lane %s: the budget object carries no provenance: %+v", lane.Lane, plan.Budget)
 		}
+		if plan.InapplicableNote != "" {
+			noted++
+		}
 	}
 	if declared == 0 {
 		t.Error("no fixture lane exercises the plan `budget` member — a wire member no fixture exercises is a contract nobody agreed to (§63 R3)")
+	}
+	if noted == 0 {
+		t.Error("no fixture lane exercises `inapplicable_note` — the state it explains is the one a fixed-clock world can " +
+			"honestly depict, and a member no fixture exercises is a contract nobody agreed to (§63 R3)")
 	}
 	if undeclared == 0 {
 		t.Error("every fixture plan block is declared — the UNDECLARED shape is the one this platform serves today and it must stay exercised")
@@ -552,5 +594,39 @@ func TestLN6PlanBudgetShapesNeverPercent(t *testing.T) {
 	}
 	if !forbidden["fraction"] {
 		t.Fatal("the never-percent walk cannot detect its own probe")
+	}
+}
+
+// TestLN6NoShippedDocumentReachesTheProposalRefusal is the honesty check on the
+// synthetic window above (drain r2 R6).
+//
+// The verb's unverified-allowance refusal is a REAL branch — a plan may publish
+// a window's shape without its figure — but on the documents that ship today it
+// is unreachable: the only window with an unverified allowance is denominated
+// in something other than what its lane counts, so the budgetable check refuses
+// it first and the proposal refusal is never consulted. The test that exercises
+// that branch therefore drives a synthetic window, and this pins WHY. The day a
+// shipped document publishes a window in its own unit with no figure, this goes
+// red and the synthetic one can be deleted.
+func TestLN6NoShippedDocumentReachesTheProposalRefusal(t *testing.T) {
+	docs, err := metering.SeedPlanDocs()
+	if err != nil {
+		t.Fatalf("SeedPlanDocs: %v", err)
+	}
+	checked := 0
+	for _, doc := range docs {
+		for _, q := range doc.Quotas {
+			checked++
+			if !q.AllowanceUnverified {
+				continue
+			}
+			if metering.PlanBudgetWindowRefusal(doc, q.Name) == "" {
+				t.Errorf("%s/%s is budgetable AND publishes no allowance — the verb's proposal refusal is now reachable "+
+					"on a SHIPPED document, so exercise it with that window and delete the synthetic one", doc.Lane, q.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the walk read no quota rows — it would pass vacuously")
 	}
 }

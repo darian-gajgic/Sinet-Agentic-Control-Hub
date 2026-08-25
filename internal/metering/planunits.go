@@ -231,16 +231,27 @@ type PlanBudget struct {
 	// published allowance.
 	PeriodUnits float64
 	// PeriodStart is the instant consumption is summed from; PeriodHours is
-	// the length the operator declared it for. This is Sinet's period, not the
-	// provider's cycle: the provider's weekly window is order-anchored per
+	// the length the operator declared it for, and the reading STOPS APPLYING
+	// once it has elapsed — a budget whose period ran out is not a budget for
+	// the current one, and re-declaring is the act that starts the next
+	// (planPeriodEnded; nothing rolls one over). This is Sinet's period, not
+	// the provider's cycle: the provider's weekly window is order-anchored per
 	// account and stays a recorded dated fact, never a period used here.
 	PeriodStart time.Time
 	PeriodHours float64
 	Declared    bool
 
-	// SeededFrom and Fraction record which allowance row a proposal came from
-	// and what share of it was taken — provenance for a person reading their
-	// own budget, never an input to the arithmetic.
+	// SeededFrom names WHICH allowance window this budget denominates, and
+	// Fraction records what share of that window's published allowance a
+	// proposal took.
+	//
+	// Fraction is provenance for a person reading their own budget and is never
+	// an input to the arithmetic. SeededFrom is NOT merely provenance and this
+	// comment used to say it was (corrected 2026-08-25, drain r1 D1): the
+	// reading resolves the seed allowance through it AND refuses to apply a
+	// budget whose window cannot denominate this lane's consumption through it
+	// (PlanBudgetWindowRefusal). It names a window; it is not a number that
+	// enters a division.
 	SeededFrom string
 	Fraction   float64
 }

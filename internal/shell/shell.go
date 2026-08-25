@@ -1610,7 +1610,8 @@ func (p routePressure) Pressure(ctx context.Context, owner, lane string) (worker
 		if err != nil {
 			return worker.LanePressure{}, err
 		}
-		return worker.LanePressure{Ratio: r.Pressure, Applicable: r.Applicable, Unit: r.Unit}, nil
+		return worker.LanePressure{Ratio: r.Pressure, Applicable: r.Applicable, Unit: r.Unit,
+			Reason: r.InapplicableNote}, nil
 	}
 	budget := metering.UndeclaredBudget()
 	if p.b != nil {
@@ -1629,8 +1630,13 @@ func (p routePressure) Pressure(ctx context.Context, owner, lane string) (worker
 
 // bindingPlanReading is the tier-3 reading for a plan-metered lane, taken
 // against the operator's DECLARED plan budgets, and the ONE place a lane's
-// several windows are aggregated. It returns the reading and the name of the
-// window that bound it (empty when none is declared).
+// several windows are aggregated.
+//
+// It returns the reading and the window the reading is ABOUT: the one that
+// bound it, or — when no window could bind — the one whose declared row the
+// reading refused, so the surface can serve that declaration beside the reason
+// it did not apply. Empty means no row exists on any window, which is the
+// honest absence and the only state that serves neither.
 //
 // THE AGGREGATION RULE IS MAX-BINDS: the most-constrained window binds the
 // lane. A plan's windows are separate allowances — the zai plan meters a
@@ -1658,7 +1664,8 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 	var (
 		best    metering.PlanReading
 		window  string
-		refused string
+		bound   bool
+		refused bool
 	)
 	for i, q := range doc.Quotas {
 		// The store is the only producer of the undeclared posture, so no
@@ -1671,22 +1678,25 @@ func bindingPlanReading(ctx context.Context, g *metering.PressureGauge, pb *mete
 		if err != nil {
 			return metering.PlanReading{}, "", err
 		}
-		// A declared row the reading REFUSED — an incoherent unit, an elapsed
-		// period — is skipped here and its reason kept, so a lane whose only
-		// row cannot denominate says why rather than looking untouched.
-		if r.InapplicableNote != "" && refused == "" {
-			refused = r.InapplicableNote
-		}
 		switch {
-		case r.Applicable && (window == "" || r.Pressure > best.Pressure):
-			best, window = r, q.Name
-		case window == "" && i == 0:
+		case r.Applicable && (!bound || r.Pressure > best.Pressure):
+			best, window, bound = r, q.Name, true
+		case bound:
+			// A window that binds already stands; nothing below outranks it.
+		case r.InapplicableNote != "":
+			// A DECLARED row the reading refused — an incoherent unit, an
+			// elapsed period. It is reported as itself rather than skipped:
+			// hiding the row would serve an untouched-looking lane while a
+			// declaration sits in the table, and hiding the reason would make
+			// the refusal unaccountable (drain r2 R2/R3). The window rides out
+			// with it, so the surface can show WHICH declaration was refused.
+			if !refused {
+				best, window, refused = r, q.Name, true
+			}
+		case !refused && i == 0:
 			// The honest absence, held only until a declared window replaces it.
 			best = r
 		}
-	}
-	if window == "" {
-		best.InapplicableNote = refused
 	}
 	return best, window, nil
 }
@@ -1952,8 +1962,11 @@ func (m projMeter) LaneMeter(ctx context.Context, userID, lane string) (api.Lane
 			p := pr.Pressure
 			plan.Pressure = &p
 		}
-		// The declaration the pressure was measured against, so a person reading
-		// their own meter can see the denominator rather than take it on trust.
+		// Whatever the reading is ABOUT rides out with it: the declaration the
+		// pressure was measured against, or the one it refused. A declared row
+		// with no budget object, no pressure and no reason is three absences
+		// contradicting each other (drain r2 R2/R3).
+		plan.InapplicableNote = pr.InapplicableNote
 		if window != "" {
 			row, perr := planBudgetRowFor(ctx, m.planBudgets, userID, lane, window)
 			if perr != nil {

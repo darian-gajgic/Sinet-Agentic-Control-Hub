@@ -248,6 +248,13 @@ type LanePressure struct {
 	Applicable bool
 	// Unit names what was counted, for the plain reason.
 	Unit string
+	// Reason is why an inapplicable reading is inapplicable, when the gauge has
+	// something more specific to say than "none was declared" — a period that
+	// has elapsed, or a window that cannot denominate this lane. It is a
+	// SENTENCE the plain reason quotes, never a code and never a number: this
+	// package still has nothing money-shaped to reason with and still does not
+	// know what a plan document is (S08.8; D5).
+	Reason string
 }
 
 // PressureReader is the D5 lane-ordering input among multiple covered
@@ -778,14 +785,24 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 			return covered[0], fmt.Sprintf("Consumption pressure was unavailable (%v), so the configured lane order stands (never dollars — D5).", err)
 		}
 		if !p.Applicable {
-			// No declared budget on a lane means no comparable ratio for it.
-			// The alternative — ordering by raw consumption — compares a token
+			// No comparable ratio on a lane means no comparison. The
+			// alternative — ordering by raw consumption — compares a token
 			// count against a credit count and hands every dispatch to
 			// whichever lane was added most recently, forever. A stable,
 			// STATED order is the honest answer to "we cannot tell yet".
-			return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty but lane %s has no declared automation budget, "+
+			//
+			// WHY it cannot be compared matters to whoever reads the decision:
+			// "nobody declared a budget" and "the declared period ran out" are
+			// different situations with different remedies, and a reason that
+			// says the first when the second is true sends a person looking for
+			// a setting they already set (drain r2 R2/R3).
+			why := "has no declared automation budget"
+			if p.Reason != "" {
+				why = "cannot be compared: " + p.Reason
+			}
+			return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty but lane %s %s, "+
 				"so there is no comparable consumption pressure and the deterministic duty-map order stands (S10.4; never dollars — D5).",
-				len(covered), c.Lane)
+				len(covered), c.Lane, why)
 		}
 		if i == 0 || p.Ratio < bestP {
 			best, bestP = c, p.Ratio

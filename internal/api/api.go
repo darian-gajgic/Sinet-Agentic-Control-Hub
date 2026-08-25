@@ -127,10 +127,18 @@ type LanePlanMeter struct {
 	// allowance (S10.4/D4).
 	Pressure       *float64
 	BudgetDeclared bool
-	// Budget is the declaration Pressure was measured against — the BINDING
-	// window's row. Nil when no plan budget is declared, which is why it is a
-	// pointer: an absent declaration is absent, never a zero budget.
+	// Budget is the declaration this reading is ABOUT — the window that bound
+	// Pressure, or the one the reading refused. Nil when no plan budget is
+	// declared on any window, which is why it is a pointer: an absent
+	// declaration is absent, never a zero budget.
 	Budget *LanePlanBudget
+	// InapplicableNote says why a DECLARED budget produced no Pressure: an
+	// elapsed period, or a window that counts something other than what this
+	// lane's consumption counts. Empty when the budget applied and empty when
+	// none was declared — that absence has its own answer. A declared budget
+	// with neither a pressure nor a note would be a refusal nobody can see
+	// (drain r2 R2/R3).
+	InapplicableNote string
 	// SeedAllowance / SeedQuota record the published allowance a budget would
 	// be proposed FROM — provenance, never the divisor.
 	SeedAllowance float64

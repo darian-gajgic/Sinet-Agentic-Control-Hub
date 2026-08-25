@@ -496,11 +496,6 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     path: '/api/events/open-sql',
     why: 'Layer 2 is reached by the assistant’s escalation control, which posts a chat TURN — the server calls this layer, and the guardrail’s audit row is what makes that the right place for it (§44). A client naming it directly would bypass the turn record.',
   },
-  {
-    method: 'POST',
-    path: '/api/meters/plan-budget',
-    why: 'the 13.4 backend half (P3-LN-6, 2026-08-25): declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need. The S15.9 settings tab consumes it when 13.4 lands — the token budget verb shipped exactly this way in B6-2B, before its editor existed.',
-  },
   // ── REPORTED GAPS: a route exists, a surface does not ───────────────────
   //
   // CLOSED 2026-08-05 (P3-UI-3), SEVEN entries removed rather than annotated:
@@ -528,6 +523,12 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
   // assigned it to a row that did not carry it, which is what kept it invisible.
   // The coordinator amended the UI-4 row to own it (OQ1(a)). CONVENTIONS §46's
   // gap record carries the dated pointer (§50).
+  {
+    method: 'POST',
+    path: '/api/meters/plan-budget',
+    gap: true,
+    why: 'REPORTED GAP (P3-LN-6, 2026-08-25): the 13.4 BACKEND half is served — declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need — and no surface exists for it. The S15.9 settings tab is its named consumer and lands with 13.4; the token budget verb sat here the same way in B6-2B until its editor arrived. This is an absence with a date, not a route no client may ever call.',
+  },
 ]
 
 describe('the SPA consumes every API built above (S19.5)', () => {
@@ -608,10 +609,20 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     // wrong reason. Every route the SPA does not consume is now a sanctioned
     // exception with a stated reason; the next one that is a real absence
     // arrives here as a gap and moves this line deliberately.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(0)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(0)
+    // MOVED DELIBERATELY 2026-08-25 (P3-LN-6), which is what the paragraph
+    // above says this line is for: POST /api/meters/plan-budget is the first
+    // real absence — a served route whose surface is the S15.9 settings tab,
+    // arriving with 13.4. CONVENTIONS §46 carries the same count and its date.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(1)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(1)
+    // A reported gap names a route the server DOES serve — that is what makes
+    // it a gap rather than a phantom, and the phantom check above already bars
+    // an exception naming an unserved route. This assertion read `toBe(0)`
+    // while the gap list was empty, where it was vacuously true and stated the
+    // opposite of the bucket it guards; the first real gap is what exposed it
+    // (corrected 2026-08-25, P3-LN-6 drain r2 R1).
     const gapRoutes = inventory.filter((r) => gaps.includes(normalizePath(r.path)))
-    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(0)
+    expect(gapRoutes.length, 'a reported gap names a route the server does not serve').toBe(gaps.length)
     // NON-VACUITY, both sides: the list is still a real list of real routes, and
     // the `gap` flag is still a thing an entry can carry.
     expect(exceptions.length, 'the exception list itself emptied, so zero gaps proves nothing').toBeGreaterThan(5)

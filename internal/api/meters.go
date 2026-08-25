@@ -78,15 +78,20 @@ type MeterLanePlan struct {
 	MultiplierWindow string   `json:"multiplier_window,omitempty"`
 	Pressure         *float64 `json:"pressure"`
 	BudgetDeclared   bool     `json:"budget_declared"`
-	// Budget is the declaration `pressure` was measured against — the binding
-	// window's row, in that window's own unit. Absent while nobody has declared
-	// one, which is what keeps an undeclared lane serving exactly the bytes it
-	// served before this member existed. There is no dollar member and none may
-	// be added (D5).
-	Budget        *MeterPlanBudget `json:"budget,omitempty"`
-	SeedAllowance float64          `json:"seed_allowance,omitempty"`
-	SeedQuota     string           `json:"seed_quota,omitempty"`
-	VerifiedOn    string           `json:"verified_on,omitempty"`
+	// Budget is the declaration this reading is ABOUT — the window that bound
+	// `pressure`, or the one the reading refused — in that window's own unit.
+	// Absent while nobody has declared one, which is what keeps an undeclared
+	// lane serving exactly the bytes it served before this member existed.
+	// There is no dollar member and none may be added (D5).
+	Budget *MeterPlanBudget `json:"budget,omitempty"`
+	// InapplicableNote says why a declared budget produced no `pressure`: an
+	// elapsed period, or a window counting something other than what this
+	// lane's consumption counts. A declared budget serving neither a pressure
+	// nor a reason is a refusal a reader cannot see (drain r2 R2/R3).
+	InapplicableNote string  `json:"inapplicable_note,omitempty"`
+	SeedAllowance    float64 `json:"seed_allowance,omitempty"`
+	SeedQuota        string  `json:"seed_quota,omitempty"`
+	VerifiedOn       string  `json:"verified_on,omitempty"`
 	// Windows are the plan's declared allowance windows with their OWN units,
 	// so a lane whose short window counts requests and whose long window counts
 	// credits cannot be rendered in one. Omitted for a plan that declares none.
@@ -365,8 +370,9 @@ func (p *projector) meterLanes(ctx context.Context, scope ownerScope, person, la
 						Consumed: m.Plan.Consumed, Calls: m.Plan.Calls,
 						Multiplier: m.Plan.Multiplier, MultiplierWindow: m.Plan.MultiplierWindow,
 						Pressure: m.Plan.Pressure, BudgetDeclared: m.Plan.BudgetDeclared,
-						Budget:        meterPlanBudget(m.Plan.Budget),
-						SeedAllowance: m.Plan.SeedAllowance, SeedQuota: m.Plan.SeedQuota,
+						Budget:           meterPlanBudget(m.Plan.Budget),
+						InapplicableNote: m.Plan.InapplicableNote,
+						SeedAllowance:    m.Plan.SeedAllowance, SeedQuota: m.Plan.SeedQuota,
 						VerifiedOn: m.Plan.VerifiedOn,
 						Windows:    meterPlanWindows(m.Plan.Windows),
 					}
