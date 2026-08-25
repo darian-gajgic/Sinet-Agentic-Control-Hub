@@ -1,3 +1,5 @@
+> **EXPIRED at landing (2026-08-25). Single-use artifact: after drains r1/r2 this brief no longer matches the code (T3 replaced by the coherence rule; D6 expiry semantics; the coherent-triple wire members). Later grounding must never read it as truth — code + spec only.**
+
 # P3-LN-6 — the plan-budget declaration path
 
 **The ratified LN-2B lever made real, so a commissioned lane can genuinely win routing selection.**
