@@ -49,7 +49,11 @@
 #      and never in dollars (D5). Until P3-LN-6 no surface could declare one
 #      for a plan-metered lane, so zai and kimi had no comparable pressure and
 #      never won anything. `POST /api/meters/plan-budget` is that surface, and
-#      the `budget` step below drives it for the person you sign in as.
+#      the `budget` step below drives it for the person you sign in as. It
+#      drives the sibling token verb for `anthropic` too, because comparability
+#      is ALL-OR-NOTHING: one covered lane without a denominator ends the
+#      comparison for every lane, and anthropic is covered whether or not this
+#      door commissioned it.
 #
 # WHAT IT NEVER TOUCHES. Production (:8481, :8482, /var/lib/sinet, /etc/sinet,
 # the installed binary), this host's real broker store (~/.local/state/sinet),
@@ -136,6 +140,22 @@ COOKIE="$WORLD/session.cookie"
 API_OUT="$WORLD/api.out"
 # api.SessionCookieName — the bearer the session-required surface reads.
 SESSION_COOKIE="sinet_session"
+
+# The lane the duty map seats by default, and the one this door never
+# commissions. It is COVERED all the same: internal/stage composes coverage as
+# [the configured lane] + [the commissioned lanes], and the configured lane
+# defaults to adapters.LaneAnthropic (internal/stage/skeleton.go) with nothing
+# in the shell overriding it. It is metered in weighted TOKENS rather than plan
+# units, so its budget is the sibling verb's — and until it has one, the whole
+# comparison is off (see declare_token_budget).
+BASE_LANE="anthropic"
+# The TEST-WORLD token budget. This door mints no figure of its own: this is the
+# one the Fleet page's own budget editor is exercised with (web/src/fleet.test.tsx
+# — person alice, lane anthropic, period_tokens 250000, period_days 30). It is
+# assumed, it is editable in the UI, and it means nothing outside a throwaway
+# world; the step says all three out loud every time it runs.
+BASE_TOKENS=250000
+BASE_DAYS=30
 
 LANES="zai kimi"
 FORBIDDEN_PORTS="8481 8482"
@@ -695,6 +715,81 @@ declare_window() {
   return 0
 }
 
+# declare_token_budget declares the WEIGHTED-TOKEN budget for the configured
+# lane, and it is the act that completes the comparison rather than a tidy extra.
+# chooseFlatLane walks EVERY covered flat-rate lane and returns the configured
+# order the instant ONE of them cannot be compared — so plan budgets on zai and
+# kimi alone change nothing whatever, because anthropic is covered too and had
+# no denominator. With this declared, all three are comparable and the
+# least-consumed lane actually wins.
+declare_token_budget() {
+  local body code prior
+  body="{\"person\":\"$(json_escape "$PERSON")\",\"lane\":\"$(json_escape "$BASE_LANE")\",\"period_tokens\":$BASE_TOKENS,\"period_days\":$BASE_DAYS,\"reason\":\"lane-test-door budget step: an assumed test-world figure, declared so the configured lane is comparable against the commissioned ones\"}"
+
+  code="$(printf '%s' "$body" | api_call POST /api/meters/budget)"
+  case "$code" in
+    200) : ;;
+    400) bad "$BASE_LANE: the token budget was refused"; wrapped "$(api_detail)"
+         die "token-budget declaration refused" ;;
+    401) die "the control plane answered 401 — the session did not carry, so nothing was declared for '$PERSON'" ;;
+    403) bad "$BASE_LANE: forbidden"; wrapped "$(api_detail)"
+         die "the session is not '$PERSON' and is not the operator" ;;
+    503) bad "the token-budget verb is not wired in this control plane"; wrapped "$(api_detail)"
+         die "POST /api/meters/budget answered 503" ;;
+    *)   bad "$BASE_LANE: POST /api/meters/budget answered $code"
+         head -c 400 "$API_OUT" 2>/dev/null | sed 's/^/          /'; printf '\n'
+         die "token-budget declaration failed" ;;
+  esac
+
+  ok "$BASE_LANE: $(jq -r '"\(.budget.period_tokens) \(.budget.unit) over \(.budget.period_days) days"' "$API_OUT")"
+  wrapped "$(jq -r '.detail // empty' "$API_OUT" 2>/dev/null || true)"
+
+  note "THAT FIGURE IS ASSUMED, AND IT IS A TEST-WORLD FIGURE."
+  info "It is not a platform constant, not a recommendation, and it means nothing"
+  info "at all outside this throwaway world. It exists for exactly one reason: the"
+  info "comparison needs EVERY covered lane to have a denominator, and $BASE_LANE is"
+  info "covered. The number itself is the one the Fleet page's own budget editor is"
+  info "exercised with, reused so this door mints no figure of its own."
+  info "IT IS YOURS TO CHANGE, in the browser, at any time: $BASE/fleet — the"
+  info "budget editor on the $PERSON / $BASE_LANE row. Re-running this step will put"
+  info "$BASE_TOKENS back; the Fleet page is the authority on what it ought to be."
+
+  # Same read-back as the plan windows: re-declaring returns the row it REPLACED,
+  # read inside the write transaction, so no prior means nothing was stored.
+  code="$(printf '%s' "$body" | api_call POST /api/meters/budget)"
+  [ "$code" = 200 ] || { bad "$BASE_LANE: re-declaring answered $code"; wrapped "$(api_detail)"; die "re-declare failed"; }
+  prior="$(jq -r '.prior // empty | "\(.period_tokens) \(.unit), over \(.period_days) days, declared by \(.declared_by)"' "$API_OUT" 2>/dev/null || true)"
+  [ -n "$prior" ] || { bad "$BASE_LANE: re-declaring returned NO prior row, so the first declaration was never stored"; die "the token budget did not land"; }
+  ok "$BASE_LANE: re-declared — the verb read back the row it replaced ($prior)"
+}
+
+# meters_show_token reads the configured lane back through GET /api/meters. Its
+# budget is the TOP-LEVEL one on the row, not a plan block: this lane meters in
+# weighted tokens and ships no plan document.
+meters_show_token() {
+  local lane=$1 code n declared
+  code="$(api_get "/api/meters?lane=$lane")"
+  [ "$code" = 200 ] || { bad "GET /api/meters?lane=$lane answered $code"; wrapped "$(api_detail)"; die "the meters read failed"; }
+  n="$(jq --arg l "$lane" '[.lanes[] | select(.lane == $l)] | length' "$API_OUT" 2>/dev/null || echo 0)"
+  if [ "$n" = 0 ]; then
+    note "$lane: GET /api/meters serves no row for it yet — the read projects its"
+    info "(person, lane) rows from the RUNS table, so a lane $PERSON has not run"
+    info "work on has none. The proof the row landed is the read-back above."
+    return 0
+  fi
+  printf '\n  \033[1mGET /api/meters?lane=%s — the token budget, as the platform serves it:\033[0m\n\n' "$lane"
+  jq --arg l "$lane" '.lanes[] | select(.lane == $l)
+     | {owner, lane, weighted_consumption, budget_declared, pressure_applicable, pressure, budget_remaining}' \
+     "$API_OUT" | sed 's/^/        /'
+  declared="$(jq -r --arg l "$lane" '[.lanes[] | select(.lane == $l) | .budget_declared][0] // false' "$API_OUT" 2>/dev/null || true)"
+  if [ "$declared" = "true" ]; then
+    ok "$lane: the meters row carries a declared token budget — this lane is comparable now"
+  else
+    bad "$lane: the meters row exists and carries NO declared budget"
+    die "the declaration did not reach the reading"
+  fi
+}
+
 # meters_show reads the lane back through GET /api/meters and shows its plan
 # block. A lane with NO row there is not a failure and not a surprise: the
 # meters read projects its (person, lane) rows out of the runs table, so a lane
@@ -734,7 +829,10 @@ do_budget() {
   info "a declared denominator: the S10.4 automation budget, at the (person, lane,"
   info "window) grain, in the WINDOW's own unit and never in dollars (D5)."
   info "This step declares one for $PERSON on every commissioned lane, taking the"
-  info "platform's own PROPOSAL rather than inventing a figure."
+  info "platform's own PROPOSAL rather than inventing a figure — and then one on"
+  info "$BASE_LANE, which this door does not commission but which is covered all the"
+  info "same. A comparison needs EVERY covered lane to have a denominator: one that"
+  info "cannot be compared ends the comparison for all of them."
 
   if [ "$DRY" = 1 ]; then
     dry "would read the lanes commissioned FOR $PERSON out of the per_person field of the control plane's own line in $CONTROL_LOG"
@@ -752,6 +850,11 @@ do_budget() {
     dry "would treat a window the platform refuses BY ITS OWN RULE as a sanctioned skip:"
     dry "  a window denominated in a unit the lane's consumption is not counted in, or one whose allowance nobody published"
     dry "would fail if no window took a budget on any commissioned lane"
+    dry "would then declare the TOKEN budget for the covered-but-uncommissioned lane, through the sibling verb:"
+    dry "  POST $BASE/api/meters/budget"
+    dry "  {\"person\":\"$PERSON\",\"lane\":\"$BASE_LANE\",\"period_tokens\":$BASE_TOKENS,\"period_days\":$BASE_DAYS,\"reason\":\"...\"}"
+    dry "  an ASSUMED test-world figure — the one the Fleet page's budget editor is exercised with — that exists only so $BASE_LANE is comparable; editable at $BASE/fleet and meaningless outside this world"
+    dry "would read it back the same way (re-declare for the prior row, then GET $BASE/api/meters?lane=$BASE_LANE)"
     return 0
   fi
 
@@ -796,6 +899,21 @@ do_budget() {
   [ "$declared" -gt 0 ] \
     || die "no window took a budget on any commissioned lane, so nothing gained comparable pressure. The refusals above say why."
   ok "$declared plan budget(s) declared for $PERSON; $skipped window(s) refused by the platform's own rule"
+
+  # And now the lane this door does NOT commission, without which none of the
+  # above changes a single routing decision.
+  printf '\n'
+  declare_token_budget
+  meters_show_token "$BASE_LANE"
+
+  printf '\n'
+  ok "every covered flat-rate lane now has a declared denominator: $lanes (plan units) and $BASE_LANE (weighted tokens)"
+  info "That is what selection needs: it now runs a REAL comparison and says so in"
+  info "the approval card, instead of falling back for want of a denominator."
+  info "It takes the strictly LESS consumed lane. On a world this fresh every lane"
+  info "sits at 0%, so the first task ties and the tie goes to the configured order"
+  info "($BASE_LANE first) — the commissioned lane takes over once $BASE_LANE has"
+  info "spent the larger share of its own budget. Watch it over several tasks."
   note "Re-run '$ENVP$SELF budget' whenever a period has ended. Nothing rolls one"
   info "over — re-declaring IS the act that starts the next period."
 }
@@ -884,11 +1002,12 @@ $people
       has one covered lane and says nothing about choosing. (One exception,
       also correct: a matched specialist that PINS a model skips lane choice
       entirely, so no such sentence appears.)
-      READ THE LANE THE FIRST SENTENCE NAMES. Before the budget step it named
-      zai or kimi. After it, those lanes have a declared denominator, so if you
-      still get the first sentence it now names ANTHROPIC — and that is the
-      budget step's own visible effect. Why anthropic: see the third honest
-      note below.
+      AFTER A GREEN BUDGET STEP YOU SHOULD GET THE SECOND ONE. Every covered
+      lane has a declared denominator now, so the router has a real comparison
+      to make and says which lane it picked and how consumed it was. The first
+      sentence is what you saw BEFORE the budget step, and if it comes back it
+      names the lane that lost its denominator — almost always a period that
+      has ended, which is one '$ENVP$SELF budget' away.
    b. $BASE/tasks/<your task>
       The receipt table under the run: Purpose · Priced · Calls · Model · Lane ·
       Unpriced calls. The Lane column is the lane the run actually used.
@@ -906,36 +1025,44 @@ $people
      you sign in as; it resolves through the LIVE broker socket that a spawn
      dials ($SOCK); the control plane commissioned that lane for that person at
      startup — the line printed above, from the control plane about itself; and
-     that lane now carries a DECLARED automation budget, in its plan's own
-     unit, at the (person, lane, window) grain, read back out of the platform
-     after it was written.
-   · THE LANE CAN NOW WIN. This is new, and it is the point of the budget step.
-     Selection compares covered flat-rate lanes on consumption pressure —
-     consumption over the DECLARED budget, each in its own unit — and the
-     LEAST-CONSUMED lane takes the work. It is a real comparison, not a
-     tie-break: on a fresh world the commissioned GLM/Kimi lane genuinely can
-     and will take execution work, and it loses the moment it is the more
-     consumed one (pinned in both directions by
-     TestLN6CommissionedLaneWinsAndLosesOnConsumption, through the production
-     router). Before P3-LN-6 no plan budget could be declared at all, so those
-     lanes never had comparable pressure and anthropic won every time; that is
-     the sentence this note used to carry, and it is retired.
-   · COMPARABILITY IS ALL-OR-NOTHING, and this door only budgets the
-     COMMISSIONED lanes. One covered lane that cannot be compared ends the
-     comparison for all of them, and the deterministic duty-map order stands.
-     Anthropic is covered too, it is metered in weighted TOKENS rather than
-     plan units, and its budget is the token one — a different verb, with no
-     proposal to derive a figure from, so this door does not declare it and
-     will not invent a number that would decide your routing. Until you declare
-     it, expect the "no comparable consumption pressure" sentence naming
-     anthropic, and Lane = anthropic in the receipt. To close it, in the
-     browser as $PERSON, or:
-
-        curl -sS -X POST $BASE/api/meters/budget \\
-          -b <your session cookie> -H 'Content-Type: application/json' \\
-          -d '{"person":"$PERSON","lane":"anthropic","period_tokens":<yours>,"period_days":7}'
-
-     The figure is YOURS to choose — that is exactly why nothing here picks it.
+     EVERY covered flat-rate lane now carries a DECLARED automation budget —
+     the commissioned ones in their plan's own unit at the (person, lane,
+     window) grain, $BASE_LANE in weighted tokens — each read back out of the
+     platform after it was written.
+   · THE LANE CAN NOW WIN, ON REAL CONSUMPTION. This is new, and it is the whole
+     point of the budget step. Selection compares covered flat-rate lanes on
+     consumption pressure — consumption over the DECLARED budget, each in its
+     own unit — and the LEAST-CONSUMED lane takes the work. Comparability is
+     all-or-nothing: one covered lane without a denominator ends the comparison
+     for all of them, which is why the budget step declares $BASE_LANE's token
+     budget too, not just the commissioned lanes' plan budgets. With all of
+     them denominated the router runs a REAL comparison and says so — you get
+     the "Chosen among N covered flat-rate lanes on consumption pressure"
+     sentence instead of the "no comparable pressure" one. Before P3-LN-6 no
+     plan budget could be declared at all, so those lanes never had comparable
+     pressure and no comparison happened; that is the sentence this note used
+     to carry, and it is retired.
+   · YOUR FIRST TASK STILL LANDS ON $BASE_LANE, and that is correct. On a world
+     this fresh EVERY lane has consumed nothing, so every ratio is 0% and the
+     comparison is a TIE — and the tie goes to the configured duty-map order,
+     which seats $BASE_LANE first. The comparison is strict: a lane takes the
+     work by being LESS consumed, not equally consumed. So watch the receipt's
+     Lane column at $BASE/tasks/<your task> across SEVERAL tasks, not one.
+   · AS CONSUMPTION BUILDS, THE LANES ALTERNATE: whichever one sits at the lower
+     share of its own budget takes the next task, so once $BASE_LANE has spent
+     more of its 250000 than the commissioned lane has of its plan window, the
+     commissioned lane takes over — and hands it back when that reverses. That
+     is the designed behaviour, not drift, and it is pinned in both directions
+     by TestLN6CommissionedLaneWinsAndLosesOnConsumption against the production
+     router. Nothing on a running control plane serves the router's would-be
+     choice before a task exists, so that test is where the proof lives.
+   · THE $BASE_LANE FIGURE IS ASSUMED AND IT IS YOURS. $BASE_TOKENS
+     weighted-consumption units over $BASE_DAYS days is a TEST-WORLD number —
+     the one the Fleet page's own budget editor is exercised with — declared so
+     that lane is comparable at all. It is not a recommendation, and it means
+     nothing outside this throwaway world. Change it in the browser at
+     $BASE/fleet, on the $PERSON / $BASE_LANE row; re-running the budget step
+     puts $BASE_TOKENS back.
    · A DECLARED PERIOD ENDS, and nothing rolls it over. The budget step's
      shortest window is five hours long: five hours after you ran it, that
      budget applies to nothing, the lane stops being comparable, and routing
@@ -1029,7 +1156,7 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) DRY=1 ;;
-      -h|--help) sed -n '2,80p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,84p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
       -*) die "unknown option '$1'" ;;
       *) only="$1" ;;
     esac
