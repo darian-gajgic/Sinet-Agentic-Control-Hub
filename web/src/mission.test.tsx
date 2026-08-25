@@ -79,8 +79,10 @@ test('every bucket is filled from served rows, and no run falls off the screen',
   const by = (id: string) => buckets.find((b) => b.id === id)!.runs.map((r) => r.run_id)
 
   expect(by('running')).toEqual(['r-ship'])
-  // Three queued runs: two of alice's and the operator's own.
-  expect(by('queued').sort()).toEqual(['r-archive', 'r-ops', 'r-triage'])
+  // Four queued runs: two of alice's, the operator's own, and bob's kimi-lane
+  // run (the LN-3 fixture world — adopted 2026-08-25, the SPA's own leg of the
+  // backend-owned contract snapshot growing a lane).
+  expect(by('queued').sort()).toEqual(['r-archive', 'r-kimi', 'r-ops', 'r-triage'])
   // Two runs are waiting on a person — bob's price audit and the intake run of
   // the task the S15.7 handoff gave birth to — and they are listed in the order
   // the server sent them, because `bucketRuns` pushes in served order and the

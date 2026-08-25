@@ -114,7 +114,10 @@ test('the person and lane filters narrow the display only', async () => {
   setSelect(selects[0], 'bob')
   await flush()
   const owners = [...view.container.querySelectorAll('.fleet-lanes tbody tr')].map((r) => r.getAttribute('data-owner'))
-  expect(owners).toEqual(['bob'])
+  // Two rows, both bob's: the LN fixture world gives bob a kimi lane and a zai
+  // lane (adopted 2026-08-25). The filter's contract is unchanged — every
+  // remaining row belongs to the selected person.
+  expect(owners).toEqual(['bob', 'bob'])
 
   setSelect(selects[0], '')
   setSelect(selects[1], 'local')
