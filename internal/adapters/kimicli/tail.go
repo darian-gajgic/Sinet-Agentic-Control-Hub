@@ -2,9 +2,12 @@ package kimicli
 
 import (
 	"bufio"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -48,10 +51,21 @@ func (s *session) drainUsage() {
 	s.usageMu.Lock()
 	defer s.usageMu.Unlock()
 
+	if s.wireRefused {
+		return
+	}
 	if s.wirePath == "" {
-		p, ok := findWireTranscript(s.low.home)
-		if !ok {
+		p, err := s.resolveTranscript()
+		if err != nil {
+			// A store this adapter cannot identify UNAMBIGUOUSLY is one it
+			// refuses to bill from. Silence here would be the failure mode
+			// that matters: a forged record billed as a real paid call.
+			s.wireRefused = true
+			s.a.warnf("kimicli: refusing to read usage for run %s: %v", s.req.RunID, err)
 			return
+		}
+		if p == "" {
+			return // the engine has not created its session yet
 		}
 		s.wirePath = p
 		s.mu.Lock()
@@ -94,17 +108,146 @@ func (s *session) drainUsage() {
 	}
 }
 
-// findWireTranscript resolves the run's own transcript inside its own home.
+// resolveTranscript pins the ONE transcript this run may be billed from.
 //
-// A per-RUN KIMI_CODE_HOME holds exactly one session directory, which is what
-// makes this a glob rather than a lookup: the session id is only reported in
-// the stream's LAST frame, and a run that fails before any model reply never
-// reports one at all, so keying on the id would lose the usage of exactly the
-// runs worth investigating.
-func findWireTranscript(home string) (string, bool) {
-	matches, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "agents", "main", "wire.jsonl"))
-	if err != nil || len(matches) == 0 {
+// It replaces a lexicographic glob over sessions/, and the difference is not
+// cosmetic. The engine's tools run inside the same filesystem namespace as its
+// data root, so the run's own work can CREATE directories under sessions/. A
+// glob taking the first match let a planted `sessions/aaa_planted/.../wire.jsonl`
+// become a real Usage event carrying an attacker-chosen ModelID — which is the
+// price-table key. The usage source was forgeable by the thing being metered.
+//
+// The pin has two independent legs and a cross-check:
+//
+//  1. On RESUME the engine-reported session id is already known (it is what
+//     `--session` names), so the path is computed and nothing is searched.
+//  2. On START the id is not known until the stream's LAST frame, so the path
+//     comes from the engine's OWN index, `session_index.jsonl`, filtered to
+//     records whose workDir is this run's cwd. The engine writes that record
+//     when it creates the session — before the first model call, and therefore
+//     before any tool could run and plant a rival. More than one match is
+//     REFUSED rather than resolved: an ambiguous store is one where something
+//     other than the engine has been writing, and the safe answer is to bill
+//     nothing and say so.
+//  3. When the stream finally reports its session id, confirmSession compares
+//     it with the pinned one and stops billing on a mismatch.
+func (s *session) resolveTranscript() (string, error) {
+	if id := s.pinnedSessionID(); id != "" {
+		p, ok := s.transcriptFor(id)
+		if !ok {
+			return "", nil
+		}
+		return p, nil
+	}
+	idx := filepath.Join(s.low.home, "session_index.jsonl")
+	raw, err := os.ReadFile(idx)
+	if err != nil {
+		return "", nil // not created yet; not an error
+	}
+	cwd := s.req.Cwd
+	var hits []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			SessionID  string `json:"sessionId"`
+			SessionDir string `json:"sessionDir"`
+			WorkDir    string `json:"workDir"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if rec.SessionID == "" || !sameDir(rec.WorkDir, cwd) {
+			continue
+		}
+		if !alreadyHave(hits, rec.SessionID) {
+			hits = append(hits, rec.SessionID)
+		}
+	}
+	switch len(hits) {
+	case 0:
+		return "", nil
+	case 1:
+		s.mu.Lock()
+		s.pinnedSession = hits[0]
+		s.mu.Unlock()
+		p, ok := s.transcriptFor(hits[0])
+		if !ok {
+			return "", nil
+		}
+		return p, nil
+	default:
+		return "", fmt.Errorf("session_index.jsonl names %d sessions for this run's cwd (%v) — a per-run engine "+
+			"home must hold exactly one, so something other than the engine has written to the store and no "+
+			"record in it can be trusted as a paid call", len(hits), hits)
+	}
+}
+
+// transcriptFor is the path a session id resolves to. The workDirKey bucket is
+// not enumerated: the id is unique within the home, so one glob segment is
+// enough and the LEAF is exact.
+func (s *session) transcriptFor(sessionID string) (string, bool) {
+	matches, err := filepath.Glob(filepath.Join(s.low.home, "sessions", "*", sessionID, "agents", "main", "wire.jsonl"))
+	if err != nil || len(matches) != 1 {
 		return "", false
 	}
 	return matches[0], true
+}
+
+func (s *session) pinnedSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pinnedSession != "" {
+		return s.pinnedSession
+	}
+	if s.low.resume {
+		return s.low.sessionID
+	}
+	return ""
+}
+
+// confirmSession is the cross-check: the engine's own reported id against the
+// one this run has been billing from. A mismatch means the pin was wrong, so
+// billing stops rather than continuing on a store that is not this session's.
+func (s *session) confirmSession(reported string) {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	s.mu.Lock()
+	pinned := s.pinnedSession
+	if pinned == "" {
+		s.pinnedSession = reported
+	}
+	s.mu.Unlock()
+	if pinned == "" || pinned == reported {
+		return
+	}
+	s.wireRefused = true
+	s.a.warnf("kimicli: run %s billed from session %q but the engine reported %q — refusing further usage from "+
+		"a store that is not this session's", s.req.RunID, pinned, reported)
+}
+
+func sameDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ra, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		ra = filepath.Clean(a)
+	}
+	rb, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		rb = filepath.Clean(b)
+	}
+	return ra == rb
+}
+
+func alreadyHave(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }

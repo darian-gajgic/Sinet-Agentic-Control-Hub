@@ -12,6 +12,7 @@ package kimicli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -221,9 +222,9 @@ func TestForbiddenFlagsNeverEmitted(t *testing.T) {
 		if rng.Intn(2) == 0 {
 			req.Worker.SystemPromptAppend = "appended"
 		}
-		if rng.Intn(2) == 0 {
-			req.Worker.PermissionMode = "acceptEdits"
-		}
+		// PermissionMode is REFUSED on this substrate (print mode fixes the
+		// policy to `auto`), so it cannot ride this generator; its refusal is
+		// pinned in TestUnsupportedWorkerFieldsRefusedByName.
 		l := mustLower(t, a, req)
 		argv := strings.Join(l.argv, " ")
 		for _, bad := range forbiddenFlags {
@@ -749,19 +750,35 @@ func TestOnePaidCallOneUsageEvent(t *testing.T) {
 
 // tailSession builds a session whose per-run home holds one session transcript,
 // laid out exactly as the engine lays it out.
+// tailSession builds a session whose per-run home holds one session transcript,
+// laid out exactly as the engine lays it out — INCLUDING session_index.jsonl,
+// which is how production identifies the one store it may bill from.
 func tailSession(t *testing.T, wire string) *session {
 	t.Helper()
-	home := t.TempDir()
-	dir := filepath.Join(home, "sessions", "wd_spike_abc123def456", "session_ln7", "agents", "main")
+	home, cwd := t.TempDir(), t.TempDir()
+	return tailSessionAt(t, home, cwd, "session_ln7", wire, true)
+}
+
+func tailSessionAt(t *testing.T, home, cwd, sessionID, wire string, index bool) *session {
+	t.Helper()
+	dir := filepath.Join(home, "sessions", "wd_spike_abc123def456", sessionID, "agents", "main")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir transcript dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(wire), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
+	if index {
+		rec := fmt.Sprintf(`{"sessionId":%q,"sessionDir":%q,"workDir":%q}`+"\n",
+			sessionID, filepath.Dir(filepath.Dir(dir)), cwd)
+		if err := os.WriteFile(filepath.Join(home, "session_index.jsonl"), []byte(rec), 0o600); err != nil {
+			t.Fatalf("write session index: %v", err)
+		}
+	}
 	return &session{
 		a:      &Adapter{Log: discardLogger()},
 		low:    &lowered{home: home},
+		req:    adapters.StartRequest{RunID: "run-tail", Cwd: cwd},
 		events: make(chan adapters.Event, 64),
 	}
 }
@@ -859,6 +876,28 @@ func tomlInt(body, key string) (int64, bool) {
 	return 0, false
 }
 
+// urlsIn extracts every http(s) URL literal from a source body.
+func urlsIn(body string) []string {
+	var out []string
+	for _, scheme := range []string{"http://", "https://"} {
+		rest := body
+		for {
+			i := strings.Index(rest, scheme)
+			if i < 0 {
+				break
+			}
+			rest = rest[i:]
+			end := strings.IndexAny(rest, "\"` +\n\t")
+			if end < 0 {
+				end = len(rest)
+			}
+			out = append(out, rest[:end])
+			rest = rest[end:]
+		}
+	}
+	return out
+}
+
 func randToken(rng *rand.Rand) string {
 	const alpha = "abcdefghijklmnopqrstuvwxyz._"
 	b := make([]byte, rng.Intn(10)+3)
@@ -897,22 +936,28 @@ func TestKimiCLIConformanceTiers(t *testing.T) {
 	if !strings.Contains(string(src), sanctioned) {
 		t.Errorf("the tier-R absence skip does not print %q", sanctioned)
 	}
-	// Tier R must terminate on loopback and NEVER on a provider. The suite
-	// asserting that about itself is cheap and catches the one edit that would
-	// make the whole tier cost money.
-	for _, banned := range []string{"api.kimi.com", "api.moonshot", "https://"} {
-		body := string(src)
-		if banned == "https://" {
-			// httptest serves http://127.0.0.1; any https URL here would be an
-			// endpoint reached off-host.
-			if strings.Contains(body, "https://") && !strings.Contains(body, "kimi-code@") {
-				t.Errorf("realengine_test.go names an https endpoint — every tier-R turn must terminate on loopback")
-			}
-			continue
+	// Tier R must terminate on loopback and NEVER on a provider. The first cut
+	// of this guard was DEAD: it excused every https:// occurrence whenever the
+	// file mentioned "kimi-code@", which it always does, so the check could
+	// never fail. It discriminates now — every http(s) URL in the file is
+	// extracted and each must be loopback.
+	for _, u := range urlsIn(string(src)) {
+		host := u
+		if i := strings.Index(host, "//"); i >= 0 {
+			host = host[i+2:]
 		}
-		if strings.Contains(body, banned) {
-			t.Errorf("realengine_test.go names %q — tier R is $0 and reaches no provider", banned)
+		if i := strings.IndexAny(host, "/:"); i >= 0 {
+			host = host[:i]
 		}
+		if host != "127.0.0.1" && host != "localhost" {
+			t.Errorf("realengine_test.go names the non-loopback endpoint %q — every tier-R turn must terminate on "+
+				"a loopback fake provider, and tier R is $0", u)
+		}
+	}
+	// …and the guard itself must not be vacuous: the file DOES carry loopback
+	// URLs, so a scan finding none means the extractor stopped working.
+	if len(urlsIn(string(src))) == 0 {
+		t.Error("the loopback scan found no URLs at all in realengine_test.go — it would pass whatever the file said")
 	}
 
 	// Tier L is gated on the EXISTING env name; no second one is minted.
@@ -928,8 +973,17 @@ func TestKimiCLIConformanceTiers(t *testing.T) {
 			t.Errorf("tier L mints a second opt-in env name %q — §10 ratifies exactly one", minted)
 		}
 	}
-	if !strings.Contains(string(live), "SANCTIONED SKIP") {
-		t.Error("tier L does not print a named skip")
+	// EVERY skip in the tier-L file uses the exact form: §10 admits ONE skip
+	// class, and a suite that invents its own wording for some of its gates
+	// makes a skipped tier indistinguishable from a passing one in a battery
+	// log. Counting them is what makes this a check rather than a spot-read.
+	total := strings.Count(string(live), "SANCTIONED SKIP")
+	exact := strings.Count(string(live), sanctioned)
+	if total == 0 {
+		t.Fatal("tier L prints no named skip at all")
+	}
+	if exact != total {
+		t.Errorf("%d of tier L's %d skips use the exact form %q; every one must", exact, total, sanctioned)
 	}
 	// And it is structurally unreachable at landing for a reason it states.
 	if !strings.Contains(string(live), "gray") {
@@ -959,7 +1013,14 @@ func TestResumeRebuildsTheWholeInvocation(t *testing.T) {
 	// Somebody edits the run's lowered config between the park and the resume.
 	// This is not a hypothetical: the home is a directory on disk that outlives
 	// the process precisely so a parked run can come back.
+	// The compiled config is written 0400, so tampering takes a deliberate
+	// chmod first — which is exactly the residual this substrate carries: the
+	// engine's data root must stay writable, so a tool inside the sandbox can
+	// still do this. The resume must therefore REBUILD rather than trust.
 	tampered := filepath.Join(start.home, configTOML)
+	if err := os.Chmod(tampered, 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
 	if err := os.WriteFile(tampered, []byte("telemetry = true\n"), 0o600); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}

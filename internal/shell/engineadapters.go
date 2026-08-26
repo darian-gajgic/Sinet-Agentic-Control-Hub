@@ -340,7 +340,7 @@ func newKimiCLIAdapter(stateDir string, lanes []opencode.LaneConfig, logger *slo
 		}
 		doc := lane
 		a.BaseURL = doc.BaseURL
-		a.ProviderType = kimiCLIProviderType
+		a.ProviderType = doc.ProviderType
 		a.Signals = func(bodyText string, httpStatus int) (json.RawMessage, bool) {
 			sig, ok := doc.ExtractSignal(bodyText, httpStatus)
 			if !ok {
@@ -361,17 +361,6 @@ func newKimiCLIAdapter(stateDir string, lanes []opencode.LaneConfig, logger *slo
 	}
 	return a
 }
-
-// kimiCLIProviderType is the KIMI_MODEL_PROVIDER_TYPE value paired with the
-// Kimi Code subscription endpoint.
-//
-// It is a structural constant rather than a document row because it names a
-// PROTOCOL SHAPE the adapter speaks, not a provider fact that moves: the
-// endpoint is documented as OpenAI-protocol at /coding/v1, and the value is one
-// of the engine's own fixed enum {kimi, anthropic, openai}. It is set
-// explicitly rather than left to the engine's default so a default change
-// cannot silently retarget the protocol.
-const kimiCLIProviderType = "openai"
 
 // laneCredInject builds the S11.5 spawn-time credential injector for one lane:
 // the broker resolves the lane document's engine-cred auth PROFILE and

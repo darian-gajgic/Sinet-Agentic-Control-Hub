@@ -74,6 +74,14 @@ type LaneConfig struct {
 	EndpointMarker string `json:"endpoint_marker"`
 	EndpointNote   string `json:"endpoint_note"`
 
+	// ProviderType is the protocol shape a non-opencode substrate must declare
+	// when it points an engine at BaseURL itself. Empty on lanes whose engine
+	// resolves the protocol from its own provider catalogue (every opencode
+	// lane). It is DATA for the same reason the endpoint is: a provider fact
+	// with a date, not a constant that goes stale invisibly.
+	ProviderType     string `json:"provider_type,omitempty"`
+	ProviderTypeNote string `json:"provider_type_note,omitempty"`
+
 	// RecordedEndpoints are dated facts about endpoints that exist and are
 	// deliberately NOT wired.
 	RecordedEndpoints []RecordedEndpoint `json:"recorded_endpoints"`

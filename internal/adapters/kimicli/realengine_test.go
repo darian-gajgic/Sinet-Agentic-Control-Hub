@@ -148,13 +148,15 @@ func runReal(t *testing.T, mutate func(a *Adapter, req *adapters.StartRequest)) 
 		t.Fatalf("materialize: %v", err)
 	}
 
-	// The sentinel rides the credential channel exactly as the broker would
-	// place it. It is a fake string against a loopback endpoint: no real key is
-	// read, and none exists on this path.
-	env := append(append([]string{}, l.env...), "KIMI_MODEL_API_KEY=sk-TIER-R-SENTINEL")
-	// A hard $0 belt: any attempt to leave loopback fails at connect rather
-	// than authenticating. Loopback itself is always proxy-bypassed.
-	env = append(env, "HTTP_PROXY=http://127.0.0.1:1", "HTTPS_PROXY=http://127.0.0.1:1", "ALL_PROXY=http://127.0.0.1:1")
+	// The lowered environment already carries this run's own KIMI_CODE_HOME and
+	// bounded HOME. The sentinel rides the credential channel exactly as the
+	// broker would place it, and the proxy belt makes leaving loopback fail at
+	// CONNECT rather than authenticate. The same three lines are what
+	// beltedEnv gives the execs that have no lowering to inherit from.
+	env := append(append([]string{}, l.env...),
+		"KIMI_MODEL_API_KEY=sk-TIER-R-SENTINEL",
+		"HTTP_PROXY=http://127.0.0.1:1", "HTTPS_PROXY=http://127.0.0.1:1", "ALL_PROXY=http://127.0.0.1:1")
+	assertBelted(t, env)
 
 	cmd := exec.Command(l.argv[0], l.argv[1:]...)
 	cmd.Dir = req.Cwd
@@ -189,7 +191,11 @@ func runReal(t *testing.T, mutate func(a *Adapter, req *adapters.StartRequest)) 
 
 func TestRealEngineVersionMatchesPin(t *testing.T) {
 	bin := realBinary(t)
-	out, err := exec.Command(bin, "--version").Output()
+	env, _ := beltedEnv(t, "http://127.0.0.1:1/v1")
+	cmd := exec.Command(bin, "--version")
+	cmd.Env = env
+	cmd.Dir = t.TempDir()
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("`%s --version`: %v", bin, err)
 	}
@@ -281,7 +287,7 @@ func TestRealEngineTurnOnLoopbackProvider(t *testing.T) {
 
 	// ★ The usage source: the run's own transcript carries one record per paid
 	// call, and it decomposes the way S02.4(a) needs.
-	wire, ok := findWireTranscript(r.l.home)
+	wire, ok := soleTranscript(r.l.home)
 	if !ok {
 		t.Fatal("the run wrote no session transcript — this substrate's ONLY usage source is that file, so without " +
 			"it the lane cannot write a D7 checkpoint at all")
@@ -358,6 +364,47 @@ func TestRealEngineTurnOnLoopbackProvider(t *testing.T) {
 
 // ── the argv the engine ACCEPTS, and the ones it refuses ─────────────────────
 
+// beltedEnv is THE environment every real-engine exec in this package runs
+// under. It exists because one exec here originally inherited the ambient
+// environment: no KIMI_CODE_HOME, so the real engine read and wrote the
+// OPERATOR'S OWN ~/.kimi-code — which holds their live credentials — with
+// auto-update enabled and no proxy belt. A test suite that touches the
+// operator's live data root is a worse defect than anything it was asserting.
+//
+// Centralized deliberately: a beltless exec should be impossible to write by
+// forgetting something, so there is exactly one place the belt lives.
+func beltedEnv(t *testing.T, baseURL string) (env []string, home string) {
+	t.Helper()
+	root := t.TempDir()
+	home = filepath.Join(root, "home")
+	codeHome := filepath.Join(root, "kimi-code")
+	for _, d := range []string{home, codeHome} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		// Bounded HOME and a per-test data root: never the operator's.
+		"HOME=" + home,
+		"KIMI_CODE_HOME=" + codeHome,
+		// The pin does not get to install its own successor mid-test.
+		"KIMI_CODE_NO_AUTO_UPDATE=1",
+		"KIMI_DISABLE_TELEMETRY=1",
+		"KIMI_CODE_BUILTIN_PRODUCT_SKILLS=0",
+		"KIMI_MODEL_NAME=k3",
+		"KIMI_MODEL_API_KEY=sk-TIER-R-SENTINEL",
+		"KIMI_MODEL_BASE_URL=" + baseURL,
+		"KIMI_MODEL_PROVIDER_TYPE=openai",
+		// $0 belt: any attempt to leave loopback fails at CONNECT rather than
+		// authenticating. Loopback is always proxy-bypassed.
+		"HTTP_PROXY=http://127.0.0.1:1",
+		"HTTPS_PROXY=http://127.0.0.1:1",
+		"ALL_PROXY=http://127.0.0.1:1",
+		"NO_COLOR=1", "CI=1",
+	}, home
+}
+
 // TestRealEngineRejectsForbiddenFlagCombination asserts BEHAVIOR, not help text
 // (S03.3 rule 4). It also pins the doc contradiction the spike settled: the
 // command reference says `--prompt` cannot be combined with `--yolo`, while a
@@ -365,25 +412,58 @@ func TestRealEngineTurnOnLoopbackProvider(t *testing.T) {
 func TestRealEngineRejectsForbiddenFlagCombination(t *testing.T) {
 	bin := realBinary(t)
 	_, baseURL := newFakeProvider(t)
-	home := t.TempDir()
+	env, _ := beltedEnv(t, baseURL)
 	cmd := exec.Command(bin, "--yolo", "-p", "go", "--output-format", "stream-json")
 	cmd.Dir = t.TempDir()
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + home,
-		"KIMI_CODE_HOME=" + filepath.Join(home, "kimi-code"),
-		"KIMI_CODE_NO_AUTO_UPDATE=1",
-		"KIMI_MODEL_NAME=k3",
-		"KIMI_MODEL_API_KEY=sk-TIER-R-SENTINEL",
-		"KIMI_MODEL_BASE_URL=" + baseURL,
-		"KIMI_MODEL_PROVIDER_TYPE=openai",
-		"NO_COLOR=1", "CI=1",
-	}
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Errorf("the engine ACCEPTED `--yolo -p`, which the command reference says it refuses. The lowering never "+
 			"emits it either way, but this suite exists to notice when the engine's behavior moves:\n%s", out)
 	}
+}
+
+// assertBelted is the guard that makes F4 non-recurrable: every real-engine
+// exec must carry its own data root, a bounded HOME, the auto-update disable
+// and the proxy belt. A test that forgets one reaches the operator's live
+// ~/.kimi-code, and that must fail here rather than in their credentials.
+func assertBelted(t *testing.T, env []string) {
+	t.Helper()
+	real, _ := os.UserHomeDir()
+	get := func(name string) string {
+		for _, kv := range env {
+			if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+				return v
+			}
+		}
+		return ""
+	}
+	for _, name := range []string{"KIMI_CODE_HOME", "HOME"} {
+		v := get(name)
+		if v == "" {
+			t.Fatalf("real-engine exec has no %s — it would read and write the operator's own data root", name)
+		}
+		if real != "" && (v == real || strings.HasPrefix(v, real+"/.kimi-code")) {
+			t.Fatalf("real-engine exec points %s at the operator's own home (%q)", name, v)
+		}
+	}
+	for _, name := range []string{"KIMI_CODE_NO_AUTO_UPDATE", "KIMI_DISABLE_TELEMETRY", "HTTPS_PROXY"} {
+		if get(name) == "" {
+			t.Fatalf("real-engine exec has no %s", name)
+		}
+	}
+}
+
+// soleTranscript finds the one transcript a completed tier-R run produced. It
+// is a TEST helper: production pins the path by session identity (see
+// resolveTranscript), and this glob deliberately does not, so that a run which
+// wrote its transcript somewhere unexpected fails loudly here.
+func soleTranscript(home string) (string, bool) {
+	matches, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "agents", "main", "wire.jsonl"))
+	if err != nil || len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
 }
 
 // asExitError is errors.As without importing errors for one call.

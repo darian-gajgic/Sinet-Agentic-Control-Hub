@@ -298,6 +298,14 @@ type PlanBudget struct {
 	PeriodHours float64
 	Declared    bool
 
+	// Lane is the lane the row was DECLARED on, which is not always the lane a
+	// reading is taken for: a pooled allowance is declared once against the
+	// pool's canonical lane and read by every member. It is on the value so the
+	// reading can refuse a row PLANTED on a non-canonical lane while still
+	// applying the canonical one — a distinction the requesting lane alone
+	// cannot make.
+	Lane string
+
 	// SeededFrom names WHICH allowance window this budget denominates, and
 	// Fraction records what share of that window's published allowance a
 	// proposal took.
@@ -414,6 +422,20 @@ func PlanDocFor(lane string) (PlanDoc, bool) {
 		}
 	}
 	return PlanDoc{}, false
+}
+
+// PoolBudgetLane maps a lane to the lane its plan budget is DECLARED on.
+//
+// For an unpooled lane that is itself. For a pooled one it is the pool's
+// canonical lane, because one allowance carries one budget row: reading a
+// sibling lane's own key would find nothing and report a lane with no budget as
+// a lane with no consumption to bound.
+func PoolBudgetLane(lane string) string {
+	doc, ok := PlanDocFor(lane)
+	if !ok || doc.Pool == "" {
+		return lane
+	}
+	return doc.Lane
 }
 
 // PlanPoolRefusal reports why a plan budget may not be declared on a lane,
@@ -786,7 +808,7 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		// refusals are DEFENCE IN DEPTH: the store and the verb refuse the same
 		// rows, and this leg is what stops a row inserted by any other means
 		// from steering dispatch (drain r1 D1/D6).
-		switch refusal, poolRefusal := PlanBudgetWindowRefusal(doc, budget.SeededFrom), PlanPoolRefusal(doc, lane); {
+		switch refusal, poolRefusal := PlanBudgetWindowRefusal(doc, budget.SeededFrom), PlanPoolRefusal(doc, budget.Lane); {
 		case poolRefusal != "":
 			// A row planted on a pooled lane other than the canonical one, by
 			// whatever route. Refusing it only at the write would leave the

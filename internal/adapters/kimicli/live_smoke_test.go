@@ -63,14 +63,14 @@ func TestLiveSmoke(t *testing.T) {
 	}
 	profiles, err := broker.PlacedEngineCreds(broker.StoreRoot(stateDir), who)
 	if err != nil || !profiles[lane.Credential.Profile] {
-		t.Skipf("SANCTIONED SKIP: lane %q is not commissioned on this host — no engine-cred is placed under profile "+
+		t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): lane %q is not commissioned on this host — no engine-cred is placed under profile "+
 			"%q for %q, so there is nothing to spend and nothing to spend it with",
 			lane.Lane, lane.Credential.Profile, who)
 	}
 
 	// Gate 4 — the Gate-A posture. Reaching here means the first three opened,
 	// which on this lane is exactly the situation that needs a person.
-	t.Skipf("SANCTIONED SKIP: lane %q carries a RECORDED GRAY-ZONE Gate-A posture (the Kimi Code Community "+
+	t.Skipf("SANCTIONED SKIP (CONVENTIONS §10): lane %q carries a RECORDED GRAY-ZONE Gate-A posture (the Kimi Code Community "+
 		"Guidelines' interactive-only clause; operator PROCEED ruling 2026-08-26, recorded in "+
 		"P3/measurements/2026-08-24-kimi-lane-gate-audit.md). The first live call on this membership through "+
 		"this path is the operator's own door run, made deliberately — not a test's, and not one a battery "+

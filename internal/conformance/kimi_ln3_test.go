@@ -21,11 +21,28 @@ func TestKimiLaneRowRegistered(t *testing.T) {
 	rows := conformance.SeedRows()
 	var row conformance.Row
 	kimiRows := 0
-	// Scoped to the `kimi` LANE's own row. A substring match on "kimi" also
-	// catches the kimi-cli substrate and lane rows added at P3-LN-7 — a
-	// DIFFERENT lane on a different engine, which this test says nothing about.
-	// The one-row invariant is unchanged; what moved is which ids it covers.
+	// The `kimi` LANE has exactly one row, AND no kimi-named row exists that
+	// this test does not know about.
+	//
+	// The invariant is narrowed rather than dropped (restored at drain r1 F14
+	// after being deleted outright): P3-LN-7 added two rows for a DIFFERENT
+	// lane on a different engine, so the allowlist names them — and anything
+	// else carrying "kimi" is still an error, which is the half that was
+	// protecting against a stray row landing unnoticed.
+	knownKimiRows := map[string]bool{
+		"adapter-kimi":     true, // this lane
+		"adapter-kimi-cli": true, // the kimi-cli SUBSTRATE (P3-LN-7)
+		"lane-kimi-cli":    true, // the kimi-cli LANE (P3-LN-7)
+	}
 	for _, r := range rows {
+		if !strings.Contains(r.ID, "kimi") {
+			continue
+		}
+		if !knownKimiRows[r.ID] {
+			t.Errorf("unexpected kimi-named row %q — every kimi row belongs to a named lane, and an unlisted one "+
+				"is either a stray or a lane nobody registered", r.ID)
+			continue
+		}
 		if r.ID != "adapter-kimi" {
 			continue
 		}

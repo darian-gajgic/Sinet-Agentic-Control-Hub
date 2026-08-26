@@ -22,14 +22,42 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
-// kimiCaptureDates are the dated captures this document is sourced from. It
-// began as one (the 2026-08-24 Gate A-C audit) and gained a second at P3-LN-7
-// (the 2026-08-26 re-read that added seven signal rows and regraded two model
-// ids). A row must carry a date from a REAL capture — the point of the pin is
-// that no row is dated by hand.
-var kimiCaptureDates = map[string]bool{"2026-08-24": true, "2026-08-26": true}
+// The document is sourced from TWO dated captures — the 2026-08-24 Gate A-C
+// audit and the 2026-08-26 re-read at P3-LN-7 — and every row is pinned to the
+// one that actually established it. Per-ROW rather than per-SET: a row free to
+// carry either date can be re-dated to a capture that never looked at it, which
+// reads as fresh verification and is the exact drift a dated document exists to
+// prevent.
+var kimiModelDates = map[string]string{
+	"k3":                        "2026-08-24",
+	"k3-256k":                   "2026-08-26", // regraded against the vendor's models page
+	"kimi-for-coding":           "2026-08-26", // regraded, same capture
+	"kimi-for-coding-highspeed": "2026-08-24",
+}
 
-var kimiCaptureDateList = []string{"2026-08-24", "2026-08-26"}
+var kimiSignalDates = map[string]string{
+	// The eleven rows the 2026-08-24 error-reference read produced.
+	"engine is currently overloaded":                    "2026-08-24",
+	"receiving too many requests":                       "2026-08-24",
+	"reached your usage limit for this period":          "2026-08-24",
+	"monthly usage limit for this billing cycle":        "2026-08-24",
+	"reached your usage limit for this billing cycle":   "2026-08-24",
+	"Access terminated":                                 "2026-08-24",
+	"does not have access to":                           "2026-08-24",
+	"supports only kimi-k3 up to 256K context":          "2026-08-24",
+	"API Key appears to be invalid or may have expired": "2026-08-24",
+	"Invalid Authentication":                            "2026-08-24",
+	"method not found":                                  "2026-08-24",
+	"Not found the model":                               "2026-08-24",
+	// The seven added by the 2026-08-26 re-read of the same page.
+	"reached your 5-hour usage limit":           "2026-08-26",
+	"reached your weekly (7-day) usage limit":   "2026-08-26",
+	"credit balance is insufficient":            "2026-08-26",
+	"concurrent request limit":                  "2026-08-26",
+	"unable to verify your membership benefits": "2026-08-26",
+	"exceeds limit 2097152":                     "2026-08-26",
+	"exceeded model token limit":                "2026-08-26",
+}
 
 const (
 	kimiProviderID   = "kimi-for-coding"
@@ -124,12 +152,15 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 		if _, ok := wantModels[m.ID]; ok {
 			wantModels[m.ID] = true
 		}
-		// The document is now sourced from TWO dated captures — the original
-		// 2026-08-24 audit and the 2026-08-26 re-read that regraded two model
-		// ids against the vendor's own models page. Every row still carries a
-		// date from a real capture; what moved is that there is more than one.
-		if !kimiCaptureDates[m.VerifiedOn] {
-			t.Errorf("model %q verified_on = %q, want one of the capture dates %v", m.ID, m.VerifiedOn, kimiCaptureDateList)
+		// EXACT per-row dates, restored at drain r1 F15 after being relaxed to
+		// set-membership. Set-membership let ANY row carry EITHER date, which
+		// is precisely the drift a dated document exists to prevent: a row
+		// re-dated to a capture that never looked at it reads as freshly
+		// verified. Each id names the capture that actually established it.
+		if want := kimiModelDates[m.ID]; want == "" {
+			t.Errorf("model %q is not in the dated-row map — a new model id must name the capture that verified it", m.ID)
+		} else if m.VerifiedOn != want {
+			t.Errorf("model %q verified_on = %q, want %q", m.ID, m.VerifiedOn, want)
 		}
 		if m.Billing != BillingFlat {
 			t.Errorf("model %q billing = %q, want flat — the membership is a flat subscription", m.ID, m.Billing)
@@ -319,8 +350,14 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 		t.Fatal("the kimi document declares no signal rows")
 	}
 	for _, row := range seed.Signals {
-		if !kimiCaptureDates[row.VerifiedOn] {
-			t.Errorf("signal row %q verified_on = %q, want one of the capture dates %v", row.MessageContains, row.VerifiedOn, kimiCaptureDateList)
+		// EXACT per-row dates (drain r1 F15). The eleven rows the 2026-08-24
+		// audit produced still say so; the seven added by the 2026-08-26
+		// re-read say that. A row that could claim either date could be
+		// re-dated silently.
+		if want := kimiSignalDates[row.MessageContains]; want == "" {
+			t.Errorf("signal row %q is not in the dated-row map — a new row must name the capture that produced it", row.MessageContains)
+		} else if row.VerifiedOn != want {
+			t.Errorf("signal row %q verified_on = %q, want %q", row.MessageContains, row.VerifiedOn, want)
 		}
 		if row.MessageContains == "" {
 			t.Errorf("signal row on HTTP %d carries no message_contains — this lane's taxonomy is (status x message), and a status-only row cannot key it", row.HTTPStatus)

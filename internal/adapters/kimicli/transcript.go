@@ -79,9 +79,16 @@ type transcript struct {
 	// lane under a fictional model name.
 	model string
 
-	// seen counts the usage records already emitted, which is both the message
-	// index and the replay guard: the file is tailed, and a re-read that
-	// re-emitted would re-bill a call that was already checkpointed.
+	// read counts usage records seen IN THE FILE; seen counts those actually
+	// emitted. They differ only on a resumed leg.
+	//
+	// skip is what makes a resume safe. The transcript is APPEND-ONLY and a
+	// resumed run re-opens the SAME file, so a fresh tail would re-read — and
+	// therefore re-bill — every call the previous leg already checkpointed. The
+	// park record carries how many records were consumed; this counter drops
+	// exactly those and emits only what is genuinely new.
+	read int64
+	skip int64
 	seen int64
 
 	unknownLines int
@@ -89,6 +96,11 @@ type transcript struct {
 
 func newTranscript(logf func(format string, args ...any)) *transcript {
 	return &transcript{logf: logf}
+}
+
+// newTranscriptFrom resumes billing after the records a previous leg consumed.
+func newTranscriptFrom(logf func(format string, args ...any), consumed int64) *transcript {
+	return &transcript{logf: logf, skip: consumed, read: 0, seen: consumed}
 }
 
 // feed consumes one transcript line and returns the Usage events it completes.
@@ -110,7 +122,14 @@ func (t *transcript) feed(line []byte) []adapters.Event {
 		if wl.Usage == nil {
 			return nil
 		}
-		t.seen++
+		t.read++
+		if t.read <= t.skip {
+			// Already billed by a previous leg of this run. Dropping it here is
+			// the whole of the resume guard: the alternative is a second
+			// checkpoint, a second ledger row and a second charge for one call.
+			return nil
+		}
+		t.seen = t.read
 		return []adapters.Event{t.usageEvent(wl)}
 	default:
 		// Every other record type is engine-internal narration. It is skipped

@@ -149,14 +149,26 @@ func TestA12AmendmentLandedInBothCopies(t *testing.T) {
 	if !strings.Contains(s03, "A12") {
 		t.Error("S03 carries no A12 annotation")
 	}
-	roadmap := sectionAround(s03, "### S03.6 Lane roadmap & onboarding", 6)
-	if !strings.Contains(roadmap, "kimi-cli") {
-		t.Errorf("the S03.6 lane roadmap does not name the kimi-cli lane: %q", roadmap)
+	// Scoped to the ACTUAL marker sites rather than file-wide substrings: a
+	// file-wide match would be satisfied by the word appearing anywhere,
+	// including in a sentence about something else.
+	substrates := lineContaining(s03, "v0 ships")
+	if !strings.Contains(substrates, "three substrates") || !strings.Contains(substrates, "A12") {
+		t.Errorf("the S03.2 substrate-count sentence is not the annotated marker site: %q", substrates)
 	}
+	roadmap := sectionAround(s03, "### S03.6 Lane roadmap & onboarding", 6)
+	if !strings.Contains(roadmap, "kimi-cli") || !strings.Contains(roadmap, "A12") {
+		t.Errorf("the S03.6 lane roadmap does not name the kimi-cli lane under A12: %q", roadmap)
+	}
+	// The S16 leg is the ROW, found by its lane key, not the file.
 	s16 := readSpec(t, "Spec/drafts/S16-adoption-manifest.md")
-	for _, needle := range []string{"kimi-cli", "0.38.0", "2026-08-26"} {
-		if !strings.Contains(s16, needle) {
-			t.Errorf("the S16 lane-onboarding manifest does not carry %q — A12 claims a second row there", needle)
+	row := lineContaining(s16, "| `kimi-cli` |")
+	if row == "" {
+		t.Fatal("the S16 lane-onboarding manifest carries no `kimi-cli` row — A12 claims a second row there")
+	}
+	for _, needle := range []string{"0.38.0", "2026-08-26", "kimi-cli"} {
+		if !strings.Contains(row, needle) {
+			t.Errorf("the S16 kimi-cli onboarding row does not carry %q: %q", needle, row)
 		}
 	}
 

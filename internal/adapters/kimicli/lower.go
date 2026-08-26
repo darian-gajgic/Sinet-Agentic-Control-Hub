@@ -108,6 +108,19 @@ var (
 
 	// ErrCwdNotClean reports project-scoped engine config in the run cwd.
 	ErrCwdNotClean = errors.New("kimicli: the run cwd carries project-scoped engine configuration")
+
+	// ErrWorkerFieldUnsupported reports a CompiledWorker field this substrate
+	// cannot honor. Silently dropping one is the same class as silently
+	// approving a gated call: the caller asked for a guarantee and got none,
+	// with nothing anywhere saying so (§12 — the only default is consent).
+	ErrWorkerFieldUnsupported = errors.New("kimicli: compiled-worker field unsupported on this substrate")
+
+	// ErrTemplateReference reports a template placeholder in operator-supplied
+	// text that the engine would interpolate.
+	ErrTemplateReference = errors.New("kimicli: template reference in supplied text")
+
+	// ErrToolName reports a tool name that cannot be written as safe TOML.
+	ErrToolName = errors.New("kimicli: unsafe tool name")
 )
 
 // nativeSpawnTools is the engine's native subagent family, verbatim from the
@@ -147,10 +160,20 @@ var (
 // S11.7 P-T09-1 and the S03.5 cwd channel arriving through one file.
 var cwdTakeoverPaths = []string{
 	".kimi-code/local.toml",
-	".kimi-code/agents/agent.md",
-	".agents/agents/agent.md",
 	".kimi-code/AGENTS.md",
+	".kimi-code/mcp.json",
 	"AGENTS.md",
+}
+
+// cwdTakeoverGlobs are the agent directories, scanned as GLOBS rather than by
+// filename. The takeover file need not be called `agent.md`: the vendor's rule
+// is about any project-scoped agent definition in these directories, and one
+// carrying `override: true` replaces the default main agent's whole system
+// prompt. Naming a single file would have closed exactly one spelling of the
+// channel and left the rest open.
+var cwdTakeoverGlobs = []string{
+	".kimi-code/agents/*",
+	".agents/agents/*",
 }
 
 // lowered is one compiled invocation: engine lowering per S03.5 — the compiled
@@ -177,6 +200,10 @@ type lowered struct {
 	fingerprint string
 	resume      bool
 	sessionID   string
+	// resumeConsumed is how many transcript usage records earlier legs of this
+	// run already billed. The transcript is append-only and a resume re-opens
+	// the same file, so without it every resumed leg re-bills the whole run.
+	resumeConsumed int64
 }
 
 // resumeSpec augments lowering for the resume path (S03.4: full invocation
@@ -184,6 +211,7 @@ type lowered struct {
 type resumeSpec struct {
 	sessionID    string
 	continuation string
+	consumed     int64
 }
 
 // lower compiles a StartRequest to the exact engine invocation.
@@ -201,6 +229,9 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec) (*lowered, e
 		return nil, fmt.Errorf("kimicli: adapter without an engine root (the per-run KIMI_CODE_HOME has nowhere to live)")
 	case a.BaseURL == "":
 		return nil, fmt.Errorf("kimicli: adapter without a base URL — it is the lane document's own value and never a Go constant (§62)")
+	case a.ProviderType == "":
+		return nil, fmt.Errorf("kimicli: adapter without a provider type — it is the lane document's own value (§62), " +
+			"and leaving it to the engine's default lets a default change silently retarget the protocol")
 	}
 
 	// The gate refusal comes FIRST, before anything is computed for an
@@ -219,6 +250,47 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec) (*lowered, e
 		if err := refuseNativeSpawn(tool, "tool allowlist"); err != nil {
 			return nil, err
 		}
+		if !safeToolName(tool) {
+			return nil, fmt.Errorf("%w: %q is not a name this lowering can write as TOML — an unparseable [tools] "+
+				"section is IGNORED by the engine, which restores every tool including the native-spawn family, "+
+				"so a name that breaks the syntax silently removes the only structural brake (S03.5)", ErrToolName, tool)
+		}
+	}
+	// Compiled-worker fields this substrate cannot honor. Each is refused BY
+	// NAME rather than dropped: the caller compiled a guarantee into the worker
+	// and a silent drop hands them the opposite with nothing saying so.
+	for _, unsupported := range []struct {
+		set    bool
+		field  string
+		reason string
+	}{
+		{req.Worker.Recitation, "Recitation",
+			"the S05.3 delivery valve rides a PostToolUse hook, and hooks are FAIL-OPEN on this engine — a valve that " +
+				"silently does not deliver is worse than none"},
+		{len(req.Worker.AgentsJSON) > 0, "AgentsJSON",
+			"this engine has no inline agent-definition channel; --agent-file would need a platform-owned file and an " +
+				"agent format this packet never captured"},
+		{req.Worker.AgentName != "", "AgentName",
+			"agent selection by name has no meaning without an agent definition this substrate can supply"},
+		{req.Worker.SessionStartContextPath != "", "SessionStartContextPath",
+			"the S05.4 re-injection hook exists on this engine (SessionStart) but is NOT wired by this packet, so a " +
+				"path supplied here would re-inject nothing"},
+		{req.Worker.PermissionMode != "", "PermissionMode",
+			"print mode fixes the permission policy to `auto` and REFUSES --yolo/--auto outright, so a requested mode " +
+				"cannot be honored and pretending otherwise would misreport the run's posture"},
+	} {
+		if unsupported.set {
+			return nil, fmt.Errorf("%w: %s — %s", ErrWorkerFieldUnsupported, unsupported.field, unsupported.reason)
+		}
+	}
+	// A template reference in operator-supplied text is refused, because
+	// SYSTEM.md is INTERPOLATED by the engine: an appended `${agents_md}` would
+	// re-open all three AGENTS.md ingestion legs that omitting it closes (R0-Q6),
+	// turning the one knob on that channel into its opposite.
+	if ref, found := templateReference(req.Worker.SystemPromptAppend); found {
+		return nil, fmt.Errorf("%w: the appended system prompt carries %s, which this engine interpolates when it "+
+			"renders SYSTEM.md — and %s in particular re-opens every AGENTS.md ingestion leg the lowering closes "+
+			"(S03.5 instruction-file channel)", ErrTemplateReference, ref, "${agents_md}")
 	}
 
 	runRoot := filepath.Join(a.Root, req.UserID, req.RunID)
@@ -252,7 +324,7 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec) (*lowered, e
 				"be refused by the CLI or do nothing (S03.4)")
 		}
 		prompt = res.continuation
-		l.resume, l.sessionID = true, res.sessionID
+		l.resume, l.sessionID, l.resumeConsumed = true, res.sessionID, res.consumed
 	}
 	if prompt == "" {
 		return nil, fmt.Errorf("kimicli: start without a prompt (`-p` takes the user turn as a single argv string)")
@@ -284,7 +356,7 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec) (*lowered, e
 	}
 	l.argv = argv
 	l.env = a.loweredEnv(req, l)
-	if err := assertBounded(cfg, l.env); err != nil {
+	if err := assertBounded(cfg, l.env, req.Worker.ToolAllowlist); err != nil {
 		return nil, err
 	}
 	l.fingerprint = fingerprint(cfg, req)
@@ -311,6 +383,19 @@ func refuseNativeSpawn(tool, where string) error {
 			"of what they would get", ErrNativeSpawnTool, where)
 	}
 	return nil
+}
+
+// templateReference reports a ${...} placeholder in supplied text.
+func templateReference(text string) (string, bool) {
+	i := strings.Index(text, "${")
+	if i < 0 {
+		return "", false
+	}
+	j := strings.Index(text[i:], "}")
+	if j < 0 {
+		return "${…", true
+	}
+	return text[i : i+j+1], true
 }
 
 // loweredConfig builds the ONE config.toml this engine sees.
@@ -423,7 +508,7 @@ Outer:
 		"KIMI_SUBAGENT_TIMEOUT_MS="+strconv.Itoa(subagentTimeoutMS),
 		"KIMI_MODEL_NAME="+req.Model,
 		"KIMI_MODEL_BASE_URL="+a.BaseURL,
-		"KIMI_MODEL_PROVIDER_TYPE="+a.providerType(),
+		"KIMI_MODEL_PROVIDER_TYPE="+a.ProviderType,
 		"NO_COLOR=1",
 		"CI=1",
 	)
@@ -433,7 +518,49 @@ Outer:
 // compiled body rather than trusting the builder, because the builder is the
 // thing most likely to be edited by somebody who does not know that a key at
 // the wrong level is silently ignored here.
-func assertBounded(cfg string, env []string) error {
+func assertBounded(cfg string, env []string, allowlist []string) error {
+	// The [tools] section is READ BACK rather than trusted, because this engine
+	// IGNORES a section it cannot parse — so an appended-but-unparseable
+	// allowlist would leave every tool enabled while the builder looked correct.
+	disabled, ok := parsedToolList(cfg, "disabled")
+	if !ok {
+		return fmt.Errorf("%w: the lowered [tools] disabled list does not parse back out of the compiled body", ErrUnbounded)
+	}
+	for _, want := range []string{"Agent", "AgentSwarm"} {
+		if !containsFold(disabled, want) {
+			return fmt.Errorf("%w: the compiled [tools] disabled list is %v, which does not disable %q — the "+
+				"native-spawn family must be closed on every invocation (S03.5)", ErrUnbounded, disabled, want)
+		}
+	}
+	if len(allowlist) > 0 {
+		enabled, ok := parsedToolList(cfg, "enabled")
+		if !ok {
+			return fmt.Errorf("%w: an allowlist was supplied but the lowered [tools] enabled list does not parse "+
+				"back out of the compiled body", ErrUnbounded)
+		}
+		if len(enabled) != len(allowlist) {
+			return fmt.Errorf("%w: the compiled allowlist is %v, want exactly %v", ErrUnbounded, enabled, allowlist)
+		}
+		for i := range allowlist {
+			if enabled[i] != allowlist[i] {
+				return fmt.Errorf("%w: the compiled allowlist is %v, want exactly %v", ErrUnbounded, enabled, allowlist)
+			}
+		}
+	}
+	return assertCeilings(cfg, env)
+}
+
+// assertCeilings is the boundedness half of the pre-spawn gate.
+//
+// A13's subagent/swarm ceilings, stated honestly: `KIMI_SUBAGENT_TIMEOUT_MS` is
+// real and set. There is NO swarm-timeout key at this pin — neither a
+// `[swarm]` config section nor a `KIMI_CODE_SWARM_TIMEOUT_MS` env var exists in
+// the shipped bundle, so none is written; inventing one would be a fabricated
+// knob that reads as a guarantee. Swarm work is bounded instead by the controls
+// that do exist: `AgentSwarm` is removed from the toolset pre-inference, and
+// the run as a whole is bounded by the [background] and [loop_control] ceilings
+// below.
+func assertCeilings(cfg string, env []string) error {
 	if !strings.Contains(cfg, "[background]") || !strings.Contains(cfg, "[loop_control]") {
 		return fmt.Errorf("%w: the lowered config is missing a ceiling table", ErrUnbounded)
 	}
@@ -462,6 +589,21 @@ func (a *Adapter) assertCleanCwd(cwd string) error {
 				"agent's whole system prompt (S03.5 cwd channel, S11.7 P-T09-1)", ErrCwdNotClean, rel)
 		}
 	}
+	for _, pattern := range cwdTakeoverGlobs {
+		matches, err := filepath.Glob(filepath.Join(cwd, pattern))
+		if err != nil {
+			return fmt.Errorf("%w: scanning %s: %w", ErrCwdNotClean, pattern, err)
+		}
+		if len(matches) > 0 {
+			rel, err := filepath.Rel(cwd, matches[0])
+			if err != nil {
+				rel = matches[0]
+			}
+			return fmt.Errorf("%w: %s exists in the run cwd (matched by %s, %d file(s) in total) — a project-scoped "+
+				"agent definition carrying override:true replaces the main agent's whole system prompt "+
+				"(S03.5, S11.7 P-T09-1)", ErrCwdNotClean, rel, pattern, len(matches))
+		}
+	}
 	return nil
 }
 
@@ -480,7 +622,17 @@ func (a *Adapter) materialize(l *lowered) error {
 		}
 	}
 	for name, body := range l.files {
-		if err := os.WriteFile(filepath.Join(l.home, name), []byte(body), 0o600); err != nil {
+		path := filepath.Join(l.home, name)
+		// Written 0400: the compiled config is not the engine's to rewrite
+		// (S11.7 P-T09-1). It is a PARTIAL mitigation and the code says so —
+		// the engine never rewrites these (measured: a run with all three at
+		// 0400 exits 0), but its data root must stay writable, so a tool
+		// inside the sandbox can still chmod them. The residual is recorded on
+		// the lane document and in CONVENTIONS §67.
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("kimicli: replace %s: %w", name, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o400); err != nil {
 			return fmt.Errorf("kimicli: write %s: %w", name, err)
 		}
 	}
@@ -493,13 +645,87 @@ func (a *Adapter) materialize(l *lowered) error {
 	return nil
 }
 
-// tomlStrings renders a TOML array of strings.
+func containsFold(ss []string, want string) bool {
+	for _, s := range ss {
+		if strings.EqualFold(s, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// safeToolName is the character class a tool name must fall in.
+//
+// It is a REFUSAL rather than an escape, and the reason is the engine's failure
+// mode: an unparseable `[tools]` section is IGNORED with a warning, and ignoring
+// it restores all 26 tools including the native-spawn family — so a name that
+// breaks the TOML silently destroys the only structural brake this substrate
+// has. Refusing is the one response that cannot fail open.
+func safeToolName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.':
+		case r == '*' && strings.HasPrefix(name, "mcp__"):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// tomlStrings renders a TOML array of strings. Every element has already been
+// through safeToolName, so strconv.Quote cannot produce anything the engine's
+// parser rejects.
 func tomlStrings(ss []string) string {
 	quoted := make([]string, 0, len(ss))
 	for _, s := range ss {
 		quoted = append(quoted, strconv.Quote(s))
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// parsedToolList reads a `[tools]` key back out of the compiled body. It exists
+// so assertBounded can verify what was WRITTEN rather than what was intended:
+// this engine ignores a section it cannot parse, so "the builder appended it"
+// is not evidence that the engine will see it.
+func parsedToolList(body, key string) ([]string, bool) {
+	inTools := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") && !strings.Contains(t, "=") {
+			inTools = t == "[tools]"
+			continue
+		}
+		if !inTools {
+			continue
+		}
+		k, v, ok := strings.Cut(t, "=")
+		if !ok || strings.TrimSpace(k) != key {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if !strings.HasPrefix(v, "[") || !strings.HasSuffix(v, "]") {
+			return nil, false
+		}
+		var out []string
+		for _, part := range strings.Split(strings.TrimSuffix(strings.TrimPrefix(v, "["), "]"), ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			unq, err := strconv.Unquote(part)
+			if err != nil {
+				return nil, false
+			}
+			out = append(out, unq)
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 // fingerprint is the S02.4(e) invocation-config fingerprint, taken over the

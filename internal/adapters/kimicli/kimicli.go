@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -74,13 +76,6 @@ func (a *Adapter) binary() string {
 	return DefaultBinary
 }
 
-func (a *Adapter) providerType() string {
-	if a.ProviderType != "" {
-		return a.ProviderType
-	}
-	return "openai"
-}
-
 func (a *Adapter) environ() []string {
 	if a.Env != nil {
 		return a.Env
@@ -135,7 +130,11 @@ func (a *Adapter) Resume(ctx context.Context, rec adapters.ParkRecord, ans *adap
 	if rec.Cursor.SessionID == "" {
 		return nil, fmt.Errorf("kimicli: park record without engine session id")
 	}
-	spec := &resumeSpec{sessionID: rec.Cursor.SessionID}
+	spec := &resumeSpec{
+		sessionID: rec.Cursor.SessionID,
+		// The park record's cursor carries what earlier legs already billed.
+		consumed: rec.Cursor.MessageIndex,
+	}
 	if ans != nil {
 		spec.continuation = ans.Continuation
 		// There is no gate ask on this substrate to answer, so an answer
@@ -214,7 +213,14 @@ func (a *Adapter) spawn(ctx context.Context, req adapters.StartRequest, l *lower
 		Substrate: adapters.SubstrateKimiCLI,
 		SessionID: l.sessionID, // empty on start; the REPORTED id wins (S02.4b)
 		CwdKey:    req.Cwd,
+		// The transcript is APPEND-ONLY and a resumed leg re-opens the SAME
+		// file, so a fresh tail starting at byte 0 re-reads — and therefore
+		// re-bills — every call the previous leg already checkpointed. The
+		// consumed position rides the cursor, which is the park record's own
+		// carrier, so the next leg starts where this one stopped.
+		MessageIndex: l.resumeConsumed,
 	}
+	s.tr = newTranscriptFrom(a.logf, l.resumeConsumed)
 	go s.pump(stdout)
 	return s, nil
 }
@@ -284,10 +290,12 @@ type session struct {
 	// The transcript tail's own state. It has its own mutex because the tail
 	// runs concurrently with the stdout pump and the two share nothing but the
 	// events channel and the cursor.
-	usageMu    sync.Mutex
-	tr         *transcript
-	wirePath   string
-	wireOffset int64
+	usageMu       sync.Mutex
+	tr            *transcript
+	wirePath      string
+	wireOffset    int64
+	wireRefused   bool
+	pinnedSession string
 }
 
 var _ adapters.Session = (*session)(nil)
@@ -372,6 +380,7 @@ func (s *session) pump(stdout io.Reader) {
 		s.mu.Lock()
 		s.cursor.SessionID = id
 		s.mu.Unlock()
+		s.confirmSession(id)
 	}
 	p.onFlush = func() {
 		s.mu.Lock()
@@ -438,6 +447,23 @@ func (s *session) assembleOutcome(p *parser, waitErr error) adapters.Outcome {
 	cur := s.cursor
 	s.mu.Unlock()
 
+	// The park record must carry what was already billed, or the resumed leg
+	// re-reads the same appended transcript from byte 0 (F2).
+	consumed := s.consumedRecords()
+	cur.MessageIndex = consumed
+	s.mu.Lock()
+	s.cursor.MessageIndex = consumed
+	s.mu.Unlock()
+	// ★ A terminal provider error reaches this platform ONLY on stderr: the
+	// spike measured a 403 depletion producing no stdout frame at all. So the
+	// captured stderr is offered to the lane's own signal seam here, at the one
+	// point where it exists — without this leg the 19-row signal table can
+	// never fire on the event class that ENDS a run, and a weekly quota
+	// exhaustion would surface as an unclassified crash.
+	if ev, ok := s.terminalSignal(p, waitErr); ok {
+		s.events <- ev
+	}
+
 	out := adapters.Outcome{ResultText: p.finalText}
 	switch {
 	case canceled:
@@ -461,6 +487,48 @@ func (s *session) assembleOutcome(p *parser, waitErr error) adapters.Outcome {
 	return out
 }
 
+// terminalSignal classifies the engine's own terminal stderr line, when there
+// is one, through the LANE DOCUMENT's extractor.
+//
+// The adapter classifies nothing itself (D4): it hands the seam the bounded
+// body text and whatever status the engine printed, and forwards the payload
+// the document produced. A nil seam, or a body no row matches, yields nothing —
+// the honest degrade, never a guessed class.
+func (s *session) terminalSignal(p *parser, waitErr error) (adapters.Event, bool) {
+	if waitErr == nil || p.signals == nil {
+		return adapters.Event{}, false
+	}
+	body := strings.TrimSpace(s.stderr.String())
+	if body == "" {
+		return adapters.Event{}, false
+	}
+	if len(body) > adapters.ExcerptCap {
+		body = body[:adapters.ExcerptCap]
+	}
+	payload, ok := p.signals(body, terminalStatus(body))
+	if !ok {
+		return adapters.Event{}, false
+	}
+	return adapters.Event{Kind: adapters.KindRateLimit, Payload: payload}, true
+}
+
+// terminalStatus reads the HTTP status out of the engine's terminal line. Its
+// own format is `provider.<label>: <status> <message>`, so the status is
+// present even though no stdout frame carries it. Zero when absent — the
+// document's message rows still key on the text.
+func terminalStatus(body string) int {
+	for _, field := range strings.Fields(body) {
+		if len(field) != 3 {
+			continue
+		}
+		n, err := strconv.Atoi(field)
+		if err == nil && n >= 400 && n < 600 {
+			return n
+		}
+	}
+	return 0
+}
+
 // crashDetail reports the engine's own terminal message. On this transport it
 // exists ONLY on stderr — a provider 403 produced no stdout frame at all — so
 // a crash with an empty detail would discard the single fact worth having.
@@ -471,6 +539,20 @@ func (s *session) crashDetail(waitErr error) string {
 	}
 	excerpt, _ := excerptOf(text)
 	return excerpt
+}
+
+// consumedRecords reports how many transcript usage records this run has now
+// consumed in total, so the park record carries it to the next leg (F2).
+func (s *session) consumedRecords() int64 {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	if s.tr == nil {
+		return 0
+	}
+	if s.tr.read > s.tr.skip {
+		return s.tr.read
+	}
+	return s.tr.skip
 }
 
 func (s *session) parkRecord(cur adapters.Cursor) *adapters.ParkRecord {

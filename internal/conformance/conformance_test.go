@@ -549,7 +549,7 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(due) != 17 {
-		t.Fatalf("never-run: %d rows due, want all 15", len(due))
+		t.Fatalf("never-run: %d rows due, want all 17", len(due))
 	}
 
 	// Record a quarterly row at now → not due; +100d → due (quarterly = 3 months).

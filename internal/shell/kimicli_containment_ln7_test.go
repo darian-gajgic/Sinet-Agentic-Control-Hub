@@ -74,13 +74,17 @@ func TestKimiCLICredentialContainmentProperty(t *testing.T) {
 	root := t.TempDir()
 	ops := &strings.Builder{}
 	a := &kimicli.Adapter{
-		// A binary that does not exist: the spawn fails, which is all this
-		// test needs. Everything it asserts is about what the LOWERING built
-		// and what the platform persisted, and neither depends on a process
-		// starting — while a real spawn would put a live engine and a real
-		// endpoint into a containment test, which is the last place either
-		// belongs.
-		Binary:       filepath.Join(root, "no-such-kimi"),
+		// A stub engine that BEHAVES like the real one: it announces its
+		// version, answers, writes the session store and the transcript the
+		// platform bills from, and exits 0.
+		//
+		// The first cut pointed this at a binary that does not exist, so the
+		// spawn failed and every scan below — the emitted events, the park
+		// record, the ops log, the durable rows — scanned NOTHING and passed
+		// vacuously. A containment test that never ran a session proves
+		// containment of nothing. It is a stub rather than the real binary so
+		// the test stays hermetic and $0.
+		Binary:       fakeEngine(t, root),
 		Root:         filepath.Join(root, "engines"),
 		BaseURL:      lane.BaseURL,
 		ProviderType: "openai",
@@ -107,6 +111,7 @@ func TestKimiCLICredentialContainmentProperty(t *testing.T) {
 	}
 
 	var payloads []string
+	var sess adapters.Session
 	out, _ := drv.Drive(ctx, a, adapters.StartRequest{
 		RunID: runID, UserID: "me",
 		Model:   lane.DefaultModel,
@@ -117,6 +122,7 @@ func TestKimiCLICredentialContainmentProperty(t *testing.T) {
 		},
 		CredInject: inject,
 		OnEvent:    func(ev adapters.Event) { payloads = append(payloads, string(ev.Payload)) },
+		OnSession:  func(s adapters.Session) { sess = s },
 	})
 
 	// ── the positive control ────────────────────────────────────────────────
@@ -173,10 +179,27 @@ func TestKimiCLICredentialContainmentProperty(t *testing.T) {
 			t.Errorf("%s carries the credential material", name)
 		}
 	}
+	// Every scan leg gets a non-emptiness guard, because a leg with nothing in
+	// it is a leg that cannot fail.
+	if len(payloads) == 0 {
+		t.Error("the run emitted no events at all — the payload scan below proves nothing")
+	}
 	for _, p := range payloads {
 		if strings.Contains(p, kimiCLISentinel) {
 			t.Errorf("an emitted event payload carries the credential material: %s", p)
 		}
+	}
+	if ops.String() == "" {
+		t.Log("the ops log is empty for this run; the scan of it is therefore weak evidence")
+	}
+	// The DIGEST leg A15 names: the invocation fingerprint is hashed, logged
+	// and compared, so a secret reaching it would travel everywhere a digest
+	// travels.
+	if fp := out.Park; fp != nil && strings.Contains(fp.Fingerprint, kimiCLISentinel) {
+		t.Error("the invocation fingerprint carries the credential material")
+	}
+	if sess != nil && strings.Contains(sess.Fingerprint(), kimiCLISentinel) {
+		t.Error("the session fingerprint carries the credential material")
 	}
 	// The park record is the S03.4 full-invocation snapshot, and StartRequest
 	// carries CredInject as a FUNC with json:"-" — so the material cannot ride
@@ -235,6 +258,21 @@ func TestKimiCLICredentialContainmentProperty(t *testing.T) {
 	if seen == 0 {
 		t.Error("the run produced no run_events rows, so the durable scan proved less than it looks")
 	}
+	// The WAL is read BEFORE truncation as well as after: truncating first can
+	// empty the very file the scan is meant to inspect, which would make the
+	// -wal leg vacuous exactly when it matters.
+	for _, suffix := range []string{"", "-wal"} {
+		raw, err := os.ReadFile(db.Path() + suffix)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", db.Path()+suffix, err)
+		}
+		if bytes.Contains(raw, []byte(kimiCLISentinel)) {
+			t.Errorf("the credential material is in %s (scanned before WAL truncation)", db.Path()+suffix)
+		}
+	}
 	if err := db.CheckpointTruncate(ctx); err != nil {
 		t.Fatalf("checkpoint the WAL into the main file: %v", err)
 	}
@@ -250,4 +288,31 @@ func TestKimiCLICredentialContainmentProperty(t *testing.T) {
 			t.Errorf("the credential material is somewhere in %s", db.Path()+suffix)
 		}
 	}
+}
+
+// fakeEngine writes a stub `kimi` that behaves like the real one for this
+// test's purposes: it announces its version, answers, writes the session index
+// and the transcript the platform bills from, and exits 0.
+func fakeEngine(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "fake-kimi")
+	var b strings.Builder
+	b.WriteString("#!/usr/bin/env bash\n")
+	b.WriteString("set -u\n")
+	b.WriteString(`home="${KIMI_CODE_HOME:?}"` + "\n")
+	b.WriteString(`sid="session_containment"` + "\n")
+	b.WriteString(`sdir="$home/sessions/wd_test_000000000000/$sid"` + "\n")
+	b.WriteString(`mkdir -p "$sdir/agents/main"` + "\n")
+	b.WriteString(`printf '{"sessionId":"%s","sessionDir":"%s","workDir":"%s"}\n' "$sid" "$sdir" "$PWD" > "$home/session_index.jsonl"` + "\n")
+	b.WriteString(`echo '{"type":"llm.request","agentId":"main","model":"k3","turnStep":"0.1","time":1}' > "$sdir/agents/main/wire.jsonl"` + "\n")
+	b.WriteString(`echo '{"type":"usage.record","agentId":"main","model":"__kimi_env_model__","usage":{"inputOther":73,"output":29,"inputCacheRead":64,"inputCacheCreation":0},"usageScope":"turn","time":2}' >> "$sdir/agents/main/wire.jsonl"` + "\n")
+	b.WriteString(`echo '{"role":"meta","type":"system.version","version":"0.38.0"}'` + "\n")
+	b.WriteString(`echo '{"role":"assistant","content":"containment ok"}'` + "\n")
+	b.WriteString(`echo "{\"role\":\"meta\",\"type\":\"session.resume_hint\",\"session_id\":\"$sid\",\"command\":\"kimi -r $sid\",\"content\":\"hint\"}"` + "\n")
+	b.WriteString("sleep 0.5\n")
+	b.WriteString("exit 0\n")
+	if err := os.WriteFile(path, []byte(b.String()), 0o700); err != nil {
+		t.Fatalf("write fake engine: %v", err)
+	}
+	return path
 }

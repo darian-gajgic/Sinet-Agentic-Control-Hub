@@ -707,8 +707,10 @@ func PaidLanes() []string { return []string{LaneAnthropic, LaneZAI, LaneKimi} }
 // LaneKimiCLI is absent from PaidLanes ON PURPOSE, and the reason is worth
 // stating where somebody would otherwise "fix" it.
 //
-// A fourth paid lane takes the disarmed-leg count from 9 to 12 at five pinned
-// sites and, once armed, DOUBLES the real-request canary spend — on ONE shared
+// A fourth paid lane takes the disarmed-leg count from 9 to 12 at the sites
+// that pin it — counted rather than recalled: internal/watchlist/canary_test.go
+// and internal/shell/watchlist_seams_test.go, two assertions each, FOUR in all
+// — and, once armed, DOUBLES the real-request canary spend — on ONE shared
 // quota pool, for answers that are properties of the MEMBERSHIP rather than of
 // the client path. The auth canary asks whether the subscription is still
 // sanctioned; the model-list canary asks what the account serves. One Console

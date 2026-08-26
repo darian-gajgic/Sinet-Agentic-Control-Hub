@@ -9,7 +9,11 @@ package shell
 // in a t.TempDir() store, never the operator's.
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +21,13 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/opencode"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/scheduler"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/settings"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/storage"
 )
 
 // ── T5 · the concurrent-request-limit row freezes rather than retries ────────
@@ -268,3 +278,103 @@ func countEnv(env []string, name string) int {
 }
 
 var _ = opencode.LaneConfig{}
+
+// ── drain r1 F3 · the pooled budget reaches the ROUTER's own call site ───────
+
+// TestPooledBudgetReachesTheRouterCallSite proves the fix where §63 D5 says to
+// prove it: at the production call site, not at the resolver.
+//
+// bindingPlanReading is what the router's pressure read and the meters surface
+// both consume, and it looked the budget up under the REQUESTING lane. With the
+// budget declared once on `kimi` — which is what OQ-2 requires — `kimi-cli`
+// came back undeclared with pressure 0 while spending the same allowance, so
+// the router saw free headroom on a pool that was already committed.
+func TestPooledBudgetReachesTheRouterCallSite(t *testing.T) {
+	ctx := context.Background()
+	reg := settings.New()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	log := eventlog.New(db, reg)
+	runs := run.NewStore(db, log)
+	cps := gates.NewCheckpoints(db, log)
+	gauge := metering.NewPressureGauge(db, reg)
+	pb := metering.NewPlanBudgets(db)
+
+	const who = "pooled"
+	if err := db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO users (user_id, role, created_ts) VALUES (?, 'operator', ?)`,
+			who, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatalf("seed person: %v", err)
+	}
+	doc, ok := metering.PlanDocFor(adapters.LaneKimi)
+	if !ok {
+		t.Fatal("no plan document for the kimi lane")
+	}
+	now := time.Now().UTC().Add(time.Hour)
+	if _, _, err := pb.Declare(ctx, metering.PlanBudgetRow{
+		UserID: who, Lane: doc.Lane, Window: metering.PlanQuotaWindow,
+		PeriodUnits: 100, Unit: doc.QuotaUnit(metering.PlanQuotaWindow),
+		PeriodStart: now.Add(-time.Hour), PeriodHours: 5,
+		Source: metering.PlanBudgetOperatorSet, DeclaredTS: now, DeclaredBy: who,
+	}); err != nil {
+		t.Fatalf("declare on the canonical lane: %v", err)
+	}
+	// Spent entirely through the SIBLING lane.
+	for i := 0; i < 3; i++ {
+		id := fmt.Sprintf("r-pooled-%d", i)
+		if _, err := runs.Create(ctx, run.NewRun{
+			ID: id, UserID: who, Lane: adapters.LaneKimiCLI, Substrate: adapters.SubstrateKimiCLI,
+		}); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+		for _, st := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+			if _, err := runs.Transition(ctx, id, st, run.TransitionOptions{Actor: run.ActorPlatform}); err != nil {
+				t.Fatalf("transition: %v", err)
+			}
+		}
+		if _, err := cps.Write(ctx, gates.NewCheckpoint{
+			RunID: id, ModelID: "k3", Usage: json.RawMessage(`{"input_tokens":10,"output_tokens":5}`),
+			SessionSubstrate: adapters.SubstrateKimiCLI, SessionID: "s-" + id,
+		}); err != nil {
+			t.Fatalf("checkpoint: %v", err)
+		}
+	}
+
+	for _, lane := range []string{adapters.LaneKimi, adapters.LaneKimiCLI} {
+		r, window, err := bindingPlanReading(ctx, gauge, pb, who, lane, doc, now)
+		if err != nil {
+			t.Fatalf("bindingPlanReading(%s): %v", lane, err)
+		}
+		if !r.Budget.Declared {
+			t.Errorf("lane %s: the router's own call site reads NO declared budget — one allowance is declared once, "+
+				"so a sibling that cannot see it reports free headroom on a committed pool", lane)
+			continue
+		}
+		if !r.Applicable {
+			t.Errorf("lane %s: the pooled budget did not apply (%s)", lane, r.InapplicableNote)
+			continue
+		}
+		if r.Pressure <= 0 {
+			t.Errorf("lane %s: pressure = %v at the router's call site, want the pool's spend", lane, r.Pressure)
+		}
+		if window == "" {
+			t.Errorf("lane %s: the reading names no window", lane)
+		}
+	}
+
+	// Both lanes bind the SAME number: one pool, one spend, one denominator.
+	a, _, _ := bindingPlanReading(ctx, gauge, pb, who, adapters.LaneKimi, doc, now)
+	b, _, _ := bindingPlanReading(ctx, gauge, pb, who, adapters.LaneKimiCLI, doc, now)
+	if a.Pressure != b.Pressure {
+		t.Errorf("kimi binds pressure %v and kimi-cli binds %v — one pool, one number", a.Pressure, b.Pressure)
+	}
+}

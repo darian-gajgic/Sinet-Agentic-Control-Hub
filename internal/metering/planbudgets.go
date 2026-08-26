@@ -110,8 +110,12 @@ func (r PlanBudgetRow) Budget() PlanBudget {
 		PeriodStart: r.PeriodStart,
 		PeriodHours: r.PeriodHours,
 		Declared:    true,
-		SeededFrom:  r.Window,
-		Fraction:    r.Fraction,
+		// The lane the row was DECLARED on. It rides the value so the reading
+		// can tell a canonical pooled row (apply) from one planted on a sibling
+		// lane (refuse) — the requesting lane alone cannot make that call.
+		Lane:       r.Lane,
+		SeededFrom: r.Window,
+		Fraction:   r.Fraction,
 	}
 }
 
@@ -258,8 +262,16 @@ func (b *PlanBudgets) Rows(ctx context.Context, userID, lane string) ([]PlanBudg
 // place the undeclared plan posture is produced from storage, so a caller can
 // never accidentally invent a denominator (D4) — the same rule Budgets.Budget
 // holds on the token side.
+// It also resolves the POOL. A pooled allowance is declared ONCE against the
+// pool's canonical lane (PlanPoolRefusal), so a read for a sibling lane must
+// look under that canonical lane or it finds nothing — which is exactly what
+// happened: the sibling lane reported declared=false and pressure 0 while
+// spending the same allowance, so routing saw free headroom on a lane whose
+// pool was already committed. Resolving here rather than at each call site is
+// what makes every consumer inherit it (the router's pressure read, the meters
+// surface and the API read-back all come through this one door).
 func (b *PlanBudgets) PlanBudget(ctx context.Context, userID, lane, window string) (PlanBudget, error) {
-	row, ok, err := b.Row(ctx, userID, lane, window)
+	row, ok, err := b.Row(ctx, userID, PoolBudgetLane(lane), window)
 	if err != nil {
 		return UndeclaredPlanBudget(), err
 	}

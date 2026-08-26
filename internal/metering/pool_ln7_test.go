@@ -269,3 +269,96 @@ func (e *poolEnv) checkpointOn(t *testing.T, runID string) {
 }
 
 var _ = json.Marshal
+
+// ── drain r1 F3 · the pooled denominator actually pools ─────────────────────
+
+// TestPooledBudgetIsReadThroughThePool is the finding the first cut missed
+// entirely, and it made the whole pool half-built: consumption was summed
+// across the pool, but the BUDGET — the denominator — was looked up under the
+// requesting lane. With the budget declared once on `kimi` (which is what OQ-2
+// requires), `kimi-cli` read declared=false and pressure 0 while spending the
+// same allowance. Routing therefore saw free headroom on a lane whose pool was
+// already committed, which is the exact failure the pool exists to prevent.
+func TestPooledBudgetIsReadThroughThePool(t *testing.T) {
+	env := newPoolEnv(t)
+	doc, _ := PlanDocFor("kimi")
+
+	// The canonical-lane mapping every consumer resolves through.
+	if got := PoolBudgetLane("kimi-cli"); got != "kimi" {
+		t.Errorf("PoolBudgetLane(kimi-cli) = %q, want the pool's canonical lane %q", got, "kimi")
+	}
+	if got := PoolBudgetLane("zai"); got != "zai" {
+		t.Errorf("PoolBudgetLane(zai) = %q — an unpooled lane is its own", got)
+	}
+
+	// Declared ONCE, on the canonical lane, exactly as OQ-2 requires.
+	if _, _, err := env.pb.Declare(context.Background(), PlanBudgetRow{
+		UserID: env.user, Lane: "kimi", Window: PlanQuotaWindow,
+		PeriodUnits: 100, Unit: doc.QuotaUnit(PlanQuotaWindow),
+		PeriodStart: env.now.Add(-time.Hour), PeriodHours: 5,
+		Source: PlanBudgetOperatorSet, DeclaredTS: env.now, DeclaredBy: env.user,
+	}); err != nil {
+		t.Fatalf("declare on the canonical lane: %v", err)
+	}
+	// …and spent through the SIBLING.
+	env.checkpoint(t, "kimi-cli", 4)
+
+	for _, lane := range []string{"kimi", "kimi-cli"} {
+		budget, err := env.pb.PlanBudget(context.Background(), env.user, lane, PlanQuotaWindow)
+		if err != nil {
+			t.Fatalf("PlanBudget(%s): %v", lane, err)
+		}
+		if !budget.Declared {
+			t.Errorf("lane %s reads NO declared budget — the allowance is declared once for the pool, so a sibling "+
+				"that cannot see it reports free headroom on a pool that is already committed", lane)
+			continue
+		}
+		if budget.Lane != "kimi" {
+			t.Errorf("lane %s resolved a budget declared on %q, want the canonical %q", lane, budget.Lane, "kimi")
+		}
+		r, err := env.g.ReadPlanUnits(context.Background(), env.user, lane, doc, budget, env.now)
+		if err != nil {
+			t.Fatalf("ReadPlanUnits(%s): %v", lane, err)
+		}
+		if !r.Applicable {
+			t.Errorf("lane %s: the pooled budget did not apply (%s)", lane, r.InapplicableNote)
+			continue
+		}
+		if r.Pressure <= 0 {
+			t.Errorf("lane %s: pressure = %v, want the pool's spend against the pool's budget", lane, r.Pressure)
+		}
+	}
+
+	// Both lanes must read the SAME pressure: it is one allowance and one spend.
+	var seen []float64
+	for _, lane := range []string{"kimi", "kimi-cli"} {
+		b, _ := env.pb.PlanBudget(context.Background(), env.user, lane, PlanQuotaWindow)
+		r, _ := env.g.ReadPlanUnits(context.Background(), env.user, lane, doc, b, env.now)
+		seen = append(seen, r.Pressure)
+	}
+	if seen[0] != seen[1] {
+		t.Errorf("kimi reads pressure %v and kimi-cli reads %v — one pool, one number", seen[0], seen[1])
+	}
+
+	// The OTHER direction is unchanged: declaring on the sibling is still
+	// refused, so the pooled read above cannot be mistaken for permission to
+	// declare twice.
+	if _, _, err := env.pb.Declare(context.Background(), PlanBudgetRow{
+		UserID: env.user, Lane: "kimi-cli", Window: PlanQuotaWindow,
+		PeriodUnits: 50, Unit: doc.QuotaUnit(PlanQuotaWindow),
+		PeriodStart: env.now, PeriodHours: 5,
+		Source: PlanBudgetOperatorSet, DeclaredTS: env.now, DeclaredBy: env.user,
+	}); err == nil {
+		t.Error("declaring on the pooled sibling was accepted — reading through the pool must not open writing to it")
+	}
+
+	// And an unpooled lane is untouched: no budget declared, none read.
+	zdoc, _ := PlanDocFor("zai")
+	zb, err := env.pb.PlanBudget(context.Background(), env.user, "zai", zdoc.Quotas[0].Name)
+	if err != nil {
+		t.Fatalf("PlanBudget(zai): %v", err)
+	}
+	if zb.Declared {
+		t.Error("the zai lane picked up a budget it never declared — pool resolution leaked to an unpooled lane")
+	}
+}
