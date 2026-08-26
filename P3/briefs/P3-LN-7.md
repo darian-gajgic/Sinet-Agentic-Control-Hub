@@ -1,3 +1,5 @@
+> **EXPIRED 2026-08-26 (landed).** Single-use artifact; after the drain rounds it no longer matches the code. Later grounding must never read it as truth — code + spec only. Known post-brief corrections: the flag surface (§2(2) is real, the STATE row's list was not), `-m` (crashes; model rides `KIMI_MODEL_NAME`), R10 (permission-deny inert in `-p`; the `[tools]` allowlist is the structural brake), the usage source (the run's own wire.jsonl, pinned by session identity, both residual directions recorded on the lane document).
+
 # P3-LN-7 — the Kimi Code CLI substrate (`internal/adapters/kimicli`) + the `kimi-cli` lane
 
 **Grounded 2026-08-26.** Carries **S00.9 amendment A12**.
