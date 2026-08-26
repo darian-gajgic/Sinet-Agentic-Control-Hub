@@ -105,6 +105,15 @@ the source rather than by de-duplication.
 frame (`{"type":"llm.request","model":"k3","modelAlias":"__kimi_env_model__",…}`). An adapter reading
 `usage.record.model` would meter every Kimi run under a fictional model name.
 
+**The transcript is appended LIVE, per call, and the store exists early.** Measured on a run whose
+first tool call slept 12 s: `session_index.jsonl` and `agents/main/wire.jsonl` both existed within
+~2 s, and the FIRST `usage.record` was already flushed to disk at that point, while the run was still
+in flight. The second appeared after the second model call. So an adapter tailing the file emits one
+`Usage` per paid call **as it happens** — D7 checkpoints fire per call during the run, not in a burst
+at exit, and a crash mid-run does not lose the calls already made. (The per-RUN home also makes the
+path unambiguous: a fresh home holds exactly one session directory, so `sessions/*/*/` resolves it
+without needing the session id the stream only reports at the end.)
+
 `usageScope` was `"turn"` on every observed record. Other scopes (subagent, compaction) were not
 reached — native subagents are disabled by lowering (Q8) and no compaction occurred.
 
