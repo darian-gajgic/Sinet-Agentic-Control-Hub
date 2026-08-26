@@ -297,6 +297,7 @@ func TestKimiCLIUsageSourceResidualIsLoadedAndPinned(t *testing.T) {
 		"0400",            // the partial mitigation actually shipped
 		"bind order",      // the config half, closable, and by whom
 		"injection proxy", // the wire.jsonl half, and what closes it
+		"suppression",     // the under-billing direction, and its bounded grace (cap residual R1)
 	} {
 		if !strings.Contains(strings.ToLower(c.UsageSource.Note), strings.ToLower(needle)) {
 			t.Errorf("the usage-source residual does not mention %q — a residual that omits how it closes is one the "+

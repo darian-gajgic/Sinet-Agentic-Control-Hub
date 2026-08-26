@@ -26,6 +26,18 @@ import (
 // choice (the §61 precedent).
 const tailPollInterval = 200 * time.Millisecond
 
+// transcriptStallGracePolls bounds how long a NAMED session may stay absent or
+// unreadable before the tail refuses instead of polling quietly. Measured, the
+// engine creates the session directory within ~2 s of writing its index
+// record, so a store still missing 50 polls (10 s) after being named is not
+// "starting up" — it has been removed or barred, which the run's own work can
+// do. Below the bound the quiet poll is genuinely benign (the engine IS still
+// starting); past it, silence would be a SILENT billing stall — usage
+// under-reported with no warning and no refusal flag, the suppression twin of
+// the forgery the session pin closed. A structural constant (the §61
+// precedent): a mechanic of the tail, not an operator choice.
+const transcriptStallGracePolls = 50
+
 // tailUsage follows the run's transcript until stop closes, emitting one Usage
 // event per paid model call.
 func (s *session) tailUsage(stop <-chan struct{}) {
@@ -65,9 +77,11 @@ func (s *session) drainUsage() {
 			return
 		}
 		if p == "" {
-			return // the engine has not created its session yet
+			s.noteStalledStore("its transcript directory has not appeared")
+			return
 		}
 		s.wirePath = p
+		s.stallPolls = 0
 		s.mu.Lock()
 		// The engine keeps a full replayable record per session, so unlike the
 		// opencode substrate the cursor's transcript path is real here and the
@@ -78,12 +92,15 @@ func (s *session) drainUsage() {
 	}
 	f, err := os.Open(s.wirePath)
 	if err != nil {
+		s.noteStalledStore(fmt.Sprintf("its pinned transcript can no longer be opened (%v)", err))
 		return
 	}
 	defer f.Close()
 	if _, err := f.Seek(s.wireOffset, io.SeekStart); err != nil {
+		s.noteStalledStore(fmt.Sprintf("its pinned transcript can no longer be read (%v)", err))
 		return
 	}
+	s.stallPolls = 0
 	if s.tr == nil {
 		s.tr = newTranscript(s.a.logf)
 	}
@@ -198,8 +215,11 @@ func (s *session) resolveTranscript() (string, error) {
 // and can read session_index.jsonl. Round 1 closed over-billing and opened
 // under-billing in the same shape. Both legs now fail closed and LOUD.
 //
-// A zero-match is the one benign case and stays quiet: the engine has not
-// created its session directory yet, and the tail simply polls again.
+// A zero-match stays quiet HERE and is escalated by the caller: it is benign
+// only while the engine is still creating the session it just named, so
+// drainUsage gives it a bounded grace (transcriptStallGracePolls) and then
+// refuses loudly via noteStalledStore — a named store that never appears, or
+// vanishes, is the suppression direction of the same trust boundary.
 func (s *session) transcriptFor(sessionID string) (string, error) {
 	pattern := filepath.Join(s.low.home, "sessions", "*", sessionID, "agents", "main", "wire.jsonl")
 	matches, err := filepath.Glob(pattern)
@@ -216,6 +236,31 @@ func (s *session) transcriptFor(sessionID string) (string, error) {
 			"(%v) — a per-run engine home must hold exactly one, so something other than the engine has written to "+
 			"the store and no record in it can be trusted as a paid call", sessionID, len(matches), matches)
 	}
+}
+
+// noteStalledStore is the suppression guard, and the counterpart of the two
+// ambiguity refusals. Zero-match and open-failure used to return quietly, and
+// quiet is correct ONLY while the engine has not yet created the session it
+// will bill from. Once a session is NAMED — pinned from the index, carried by
+// a resume, or already resolved to a path — a store that stays absent or
+// unreadable means the run's own work may have unlinked or barred it: silent
+// under-billing, the suppression twin of the forgery the session pin closed
+// (the residual record on the lane document names both directions). So the
+// quiet reading gets a bounded grace and past it the tail refuses LOUDLY,
+// exactly like the ambiguity legs. usageMu must be held.
+func (s *session) noteStalledStore(why string) {
+	id := s.pinnedSessionID()
+	if id == "" && s.wirePath == "" {
+		return // no session named yet — the engine is still starting
+	}
+	s.stallPolls++
+	if s.stallPolls <= transcriptStallGracePolls {
+		return
+	}
+	s.wireRefused = true
+	s.a.warnf("kimicli: run %s: session %q was named, but %s across %d polls — refusing further usage from a store "+
+		"that cannot be read (usage is being UNDER-reported; the store, not the platform, is the anomaly)",
+		s.req.RunID, id, why, s.stallPolls)
 }
 
 func (s *session) pinnedSessionID() string {

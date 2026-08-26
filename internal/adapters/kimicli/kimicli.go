@@ -295,6 +295,7 @@ type session struct {
 	wirePath        string
 	wireOffset      int64
 	wireRefused     bool
+	stallPolls      int
 	pinnedSession   string
 	reportedSession string
 }
