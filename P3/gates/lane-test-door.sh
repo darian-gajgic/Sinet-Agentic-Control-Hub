@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
-# P3/gates/lane-test-door.sh — P3-LN-5: the lane-test door.
+# P3/gates/lane-test-door.sh — P3-LN-5, extended at P3-LN-8: the lane-test door.
 #
 # ONE COMMAND, cold to a CLICKABLE lane test:
 #
 #     ./P3/gates/lane-test-door.sh
 #
-# It builds a THROWAWAY world of its own, starts the per-person broker daemon
-# that spawn-time credential injection dials, hands you the key ceremony pointed
-# at that world, starts the world's control plane AFTER the keys exist, shows
-# you the commissioning line the control plane printed about itself, declares
-# the automation budget that makes the commissioned lane's consumption pressure
-# comparable, and then tells you the exact URL, the exact sign-in, what to click
-# and where the lane shows.
+# It builds a THROWAWAY world of its own, installs the PINNED Kimi CLI into that
+# world so the kimi-cli lane runs the version this tree claims, starts the
+# per-person broker daemon that spawn-time credential injection dials, hands you
+# the key ceremony pointed at that world, starts the world's control plane AFTER
+# the keys exist, shows you the commissioning line the control plane printed
+# about itself, declares the automation budget that makes the commissioned
+# lanes' consumption pressure comparable, and then tells you the exact URL, the
+# exact sign-in, what to click and where the lane shows.
+#
+# SINCE P3-LN-8 IT ANSWERS A SECOND QUESTION. The operator holds ONE Kimi Code
+# membership that TWO paths reach: lane `kimi` (the API endpoint, on the
+# opencode substrate) and lane `kimi-cli` (Moonshot's own pinned CLI, on the
+# kimi-cli substrate). Which one performs better is not answerable from a
+# document — it is answerable by running comparable work down both and reading
+# the receipts. The walk below is that recipe, and it is honest about the one
+# thing that cannot be compared: they draw a SINGLE quota pool, so consumption
+# figures are within-pool and only duration, token counts and outcome quality
+# separate the two paths.
 #
 # Every step is independently re-runnable:
 #
@@ -23,7 +34,7 @@
 #     ./P3/gates/lane-test-door.sh --dry-run
 #     ./P3/gates/lane-test-door.sh --dry-run <step>
 #
-# Steps: preflight  world  broker  keys  plane  budget  walk
+# Steps: preflight  world  engine  broker  keys  plane  budget  walk
 # Verbs: stop   (reap the broker and the control plane this door started)
 #        clean  (delete this door's throwaway world — refuses any other path)
 #
@@ -54,10 +65,33 @@
 #      is ALL-OR-NOTHING: one covered lane without a denominator ends the
 #      comparison for every lane, and anthropic is covered whether or not this
 #      door commissioned it.
+#   5. The kimi-cli engine binary is resolved BY PATH, and a version match is
+#      not a distribution match. The adapter sets no explicit path
+#      (internal/shell/engineadapters.go composes kimicli.Adapter without a
+#      Binary), so it spawns whatever `kimi` the CONTROL PLANE's PATH finds, and
+#      that process's environment is the ambient one minus the KIMI_* scrub —
+#      PATH is not scrubbed. This host carries the vendor's `curl | bash`
+#      installer build inside the operator's own ~/.kimi-code as well as the npm
+#      package this tree pins; both answer --version with the same string and
+#      only one of them is the pinned artefact (§67). So the `engine` step
+#      installs the pinned npm package into a DOOR-OWNED prefix inside the
+#      throwaway world and the `plane` step prepends that prefix's bin
+#      directory. The operator's own install is never used and never touched.
+#   6. THE TWO KIMI LANES ARE ONE SUBSCRIPTION. `kimi` and `kimi-cli` name the
+#      same broker auth-profile (`kimi-code`), so ONE paste commissions both,
+#      and they name the same quota pool (`kimi-code-membership`), so their
+#      consumption is SUMMED and the plan budget is declared ONCE against the
+#      canonical lane `kimi`. Declaring it a second time on `kimi-cli` is
+#      REFUSED by the platform, at the store, at the HTTP boundary and at the
+#      reading — the budget step shows you that refusal in the platform's own
+#      words, because a rule you can see enforced is worth more than a rule
+#      this script asserts.
 #
 # WHAT IT NEVER TOUCHES. Production (:8481, :8482, /var/lib/sinet, /etc/sinet,
 # the installed binary), this host's real broker store (~/.local/state/sinet),
-# the operator's live gate world (~/.sinet-b6-clickthrough) and every other
+# the operator's own Kimi CLI data root ~/.kimi-code — which holds live
+# credentials — and the binary inside it, the operator's live gate world
+# (~/.sinet-b6-clickthrough) and every other
 # ~/.sinet-* evidence world. It refuses BY CHECK rather than by intention: a
 # state directory that already exists without this door's own marker file is
 # somebody else's world and the door stops.
@@ -126,6 +160,29 @@ CEREMONY="$REPO/P3/gates/lane-key-ceremony.sh"
 DIST="$REPO/internal/webui/dist"
 BASE="http://127.0.0.1:$PORT"
 
+# ─── the kimi-cli engine, pinned, inside this world ─────────────────────────
+# The npm package is installed with `npm install -g --prefix ENGINE_PREFIX`, so
+# it lands entirely inside the throwaway world and `clean` takes it with the
+# rest. The CLI flag beats any prefix an .npmrc sets, which is what keeps this
+# out of the operator's own global prefix.
+ENGINE_PKG="@moonshot-ai/kimi-code"
+ENGINE_PREFIX="$WORLD/engine-npm"
+ENGINE_BINDIR="$ENGINE_PREFIX/bin"
+# adapters/kimicli.DefaultBinary — the name the adapter resolves through PATH.
+ENGINE_BIN="$ENGINE_BINDIR/kimi"
+# A bounded HOME and data root for the door's OWN --version probe, so even the
+# version print cannot read or write the operator's ~/.kimi-code. It mirrors
+# what the adapter does at spawn (lower.go loweredEnv: HOME and KIMI_CODE_HOME
+# are both moved, and KIMI_CODE_NO_AUTO_UPDATE=1 is set on every invocation).
+ENGINE_PROBE_HOME="$WORLD/engine-probe"
+# Where the running world puts each person's engine subtree, and each run's own
+# KIMI_CODE_HOME beneath that: shell.kimicliRoot(stateDir).
+ENGINE_ROOT="$WORLD/engines/kimi-cli"
+# The pin, read out of the Go source that the components.lock entry is coupled
+# to by TestPinMatchesLock. Never written down here: a second spelling of a pin
+# is a pin that drifts.
+ENGINE_PIN_SRC="$REPO/internal/adapters/kimicli/lower.go"
+
 # The plan documents the budget step enumerates windows out of. They are the
 # SAME files the binary this door built embeds (`//go:embed plandata/*.json` in
 # internal/metering/planunits.go), so a window named here and a window the
@@ -157,7 +214,10 @@ BASE_LANE="anthropic"
 BASE_TOKENS=250000
 BASE_DAYS=30
 
-LANES="zai kimi"
+# The lanes this door places keys for and verifies. THREE lanes, TWO pastes:
+# `kimi` and `kimi-cli` name the same broker auth-profile, so the single Kimi
+# paste lights both. The ceremony's own key steps are unchanged in count.
+LANES="zai kimi kimi-cli"
 FORBIDDEN_PORTS="8481 8482"
 DRY=0
 
@@ -177,6 +237,12 @@ dry()   { printf '  \033[36mDRY\033[0m   %s\n' "$*"; }
 die()   { printf '\n  \033[31mSTOPPED\033[0m  %s\n\n' "$*" >&2; exit 1; }
 
 lane_doc() { printf '%s/internal/adapters/opencode/lanedata/%s.json' "$REPO" "$1"; }
+# The broker auth-profile a lane's credential is placed under, and the pool its
+# allowance belongs to — read out of the document rather than written down, so
+# the "one profile, two lanes" and "one pool, two lanes" facts this door prints
+# are the platform's own and cannot drift from it.
+lane_profile() { jq -r '.credential.profile // ""' "$(lane_doc "$1")" 2>/dev/null || true; }
+lane_pool()    { jq -r '.pool // ""'                "$(lane_doc "$1")" 2>/dev/null || true; }
 
 # ─── refusals ───────────────────────────────────────────────────────────────
 # Everything this door must never write to, refused by check. The messages name
@@ -238,7 +304,7 @@ reap() { # $1 = pid file, $2 = cmdline fragment, $3 = what to call it
 
 # ─── 1. preflight ───────────────────────────────────────────────────────────
 do_preflight() {
-  step "1/7  Preflight — what this door will and will not touch"
+  step "1/8  Preflight — what this door will and will not touch"
 
   [ -d "$REPO/.git" ] && [ -f "$REPO/go.mod" ] || die "this script is not inside the Sinet repository ($REPO)"
   ok "repository: $REPO"
@@ -279,6 +345,25 @@ do_preflight() {
   ok "jq present: $(command -v jq)"
   command -v curl >/dev/null || die "curl is not on PATH"
 
+  # The kimi-cli lane's engine is an npm-published CLI that runs on Node, so
+  # both are hard requirements now rather than SPA-build conveniences. The
+  # engine step installs the pin; WHICH Node version it needs is the package's
+  # own declaration and is enforced by npm at install time (--engine-strict),
+  # never by a figure written down here.
+  command -v npm >/dev/null || die "npm is not on PATH — the engine step installs the pinned $ENGINE_PKG with it"
+  ok "npm present: $(npm --version)"
+  command -v node >/dev/null || die "node is not on PATH — the pinned Kimi CLI is a Node program and cannot run without it"
+  ok "node present: $(node --version)"
+
+  local pin
+  pin="$(engine_pin)" || die "could not read the kimi-cli engine pin out of $ENGINE_PIN_SRC"
+  ok "kimi-cli engine pin: $ENGINE_PKG@$pin   (read from $ENGINE_PIN_SRC, the constant components.lock is coupled to)"
+  info "The engine step installs THAT version into $ENGINE_PREFIX and the plane"
+  info "step puts $ENGINE_BINDIR at the front of the control plane's PATH."
+  if command -v kimi >/dev/null 2>&1; then
+    info "your own 'kimi' on PATH is $(command -v kimi) — NOT used by this world, and not touched"
+  fi
+
   if [ -f "$DIST/index.html" ]; then
     ok "the SPA build is present: $DIST (built $(date -r "$DIST/index.html" '+%Y-%m-%d %H:%M'))"
     info "It is embedded as-is. For a freshly built UI run 'npm run build' in web/ first."
@@ -302,7 +387,7 @@ do_preflight() {
 
 # ─── 2. world ───────────────────────────────────────────────────────────────
 do_world() {
-  step "2/7  A fresh world — binary, SPA, seeded demo data"
+  step "2/8  A fresh world — binary, SPA, seeded demo data"
 
   if [ "$DRY" = 1 ]; then
     dry "would create $WORLD (marker $MARKER)"
@@ -358,9 +443,109 @@ do_world() {
   ok "'$PERSON' is a seeded person of this world"
 }
 
-# ─── 3. broker ──────────────────────────────────────────────────────────────
+# ─── 3. engine ──────────────────────────────────────────────────────────────
+
+# engine_pin prints the kimi-cli engine pin, read out of the Go constant the
+# components.lock entry is mechanically coupled to (TestPinMatchesLock). The
+# ceremony reads opencode.Pin the same way and for the same reason: a pin
+# spelled twice is a pin that drifts.
+engine_pin() {
+  local v
+  v="$(grep -E '^const Pin = ' "$ENGINE_PIN_SRC" 2>/dev/null | head -1 | cut -d'"' -f2)"
+  [ -n "$v" ] || return 1
+  printf '%s' "$v"
+}
+
+# engine_version runs the door's OWN pinned shim under a bounded HOME and a
+# bounded data root, with auto-update off. Even a version print gets the belt:
+# the operator's ~/.kimi-code holds live credentials, and a probe that reads it
+# is a probe that had no business existing. This mirrors the adapter's own
+# spawn environment (kimicli/lower.go loweredEnv).
+engine_version() {
+  env HOME="$ENGINE_PROBE_HOME" \
+      KIMI_CODE_HOME="$ENGINE_PROBE_HOME/kimi-code" \
+      KIMI_CODE_NO_AUTO_UPDATE=1 KIMI_DISABLE_TELEMETRY=1 NO_COLOR=1 CI=1 \
+      "$ENGINE_BIN" --version 2>/dev/null | tail -1 | tr -d '[:space:]'
+}
+
+do_engine() {
+  step "3/8  The pinned Kimi CLI — the kimi-cli lane's engine, inside this world"
+
+  local pin
+  pin="$(engine_pin)" || die "could not read the engine pin out of $ENGINE_PIN_SRC"
+
+  info "The kimi-cli adapter names NO path for its engine: it spawns whatever"
+  info "'kimi' the CONTROL PLANE's PATH resolves (kimicli.DefaultBinary), and the"
+  info "spawn environment is the ambient one minus the KIMI_* scrub — PATH is not"
+  info "scrubbed. So whichever 'kimi' this door's control plane can see is the one"
+  info "your lane test measures, and a version match is NOT a distribution match:"
+  info "the vendor's curl-installer build and the npm package this tree pins both"
+  info "answer --version identically and only one of them is the pinned artefact."
+  info "This step installs the pin into a door-owned prefix; the plane step puts"
+  info "that prefix first on PATH. Your own install is never used and never touched."
+
+  if [ "$DRY" = 1 ]; then
+    dry "would install, user-level, into this door's own world:"
+    dry "  npm install -g --engine-strict --prefix $ENGINE_PREFIX $ENGINE_PKG@$pin"
+    dry "  --prefix beats any prefix an .npmrc sets, so nothing lands in your global npm root"
+    dry "  --engine-strict makes npm enforce the PACKAGE's own Node requirement (no version written down here)"
+    dry "would skip the install when $ENGINE_BIN already answers $pin"
+    dry "would then verify the version, under a bounded HOME and data root:"
+    dry "  HOME=$ENGINE_PROBE_HOME KIMI_CODE_HOME=$ENGINE_PROBE_HOME/kimi-code KIMI_CODE_NO_AUTO_UPDATE=1 $ENGINE_BIN --version"
+    dry "would require it to print exactly $pin, and would print the file it resolves to"
+    dry "would NEVER read, write or run anything under $HOME/.kimi-code"
+    return 0
+  fi
+
+  [ -d "$WORLD" ] || die "the world does not exist yet — run: $ENVP$SELF world"
+  refuse_protected_world
+  mkdir -p "$ENGINE_PROBE_HOME/kimi-code"
+
+  local have=""
+  [ -x "$ENGINE_BIN" ] && have="$(engine_version || true)"
+  if [ "$have" = "$pin" ]; then
+    ok "the pinned engine is already installed in this world: $ENGINE_PKG@$pin"
+  else
+    [ -n "$have" ] && note "the copy in this world answers '$have', not the pin '$pin' — reinstalling"
+    info "installing $ENGINE_PKG@$pin into $ENGINE_PREFIX (this is a normal npm fetch, no provider call)"
+    if ! npm install -g --engine-strict --prefix "$ENGINE_PREFIX" "$ENGINE_PKG@$pin" \
+         >"$WORLD/engine-install.log" 2>&1; then
+      bad "the engine install failed — see $WORLD/engine-install.log"
+      tail -15 "$WORLD/engine-install.log" | sed 's/^/        /'
+      die "could not install $ENGINE_PKG@$pin"
+    fi
+    ok "installed $ENGINE_PKG@$pin into $ENGINE_PREFIX"
+    # npm's own last line, whatever it chose to say ("added 6 packages", "changed
+    # 6 packages" on a re-point). Printed rather than parsed: the door has no
+    # business re-wording a tool's summary, and the version check below is what
+    # actually decides.
+    info "npm: $(grep -E 'packages' "$WORLD/engine-install.log" | tail -1 | sed 's/^ *//')"
+  fi
+
+  [ -x "$ENGINE_BIN" ] || die "the install left no executable at $ENGINE_BIN"
+
+  local got
+  got="$(engine_version)"
+  [ "$got" = "$pin" ] \
+    || die "the engine in this world answers '$got' but this tree pins '$pin' ($ENGINE_PIN_SRC). Refusing — a lane test on an unpinned engine measures something nobody can reproduce."
+  ok "$ENGINE_BIN --version prints $got, which IS the pin ($ENGINE_PIN_SRC)"
+  info "it resolves to $(readlink -f "$ENGINE_BIN" 2>/dev/null || printf '%s' "$ENGINE_BIN")"
+  info "that is the npm package tree — the distribution components.lock records"
+  ok "the version print ran under HOME=$ENGINE_PROBE_HOME, so $HOME/.kimi-code was never read"
+
+  if command -v kimi >/dev/null 2>&1; then
+    local ambient; ambient="$(command -v kimi)"
+    if [ "$ambient" != "$ENGINE_BIN" ]; then
+      note "your shell's own 'kimi' is $ambient and this world will NOT use it."
+      info "The plane step puts $ENGINE_BINDIR ahead of it on the control plane's"
+      info "PATH, so the lane runs the pin above. Nothing about your install changes."
+    fi
+  fi
+}
+
+# ─── 4. broker ──────────────────────────────────────────────────────────────
 do_broker() {
-  step "3/7  The broker daemon for $PERSON, inside this world"
+  step "4/8  The broker daemon for $PERSON, inside this world"
 
   info "Spawn-time credential injection dials $SOCK."
   info "Nothing else in a world starts a broker, so without this the engine"
@@ -426,22 +611,33 @@ probe_socket() {
   esac
 }
 
-# ─── 4. keys ────────────────────────────────────────────────────────────────
+# ─── 5. keys ────────────────────────────────────────────────────────────────
 do_keys() {
-  step "4/7  Key placement — the ceremony, pointed at this world and this person"
+  step "5/8  Key placement — the ceremony, pointed at this world and this person"
 
   info "The ceremony is handed two things and changes nothing else:"
   info "  STATE_DIRECTORY=$WORLD      -> store $STORE_ROOT/$PERSON"
   info "  SINET_CEREMONY_USER=$PERSON -> the person you will SIGN IN as"
   info "It prompts for each key with 'read -rs' and hands it to the placement"
   info "tool on stdin. This door never sees, logs or stores a key."
+  printf '\n'
+  note "TWO PASTES, THREE LANES — and the count of pastes did not change."
+  info "The ceremony asks for a Z.AI key and a Kimi key, exactly as before. But"
+  info "'kimi' and 'kimi-cli' name the SAME broker auth-profile ('kimi-code'),"
+  info "because one Kimi Code membership is one Console key. Placing it once"
+  info "commissions both documents, and the platform then delivers that one"
+  info "secret under each lane's OWN variable at spawn — KIMI_API_KEY for the"
+  info "API lane, KIMI_MODEL_API_KEY for the CLI, which reads no other name."
+  info "The verification below therefore checks all three lanes through the live"
+  info "socket, and the plane step shows the control plane naming them itself."
 
   if [ "$DRY" = 1 ]; then
     dry "would run, one step at a time (each tolerated to fail — a lane you have no key for must not stop the door):"
     dry "  STATE_DIRECTORY=$WORLD SINET_CEREMONY_USER=$PERSON $CEREMONY preflight"
     dry "  STATE_DIRECTORY=$WORLD SINET_CEREMONY_USER=$PERSON $CEREMONY zai-key"
     dry "  STATE_DIRECTORY=$WORLD SINET_CEREMONY_USER=$PERSON $CEREMONY kimi-key"
-    dry "would then verify each lane through the LIVE socket: $LANEKEY verify --socket $SOCK ..."
+    dry "would then verify each of $LANES through the LIVE socket: $LANEKEY verify --socket $SOCK ..."
+    dry "  the single Kimi paste is expected to resolve BOTH kimi lanes — they share one auth profile"
     dry "would require at least ONE lane to resolve before starting the control plane"
     note "rehearse the ceremony itself with: $CEREMONY --dry-run"
     return 0
@@ -473,7 +669,7 @@ do_keys() {
   for lane in $LANES; do
     if "$LANEKEY" verify --socket "$SOCK" --store-dir "$STORE_ROOT" --user "$PERSON" \
          --lane "$(lane_doc "$lane")" >/dev/null 2>&1; then
-      ok "$lane: resolves through the LIVE broker socket — the same socket a spawn dials"
+      ok "$lane: resolves through the LIVE broker socket under profile '$(lane_profile "$lane")' — the same socket a spawn dials"
       placed=$((placed+1))
     else
       note "$lane: no credential resolves for $PERSON (not placed, or declined)"
@@ -483,18 +679,24 @@ do_keys() {
   ok "$placed lane(s) placed and live-resolvable for $PERSON"
 }
 
-# ─── 5. plane ───────────────────────────────────────────────────────────────
+# ─── 6. plane ───────────────────────────────────────────────────────────────
 do_plane() {
-  step "5/7  The control plane — started AFTER the keys, because commissioning is startup-bound"
+  step "6/8  The control plane — started AFTER the keys, because commissioning is startup-bound"
 
   info "Coverage, the lane-to-substrate map, the alternate seats and the credential"
   info "injector are all composed once, at startup, from what is placed in each"
   info "person's broker store. A key placed later is picked up at the NEXT start,"
   info "which is why this step always restarts rather than reusing."
+  info "It is started with $ENGINE_BINDIR at the FRONT of PATH, because the"
+  info "kimi-cli adapter resolves its engine by name through the environment this"
+  info "process passes down — so the PATH of the control plane decides which"
+  info "'kimi' every run on that lane executes."
 
   if [ "$DRY" = 1 ]; then
     dry "would stop any control plane this door had running"
-    dry "would start: $BIN control --state-dir $WORLD --config-dir $WORLD --http-addr 127.0.0.1:$PORT"
+    dry "would start, with the pinned engine first on PATH:"
+    dry "  PATH=$ENGINE_BINDIR:\$PATH $BIN control --state-dir $WORLD --config-dir $WORLD --http-addr 127.0.0.1:$PORT"
+    dry "would refuse to start at all if $ENGINE_BIN is missing — see the engine step"
     dry "would wait for $BASE/api/health"
     dry "would re-check, while it runs, that production still holds 8481/8482 and its units are active"
     dry "would grep 'lanes: commissioned' out of $CONTROL_LOG and SHOW it as the proof"
@@ -504,14 +706,22 @@ do_plane() {
 
   [ -x "$BIN" ] || die "the world is not built yet — run: $ENVP$SELF world"
   [ -S "$SOCK" ] || die "the broker is not running — run: $ENVP$SELF broker"
+  # Refused rather than degraded: without this the plane would silently resolve
+  # whatever 'kimi' the ambient PATH offers — on this host, the installer build
+  # inside the operator's own credential-holding data root — and every kimi-cli
+  # measurement would be about a binary nobody pinned.
+  [ -x "$ENGINE_BIN" ] \
+    || die "the pinned kimi-cli engine is not installed in this world ($ENGINE_BIN) — run: $ENVP$SELF engine"
 
   if alive_ours "$CONTROL_PID_FILE" "control --state-dir $WORLD"; then
     reap "$CONTROL_PID_FILE" "control --state-dir $WORLD" "the previous control plane"
   fi
 
+  PATH="$ENGINE_BINDIR:$PATH" \
   "$BIN" control --state-dir "$WORLD" --config-dir "$WORLD" --http-addr "127.0.0.1:$PORT" \
     >"$CONTROL_LOG" 2>&1 &
   printf '%s' "$!" > "$CONTROL_PID_FILE"
+  ok "the control plane's PATH starts with $ENGINE_BINDIR — kimi-cli runs execute the pin"
   ok "control plane started (pid $(pid_of "$CONTROL_PID_FILE")), log $CONTROL_LOG"
 
   local i ready=0
@@ -571,7 +781,7 @@ show_commissioning() {
   esac
 }
 
-# ─── 6. budget ──────────────────────────────────────────────────────────────
+# ─── 7. budget ──────────────────────────────────────────────────────────────
 
 # person_lanes prints the lanes commissioned FOR THIS PERSON, from the control
 # plane's own per_person field — not the line's `lanes=` union, which is every
@@ -593,8 +803,26 @@ person_lanes() {
   done
 }
 
-plan_doc()     { printf '%s/%s.json' "$PLANDATA" "$1"; }
-plan_windows() { jq -r '.quotas[]?.name' "$(plan_doc "$1")" 2>/dev/null || true; }
+# plan_doc_for prints the plan document that COUNTS lane $1 — its own, or the
+# POOLED one whose member list names it. It mirrors metering.PlanDoc.CountsLane,
+# which is what every production reader resolves through since P3-LN-7: a lane
+# sharing an allowance has no document of its own, and refusing to look for one
+# is how `kimi-cli` would be reported as metering in no plan units when it in
+# fact spends `kimi`'s. Fails (rc 1) when no shipped document counts the lane.
+plan_doc_for() {
+  local lane=$1 f
+  for f in "$PLANDATA"/*.json; do
+    [ -f "$f" ] || continue
+    if [ "$(jq -r --arg l "$lane" '((.lane == $l) or ((.pool_lanes // []) | index($l) != null)) | tostring' "$f" 2>/dev/null)" = "true" ]; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+# The window names a plan document declares. It takes a DOCUMENT PATH, not a
+# lane, because a pooled lane's windows are its pool's.
+plan_windows() { jq -r '.quotas[]?.name' "$1" 2>/dev/null || true; }
 
 # json_escape quotes a value for a JSON string using SHELL BUILTINS ONLY. It
 # exists for the PIN: `jq --arg pin "$pin"` would put the PIN in argv, where
@@ -821,8 +1049,67 @@ meters_show() {
   fi
 }
 
+# pool_sibling handles a commissioned lane whose allowance is DECLARED ON
+# ANOTHER LANE — the P3-LN-7 pool. It declares nothing. It states what the pool
+# means for this lane, and then it ASKS THE PLATFORM to declare a second row and
+# shows you the refusal in the platform's own words, because a rule you can see
+# enforced is worth more than a rule this script asserts. Nothing is stored: the
+# refusal is the whole point, and it is a feature — two rows against one
+# allowance is a number nobody can reconcile, and either could bind the lane.
+pool_sibling() {
+  local lane=$1 doc canonical pool members window body code detail
+  doc="$(plan_doc_for "$lane")" || return 0
+  canonical="$(jq -r '.lane' "$doc")"
+  pool="$(jq -r '.pool // ""' "$doc")"
+  members="$(jq -r '(.pool_lanes // []) | join(" + ")' "$doc")"
+  window="$(plan_windows "$doc" | head -1)"
+
+  printf '\n'
+  note "$lane: ONE ALLOWANCE, TWO LANES — and it is already declared."
+  info "'$members' draw the shared '$pool' allowance between them. Consumption is"
+  info "SUMMED across both and divided by the single denominator declared above on"
+  info "'$canonical', so '$lane' is denominated and comparable already. Declaring"
+  info "again here would put two independent rows against one allowance."
+  info "The lane documents state the same fact on their own side, so it is one"
+  info "reading rather than this script's opinion: $(lane_pool "$lane")"
+
+  [ -n "$window" ] || { note "$lane: the pooled document declares no window to demonstrate the refusal with"; return 0; }
+
+  body="{\"person\":\"$(json_escape "$PERSON")\",\"lane\":\"$(json_escape "$lane")\",\"window\":\"$(json_escape "$window")\",\"from_proposal\":true,\"reason\":\"lane-test-door: demonstrating that a pooled allowance is declared once\"}"
+  code="$(printf '%s' "$body" | api_call POST /api/meters/plan-budget)"
+  detail="$(api_detail)"
+  case "$code" in
+    400)
+      case "$detail" in
+        *"declared ONCE against lane"*)
+          ok "$lane: the platform REFUSED a second declaration, in its own words:"
+          wrapped "$detail"
+          info "That is metering.PlanPoolRefusal, enforced at the store, at this HTTP"
+          info "boundary and again at the reading. Nothing was written." ;;
+        *)
+          bad "$lane: the declaration was refused, but not by the pool rule:"
+          wrapped "$detail"
+          die "unexpected refusal on a pooled lane" ;;
+      esac ;;
+    200)
+      bad "$lane: the platform ACCEPTED a second budget row against the '$pool' allowance."
+      info "That is the state the pool rule exists to prevent: two independent rows"
+      info "against one allowance, either of which could bind the lane under"
+      info "max-binds, with no way to explain why a number nobody touched moved."
+      die "the pooled-declaration refusal did not hold — this is a platform defect, not a door failure" ;;
+    401)
+      die "the control plane answered 401 — the session did not carry" ;;
+    *)
+      bad "$lane: POST /api/meters/plan-budget answered $code on the pooled sibling"
+      wrapped "$detail"
+      die "pooled-sibling probe failed" ;;
+  esac
+
+  meters_show "$lane"
+}
+
 do_budget() {
-  step "6/7  The plan budget — what makes the commissioned lane's pressure comparable"
+  step "7/8  The plan budget — what makes the commissioned lane's pressure comparable"
 
   info "A commissioned lane is a lane the router MAY pick, not one it does. It picks"
   info "between covered flat-rate lanes on consumption PRESSURE, and a pressure needs"
@@ -833,10 +1120,15 @@ do_budget() {
   info "$BASE_LANE, which this door does not commission but which is covered all the"
   info "same. A comparison needs EVERY covered lane to have a denominator: one that"
   info "cannot be compared ends the comparison for all of them."
+  info "ONE EXCEPTION, AND IT IS THE POINT OF THE POOL: lanes that share a single"
+  info "allowance get ONE row, declared against the pool's canonical lane. The"
+  info "two kimi lanes are one Kimi Code membership, so 'kimi' carries the row and"
+  info "'kimi-cli' reads through it — and the step shows you the platform refusing"
+  info "a second declaration rather than taking this script's word for it."
 
   if [ "$DRY" = 1 ]; then
     dry "would read the lanes commissioned FOR $PERSON out of the per_person field of the control plane's own line in $CONTROL_LOG"
-    dry "would read each lane's window names from $PLANDATA/<lane>.json — the same files the binary embeds"
+    dry "would resolve each lane to the plan document that COUNTS it in $PLANDATA — its own, or the POOLED one whose member list names it (the same files the binary embeds), and read that document's window names"
     dry "would read $PERSON's PIN out of $SEED_LOG and mint a session:"
     dry "  POST $BASE/api/auth/login   {\"user_id\":\"$PERSON\",\"pin\":\"<the seed's own PIN>\"}"
     dry "  the PIN is assembled by shell builtins and handed to curl on STDIN — never argv, never the environment"
@@ -850,6 +1142,10 @@ do_budget() {
     dry "would treat a window the platform refuses BY ITS OWN RULE as a sanctioned skip:"
     dry "  a window denominated in a unit the lane's consumption is not counted in, or one whose allowance nobody published"
     dry "would fail if no window took a budget on any commissioned lane"
+    dry "would then handle every POOLED sibling — a commissioned lane whose allowance another lane's row already declares:"
+    dry "  it declares NOTHING there, and instead POSTs one deliberate second declaration to SHOW the platform refuse it,"
+    dry "  expecting 400 with metering.PlanPoolRefusal's own sentence naming the canonical lane (nothing is stored),"
+    dry "  and would treat a 200 as a PLATFORM DEFECT — two rows against one allowance — rather than a door failure"
     dry "would then declare the TOKEN budget for the covered-but-uncommissioned lane, through the sibling verb:"
     dry "  POST $BASE/api/meters/budget"
     dry "  {\"person\":\"$PERSON\",\"lane\":\"$BASE_LANE\",\"period_tokens\":$BASE_TOKENS,\"period_days\":$BASE_DAYS,\"reason\":\"...\"}"
@@ -872,15 +1168,26 @@ do_budget() {
   trap 'rm -f "$COOKIE" "$API_OUT"' EXIT
   door_login
 
-  local lane window windows declared=0 skipped=0
+  # TWO PASSES, and the order is load-bearing. A POOLED allowance is declared
+  # ONCE against its canonical lane, and a sibling reads THROUGH that one row —
+  # so the siblings are handled second, after the row they read exists. Doing it
+  # in one pass would report a sibling as undeclared for no reason but ordering.
+  local lane doc canonical window windows declared=0 skipped=0 pooled=""
   for lane in $lanes; do
     printf '\n'
-    if [ ! -f "$(plan_doc "$lane")" ]; then
-      note "$lane: it meters in no plan units, so it carries no PLAN budget — its"
-      info "automation budget is the weighted-consumption one (POST /api/meters/budget)"
+    if ! doc="$(plan_doc_for "$lane")"; then
+      note "$lane: no shipped plan document counts it, so it carries no PLAN budget —"
+      info "its automation budget is the weighted-consumption one (POST /api/meters/budget)"
       continue
     fi
-    windows="$(plan_windows "$lane")"
+    canonical="$(jq -r '.lane' "$doc")"
+    if [ "$canonical" != "$lane" ]; then
+      # A pooled sibling. Handled in pass 2 so the canonical row is in first.
+      pooled="$pooled $lane"
+      note "$lane: it shares '$canonical's allowance — held for the pooled pass below"
+      continue
+    fi
+    windows="$(plan_windows "$doc")"
     if [ -z "$windows" ]; then
       note "$lane: its plan document declares no allowance window at all"
       continue
@@ -900,6 +1207,12 @@ do_budget() {
     || die "no window took a budget on any commissioned lane, so nothing gained comparable pressure. The refusals above say why."
   ok "$declared plan budget(s) declared for $PERSON; $skipped window(s) refused by the platform's own rule"
 
+  # Pass 2: every commissioned lane that draws an allowance somebody else's row
+  # already declared.
+  for lane in $pooled; do
+    pool_sibling "$lane"
+  done
+
   # And now the lane this door does NOT commission, without which none of the
   # above changes a single routing decision.
   printf '\n'
@@ -907,25 +1220,38 @@ do_budget() {
   meters_show_token "$BASE_LANE"
 
   printf '\n'
-  ok "every covered flat-rate lane now has a declared denominator: $lanes (plan units) and $BASE_LANE (weighted tokens)"
+  ok "every covered flat-rate lane now has a declared denominator: $lanes (plan units${pooled:+, ${pooled# } through the pool}) and $BASE_LANE (weighted tokens)"
   info "That is what selection needs: it now runs a REAL comparison and says so in"
   info "the approval card, instead of falling back for want of a denominator."
   info "It takes the strictly LESS consumed lane. On a world this fresh every lane"
   info "sits at 0%, so the first task ties and the tie goes to the configured order"
   info "($BASE_LANE first) — the commissioned lane takes over once $BASE_LANE has"
   info "spent the larger share of its own budget. Watch it over several tasks."
+  if [ -n "$pooled" ]; then
+    local sib canon
+    sib="${pooled# }"; sib="${sib%% *}"
+    canon="$(jq -r '.lane' "$(plan_doc_for "$sib")" 2>/dev/null || true)"
+    printf '\n'
+    note "AND ONE CONSEQUENCE OF THE POOL THAT THE WALK EXPLAINS IN FULL:"
+    info "one pool means one number, so '$canon' and '$sib' report the IDENTICAL"
+    info "pressure ratio at every moment. Selection takes the strictly less"
+    info "consumed lane and keeps the earlier candidate on a tie, so between those"
+    info "two the earlier one wins always. Read the walk's head-to-head section"
+    info "before you read a run of '$canon' receipts as a verdict about either."
+  fi
   note "Re-run '$ENVP$SELF budget' whenever a period has ended. Nothing rolls one"
   info "over — re-declaring IS the act that starts the next period."
 }
 
-# ─── 7. walk ────────────────────────────────────────────────────────────────
+# ─── 8. walk ────────────────────────────────────────────────────────────────
 do_walk() {
-  step "7/7  What to open, who to be, what to click"
+  step "8/8  What to open, who to be, what to click"
 
   if [ "$DRY" = 1 ]; then
     dry "would read the people out of the RUNNING world: GET $BASE/api/auth/users"
     dry "would read the PIN out of $SEED_LOG (the seed's own printed line)"
-    dry "would print the URL, the sign-in, the click path and the honest notes"
+    dry "would read the lanes commissioned for $PERSON, and the pool facts, out of the plan document that counts them"
+    dry "would print the URL, the sign-in, the click path, the kimi-vs-kimi-cli head-to-head and the honest notes"
     return 0
   fi
 
@@ -952,6 +1278,25 @@ do_walk() {
   local commissioned
   commissioned="$(grep 'lanes: commissioned' "$CONTROL_LOG" 2>/dev/null | tail -1 \
     | grep -oE 'lanes=[^ ]*' | cut -d= -f2 | tr -d '"' || true)"
+
+  # The head-to-head's facts, derived rather than written down. The candidate
+  # ORDER is the thing the comparison turns on, and it is not a preference: the
+  # duty-map seat's lane comes first and the commissioned lanes follow it sorted
+  # by lane name (opencode.loadLaneDocs returns them "SORTED BY LANE NAME";
+  # CommissionedSeats walks them in that order; worker.chooseFlatLane builds
+  # `covered` as the seat then the alternates).
+  local mine kimi_doc kimi_canon kimi_pool kimi_members kimi_model candidates
+  mine="$(person_lanes)"
+  kimi_doc="$(plan_doc_for "$(printf '%s' "$mine" | tr ' ' '\n' | grep -x 'kimi-cli' || true)" 2>/dev/null || true)"
+  if [ -n "$kimi_doc" ]; then
+    kimi_canon="$(jq -r '.lane' "$kimi_doc")"
+    kimi_pool="$(jq -r '.pool // ""' "$kimi_doc")"
+    kimi_members="$(jq -r '(.pool_lanes // []) | join(" and ")' "$kimi_doc")"
+    # Both kimi documents front one model; the walk says so, and reads it off
+    # the CLI document rather than repeating an id this tree already dates.
+    kimi_model="$(jq -r '.default_model // ""' "$(lane_doc kimi-cli)" 2>/dev/null || true)"
+  fi
+  candidates="$BASE_LANE$(printf '%s' "$mine" | tr ' ' '\n' | sort | sed 's/^/, /' | tr -d '\n')"
 
   cat <<EOF
 
@@ -1010,7 +1355,12 @@ $people
       has ended, which is one '$ENVP$SELF budget' away.
    b. $BASE/tasks/<your task>
       The receipt table under the run: Purpose · Priced · Calls · Model · Lane ·
-      Unpriced calls. The Lane column is the lane the run actually used.
+      Unpriced calls. The Lane column is the lane the run actually used, and it
+      is the ONLY place that says so per call rather than per decision.
+      Above the table, the run's own card carries the two figures a comparison
+      is actually made of: a TOKEN count, and how long it ran — "ran for …,
+      from its first record to its last" once the run has finished (a live run
+      shows elapsed-since-created instead, which is a different quantity).
    c. $BASE/fleet
       Per-person, per-lane meters: Whose · Lane · Open runs · Parked · Until,
       and consumption / pressure / budget remaining. A lane gets a row here once
@@ -1019,16 +1369,88 @@ $people
       Per routed run: model · lane · effort, with the routing reason. The closest
       thing to a "which lane ran it" audit surface.
 
+  $(printf '\033[1mTHE HEAD-TO-HEAD: kimi (API) vs kimi-cli (CLI) — READ BEFORE YOU JUDGE\033[0m')
+
+  You hold ONE Kimi Code membership that two paths reach, and the question this
+  door was extended to answer is which path performs better. Here is the whole
+  truth about what you can and cannot measure today.
+
+  WHAT THIS DOOR HAS ALREADY PROVEN about the CLI path:
+    · the pinned engine is installed in this world and answers the pin exactly
+      (the engine step above), and the control plane runs with it first on PATH,
+      so a kimi-cli run executes THAT binary and not your own install;
+    · your one Kimi paste commissioned BOTH lanes — the same auth profile — and
+      the control plane's own startup line names them: ${commissioned:-none};
+    · both are denominated: ${kimi_members:-the two kimi lanes} draw the single
+      "${kimi_pool:-shared}" allowance, declared once against ${kimi_canon:-kimi}.
+
+  WHAT YOU CANNOT DO, AND IT IS BETTER TO KNOW IT NOW:
+  There is no way to aim a task at a named lane. No form field, no button, no
+  URL, no environment variable and no CLI flag anywhere in this platform takes a
+  lane from you; every "lane" you can see in the UI is routing READING BACK a
+  decision it already made. The benchmark's direct-arm path is not a way in
+  either — its substrate and lane are compiled constants (claude-cli/anthropic).
+
+  AND ROUTING WILL NOT DO IT FOR YOU. The arithmetic, in full, because the
+  conclusion is uncomfortable and you should be able to check it:
+    · candidates for this duty, in order: ${candidates:-$BASE_LANE} — the duty
+      seat's lane first, then the lanes commissioned for you sorted by NAME;
+    · selection takes the STRICTLY less consumed lane, and a tie keeps the
+      earlier candidate;
+    · ${kimi_members:-the two kimi lanes} share one pool, so their consumption is
+      SUMMED and divided by the SAME single budget. Their pressure ratios are
+      not merely close — they are the same number, always, by construction;
+    · "kimi" sorts before "kimi-cli".
+  Put together: kimi-cli ties kimi at every moment and loses every tie. It can
+  never be picked while kimi is commissioned, and the two commission from one
+  credential, so you cannot hold one without the other. Run ten tasks and you
+  will get ten receipts reading anthropic, kimi or zai, and not one reading
+  kimi-cli. That is the platform behaving exactly as designed — and reporting it
+  as a broken lane would be reporting the wrong defect.
+
+  SO WHAT IS WORTH DOING IN THIS SITTING:
+   1. Run several tasks and watch the Lane column alternate across anthropic,
+      kimi and zai as consumption builds. That is the LN-6 pressure mechanism
+      working, and it is real: it is what a lane winning looks like.
+   2. Read the kimi receipts for the two figures a path comparison is made of —
+      the token count and the "ran for" duration on the task card — and keep
+      them. They are the API path's half of the head-to-head, measured on real
+      work rather than on a smoke test.
+   3. Do NOT read the absence of kimi-cli receipts as a result about the CLI.
+      It is a result about routing.
+
+  WHAT WOULD MAKE THE COMPARISON RUNNABLE — named, so nobody re-derives it:
+  a per-task lane pin (an operator surface that puts a lane on the request, the
+  natural home being the settings/approval path), OR routing treating pooled
+  siblings as separable candidates instead of two names for one ratio. Neither
+  exists today. This door will not fake one: a recipe that quietly produced
+  kimi receipts and called them a comparison would be worse than no recipe.
+
+  AND WHEN IT DOES BECOME RUNNABLE, READ IT HERE:
+    · the receipt Lane column (b) tells you which path actually ran the work;
+    · the task card's token count and "ran for" duration are the comparable
+      figures — same membership, and both lane documents front the same model
+      seat (${kimi_model:-the same default model});
+    · CONSUMPTION IS NOT ONE OF THEM. Both lanes draw one pool, so /fleet's
+      consumption and pressure figures are WITHIN-POOL: they tell you what the
+      membership spent, never which path spent it. Comparing them lane-to-lane
+      compares a number against itself.
+    · neither lane ships seeded prices, so both render UNPRICED and the Priced
+      column is \$0.00 on both. That is not a discount and not a bug.
+
   $(printf '\033[1mHONEST NOTES — read these before reporting a defect\033[0m')
 
    · WHAT A GREEN DOOR NOW PROVES, exactly: the key is placed under the person
      you sign in as; it resolves through the LIVE broker socket that a spawn
      dials ($SOCK); the control plane commissioned that lane for that person at
-     startup — the line printed above, from the control plane about itself; and
-     EVERY covered flat-rate lane now carries a DECLARED automation budget —
-     the commissioned ones in their plan's own unit at the (person, lane,
-     window) grain, $BASE_LANE in weighted tokens — each read back out of the
-     platform after it was written.
+     startup — the line printed above, from the control plane about itself; the
+     kimi-cli lane's engine in this world IS the pinned version, verified by its
+     own --version under a bounded home and put first on the control plane's
+     PATH; and EVERY covered flat-rate lane now carries a DECLARED automation
+     budget — the commissioned ones in their plan's own unit at the (person,
+     lane, window) grain, pooled lanes through their canonical lane's single
+     row, $BASE_LANE in weighted tokens — each read back out of the platform
+     after it was written.
    · THE LANE CAN NOW WIN, ON REAL CONSUMPTION. This is new, and it is the whole
      point of the budget step. Selection compares covered flat-rate lanes on
      consumption pressure — consumption over the DECLARED budget, each in its
@@ -1056,6 +1478,10 @@ $people
      by TestLN6CommissionedLaneWinsAndLosesOnConsumption against the production
      router. Nothing on a running control plane serves the router's would-be
      choice before a task exists, so that test is where the proof lives.
+     ALTERNATION DOES NOT REACH INSIDE A POOL. Two lanes sharing one allowance
+     report one ratio, so they never alternate with each other, only with the
+     lanes outside their pool. The head-to-head section above works that through
+     for the two kimi lanes and says what it costs you.
    · THE $BASE_LANE FIGURE IS ASSUMED AND IT IS YOURS. $BASE_TOKENS
      weighted-consumption units over $BASE_DAYS days is a TEST-WORLD number —
      the one the Fleet page's own budget editor is exercised with — declared so
@@ -1073,11 +1499,35 @@ $people
      about to read were never candidates for it.
    · It does not prove the key WORKS against the vendor either. The only thing
      that does is the ceremony's tier-L smoke, which is one real paid call and
-     is deliberately not part of this door.
-   · The Kimi C5 no-household-personal-data rider is RECORDED, NOT ENFORCED
-     (lanedata/kimi.json, enforced:false). There is no per-lane data-policy
-     enforcement point anywhere in the tree. Do not type personal or household
-     data into a task on this world and expect the platform to hold that line.
+     is deliberately not part of this door. On the kimi-cli lane there is no
+     smoke to fall back on at all: that suite is written to skip even when every
+     gate opens, because the FIRST live call on this membership through the CLI
+     path was meant to be your own door run, made deliberately. Since routing
+     will not send one (see the head-to-head), the CLI path's first live call is
+     still ahead of you.
+   · YOUR OWN KIMI INSTALL AND ITS DATA ROOT ARE UNTOUCHED. $HOME/.kimi-code
+     holds live credentials; nothing in this door reads it, writes it or runs
+     the binary inside it. The engine step installed the pin into this world,
+     the version probe ran under a bounded HOME, and every kimi-cli RUN gets its
+     own KIMI_CODE_HOME under $ENGINE_ROOT with HOME bounded too and
+     auto-update off. Those run homes are never deleted by the platform — a
+     parked run's home has to outlive its process — so '$ENVP$SELF clean' is
+     what removes them, along with the rest of this world.
+   · FIRST USE OF THE CLI MAY FETCH TWO HELPER BINARIES. Depending on which
+     tools a run is given, the engine downloads and caches ripgrep and fd inside
+     its own home. It is conditional rather than certain — the hermetic
+     batteries triggered neither — and it lands inside this world, not in your
+     home. If a first kimi-cli run is slower than the second, that is the most
+     likely reason and it is not the lane being slow.
+   · The Kimi C5 no-household-personal-data rider is RECORDED, NOT ENFORCED, on
+     BOTH kimi lanes (lanedata/kimi.json and lanedata/kimi-cli.json,
+     enforced:false). There is no per-lane data-policy enforcement point
+     anywhere in the tree. Do not type personal or household data into a task on
+     this world and expect the platform to hold that line.
+   · Both kimi lanes carry the same RECORDED GRAY-ZONE Gate-A posture — the
+     Community Guidelines' interactive-only clause, and the operator's
+     2026-08-26 PROCEED ruling. It is one subscription, so the ruling binds both
+     paths equally, and neither lane ever alters the client identity it presents.
    · This door does NOT wire the local GPU tier (the B6 gate script is the one
      that does). Local-tier seats are unconfigured here, so interview wording
      and any local seat degrade — expected, not a defect.
@@ -1109,15 +1559,56 @@ EOF
 }
 
 # ─── verbs ──────────────────────────────────────────────────────────────────
+# engine_strays lists any kimi-cli engine process still running against THIS
+# world's engine root. It is a report, not a reap: the door owns two daemons and
+# these are neither.
+#
+# WHY THERE IS NO ENGINE VERB. The kimi-cli substrate adds NO daemon class. It
+# owns no standing process and no per-user server — unlike the opencode
+# substrate, whose per-user serve manager the control plane starts and stops —
+# so a run is one `kimi -p` that lives and dies with its session, which is why
+# the platform adds nothing to its own shutdown reap either
+# (internal/shell/engineadapters.go). Two daemons in, two daemons out: the stop
+# verb is complete as it stands.
+#
+# What CAN outlive the plane is an in-flight run's own process group, orphaned
+# by killing its parent mid-run. That is not a class needing a verb; it is one
+# process needing to be seen, so it is named with the exact command to end it
+# rather than swept silently. Matched on the run's own KIMI_CODE_HOME, which is
+# the only thing that ties a `kimi` process to THIS world.
+engine_strays() {
+  local pid found=""
+  for pid in /proc/[0-9]*; do
+    pid="${pid#/proc/}"
+    grep -qz "KIMI_CODE_HOME=$ENGINE_ROOT" "/proc/$pid/environ" 2>/dev/null && found="$found $pid"
+  done
+  printf '%s' "${found# }"
+}
+
 do_stop() {
   step "stop — reaping what this door started"
   if [ "$DRY" = 1 ]; then
     dry "would kill the pids recorded in $CONTROL_PID_FILE and $BROKER_PID_FILE"
     dry "  each is checked against /proc/<pid>/cmdline first, so a recycled pid is never killed"
+    dry "would then REPORT (never kill) any engine process still running against $ENGINE_ROOT"
+    dry "  the kimi-cli substrate starts no daemon of its own, so there is no third verb to add"
     return 0
   fi
   reap "$CONTROL_PID_FILE" "control --state-dir $WORLD" "control plane"
   reap "$BROKER_PID_FILE" "broker --user $PERSON --state-dir $WORLD" "broker"
+
+  local strays
+  strays="$(engine_strays)"
+  if [ -n "$strays" ]; then
+    note "engine processes still running against this world's engine root: $strays"
+    info "A kimi-cli run is a child of the control plane, not a daemon, so stopping"
+    info "the plane mid-run can leave its process group behind. End them with:"
+    info "  kill $strays        (then 'kill -9' the same pids if any survive)"
+  else
+    ok "no kimi-cli engine process is running against $ENGINE_ROOT"
+    info "There is no engine daemon to stop: that substrate owns no standing"
+    info "process and no per-user server — a run lives and dies with its session."
+  fi
   info "the world is kept at $WORLD — re-run '$ENVP$SELF' to bring it back up"
 }
 
@@ -1126,13 +1617,22 @@ do_clean() {
   refuse_protected_world
   if [ "$DRY" = 1 ]; then
     dry "would stop the broker and the control plane, then rm -rf $WORLD"
+    dry "  that takes this door's pinned engine install ($ENGINE_PREFIX) and every run's"
+    dry "  engine home ($ENGINE_ROOT) with it; the next run re-installs the pin"
+    dry "would REFUSE while an engine process is still running against $ENGINE_ROOT"
     return 0
   fi
   [ -d "$WORLD" ] || { note "nothing to remove ($WORLD does not exist)"; return 0; }
   [ -f "$MARKER" ] || die "$WORLD carries no lane-test-door marker — refusing to delete it"
   do_stop
+  # Deleting a world out from under a live engine leaves a process spending the
+  # membership with its files gone — the one orphan shape this door can create.
+  local strays
+  strays="$(engine_strays)"
+  [ -z "$strays" ] \
+    || die "engine process(es) $strays are still running against $ENGINE_ROOT. Refusing to delete the world under them — end them first: kill $strays"
   rm -rf "$WORLD"
-  ok "removed $WORLD"
+  ok "removed $WORLD (including the pinned engine install and every run's engine home)"
 }
 
 # ─── driver ─────────────────────────────────────────────────────────────────
@@ -1140,6 +1640,7 @@ run_step() {
   case "$1" in
     preflight) do_preflight ;;
     world)     do_world ;;
+    engine)    do_engine ;;
     broker)    do_broker ;;
     keys)      do_keys ;;
     plane)     do_plane ;;
@@ -1147,7 +1648,7 @@ run_step() {
     walk)      do_walk ;;
     stop)      do_stop ;;
     clean)     do_clean ;;
-    *) die "unknown step '$1' (steps: preflight world broker keys plane budget walk · verbs: stop clean)" ;;
+    *) die "unknown step '$1' (steps: preflight world engine broker keys plane budget walk · verbs: stop clean)" ;;
   esac
 }
 
@@ -1156,7 +1657,7 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) DRY=1 ;;
-      -h|--help) sed -n '2,84p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,118p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
       -*) die "unknown option '$1'" ;;
       *) only="$1" ;;
     esac
@@ -1175,7 +1676,7 @@ main() {
   if [ -n "$only" ]; then
     run_step "$only"
   else
-    for s in preflight world broker keys plane budget walk; do
+    for s in preflight world engine broker keys plane budget walk; do
       run_step "$s"
     done
   fi

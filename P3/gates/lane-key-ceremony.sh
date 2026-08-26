@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
-# P3/gates/lane-key-ceremony.sh — LN-CEREMONY: commission the zai and kimi
-# lanes on this host, in one guided, self-verifying pass.
+# P3/gates/lane-key-ceremony.sh — LN-CEREMONY: commission this host's engine
+# lanes, in one guided, self-verifying pass.
+#
+# TWO KEYS, THREE LANES (since P3-LN-7). It asks for a Z.AI key and a Kimi key,
+# as it always has. What changed is what the Kimi key buys: `kimi` (the API
+# endpoint, opencode substrate) and `kimi-cli` (Moonshot's own pinned CLI) name
+# the SAME broker auth-profile, because one Kimi Code membership is one Console
+# key — so placing it once commissions both, and the platform delivers that one
+# secret under each lane's own variable at spawn. The key steps below are
+# unchanged; the summary reports every shipped lane document rather than the two
+# this script prompts for, so a lane commissioned by a sibling's paste is
+# visible instead of silently absent.
 #
 # ONE COMMAND:
 #
@@ -92,6 +102,35 @@ trap cleanup EXIT
 
 lane_doc()  { printf '%s/internal/adapters/opencode/lanedata/%s.json' "$REPO" "$1"; }
 plan_doc()  { printf '%s/internal/metering/plandata/%s.json' "$REPO" "$1"; }
+LANEDATA="$REPO/internal/adapters/opencode/lanedata"
+
+# all_lanes prints every SHIPPED lane document's lane name, sorted — which is
+# the same corpus and the same order the control plane loads. It is not $LANES:
+# this script PROMPTS for two keys, and since P3-LN-7 one of those two keys
+# commissions two lanes, so "what is commissioned" is a question about the
+# corpus and "what do I paste" is a question about the prompts.
+all_lanes() {
+  local f
+  for f in "$LANEDATA"/*.json; do
+    [ -f "$f" ] || continue
+    jq -r '.lane' "$f" 2>/dev/null || true
+  done | sort
+}
+
+# profile_siblings prints every OTHER shipped lane that places under the SAME
+# broker auth-profile as lane $1, as "<lane> (as $VAR)". One membership can now
+# serve two lanes on two engines, so a placement note naming only the lane it
+# was asked about would understate what the paste just did.
+profile_siblings() {
+  local lane=$1 profile=$2 f
+  [ -n "$profile" ] || return 0
+  for f in "$LANEDATA"/*.json; do
+    [ -f "$f" ] || continue
+    jq -r --arg l "$lane" --arg p "$profile" \
+      'select(.lane != $l and ((.credential.profile // "") == $p)) | "\(.lane) (as $\(.credential.env_var))"' \
+      "$f" 2>/dev/null || true
+  done
+}
 
 # need_tool builds the credential tool. It is a TOOL under tools/, not a
 # platform change: no `sinet` verb places an engine-cred (the binary's modes are
@@ -168,14 +207,20 @@ do_preflight() {
   need_tool
   ok "credential tool built: tools/lanekey"
 
-  local lane
-  for lane in $LANES; do
+  # Every SHIPPED lane document, not just the two this script prompts a key for.
+  # Two of them share one auth profile since P3-LN-7, and a preflight that
+  # listed only the prompted lanes would leave the reader counting one lane per
+  # key — which is the thing that is no longer true.
+  local lane n=0
+  for lane in $(all_lanes); do
     [ -f "$(lane_doc "$lane")" ] || die "lane document missing: $(lane_doc "$lane")"
     # Reading a fact runs the loader AND the endpoint self-check.
-    info "$(printf 'lane %-5s profile=%-16s var=%-14s endpoint=%s' \
+    info "$(printf 'lane %-8s profile=%-16s var=%-20s endpoint=%s' \
         "$lane" "$(lane_fact "$lane" profile)" "$(lane_fact "$lane" env_var)" "$(lane_fact "$lane" base_url)")"
+    n=$((n+1))
   done
-  ok "both lane documents load and pass the endpoint self-check"
+  ok "all $n lane documents load and pass the endpoint self-check"
+  info "Lanes sharing a profile above are commissioned by ONE paste of that key."
 
   [ "$fail" = 0 ] || die "preflight found $fail problem(s) — fix them before placing a key"
 }
@@ -191,6 +236,17 @@ place_key() {
   info "The platform delivers it to the engine as \$$envvar at spawn, resolved"
   info "fresh each time. It is stored encrypted and never logged or committed."
   info "Store: $STORE_ROOT/$STORE_USER"
+
+  # What this ONE placement commissions besides the lane being asked about,
+  # derived from the shipped documents rather than written down.
+  local sibs
+  sibs="$(profile_siblings "$lane" "$profile" | tr '\n' ' ')"
+  if [ -n "${sibs// /}" ]; then
+    info "ONE PASTE, MORE THAN ONE LANE. Profile '$profile' is also lane"
+    info "${sibs% }, so this single placement commissions"
+    info "that lane too — the same material, delivered under a DIFFERENT variable"
+    info "to a different engine. It is one subscription, so it is one key."
+  fi
 
   if [ "$DRY" = 1 ]; then
     dry "would prompt for the $lane key with 'read -rs' (never shown)"
@@ -428,7 +484,10 @@ do_summary() {
 
   local lane profile state
   need_tool
-  for lane in $LANES; do
+  # Every SHIPPED lane, not the two this script prompts for: since P3-LN-7 a
+  # single Kimi paste commissions two lanes, and a summary listing only the
+  # prompted ones would report a commissioned lane as absent.
+  for lane in $(all_lanes); do
     profile="$(lane_fact "$lane" profile)"
     if [ "$DRY" = 1 ]; then
       dry "would run: lanekey verify --store-dir $STORE_ROOT --user $STORE_USER --lane $(lane_doc "$lane")"
@@ -439,7 +498,7 @@ do_summary() {
     else
       state="not commissioned — no credential resolves under profile '$profile'"
     fi
-    printf '  %-6s %s\n' "$lane" "$state"
+    printf '  %-9s %s\n' "$lane" "$state"
   done
 
   printf '\n'
