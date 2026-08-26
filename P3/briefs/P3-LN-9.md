@@ -1,3 +1,5 @@
+> **EXPIRED 2026-08-27 (landed).** Single-use artifact; after the drain rounds it no longer matches the code. Later grounding must never read it as truth — code + spec only. Known post-brief corrections: a pin on a covered lane whose effective duty has no seat RIDES the lane's execution seat (r1 F1/F2 — the brief's refusal reading was superseded); `runs.lane`/`runs.substrate` are stamped at the execute dispatch (R9, with the pressure-gauge/plan-allowance reader consequence recorded in §68); lockgate is 40, not 39.
+
 # P3-LN-9 — the per-task lane pin, backend half
 
 **Packet:** P3-LN-9 · **Phase:** LN (lane campaign) · **Grounding:** 2026-08-26
