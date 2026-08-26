@@ -46,6 +46,7 @@ import (
 	"net/url"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/accept"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/chat"
@@ -2053,8 +2054,36 @@ func fixtureServer(t *testing.T, b *backend, who string) *api.Server {
 		Chat:       b.chat,
 		Workforce:  fixtureWorkforce(t, b),
 		Push:       fixturePushStore(t, b),
-		Now:        func() time.Time { return mustTime(t, fxT4) },
+		// The S00.9 A13 lane-pin set behind GET /api/intake/pinnable-lanes
+		// (P3-LN-10a), for the lanes this fixture world already speaks.
+		PinnableLanes: fixturePinnableLanes(),
+		Now:           func() time.Time { return mustTime(t, fxT4) },
 	})
+}
+
+// fixturePinnableLanes is the committed world's lane-pin set, produced by the
+// REAL producer over a real Coverage — the composition root's own adaptation
+// (stage.lanePinOptions), inlined because internal/api holds the set as data.
+//
+// The three-field copy is harness; the SENTENCE is the rule and is never typed
+// by hand. Both row KINDS reach the committed body deliberately: a pinnable row
+// (which must carry no `not_pinnable` key at all) and the local engine lane's
+// refusal (whose words the picker renders verbatim) — a member no fixture
+// exercises is a contract nobody agreed to (§63-R3).
+//
+// The lanes are the ones this world already speaks: anthropic configured-first,
+// kimi and zai commissioned, the local engine lane appended last.
+func fixturePinnableLanes() []intake.LanePinOption {
+	cov := worker.Coverage{
+		FlatRateLanes: []string{adapters.LaneAnthropic, adapters.LaneKimi, adapters.LaneZAI},
+		LocalLane:     adapters.LaneLocal,
+	}
+	pinnable := worker.PinnableLanes(cov)
+	out := make([]intake.LanePinOption, 0, len(pinnable))
+	for _, p := range pinnable {
+		out = append(out, intake.LanePinOption{Lane: p.Lane, Pinnable: p.Pinnable, NotPinnable: p.NotPinnable})
+	}
+	return out
 }
 
 // fixtureBenchmark is the practice seam for the fixture world.
@@ -2290,6 +2319,11 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// a served body and not about a render.
 	{"workforce", "/api/workforce", ""},
 	{"workforce-member", "/api/workforce", "alice"},
+	// The S00.9 A13 lane-pin set (P3-LN-10a): the lanes a task-creation pin may
+	// name, each with the platform's own verdict. Read at the household
+	// altitude because the set is PROCESS-WIDE by construction — coverage is the
+	// union across the people who placed a credential, and selection re-checks.
+	{"intake-pinnable-lanes", "/api/intake/pinnable-lanes", ""},
 }
 
 func TestWebAPIFixtures(t *testing.T) {

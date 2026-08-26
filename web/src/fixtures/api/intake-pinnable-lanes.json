@@ -1,0 +1,21 @@
+{
+  "lanes": [
+    {
+      "lane": "anthropic",
+      "pinnable": true
+    },
+    {
+      "lane": "kimi",
+      "pinnable": true
+    },
+    {
+      "lane": "zai",
+      "pinnable": true
+    },
+    {
+      "lane": "local",
+      "pinnable": false,
+      "not_pinnable": "lane \"local\" is the local ENGINE lane, which carries no v0 consumer: no local provider entry is commissioned, so honoring a pin to it could only mean riding the paid seat instead (S12.1 class (a)). The lanes a task may pin are: \"anthropic\", \"kimi\", \"zai\""
+    }
+  ]
+}

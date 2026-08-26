@@ -529,6 +529,12 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     gap: true,
     why: 'REPORTED GAP (P3-LN-6, 2026-08-25): the 13.4 BACKEND half is served — declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need — and no surface exists for it. The S15.9 settings tab is its named consumer and lands with 13.4; the token budget verb sat here the same way in B6-2B until its editor arrived. This is an absence with a date, not a route no client may ever call.',
   },
+  {
+    method: 'GET',
+    path: '/api/intake/pinnable-lanes',
+    gap: true,
+    why: 'REPORTED GAP (P3-LN-10a, 2026-08-27): the BACKEND half of the lane pin is served — the lanes a task-creation pin may name, composed once at startup and carried verbatim with the verdict the platform itself computed on each, so a picker enumerates the set the boundary actually honors instead of hardcoding a second spelling. Its named consumer is P3-LN-10, the lane picker on the create form, and it lands with that packet. The plan-budget entry above is the same shape of absence: a backend half sitting served-but-unconsumed until its surface arrives. An absence with a date, not a route no client may ever call.',
+  },
 ]
 
 describe('the SPA consumes every API built above (S19.5)', () => {
@@ -613,8 +619,14 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     // above says this line is for: POST /api/meters/plan-budget is the first
     // real absence — a served route whose surface is the S15.9 settings tab,
     // arriving with 13.4. CONVENTIONS §46 carries the same count and its date.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(1)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(1)
+    // MOVED DELIBERATELY AGAIN 2026-08-27 (P3-LN-10a), the same way and for the
+    // same kind of reason: GET /api/intake/pinnable-lanes is the lane pin's
+    // backend half — the set a task-creation pin may name, served so the picker
+    // enumerates the set the boundary honors rather than spelling it a second
+    // time — and its surface is P3-LN-10, the lane picker on the create form.
+    // Two routes over two shapes; §46 carries both counts and both dates.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(2)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(2)
     // A reported gap names a route the server DOES serve — that is what makes
     // it a gap rather than a phantom, and the phantom check above already bars
     // an exception naming an unserved route. This assertion read `toBe(0)`

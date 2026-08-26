@@ -132,6 +132,11 @@
       "session_required": true
     },
     {
+      "method": "GET",
+      "path": "/api/intake/pinnable-lanes",
+      "session_required": true
+    },
+    {
       "method": "POST",
       "path": "/api/tasks/{task}/advance",
       "session_required": true

@@ -253,6 +253,16 @@ type Config struct {
 	// Intake is the walking-skeleton pipeline surface (intake_handlers.go);
 	// nil leaves those routes answering 503 (surface not wired).
 	Intake IntakeSurface
+	// PinnableLanes is the lane-pin set the intake pipeline was composed with
+	// (S00.9 A13), served verbatim by GET /api/intake/pinnable-lanes so the
+	// lane picker enumerates the set the BOUNDARY honors. It crosses as DATA
+	// rather than as an IntakeSurface method — the PlanBudgets/Meter Config
+	// seam precedent — because it is startup-bound (§65: commissioning has no
+	// reload seam) and because a surface returning pre-assembled JSON would let
+	// the golden fixture pin a fake's bytes instead of a real producer's
+	// (§63-R3). Empty is a real state and answers 200 with an empty list; what
+	// answers 503 is an unwired Intake, above.
+	PinnableLanes []intake.LanePinOption
 	// Review is the S13.1–S13.4 deliverable/review data layer behind the S15.2
 	// deliverables family (deliverables.go, B6-3B): the revision lineage, the
 	// per-type comparison, the anchored comments and their placements. It is
@@ -403,6 +413,9 @@ type Server struct {
 	clock    func() time.Time
 	nudge    *broadcast
 	intake   IntakeSurface
+	// pinnableLanes is the startup-composed lane-pin set behind the intake
+	// family's read (intake_handlers.go).
+	pinnableLanes []intake.LanePinOption
 	// review is the S13.1–S13.4 store behind the deliverables family (B6-3B).
 	review *review.Store
 	// accept is the S13.6 orchestration behind the one outward act (B6-3B).
@@ -483,41 +496,42 @@ func (s *Server) record(pattern string, session bool) {
 // New assembles the Server.
 func New(cfg Config) *Server {
 	s := &Server{
-		log:         cfg.Log,
-		sessions:    cfg.Sessions,
-		devPosture:  cfg.DevPosture,
-		auth:        cfg.Auth,
-		settings:    cfg.Settings,
-		registry:    cfg.Registry,
-		prices:      cfg.Prices,
-		healthFn:    cfg.HealthFn,
-		stopping:    cfg.Stopping,
-		poll:        cfg.PollInterval,
-		logger:      cfg.Logger,
-		nudge:       newBroadcast(),
-		intake:      cfg.Intake,
-		onboard:     cfg.Onboard,
-		review:      cfg.Review,
-		accept:      cfg.Accept,
-		followUp:    cfg.FollowUp,
-		preview:     cfg.Preview,
-		memory:      cfg.Memory,
-		memGate:     cfg.MemoryGate,
-		history:     cfg.History,
-		chat:        cfg.Chat,
-		push:        cfg.Push,
-		pushSender:  cfg.PushSender,
-		workforce:   cfg.Workforce,
-		effects:     cfg.Effects,
-		cancel:      cfg.Cancel,
-		clock:       cfg.Now,
-		budgets:     cfg.Budgets,
-		planBudgets: cfg.PlanBudgets,
-		pause:       cfg.Pause,
-		hints:       cfg.Hints,
-		watchdog:    cfg.Watchdog,
-		resume:      cfg.Resume,
-		benchmark:   cfg.Benchmark,
+		log:           cfg.Log,
+		sessions:      cfg.Sessions,
+		devPosture:    cfg.DevPosture,
+		auth:          cfg.Auth,
+		settings:      cfg.Settings,
+		registry:      cfg.Registry,
+		prices:        cfg.Prices,
+		healthFn:      cfg.HealthFn,
+		stopping:      cfg.Stopping,
+		poll:          cfg.PollInterval,
+		logger:        cfg.Logger,
+		nudge:         newBroadcast(),
+		intake:        cfg.Intake,
+		pinnableLanes: cfg.PinnableLanes,
+		onboard:       cfg.Onboard,
+		review:        cfg.Review,
+		accept:        cfg.Accept,
+		followUp:      cfg.FollowUp,
+		preview:       cfg.Preview,
+		memory:        cfg.Memory,
+		memGate:       cfg.MemoryGate,
+		history:       cfg.History,
+		chat:          cfg.Chat,
+		push:          cfg.Push,
+		pushSender:    cfg.PushSender,
+		workforce:     cfg.Workforce,
+		effects:       cfg.Effects,
+		cancel:        cfg.Cancel,
+		clock:         cfg.Now,
+		budgets:       cfg.Budgets,
+		planBudgets:   cfg.PlanBudgets,
+		pause:         cfg.Pause,
+		hints:         cfg.Hints,
+		watchdog:      cfg.Watchdog,
+		resume:        cfg.Resume,
+		benchmark:     cfg.Benchmark,
 	}
 	if cfg.DB != nil {
 		s.proj = &projector{db: cfg.DB, meter: cfg.Meter, now: s.clock}
@@ -603,6 +617,10 @@ func (s *Server) Handler() http.Handler {
 	// is additive-first (S15.2) — and the S15.6 decision plane below joins them
 	// rather than replacing them.
 	protected("POST /api/intake/requests", s.handleIntakeSubmit)
+	// The S00.9 A13 lane-pin set, read (P3-LN-10a): the lanes a task-creation
+	// pin may name, so the picker offers exactly what the submit verb beside it
+	// will honor.
+	protected("GET /api/intake/pinnable-lanes", s.handlePinnableLanes)
 	protected("POST /api/tasks/{task}/advance", s.handleTaskAdvance)
 	protected("POST /api/asks/{ask}/answer", s.handleAskAnswer)
 

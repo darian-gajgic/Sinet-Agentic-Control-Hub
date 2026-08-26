@@ -44,6 +44,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/gates"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/history"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/memory"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
@@ -251,6 +252,10 @@ func Run(ctx context.Context, opts Options) error {
 	// Spec S19.5 B2), and the intake API surface goes live.
 	var sched *scheduler.Scheduler
 	var intakeSurface api.IntakeSurface
+	// pinnableLanes is the skeleton's OWN composed lane-pin set (S00.9 A13),
+	// carried to the api read (P3-LN-10a). It stays empty under injected
+	// admission, where there is no skeleton and the intake routes answer 503.
+	var pinnableLanes []intake.LanePinOption
 	var cancelSurface api.CancelSurface
 	// onboardSurface is the S13.7 create door behind POST /api/projects
 	// (P3-RW-2), composed over the registry store and the run substrate below.
@@ -734,6 +739,9 @@ func Run(ctx context.Context, opts Options) error {
 		admission = sched
 		surface := sk.Surface()
 		intakeSurface = surface
+		// The lane-pin set the picker enumerates is read off the skeleton that
+		// composed it, so the transport and the boundary hold ONE set (§65).
+		pinnableLanes = sk.PinnableLaneOptions()
 		// The S13.7 onboarding door (P3-RW-2): the registry half over
 		// internal/project, the run half over the skeleton's landed
 		// StartOnboarding. internal/api holds it as a narrow interface and
@@ -973,9 +981,12 @@ func Run(ctx context.Context, opts Options) error {
 		HealthFn: healthFn(st, maint, log),
 		Stopping: st.stopping,
 		Intake:   intakeSurface,
-		Onboard:  onboardSurface, // S13.7 projects family: the create door (P3-RW-2)
-		Cancel:   cancelSurface,  // S15.6 / 4.5 cancel verbs (B6-2A)
-		Effects:  effects,        // S02.7 journal behind the S15.6 effect approvals
+		// The S00.9 A13 lane-pin set behind GET /api/intake/pinnable-lanes
+		// (P3-LN-10a), composed once at stage.New and carried verbatim.
+		PinnableLanes: pinnableLanes,
+		Onboard:       onboardSurface, // S13.7 projects family: the create door (P3-RW-2)
+		Cancel:        cancelSurface,  // S15.6 / 4.5 cancel verbs (B6-2A)
+		Effects:       effects,        // S02.7 journal behind the S15.6 effect approvals
 		// The B6-2B decision-plane seams: the S10.4 meters mutations, the S15.5
 		// board drag, and the two oversight verbs over landed internals. wd is
 		// nil under injected admission, which leaves the suppress route at 503

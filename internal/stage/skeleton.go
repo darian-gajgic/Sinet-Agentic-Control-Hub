@@ -238,6 +238,13 @@ func (s *Skeleton) Bind(a Admitter) { s.sched = a }
 // and tests compose against it).
 func (s *Skeleton) Pipeline() *intake.Pipeline { return s.pipe }
 
+// PinnableLaneOptions is the composed lane-pin set (S00.9 A13) the transport
+// serves to the lane picker: the SAME value the boundary refuses against, so
+// the set an operator may pin from IS the set selection will honor rather than
+// a second spelling that agrees today (§65). It is startup-bound data and
+// crosses to internal/api as data, never as a second worker.PinnableLanes call.
+func (s *Skeleton) PinnableLaneOptions() []intake.LanePinOption { return s.pipe.PinnableLanes }
+
 func (s *Skeleton) logger() *slog.Logger {
 	if s.cfg.Logger != nil {
 		return s.cfg.Logger

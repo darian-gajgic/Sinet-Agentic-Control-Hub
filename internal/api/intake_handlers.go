@@ -130,6 +130,55 @@ func (s *Server) handleIntakeSubmit(w http.ResponseWriter, r *http.Request) {
 	s.writeSurface(w, payload, err)
 }
 
+// lanePinOptionRow is one served row of the lane-pin set (S00.9 A13). It is a
+// wire struct rather than json tags on intake.LanePinOption because that type
+// is the SEAM the verdict crosses on, not a payload — the snake_case spelling
+// belongs to the transport, beside `pinned_lane` on the submit verb.
+//
+// NotPinnable is the selection layer's own sentence, carried verbatim: the same
+// words refuseLanePin quotes when it refuses a submission naming this lane.
+// `omitempty` keeps it off a pinnable row entirely, so a reader never has to
+// decide what an empty reason means.
+type lanePinOptionRow struct {
+	Lane        string `json:"lane"`
+	Pinnable    bool   `json:"pinnable"`
+	NotPinnable string `json:"not_pinnable,omitempty"`
+}
+
+// pinnableLanesBody is an OBJECT and never a bare array: evolution on this
+// surface is additive-first (S15.2), and a top-level array can never grow a
+// sibling key.
+type pinnableLanesBody struct {
+	Lanes []lanePinOptionRow `json:"lanes"`
+}
+
+// GET /api/intake/pinnable-lanes — the lanes a task-creation pin may name,
+// each carrying the platform's own verdict (S00.9 A13, P3-LN-10a).
+//
+// The set is the one the intake pipeline was composed with, served in its
+// COMPOSITION order: first row is the platform's configured flat-rate lane,
+// commissioned lanes follow, the local engine lane is last. Nothing is sorted,
+// filtered or re-derived here — that order is meaningful and owned by the
+// composition, and the verdicts are the selection layer's (§65/§66 D1: the
+// transport re-derives no more than the boundary does).
+//
+// The set is PROCESS-WIDE, deliberately: coverage is the union across the
+// people who placed a credential (worker.PinnableLanes states the same
+// over-approximation), selection re-checks, and the boundary still refuses.
+func (s *Server) handlePinnableLanes(w http.ResponseWriter, r *http.Request) {
+	if !s.surfaceReady(w) {
+		return
+	}
+	// Initialized, never nil: an empty set serves `[]`, which says "no lane is
+	// pinnable here" where `null` would read as a broken response.
+	rows := make([]lanePinOptionRow, 0, len(s.pinnableLanes))
+	for _, opt := range s.pinnableLanes {
+		rows = append(rows, lanePinOptionRow{Lane: opt.Lane, Pinnable: opt.Pinnable, NotPinnable: opt.NotPinnable})
+	}
+	payload, err := json.Marshal(pinnableLanesBody{Lanes: rows})
+	s.writeSurface(w, payload, err)
+}
+
 // POST /api/tasks/{task}/advance
 func (s *Server) handleTaskAdvance(w http.ResponseWriter, r *http.Request) {
 	if !s.surfaceReady(w) {
