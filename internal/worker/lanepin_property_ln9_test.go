@@ -2,21 +2,31 @@ package worker_test
 
 // lanepin_property_ln9_test.go — P3-LN-9 §9.3/§9.5 (S08.8, S00.9 A13, D5).
 //
-// R10 as a PROPERTY, not as an example: an unpinned task's Decision must be
-// what it was before this packet existed, field for field, across arbitrary
-// draws — and the property must be able to FAIL, which is what the held-out
-// mutation at the bottom proves. §66 D8 is the record of exactly this property
-// passing while comparing too few fields, so the comparison here is over the
-// WHOLE Decision, and PlainReason additionally against a byte-exact literal.
+// R10 as a PROPERTY, not as an example — and stated precisely, because the
+// first cut overclaimed it (r1 F13).
+//
+// WHAT IT PROVES: over arbitrary draws, an unpinned Decision is INERT to
+// everything this packet added — identical field for field between a world
+// carrying the new Coverage members and one without them, with `LanePin` empty
+// and no pin vocabulary anywhere in the reason. WHAT IT DOES NOT PROVE: that
+// the result equals a pre-packet binary, since both arms run post-packet code.
+// The pre-vs-post half is carried by the two assertions below it — every new
+// arm in selection is gated on `q.PinnedLane`, and `lane_pin` is absent from
+// an unpinned Decision's JSON — plus the held-out mutation, which is what stops
+// this being a property that can only pass. §66 D8 is the record of exactly
+// this property passing while comparing too few fields, so the comparison here
+// is over the WHOLE Decision.
 //
 // $0: a real store over a temp database, a fake tie-break, no engine, no
 // provider, no network.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -247,4 +257,87 @@ func TestLN9PlantedPinCannotSteerDispatch(t *testing.T) {
 	if d.Lane != "" || d.Model != "" {
 		t.Errorf("a refused pin still produced a routable decision: %+v", d)
 	}
+}
+
+// TestLN9R1UnpinnedDecisionSerializesWithoutTheMember is the evaluator's own
+// probe, committed (r1 F13). `omitempty` is a claim about BYTES, and the
+// property above compares Go values — so this is the half that actually holds
+// the wire contract: an unpinned task's routing.decided payload must not carry
+// the key at all, or every consumer sees a member the platform said it would
+// only send when it meant something.
+func TestLN9R1UnpinnedDecisionSerializesWithoutTheMember(t *testing.T) {
+	f := newFix(t)
+	f.user("alice", "member")
+	approveReviewer(t, f, "alice")
+
+	r := ln9Router(f, true, []string{"anthropic", "zai"}, ln9Pressure{"anthropic": 0.2, "zai": 0.4})
+	q := worker.RouteQuery{
+		Requester: "alice", TaskID: "t-ln9r1-wire",
+		TaskText: "Please review my code for defects",
+		Family:   "read-analyze", Domain: "software",
+		Classes: []string{"C1"}, Tools: []string{"Read"},
+	}
+	unpinned, err := r.Route(context.Background(), q)
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	raw, err := json.Marshal(unpinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "lane_pin") {
+		t.Errorf("an UNPINNED decision serializes the lane_pin key: %s", raw)
+	}
+
+	// The inverse, so the absence above is a fact about the pin and not about
+	// the marshaller.
+	q.PinnedLane, q.TaskID = "zai", "t-ln9r1-wire-pinned"
+	pinned, err := r.Route(context.Background(), q)
+	if err != nil {
+		t.Fatalf("Route(pinned): %v", err)
+	}
+	raw, err = json.Marshal(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"lane_pin":"zai"`) {
+		t.Errorf("a PINNED decision does not serialize the member: %s", raw)
+	}
+}
+
+// TestLN9R1EveryNewSelectionArmIsGatedOnThePin is the structural half of the
+// pre-vs-post claim: the packet's additions to routing.go are reachable ONLY
+// through a non-empty PinnedLane. A source scan is a weak instrument in
+// general; here it is the right one, because the claim is precisely "no new
+// code runs when the field is empty" and that is a statement about the SOURCE
+// rather than about any one draw.
+func TestLN9R1EveryNewSelectionArmIsGatedOnThePin(t *testing.T) {
+	body := readWorkerSourceExternal(t, "routing.go")
+
+	// The lane-pin arm in resolveSeat is entered only under the guard.
+	if !strings.Contains(body, `if q.PinnedLane != "" {`) {
+		t.Error("the lane-pin arm is no longer gated on a non-empty PinnedLane — an ungated arm runs on every " +
+			"unpinned task, which is what R10 exists to forbid")
+	}
+	// resolveLanePin is reached from exactly one place: that arm.
+	if n := strings.Count(body, "r.resolveLanePin("); n != 1 {
+		t.Errorf("resolveLanePin has %d call sites, want exactly 1 (the guarded arm) — a second caller is a "+
+			"second door the property above does not cover", n)
+	}
+	// And the two decision sites carry the member straight from the query, so
+	// an empty query member cannot produce a non-empty decision member.
+	if n := strings.Count(body, "LanePin:      q.PinnedLane"); n < 1 {
+		if n := strings.Count(body, "LanePin:       q.PinnedLane"); n < 1 {
+			t.Error("Decision.LanePin is no longer taken directly from the query")
+		}
+	}
+}
+
+func readWorkerSourceExternal(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
 }

@@ -574,8 +574,15 @@ func (s *Store) SetWorkspaceRef(ctx context.Context, runID, ref string) error {
 // is not a state change, and the value is derived from the run's OWN settled
 // decision — two writers racing here would write the same two strings. The
 // FSM, the lease and the generation are untouched.
+// NEVER BLANKS A STAMPED TRUTH (P3-LN-9 r1 F5). The first cut guarded the two
+// values JOINTLY — it skipped only when BOTH were empty — so a call carrying a
+// substrate and no lane wrote `lane = ”` over a row that already named the
+// lane that ran, turning a correction into a data loss. It is reachable in
+// principle: the S08.8 gap leg zeroes the seat, and a decision with no lane is
+// exactly the case where the row's own value is the better answer. An absent
+// decision is an ABSENCE, never an instruction to forget.
 func (s *Store) SetDecidedLane(ctx context.Context, runID, lane, substrate string) error {
-	if runID == "" || (lane == "" && substrate == "") {
+	if runID == "" || lane == "" || substrate == "" {
 		return nil
 	}
 	return s.db.WriteTx(ctx, func(tx *sql.Tx) error {

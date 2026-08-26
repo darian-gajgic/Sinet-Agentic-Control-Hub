@@ -45,19 +45,27 @@ func TestLN9R1PinIsHonoredForANonExecutionDuty(t *testing.T) {
 	for _, tc := range []struct {
 		name, duty string
 		wantSaid   []string
+		wantAbsent []string
 	}{
 		// The duty map HAS a planning seat, so nothing degrades and the old
 		// search simply found nothing on that duty. Riding the lane's
 		// execution seat IS a substitution here, so the reason must say so.
 		{"a template declaring the planning duty", DutyPlanning,
-			[]string{"REPLACED", "EXECUTION only", "S07.5", DutyPlanning}},
+			[]string{"REPLACED", "EXECUTION only", "S07.5", DutyPlanning}, nil},
 		// An unknown duty degrades onto the execution SEAT while `duty` keeps
 		// its original value — the second door to the same refusal. Here the
 		// substitution is the degrade selection ALREADY records in its own
 		// sentence, so the pin adds no second claim: the effective duty is
 		// execution before the pin is consulted at all.
 		{"a template declaring an unknown duty", "reviewer",
-			[]string{"REPLACED", "has no seat in the v0 duty map; riding the execution seat"}},
+			[]string{"REPLACED", "has no seat in the v0 duty map; riding the execution seat"},
+			// And NOT the execution-seat substitution clause. Selection already
+			// degraded this duty onto the execution seat and said so in its own
+			// sentence, so the effective duty IS execution by the time the pin
+			// is consulted. Saying it a second time would describe two
+			// substitutions where one happened — which is what tracking the
+			// EFFECTIVE duty (rather than re-deriving from the template's) buys.
+			[]string{"EXECUTION only"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := ln9r1Router()
@@ -86,6 +94,13 @@ func TestLN9R1PinIsHonoredForANonExecutionDuty(t *testing.T) {
 			for _, want := range tc.wantSaid {
 				if !strings.Contains(reason, want) {
 					t.Errorf("duty %q: the reason does not say %q: %q", tc.duty, want, reason)
+				}
+			}
+			for _, absent := range tc.wantAbsent {
+				if strings.Contains(reason, absent) {
+					t.Errorf("duty %q: the reason says %q, which describes a substitution that did NOT happen "+
+						"a second time — selection had already degraded this duty onto the execution seat: %q",
+						tc.duty, absent, reason)
 				}
 			}
 			// Whichever door it came through, the reader is told the duty is

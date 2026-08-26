@@ -121,3 +121,46 @@ func TestLN9SetDecidedLaneWritesNothingWhenNothingMoved(t *testing.T) {
 		t.Errorf("an empty decision blanked the row: %+v", blank)
 	}
 }
+
+// TestLN9R1PartialStampNeverBlanksAStampedTruth — drain r1 F5.
+//
+// The first cut guarded the two values JOINTLY, skipping only when BOTH were
+// empty. So the HALF-EMPTY shapes wrote through: a substrate with no lane
+// blanked `runs.lane` — over a row that already named the lane that ran. The
+// S08.8 gap leg zeroes the seat, so a decision carrying no lane is a real
+// shape, and it is precisely the case where the row's own value is the better
+// answer. An absent decision is an ABSENCE, never an instruction to forget.
+func TestLN9R1PartialStampNeverBlanksAStampedTruth(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct{ name, lane, substrate string }{
+		{"a substrate with no lane", "", "opencode"},
+		{"a lane with no substrate", "zai", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ln9Store(t)
+			if _, err := s.Create(ctx, run.NewRun{
+				ID: "r-partial", UserID: "alice",
+				Substrate: "claude-cli", Lane: "anthropic",
+			}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			// The row already carries a stamped truth — the state R9 exists to
+			// produce — so a partial call must not erase half of it.
+			if err := s.SetDecidedLane(ctx, "r-partial", "zai", "opencode"); err != nil {
+				t.Fatalf("SetDecidedLane (the real stamp): %v", err)
+			}
+			if err := s.SetDecidedLane(ctx, "r-partial", tc.lane, tc.substrate); err != nil {
+				t.Fatalf("SetDecidedLane(%q, %q): %v", tc.lane, tc.substrate, err)
+			}
+			got, err := s.Get(ctx, "r-partial")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Lane != "zai" || got.Substrate != "opencode" {
+				t.Fatalf("a partial stamp (%q, %q) left the row at lane %q / substrate %q — it overwrote a "+
+					"value that already named what ran, which turns a correction into a data loss (r1 F5)",
+					tc.lane, tc.substrate, got.Lane, got.Substrate)
+			}
+		})
+	}
+}

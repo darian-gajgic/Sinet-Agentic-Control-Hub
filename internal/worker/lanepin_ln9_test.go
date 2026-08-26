@@ -257,8 +257,14 @@ func TestLN9CoveredLaneWithNoSeatForTheDutyRefuses(t *testing.T) {
 	if !errors.Is(err, ErrLanePinUnhonorable) {
 		t.Fatalf("err = %v, want ErrLanePinUnhonorable", err)
 	}
-	if !strings.Contains(err.Error(), "no seat") {
+	// The message names the TRUE cause. r1 F1 corrected it: it used to blame
+	// the duty ("this duty resolves to no model there"), which sent a reader to
+	// the template when the missing thing is a commissioned execution seat.
+	if !strings.Contains(err.Error(), "no execution seat on it") {
 		t.Errorf("the refusal does not say what is missing: %v", err)
+	}
+	if strings.Contains(err.Error(), "this duty resolves to no model there") {
+		t.Errorf("the refusal still blames the duty: %v", err)
 	}
 }
 

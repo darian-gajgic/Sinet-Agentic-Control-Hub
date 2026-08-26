@@ -341,6 +341,22 @@ func PinnableLanes(cov Coverage) []PinnableLane {
 	return out
 }
 
+// coveredLaneCount is the number of DISTINCT covered flat-rate lanes. The raw
+// slice can repeat a lane — the composition root prepends the configured lane
+// to the commissioned set, and a commissioned lane that IS the configured one
+// appears twice — so counting it raw told an operator the pin replaced a
+// comparison across three lanes when there were two (r1 F6). pinnableList
+// already dedupes; the count now agrees with the names beside it.
+func coveredLaneCount(cov Coverage) int {
+	seen := map[string]bool{}
+	for _, lane := range cov.FlatRateLanes {
+		if lane != "" {
+			seen[lane] = true
+		}
+	}
+	return len(seen)
+}
+
 // pinnableList names the covered lanes for a refusal message. Lane names are
 // not secret — they ship in the lane documents — so unlike the project pin
 // there is no existence-oracle concern and the message may enumerate freely.
@@ -825,13 +841,21 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 		duty = DutyExecution
 	}
 
+	// seatDuty is the duty whose seat selection ACTUALLY resolved, which is not
+	// always the duty the template asked for: an unknown duty degrades onto the
+	// execution seat below. `duty` itself is deliberately NOT reassigned —
+	// chooseFlatLane and the reason both read it, and moving it would change
+	// the unpinned path — so the effective value is tracked separately and only
+	// the lane pin reads it (P3-LN-9 r1 F1/F2).
 	seat, ok := r.DutyMap[duty]
+	seatDuty := duty
 	if !ok {
 		localNote = fmt.Sprintf("Duty %q has no seat in the v0 duty map; riding the execution seat.", duty) + " " + localNote
 		seat, ok = r.DutyMap[DutyExecution]
 		if !ok {
 			return Seat{}, "", "", "", fmt.Errorf("%w: duty map has no execution seat", ErrInvalid)
 		}
+		seatDuty = DutyExecution
 	}
 
 	// The per-task LANE PIN [S00.9 A13]. It is resolved BEFORE the template's
@@ -843,7 +867,7 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	// reason: offering a different lane would not be honoring the pin.
 	lanePinNote, lanePinned := "", false
 	if q.PinnedLane != "" {
-		pinnedSeat, note, err := r.resolveLanePin(q.PinnedLane, duty, seat, p)
+		pinnedSeat, note, err := r.resolveLanePin(q.PinnedLane, seatDuty, seat, p)
 		if err != nil {
 			return Seat{}, "", "", "", err
 		}
@@ -914,12 +938,20 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 // resolveLanePin settles the seat a bound per-task lane pin selects, and the
 // sentence that says so [S00.9 A13].
 //
-// The pin resolves against the seats available to THIS duty — the duty-map seat
-// plus its registered alternates — because a lane with no seat for the duty is a
-// lane this dispatch cannot actually run on, and seating a model that no lane
-// document declares would invent a fact (§63 D5: no model id is a constant in
-// this package).
-func (r *Router) resolveLanePin(pin, duty string, seat Seat, p ExecutionProfile) (Seat, string, error) {
+// The search is three-deep, and the third leg is the one r1 F1/F2 added. A
+// commissioned lane seats EXECUTION ONLY by ratification — planning and judge
+// keep their anthropic-only seats because nobody has measured a second lane's
+// models against the S07.5 bars — so `AlternateSeatsFor` only ever populates
+// DutyExecution. Searching the template's own duty alone therefore REFUSED a
+// pin to a perfectly covered lane whenever that duty was not execution, which
+// is a refusal about this platform's seat bookkeeping wearing the costume of a
+// coverage verdict. The pin names a LANE; the lane's seat is the lane
+// document's own; so the pin is honored on that lane's execution seat and the
+// substitution is STATED rather than smuggled.
+//
+// No model id is minted on any leg (§63 D5): every seat here came from a lane
+// document through the composition root.
+func (r *Router) resolveLanePin(pin, seatDuty string, seat Seat, p ExecutionProfile) (Seat, string, error) {
 	// Layer 3 of the three. The boundary already refused this, and it is
 	// checked again here so a pin planted by any other route cannot steer
 	// dispatch — the same defence-in-depth the pooled plan budget takes.
@@ -927,25 +959,40 @@ func (r *Router) resolveLanePin(pin, duty string, seat Seat, p ExecutionProfile)
 		return Seat{}, "", fmt.Errorf("%w: %s", ErrLanePinUnhonorable, refusal)
 	}
 
-	chosen, found := Seat{}, false
-	if seat.Lane == pin {
+	chosen, found, viaExecution := Seat{}, false, false
+	switch {
+	case seat.Lane == pin:
 		chosen, found = seat, true
-	} else {
-		for _, a := range r.Alternates[duty] {
+	default:
+		for _, a := range r.Alternates[seatDuty] {
 			if a.Lane == pin {
 				chosen, found = a, true
 				break
 			}
 		}
+		if !found && seatDuty != DutyExecution {
+			// The lane seats execution only, which is the ratified shape
+			// rather than an accident. Honor the pin there.
+			for _, a := range r.Alternates[DutyExecution] {
+				if a.Lane == pin {
+					chosen, found, viaExecution = a, true, true
+					break
+				}
+			}
+		}
 	}
 	if !found {
-		// Covered, and still nothing to seat: the duty has no row on that
-		// lane. Refusing is the only honest answer — riding the duty's own
-		// seat would silently give the requester a lane they did not ask for,
-		// which is the whole failure the pin exists to end.
-		return Seat{}, "", fmt.Errorf("%w: lane %q is pinned on this task, but duty %q has no seat on it — "+
-			"the lane is held flat-rate and this duty resolves to no model there (S08.8 step 3; the seat rows are "+
-			"the lane documents' own, S03.6)", ErrLanePinUnhonorable, pin, duty)
+		// Held flat-rate and still nothing to seat: NOTHING on this platform
+		// has an execution seat on that lane — no lane document contributed
+		// one, so there is no model to run. Refusing is the only honest
+		// answer; riding another lane's seat would hand the requester a lane
+		// they did not ask for, which is the whole failure the pin exists to
+		// end. (The cause is this platform's seat set, NOT the duty: saying
+		// "this duty resolves to no model there" sent a reader to the template
+		// when the missing thing is a commissioned seat — r1 F1.)
+		return Seat{}, "", fmt.Errorf("%w: lane %q is pinned on this task and is held flat-rate, but this "+
+			"platform has no execution seat on it — no lane document contributed one, so there is no model to "+
+			"run there (S08.8 step 3; seat rows are the lane documents' own, S03.6)", ErrLanePinUnhonorable, pin)
 	}
 	if chosen.WindowTokens == 0 {
 		chosen.WindowTokens = DefaultWindowTokens
@@ -953,7 +1000,12 @@ func (r *Router) resolveLanePin(pin, duty string, seat Seat, p ExecutionProfile)
 
 	note := fmt.Sprintf("Lane %q is pinned on this task, so the pin REPLACED the consumption-pressure comparison "+
 		"across the %d covered flat-rate lanes and selection honored it (S08.8 visible-and-overridable [S00.9 A13]; "+
-		"never dollars — D5).", pin, len(r.Coverage.FlatRateLanes))
+		"never dollars — D5).", pin, coveredLaneCount(r.Coverage))
+	if viaExecution {
+		note += fmt.Sprintf(" Lane %q seats EXECUTION only — planning and judge keep their ratified seats because "+
+			"no second lane's models have been measured against the S07.5 bars — so duty %q rides that lane's "+
+			"execution seat (%s).", pin, seatDuty, chosen.Model)
+	}
 	if laneNote := r.Coverage.PinNotes[pin]; laneNote != "" {
 		note += " " + laneNote
 	}

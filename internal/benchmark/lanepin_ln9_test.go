@@ -48,9 +48,12 @@ func TestLN9BenchmarkDirectArmIgnoresThePin(t *testing.T) {
 			"different surface than its own record names (BENCH-REG §2; brief R8(c))", lane, substrate)
 	}
 
-	// And nothing stamps it afterwards either: the R9 correction rides the
-	// EXECUTE dispatch, which the direct arm never enters. This is the guard
-	// that would catch a stamp installed generically instead of on that path.
+	// And the arm's row is stable across its own admission. Stated for what it
+	// is (r1 F12): this drives NO dispatch, so it does not prove where the R9
+	// stamp was installed — that is held by the execute-dispatch guards in
+	// internal/stage. What it proves is narrower and still worth holding: the
+	// direct arm's lane and substrate are set once, at birth, from the
+	// structural constants, and nothing on the arm's own path moves them.
 	if err := h.exec(ctx, `UPDATE runs SET state = 'running' WHERE run_id = ?`, runID); err != nil {
 		t.Fatalf("advance the arm: %v", err)
 	}

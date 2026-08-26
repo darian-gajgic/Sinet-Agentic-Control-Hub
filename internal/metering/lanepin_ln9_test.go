@@ -52,13 +52,18 @@ func TestLN9ReceiptLaneIsTheLaneThatRan(t *testing.T) {
 	if len(rcpt.Items) != 1 {
 		t.Fatalf("receipt has %d line items, want 1", len(rcpt.Items))
 	}
-	if got := rcpt.Items[0].Lane; got != "zai" {
+	// Both arms can actually fire (r1 F11): the second used to sit after a
+	// Fatalf on the same value, so it was unreachable — a dead assertion reads
+	// as coverage while holding nothing.
+	switch got := rcpt.Items[0].Lane; got {
+	case "zai":
+		// the correction landed
+	case "anthropic":
+		t.Fatalf("the receipt reports %q — the creation-time stamp, which is the PRE-PACKET behaviour and "+
+			"exactly the regression pin: a decision naming one lane and a receipt naming another", got)
+	default:
 		t.Fatalf("the receipt's Lane column says %q, want %q — the operator was told this column is the proof "+
 			"of which path ran the work, and until the run row carried the DECIDED lane it was not (R9)", got, "zai")
-	}
-	if got := rcpt.Items[0].Lane; got == "anthropic" {
-		t.Fatal("the receipt still reports the creation-time stamp — this is the pre-packet behaviour, and it " +
-			"is exactly what must fail now")
 	}
 }
 
@@ -158,5 +163,49 @@ func TestLN9PinDoesNotMakeTheSiblingLaneBudgetable(t *testing.T) {
 	}
 	if !strings.Contains(refusal, doc.Lane) {
 		t.Errorf("the refusal does not name the pool's canonical lane: %q", refusal)
+	}
+}
+
+// ── r1 F4 · consumption attribution follows the STAMPED lane ──────────────
+
+// TestLN9R1PressureAttributionFollowsTheStampedLane pins the reach of R9 that
+// the first cut left unrecorded. `runs.lane` is not only the receipt's column:
+// the consumption gauge and the plan-allowance reading both JOIN through it, so
+// correcting the row moves what CONSUMPTION-PRESSURE ROUTING sees.
+//
+// That is the honesty fix WORKING, and it is the half the LN-8 comparison
+// actually needs — pressure must land on the lane that ran, or the operator's
+// head-to-head reads two lanes' work under one lane's name. It is also a real
+// behaviour change in a multi-lane world, which is why it is pinned here rather
+// than left to be discovered.
+func TestLN9R1PressureAttributionFollowsTheStampedLane(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	g := NewPressureGauge(e.db, e.reg)
+
+	// Born on the process default, routed elsewhere, stamped by the dispatch.
+	e.runningRun(t, "r-stamped", "alice", "anthropic", "claude-cli")
+	if err := e.runs.SetDecidedLane(ctx, "r-stamped", "zai", "opencode"); err != nil {
+		t.Fatalf("SetDecidedLane: %v", err)
+	}
+	e.checkpoint(t, "r-stamped", "glm-5.3", `{"input_tokens":1000,"output_tokens":500}`)
+
+	// The production reader the S08.8 flat-lane rule consumes, at its own
+	// signature — not a re-implementation of its JOIN.
+	anthropic, err := g.weightedConsumption(ctx, "alice", "anthropic", time.Time{}, false, 1.0)
+	if err != nil {
+		t.Fatalf("weightedConsumption(anthropic): %v", err)
+	}
+	zai, err := g.weightedConsumption(ctx, "alice", "zai", time.Time{}, false, 1.0)
+	if err != nil {
+		t.Fatalf("weightedConsumption(zai): %v", err)
+	}
+	if zai == 0 {
+		t.Fatalf("the zai lane consumed nothing after the stamp — consumption must land on the lane that RAN, " +
+			"or consumption-pressure routing steers by a fiction (r1 F4)")
+	}
+	if anthropic != 0 {
+		t.Errorf("the anthropic lane still carries %v of consumption it did not do — the row was corrected, so "+
+			"the gauge that joins through it must follow", anthropic)
 	}
 }

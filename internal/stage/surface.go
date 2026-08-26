@@ -14,6 +14,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // Surface adapts the skeleton to the api.IntakeSurface transport contract
@@ -51,7 +52,14 @@ func mapIntakeErr(err error) error {
 		// Visible but not yet owner-approved: a state the requester may know
 		// honestly, and one that resolves by finishing onboarding (S13.7).
 		return surfaceErr(http.StatusConflict, "project_not_active", err)
-	case errors.Is(err, intake.ErrLanePinRefused):
+	case errors.Is(err, intake.ErrLanePinRefused), errors.Is(err, worker.ErrLanePinUnhonorable):
+		// TWO sentinels, ONE answer. The first is the boundary's own refusal
+		// before a task is born; the second is SELECTION's, raised mid-pipeline
+		// by layer 3 for a pin that reached it some other way. Both are the
+		// same fact to a caller — the pin cannot be honored — and mapping only
+		// the first let the second escape as a bare 500, which is a platform
+		// defect's status on a bad request (§30) and tells the requester
+		// nothing about what to fix (r1 F1/F2).
 		// A pin naming a lane this platform cannot dispatch to is a bad
 		// REQUEST, never a platform defect (§30) — and never a silent
 		// fallback onto whatever routing would have chosen (S00.9 A13).
