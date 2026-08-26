@@ -177,6 +177,42 @@ func EnvInjector(socket, profile, varName string) func(base []string) ([]string,
 	}
 }
 
+// EnvInjectorVars resolves ONE auth profile per spawn and fans the material out
+// to SEVERAL environment variables.
+//
+// It exists because a single credential can serve more than one lane under
+// different variable names: one Kimi Code membership is one Console key, and
+// the API lane reads it as KIMI_API_KEY while Moonshot's own CLI reads only the
+// KIMI_MODEL_* channel and ignores that name entirely. Composing two
+// EnvInjectors would dial the broker twice and decrypt the same secret twice
+// for one spawn — twice the exposure for nothing, and two chances to fail
+// half-way with an environment carrying one variable and not the other.
+//
+// The material stays inside this closure exactly as it does for EnvInjector:
+// resolved per spawn, never captured, never returned to the caller.
+func EnvInjectorVars(socket, profile string, varNames []string) func(base []string) ([]string, error) {
+	if len(varNames) == 0 {
+		return nil
+	}
+	return func(base []string) ([]string, error) {
+		c, err := Dial(socket)
+		if err != nil {
+			return nil, err
+		}
+		defer c.Close()
+		secret, _, err := c.Resolve(profile)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, 0, len(base)+len(varNames))
+		out = append(out, base...)
+		for _, name := range varNames {
+			out = append(out, name+"="+secret)
+		}
+		return out, nil
+	}
+}
+
 // ── shared JSON framing (newline-delimited) ─────────────────────────────────
 
 func writeJSON(w io.Writer, v any) error {

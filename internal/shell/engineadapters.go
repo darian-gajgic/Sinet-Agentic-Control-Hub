@@ -19,6 +19,7 @@ package shell
 // something asks it to run.
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/kimicli"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/opencode"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/broker"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
@@ -55,6 +57,27 @@ type engineAdapterDeps struct {
 // opencodeRoot is where the per-user XDG trees of the opencode substrate live.
 func opencodeRoot(stateDir string) string {
 	return filepath.Join(stateDir, "engines", "opencode")
+}
+
+// kimicliRoot is the per-USER engine root for the kimi-cli substrate. Each
+// person gets a 0700 subtree beneath it and each RUN its own KIMI_CODE_HOME
+// beneath that — per-run rather than per-user because there is exactly one
+// config.toml per home and no --config flag, so two concurrent runs sharing a
+// home would share one lowered config and S03.5's guarantee would be lost.
+func kimicliRoot(stateDir string) string {
+	return filepath.Join(stateDir, "engines", "kimi-cli")
+}
+
+// opencodeProviderEntries narrows a person's commissioned entries to the lanes
+// the opencode substrate actually drives.
+//
+// Since A12 the lane corpus carries a document on a substrate opencode does not
+// serve. Handing its provider entry to opencode would make that engine compile
+// a provider block for a lane it never runs: harmless to execution, and a LIE
+// in a config body that gets hashed, logged and inspected — plus a spurious
+// restart of that person's serve, because the block is startup-bound.
+func opencodeProviderEntries(lanes []opencode.LaneConfig, entries opencode.ProviderConfig) opencode.ProviderConfig {
+	return opencode.EntriesForSubstrate(lanes, entries, adapters.SubstrateOpencode)
 }
 
 // engineLanes loads the lane documents the platform ships. A document that
@@ -92,18 +115,61 @@ func laneCredInjector(stateDir string, lanes []opencode.LaneConfig,
 			return nil
 		}
 		socket := brokerSocketFor(stateDir, userID)
-		var injectors []func([]string) ([]string, error)
+		held := map[string]bool{}
 		for _, lane := range lanes {
-			if _, ok := entries[lane.ProviderID]; !ok {
-				continue
-			}
-			if inject := laneCredInject(socket, lane); inject != nil {
-				injectors = append(injectors, inject)
+			if _, ok := entries[lane.ProviderID]; ok {
+				held[lane.Credential.Profile] = true
 			}
 		}
-		if len(injectors) == 0 {
-			return nil
+		return laneCredInjectorWith(lanes, held, func(profile string, vars []string) func([]string) ([]string, error) {
+			if socket == "" {
+				return nil
+			}
+			return broker.EnvInjectorVars(socket, profile, vars)
+		})
+	}
+}
+
+// laneCredInjectorWith composes one injector per commissioned PROFILE — not per
+// lane — and applies them left to right.
+//
+// The distinction is the whole point. Two lanes can share one auth profile and
+// still name different variables: the kimi lanes do, because one membership is
+// one key while Moonshot's CLI reads only the KIMI_MODEL_* channel and does not
+// read the API lane's variable at all. Composing per lane would dial the broker
+// twice for one secret in one spawn. So the profile is resolved once and the
+// material fans out to every variable that profile serves.
+//
+// mk is a seam rather than a direct broker call so this composition can be
+// exercised without a broker, and so no secret ever passes through this
+// package: the material lives and dies inside whatever mk returns.
+func laneCredInjectorWith(lanes []opencode.LaneConfig, held map[string]bool,
+	mk func(profile string, vars []string) func([]string) ([]string, error)) func([]string) ([]string, error) {
+
+	var profiles []string
+	vars := map[string][]string{}
+	for _, lane := range lanes {
+		if !lane.Commissionable() || !held[lane.Credential.Profile] {
+			continue
 		}
+		p := lane.Credential.Profile
+		if _, seen := vars[p]; !seen {
+			profiles = append(profiles, p)
+		}
+		if !containsVar(vars[p], lane.Credential.EnvVar) {
+			vars[p] = append(vars[p], lane.Credential.EnvVar)
+		}
+	}
+	var injectors []func([]string) ([]string, error)
+	for _, p := range profiles {
+		if inject := mk(p, vars[p]); inject != nil {
+			injectors = append(injectors, inject)
+		}
+	}
+	if len(injectors) == 0 {
+		return nil
+	}
+	{
 		return func(base []string) ([]string, error) {
 			env := base
 			for _, inject := range injectors {
@@ -116,6 +182,15 @@ func laneCredInjector(stateDir string, lanes []opencode.LaneConfig,
 			return env, nil
 		}
 	}
+}
+
+func containsVar(vars []string, want string) bool {
+	for _, v := range vars {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // commissionEngineLanes composes the commissioned map: for every person who has
@@ -239,11 +314,64 @@ func engineAdapters(deps engineAdapterDeps) map[string]adapters.Adapter {
 			Lanes:     lanes,
 			Log:       deps.Logger,
 			ProvidersFor: func(userID string) (opencode.ProviderConfig, error) {
-				return commissioned[userID], nil
+				return opencodeProviderEntries(lanes, commissioned[userID]), nil
 			},
 		},
+		// The third substrate (S00.9 A12). It owns no standing process and no
+		// per-user server: a run is one `kimi -p` that lives and dies with its
+		// session, which is why nothing is added to the shutdown reap.
+		adapters.SubstrateKimiCLI: newKimiCLIAdapter(deps.StateDir, lanes, deps.Logger),
 	}
 }
+
+// newKimiCLIAdapter composes the kimi-cli adapter FROM ITS LANE DOCUMENT.
+//
+// The endpoint, the provider type and the wire-signal table are all the
+// document's own, wired here because internal/adapters/kimicli may not import
+// the lane machinery (its imports are internal/adapters + stdlib, §12) and
+// because no endpoint may be a Go constant in a non-test source (§62). The
+// Signals seam is a plain func: the PAYLOAD is the contract that crosses it, so
+// no shared type is needed and the adapter classifies nothing.
+func newKimiCLIAdapter(stateDir string, lanes []opencode.LaneConfig, logger *slog.Logger) *kimicli.Adapter {
+	a := &kimicli.Adapter{Root: kimicliRoot(stateDir), Log: logger}
+	for _, lane := range lanes {
+		if lane.Substrate != adapters.SubstrateKimiCLI {
+			continue
+		}
+		doc := lane
+		a.BaseURL = doc.BaseURL
+		a.ProviderType = kimiCLIProviderType
+		a.Signals = func(bodyText string, httpStatus int) (json.RawMessage, bool) {
+			sig, ok := doc.ExtractSignal(bodyText, httpStatus)
+			if !ok {
+				return nil, false
+			}
+			// EndpointVerified is established HERE, at lowering, where the
+			// configured endpoint is — never looked up inside Classify, which
+			// is pure and total. It rides the payload as data.
+			verified, _ := doc.VerifyEndpoint(doc.ProviderEntry())
+			sig.EndpointVerified = verified
+			raw, err := json.Marshal(sig)
+			if err != nil {
+				return nil, false
+			}
+			return raw, true
+		}
+		break
+	}
+	return a
+}
+
+// kimiCLIProviderType is the KIMI_MODEL_PROVIDER_TYPE value paired with the
+// Kimi Code subscription endpoint.
+//
+// It is a structural constant rather than a document row because it names a
+// PROTOCOL SHAPE the adapter speaks, not a provider fact that moves: the
+// endpoint is documented as OpenAI-protocol at /coding/v1, and the value is one
+// of the engine's own fixed enum {kimi, anthropic, openai}. It is set
+// explicitly rather than left to the engine's default so a default change
+// cannot silently retarget the protocol.
+const kimiCLIProviderType = "openai"
 
 // laneCredInject builds the S11.5 spawn-time credential injector for one lane:
 // the broker resolves the lane document's engine-cred auth PROFILE and

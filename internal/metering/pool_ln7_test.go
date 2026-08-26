@@ -13,6 +13,7 @@ package metering
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -203,7 +204,7 @@ func TestPoolBudgetDoubleDeclarationRefused(t *testing.T) {
 		t.Fatalf("ReadPlanUnits: %v", err)
 	}
 	if r.Applicable {
-		t.Error("a planted budget row on the pooled sibling lane was APPLIED — a rule enforced only at the write is "+
+		t.Error("a planted budget row on the pooled sibling lane was APPLIED — a rule enforced only at the write is " +
 			"a rule any other route walks around")
 	}
 	if r.InapplicableNote == "" {
@@ -233,7 +234,18 @@ func newPoolEnv(t *testing.T) *poolEnv {
 		g:    NewPressureGauge(base.db, base.reg),
 		pb:   NewPlanBudgets(base.db),
 		user: "pooluser",
-		now:  time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
+		// The reading bounds consumption at `now`, and checkpoints are written
+		// with the real clock, so a fixed literal in the past would silently
+		// count nothing and every assertion below would pass vacuously.
+		now: time.Now().UTC().Add(time.Hour),
+	}
+	if err := base.db.WriteTx(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(context.Background(),
+			`INSERT INTO users (user_id, role, created_ts) VALUES (?, 'operator', ?)`,
+			e.user, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatalf("seed the pool's person: %v", err)
 	}
 	return e
 }
@@ -247,6 +259,7 @@ func (e *poolEnv) checkpoint(t *testing.T, lane string, n int) {
 		id := fmt.Sprintf("pool-%s-%d", lane, e.seq)
 		e.runningRun(t, id, e.user, lane, "claude-cli")
 		e.checkpointOn(t, id)
+		_ = i
 	}
 }
 

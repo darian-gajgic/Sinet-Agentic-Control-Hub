@@ -231,9 +231,14 @@ func newCallSiteEnvWith(t *testing.T, lanes map[string]string) *callSiteEnv {
 		DB: db, Log: log, Runs: runs, Checkpoints: gates.NewCheckpoints(db, log),
 		Ledger: ledger.NewStore(db, log), Settings: reg,
 		Substrate: adapters.SubstrateClaudeCLI, Lane: adapters.LaneAnthropic,
+		// A recording adapter for every substrate the platform ships. It is
+		// built from the constants rather than from `lanes` so a lane whose
+		// substrate is genuinely unregistered still trips stage.New's own
+		// guard — which is the thing worth keeping about this map.
 		Adapters: map[string]adapters.Adapter{
 			adapters.SubstrateClaudeCLI: recordingAdapter{adapters.SubstrateClaudeCLI, &e.seen, &e.mu},
 			adapters.SubstrateOpencode:  recordingAdapter{adapters.SubstrateOpencode, &e.seen, &e.mu},
+			adapters.SubstrateKimiCLI:   recordingAdapter{adapters.SubstrateKimiCLI, &e.seen, &e.mu},
 		},
 		LaneSubstrates: lanes,
 		ArtifactRoot:   filepath.Join(root, "artifacts"),

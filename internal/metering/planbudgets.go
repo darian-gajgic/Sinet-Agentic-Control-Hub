@@ -159,6 +159,14 @@ func (b *PlanBudgets) Declare(ctx context.Context, row PlanBudgetRow) (prior Pla
 	if !ok {
 		return PlanBudgetRow{}, false, fmt.Errorf("metering: lane %q meters in no plan units, so it carries no plan budget — its automation budget is the weighted-consumption one", row.Lane)
 	}
+	// OQ-2: a pooled allowance is declared ONCE, against the pool's canonical
+	// lane. Two rows against one allowance is a number the operator cannot
+	// reconcile — under max-binds either could bind the lane, and the row they
+	// did not touch would be the one that moved.
+	if refusal := PlanPoolRefusal(doc, row.Lane); refusal != "" {
+		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s refused: %s",
+			row.UserID, row.Lane, row.Window, refusal)
+	}
 	if refusal := PlanBudgetWindowRefusal(doc, row.Window); refusal != "" {
 		return PlanBudgetRow{}, false, fmt.Errorf("metering: plan budget for %q/%s/%s refused: %s", row.UserID, row.Lane, row.Window, refusal)
 	}

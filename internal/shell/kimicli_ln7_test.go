@@ -200,7 +200,7 @@ func TestCredResolvedOncePerProfilePerSpawn(t *testing.T) {
 	rec := &recordingResolver{secret: "sk-LN7-SENTINEL"}
 	inject := laneCredInjectorWith(lanes, map[string]bool{
 		kimi.Credential.Profile: true,
-	}, rec.resolve)
+	}, rec.mk)
 	if inject == nil {
 		t.Fatal("no injector was composed for a person holding the kimi-code profile")
 	}
@@ -226,17 +226,26 @@ func TestCredResolvedOncePerProfilePerSpawn(t *testing.T) {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+// recordingResolver counts BROKER RESOLUTIONS, not compositions: the closure
+// increments when it runs, which is once per spawn, which is the property under
+// test.
 type recordingResolver struct {
 	secret string
 	calls  map[string]int
 }
 
-func (r *recordingResolver) resolve(profile string) (string, error) {
-	if r.calls == nil {
-		r.calls = map[string]int{}
+func (r *recordingResolver) mk(profile string, vars []string) func([]string) ([]string, error) {
+	return func(base []string) ([]string, error) {
+		if r.calls == nil {
+			r.calls = map[string]int{}
+		}
+		r.calls[profile]++
+		out := append([]string{}, base...)
+		for _, v := range vars {
+			out = append(out, v+"="+r.secret)
+		}
+		return out, nil
 	}
-	r.calls[profile]++
-	return r.secret, nil
 }
 
 func containsString(ss []string, want string) bool {

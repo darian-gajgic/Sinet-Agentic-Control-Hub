@@ -1802,11 +1802,18 @@ func (a planBudgetAdapter) PlanWindows(_ context.Context, lane string) ([]api.Pl
 	if !ok {
 		return nil, nil
 	}
+	// A pooled lane's allowance is declared against the pool's canonical lane,
+	// so on the sibling EVERY window is un-budgetable for the same reason. The
+	// verdict is the store's own predicate carried across, never re-derived
+	// here (drain r1 D1) — which is also why the operator gets a 400 naming the
+	// canonical lane instead of a row that quietly does nothing.
+	pooled := metering.PlanPoolRefusal(doc, lane)
 	out := make([]api.PlanWindowRecord, 0, len(doc.Quotas))
 	for _, q := range doc.Quotas {
-		// The budgetable verdict is the STORE's own predicate, carried across
-		// rather than re-derived at the boundary (drain r1 D1).
-		refusal := metering.PlanBudgetWindowRefusal(doc, q.Name)
+		refusal := pooled
+		if refusal == "" {
+			refusal = metering.PlanBudgetWindowRefusal(doc, q.Name)
+		}
 		out = append(out, api.PlanWindowRecord{
 			Name: q.Name, Unit: doc.QuotaUnit(q.Name), WindowHours: q.WindowHours,
 			Allowance: q.Units, AllowanceUnverified: q.AllowanceUnverified,

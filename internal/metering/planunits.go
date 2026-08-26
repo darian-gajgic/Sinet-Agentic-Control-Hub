@@ -81,8 +81,58 @@ type PlanDoc struct {
 	// absence for an oversight.
 	TierMultiplierNote string `json:"tier_multiplier_note,omitempty"`
 
+	// Pool names the shared quota pool this document's allowance IS, when more
+	// than one lane draws it; PoolLanes are the lanes that draw it, and
+	// PoolNote carries the vendor's own dated words for the claim.
+	//
+	// A pool is ONE document with several members, never several documents:
+	// a second document would BE a second allowance, which is the exact
+	// misreading the concept exists to prevent. Consumption is SUMMED across
+	// the members — without that each lane reports a half-empty pool and
+	// routing steers work onto an allowance that is already spent.
+	//
+	// Absent members mean the pre-packet behavior exactly: a document with no
+	// pool serves its own lane alone (the PlanQuota.Unit precedent), which is
+	// why the unpooled plan is expressible unchanged.
+	//
+	// The document's own Lane stays the pool's CANONICAL lane — the one a
+	// budget may be declared against. See PlanPoolRefusal.
+	Pool      string   `json:"pool,omitempty"`
+	PoolLanes []string `json:"pool_lanes,omitempty"`
+	PoolNote  string   `json:"pool_note,omitempty"`
+
 	Multipliers []PlanMultiplier `json:"multipliers"`
 	Quotas      []PlanQuota      `json:"quotas"`
+}
+
+// CountsLane reports whether consumption on a lane draws THIS document's
+// allowance. An unpooled document counts its own lane and nothing else.
+func (d PlanDoc) CountsLane(lane string) bool {
+	if lane == d.Lane {
+		return true
+	}
+	for _, member := range d.PoolLanes {
+		if member == lane {
+			return true
+		}
+	}
+	return false
+}
+
+// poolMembers reports the lanes drawing this document's allowance, canonical
+// lane first, or nothing when the document is unpooled.
+func (d PlanDoc) poolMembers() []string {
+	if d.Pool == "" {
+		return nil
+	}
+	out := make([]string, 0, len(d.PoolLanes)+1)
+	out = append(out, d.Lane)
+	for _, member := range d.PoolLanes {
+		if member != d.Lane {
+			out = append(out, member)
+		}
+	}
+	return out
 }
 
 // PlanMultiplier is one charging-rate window. Exactly one row is the DEFAULT:
@@ -198,6 +248,13 @@ type PlanReading struct {
 	// Pressure is Consumed/Budget.PeriodUnits, valid only when Applicable;
 	// BackgroundCeiling is ⚙ budget.background_window_fraction of the declared
 	// budget — background work's own ceiling on this lane (S10.4).
+	// Pool and PoolLanes name the shared allowance this reading covers, when
+	// the lane draws one. Lane above stays the REQUESTING lane: the reading is
+	// about that lane, taken against a pool it shares. Both empty on an
+	// unpooled lane, which is every lane that predates the concept.
+	Pool      string
+	PoolLanes []string
+
 	Pressure          float64
 	BackgroundCeiling float64
 	Applicable        bool
@@ -291,7 +348,14 @@ func loadPlanDocs(fsys fs.FS, dir string) ([]PlanDoc, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		if first, dup := byLane[d.Lane]; dup {
+		for _, member := range d.poolMembers() {
+			if first, dup := byLane[member]; dup && first != path {
+				return nil, fmt.Errorf("%w: %s and %s both count lane %q — the plan lookup takes the FIRST match, so "+
+					"one of them would be silently unreachable", ErrPlanDoc, first, path, member)
+			}
+			byLane[member] = path
+		}
+		if first, dup := byLane[d.Lane]; dup && first != path {
 			return nil, fmt.Errorf("%w: %s and %s both declare lane %q — the plan lookup takes the FIRST match, "+
 				"so the second document would be silently unreachable", ErrPlanDoc, first, path, d.Lane)
 		}
@@ -340,11 +404,39 @@ func PlanDocFor(lane string) (PlanDoc, bool) {
 		return PlanDoc{}, false
 	}
 	for _, d := range docs {
-		if d.Lane == lane {
+		// Membership, not equality: a pooled lane resolves to the pool's own
+		// document. This single predicate reaches every production caller —
+		// the store's Declare, the router's pressure read, the meters surface,
+		// the boundary's window list and the proposal — so the pool cannot be
+		// honored in one place and forgotten in another.
+		if d.CountsLane(lane) {
 			return d, true
 		}
 	}
 	return PlanDoc{}, false
+}
+
+// PlanPoolRefusal reports why a plan budget may not be declared on a lane,
+// naming the pool's canonical lane. Empty means the declaration is allowed.
+//
+// plan_budgets is keyed (user_id, lane, window), so two lanes sharing one
+// allowance could carry two independent rows against it — and under max-binds
+// either could bind the lane, with the operator unable to tell why the number
+// they did not touch moved. The rule is: a pooled allowance is declared ONCE,
+// against the document's own lane.
+//
+// It is a predicate rather than a branch because it is enforced at three
+// layers — the store refuses the write, the HTTP boundary carries the same
+// verdict rather than re-deriving it, and the reading refuses to apply a row
+// inserted by any other route. A rule spelled three times drifts; a rule
+// computed once and carried does not.
+func PlanPoolRefusal(doc PlanDoc, lane string) string {
+	if doc.Pool == "" || lane == doc.Lane || !doc.CountsLane(lane) {
+		return ""
+	}
+	return fmt.Sprintf("lane %q draws the shared %q allowance, which is declared ONCE against lane %q — "+
+		"declaring it here as well would put two independent budget rows against one allowance, and either "+
+		"could bind the lane (S10.4)", lane, doc.Pool, doc.Lane)
 }
 
 // LoadPlanDoc parses and VALIDATES one plan document. A denominator nobody can
@@ -429,6 +521,49 @@ func (d PlanDoc) validate() error {
 			return err
 		}
 		seen[q.Name] = true
+	}
+	return d.validatePool()
+}
+
+// validatePool refuses a pool that cannot be read honestly. Each gate closes a
+// way the concept could look declared and mean nothing.
+func (d PlanDoc) validatePool() error {
+	if d.Pool == "" {
+		if len(d.PoolLanes) > 0 {
+			return fmt.Errorf("%w (lane %q): pool_lanes %v with no pool name — the members would be summed into an "+
+				"allowance nothing identifies", ErrPlanDoc, d.Lane, d.PoolLanes)
+		}
+		return nil
+	}
+	if len(d.PoolLanes) < 2 {
+		return fmt.Errorf("%w (lane %q): pool %q declares %d member lanes — a pool with fewer than two members is "+
+			"an ordinary allowance wearing a pool's name", ErrPlanDoc, d.Lane, d.Pool, len(d.PoolLanes))
+	}
+	if d.PoolNote == "" {
+		return fmt.Errorf("%w (lane %q): pool %q carries no note — a shared-quota claim with no source is an "+
+			"assertion, and this one decides whether two lanes read as one allowance or two", ErrPlanDoc, d.Lane, d.Pool)
+	}
+	seen := map[string]bool{}
+	canonical := false
+	for _, member := range d.PoolLanes {
+		switch {
+		case member == "":
+			return fmt.Errorf("%w (lane %q): pool %q lists an empty member lane", ErrPlanDoc, d.Lane, d.Pool)
+		case seen[member]:
+			return fmt.Errorf("%w (lane %q): pool %q lists lane %q twice", ErrPlanDoc, d.Lane, d.Pool, member)
+		}
+		seen[member] = true
+		if member == d.Lane {
+			canonical = true
+		}
+	}
+	// The document's own lane must be a member, because it is the CANONICAL
+	// one: PlanPoolRefusal points every declaration at it, and a pool whose
+	// canonical lane does not draw it would send budgets to a lane that spends
+	// nothing.
+	if !canonical {
+		return fmt.Errorf("%w (lane %q): pool %q does not list its own document's lane among %v — the canonical "+
+			"lane is where a budget for this allowance is declared", ErrPlanDoc, d.Lane, d.Pool, d.PoolLanes)
 	}
 	return nil
 }
@@ -634,6 +769,13 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		Budget: budget,
 		Calls:  calls, Consumed: consumed,
 		Multiplier: factor, MultiplierWindow: window,
+
+		// A combined figure that does not say what it combined invites exactly
+		// the wrong reading: somebody sees a lane at 80% and goes looking for
+		// 80% of that lane's own traffic. Lane stays the REQUESTING lane;
+		// these name the pool the number actually covers.
+		Pool:      doc.Pool,
+		PoolLanes: doc.poolMembers(),
 	}
 	// The allowance the budget was proposed from, reported as provenance.
 	if q, ok := doc.Quota(budget.SeededFrom); ok {
@@ -644,7 +786,13 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		// refusals are DEFENCE IN DEPTH: the store and the verb refuse the same
 		// rows, and this leg is what stops a row inserted by any other means
 		// from steering dispatch (drain r1 D1/D6).
-		switch refusal := PlanBudgetWindowRefusal(doc, budget.SeededFrom); {
+		switch refusal, poolRefusal := PlanBudgetWindowRefusal(doc, budget.SeededFrom), PlanPoolRefusal(doc, lane); {
+		case poolRefusal != "":
+			// A row planted on a pooled lane other than the canonical one, by
+			// whatever route. Refusing it only at the write would leave the
+			// rule walkable-around; this is the leg that stops it steering
+			// dispatch.
+			r.InapplicableNote = poolRefusal
 		case refusal != "":
 			r.InapplicableNote = refusal
 		case planPeriodEnded(budget, now):
@@ -685,7 +833,13 @@ func (g *PressureGauge) planUnits(ctx context.Context, userID, lane string, doc 
 		if err := rows.Scan(&usage, &runLane, &ts); err != nil {
 			return 0, 0, fmt.Errorf("metering: scan plan-unit consumption: %w", err)
 		}
-		if effectiveLane(runLane, json.RawMessage(usage)) != lane {
+		// Pool MEMBERSHIP, not lane equality. The SQL already selects every
+		// lane for this person, so the whole pool test lives here: a lane that
+		// shares an allowance must count what its siblings spent, or each side
+		// reports a half-empty pool and routing steers work onto an allowance
+		// that is already gone. An unpooled document counts its own lane and
+		// nothing else, exactly as before.
+		if !doc.CountsLane(effectiveLane(runLane, json.RawMessage(usage))) {
 			continue
 		}
 		at, perr := time.Parse(time.RFC3339Nano, ts)
