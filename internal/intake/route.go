@@ -3,6 +3,8 @@ package intake
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 // route.go — the S08.8 boundary as intake sees it: the plan declares
@@ -37,6 +39,11 @@ type RouteQuery struct {
 	// the fact the S02.8 W claim is minted from). The plan DECLARES the
 	// requirement; S08.8 selection enforces it (P3-RW-14 R8).
 	Writes bool `json:"writes,omitempty"`
+	// PinnedLane carries the task's declared lane pin to selection (S00.9
+	// A13). It is re-read from the REQUEST on every recompute rather than
+	// frozen onto the block, which is why a lane pin survives re-planning
+	// with none of the worker pin's freeze mechanic.
+	PinnedLane string `json:"pinned_lane,omitempty"`
 }
 
 // RouteCandidate is one re-route target offered on the card.
@@ -75,6 +82,17 @@ type RouteBlock struct {
 	GapSignature  string `json:"gap_signature,omitempty"`
 	ComposeEarned bool   `json:"compose_earned,omitempty"`
 	GapAdvice     string `json:"gap_advice,omitempty"`
+
+	// LanePin mirrors worker.Decision.LanePin: the lane this task pinned at
+	// creation, empty when it pinned none (S00.9 A13). It is the structured
+	// member LN-10's picker binds to; the plain reason is what makes the pin
+	// visible on every surface that already renders a reason.
+	//
+	// It is deliberately NOT Pinned below. That flag is the WORKER axis and
+	// means one specific thing — freeze the worker choice against a re-plan
+	// recompute — and setting it for a lane pin would freeze a choice nobody
+	// asked to freeze.
+	LanePin string `json:"lane_pin,omitempty"`
 
 	// Override bookkeeping (Spec S08.8 "overrides are recorded with their
 	// actor"). Pinned selections survive re-planning recomputes.
@@ -117,6 +135,11 @@ func routeQueryFor(st *State, pair *Pair) RouteQuery {
 		TaskText: st.Req.Title + " " + st.Req.Text,
 		Family:   string(st.Family),
 		Research: len(pair.Plan.ResearchNodes) > 0,
+		// Read FRESH from the request on every recompute (S00.9 A13). That is
+		// what makes the lane pin survive a re-plan without borrowing the
+		// worker pin's freeze: the pin is a fact about the TASK, so a
+		// recompute that re-reads the task re-reads the pin.
+		PinnedLane: st.Req.PinnedLane,
 	}
 	// The write posture is a REQUIREMENT, exactly like the class and tools
 	// below it: a plan that declares it writes cannot be given to equipment
@@ -138,6 +161,50 @@ func routeQueryFor(st *State, pair *Pair) RouteQuery {
 		}
 	}
 	return q
+}
+
+// refuseLanePin answers whether a submitted lane pin may be admitted (S00.9
+// A13), returning an ErrLanePinRefused-wrapped refusal when it may not.
+//
+// Layer 1 of three. The VERDICT is the selection layer's, carried across the
+// seam as data and quoted verbatim; what happens here is set membership and
+// message composition, never a second derivation of the domain rule (§66 D1:
+// the boundary never re-derives a domain verdict). The message names the lanes
+// that ARE pinnable, the way the plan-budget verb names the windows that exist.
+func (p *Pipeline) refuseLanePin(lane string) error {
+	if lane == "" {
+		return nil
+	}
+	for _, opt := range p.PinnableLanes {
+		if opt.Lane != lane {
+			continue
+		}
+		if opt.Pinnable {
+			return nil
+		}
+		// A lane the platform KNOWS and still cannot dispatch to. Its own
+		// words, computed where the rule lives — borrowing the general
+		// sentence would answer the wrong question.
+		return fmt.Errorf("%w: %s", ErrLanePinRefused, opt.NotPinnable)
+	}
+	return fmt.Errorf("%w: lane %q is not one this platform can pin a task to. Pinnable lanes: %s",
+		ErrLanePinRefused, lane, p.pinnableLaneNames())
+}
+
+// pinnableLaneNames lists the admissible lanes for a refusal message. Lane
+// names ship in the lane documents and are not secret, so unlike the project
+// pin there is no existence-oracle concern and this may enumerate freely.
+func (p *Pipeline) pinnableLaneNames() string {
+	names := make([]string, 0, len(p.PinnableLanes))
+	for _, opt := range p.PinnableLanes {
+		if opt.Pinnable {
+			names = append(names, strconv.Quote(opt.Lane))
+		}
+	}
+	if len(names) == 0 {
+		return "none — this platform holds no pinnable lane at all"
+	}
+	return strings.Join(names, ", ")
 }
 
 // computeRouting runs selection for the approval card (pre-execution

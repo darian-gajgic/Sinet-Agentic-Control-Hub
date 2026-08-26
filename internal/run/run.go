@@ -553,6 +553,40 @@ func (s *Store) SetWorkspaceRef(ctx context.Context, runID, ref string) error {
 	})
 }
 
+// SetDecidedLane records the lane and substrate the run's S08.8 selection
+// actually settled on, so the row names what RAN rather than what the process
+// default was when the row was born (P3-LN-9 R9; Spec S10.1).
+//
+// The columns are stamped at CREATION, from process config, long before
+// routing has chosen anything — so on a run that routes to a second lane the
+// row said `anthropic` while the work executed elsewhere, and every reader
+// that joins through it (the receipt's Lane column, /api/meters, the cost view,
+// the run list) reported the wrong lane with nothing anywhere contradicting it.
+// `routing_quality` is the one place the divergence was already visible: it
+// carries the decision's lane and the row's lane side by side.
+//
+// IDEMPOTENT AND A NO-OP WHEN NOTHING MOVED: the guard is in the statement, so
+// a world where the decided lane equals the configured one writes no row at
+// all. That is every world until a lane is commissioned, which is what keeps
+// this correction invisible where there is nothing to correct.
+//
+// It carries no fence and no generation, on the SetWorkspaceRef reading: this
+// is not a state change, and the value is derived from the run's OWN settled
+// decision — two writers racing here would write the same two strings. The
+// FSM, the lease and the generation are untouched.
+func (s *Store) SetDecidedLane(ctx context.Context, runID, lane, substrate string) error {
+	if runID == "" || (lane == "" && substrate == "") {
+		return nil
+	}
+	return s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`UPDATE runs SET lane = ?, substrate = ?
+			  WHERE run_id = ? AND (lane <> ? OR substrate <> ?)`,
+			lane, substrate, runID, lane, substrate)
+		return err
+	})
+}
+
 // GetTx returns one run inside the caller's transaction.
 func (s *Store) GetTx(ctx context.Context, tx *sql.Tx, runID string) (Run, error) {
 	return s.getTx(ctx, tx, runID)

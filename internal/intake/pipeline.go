@@ -59,6 +59,22 @@ type Pipeline struct {
 	// routing block; the composition root always wires it).
 	Router Router
 
+	// PinnableLanes is the S08.8 lane-pin seam (S00.9 A13): which lanes a
+	// request may name in Request.PinnedLane, each carrying the SELECTION
+	// layer's own verdict. The composition root fills it beside the coverage
+	// view the router reads, so the pinnable set has one spelling (§65 D4).
+	//
+	// NIL IS FAIL-CLOSED, deliberately: with no seam wired nothing is
+	// pinnable and every pin refuses. The hazard this packet exists to close
+	// is a pin silently dropped, so an unwired seam may not answer "allow
+	// everything" — the only default is consent (§12), and a mutation that
+	// stops the composition root filling this turns the accepted case red
+	// rather than leaving it quietly permissive.
+	//
+	// An EMPTY PinnedLane never consults it, so an unpinned request on an
+	// unwired pipeline behaves exactly as it did before this seam existed.
+	PinnableLanes []LanePinOption
+
 	// Fingerprint supplies the current freshness fingerprint for the
 	// approval staleness check (G1 Def.5; S02 owns the durable set). The
 	// matched project (from the registry slice, "" when none) lets the probe
@@ -177,6 +193,15 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 	}
 	if req.Text == "" {
 		return nil, fmt.Errorf("intake: empty request")
+	}
+	// The LANE PIN is refused HERE — before the task id is even minted, and
+	// far before the task/run/event birth transaction below (S00.9 A13). It
+	// is a question about this request's input, answered at the boundary that
+	// admits it (§30: an unhonorable pin is a bad REQUEST, never a platform
+	// defect), and answering it late would leave a task born believing it got
+	// a lane it did not get — the Request.Project precedent exactly.
+	if err := p.refuseLanePin(req.PinnedLane); err != nil {
+		return nil, err
 	}
 	if req.TaskID == "" {
 		req.TaskID = "t-" + randomHex(8)

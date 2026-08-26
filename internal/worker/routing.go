@@ -32,6 +32,14 @@ import (
 //     at v0 (G1 P7). Among flat-rate lanes selection uses consumption
 //     pressure, NEVER dollars (D5) — no price, cost, or dollar figure
 //     enters this package's selection inputs, structurally.
+//     A per-task PINNED LANE is the one sanctioned override of that
+//     comparison [S00.9 A13]: RouteQuery.PinnedLane names a lane the
+//     requester declared at task creation, and when it binds it REPLACES
+//     the pressure comparison rather than adding an input to it. Coverage
+//     still outranks it — a pin naming a lane the owner does not hold
+//     flat-rate is REFUSED here, never degraded onto another lane, because
+//     degrading is right for a lane the PLATFORM chose and wrong for one a
+//     PERSON chose.
 //  4. Research nodes route to a search-capable lane.
 //  5. Helpers ride this same pipeline with the spawn trigger as an input
 //     (the S04 boundary); mechanical helper duties prefer the local lane —
@@ -59,6 +67,14 @@ const EventWorkerCompiled = "worker.compiled"
 
 // RoutingSchemaVersion versions the routing.decided payload.
 const RoutingSchemaVersion = 1
+
+// ErrLanePinUnhonorable is SELECTION's own refusal of a per-task lane pin it
+// cannot honor [S00.9 A13] — the third of the three layers, so a pin arriving
+// by any route other than the boundary that admits one still cannot steer
+// dispatch. Selection refuses here rather than routing somewhere else,
+// because falling back to its own choice is exactly the silent substitution
+// the pin exists to prevent (14.3: no silent switching, ever).
+var ErrLanePinUnhonorable = fmt.Errorf("%w: lane pin cannot be honored", ErrInvalid)
 
 // Duty classes a template execution profile may name (Spec S08.1: "duty
 // class + effort floor, lane-agnostic"). The maps referenced, never
@@ -208,6 +224,31 @@ type Coverage struct {
 	// P7), so the production wiring always answers false; the hook exists
 	// so the refusal is testable, not so it can pass.
 	MeteredAllowed func(model string) bool
+
+	// LocalLane names the S12.1 class-(a) local ENGINE lane, so a task pin
+	// naming it refuses IN ITS OWN WORDS rather than under the flat-rate
+	// sentence [S00.9 A13]. The two absences are not the same absence: a
+	// commissionable lane the owner has not bought is a subscription gap,
+	// while the local engine lane is absent because no local provider entry
+	// is commissioned at all — telling an operator to buy a subscription
+	// they already hold would be the wrong answer to the wrong question.
+	//
+	// Empty leaves such a pin refused under the general sentence: the
+	// verdict does not move, only the wording. The composition root sets it.
+	LocalLane string
+
+	// PinNotes are per-lane SENTENCES the plain reason quotes when a task
+	// pins that lane — a fact about the lane the requester should read
+	// beside their own choice. The live case is a shared allowance: two
+	// lanes drawing ONE membership pool, where pinning between them changes
+	// which client runs the work and changes the allowance not at all.
+	//
+	// It is a sentence rather than a structure for the reason
+	// LanePressure.Reason is: this package still does not know what a plan
+	// document is and still has nothing money-shaped to reason with (D5).
+	// The composition root reads the documents; selection quotes what it is
+	// handed.
+	PinNotes map[string]string
 }
 
 func (c Coverage) laneCovered(lane string) bool {
@@ -217,6 +258,107 @@ func (c Coverage) laneCovered(lane string) bool {
 		}
 	}
 	return false
+}
+
+// PinnableLane is one lane a per-task lane pin may name, with the verdict
+// already computed by the layer that owns it [S00.9 A13].
+//
+// It exists so the boundary that admits a pin does not have to re-derive
+// whether it is honorable: internal/intake cannot import this package (the
+// S06.10 seam wall), so the verdict crosses as DATA — the PlanWindowRecord
+// shape, for the same reason. A rule spelled twice drifts (§65 D4).
+type PinnableLane struct {
+	Lane string
+	// Pinnable reports that selection would honor a pin naming this lane.
+	Pinnable bool
+	// NotPinnable says why it would not, when it would not. Empty when
+	// Pinnable.
+	NotPinnable string
+}
+
+// LanePinRefusal is THE lane-pin predicate: it reports why a pin naming this
+// lane cannot be honored, or "" when it can [S00.9 A13].
+//
+// One predicate because it is enforced at three layers — the system boundary
+// refuses the submission before a task is born, the refusal verdict is carried
+// across the intake seam rather than re-derived there, and selection re-checks
+// it so a pin arriving by any other route cannot steer dispatch. A rule spelled
+// three times drifts; a rule computed once and carried does not — the ratified
+// pooled-plan-budget refusal shape, applied to a different axis. (Named by
+// shape rather than by symbol: this package's own D5 scan bans it from naming
+// the accounting package at all, and that scan is right.)
+//
+// The refusal is deliberately NOT the degrade-and-explain posture routing takes
+// for an uncovered lane it chose itself, and the inversion is the point:
+// routing degrades when the PLATFORM picked a lane it cannot use, and refuses
+// when a PERSON did (§19; §12 — the only default is consent).
+func LanePinRefusal(cov Coverage, lane string) string {
+	switch {
+	case lane == "":
+		return ""
+	case cov.laneCovered(lane):
+		return ""
+	case cov.LocalLane != "" && lane == cov.LocalLane:
+		return fmt.Sprintf("lane %q is the local ENGINE lane, which carries no v0 consumer: no local provider entry is "+
+			"commissioned, so honoring a pin to it could only mean riding the paid seat instead (S12.1 class (a)). "+
+			"The lanes a task may pin are: %s", lane, pinnableList(cov))
+	default:
+		return fmt.Sprintf("lane %q is not one this platform holds flat-rate coverage on, and subscription coverage "+
+			"binds every choice (S08.8 step 3). The lanes a task may pin are: %s", lane, pinnableList(cov))
+	}
+}
+
+// PinnableLanes reports every lane a task-creation pin may name, plus the local
+// engine lane with its own refusal, so the boundary can answer a typo by naming
+// what exists rather than by guessing.
+//
+// It is the PROCESS-WIDE set, and the over-approximation is stated rather than
+// hidden: Coverage is the union across the people who have placed a credential
+// (§65), so at a household with more than one person this admits a pin the
+// requester personally cannot draw on. What makes that safe is that selection
+// re-checks against the same predicate and the dispatch still refuses; what
+// makes it an over-approximation rather than a bug is that per-person coverage
+// is not built (B6/v1) and the broker `who` → auth.User.ID relationship is
+// unsettled — it rides LN gate-batch item 8. At v0 the platform is operated
+// single-user, so the union IS the operator's set. Inventing a namespace
+// mapping here would settle a household question the spec has not settled.
+func PinnableLanes(cov Coverage) []PinnableLane {
+	out := make([]PinnableLane, 0, len(cov.FlatRateLanes)+1)
+	seen := map[string]bool{}
+	for _, lane := range cov.FlatRateLanes {
+		if lane == "" || seen[lane] {
+			continue
+		}
+		seen[lane] = true
+		out = append(out, PinnableLane{Lane: lane, Pinnable: true})
+	}
+	if cov.LocalLane != "" && !seen[cov.LocalLane] {
+		out = append(out, PinnableLane{
+			Lane:        cov.LocalLane,
+			NotPinnable: LanePinRefusal(cov, cov.LocalLane),
+		})
+	}
+	return out
+}
+
+// pinnableList names the covered lanes for a refusal message. Lane names are
+// not secret — they ship in the lane documents — so unlike the project pin
+// there is no existence-oracle concern and the message may enumerate freely.
+func pinnableList(cov Coverage) string {
+	names := make([]string, 0, len(cov.FlatRateLanes))
+	seen := map[string]bool{}
+	for _, lane := range cov.FlatRateLanes {
+		if lane == "" || seen[lane] {
+			continue
+		}
+		seen[lane] = true
+		names = append(names, strconv.Quote(lane))
+	}
+	if len(names) == 0 {
+		return "none — this platform holds no flat-rate lane at all"
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // TieBreaker is the S08.8 step-2 seam: a local duty alias picks among
@@ -312,6 +454,12 @@ type RouteQuery struct {
 	// Mechanical marks a mechanical helper duty (defaults to the local
 	// lane, the permanent free tier — S08.8 step 5; R06 §4.5).
 	Mechanical bool
+	// PinnedLane is the lane the requester declared on this task, empty for
+	// the ordinary case [S00.9 A13]. When it binds it REPLACES the step-3
+	// consumption-pressure comparison; when it cannot be honored selection
+	// refuses rather than choosing something else. It is a person's named
+	// choice and carries no money — D5 is untouched.
+	PinnedLane string
 }
 
 // Candidate is one surviving selector-match candidate, surfaced on the
@@ -343,6 +491,18 @@ type Decision struct {
 	Lane         string `json:"lane"`
 	Effort       string `json:"effort,omitempty"`
 	WindowTokens int64  `json:"window_tokens"`
+
+	// LanePin records that this task carried a per-task lane pin and which
+	// lane it named [S00.9 A13] — the structured member beside the plain
+	// reason, so a surface can tell a pinned selection from one that merely
+	// landed on the same lane. Empty on an unpinned task, and the empty
+	// case serves exactly the bytes it served before.
+	//
+	// It is NOT RouteBlock.Pinned: that flag freezes the WORKER choice
+	// against a re-plan recompute, and a lane pin asks for no such freeze.
+	// A lane pin survives re-planning by construction — it is re-read from
+	// the request on every recompute.
+	LanePin string `json:"lane_pin,omitempty"`
 
 	// PlainReason is the plain-language reason (Spec S08.8: appears on the
 	// plan/approval card; 7.7 accountability).
@@ -480,6 +640,7 @@ func (r *Router) Route(ctx context.Context, q RouteQuery) (Decision, error) {
 		PlainReason:  reason,
 		Degraded:     degraded,
 		Candidates:   candidates,
+		LanePin:      q.PinnedLane,
 	}, nil
 }
 
@@ -673,10 +834,28 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 		}
 	}
 
+	// The per-task LANE PIN [S00.9 A13]. It is resolved BEFORE the template's
+	// model pin and before the flat-lane comparison, because it outranks both:
+	// S08.8 records overrides with their actor, and a person's declaration on
+	// THIS task outranks a standing template default (S08.4 8.9 puts task spec
+	// above template baseline). When it binds, chooseFlatLane is not consulted
+	// at all — the same reading the model pin already sets, for the same
+	// reason: offering a different lane would not be honoring the pin.
+	lanePinNote, lanePinned := "", false
+	if q.PinnedLane != "" {
+		pinnedSeat, note, err := r.resolveLanePin(q.PinnedLane, duty, seat, p)
+		if err != nil {
+			return Seat{}, "", "", "", err
+		}
+		seat, lanePinNote, lanePinned = pinnedSeat, note, true
+	}
+
 	// A concrete model pin (recorded reason required at lint) overrides the
-	// seat model — but coverage still binds.
+	// seat model — but coverage still binds. A bound lane pin has already
+	// settled the seat, model included, so this arm stands down (the
+	// supersession is stated in the pin's own note).
 	pinNote := ""
-	if p.ModelPin != "" {
+	if p.ModelPin != "" && !lanePinned {
 		if !r.modelCovered(p.ModelPin, seat.Lane) {
 			advice := fmt.Sprintf("Subscription gap (2.7): the worker pins model %q, which no flat-rate lane covers "+
 				"(config-derived; observed-list diffing arrives with the S03.6 watch, B5). "+
@@ -692,7 +871,7 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	// asked for one model, and offering it a different lane's model would not
 	// be honoring the pin.
 	laneNote := ""
-	if p.ModelPin == "" {
+	if p.ModelPin == "" && !lanePinned {
 		seat, laneNote = r.chooseFlatLane(ctx, q.Requester, duty, seat)
 	}
 
@@ -722,11 +901,78 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	if laneNote != "" {
 		reason += " " + laneNote
 	}
+	if lanePinNote != "" {
+		reason += " " + lanePinNote
+	}
 	if localNote != "" {
 		reason = localNote + " " + reason
 	}
 	reason += pinNote
 	return seat, effort, reason, "", nil
+}
+
+// resolveLanePin settles the seat a bound per-task lane pin selects, and the
+// sentence that says so [S00.9 A13].
+//
+// The pin resolves against the seats available to THIS duty — the duty-map seat
+// plus its registered alternates — because a lane with no seat for the duty is a
+// lane this dispatch cannot actually run on, and seating a model that no lane
+// document declares would invent a fact (§63 D5: no model id is a constant in
+// this package).
+func (r *Router) resolveLanePin(pin, duty string, seat Seat, p ExecutionProfile) (Seat, string, error) {
+	// Layer 3 of the three. The boundary already refused this, and it is
+	// checked again here so a pin planted by any other route cannot steer
+	// dispatch — the same defence-in-depth the pooled plan budget takes.
+	if refusal := LanePinRefusal(r.Coverage, pin); refusal != "" {
+		return Seat{}, "", fmt.Errorf("%w: %s", ErrLanePinUnhonorable, refusal)
+	}
+
+	chosen, found := Seat{}, false
+	if seat.Lane == pin {
+		chosen, found = seat, true
+	} else {
+		for _, a := range r.Alternates[duty] {
+			if a.Lane == pin {
+				chosen, found = a, true
+				break
+			}
+		}
+	}
+	if !found {
+		// Covered, and still nothing to seat: the duty has no row on that
+		// lane. Refusing is the only honest answer — riding the duty's own
+		// seat would silently give the requester a lane they did not ask for,
+		// which is the whole failure the pin exists to end.
+		return Seat{}, "", fmt.Errorf("%w: lane %q is pinned on this task, but duty %q has no seat on it — "+
+			"the lane is held flat-rate and this duty resolves to no model there (S08.8 step 3; the seat rows are "+
+			"the lane documents' own, S03.6)", ErrLanePinUnhonorable, pin, duty)
+	}
+	if chosen.WindowTokens == 0 {
+		chosen.WindowTokens = DefaultWindowTokens
+	}
+
+	note := fmt.Sprintf("Lane %q is pinned on this task, so the pin REPLACED the consumption-pressure comparison "+
+		"across the %d covered flat-rate lanes and selection honored it (S08.8 visible-and-overridable [S00.9 A13]; "+
+		"never dollars — D5).", pin, len(r.Coverage.FlatRateLanes))
+	if laneNote := r.Coverage.PinNotes[pin]; laneNote != "" {
+		note += " " + laneNote
+	}
+	if p.ModelPin != "" {
+		if chosen.Lane == seat.Lane {
+			// No conflict: the pin names the duty seat's own lane, so the
+			// template's model pin still applies on it. Coverage was settled
+			// above, and modelCovered is that same lane question, so the 2.7
+			// model-gap leg cannot fire on this path.
+			chosen = Seat{Model: p.ModelPin, Lane: chosen.Lane, WindowTokens: chosen.WindowTokens}
+			note += fmt.Sprintf(" Model pinned by the template (%s), which the lane pin leaves standing "+
+				"because it names this seat's own lane.", p.ModelPinReason)
+		} else {
+			note += fmt.Sprintf(" It SUPERSEDES the template's own model pin, whose recorded reason was %q: "+
+				"an override is recorded with its actor (S08.8), and a person's choice on this task outranks a "+
+				"standing template default (S08.4 8.9).", p.ModelPinReason)
+		}
+	}
+	return chosen, note, nil
 }
 
 // chooseFlatLane picks among the flat-rate seats the owner holds for a duty:
@@ -885,6 +1131,7 @@ func (r *Router) noFit(ctx context.Context, q RouteQuery, signals []string, degr
 		GapSignature:  sig,
 		ComposeEarned: due,
 		GapAdvice:     gapAdvice,
+		LanePin:       q.PinnedLane,
 	}, nil
 }
 

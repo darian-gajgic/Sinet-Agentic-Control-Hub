@@ -376,7 +376,21 @@ func (s *Skeleton) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, er
 	// ── Routing: helpers ride the SAME S08.8 pipeline with the spawn
 	// trigger as an input (Spec S08.8 step 5; S04.1 boundary "S08 owns
 	// which worker/model/lane a helper runs on").
-	decision := s.routeHelper(ctx, r, req)
+	pin := s.taskLanePin(ctx, r.TaskID)
+	decision := s.routeHelper(ctx, r, req, pin)
+	// R7's invariant, enforced at the spawn site rather than inside whichever
+	// branch produced the decision: a task's helpers run on the task's pinned
+	// lane or the spawn REFUSES. routeHelper degrades to the generalist seat
+	// when the router errors, and a degrade that quietly seats a different
+	// lane is the silent substitution the pin exists to prevent — the
+	// comparison the operator ordered is not a comparison if a coordinator on
+	// one lane spawns helpers on another (S00.9 A13; S08.8 step 5).
+	if pin != "" && decision.Lane != pin {
+		return refuse("lane-pin", fmt.Sprintf(
+			"this task pins lane %q and helper selection resolved to %q; a helper on another lane would split the "+
+				"comparison the pin was declared for, so the spawn is refused rather than degraded (S08.8 step 5 "+
+				"[S00.9 A13])", pin, decision.Lane))
+	}
 	if err := s.emitRoutingDecided(ctx, r, executeRouting{Decision: decision}); err != nil {
 		return SpawnResult{}, err
 	}
@@ -387,7 +401,16 @@ func (s *Skeleton) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, er
 // routeHelper resolves the helper's worker/model/lane through the S08.8
 // router (generalist duty-map default in the no-router test posture,
 // loudly logged — never silent).
-func (s *Skeleton) routeHelper(ctx context.Context, r run.Run, req SpawnRequest) worker.Decision {
+// The pin binds the EXECUTION dispatch, and helpers are part of it. Ceremony
+// duties are NOT: planning, critique and the S07.5 judge never pass through
+// Route at all (they resolve through s.seat(duty)), they are anthropic-only by
+// B3-gate ratification, and the judge additionally carries the
+// capability-≥-executor bar and the different-model-than-the-executor rule.
+// Nobody has measured a second lane's models against either, so seating a
+// pinned lane there would be inventing a ratification — and a comparison split
+// between a coordinator on one lane and its helpers on another is not a
+// comparison, which is why the helper leg DOES read the pin (S08.8 step 5).
+func (s *Skeleton) routeHelper(ctx context.Context, r run.Run, req SpawnRequest, pin string) worker.Decision {
 	if s.router != nil {
 		d, err := s.router.Route(ctx, worker.RouteQuery{
 			Requester: r.UserID,
@@ -402,6 +425,12 @@ func (s *Skeleton) routeHelper(ctx context.Context, r run.Run, req SpawnRequest)
 			Tools:        req.Brief.Tools,
 			SpawnTrigger: req.Trigger,
 			Mechanical:   req.Mechanical,
+			// The task's lane pin, read by the caller from the same recorded
+			// state executeRouting already consults (S00.9 A13). routeHelper
+			// builds a FRESH query from the brief and never otherwise reads
+			// the intake state, so without this the pin would reach the
+			// coordinator and stop there.
+			PinnedLane: pin,
 		})
 		if err == nil {
 			d.Cause = "helper-spawn"
@@ -412,17 +441,28 @@ func (s *Skeleton) routeHelper(ctx context.Context, r run.Run, req SpawnRequest)
 		s.logger().Warn("stage: helper spawn without a router (test-only posture) — duty-map generalist")
 	}
 	seat := s.seat(worker.DutyExecution)
+	pinNote := ""
+	if pin != "" {
+		// The DEGRADED path honors the pin too, or leaves the disagreement
+		// visible for the spawn site to refuse on. Seating the duty default
+		// here while the task named a lane is the one outcome that must not
+		// happen quietly.
+		if alt, ok := s.pinnedExecutionSeat(pin); ok {
+			seat = alt
+			pinNote = fmt.Sprintf(" Lane %q is pinned on this task, so the helper rides that lane's seat.", pin)
+		}
+	}
 	model := seat.Model
 	if s.cfg.Model != "" {
 		model = s.cfg.Model
 	}
-	reason := "Helper on the generalist execution seat."
+	reason := "Helper on the generalist execution seat." + pinNote
 	if req.Mechanical {
 		reason = "Mechanical helper duty prefers the local free tier; its engine lane carries no v0 consumer (S12.1 class (a), B4-5), so it rides the paid execution seat. " + reason
 	}
 	return worker.Decision{
 		Cause: "helper-spawn", Generalist: true, Model: model, Lane: seat.Lane,
-		WindowTokens: seat.WindowTokens, PlainReason: reason,
+		WindowTokens: seat.WindowTokens, PlainReason: reason, LanePin: pin,
 		Signals: []string{"spawn_trigger=" + req.Trigger},
 	}
 }

@@ -51,6 +51,16 @@ func mapIntakeErr(err error) error {
 		// Visible but not yet owner-approved: a state the requester may know
 		// honestly, and one that resolves by finishing onboarding (S13.7).
 		return surfaceErr(http.StatusConflict, "project_not_active", err)
+	case errors.Is(err, intake.ErrLanePinRefused):
+		// A pin naming a lane this platform cannot dispatch to is a bad
+		// REQUEST, never a platform defect (§30) — and never a silent
+		// fallback onto whatever routing would have chosen (S00.9 A13).
+		// ONE code for every unhonorable pin: the DETAIL distinguishes an
+		// uncovered lane from the local engine lane, and the message names
+		// the lanes that ARE pinnable. Lane names ship in the lane documents
+		// and are not secret, so unlike the project pin there is no
+		// existence-oracle concern to answer with a deliberate 404.
+		return surfaceErr(http.StatusBadRequest, "lane_pin_refused", err)
 	case errors.Is(err, intake.ErrUnknownAsk), errors.Is(err, sql.ErrNoRows):
 		return surfaceErr(http.StatusNotFound, "not_found", err)
 	case errors.Is(err, intake.ErrBadAnswer), errors.Is(err, intake.ErrMarkersOpen),
@@ -171,6 +181,17 @@ type submitBody struct {
 	// server-side at the registry seam — owner-or-member and ACTIVE — and an
 	// invalid pin refuses the submission rather than quietly dropping it.
 	Project string `json:"project,omitempty"`
+	// PinnedLane OPTIONALLY pins the task to one lane at CREATION, ADDITIVE
+	// (S15.2; S00.9 A13; the Project precedent above). It is the picker's
+	// door: selection honors the named lane in place of the S08.8 step-3
+	// consumption-pressure comparison, which is what makes a head-to-head
+	// between two lanes runnable at all. Validated server-side against what
+	// this platform can dispatch to, and a pin it cannot honor refuses the
+	// submission rather than quietly dropping it.
+	//
+	// A VALUE and `omitempty`, never a pointer: "" is an unambiguous "no
+	// pin", and pointers appear only on response structs in this codebase.
+	PinnedLane string `json:"pinned_lane,omitempty"`
 }
 
 // Submit implements api.IntakeSurface: Stage-0 triage + task/run birth,
@@ -188,7 +209,8 @@ func (u *Surface) Submit(ctx context.Context, userID string, body json.RawMessag
 		return nil, errors.New("stage: no scheduler bound")
 	}
 	st, err := u.sk.pipe.Start(ctx, intake.Request{
-		UserID: userID, Title: b.Title, Text: b.Text, Inputs: b.Inputs, Project: b.Project})
+		UserID: userID, Title: b.Title, Text: b.Text, Inputs: b.Inputs, Project: b.Project,
+		PinnedLane: b.PinnedLane})
 	if err != nil {
 		return nil, mapIntakeErr(err)
 	}

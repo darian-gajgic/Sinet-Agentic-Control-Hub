@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -106,6 +107,19 @@ func New(cfg Config) (*Skeleton, error) {
 	if s.dutyMap == nil {
 		s.dutyMap = worker.DefaultDutyMap()
 	}
+	// ONE coverage view, composed once and shared by everything that asks
+	// "which lanes may this platform use" (§65 D4: a rule spelled twice
+	// drifts). The router reads it to bind every choice; the lane-pin seam
+	// derives the pinnable set from the SAME value, so the set an operator
+	// may pin from and the set selection will honor cannot disagree.
+	coverage := worker.Coverage{
+		FlatRateLanes:  append([]string{cfg.Lane}, cfg.CommissionedLanes...),
+		LocalAvailable: cfg.LocalAvailable,
+		// The S12.1 class-(a) local engine lane, so a pin naming it refuses
+		// in its own words rather than under the flat-rate sentence.
+		LocalLane: adapters.LaneLocal,
+		PinNotes:  lanePinNotes(cfg.Lane, cfg.CommissionedLanes),
+	}
 	if cfg.Workers != nil {
 		// The S08.8 selection engine over the worker store. Coverage at v0:
 		// the configured lane is the owner's flat-rate lane; the local tier
@@ -125,10 +139,7 @@ func New(cfg Config) (*Skeleton, error) {
 			// (B4-5): the utility seat joins the effective DutyMap (built at
 			// the composition root) and a class-(a) dispatch onto it degrades
 			// to the paid seat with the refined reason (R22).
-			Coverage: worker.Coverage{
-				FlatRateLanes:  append([]string{cfg.Lane}, cfg.CommissionedLanes...),
-				LocalAvailable: cfg.LocalAvailable,
-			},
+			Coverage: coverage,
 			TieBreak: cfg.TieBreak,
 			Pressure: cfg.RoutePressure,
 		}
@@ -181,7 +192,12 @@ func New(cfg Config) (*Skeleton, error) {
 		Registry:           cfg.Registry,
 		Fingerprint:        cfg.Fingerprint,
 		CitedEntryVersions: cfg.CitedEntryVersions,
-		Now:                cfg.Now,
+		// The S08.8 lane-pin seam (S00.9 A13), composed from the SAME coverage
+		// value the router binds every choice with — so the set an operator
+		// may pin from and the set selection will honor are one set, not two
+		// that agree today.
+		PinnableLanes: lanePinOptions(coverage),
+		Now:           cfg.Now,
 		// The pipeline's degrade log (PH-1 F3) rides the same logger as every
 		// other layer this skeleton composes.
 		Logger: cfg.Logger,
@@ -512,6 +528,66 @@ func (s *Skeleton) finishIntake(ctx context.Context, st *intake.State) error {
 	return s.launchRole(ctx, st.TaskID, st.Owner, roleExecute)
 }
 
+// lanePinOptions adapts the selection layer's own pin verdicts to the intake
+// seam's type (S00.9 A13). internal/intake cannot import internal/worker, so
+// the verdict crosses as data and is quoted verbatim at the boundary — the
+// PlanWindowRecord shape, for the same reason (§66 D1).
+func lanePinOptions(cov worker.Coverage) []intake.LanePinOption {
+	pinnable := worker.PinnableLanes(cov)
+	out := make([]intake.LanePinOption, 0, len(pinnable))
+	for _, p := range pinnable {
+		out = append(out, intake.LanePinOption{
+			Lane: p.Lane, Pinnable: p.Pinnable, NotPinnable: p.NotPinnable,
+		})
+	}
+	return out
+}
+
+// lanePinNotes composes the per-lane sentences the plain reason quotes when a
+// task pins that lane (S00.9 A13).
+//
+// The live case is a SHARED ALLOWANCE: the two Kimi lanes reach one membership
+// pool, so pinning between them changes which client runs the work and changes
+// the allowance not at all. An operator running a head-to-head between them
+// would otherwise read a pinned receipt as evidence of a separate quota. The
+// fact and its dated wording are the plan DOCUMENT's, never a constant here —
+// internal/worker never learns what a plan document is; it quotes a sentence.
+// The note is composed only where MORE THAN ONE member of the pool is actually
+// covered here, because that is the world in which a person can pin between
+// them and be misled about what the pin bought.
+func lanePinNotes(configured string, commissioned []string) map[string]string {
+	covered := map[string]bool{}
+	for _, lane := range append([]string{configured}, commissioned...) {
+		if lane != "" {
+			covered[lane] = true
+		}
+	}
+	notes := map[string]string{}
+	for lane := range covered {
+		doc, ok := metering.PlanDocFor(lane)
+		if !ok || doc.Pool == "" {
+			continue
+		}
+		siblings := make([]string, 0, len(doc.PoolLanes))
+		for _, member := range doc.PoolLanes {
+			if member != lane && covered[member] {
+				siblings = append(siblings, strconv.Quote(member))
+			}
+		}
+		if len(siblings) == 0 {
+			continue
+		}
+		sort.Strings(siblings)
+		notes[lane] = fmt.Sprintf("Note: lane %q draws the shared %q allowance together with %s, so pinning between "+
+			"them changes which client runs the work and does not change the allowance available to it.",
+			lane, doc.Pool, strings.Join(siblings, ", "))
+	}
+	if len(notes) == 0 {
+		return nil
+	}
+	return notes
+}
+
 // launchRole creates and enqueues a role run for the task (Spec S16.6:
 // Enqueue is the sole ingress). An existing live run for the role is
 // re-enqueued only from new/queued; anything else is reported.
@@ -578,6 +654,24 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	er := s.executeRouting(ctx, r)
 	if err := s.emitRoutingDecided(ctx, r, er); err != nil {
 		s.crash(ctx, r.ID, "routing record: "+err.Error())
+		return err
+	}
+	// The run row tells the truth about the lane that ran (P3-LN-9 R9). The
+	// row was stamped at CREATION from process config, before routing existed
+	// to choose anything, and the receipt's Lane column, /api/meters and the
+	// run list all read it — so a run that routed elsewhere metered and
+	// receipted as the configured lane. Stamped HERE because this is where
+	// the selection is settled and where substrateFor already resolves the
+	// engine, and stamped as a PAIR because a row whose lane moved and whose
+	// substrate did not is a row that contradicts itself.
+	//
+	// Deliberately on the EXECUTE dispatch only. The BENCH-REG §2 direct arm
+	// never reaches this path (it is dispatched through its own role and
+	// consults no selection), and its substrate is a structural constant
+	// naming which surface the pair recorded — a stamp moving it would
+	// corrupt the blind-pair protocol.
+	if err := s.cfg.Runs.SetDecidedLane(ctx, r.ID, er.Decision.Lane, s.substrateFor(er.Decision.Lane, r)); err != nil {
+		s.crash(ctx, r.ID, "stamp decided lane: "+err.Error())
 		return err
 	}
 

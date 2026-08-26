@@ -136,6 +136,33 @@ type Request struct {
 	// (additive-first, S15.2). Durable for free: the State carrying this
 	// Request is marshaled whole onto every intake.state event.
 	Project string `json:"project,omitempty"`
+	// PinnedLane OPTIONALLY pins this task to one lane, declared at CREATION
+	// ahead of the first selection rather than only as a re-route on the
+	// approval card (S00.9 A13; the Project precedent above). Selection
+	// honors it in place of the S08.8 step-3 consumption-pressure comparison.
+	// The lane is validated server-side against what this platform can
+	// actually dispatch to, and a pin it cannot honor REFUSES the submission
+	// rather than quietly dropping it — an operator who names a lane asked
+	// for THAT lane. Empty is the ordinary case and changes nothing.
+	// Durable for free, by the same marshaling as Project.
+	PinnedLane string `json:"pinned_lane,omitempty"`
+}
+
+// LanePinOption is one lane a request may name in Request.PinnedLane, with the
+// verdict already computed by the layer that owns it (S00.9 A13).
+//
+// The verdict is CARRIED, never re-derived here: internal/intake cannot import
+// internal/worker (the S06.10 seam wall), so what crosses is data — the
+// PlanWindowRecord shape, for the same reason. A rule spelled twice drifts.
+type LanePinOption struct {
+	// Lane is the lane name a request may name.
+	Lane string
+	// Pinnable reports that selection would honor a pin naming this lane.
+	Pinnable bool
+	// NotPinnable is the selection layer's own sentence saying why it would
+	// not — quoted verbatim, so the refusal a person reads is the refusal the
+	// platform computed.
+	NotPinnable string
 }
 
 // Deterministic floor classes (Spec S06.2): any of these forces the high
@@ -545,6 +572,20 @@ var (
 	// not been owner-approved yet (S13.7: only active entries feed intake
 	// resolution). Visible, so it may be named honestly.
 	ErrPinNotActive = fmt.Errorf("%w: project is registered but not active yet", ErrPinRefused)
+	// ErrLanePinRefused is the class of Request.PinnedLane refusals (P3-LN-9;
+	// S00.9 A13). It is the ErrPinRefused posture on a second axis: a
+	// requester who pins a LANE asked for THAT lane, so a pin the platform
+	// cannot honor is refused loudly at Submit and no task is born believing
+	// it got one. Refusing — rather than degrading onto whatever selection
+	// would have chosen — is the inversion that matters: routing degrades
+	// when the PLATFORM picked a lane it cannot use, and refuses when a
+	// PERSON did (§19; §12 — the only default is consent).
+	//
+	// ONE code for every unhonorable pin, with the DETAIL distinguishing the
+	// cases. Unlike the project pin there is no existence-oracle concern:
+	// lane names ship in the lane documents and are not secret, so the
+	// message may name the lanes that ARE pinnable.
+	ErrLanePinRefused = errors.New("intake: submitted lane pin refused")
 	// ErrCitationUnresolved reports a PLAN citing a project-truth knowledge
 	// entry that cannot be resolved to an active version at approval (Spec
 	// S09.6): a loud capture failure, never a silent no-op that would escape

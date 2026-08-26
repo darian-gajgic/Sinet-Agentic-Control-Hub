@@ -45,6 +45,10 @@ func (sr *skeletonRouter) RouteTask(ctx context.Context, q intake.RouteQuery) (i
 		Tools:     q.Tools,
 		Research:  q.Research,
 		Writes:    q.Writes,
+		// The task's own lane pin, carried to selection (S00.9 A13). A
+		// correct resolver reached through a dropped argument is a broken
+		// feature, so this is the site the pin guards drive.
+		PinnedLane: q.PinnedLane,
 	})
 	if err != nil {
 		return intake.RouteBlock{}, err
@@ -70,6 +74,7 @@ func blockFromDecision(d worker.Decision) intake.RouteBlock {
 		GapSignature:  d.GapSignature,
 		ComposeEarned: d.ComposeEarned,
 		GapAdvice:     d.GapAdvice,
+		LanePin:       d.LanePin,
 	}
 	for _, c := range d.Candidates {
 		b.Candidates = append(b.Candidates, intake.RouteCandidate{
@@ -98,6 +103,7 @@ func decisionFromBlock(b *intake.RouteBlock) worker.Decision {
 		GapSignature:  b.GapSignature,
 		ComposeEarned: b.ComposeEarned,
 		GapAdvice:     b.GapAdvice,
+		LanePin:       b.LanePin,
 	}
 }
 
@@ -145,6 +151,48 @@ func (s *Skeleton) executeRouting(ctx context.Context, r run.Run) executeRouting
 		PlainReason:  "No recorded selection (router unwired — test posture); generalist on the execution duty seat.",
 	}
 	return out
+}
+
+// taskLanePin reads the task's declared lane pin off the recorded intake state
+// — the same read executeRouting already performs (S00.9 A13).
+//
+// It reads the REQUEST rather than the recorded routing block deliberately: the
+// pin is a fact about the task, so re-reading it is what makes it survive a
+// re-plan recompute without the worker pin's freeze mechanic. A task with no
+// state, or no pin, answers "" and every downstream path is byte-unchanged.
+func (s *Skeleton) taskLanePin(ctx context.Context, taskID string) string {
+	st, err := s.pipe.LoadState(ctx, taskID)
+	if err != nil || st == nil {
+		return ""
+	}
+	return st.Req.PinnedLane
+}
+
+// pinnedExecutionSeat resolves the pinned lane's EXECUTION seat from the
+// composed alternates, for the degraded path that never reaches the router
+// (S00.9 A13).
+//
+// It is the same seat set the router resolves a pin against, read from the
+// same composed value — so a pin honored by selection and a pin honored by
+// the fallback name the same model, and neither invents one. Not found means
+// this platform seats no model for that lane, which the caller must treat as
+// a refusal rather than as permission to seat something else.
+func (s *Skeleton) pinnedExecutionSeat(lane string) (worker.Seat, bool) {
+	if lane == "" {
+		return worker.Seat{}, false
+	}
+	if seat := s.seat(worker.DutyExecution); seat.Lane == lane {
+		return seat, true
+	}
+	for _, alt := range s.cfg.AlternateSeats[worker.DutyExecution] {
+		if alt.Lane == lane {
+			if alt.WindowTokens == 0 {
+				alt.WindowTokens = worker.DefaultWindowTokens
+			}
+			return alt, true
+		}
+	}
+	return worker.Seat{}, false
 }
 
 // emitRoutingDecided appends the settled routing.decided event on the run
