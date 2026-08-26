@@ -933,8 +933,13 @@ func TestKimiCLIConformanceTiers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read realengine_test.go: %v", err)
 	}
-	if !strings.Contains(string(src), sanctioned) {
-		t.Errorf("the tier-R absence skip does not print %q", sanctioned)
+	// COUNT-EQUALITY, like the tier-L half: presence-only would pass while a
+	// second skip in the same file invented its own wording, which is exactly
+	// what makes a skipped tier look like a passing one in a battery log.
+	if total, exact := strings.Count(string(src), "SANCTIONED SKIP"), strings.Count(string(src), sanctioned); total == 0 {
+		t.Error("tier R prints no named skip at all")
+	} else if exact != total {
+		t.Errorf("%d of tier R's %d skips use the exact form %q; every one must", exact, total, sanctioned)
 	}
 	// Tier R must terminate on loopback and NEVER on a provider. The first cut
 	// of this guard was DEAD: it excused every https:// occurrence whenever the

@@ -373,17 +373,17 @@ func TestRealEngineTurnOnLoopbackProvider(t *testing.T) {
 //
 // Centralized deliberately: a beltless exec should be impossible to write by
 // forgetting something, so there is exactly one place the belt lives.
-func beltedEnv(t *testing.T, baseURL string) (env []string, home string) {
+func beltedEnv(t *testing.T, baseURL string) ([]string, string) {
 	t.Helper()
 	root := t.TempDir()
-	home = filepath.Join(root, "home")
+	home := filepath.Join(root, "home")
 	codeHome := filepath.Join(root, "kimi-code")
 	for _, d := range []string{home, codeHome} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
 	}
-	return []string{
+	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		// Bounded HOME and a per-test data root: never the operator's.
 		"HOME=" + home,
@@ -402,7 +402,12 @@ func beltedEnv(t *testing.T, baseURL string) (env []string, home string) {
 		"HTTPS_PROXY=http://127.0.0.1:1",
 		"ALL_PROXY=http://127.0.0.1:1",
 		"NO_COLOR=1", "CI=1",
-	}, home
+	}
+	// The helper guards ITSELF, so the guarantee is a property of using it
+	// rather than of remembering to check afterwards. Round 1 wired the guard
+	// at one of three exec sites while the comment claimed "every".
+	assertBelted(t, env)
+	return env, home
 }
 
 // TestRealEngineRejectsForbiddenFlagCombination asserts BEHAVIOR, not help text

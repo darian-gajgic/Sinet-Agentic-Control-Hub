@@ -36,7 +36,7 @@ var kimiModelDates = map[string]string{
 }
 
 var kimiSignalDates = map[string]string{
-	// The eleven rows the 2026-08-24 error-reference read produced.
+	// The twelve rows the 2026-08-24 error-reference read produced.
 	"engine is currently overloaded":                    "2026-08-24",
 	"receiving too many requests":                       "2026-08-24",
 	"reached your usage limit for this period":          "2026-08-24",

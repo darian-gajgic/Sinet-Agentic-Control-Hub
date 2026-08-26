@@ -133,12 +133,13 @@ func (s *session) drainUsage() {
 //     it with the pinned one and stops billing on a mismatch.
 func (s *session) resolveTranscript() (string, error) {
 	if id := s.pinnedSessionID(); id != "" {
-		p, ok := s.transcriptFor(id)
-		if !ok {
-			return "", nil
-		}
-		return p, nil
+		return s.transcriptFor(id)
 	}
+	// The stream may report its session id BEFORE the store is resolvable. That
+	// id does not become the pin on its own: if the engine's own index then
+	// names a different session, the two disagree and neither can be trusted —
+	// which is the same refusal as below, reached in the other order.
+	reported := s.reportedSessionID()
 	idx := filepath.Join(s.low.home, "session_index.jsonl")
 	raw, err := os.ReadFile(idx)
 	if err != nil {
@@ -170,14 +171,14 @@ func (s *session) resolveTranscript() (string, error) {
 	case 0:
 		return "", nil
 	case 1:
+		if reported != "" && reported != hits[0] {
+			return "", fmt.Errorf("the engine reported session %q but its own index names %q for this run's cwd — "+
+				"the two disagree, so neither identifies a store that can be trusted as a paid call", reported, hits[0])
+		}
 		s.mu.Lock()
 		s.pinnedSession = hits[0]
 		s.mu.Unlock()
-		p, ok := s.transcriptFor(hits[0])
-		if !ok {
-			return "", nil
-		}
-		return p, nil
+		return s.transcriptFor(hits[0])
 	default:
 		return "", fmt.Errorf("session_index.jsonl names %d sessions for this run's cwd (%v) — a per-run engine "+
 			"home must hold exactly one, so something other than the engine has written to the store and no "+
@@ -188,12 +189,33 @@ func (s *session) resolveTranscript() (string, error) {
 // transcriptFor is the path a session id resolves to. The workDirKey bucket is
 // not enumerated: the id is unique within the home, so one glob segment is
 // enough and the LEAF is exact.
-func (s *session) transcriptFor(sessionID string) (string, bool) {
-	matches, err := filepath.Glob(filepath.Join(s.low.home, "sessions", "*", sessionID, "agents", "main", "wire.jsonl"))
-	if err != nil || len(matches) != 1 {
-		return "", false
+//
+// AMBIGUITY IS AN ERROR HERE, exactly as it is on the index leg, and the
+// asymmetry that used to exist between them was a real hole. Returning "not
+// found" for two directories sharing the pinned id meant drainUsage simply
+// returned: no usage, no refusal flag, no warning, forever — a SILENT billing
+// stall that the run's own work could trigger, since it knows KIMI_CODE_HOME
+// and can read session_index.jsonl. Round 1 closed over-billing and opened
+// under-billing in the same shape. Both legs now fail closed and LOUD.
+//
+// A zero-match is the one benign case and stays quiet: the engine has not
+// created its session directory yet, and the tail simply polls again.
+func (s *session) transcriptFor(sessionID string) (string, error) {
+	pattern := filepath.Join(s.low.home, "sessions", "*", sessionID, "agents", "main", "wire.jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", fmt.Errorf("resolving the transcript for session %q: %w", sessionID, err)
 	}
-	return matches[0], true
+	switch len(matches) {
+	case 0:
+		return "", nil // not created yet
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("session %q resolves to %d transcript directories under different workDirKey buckets "+
+			"(%v) — a per-run engine home must hold exactly one, so something other than the engine has written to "+
+			"the store and no record in it can be trusted as a paid call", sessionID, len(matches), matches)
+	}
 }
 
 func (s *session) pinnedSessionID() string {
@@ -202,22 +224,35 @@ func (s *session) pinnedSessionID() string {
 	if s.pinnedSession != "" {
 		return s.pinnedSession
 	}
+	// On a resume the id is not inferred at all: it is the one `--session`
+	// names, which the platform took from its own park record.
 	if s.low.resume {
 		return s.low.sessionID
 	}
 	return ""
 }
 
+func (s *session) reportedSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reportedSession
+}
+
 // confirmSession is the cross-check: the engine's own reported id against the
 // one this run has been billing from. A mismatch means the pin was wrong, so
 // billing stops rather than continuing on a store that is not this session's.
+// It records the reported id rather than adopting it as the pin. Adopting it
+// would silently retarget the tail at a store the index never named — zero
+// usage, no refusal, no warning — which is the same silent stall the ambiguity
+// legs exist to prevent, reached by a different route.
 func (s *session) confirmSession(reported string) {
 	s.usageMu.Lock()
 	defer s.usageMu.Unlock()
 	s.mu.Lock()
+	s.reportedSession = reported
 	pinned := s.pinnedSession
-	if pinned == "" {
-		s.pinnedSession = reported
+	if pinned == "" && s.low.resume {
+		pinned = s.low.sessionID
 	}
 	s.mu.Unlock()
 	if pinned == "" || pinned == reported {

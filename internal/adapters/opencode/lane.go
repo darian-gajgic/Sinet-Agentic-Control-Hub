@@ -141,6 +141,16 @@ type LaneConfig struct {
 	// The per-model enum value is the machine-readable half (LaneModel).
 	OverflowNote string `json:"overflow_note,omitempty"`
 
+	// UsageSource records WHERE a substrate's per-call usage comes from, and —
+	// where the answer carries a limit — what that limit is.
+	//
+	// It is a LOADED field rather than loose JSON deliberately. The packet's
+	// single largest accepted deviation rides this text, and an unloaded key is
+	// one the loader silently drops: nothing would have noticed if it were
+	// deleted, mistyped or emptied, which is precisely the state a recorded
+	// residual must not be in.
+	UsageSource LaneUsageSource `json:"usage_source,omitempty"`
+
 	// SignalsNote is the honesty label on the whole signal table — whether its
 	// rows are OBSERVED wire bodies or DOCUMENTED message strings, and what
 	// closes the difference.
@@ -186,6 +196,18 @@ type LaneDataPolicy struct {
 	Source          string `json:"source,omitempty"`
 	// Audit is the repo path of the onboarding audit this row came from.
 	Audit string `json:"audit,omitempty"`
+}
+
+// LaneUsageSource is a dated statement of where a lane's usage numbers come
+// from and what the platform can and cannot guarantee about them.
+//
+// The Note is the load-bearing member: a residual that is not written down is
+// one the next packet re-derives, and a residual written only in a commit
+// message is one nobody reads at the moment it matters.
+type LaneUsageSource struct {
+	VerifiedOn string `json:"verified_on,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Note       string `json:"note,omitempty"`
 }
 
 // RecordedEndpoint is an endpoint that exists and is not wired, kept dated so
@@ -576,6 +598,19 @@ func (c LaneConfig) validate() error {
 		// depletion behind a permanent false alarm (R11).
 		return fmt.Errorf("%w (lane %q): no endpoint_marker — the subscription-endpoint self-check would "+
 			"answer 'unverified' for every signal and mask real depletion (S10.5)", ErrLaneConfig, c.Lane)
+	}
+	if c.UsageSource != (LaneUsageSource{}) {
+		if c.UsageSource.Note == "" {
+			return fmt.Errorf("%w (lane %q): usage_source carries no note — the note IS the record, and an empty "+
+				"one is a residual nobody can read at the moment it matters", ErrLaneConfig, c.Lane)
+		}
+		if c.UsageSource.VerifiedOn == "" {
+			return fmt.Errorf("%w (lane %q): usage_source carries no verified-on date", ErrLaneConfig, c.Lane)
+		}
+		if _, err := time.Parse(dateLayout, c.UsageSource.VerifiedOn); err != nil {
+			return fmt.Errorf("%w (lane %q): usage_source verified-on %q is not a %s date",
+				ErrLaneConfig, c.Lane, c.UsageSource.VerifiedOn, dateLayout)
+		}
 	}
 	for _, row := range c.Signals {
 		name := row.Code

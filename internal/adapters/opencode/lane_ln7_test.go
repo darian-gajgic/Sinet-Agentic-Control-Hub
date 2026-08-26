@@ -266,3 +266,53 @@ func rawField(t *testing.T, raw []byte, key string) string {
 	}
 	return s
 }
+
+// ── drain r2 N4 · the residual is a LOADED field, and it is pinned ───────────
+
+// TestKimiCLIUsageSourceResidualIsLoadedAndPinned.
+//
+// The packet's single largest accepted deviation — that the usage source is not
+// fully forge-immune at this pin — rides this text. It was originally an
+// unloaded JSON key: `LoadLaneConfig` dropped it, no Go code referenced it and
+// no test pinned it, so deleting, emptying or mistyping it would have gone
+// unnoticed. A recorded residual that nothing holds is not recorded.
+func TestKimiCLIUsageSourceResidualIsLoadedAndPinned(t *testing.T) {
+	c := laneNamed(t, adapters.LaneKimiCLI)
+	if c.UsageSource.Note == "" {
+		t.Fatal("the kimi-cli lane document records no usage-source residual — the largest accepted deviation in " +
+			"this packet would then live only in a commit message")
+	}
+	if c.UsageSource.VerifiedOn == "" {
+		t.Error("the usage-source residual carries no date")
+	}
+	if c.UsageSource.Source == "" {
+		t.Error("the usage-source residual names no evidence")
+	}
+	// The residual must say WHAT is guaranteed, WHAT is not, and HOW the rest
+	// closes — the three things a follow-up packet would otherwise re-derive.
+	for _, needle := range []string{
+		"wire.jsonl",      // where usage comes from
+		"session_index",   // the identity pin that replaced the glob
+		"writable",        // the measured reason F1(a) is unreachable
+		"0400",            // the partial mitigation actually shipped
+		"bind order",      // the config half, closable, and by whom
+		"injection proxy", // the wire.jsonl half, and what closes it
+	} {
+		if !strings.Contains(strings.ToLower(c.UsageSource.Note), strings.ToLower(needle)) {
+			t.Errorf("the usage-source residual does not mention %q — a residual that omits how it closes is one the "+
+				"next packet re-derives", needle)
+		}
+	}
+	// It must not overstate: this substrate is NOT forge-immune, and the record
+	// has to keep saying so.
+	low := strings.ToLower(c.UsageSource.Note)
+	if !strings.Contains(low, "not reachable") && !strings.Contains(low, "unreachable") && !strings.Contains(low, "not closed") {
+		t.Error("the usage-source residual does not state plainly that total forge-immunity is unreachable at this pin")
+	}
+	// The sibling lane does not carry one, and should not: it rides opencode,
+	// whose usage comes off the wire rather than out of a writable store.
+	if api := laneNamed(t, adapters.LaneKimi); api.UsageSource.Note != "" {
+		t.Errorf("the opencode-substrate kimi lane declares a usage-source residual (%q) — this residual is a "+
+			"property of the CLI substrate's writable session store, not of the membership", api.UsageSource.Note)
+	}
+}

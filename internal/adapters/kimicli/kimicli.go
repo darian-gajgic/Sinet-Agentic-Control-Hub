@@ -290,12 +290,13 @@ type session struct {
 	// The transcript tail's own state. It has its own mutex because the tail
 	// runs concurrently with the stdout pump and the two share nothing but the
 	// events channel and the cursor.
-	usageMu       sync.Mutex
-	tr            *transcript
-	wirePath      string
-	wireOffset    int64
-	wireRefused   bool
-	pinnedSession string
+	usageMu         sync.Mutex
+	tr              *transcript
+	wirePath        string
+	wireOffset      int64
+	wireRefused     bool
+	pinnedSession   string
+	reportedSession string
 }
 
 var _ adapters.Session = (*session)(nil)
