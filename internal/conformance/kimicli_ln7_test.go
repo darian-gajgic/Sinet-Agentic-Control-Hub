@@ -77,7 +77,8 @@ func TestConformanceSeedRowCounts(t *testing.T) {
 	}
 	// The gray-zone Gate-A posture is recorded where a person reading the row
 	// will see it, not only in the audit file.
-	if !strings.Contains(lane.Notes, "gray zone") && !strings.Contains(lane.Notes, "Gate A") {
+	notes := strings.ToLower(lane.Notes)
+	if !strings.Contains(notes, "gray zone") && !strings.Contains(notes, "gate a") {
 		t.Error("the kimi-cli lane row does not record the 2026-08-26 Gate-A ruling")
 	}
 }

@@ -533,6 +533,13 @@ func TestEveryHeldRegionFilterNamesASeededPageRow(t *testing.T) {
 		"t1-kimi-price-k3": true, "t1-kimi-tos-platform": true,
 		"t1-kimi-tos-assistant": true, "t1-kimi-membership-pricing": true,
 		"t1-kimi-plan-pricing": true, "t2-modelsdev-kimi-provider": true,
+
+		// The two rows P3-LN-7 added carry no filter for that same second
+		// reason: the Community Guidelines page was read in full for the
+		// 2026-08-26 Gate-A re-audit and the CLI's release feed for the pin,
+		// so their content is known and their DOM is not. Diffed whole until
+		// somebody looks.
+		"t1-kimi-community-guidelines": true, "t1-kimi-cli-changelog": true,
 	}
 	held := 0
 	for _, r := range watchlist.SeedRows() {

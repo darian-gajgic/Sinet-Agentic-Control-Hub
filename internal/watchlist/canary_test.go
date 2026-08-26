@@ -592,10 +592,11 @@ func TestConformanceCanarySurfacesDueAdapterRowsOncePerWindow(t *testing.T) {
 	}
 	// Exactly the weekly lane-affecting adapter rows — the narrowing of B5-4's
 	// "dueness raises nothing at v0" (OQ5(a)). The opencode substrate row
-	// joined them at P3-LN-1 and the zai LANE row at P3-LN-2B (weekly +
-	// AffectLane, like their siblings).
-	if sweep.Cards != 5 {
-		t.Fatalf("conformance cards = %d, want 5 (adapter-anthropic + adapter-local + adapter-opencode + adapter-zai + adapter-kimi)", sweep.Cards)
+	// joined them at P3-LN-1, the zai LANE row at P3-LN-2B, and the kimi-cli
+	// SUBSTRATE and LANE rows at P3-LN-7 (weekly + AffectLane, like their
+	// siblings).
+	if sweep.Cards != 7 {
+		t.Fatalf("conformance cards = %d, want 7 (adapter-anthropic + adapter-local + adapter-opencode + adapter-zai + adapter-kimi + adapter-kimi-cli + lane-kimi-cli)", sweep.Cards)
 	}
 	cards := h.findings(t)
 	seen := map[string]bool{}
@@ -631,8 +632,8 @@ func TestConformanceCanarySurfacesDueAdapterRowsOncePerWindow(t *testing.T) {
 	if _, err := c.RunDue(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if after := len(h.findings(t)); after != before+5 {
-		t.Errorf("findings after the window = %d, want %d", after, before+5)
+	if after := len(h.findings(t)); after != before+7 {
+		t.Errorf("findings after the window = %d, want %d (one per weekly lane-affecting adapter row)", after, before+7)
 	}
 }
 

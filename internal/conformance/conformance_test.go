@@ -170,8 +170,8 @@ func TestSeedRowsCoverEveryS14_5Group(t *testing.T) {
 	// The kimi LANE row (P3-LN-3): the SECOND lane on that one substrate, added
 	// ahead of its post-v0 slot on the operator's 2026-08-23 order (S00.9 A11).
 	find(t, states, "adapter-kimi")
-	if len(states) != 15 {
-		t.Fatalf("seed produced %d rows, want 15 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate + the P3-LN-2B zai lane + the P3-LN-3 kimi lane)", len(states))
+	if len(states) != 17 {
+		t.Fatalf("seed produced %d rows, want 17 (7 spec-group rows + no-sse-replay + dead-man + the S14.8 regression sweep + the B5-8B Layer-2 injection battery + the B6-4 frontend dependency pass + the P3-LN-1 opencode substrate + the P3-LN-2B zai lane + the P3-LN-3 kimi lane + the P3-LN-7 kimi-cli substrate and lane)", len(states))
 	}
 
 	// The zai lane's row is the ONLY zai row, and it is honest about the half
@@ -495,6 +495,12 @@ func TestBumpGatingSetSurfacesBLimbReference(t *testing.T) {
 		// The kimi LANE battery (P3-LN-3): a second lane on the same substrate,
 		// and a substrate that still passes can carry either lane failing.
 		"adapter-kimi": true,
+		// The kimi-cli SUBSTRATE and LANE batteries (P3-LN-7): a third engine,
+		// pinned to a package that published 70 versions in ~3 months, so a
+		// bump on it gates on both — the substrate suite and the lane that
+		// rides it.
+		"adapter-kimi-cli": true,
+		"lane-kimi-cli":    true,
 		// The S14.8 regression sweep carries engine_bump because it is where
 		// limb (b) — the before/after quality probe — records (B5-5 OQ2(a)).
 		conformance.RowRegressionSweep: true,
@@ -542,7 +548,7 @@ func TestDuenessStructuralAndSettingsBacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 15 {
+	if len(due) != 17 {
 		t.Fatalf("never-run: %d rows due, want all 15", len(due))
 	}
 

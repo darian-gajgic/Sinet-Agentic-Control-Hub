@@ -259,11 +259,19 @@ func (a *Adapter) lower(req adapters.StartRequest, res *resumeSpec) (*lowered, e
 	}
 	argv = append(argv, prompt,
 		"--output-format", "stream-json",
-		"-m", req.Model,
 		// --skills-dir REPLACES user and project skill discovery, which is the
 		// only knob this engine offers on that channel.
 		"--skills-dir", l.skillsDir,
 	)
+	// NO `-m`. The model is chosen per invocation by KIMI_MODEL_NAME, and that
+	// is not a preference — it is the only thing that works on this channel.
+	// `-m` selects a model ALIAS from the config file, and the KIMI_MODEL_*
+	// channel synthesizes its provider under the alias `__kimi_env_model__`, so
+	// `-m <model-id>` names an alias that does not exist. Measured at pin
+	// 0.38.0: the engine does not report a clean error for it, it crashes with
+	// an unhandled `Agent event 'agent.activity.updated' has no active lifecycle
+	// context` and exits 1 after emitting only the version frame. The brief
+	// specified `-m <model>` here; the spike overturned it.
 	if l.resume {
 		argv = append(argv, "--session", l.sessionID)
 	}

@@ -690,6 +690,9 @@ const (
 	LaneLocal     = "local"
 	// LaneKimi is the Kimi Code (Moonshot) lane (S00.9 amendment A11).
 	LaneKimi = "kimi"
+	// LaneKimiCLI is the same membership reached through Moonshot's own CLI
+	// (S00.9 amendment A12). It is deliberately NOT in PaidLanes: see there.
+	LaneKimiCLI = "kimi-cli"
 )
 
 // PaidLanes are the lanes a real-request canary probes. All are FLAT-RATE
@@ -700,3 +703,19 @@ const (
 // operator's 2026-08-23 order (S00.9 amendment A11), config-only through the
 // report-02 §5 onboarding checklist.
 func PaidLanes() []string { return []string{LaneAnthropic, LaneZAI, LaneKimi} }
+
+// LaneKimiCLI is absent from PaidLanes ON PURPOSE, and the reason is worth
+// stating where somebody would otherwise "fix" it.
+//
+// A fourth paid lane takes the disarmed-leg count from 9 to 12 at five pinned
+// sites and, once armed, DOUBLES the real-request canary spend — on ONE shared
+// quota pool, for answers that are properties of the MEMBERSHIP rather than of
+// the client path. The auth canary asks whether the subscription is still
+// sanctioned; the model-list canary asks what the account serves. One Console
+// key answers both for both lanes, so running them twice buys nothing and
+// spends the same allowance twice.
+//
+// The kimi-cli lane document records that its canary coverage is the `kimi`
+// lane's, BY NAME. Revisit only if the two lanes can ever be entitled or
+// revoked independently — under the current credential design (one profile, one
+// key) they cannot.

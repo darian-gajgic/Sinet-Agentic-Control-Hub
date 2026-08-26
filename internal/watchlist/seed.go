@@ -34,6 +34,7 @@ var LockEntryNames = []string{
 	"golang.org/x/crypto",
 	"claude CLI (engine)",
 	"opencode-ai (engine)",
+	"kimi-code (engine)",
 	"sandbox-runtime",
 	"OS mechanisms: bubblewrap/seccomp/Landlock/netns+nftables",
 	"PDF text extraction",
@@ -257,10 +258,27 @@ func tier1Rows() []Row {
 			"Extra Usage Pack — the C1 overflow mechanism. It is what makes this lane opt-in-credits rather "+
 				"than hard-stop, and its any-time disable is the clause that clears 3.10; if that clause moves, "+
 				"the lane's overflow_mode is wrong. VERIFIED 2026-08-24"),
+		page("t1-kimi-community-guidelines", "https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html", "kimi",
+			"Kimi Code Community Guidelines / Scope of Use — THE SANCTION SURFACE, and the row whose absence is "+
+				"the reason this set needed correcting. It states verbatim 'Kimi Code subscriptions are for "+
+				"interactive use only' and 'Don't use Kimi Code for non-interactive automation', which is S03.6 "+
+				"class-3 language; the 2026-08-24 Gate A-C audit passed this membership as class 2 WITHOUT "+
+				"reading this page, and its own pre-registered trigger names exactly that text. The operator "+
+				"ruled PROCEED on 2026-08-26 and the lane runs as a RECORDED GRAY ZONE, so a change here does "+
+				"not merely update a fact — it re-opens that ruling, for BOTH kimi lanes at once, since it is "+
+				"one subscription. The same page's graduated-enforcement sentence is why the 403 concurrent-"+
+				"request-limit signal row carries no documented class. VERIFIED 2026-08-26"),
 		page("t1-kimi-price-k3", "https://platform.kimi.ai/docs/pricing/chat-k3", "kimi",
 			"K3 metered price table — the D5 API-equivalent row receipts are priced from ($3.00 in / $15.00 out "+
 				"per M, cache-hit $0.30/M, 1,048,576 ctx). The plan itself is flat and opencode reports $0.00, "+
 				"so these are the only dollar figures this lane has. VERIFIED 2026-08-24"),
+		page("t1-kimi-cli-changelog", "https://github.com/MoonshotAI/kimi-code/releases", "kimi-cli",
+			"Kimi Code CLI releases — the pinned ENGINE's own changelog. 70 versions in ~3 months (first "+
+				"publish 0.1.0 on 2026-05-21, the pinned 0.38.0 on 2026-08-20), and the CLI ships with "+
+				"auto-update ON by default, so this pin is FRAGILE in a way no other engine pin in this "+
+				"platform is. The stream envelope it emits is UNDOCUMENTED — the adapter's shapes come from a "+
+				"$0 execution capture, not from a spec — so a release here can move the contract with nothing "+
+				"published to diff. VERIFIED 2026-08-26"),
 		page("t1-kimi-tos-platform", "https://platform.kimi.ai/docs/agreement/modeluse", "kimi",
 			"Terms of Service for Kimi OpenPlatform — THE GATE-A RE-AUDIT TRIGGER. Read in full 2026-08-24: no "+
 				"automation, unattended-use or interactive-only clause exists (class 2). An interactive-only or "+

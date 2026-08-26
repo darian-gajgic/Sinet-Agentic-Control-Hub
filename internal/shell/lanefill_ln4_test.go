@@ -185,7 +185,14 @@ func TestLN4CommissioningIsAProperty(t *testing.T) {
 	rng := rand.New(rand.NewSource(0x5A17))
 	for draw := 0; draw < 200; draw++ {
 		stateDir := t.TempDir()
-		want := map[string]bool{}
+		// The property is about PLACEMENT, not about lanes: what is placed is
+		// an engine-cred under a PROFILE, and commissioning gives that person
+		// every commissionable lane naming it. Those are not the same set —
+		// two lanes can share one profile (the kimi lanes share `kimi-code`,
+		// since one membership is one Console key), so a placement made while
+		// iterating one lane legitimately commissions its sibling too.
+		// Building `want` per drawn lane would encode the opposite claim.
+		placed := map[string]map[string]string{}
 		for _, who := range people {
 			for _, lane := range lanes {
 				if rng.Intn(2) == 0 {
@@ -200,7 +207,24 @@ func TestLN4CommissioningIsAProperty(t *testing.T) {
 					profile = lane.Lane
 				}
 				ln4Place(t, stateDir, who, profile, kind)
-				if kind == broker.KindEngineCred && lane.Credential.Profile != "" && lane.Credential.EnvVar != "" {
+				// The LAST placement under a profile wins, because it
+				// overwrites the record on disk. That matters now that two
+				// lanes share one profile: a draw for the sibling lane can
+				// replace an engine-cred with a signing-key under the same
+				// name, and the store then holds what was written last.
+				if placed[who] == nil {
+					placed[who] = map[string]string{}
+				}
+				placed[who][profile] = kind
+			}
+		}
+		want := map[string]bool{}
+		for who, profiles := range placed {
+			for _, lane := range lanes {
+				if lane.Credential.Profile == "" || lane.Credential.EnvVar == "" {
+					continue
+				}
+				if profiles[lane.Credential.Profile] == broker.KindEngineCred {
 					want[who+"\x00"+lane.ProviderID] = true
 				}
 			}
@@ -279,13 +303,15 @@ func TestLN4CoverageAndSeatsGrowOnlyFromPlacement(t *testing.T) {
 		t.Error("a person with nothing placed got a credential injector")
 	}
 
-	// Both lanes placed: two lanes, sorted, two seats — and still execution only.
+	// Both profiles placed: THREE lanes, sorted, three seats — and still
+	// execution only. Three from two placements, because the kimi-code profile
+	// serves both kimi lanes: one membership, one Console key, two engines.
 	ln4Place(t, stateDir, "me", kimi.Credential.Profile, broker.KindEngineCred)
 	both := commissionEngineLanes(stateDir, lanes, ln4Logger(t))
-	if got, want := commissionedLanes(lanes, both), []string{adapters.LaneKimi, adapters.LaneZAI}; !equalStrings(got, want) {
+	if got, want := commissionedLanes(lanes, both), []string{adapters.LaneKimi, adapters.LaneKimiCLI, adapters.LaneZAI}; !equalStrings(got, want) {
 		t.Errorf("commissionedLanes = %v, want %v (sorted)", got, want)
 	}
-	if got := laneAlternateSeats(lanes, both)[worker.DutyExecution]; len(got) != 2 {
+	if got := laneAlternateSeats(lanes, both)[worker.DutyExecution]; len(got) != 3 {
 		t.Errorf("execution alternates = %+v, want one seat per commissioned lane", got)
 	}
 	for _, duty := range []string{worker.DutyPlanning, worker.DutyJudge, worker.DutyUtility} {

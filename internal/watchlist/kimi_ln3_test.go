@@ -327,8 +327,13 @@ func TestKimiWatchRowsVerified(t *testing.T) {
 			lane++
 		}
 	}
-	if lane != 12 {
-		t.Errorf("%d rows carry lane kimi, want 12 — every row in `want` above plus none unaccounted for", lane)
+	// 13 since P3-LN-7 added the Community Guidelines page — the SANCTION
+	// surface, on the kimi lane because the clause binds the membership and the
+	// audit it corrects is this lane's. It is not in `want` above, which pins
+	// the twelve rows the LN-3 audit produced.
+	if lane != 13 {
+		t.Errorf("%d rows carry lane kimi, want 13 — the twelve rows in `want` above plus the community-guidelines "+
+			"page added at P3-LN-7, and none unaccounted for", lane)
 	}
 
 	// The classifier's constrained-decoding grammar must be able to EMIT the

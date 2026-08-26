@@ -124,6 +124,11 @@ func conformanceRowLane(rowID string) string {
 		// substrate row, which is exactly why that row stays unmapped: a
 		// substrate result belongs to no single lane.
 		return LaneKimi
+	case "lane-kimi-cli":
+		// The kimi-cli LANE row (P3-LN-7). Its sibling adapter-kimi-cli row
+		// stays unmapped for the same reason adapter-opencode does: that one
+		// proves the SUBSTRATE, and a substrate result belongs to no lane.
+		return LaneKimiCLI
 	}
 	return ""
 }

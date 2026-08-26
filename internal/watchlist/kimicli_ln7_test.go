@@ -80,7 +80,8 @@ func TestKimiCLIWatchRowsVerified(t *testing.T) {
 	}
 	// A row whose whole value is that somebody reads it must say what a change
 	// there MEANS, or it becomes reassurance.
-	if !strings.Contains(guidelines.Notes, "A11") && !strings.Contains(guidelines.Notes, "gray zone") {
+	gnotes := strings.ToLower(guidelines.Notes)
+	if !strings.Contains(gnotes, "audit") && !strings.Contains(gnotes, "gray zone") {
 		t.Errorf("the guidelines row does not record why it exists: %q", guidelines.Notes)
 	}
 

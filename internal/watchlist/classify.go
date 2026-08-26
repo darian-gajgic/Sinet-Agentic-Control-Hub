@@ -70,7 +70,7 @@ func WatchlistSchema() json.RawMessage {
 		// The lane enum is a CONSTRAINED-DECODING grammar, not a hint: a lane
 		// missing from it is a lane the local classifier literally cannot emit,
 		// so no hit would ever be attributed to it (kimi added at P3-LN-3).
-		`"lanes":{"type":"array","items":{"type":"string","enum":["anthropic","zai","kimi","local"]},"description":"the Sinet lanes this change affects; empty when it affects none"},` +
+		`"lanes":{"type":"array","items":{"type":"string","enum":["anthropic","zai","kimi","kimi-cli","local"]},"description":"the Sinet lanes this change affects; empty when it affects none"},` +
 		`"summary":{"type":"string","description":"one-line summary of the change, plain language"}` +
 		`},"required":["reason","change_class","lanes","summary"],"additionalProperties":false}`)
 }

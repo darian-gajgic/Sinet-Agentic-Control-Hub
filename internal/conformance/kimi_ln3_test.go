@@ -21,19 +21,19 @@ func TestKimiLaneRowRegistered(t *testing.T) {
 	rows := conformance.SeedRows()
 	var row conformance.Row
 	kimiRows := 0
+	// Scoped to the `kimi` LANE's own row. A substring match on "kimi" also
+	// catches the kimi-cli substrate and lane rows added at P3-LN-7 — a
+	// DIFFERENT lane on a different engine, which this test says nothing about.
+	// The one-row invariant is unchanged; what moved is which ids it covers.
 	for _, r := range rows {
-		if !strings.Contains(r.ID, "kimi") {
+		if r.ID != "adapter-kimi" {
 			continue
 		}
 		kimiRows++
-		if r.ID != "adapter-kimi" {
-			t.Errorf("unexpected kimi row %q — the lane has exactly one row", r.ID)
-			continue
-		}
 		row = r
 	}
 	if kimiRows != 1 {
-		t.Fatalf("%d kimi rows registered, want exactly 1 (adapter-kimi)", kimiRows)
+		t.Fatalf("%d adapter-kimi rows registered, want exactly 1", kimiRows)
 	}
 
 	if row.AffectClass != conformance.AffectLane {

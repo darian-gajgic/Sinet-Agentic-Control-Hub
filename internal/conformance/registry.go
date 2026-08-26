@@ -227,6 +227,77 @@ func SeedRows() []Row {
 			Notes:       "the opencode SUBSTRATE (the internal/adapters/opencode battery), landed at P3-LN-1. HONEST SCOPE: this row proves the substrate, not a lane — the lane that rides it has its own row (adapter-zai, P3-LN-2B), and this one stays silent about lanes so a green substrate is never read as a working lane. Tier L is defined here and stays structurally unreachable until a credential is placed. Tier R runs for real whenever the pinned binary is installed and costs $0: the permission round-trip drives a REAL serve against a loopback fake OpenAI-compatible provider. The weekly RUN of this suite is the S14.6 canary layer's (B5-6); this row is the scheduling home. Lane-affecting ⇒ flag-now." + bumpGateNote,
 		},
 		{
+			// Adapter per-SUBSTRATE — kimi-cli [S03.1/S03.4/S03.5], landed at
+			// P3-LN-7 under S00.9 amendment A12, in the same commit as the
+			// adapter package.
+			ID:            "adapter-kimi-cli",
+			OwningSection: "S03.1/S03.4/S03.5",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestUnknownFramesAreSkippedNotFatal (tier F: forward tolerance as a PROPERTY over random unknown frames — the envelope is undocumented and the engine publishes ~70 versions a quarter)", Pkg: "internal/adapters/kimicli", Run: "TestUnknownFramesAreSkippedNotFatal"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestOnePaidCallOneUsageEvent (tier F: one usage.record = one adapters.Usage, from the run's own transcript, with the S02.4a decomposition checked by arithmetic)", Pkg: "internal/adapters/kimicli", Run: "TestOnePaidCallOneUsageEvent"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestLoweredRunIsBounded (tier F: the run is bounded or it does not spawn — the F4 runaway guard)", Pkg: "internal/adapters/kimicli", Run: "TestLoweredRunIsBounded"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestConfigChannelDecoysDoNotTakeEffect (tier F: per-channel attempt-the-leak, asserting the decoy did NOT take effect)", Pkg: "internal/adapters/kimicli", Run: "TestConfigChannelDecoysDoNotTakeEffect"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestGatedToolsRefusedOnKimiCLI (tier F: a gated-tool worker is REFUSED by name, never auto-approved)", Pkg: "internal/adapters/kimicli", Run: "TestGatedToolsRefusedOnKimiCLI"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestNativeSpawnReadmissionRefused (tier F: native-spawn re-admission refused as a property, wildcards included)", Pkg: "internal/adapters/kimicli", Run: "TestNativeSpawnReadmissionRefused"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestPerRunHomeIsolation (tier F: a distinct KIMI_CODE_HOME per run and per person, HOME bounded)", Pkg: "internal/adapters/kimicli", Run: "TestPerRunHomeIsolation"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestPinMatchesLock (tier F: pin<->components.lock coupling)", Pkg: "internal/adapters/kimicli", Run: "TestPinMatchesLock"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestRealEngineVersionMatchesPin (tier R: the INSTALLED engine vs the pin, reported LOUDLY; SANCTIONED SKIP when the binary is absent)", Pkg: "internal/adapters/kimicli", Run: "TestRealEngineVersionMatchesPin"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestRealEngineTurnOnLoopbackProvider (tier R: a REAL `kimi -p` turn terminating on a loopback fake provider at $0 — the offered toolset proves Agent/AgentSwarm are stripped PRE-inference, and the transcript proves the usage source)", Pkg: "internal/adapters/kimicli", Run: "TestRealEngineTurnOnLoopbackProvider"},
+				{Handle: "go test ./internal/adapters/kimicli/ -run TestRealEngineRejectsForbiddenFlagCombination (tier R: the engine's own refusal of `--yolo -p`, asserted as BEHAVIOR rather than help text)", Pkg: "internal/adapters/kimicli", Run: "TestRealEngineRejectsForbiddenFlagCombination"},
+				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/kimicli/ -run TestLiveSmoke (tier L: one minimal paid call — DEFINED, and structurally unreachable at landing)", Pkg: "internal/adapters/kimicli", Run: "TestLiveSmoke"},
+			},
+			TriggerSet:  []string{TriggerEngineBump, TriggerWeekly},
+			Schedule:    "on any engine/CLI version change + weekly",
+			Cadence:     CadenceWeekly,
+			AffectClass: AffectLane,
+			Notes: "the kimi-cli SUBSTRATE (the internal/adapters/kimicli battery), landed at P3-LN-7 under S00.9 A12. " +
+				"HONEST SCOPE: this row proves the SUBSTRATE, not a lane — the lane that rides it has its own row " +
+				"(lane-kimi-cli). What it does NOT prove: (1) that the operator's ACCOUNT serves any of the model ids " +
+				"the lane declares — that is the model-list canary's job (P-T17-3); (2) that a paid call succeeds, " +
+				"since every turn here terminates on a loopback fake provider at $0; (3) that the engine's stream " +
+				"envelope is stable — it is UNDOCUMENTED and this pin published 70 versions in ~3 months, which is " +
+				"why forward tolerance is pinned as a property rather than as examples. Tier R runs for real whenever " +
+				"the pinned binary is installed and costs nothing. Lane-affecting => flag-now." + bumpGateNote,
+		},
+		{
+			// LANE — kimi-cli [S03.2/S03.6/S10.4]. The lane rides the substrate
+			// above and shares its quota pool with the `kimi` lane, which is
+			// the fact this row exists to keep visible.
+			ID:            "lane-kimi-cli",
+			OwningSection: "S03.2/S03.6/S10.4",
+			Fixtures: []Fixture{
+				{Handle: "go test ./internal/adapters/opencode/ -run TestKimiCLILaneDocumentValidates (tier F: the lane document loads and declares its substrate, provider id, empty npm and credential channel)", Pkg: "internal/adapters/opencode", Run: "TestKimiCLILaneDocumentValidates"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestBothKimiLaneSignalTablesAreEqual (tier F: one membership, one wire — the two lanes' signal tables pinned EQUAL)", Pkg: "internal/adapters/opencode", Run: "TestBothKimiLaneSignalTablesAreEqual"},
+				{Handle: "go test ./internal/adapters/opencode/ -run TestBothLaneDocumentsDeclareTheSamePool (tier F: both lanes name one pool, with the vendor's dated quote)", Pkg: "internal/adapters/opencode", Run: "TestBothLaneDocumentsDeclareTheSamePool"},
+				{Handle: "go test ./internal/shell/ -run TestConcurrentLimitRowFreezesRatherThanRetries (tier F: the 403 concurrent-limit trap freezes instead of retrying through an enforcement action)", Pkg: "internal/shell", Run: "TestConcurrentLimitRowFreezesRatherThanRetries"},
+				{Handle: "go test ./internal/shell/ -run TestOnePlacedKeyCommissionsBothKimiLanes (tier F: one placed credential commissions BOTH kimi lanes, each on its own substrate)", Pkg: "internal/shell", Run: "TestOnePlacedKeyCommissionsBothKimiLanes"},
+				{Handle: "go test ./internal/shell/ -run TestCredResolvedOncePerProfilePerSpawn (tier F: one broker resolution per profile per spawn, fanned out to both variables)", Pkg: "internal/shell", Run: "TestCredResolvedOncePerProfilePerSpawn"},
+				{Handle: "go test ./internal/shell/ -run TestOpencodeEntriesUnchangedByCLILane (tier F: opencode is never handed a provider entry for an engine it does not drive)", Pkg: "internal/shell", Run: "TestOpencodeEntriesUnchangedByCLILane"},
+				{Handle: "go test ./internal/metering/ -run TestPooledConsumptionIsSummedNotSplit (tier F: the pool is summed, never split — the reading for either lane reports the combined consumption)", Pkg: "internal/metering", Run: "TestPooledConsumptionIsSummedNotSplit"},
+				{Handle: "go test ./internal/metering/ -run TestPoolBudgetDoubleDeclarationRefused (tier F: one allowance, one declaration, refused at all three layers)", Pkg: "internal/metering", Run: "TestPoolBudgetDoubleDeclarationRefused"},
+				{Handle: "go test ./internal/stage/ -run TestKimiCLIDispatchAtRealCallSites (tier F: dispatch proven at helper-spawn and revise, mutation-verified)", Pkg: "internal/stage", Run: "TestKimiCLIDispatchAtRealCallSites"},
+				{Handle: "go test ./internal/watchlist/ -run TestKimiCLIWatchRowsVerified (tier F: the CLI changelog and the community-guidelines page are watched, dated)", Pkg: "internal/watchlist", Run: "TestKimiCLIWatchRowsVerified"},
+				{Handle: "SINET_LIVE_SMOKE=1 go test ./internal/adapters/kimicli/ -run TestLiveSmoke (tier L: one minimal paid call on this lane — DEFINED, structurally unreachable at landing)", Pkg: "internal/adapters/kimicli", Run: "TestLiveSmoke"},
+			},
+			TriggerSet:  []string{TriggerEngineBump, TriggerWeekly},
+			Schedule:    "on any engine/CLI version change + weekly",
+			Cadence:     CadenceWeekly,
+			AffectClass: AffectLane,
+			Notes: "the kimi-cli LANE, landed at P3-LN-7 under S00.9 A12 on the operator's order to run K3 by both " +
+				"the API endpoint and Moonshot's own CLI so the two can be compared. It draws the SAME quota pool as " +
+				"the `kimi` lane (vendor verbatim, 2026-08-26: the CLI and third-party tools all count toward one " +
+				"membership quota), which is why the pool is declared ONCE on the plan document and a budget for it " +
+				"is refused on this lane in favour of the canonical one. GATE A IS A RECORDED GRAY ZONE: the Kimi " +
+				"Code Community Guidelines state \"Kimi Code subscriptions are for interactive use only\", which is " +
+				"S03.6 class-3 language; the operator ruled PROCEED on 2026-08-26 and the acceptance is recorded in " +
+				"P3/measurements/2026-08-24-kimi-lane-gate-audit.md. What this row does NOT prove: (1) that the " +
+				"account serves the declared model ids (P-T17-3); (2) that the lane is commissioned — that needs a " +
+				"credential placed in a broker store; (3) anything about REVOCATION, because this lane deliberately " +
+				"does not join watchlist.PaidLanes(): its canary coverage is the `kimi` lane's BY NAME, since one " +
+				"membership means one Console key and the two cannot be entitled or revoked independently (OQ-4). " +
+				"Lane-affecting => flag-now." + bumpGateNote,
+		},
+		{
 			// Adapter per-lane — zai [S03.2/S03.6/S10]. registry.go promised this
 			// row would land with the lane, and P3-LN-2B is where it does.
 			ID:            "adapter-zai",

@@ -239,8 +239,16 @@ func TestForbiddenFlagsNeverEmitted(t *testing.T) {
 		if !contains(l.argv, "-p") {
 			t.Fatalf("argv does not run in print mode: %s", argv)
 		}
-		if !hasPair(l.argv, "-m", req.Model) {
-			t.Fatalf("argv does not carry the per-invocation model %q: %s", req.Model, argv)
+		// The model rides the ENV, not argv. `-m` selects a config ALIAS, and
+		// on the KIMI_MODEL_* channel the synthesized alias is
+		// `__kimi_env_model__` — so `-m k3` names something that does not
+		// exist and the engine CRASHES (measured at pin 0.38.0, exit 1 with an
+		// unhandled lifecycle error after only the version frame).
+		if contains(l.argv, "-m") || contains(l.argv, "--model") {
+			t.Fatalf("argv carries a model flag: %s — the model is chosen by KIMI_MODEL_NAME on this channel", argv)
+		}
+		if got := envValue(l.env, "KIMI_MODEL_NAME"); got != req.Model {
+			t.Fatalf("KIMI_MODEL_NAME = %q, want the per-invocation model %q", got, req.Model)
 		}
 		// `--yolo` and `-p` are mutually exclusive at the pin and the engine
 		// REJECTS the pair (R0-Q7, measured: "Cannot combine --prompt with
@@ -860,3 +868,70 @@ func randToken(rng *rand.Rand) string {
 }
 
 var _ = json.Marshal
+
+// ── T25 · the three tiers, and the ONE sanctioned skip class ─────────────────
+
+// TestKimiCLIConformanceTiers pins the tier split itself: tier F always runs,
+// tier R runs for real at $0 whenever the binary is present and otherwise
+// prints exactly the sanctioned text, and tier L never spends without its
+// ratified opt-in. The skip TEXT is load-bearing — CONVENTIONS §10 admits one
+// skip class, and a suite that invents its own wording makes a skipped tier
+// indistinguishable from a passing one in a battery log.
+func TestKimiCLIConformanceTiers(t *testing.T) {
+	const sanctioned = "SANCTIONED SKIP (CONVENTIONS §10)"
+
+	// Tier F needs nothing: it is the R0 capture replayed, and it has already
+	// run by the time this line executes.
+	l := mustLower(t, testAdapter(t), testRequest(t))
+	if len(l.argv) == 0 {
+		t.Fatal("tier F could not lower an invocation")
+	}
+
+	// Tier R's absence-skip is the sanctioned text, verbatim, and it names the
+	// binary rather than the packet.
+	src, err := os.ReadFile("realengine_test.go")
+	if err != nil {
+		t.Fatalf("read realengine_test.go: %v", err)
+	}
+	if !strings.Contains(string(src), sanctioned) {
+		t.Errorf("the tier-R absence skip does not print %q", sanctioned)
+	}
+	// Tier R must terminate on loopback and NEVER on a provider. The suite
+	// asserting that about itself is cheap and catches the one edit that would
+	// make the whole tier cost money.
+	for _, banned := range []string{"api.kimi.com", "api.moonshot", "https://"} {
+		body := string(src)
+		if banned == "https://" {
+			// httptest serves http://127.0.0.1; any https URL here would be an
+			// endpoint reached off-host.
+			if strings.Contains(body, "https://") && !strings.Contains(body, "kimi-code@") {
+				t.Errorf("realengine_test.go names an https endpoint — every tier-R turn must terminate on loopback")
+			}
+			continue
+		}
+		if strings.Contains(body, banned) {
+			t.Errorf("realengine_test.go names %q — tier R is $0 and reaches no provider", banned)
+		}
+	}
+
+	// Tier L is gated on the EXISTING env name; no second one is minted.
+	live, err := os.ReadFile("live_smoke_test.go")
+	if err != nil {
+		t.Fatalf("read live_smoke_test.go: %v", err)
+	}
+	if !strings.Contains(string(live), `"SINET_LIVE_SMOKE"`) {
+		t.Error("tier L does not gate on SINET_LIVE_SMOKE")
+	}
+	for _, minted := range []string{"SINET_KIMI_LIVE", "SINET_LIVE_KIMI", "KIMI_LIVE_SMOKE"} {
+		if strings.Contains(string(live), minted) {
+			t.Errorf("tier L mints a second opt-in env name %q — §10 ratifies exactly one", minted)
+		}
+	}
+	if !strings.Contains(string(live), "SANCTIONED SKIP") {
+		t.Error("tier L does not print a named skip")
+	}
+	// And it is structurally unreachable at landing for a reason it states.
+	if !strings.Contains(string(live), "gray") {
+		t.Error("tier L does not record that the first live call on this lane is the operator's own door run")
+	}
+}
