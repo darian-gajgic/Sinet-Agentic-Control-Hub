@@ -11,6 +11,8 @@ package kimicli
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -359,7 +361,17 @@ func TestClientIdentityNeverAppearsInNonTestSources(t *testing.T) {
 			t.Fatalf("read %s: %v", name, err)
 		}
 		scanned++
-		for _, bad := range []string{"KIMI_CODE_IDENTITY_NAME", "KIMI_CODE_IDENTITY_SLUG", "KIMI_CODE_INFINITE_RETRY"} {
+		// R14: neither identity variable may appear anywhere in a non-test
+		// source. The guidelines forbid altering client identity, and a name
+		// that is absent from one code path but present in another is a name
+		// somebody will set.
+		//
+		// KIMI_CODE_INFINITE_RETRY is deliberately NOT on this list: the
+		// lowering must NAME it in order to refuse it, and a source ban would
+		// force the guard to be deleted to satisfy the scan. Its absence from
+		// the environment is asserted behaviorally instead, in
+		// TestLoweredRunIsBounded, which is the stronger check anyway.
+		for _, bad := range []string{"KIMI_CODE_IDENTITY_NAME", "KIMI_CODE_IDENTITY_SLUG"} {
 			if strings.Contains(string(raw), bad) {
 				t.Errorf("%s names %s in a non-test source", name, bad)
 			}
@@ -703,17 +715,73 @@ func TestOnePaidCallOneUsageEvent(t *testing.T) {
 		t.Errorf("message index did not advance: %d then %d", usages[0].MessageIndex, usages[1].MessageIndex)
 	}
 
-	// Re-feeding the same records must not double-count.
-	before := len(usages)
-	for _, line := range strings.Split(strings.TrimSuffix(wire, "\n"), "\n") {
-		for range tr.feed([]byte(line)) {
-			before++
-		}
+	// A SECOND drain of the same transcript must not re-bill. The guard is the
+	// byte offset the tail carries, so the assertion drives the real path —
+	// two drains of one growing file — rather than re-feeding lines, which is
+	// something production never does.
+	s := tailSession(t, wire)
+	s.drainUsage()
+	first := drainEvents(s)
+	s.drainUsage()
+	if again := drainEvents(s); len(again) != 0 {
+		t.Errorf("a second drain of an unchanged transcript emitted %d more Usage events — a checkpointed call would be billed twice", len(again))
 	}
-	if before != 2 {
-		t.Errorf("replaying the transcript emitted %d Usage events in total, want 2 — a re-read must not re-bill", before)
+	if len(first) != 2 {
+		t.Fatalf("the first drain emitted %d Usage events, want 2", len(first))
+	}
+	// And a call appended AFTER the first drain is picked up exactly once —
+	// the tail must not stall, or a long run checkpoints only its opening.
+	appendWire(t, s.wirePath, `{"type":"usage.record","agentId":"main","model":"__kimi_env_model__","usage":{"inputOther":1,"output":1,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":1787763099600}`)
+	s.drainUsage()
+	if grew := drainEvents(s); len(grew) != 1 {
+		t.Errorf("a newly appended paid call produced %d Usage events, want exactly 1", len(grew))
 	}
 }
+
+// tailSession builds a session whose per-run home holds one session transcript,
+// laid out exactly as the engine lays it out.
+func tailSession(t *testing.T, wire string) *session {
+	t.Helper()
+	home := t.TempDir()
+	dir := filepath.Join(home, "sessions", "wd_spike_abc123def456", "session_ln7", "agents", "main")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(wire), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return &session{
+		a:      &Adapter{Log: discardLogger()},
+		low:    &lowered{home: home},
+		events: make(chan adapters.Event, 64),
+	}
+}
+
+func drainEvents(s *session) []adapters.Event {
+	var out []adapters.Event
+	for {
+		select {
+		case ev := <-s.events:
+			out = append(out, ev)
+		default:
+			return out
+		}
+	}
+}
+
+func appendWire(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("append to transcript: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatalf("append to transcript: %v", err)
+	}
+}
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

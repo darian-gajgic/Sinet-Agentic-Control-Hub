@@ -33,16 +33,24 @@ import (
 	"time"
 )
 
-// Substrate names (Spec S03.2): v0 ships exactly two substrates carrying
-// three lanes; additions are config-only (S03.6).
+// Substrate names (Spec S03.2, as amended): v0 ships three substrates
+// carrying four lanes. Adding a LANE stays config-only (S03.6); adding a
+// SUBSTRATE is an amendment, and this block records the one that happened —
+// S00.9 amendment A12 (2026-08-26), on the operator's explicit order.
 const (
 	// SubstrateClaudeCLI is the wrapped `claude` CLI (Anthropic lane),
 	// pinned per components.lock; bump procedure Spec S03.3.
 	SubstrateClaudeCLI = "claude-cli"
-	// SubstrateOpencode is the pinned `opencode serve` (Z.AI + local
-	// lanes). Its adapter lands with its consuming packet; the name is
+	// SubstrateOpencode is the pinned `opencode serve` (Z.AI + local +
+	// Kimi lanes). Its adapter lands with its consuming packet; the name is
 	// fixed here so runs.substrate values converge.
 	SubstrateOpencode = "opencode"
+	// SubstrateKimiCLI is Moonshot's first-party `kimi` CLI driven headless
+	// (`kimi -p --output-format stream-json`), added by S00.9 amendment A12
+	// so the operator can run K3 by BOTH paths and measure which performs
+	// better. It is a real substrate rather than a relabelled lane because a
+	// comparison between two engines is only honest if two engines run.
+	SubstrateKimiCLI = "kimi-cli"
 )
 
 // Lane names (Spec S03.2).
@@ -56,6 +64,15 @@ const (
 	// than the OpenAI-compatible one, which is a data difference in its lane
 	// document and not a second substrate (S03.6).
 	LaneKimi = "kimi"
+	// LaneKimiCLI is the same Kimi Code membership reached through Moonshot's
+	// own CLI instead of the API endpoint (S00.9 amendment A12). It draws the
+	// SAME quota pool as LaneKimi — vendor verbatim, 2026-08-26: "provided
+	// together with a Kimi membership subscription and sharing the same quota.
+	// Requests from the CLI, VS Code, and third-party tools all count toward
+	// that quota." The pool is declared ONCE, on the kimi plan document; two
+	// lanes drawing one allowance must never read as two allowances. See
+	// internal/adapters/opencode/lanedata/kimi-cli.json.
+	LaneKimiCLI = "kimi-cli"
 )
 
 // Effort modes (Spec S10.6): policy bundles, each a depletion ladder whose
