@@ -10,6 +10,7 @@ package kimicli
 // tier L is live_smoke_test.go.
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -933,5 +934,98 @@ func TestKimiCLIConformanceTiers(t *testing.T) {
 	// And it is structurally unreachable at landing for a reason it states.
 	if !strings.Contains(string(live), "gray") {
 		t.Error("tier L does not record that the first live call on this lane is the operator's own door run")
+	}
+}
+
+// ── T?/A8 · resume re-supplies the ENTIRE invocation ─────────────────────────
+
+// TestResumeRebuildsTheWholeInvocation pins S03.4's obligation on the substrate
+// where it is most literal. On the Anthropic lane "re-supply" means passing the
+// settings, permission mode, model and tool allowlist again; here the whole
+// invocation LIVES in the run's own KIMI_CODE_HOME, so a resume that trusted a
+// home somebody had edited would run under configuration nobody re-checked.
+//
+// The engine restores nothing on its own. It cannot even be told which session
+// id to use on a fresh start — the id is server-generated — so a resume names
+// the REPORTED id and rebuilds everything else from the park record.
+func TestResumeRebuildsTheWholeInvocation(t *testing.T) {
+	a := testAdapter(t)
+	req := testRequest(t)
+	start := mustLower(t, a, req)
+	if err := a.materialize(start); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+
+	// Somebody edits the run's lowered config between the park and the resume.
+	// This is not a hypothetical: the home is a directory on disk that outlives
+	// the process precisely so a parked run can come back.
+	tampered := filepath.Join(start.home, configTOML)
+	if err := os.WriteFile(tampered, []byte("telemetry = true\n"), 0o600); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	rec := adapters.ParkRecord{
+		RunID:     req.RunID,
+		Substrate: adapters.SubstrateKimiCLI,
+		Cursor:    adapters.Cursor{Substrate: adapters.SubstrateKimiCLI, SessionID: "session_abc-123"},
+		Reason:    adapters.ParkReasonPause,
+		Start:     req,
+	}
+	resumed, err := a.lower(rec.Start, &resumeSpec{sessionID: rec.Cursor.SessionID, continuation: "carry on"})
+	if err != nil {
+		t.Fatalf("lower(resume): %v", err)
+	}
+	if err := a.materialize(resumed); err != nil {
+		t.Fatalf("materialize(resume): %v", err)
+	}
+
+	// The home is REBUILT, not assumed intact: the tampered body is gone.
+	raw, err := os.ReadFile(filepath.Join(resumed.home, configTOML))
+	if err != nil {
+		t.Fatalf("read the resumed config: %v", err)
+	}
+	if strings.Contains(string(raw), "telemetry = true") {
+		t.Error("the resume inherited a tampered config — the invocation must be re-supplied and re-verified, not trusted")
+	}
+	// Every channel is closed again, not just the one that was edited.
+	for _, needle := range []string{`disabled = ["Agent", "AgentSwarm", "mcp__*"]`, `print_background_mode = "exit"`, "max_attempts_per_step"} {
+		if !strings.Contains(string(raw), needle) {
+			t.Errorf("the resumed config lost %q", needle)
+		}
+	}
+	if _, ok := resumed.files[systemMD]; !ok {
+		t.Error("the resume did not re-supply SYSTEM.md, so the AGENTS.md channel re-opens on the second leg")
+	}
+	if got := envValue(resumed.env, "KIMI_MODEL_NAME"); got != req.Model {
+		t.Errorf("the resumed env carries model %q, want %q", got, req.Model)
+	}
+
+	// It names the ENGINE-REPORTED id, and nothing fabricates one.
+	if !hasPair(resumed.argv, "--session", "session_abc-123") {
+		t.Errorf("the resume does not name the engine-reported session id: %v", resumed.argv)
+	}
+	if !resumed.resume {
+		t.Error("the lowering is not marked as a resume")
+	}
+	if !contains(resumed.argv, "carry on") {
+		t.Errorf("the continuation never reached argv: %v", resumed.argv)
+	}
+
+	// A resume with no continuation is REFUSED rather than sent as an empty
+	// turn: every resume here is a pause-resume, since there is no gate defer
+	// to unpark, and a resumed session with no user body does nothing.
+	if _, err := a.lower(rec.Start, &resumeSpec{sessionID: rec.Cursor.SessionID}); err == nil {
+		t.Error("a resume with no continuation was accepted")
+	}
+	// And a park record with no engine-reported id cannot resume at all.
+	if _, err := a.Resume(context.Background(), adapters.ParkRecord{Start: req}, nil); err == nil {
+		t.Error("a park record with no engine session id was resumed — there is nothing to resume ONTO")
+	}
+	// An answer carrying a gate ask is refused: this substrate never parks on a
+	// gate, so an ask id in an answer is a caller error, and dropping it
+	// silently is how a refused call gets executed anyway.
+	_, err = a.Resume(context.Background(), rec, &adapters.Answer{AskID: "ask-1", Continuation: "go"})
+	if !isErr(err, ErrGateParkUnsupported) {
+		t.Errorf("resuming with a gate answer returned %v, want ErrGateParkUnsupported", err)
 	}
 }
