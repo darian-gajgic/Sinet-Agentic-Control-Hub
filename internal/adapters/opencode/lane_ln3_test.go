@@ -22,6 +22,15 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
 )
 
+// kimiCaptureDates are the dated captures this document is sourced from. It
+// began as one (the 2026-08-24 Gate A-C audit) and gained a second at P3-LN-7
+// (the 2026-08-26 re-read that added seven signal rows and regraded two model
+// ids). A row must carry a date from a REAL capture — the point of the pin is
+// that no row is dated by hand.
+var kimiCaptureDates = map[string]bool{"2026-08-24": true, "2026-08-26": true}
+
+var kimiCaptureDateList = []string{"2026-08-24", "2026-08-26"}
+
 const (
 	kimiProviderID   = "kimi-for-coding"
 	kimiCodingBase   = "https://api.kimi.com/coding/v1"
@@ -115,8 +124,12 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 		if _, ok := wantModels[m.ID]; ok {
 			wantModels[m.ID] = true
 		}
-		if m.VerifiedOn != "2026-08-24" {
-			t.Errorf("model %q verified_on = %q, want 2026-08-24", m.ID, m.VerifiedOn)
+		// The document is now sourced from TWO dated captures — the original
+		// 2026-08-24 audit and the 2026-08-26 re-read that regraded two model
+		// ids against the vendor's own models page. Every row still carries a
+		// date from a real capture; what moved is that there is more than one.
+		if !kimiCaptureDates[m.VerifiedOn] {
+			t.Errorf("model %q verified_on = %q, want one of the capture dates %v", m.ID, m.VerifiedOn, kimiCaptureDateList)
 		}
 		if m.Billing != BillingFlat {
 			t.Errorf("model %q billing = %q, want flat — the membership is a flat subscription", m.ID, m.Billing)
@@ -270,7 +283,7 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 		graded[m.ID] = m.ObservationGrade
 	}
 	for _, id := range []string{"k3-256k", "kimi-for-coding"} {
-		if graded[id] != "seed-only-pending-observation" {
+		if graded[id] != "documented-primary-absent-from-pinned-engine-record" {
 			t.Errorf("model %q carries observation_grade %q — it is ABSENT from the pinned engine's own record "+
 				"and must say so; the account's observed list settles it, and silently dropping it would lose a "+
 				"fact the vendor publishes", id, graded[id])
@@ -306,8 +319,8 @@ func TestKimiLaneDocumentLoads(t *testing.T) {
 		t.Fatal("the kimi document declares no signal rows")
 	}
 	for _, row := range seed.Signals {
-		if row.VerifiedOn != "2026-08-24" {
-			t.Errorf("signal row %q verified_on = %q, want 2026-08-24", row.MessageContains, row.VerifiedOn)
+		if !kimiCaptureDates[row.VerifiedOn] {
+			t.Errorf("signal row %q verified_on = %q, want one of the capture dates %v", row.MessageContains, row.VerifiedOn, kimiCaptureDateList)
 		}
 		if row.MessageContains == "" {
 			t.Errorf("signal row on HTTP %d carries no message_contains — this lane's taxonomy is (status x message), and a status-only row cannot key it", row.HTTPStatus)
@@ -391,16 +404,21 @@ func TestLaneSeedRefusesDuplicateLaneOrProvider(t *testing.T) {
 		})
 	}
 
-	// And the SHIPPED set loads: two lanes, sorted, no duplicate.
+	// And the SHIPPED set loads: three lanes, sorted, no duplicate. The third
+	// arrived at P3-LN-7 and it is the first document in this corpus whose
+	// substrate is NOT opencode — which is the point of the substrate field.
 	shipped, err := SeedLaneConfigs()
 	if err != nil {
 		t.Fatalf("SeedLaneConfigs: %v", err)
 	}
-	if len(shipped) != 2 {
-		t.Fatalf("the platform ships %d lane documents, want 2 (kimi + zai)", len(shipped))
+	if len(shipped) != 3 {
+		t.Fatalf("the platform ships %d lane documents, want 3 (kimi + kimi-cli + zai)", len(shipped))
 	}
-	if shipped[0].Lane != adapters.LaneKimi || shipped[1].Lane != adapters.LaneZAI {
-		t.Errorf("shipped lanes = %q/%q, want them sorted by lane name (kimi, zai)", shipped[0].Lane, shipped[1].Lane)
+	wantOrder := []string{adapters.LaneKimi, adapters.LaneKimiCLI, adapters.LaneZAI}
+	for i, want := range wantOrder {
+		if shipped[i].Lane != want {
+			t.Errorf("shipped lane %d = %q, want %q — the corpus is sorted by lane name", i, shipped[i].Lane, want)
+		}
 	}
 }
 

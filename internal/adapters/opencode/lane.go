@@ -1,7 +1,18 @@
 package opencode
 
-// Lane commissioning on this substrate (Spec S03.6): "adding a lane is a
-// provider entry per user plus billing flags — never a new substrate."
+// Lane commissioning (Spec S03.6): "adding a lane is a provider entry per user
+// plus billing flags — never a new substrate."
+//
+// THIS MACHINERY SERVES EVERY SUBSTRATE, not only opencode. The package name is
+// where it was born, not what it owns: LaneConfig has carried a `substrate`
+// field since LN-2B precisely so that which engine serves a lane is DATA, and
+// every platform-side consumer — Commission, CommissionedLanes,
+// CommissionedSubstrates, CommissionedSeats, laneConfiguredModels,
+// laneCredInjector — walks ALL documents substrate-blind by design. Since A12
+// the corpus carries a lane on the kimi-cli substrate, which this package does
+// not drive at all. Splitting the corpus per substrate would fork every one of
+// those consumers for no behavior gain, so it stays whole and this comment says
+// so rather than leaving the next reader to infer it from a surprise.
 //
 // Everything a lane IS lives in this file as a shape and in lanedata/ as
 // DATA. No endpoint string and no model id is a Go constant here: the values
@@ -94,6 +105,24 @@ type LaneConfig struct {
 
 	// ReasoningEffort is a RECORDED, unwired vendor knob (see the type).
 	ReasoningEffort RecordedKnob `json:"reasoning_effort"`
+
+	// Pool names the QUOTA POOL this lane draws, when it shares one with
+	// another lane. Empty means the lane's allowance is its own.
+	//
+	// It is on the lane document because sharing is a fact about the
+	// SUBSCRIPTION, not about the engine: one membership can serve both an API
+	// endpoint and a first-party CLI, and a vendor that says so says it with a
+	// date. Two lanes drawing one allowance must never read as two
+	// allowances — that is the whole difference between an honest comparison of
+	// two engines and a gauge that says a spent pool is half full. The
+	// consumption side of the same fact lives on the PLAN document
+	// (internal/metering/plandata), which is where a denominator belongs; this
+	// field is the lane-side statement of it, and a test pins the two lanes
+	// naming the same pool.
+	Pool string `json:"pool,omitempty"`
+	// PoolNote carries the vendor's own dated words for the pool claim. A pool
+	// claim with no quote is an assertion; with the quote it is evidence.
+	PoolNote string `json:"pool_note,omitempty"`
 
 	// ResetMarker is the verbatim phrase the provider's depletion messages put
 	// before the resume time.
@@ -694,6 +723,36 @@ func Commission(lanes []LaneConfig, placed map[string]map[string]bool) map[strin
 		}
 	}
 	return out
+}
+
+// EntriesForSubstrate narrows a person's commissioned provider entries to the
+// lanes a given substrate actually drives.
+//
+// It exists because Commission is deliberately substrate-blind — the map it
+// builds is the PLATFORM's, feeding routing, coverage and the credential
+// injector — while an engine's provider block is not. Handing opencode an entry
+// for a lane that runs on the kimi-cli substrate would make it compile a
+// provider block for an engine it does not drive: harmless to execution, and a
+// LIE in a config body that gets hashed, logged and inspected, plus a spurious
+// restart of that person's serve when the block changes.
+//
+// The composer lives here rather than in internal/shell for the §65 reason:
+// this package owns both the input and the output types, so the guard that
+// proves the narrowing can run wherever those types are in scope.
+func EntriesForSubstrate(lanes []LaneConfig, entries ProviderConfig, substrate string) ProviderConfig {
+	if len(entries) == 0 {
+		return entries
+	}
+	keep := ProviderConfig{}
+	for _, l := range lanes {
+		if l.Substrate != substrate {
+			continue
+		}
+		if e, ok := entries[l.ProviderID]; ok {
+			keep[l.ProviderID] = e
+		}
+	}
+	return keep
 }
 
 // CommissionedLanes reports the lane names commissioned across every person,

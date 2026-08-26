@@ -61,8 +61,12 @@ func TestLN4CommissionBuildsEntriesFromPlacement(t *testing.T) {
 	if len(got["me"]) != 1 || !reflect.DeepEqual(got["me"][zai.ProviderID], zai.ProviderEntry()) {
 		t.Errorf("me = %v, want exactly the zai document's own entry", got["me"])
 	}
-	if len(got["you"]) != 2 {
-		t.Errorf("you = %v, want both placed lanes", got["you"])
+	// THREE entries from TWO placed profiles: since P3-LN-7 the kimi-code
+	// profile serves BOTH kimi lanes, because one membership is one key. That
+	// is the shape the operator's comparison rests on — placing one credential
+	// must light up both paths, or the comparison cannot be run at all.
+	if len(got["you"]) != 3 {
+		t.Errorf("you = %v, want three entries: the zai lane plus BOTH lanes the kimi-code profile serves", got["you"])
 	}
 
 	if empty := Commission(lanes, nil); len(empty) != 0 {
@@ -123,8 +127,9 @@ func TestLN4CommissionedDerivations(t *testing.T) {
 		t.Errorf("CommissionedLanes = %v, want [zai]", got)
 	}
 	// The UNION across people, sorted — one Router serves the whole household.
-	if got := CommissionedLanes(lanes, two); !reflect.DeepEqual(got, []string{"kimi", "zai"}) {
-		t.Errorf("CommissionedLanes = %v, want [kimi zai] — coverage is the union across people, sorted", got)
+	if got := CommissionedLanes(lanes, two); !reflect.DeepEqual(got, []string{"kimi", "kimi-cli", "zai"}) {
+		t.Errorf("CommissionedLanes = %v, want [kimi kimi-cli zai] — coverage is the union across people, sorted, "+
+			"and one placed kimi-code credential commissions both kimi lanes", got)
 	}
 	if got := CommissionedLanes(lanes, nil); len(got) != 0 {
 		t.Errorf("CommissionedLanes(nothing) = %v, want none", got)
@@ -141,8 +146,9 @@ func TestLN4CommissionedDerivations(t *testing.T) {
 	if got := CommissionedSeats(lanes, one); !reflect.DeepEqual(got, []CommissionedSeat{{Lane: "zai", Model: zai.DefaultModel}}) {
 		t.Errorf("CommissionedSeats = %v, want the zai document's own default model %q", got, zai.DefaultModel)
 	}
-	if got := CommissionedSeats(lanes, two); len(got) != 2 {
-		t.Errorf("CommissionedSeats = %v, want one seat per commissioned lane", got)
+	if got := CommissionedSeats(lanes, two); len(got) != 3 {
+		t.Errorf("CommissionedSeats = %v, want one seat per commissioned lane (three, since the kimi-code profile "+
+			"commissions two of them)", got)
 	}
 	if got := CommissionedSeats(lanes, nil); len(got) != 0 {
 		t.Errorf("CommissionedSeats(nothing) = %v, want none", got)

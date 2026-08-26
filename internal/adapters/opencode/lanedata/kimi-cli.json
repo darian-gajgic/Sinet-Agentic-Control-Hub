@@ -1,0 +1,258 @@
+{
+  "lane": "kimi-cli",
+  "provider_id": "kimi-code-cli",
+  "provider_id_note": "A DOCUMENT-IDENTITY KEY, not a provider key inside any engine config. On the opencode substrate provider_id is literally the key of a provider block in the engine's own configuration; this lane runs on the kimi-cli substrate, which has no such block — the engine is the pinned CLI itself, configured through argv, TOML and the KIMI_MODEL_* env channel. The value must still be distinct from every other document's, because loadLaneDocs refuses a duplicate provider id BY NAME and is right to: provider-id resolution takes the first match, so a collision would make one of the two kimi documents silently unreachable.",
+  "substrate": "kimi-cli",
+  "npm": "",
+  "npm_note": "DELIBERATELY EMPTY. The npm field names the ai-sdk provider package opencode loads for a lane (@ai-sdk/anthropic for the kimi lane, @ai-sdk/openai-compatible for zai). This substrate loads none: the engine is the pinned CLI @moonshot-ai/kimi-code@0.38.0, recorded in components.lock as an engine entry rather than here. Declaring @ai-sdk/anthropic to mirror the sibling lane would be a false dated claim in a document whose entire value is that its claims are dated.",
+  "display_name": "Kimi Code CLI (Moonshot)",
+  "verified_on": "2026-08-26",
+  "source": "https://www.kimi.com/code/docs/en/",
+  "base_url": "https://api.kimi.com/coding/v1",
+  "endpoint_marker": "/coding/v1",
+  "endpoint_note": "The subscription (Kimi Code membership) endpoint, reached through the CLI's KIMI_MODEL_BASE_URL channel rather than through an engine provider block. Same endpoint as lane kimi and the same vendor warning applies verbatim: \"Kimi Code membership benefits and the Kimi Platform have different Base URLs. Please ensure your Base URL and API Key are matched correctly.\" The SAME HONEST LIMIT also applies: Moonshot does not publish what a membership key does when sent to the metered endpoint (A11 audit U5).",
+  "pool": "kimi-code-membership",
+  "pool_note": "ONE POOL, TWO LANES. Vendor verbatim, read 2026-08-26 at https://www.kimi.com/code/docs/en/kimi-code/membership.html: \"Kimi Code is the developer-focused AI coding service within Kimi membership benefits, provided together with a Kimi membership subscription and sharing the same quota. Requests from the CLI, VS Code, and third-party tools all count toward that quota.\" And: \"All logged-in devices and API Keys share the same quota\". This is the direct primary-source statement that the CLI and api.kimi.com/coding/v1 draw ONE allowance, and it names the CLI explicitly. The consumption side is declared ONCE on the plan document (internal/metering/plandata/kimi.json), which is where a denominator belongs; this row is the lane-side statement of the same fact, and a test pins that both kimi lanes name this identical pool.",
+  "recorded_endpoints": [
+    {
+      "protocol": "kimi-web-loopback",
+      "base_url": "http://127.0.0.1:58628/api/v1/oauth/usage",
+      "wired": false,
+      "verified_on": "2026-08-26",
+      "note": "RECORDED, BUILT ON BY NOTHING. `kimi web` exposes a loopback REST surface carrying a live PLAN-QUOTA READBACK: `{kind:\"ok\", summary, limits, extra_usage}` where a limits row is `{name?, window:{duration,unit}, used, limit, reset_at?}` with unit one of minute/hour/day/week, plus the pay-as-you-go wallet `{balance_cents, total_cents, monthly_charge_limit_enabled, monthly_charge_limit_cents, monthly_used_cents, currency}`. It CLOSES A11 audit item U3 (the /usage response shape, previously mentioned but never specified) and is the strongest candidate yet for U4 (the missing reset-time signal, which is why reset_marker is empty on both kimi documents). It would be this platform's first provider-signaled OBSERVED overlay outside the Anthropic wire, and it is D4-clean in S10.4's exact sense — an overlay, never the pressure denominator. It is NOT built here and nothing reads it: S10.4's denominator stays the operator's declared budget, and wiring an overlay with no consumer is the class §63 D2 exists to close. A follow-up packet is the place for it (OQ-5)."
+    },
+    {
+      "protocol": "openai-general",
+      "base_url": "https://api.moonshot.ai/v1",
+      "wired": false,
+      "verified_on": "2026-08-26",
+      "note": "The international metered Kimi Open Platform endpoint. Recorded so the endpoint self-check owns the wrong-endpoint case by name; never wired. It is ALSO the escape route that does not work: routing around the Gate-A gray zone by swapping to a pay-as-you-go Open Platform key is a DIFFERENT lane — metered, not flat — and G1 P7 keeps the metered-exception list EMPTY at v0 with DeepSeek as the sole pre-registered exception. It would need its own amendment and its own Gate A-C audit, and no Open Platform ToS document was locatable in the 2026-08-26 capture."
+    }
+  ],
+  "credential": {
+    "profile": "kimi-code",
+    "env_var": "KIMI_MODEL_API_KEY",
+    "note": "THE SAME BROKER PROFILE AS LANE kimi, A DIFFERENT VARIABLE NAME — and the difference is load-bearing rather than cosmetic. The vendor states plainly that credential variables \"such as KIMI_API_KEY, ANTHROPIC_API_KEY, and OPENAI_API_KEY are NOT read automatically from shell environment variables\", and that \"the only exception is the KIMI_MODEL_* family, which is an explicit channel that does read credentials from the shell\". So injecting the API lane's KIMI_API_KEY into this CLI authenticates nobody. Two properties of that channel were MEASURED at pin 0.38.0 on 2026-08-26, not assumed: nothing is written back to the config file (the secret never lands on disk), and a missing OR empty key fails with exit 1, the message \"provider __kimi_env__ has no credential configured\", and ZERO provider calls — fail-closed, never a silent unauthenticated call. One membership means one Console key, so the broker resolves this profile ONCE per spawn and the material fans out to both lanes' variables. No OAuth path is used: `kimi login` and $KIMI_CODE_HOME/credentials/ are not part of this design, and a design that does not need an interactive login should not grow one."
+  },
+  "data_policy": {
+    "constraint": "no-household-personal-data",
+    "verified_on": "2026-08-24",
+    "source": "https://www.kimi.com/user/agreement/userPrivacy?version=v2",
+    "audit": "P3/measurements/2026-08-24-kimi-lane-gate-audit.md",
+    "enforced": false,
+    "statement": "The kimi-cli lane carries a no-household-personal-data routing constraint. It is approved for code and general technical work only; household personal data, personal correspondence, and identity-bearing content must never route to it.",
+    "basis": "Identical to lane kimi's, because the constraint is a property of the PROVIDER and not of the client path: operating entity 北京月之暗面科技有限公司 (Beijing Moonshot AI); personal information stored within mainland China; training on inputs is the DEFAULT with only a contact-based opt-out; no GDPR/EEA language. Governing law differs between the two applicable agreements and no page states which binds a membership (A11 audit U6) — the constraint is written to hold under either reading.",
+    "enforcement_note": "RECORDED AND SURFACED, NOT MACHINE-ENFORCED. No per-lane data-policy enforcement point exists in the tree as of 2026-08-26; enforcement lands with the routing-policy seam, and this row is what that seam will read. The rider needs an AFFIRMATIVE operator answer at the gate, not merely an absence of objection."
+  },
+  "sanction": {
+    "verified_on": "2026-08-26",
+    "source": "https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html",
+    "audit": "P3/measurements/2026-08-24-kimi-lane-gate-audit.md",
+    "posture": "recorded-gray-zone",
+    "note": "GATE A IS A RECORDED GRAY ZONE ON BOTH KIMI LANES, not a clean pass, and this row exists so nobody rediscovers that as news. The Community Guidelines state verbatim \"Kimi Code subscriptions are for interactive use only\" and, as a heading, \"Don't use Kimi Code for non-interactive automation\" — S03.6 class-3 language, which its own pre-registered watch trigger names and answers with immediate re-audit and lane freeze. The countervailing text is on the same page: it blesses agent frameworks by name (\"Kimi CLI, VS Code, Claude Code, OpenCode, OpenClaw\"), states that heavy and multi-device use is normal, gives \"scripted batch execution or data annotation pipelines\" as the banned examples, and describes GRADUATED enforcement (\"limiting concurrent access\"). The operator ruled PROCEED on 2026-08-26 and the acceptance is recorded in the audit's dated addendum and in S00.9 amendment A12. Two consequences bind the code: the 403 concurrent-request-limit row carries NO documented class (it is also the enforcement signal), and KIMI_CODE_IDENTITY_NAME/_SLUG are never set, because the same page forbids spoofing client identity."
+  },
+  "models": [
+    {
+      "id": "k3",
+      "name": "K3",
+      "verified_on": "2026-08-26",
+      "billing": "flat",
+      "overflow_mode": "opt-in-credits",
+      "region_model_gate": "none",
+      "note": "Flagship. Named as a Model ID to send at https://www.kimi.com/code/docs/en/kimi-code/models.html, re-read 2026-08-26. The operator's stated reason for both kimi lanes is K3, which is what makes the comparison a comparison."
+    },
+    {
+      "id": "k3-256k",
+      "name": "K3 (256K)",
+      "verified_on": "2026-08-26",
+      "billing": "flat",
+      "overflow_mode": "opt-in-credits",
+      "region_model_gate": "none",
+      "note": "256K-context variant. NEW PRIMARY-SOURCE CORROBORATION 2026-08-26: kimi-code/models.html names it among the Model IDs to send (\"Fill in the Model ID, not the model version name: when calling a model, use one of the Model IDs from the table above (k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed)\"). That settles it is a REAL VENDOR MODEL ID and nothing more. It remains absent from the opencode 1.18.3 embedded engine record, which is why the sibling lane still flags it; on THIS substrate the engine holds no model catalogue at all and passes the id straight through, so the engine-record objection does not apply here. What still decides is the ACCOUNT's observed list (P-T17-3). Not promoted to observed.",
+      "observation_grade": "documented-primary-pending-account-observation"
+    },
+    {
+      "id": "kimi-for-coding",
+      "name": "Kimi For Coding",
+      "verified_on": "2026-08-26",
+      "billing": "flat",
+      "overflow_mode": "opt-in-credits",
+      "region_model_gate": "none",
+      "note": "NEW PRIMARY-SOURCE CORROBORATION 2026-08-26 from the same models.html line: it is named as a Model ID to send, which resolves the sibling document's recorded confusion about whether this string is only the opencode PROVIDER key. It is both — a provider key in opencode's catalogue AND a vendor model id — and on this substrate only the second meaning applies. Tier availability remains UNVERIFIED at primary source; the account's observed tier and model list close it at bring-up (P-T17-3). Not promoted to observed.",
+      "note_grade": "unverified-primary",
+      "observation_grade": "documented-primary-pending-account-observation"
+    },
+    {
+      "id": "kimi-for-coding-highspeed",
+      "name": "Kimi For Coding HighSpeed",
+      "verified_on": "2026-08-26",
+      "billing": "flat",
+      "overflow_mode": "opt-in-credits",
+      "region_model_gate": "none",
+      "note": "Named as a Model ID to send (models.html, 2026-08-26). Tier availability \"available to Allegretto members and above\" is UNVERIFIED at primary source; the A11 audit captured the 401 entitlement string for this model but no tier-availability line. Closes from the operator's observed tier/model list at bring-up (P-T17-3).",
+      "note_grade": "unverified-primary"
+    }
+  ],
+  "default_model": "k3",
+  "default_model_note": "K3, matching lane kimi's seat exactly — because the operator's question is which PATH performs better, and a comparison that changed the model as well as the engine would answer neither question. DATA like every other id here: the account's observed model list is the authority (P-T17-3). The seat stays EXECUTION-ONLY: no Kimi model has been measured against the S07.5 bars, and seating one for planning or judging would be inventing a ratification.",
+  "model_routing_note": "TIER GATE, NOT REGION GATE — identical to lane kimi, because it is the same membership. region_model_gate stays \"none\" on every row; the gate is by MEMBERSHIP TIER, is real and enforced on the wire (401 \"Your current subscription does not have access to k3\"), and the thing that handles it is the model-list-diff canary (P-T17-3). On this lane that canary is the kimi lane's, by name (OQ-4): one Console key means the two lanes cannot be entitled or revoked independently.",
+  "overflow_note": "overflow_mode is `opt-in-credits` on every model, inherited from the membership rather than from the client path: the Extra Usage Credit Pack is OFF by default, requires funding, and carries an explicitly PROVEN disable (satisfying 3.10 / P-T17-2). Kimi on the web and Kimi Code share the same Extra Usage balance, so this lane and lane kimi also share the spill. RECOMMENDED OPERATOR POSTURE: Extra Usage OFF, under which the lane behaves as a hard stop.",
+  "reasoning_effort": {
+    "wired": false,
+    "verified_on": "2026-08-26",
+    "values": [],
+    "values_grade": "not-captured",
+    "note": "DELIBERATELY EMPTY AND UNWIRED. The CLI does expose thinking configuration (a [thinking] config section with enabled/effort/keep, observed in the pinned bundle, and the profile.bind frame reports thinkingEffort \"on\" by default), but no vendor page captured in this packet publishes the accepted effort vocabulary for this engine, and the sibling lane's own value list is already graded unverified-primary from a different source. Declaring a list nobody published would be exactly the false dated claim §64 was written about. No eco_options are declared and no S10.6 rung is invented; the lever stays unwired until somebody captures the vocabulary."
+  },
+  "reset_marker": "",
+  "reset_marker_note": "DELIBERATELY EMPTY, unchanged from lane kimi and for the unchanged reason (A11 audit U4): no reset-time signal is documented anywhere on the error surface, and the vendor states reset times live in the Console. An empty marker routes depletion to the Class-3 probe park rather than fabricating a Class-2 wait on a time nobody published. The `kimi web` oauth/usage readback recorded above carries a real reset_at and is the candidate that could fill this later — recorded, not wired.",
+  "signals_note": "DOCUMENTED-NOT-OBSERVED, and pinned EQUAL to lane kimi's table by test. Every row below is a MESSAGE STRING quoted from the vendor's published error reference (https://www.kimi.com/code/docs/en/kimi-code/error-reference.html, first captured 2026-08-24 and RE-READ 2026-08-26, which is where the five newest rows come from), not a body this platform has seen on the wire. The two lanes are held equal deliberately: same membership, same wire, and a divergence would make one lane freeze where the other parks — which the operator, comparing the two lanes, would read as a property of the client path. TRANSPORT NOTE specific to this substrate: the CLI surfaces a terminal provider error ONLY on stderr (measured 2026-08-26 — a provider 403 produced no stdout frame at all), prefixed with its own taxonomy label such as `provider.auth_error:`; retried failures additionally appear on stdout as `turn.step.retrying` meta frames carrying status_code and error_message. The vendor's own caveat applies with extra force here: \"If you are using a third-party client such as OpenCode or Claude Code, the client may transform or re-wrap error codes... focus on the text content of the error message\". The ceremony's live single-request probe still owes one real 401, one real 429 and, if reachable, one real 403 body before this table is treated as final.",
+  "signals": [
+    {
+      "http_status": 429,
+      "message_contains": "engine is currently overloaded",
+      "documented_class": "transient",
+      "verified_on": "2026-08-24",
+      "message": "The engine is currently overloaded, please try again later",
+      "note": "Transient capacity shed — retry in place, never park."
+    },
+    {
+      "http_status": 429,
+      "message_contains": "receiving too many requests",
+      "documented_class": "transient",
+      "verified_on": "2026-08-24",
+      "message": "We're receiving too many requests at the moment",
+      "note": "Account concurrency limit — transient."
+    },
+    {
+      "http_status": 429,
+      "message_contains": "reached your usage limit for this period",
+      "documented_class": "depletion",
+      "verified_on": "2026-08-24",
+      "message": "You've reached your usage limit for this period",
+      "note": "The rolling 5-hour window is exhausted."
+    },
+    {
+      "http_status": 429,
+      "message_contains": "monthly usage limit for this billing cycle",
+      "documented_class": "depletion",
+      "verified_on": "2026-08-24",
+      "message": "You've reached kimi monthly usage limit for this billing cycle",
+      "note": "The monthly membership pool is consumed."
+    },
+    {
+      "http_status": 403,
+      "message_contains": "reached your usage limit for this billing cycle",
+      "documented_class": "depletion",
+      "verified_on": "2026-08-24",
+      "message": "You've reached your usage limit for this billing cycle",
+      "note": "WEEKLY DEPLETION ON A 403 — NOT AUTH. This lane's quota exhaustion splits across 429 AND 403, so HTTP status alone is not a classifier here and the message string is load-bearing. Without this row the lane would freeze itself and page the operator with a suspected policy revocation every time its weekly window emptied."
+    },
+    {
+      "http_status": 403,
+      "message_contains": "reached your 5-hour usage limit",
+      "documented_class": "depletion",
+      "verified_on": "2026-08-26",
+      "message": "You've reached your 5-hour usage limit",
+      "note": "ADDED 2026-08-26 from a re-read of the vendor's error reference. The rolling 5-hour window, arriving on a 403 as well as the 429 above — the same split that makes status a non-classifier on this wire."
+    },
+    {
+      "http_status": 403,
+      "message_contains": "reached your weekly (7-day) usage limit",
+      "documented_class": "depletion",
+      "verified_on": "2026-08-26",
+      "message": "You've reached your weekly (7-day) usage limit",
+      "note": "ADDED 2026-08-26. The 7-day subscription-anchored window emptying is the single most routine failure this lane has; classing it as anything but depletion would page the operator weekly."
+    },
+    {
+      "http_status": 403,
+      "message_contains": "credit balance is insufficient",
+      "verified_on": "2026-08-26",
+      "message": "Your credit balance is insufficient",
+      "note": "ADDED 2026-08-26. A BALANCE event, and it carries NO documented class deliberately: the exemption vocabulary is {transient, depletion, model-drift, endpoint-defect} and has no `balance` member BY DESIGN. So it falls through to the Class-4 status rule and freezes, which is correct — an Extra Usage wallet running dry is not a quota window rolling over, and probe-parking it would wait forever for a top-up nobody is going to make (P-T08-2's failure class)."
+    },
+    {
+      "http_status": 403,
+      "message_contains": "concurrent request limit",
+      "verified_on": "2026-08-26",
+      "message": "You've reached your concurrent request limit",
+      "note": "ADDED 2026-08-26, AND IT IS A TRAP — this row carries NO documented class on purpose and the reason must not be optimized away. The string is BOTH an ordinary concurrency shed AND the vendor's stated enforcement action for a terms concern, verbatim from the Community Guidelines: \"we'll review the situation first and take appropriate action—such as limiting concurrent access—based on the severity. You'll then see a You've reached your concurrent request limit error.\" Classing it `transient` would make the platform retry silently THROUGH an enforcement action against the operator's own account — the worst possible response to it, and precisely how a recorded gray zone becomes a terminated subscription. With no class it falls through to the Class-4 status rule (freeze + operator alert), which is the safe half of P-T08-2: recoverable, visible, and it puts a person in front of the decision."
+    },
+    {
+      "http_status": 402,
+      "message_contains": "unable to verify your membership benefits",
+      "verified_on": "2026-08-26",
+      "message": "unable to verify your membership benefits",
+      "note": "ADDED 2026-08-26. No documented class: 402 freezes on the unchanged status rule. A membership that cannot be verified is not a window that emptied, and retrying or parking it hides the one fact worth acting on."
+    },
+    {
+      "http_status": 400,
+      "message_contains": "exceeds limit 2097152",
+      "documented_class": "endpoint-defect",
+      "verified_on": "2026-08-26",
+      "message": "total message size N exceeds limit 2097152",
+      "note": "ADDED 2026-08-26. A request-shape defect, surfaced and never parked: no amount of waiting makes an oversized message smaller. It is classed endpoint-defect rather than left bare because a bare 400 is not an auth-shaped status and would otherwise classify as no limit event at all, losing the surfaced reason."
+    },
+    {
+      "http_status": 400,
+      "message_contains": "exceeded model token limit",
+      "documented_class": "endpoint-defect",
+      "verified_on": "2026-08-26",
+      "message": "Your request exceeded model token limit: 262144",
+      "note": "ADDED 2026-08-26. The sibling request-shape defect. Surfaced, never parked — and note the figure names the 256K tier, so on an account gated to it this is the shape a too-large context takes."
+    },
+    {
+      "http_status": 403,
+      "message_contains": "Access terminated",
+      "verified_on": "2026-08-24",
+      "message": "Access terminated",
+      "note": "GENUINE POLICY REVOCATION (account suspended for policy violation). It declares NO documented_class, deliberately: the exemption list must never be able to suppress a revocation, so this row falls through to the Class-4 status rule and freezes the lane."
+    },
+    {
+      "http_status": 401,
+      "message_contains": "does not have access to",
+      "documented_class": "model-drift",
+      "verified_on": "2026-08-24",
+      "message": "Your current subscription does not have access to k3",
+      "note": "Entitlement / membership-tier gate arriving on a 401. It is model drift, not revocation: the model-list-diff canary is what acts on it (P-T17-3). Covers the highspeed variant of the same message."
+    },
+    {
+      "http_status": 401,
+      "message_contains": "supports only kimi-k3 up to 256K context",
+      "documented_class": "model-drift",
+      "verified_on": "2026-08-24",
+      "message": "Your current plan supports only kimi-k3 up to 256K context",
+      "note": "Context entitlement — model drift, not revocation."
+    },
+    {
+      "http_status": 401,
+      "message_contains": "API Key appears to be invalid or may have expired",
+      "verified_on": "2026-08-24",
+      "message": "The API Key appears to be invalid or may have expired",
+      "note": "GENUINE AUTH. No documented_class: it freezes on the Class-4 status rule."
+    },
+    {
+      "http_status": 401,
+      "message_contains": "Invalid Authentication",
+      "verified_on": "2026-08-24",
+      "message": "Invalid Authentication",
+      "note": "GENUINE AUTH (unsupported authentication format). No documented_class: it freezes."
+    },
+    {
+      "http_status": 404,
+      "message_contains": "method not found",
+      "documented_class": "endpoint-defect",
+      "verified_on": "2026-08-24",
+      "message": "method not found",
+      "note": "The endpoint path is wrong — the wrong-endpoint case BY NAME. Surfaced as a configuration defect, never parked indefinitely (P-T08-2's failure class)."
+    },
+    {
+      "http_status": 404,
+      "message_contains": "Not found the model",
+      "documented_class": "model-drift",
+      "verified_on": "2026-08-24",
+      "message": "Not found the model kimi-for-coding or Permission denied",
+      "note": "Model drift or a permission gate — surfaced, never parked."
+    }
+  ]
+}
