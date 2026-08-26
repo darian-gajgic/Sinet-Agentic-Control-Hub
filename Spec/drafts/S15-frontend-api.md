@@ -24,7 +24,7 @@ Every surface is a client of the same HTTP API and the one SSE endpoint — the 
 
 | Family | Root | Exposes | Mutating verbs (all owner-scoped) | Data owner |
 |---|---|---|---|---|
-| tasks | `/api/tasks` | task objects: spec + numbered AC, plan, stage progress, lineage (project, follow-ups), receipt view | create (opens intake [XREF:S06]); follow-up spawn (S1.2); cancel (4.5) | S06/S02; receipt figures S10 |
+| tasks | `/api/tasks` | task objects: spec + numbered AC, plan, stage progress, lineage (project, follow-ups), receipt view | create (opens intake [XREF:S06]), carrying the OPTIONAL per-task lane pin **[S00.9 A13]** — validated server-side and refused rather than dropped; follow-up spawn (S1.2); cancel (4.5) | S06/S02; receipt figures S10 |
 | runs | `/api/runs` | run FSM state, live-activity refs, spawn records, routing records (S2.6) | cancel (4.5) | S02/S03/S10 |
 | approvals | `/api/approvals` | inbox items — proposals, questions, sign-offs, escalations — with risk tier, expiry, and 13.5 help fields | answer (approve / deny / answer / re-plan); Low-tier batch answer | S02 effect journal; D7/D10 gates |
 | deliverables | `/api/deliverables` | immutable numbered revisions, diffs, anchored comments, preview sessions | comment CRUD (own comments); request bounded revision; accept (6.3 → S13 flow) | S13 |
