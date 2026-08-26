@@ -70,6 +70,14 @@ type ln9Harness struct {
 
 func newLN9Harness(t *testing.T) *ln9Harness {
 	t.Helper()
+	return newLN9HarnessWith(t, worker.AlternateSeatsFor(worker.LaneSeat{Lane: adapters.LaneZAI, Model: "glm-5.3"}))
+}
+
+// newLN9HarnessWith takes the commissioned lane's SEAT set, so a world where a
+// lane is covered and NOTHING seats it can be composed (drain r1 F3). The lane,
+// its engine and its coverage are unchanged; only the seat row moves.
+func newLN9HarnessWith(t *testing.T, seats worker.AlternateSeats) *ln9Harness {
+	t.Helper()
 	ctx := context.Background()
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
@@ -110,7 +118,7 @@ func newLN9Harness(t *testing.T) *ln9Harness {
 		},
 		CommissionedLanes: []string{adapters.LaneZAI},
 		LaneSubstrates:    map[string]string{adapters.LaneZAI: adapters.SubstrateOpencode},
-		AlternateSeats:    worker.AlternateSeatsFor(worker.LaneSeat{Lane: adapters.LaneZAI, Model: "glm-5.3"}),
+		AlternateSeats:    seats,
 		ArtifactRoot:      filepath.Join(root, "artifacts"),
 		RunRoot:           filepath.Join(root, "runs"),
 		CopyAsideDir:      filepath.Join(root, "copy-aside"),
