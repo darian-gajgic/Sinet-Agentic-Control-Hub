@@ -28,6 +28,7 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -324,12 +325,11 @@ func TestLN9R1EveryNewSelectionArmIsGatedOnThePin(t *testing.T) {
 		t.Errorf("resolveLanePin has %d call sites, want exactly 1 (the guarded arm) — a second caller is a "+
 			"second door the property above does not cover", n)
 	}
-	// And the two decision sites carry the member straight from the query, so
-	// an empty query member cannot produce a non-empty decision member.
-	if n := strings.Count(body, "LanePin:      q.PinnedLane"); n < 1 {
-		if n := strings.Count(body, "LanePin:       q.PinnedLane"); n < 1 {
-			t.Error("Decision.LanePin is no longer taken directly from the query")
-		}
+	// And the decision sites carry the member straight from the query, so an
+	// empty query member cannot produce a non-empty decision member. Matched
+	// whitespace-insensitively: a gofmt re-alignment must not turn this red.
+	if !regexp.MustCompile(`LanePin:\s+q\.PinnedLane`).MatchString(body) {
+		t.Error("Decision.LanePin is no longer taken directly from the query")
 	}
 }
 

@@ -16,10 +16,14 @@ package stage_test
 // transport UNMAPPED, so a bad request answered as a platform defect (§30).
 //
 // The world both use is a deliberate MISCONFIGURATION — a lane that is covered
-// and seated by nothing. Production cannot produce it (coverage and seats are
-// derived from the same placed-credential set at the composition root), which
-// is exactly why it is the right shape for a defence-in-depth guard: it is the
-// only way to reach layer 3 without planting anything.
+// and seated by nothing. Not reachable with the three SHIPPED lane documents
+// (each declares a default_model), but production CAN produce it: coverage and
+// seats derive from the same placed-credential set through DIFFERENT
+// predicates — CommissionedLanes has no model condition while CommissionedSeats
+// skips any lane whose DefaultModel is empty, and a lane document omitting
+// default_model loads clean — so a config-only lane addition (the S03.6
+// rider-3 mechanism) that omits default_model lands exactly here. That is why
+// this guard exists and why it is tested from the misconfigured shape.
 //
 // $0: recording adapters that start no engine; no provider on any path.
 
