@@ -345,3 +345,97 @@ Every URL below was fetched live on **2026-08-24**; quotes above are verbatim fr
 16. https://models.dev/providers/kimi-for-coding — opencode provider record (npm, base URL, model ids)
 17. https://www.kimi.com/coding — **JS shell** (recorded as a gap)
 18. https://www.kimi.com/membership/pricing — **JS shell** (recorded as a gap)
+
+---
+
+## Addendum — 2026-08-26 · Gate A RE-AUDITED, and this audit's own verdict corrected (P3-LN-7 / S00.9 A12 / R30)
+
+**This addendum outranks §0's Gate-A row above.** The 2026-08-24 verdict was reached without reading
+a first-party page that materially changes it, and this record's whole value is that its claims are
+dated — so the omission is recorded here rather than repaired invisibly.
+
+### The omission
+
+Gate A passed **class 2** on the strength of two full ToS reads and the sentence *"neither contains
+any automation / unattended-use / interactive-only clause"*. That sentence remains **true of the two
+documents it names**. It is not true of the membership's usage policy as a whole: a **third,
+previously unread** first-party surface exists —
+`https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html` — and it is not among the 18
+sources listed above. Read on **2026-08-26**, it carries verbatim:
+
+```
+Scope of Use
+
+Kimi Code subscriptions are for interactive use only.
+```
+```
+Don't use Kimi Code for non-interactive automation
+
+Kimi Code subscriptions are for personal interactive use only. Using it for non-interactive
+purposes — such as scripted batch execution or data annotation pipelines — goes beyond normal use.
+```
+
+Under S03.6's ratified taxonomy that is **class 3** language — *"explicit interactive-only /
+automation-banned → auto-disqualifying"* — stated on a first-party page.
+
+### The pre-registered trigger fired
+
+This audit's own §6 watchlist entry pre-registered exactly this text, verbatim:
+
+> **Would-change trigger (for the §6 watchlist):** appearance in either ToS of an interactive-only /
+> no-automation / no-non-interactive-batch clause of the kind Alibaba, Tencent and Xiaomi carry
+> verbatim → **immediate re-audit and lane freeze before the next run consumes allowance.**
+
+The trigger has fired. It binds the **already-commissioned `kimi` lane** exactly as it binds the new
+`kimi-cli` lane: it is one subscription, one quota pool, and the clause is a property of the
+subscription rather than of the client path. This is a **gap in this audit's source coverage**, not a
+change in Moonshot's position — the page predates the audit.
+
+### The countervailing text, quoted so the ruling rests on both halves
+
+The same page sanctions agent frameworks by name and describes graduated enforcement:
+
+```
+We're compatible with mainstream coding tools and agent frameworks (Kimi CLI, VS Code, Claude Code,
+OpenCode, OpenClaw, etc.), so you can call Kimi Code's AI capabilities from the tools you already use.
+```
+```
+Q3: I use Kimi Code across multiple devices and tools at the same time. Will that get me suspended?
+No. Switching between devices (e.g., work laptop, personal machine) or different coding tools (Kimi
+CLI, VS Code, Claude Code) is a completely normal usage pattern.
+```
+```
+If your usage doesn't align with the guidelines above, we'll review the situation first and take
+appropriate action—such as limiting concurrent access—based on the severity.
+```
+
+### The ruling
+
+**Operator ruling, 2026-08-26 (in-session; coordinator-presented option form, operator-selected —
+their authoritative act): PROCEED, acceptance recorded.** Recorded reasoning, as selected:
+
+> personal interactive use through agent frameworks the guidelines page itself sanctions (Kimi CLI,
+> VS Code, Claude Code, OpenCode); the banned examples (scripted batch execution, data-annotation
+> pipelines) do not describe this use; stated enforcement is graduated (concurrency limiting);
+> accepted as a recorded gray zone, the same posture as the Anthropic lane's G1 P2 note.
+
+**Corrected Gate-A verdict: PASS as a RECORDED GRAY ZONE on explicit operator acceptance**, replacing
+the unqualified class-2 PASS above. Both kimi lanes proceed. Neither lane is frozen.
+
+### What this addendum changes downstream
+
+1. `403 "You've reached your concurrent request limit"` is **both** an ordinary concurrency shed
+   **and** the vendor's stated enforcement signal for a terms concern. It therefore carries **no
+   `documented_class`** on either lane document and falls through to the Class-4 status rule (freeze
+   + operator alert). Classing it `transient` would retry silently through an enforcement action
+   against the operator's own account.
+2. `community-guidelines.html` joins the watchlist as a **tier-1 row** on both kimi lanes. This audit
+   not watching it is precisely how the clause stayed invisible for two days.
+3. The escape route the capture suggested — a Kimi **Open Platform** pay-as-you-go key — remains
+   **closed at v0**: it is a metered lane, G1 P7 keeps the metered-exception list EMPTY with DeepSeek
+   the sole pre-registered exception, and it would need its own amendment and its own Gate A–C audit.
+   No Open Platform ToS document was locatable in the 2026-08-26 capture.
+
+**Sources added by this addendum:**
+
+19. https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html — Community Guidelines / Scope of Use (read 2026-08-26; the class-3 language and its countervailing FAQ)
