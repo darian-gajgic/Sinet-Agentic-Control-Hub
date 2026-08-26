@@ -398,8 +398,14 @@ func fixtureWorldOn(t *testing.T, b *backend, root string) *backend {
 		// Effort mode with NO disclosed downgrade: the routing reason is
 		// mandatory, a downgrade note is not, and the card must show the
 		// absence rather than promoting the reason into one.
+		// P3-LN-9: this task carries a per-task LANE PIN (S00.9 A13). The
+		// `lane_pin` member is what LN-10's picker binds to, and a member no
+		// fixture exercises is a contract nobody agreed to (§63 R3) — so the
+		// fixture world has to contain one pinned task, not merely permit one.
+		// The reason moves with it: the pin is visible on every surface that
+		// renders a reason, which is what makes R1 true with no web/src change.
 		{"alice", "r-ship", "routing.decided",
-			`{"cause":"selector-match","score":0.91,"model":"claude","lane":"anthropic","effort":"standard","plain_reason":"the release-notes worker matched on both signals","window_tokens":200000}`, fxT0},
+			`{"cause":"selector-match","score":0.91,"model":"claude","lane":"anthropic","lane_pin":"anthropic","effort":"standard","plain_reason":"the release-notes worker matched on both signals; lane \"anthropic\" is pinned on this task, so the pin replaced the consumption-pressure comparison","window_tokens":200000}`, fxT0},
 		{"alice", "r-ship", "stage.started", `{"stage":"execute","kind":"execute"}`, fxT1},
 		// The other direction: a producer that DID disclose one.
 		{"alice", "r-triage", "routing.decided",
