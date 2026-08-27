@@ -78,6 +78,28 @@ func stepContract(s *Step, p *Plan) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Current step %s: %s\n", s.ID, s.Title)
 	fmt.Fprintf(&b, "Done when: %s\n", s.DoneWhen)
+	// The APPROVED method (P3-GF8 R15; Spec S06.6 [A15]). The requester
+	// approved a HOW, not only a WHAT, so the executing stage is told what was
+	// approved instead of re-deriving an approach the person never saw. The
+	// lines are GUARDED: a pre-A15 plan's step contract is byte-identical to
+	// what it was. Nothing here binds verification — that still judges the ACs
+	// and the "Done when" contract [A15 "What does NOT change"].
+	if s.Approach != "" {
+		fmt.Fprintf(&b, "Approved approach: %s\n", s.Approach)
+	}
+	for _, d := range s.Decisions {
+		line := "Approved decision: " + d.Decision
+		if len(d.Alternatives) > 0 {
+			line += " (considered instead: " + strings.Join(d.Alternatives, ", ") + ")"
+		}
+		if d.Why != "" {
+			line += "; why: " + d.Why
+		}
+		b.WriteString(line + "\n")
+	}
+	if s.OrderingRationale != "" {
+		fmt.Fprintf(&b, "Why this step sits here: %s\n", s.OrderingRationale)
+	}
 	fmt.Fprintf(&b, "Confinement class: %s (declared at plan time; helpers inherit tighter-only, P-T05-1)\n", s.Class)
 	if len(s.WriteSet) > 0 {
 		fmt.Fprintf(&b, "Declared write-set: %s\n", strings.Join(s.WriteSet, ", "))

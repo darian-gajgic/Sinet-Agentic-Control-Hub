@@ -1516,12 +1516,25 @@ func fixtureApprovalCard(t *testing.T) string {
 					{N: 2, Plain: "Each entry says what changed in plain language.",
 						Structured: "WHEN a reader opens the notes THEN each entry reads as a sentence", StructuredKind: "gwt"},
 				},
+				// The [A15] per-step approach and the r5 §B.1 understanding
+				// fields the card now serves (P3-GF8 R4/R17): GF9 draws these,
+				// so the committed body carries the real shapes.
 				Steps: []intake.Step{
-					{ID: "S-1", Title: "Collect the merged changes", DoneWhen: "every merge since the last tag is listed"},
-					{ID: "S-2", Title: "Write one line per change", DoneWhen: "each listed change has a plain sentence"},
+					{ID: "S-1", Title: "Collect the merged changes", DoneWhen: "every merge since the last tag is listed",
+						Approach: "I read the merge log since the last release tag and list every entry once, newest first.",
+						Decisions: []intake.StepDecision{{
+							Decision:     "read the merge log rather than the commit log",
+							Alternatives: []string{"walk every commit", "diff the two release tags"},
+							Why:          "one line per merged change is what the notes list, and the merge log already says that",
+						}},
+						OrderingRationale: "nothing can be written up before the list of what changed exists"},
+					{ID: "S-2", Title: "Write one line per change", DoneWhen: "each listed change has a plain sentence",
+						Approach: "I write one plain sentence per listed change, saying what a reader would notice."},
 				},
-				Coverage: map[string][]string{"AC-1": {"S-1"}, "AC-2": {"S-2"}},
-				Estimate: intake.Estimate{SizeClass: "small", USD: 0.12, Known: true, Basis: "median of the last five notes runs"},
+				Coverage:    map[string][]string{"AC-1": {"S-1"}, "AC-2": {"S-2"}},
+				Constraints: []string{"no external publishing"},
+				Supplied:    []intake.SuppliedFact{{RuleID: "P47-7", Fact: "the last release tag is v2.3.0, cut on 2026-07-06", TS: fxT1}},
+				Estimate:    intake.Estimate{SizeClass: "small", USD: 0.12, Known: true, Basis: "median of the last five notes runs"},
 			},
 			Actions:      []string{intake.ActionApprove, intake.ActionRePlan, intake.ActionReInterview},
 			StaleFlag:    true,
@@ -1553,8 +1566,9 @@ func fixtureTrivialApprovalCard(t *testing.T, taskID, runID, restatement string)
 				},
 			},
 			Layer2: intake.ApprovalLayer2{
-				ACs:      []intake.AC{{N: 1, Plain: "The note names every task finished this week."}},
-				Steps:    []intake.Step{{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists in the household folder"}},
+				ACs: []intake.AC{{N: 1, Plain: "The note names every task finished this week."}},
+				Steps: []intake.Step{{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists in the household folder",
+					Approach: "I read this week's finished tasks and write one short paragraph naming each."}},
 				Coverage: map[string][]string{"AC-1": {"S-1"}},
 				Estimate: intake.Estimate{SizeClass: "tiny", Known: false, Basis: "no comparable run yet"},
 			},
@@ -2000,7 +2014,14 @@ func fixturePair(status string, n int) string {
 		`"out_of_scope":["translating the notes"]},` +
 		`"plan":{"task_id":"t-x","owner":"alice","version":` + strconv.Itoa(n) + `,"spec_version":` + strconv.Itoa(n) +
 		`,"status":"` + status + `","tier":"standard","provenance":"claude/2026-07",` +
-		`"steps":[{"id":"S-1","title":"Collect the merged changes"},{"id":"S-2","title":"Write one line per change"}],` +
+		`"steps":[{"id":"S-1","title":"Collect the merged changes",` +
+		`"approach":"I read the merge log since the last release tag and list every entry once, newest first.",` +
+		`"decisions":[{"decision":"read the merge log rather than the commit log",` +
+		`"alternatives":["walk every commit","diff the two release tags"],` +
+		`"why":"one line per merged change is what the notes are supposed to list, and the merge log already says that"}],` +
+		`"ordering_rationale":"nothing can be written up before the list of what changed exists"},` +
+		`{"id":"S-2","title":"Write one line per change",` +
+		`"approach":"I write one plain sentence per listed change, saying what a reader would notice."}],` +
 		`"coverage":{"AC-1":["S-1"],"AC-2":["S-2"]},"risks":["the changelog may be incomplete"]}}`
 }
 

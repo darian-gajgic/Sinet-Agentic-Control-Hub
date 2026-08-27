@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // The artifact pair (Spec S06.6): Sinet-owned markdown + YAML frontmatter
@@ -198,6 +199,63 @@ type Step struct {
 	Research bool `json:"research,omitempty"` // this step is a research node
 }
 
+// validateApproach enforces the [A15] per-step approach contract at the
+// artifact boundary (Spec S06.6 "Per-step approach [A15]"; P3-GF8 R11).
+//
+// The approach is REQUIRED: a step that names only its outcome cannot be judged
+// for approach, which is the one job the 1.6 cheap preview exists to do. A
+// listed decision must be COMPLETE — S06.6 says "the material decisions it made
+// inside the step with the alternatives it considered and why the chosen one
+// won", and a decision with no alternative is not a material decision, it is a
+// sentence. The ordering rationale is optional by contract: it is owed only
+// where the ordering is load-bearing, and demanding it everywhere would buy
+// filler.
+//
+// Nothing here is a machine-check target: verification still binds to the ACs
+// and the "Done when" contracts [A15 "What does NOT change"]. This is a size
+// and completeness contract, never a reading-level one.
+func (s *Step) validateApproach() error {
+	if strings.TrimSpace(s.Approach) == "" {
+		return fmt.Errorf("%w: step %s states no approach — a step that names only its outcome cannot be judged for approach (S06.6 [A15])", ErrBadArtifact, s.ID)
+	}
+	if n := utf8.RuneCountInString(s.Approach); n > approachMaxRunes {
+		return fmt.Errorf("%w: step %s approach is %d characters (cap %d)", ErrBadArtifact, s.ID, n, approachMaxRunes)
+	}
+	if len(s.Decisions) > maxStepDecisions {
+		return fmt.Errorf("%w: step %s lists %d material decisions (cap %d — a step making more calls than that is a step that should be split)",
+			ErrBadArtifact, s.ID, len(s.Decisions), maxStepDecisions)
+	}
+	for i, d := range s.Decisions {
+		if strings.TrimSpace(d.Decision) == "" {
+			return fmt.Errorf("%w: step %s decision %d says nothing (S06.6 [A15])", ErrBadArtifact, s.ID, i+1)
+		}
+		if strings.TrimSpace(d.Why) == "" {
+			return fmt.Errorf("%w: step %s decision %q gives no reason it won (S06.6 [A15])", ErrBadArtifact, s.ID, d.Decision)
+		}
+		alternatives := 0
+		for _, alt := range d.Alternatives {
+			if strings.TrimSpace(alt) != "" {
+				alternatives++
+			}
+			if n := utf8.RuneCountInString(alt); n > decisionFieldMaxRunes {
+				return fmt.Errorf("%w: step %s decision %q has an alternative of %d characters (cap %d)", ErrBadArtifact, s.ID, d.Decision, n, decisionFieldMaxRunes)
+			}
+		}
+		if alternatives == 0 {
+			return fmt.Errorf("%w: step %s decision %q considered no alternative — a material decision with nothing to weigh against is not one (S06.6 [A15])", ErrBadArtifact, s.ID, d.Decision)
+		}
+		for _, field := range []string{d.Decision, d.Why} {
+			if n := utf8.RuneCountInString(field); n > decisionFieldMaxRunes {
+				return fmt.Errorf("%w: step %s decision %q carries a %d-character field (cap %d)", ErrBadArtifact, s.ID, d.Decision, n, decisionFieldMaxRunes)
+			}
+		}
+	}
+	if n := utf8.RuneCountInString(s.OrderingRationale); n > orderingMaxRunes {
+		return fmt.Errorf("%w: step %s ordering rationale is %d characters (cap %d)", ErrBadArtifact, s.ID, n, orderingMaxRunes)
+	}
+	return nil
+}
+
 // Plan is the PLAN artifact (Spec S06.6).
 type Plan struct {
 	TaskID      string `json:"task_id"`
@@ -272,6 +330,9 @@ func (p *Plan) Validate() error {
 		case "C0", "C1", "C2":
 		default:
 			return fmt.Errorf("%w: step %s confinement class %q (C0–C2 at v0, Spec S11)", ErrBadArtifact, st.ID, st.Class)
+		}
+		if err := st.validateApproach(); err != nil {
+			return err
 		}
 	}
 	for key, steps := range p.Coverage {
@@ -562,6 +623,28 @@ func renderPlanMD(p *Plan) []byte {
 	for i, st := range p.Steps {
 		fmt.Fprintf(&b, "%d. **%s**: %s\n", i+1, st.ID, st.Title)
 		fmt.Fprintf(&b, "   - Done when: %s\n", st.DoneWhen)
+		// The [A15] per-step approach, on the artifact of record and not only
+		// in the sidecar: the markdown IS the plan (D9), so a plan whose HOW
+		// lived only in a JSON projection would still be a black box to
+		// anyone reading the artifact. Every line is GUARDED — the
+		// CitedEntries precedent — so a pre-A15 plan re-renders byte-
+		// identically and keeps loading (S06.6 resume integrity).
+		if st.Approach != "" {
+			fmt.Fprintf(&b, "   - Approach: %s\n", st.Approach)
+		}
+		for _, d := range st.Decisions {
+			line := "   - Decision: " + d.Decision
+			if len(d.Alternatives) > 0 {
+				line += " (considered instead: " + strings.Join(d.Alternatives, ", ") + ")"
+			}
+			if d.Why != "" {
+				line += "; why: " + d.Why
+			}
+			b.WriteString(line + "\n")
+		}
+		if st.OrderingRationale != "" {
+			fmt.Fprintf(&b, "   - Why this step sits here: %s\n", st.OrderingRationale)
+		}
 		fmt.Fprintf(&b, "   - Confinement: %s\n", st.Class)
 		if len(st.WriteSet) > 0 {
 			fmt.Fprintf(&b, "   - Writes: %s\n", strings.Join(st.WriteSet, ", "))

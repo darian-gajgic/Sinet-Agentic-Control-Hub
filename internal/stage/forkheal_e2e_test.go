@@ -117,9 +117,12 @@ func forkPair(in intake.DraftInput) intake.Pair {
 		},
 		Plan: intake.Plan{
 			Provenance: "capture-planner v1",
+			// The [A15] approach is required at the boundary (P3-GF8 R11).
 			Steps: []intake.Step{
-				{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists", Class: "C1", WriteSet: []string{"src/**"}},
-				{ID: "S-2", Title: "Verify against the criteria", DoneWhen: "all ACs demonstrably hold", Class: "C1"},
+				{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists", Class: "C1", WriteSet: []string{"src/**"},
+					Approach: "I write the note into the workspace file and leave everything else alone."},
+				{ID: "S-2", Title: "Verify against the criteria", DoneWhen: "all ACs demonstrably hold", Class: "C1",
+					Approach: "I read each criterion against what the checks report."},
 			},
 			Coverage: map[string][]string{"AC-1": {"S-1"}, "AC-2": {"S-2"}},
 			Risks:    []string{"estimate may be off"},

@@ -58,9 +58,20 @@ func basePair(in intake.DraftInput) intake.Pair {
 		writes = nil // the band's degenerate read-only plan (S06.4)
 		est = intake.Estimate{SizeClass: "XS", USD: 0.10, Known: true, Basis: "fake"}
 	}
+	// The [A15] per-step approach is REQUIRED at the artifact boundary
+	// (P3-GF8 R11), so the fixture planner emits one — an honest one, in the
+	// plain words a real emission owes. No assertion changes.
 	steps := []intake.Step{
-		{ID: "S-1", Title: "Implement the change", DoneWhen: "tests pass", Class: "C1", WriteSet: writes},
-		{ID: "S-2", Title: "Verify against the criteria", DoneWhen: "all ACs demonstrably hold", Class: "C1"},
+		{ID: "S-1", Title: "Implement the change", DoneWhen: "tests pass", Class: "C1", WriteSet: writes,
+			Approach: "I change the widget code in place and leave everything around it alone.",
+			Decisions: []intake.StepDecision{{
+				Decision:     "edit the existing module rather than add a new one",
+				Alternatives: []string{"add a second module beside it"},
+				Why:          "one place to look is easier to keep right than two",
+			}}},
+		{ID: "S-2", Title: "Verify against the criteria", DoneWhen: "all ACs demonstrably hold", Class: "C1",
+			Approach:          "I run the project's own checks and read each acceptance criterion against what they report.",
+			OrderingRationale: "nothing can be verified before the change exists"},
 	}
 	var nodes []intake.ResearchNode
 	if len(in.DataHits) > 0 {

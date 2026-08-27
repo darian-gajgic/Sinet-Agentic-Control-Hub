@@ -72,9 +72,11 @@ func (shopPlanner) Draft(_ context.Context, in intake.DraftInput) (intake.Pair, 
 			Version: in.PlanVersion, SpecVersion: in.SpecVersion,
 			Status: intake.StatusDraft, Tier: in.Tier,
 			Provenance: "RW-14 re-walk in-process planner (tier-L harness)",
+			// The [A15] approach is required at the boundary (P3-GF8 R11).
 			Steps: []intake.Step{{
 				ID: "S-1", Title: "Create the shop landing page", Class: "C2",
 				DoneWhen: "app/index.html exists and names the shop",
+				Approach: "I add one static HTML page under app/ and link nothing else to it yet.",
 				WriteSet: []string{"app/**"},
 			}},
 			Coverage: map[string][]string{"AC-1": {"S-1"}},

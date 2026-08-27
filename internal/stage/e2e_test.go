@@ -257,9 +257,12 @@ func fakePairJSON() string {
 			"out_of_scope": []string{"publishing the note outside the workspace"},
 		},
 		"plan": map[string]any{
+			// The [A15] per-step approach is required at the artifact boundary
+			// (Spec S06.6; P3-GF8 R11), so this fixture emission carries one.
 			"steps": []map[string]any{{
 				"id": "S-1", "title": "Write the note", "class": "C2",
 				"done_when": "the final message contains the complete note text mentioning SQLite",
+				"approach":  "I write the note straight into the final message, in a few plain sentences.",
 				"write_set": []string{"note.md"},
 			}},
 			"coverage": map[string]any{"AC-1": []string{"S-1"}, "AC-2": []string{"S-1"}},

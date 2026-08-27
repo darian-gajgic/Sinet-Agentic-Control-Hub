@@ -56,9 +56,11 @@ func (smokePlanner) Draft(_ context.Context, in intake.DraftInput) (intake.Pair,
 			Version: in.PlanVersion, SpecVersion: in.SpecVersion,
 			Status: intake.StatusDraft, Tier: in.Tier,
 			Provenance: "live-smoke in-process planner (tier-L harness)",
+			// The [A15] approach is required at the boundary (P3-GF8 R11).
 			Steps: []intake.Step{{
 				ID: "S-1", Title: "Write the sentence", Class: "C1",
 				DoneWhen: "the final message is one sentence that mentions SQLite",
+				Approach: "I write the sentence directly in the final message and name SQLite in it.",
 			}},
 			Coverage: map[string][]string{"AC-1": {"S-1"}},
 			Est:      intake.Estimate{Known: false, Basis: "fixed tier-L smoke plan"},

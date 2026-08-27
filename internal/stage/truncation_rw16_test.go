@@ -28,7 +28,7 @@ import (
 // crashed sessions' shape: the document ends in three consecutive closing
 // braces (basis string -> est -> plan -> pair), the depth profile the
 // engine repeatedly got one brace wrong on.
-const rw16FullPair = `{"spec":{"restatement":"Draft a GPU restock announcement","outcome":["email ready"],"acs":[{"n":1,"plain":"email drafted"}],"constraints":[],"assumptions":[],"out_of_scope":[],"clarifications":[]},"plan":{"steps":[{"id":"S-1","title":"draft","done_when":"exists","class":"C1"}],"coverage":{"AC-1":["S-1"]},"risks":[],"est":{"size_class":"S","usd":0,"known":true,"basis":"content drafting only."}}}`
+const rw16FullPair = `{"spec":{"restatement":"Draft a GPU restock announcement","outcome":["email ready"],"acs":[{"n":1,"plain":"email drafted"}],"constraints":[],"assumptions":[],"out_of_scope":[],"clarifications":[]},"plan":{"steps":[{"id":"S-1","title":"draft","done_when":"exists","class":"C1","approach":"I draft the announcement in one pass and keep it to a few short paragraphs."}],"coverage":{"AC-1":["S-1"]},"risks":[],"est":{"size_class":"S","usd":0,"known":true,"basis":"content drafting only."}}}`
 
 type rw16Pair struct {
 	Spec struct {

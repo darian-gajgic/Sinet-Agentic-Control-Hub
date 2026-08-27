@@ -53,12 +53,25 @@
         "id": "S-1",
         "title": "Collect the merged changes",
         "done_when": "",
+        "approach": "I read the merge log since the last release tag and list every entry once, newest first.",
+        "decisions": [
+          {
+            "decision": "read the merge log rather than the commit log",
+            "alternatives": [
+              "walk every commit",
+              "diff the two release tags"
+            ],
+            "why": "one line per merged change is what the notes are supposed to list, and the merge log already says that"
+          }
+        ],
+        "ordering_rationale": "nothing can be written up before the list of what changed exists",
         "class": ""
       },
       {
         "id": "S-2",
         "title": "Write one line per change",
         "done_when": "",
+        "approach": "I write one plain sentence per listed change, saying what a reader would notice.",
         "class": ""
       }
     ],

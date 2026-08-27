@@ -179,7 +179,30 @@ func (p *Pipeline) applyInterviewAnswer(ctx context.Context, st *State, card *Ca
 	var skipped []SlotResolution
 	for _, a := range ans.Answers {
 		question, onCard := asked[a.ID]
-		if !onCard || tax.Slot(a.ID) == nil {
+		// The pre-draft per-field correction (P3-GF8 R2; operator record r5
+		// §C rule 3 + §B.1; harvest H9's ✓-badge grammar). The card SHOWS what
+		// the platform understood so far — its Understood block, one item per
+		// resolved slot, addressed by slot id (R3: that id IS the per-field
+		// identity, and a surface renders the edit affordance from it). A
+		// requester who reads their own record and sees it wrong corrects it
+		// in the same send as this card's answers, instead of discovering the
+		// misunderstanding on the approval card four rounds later.
+		//
+		// Last write wins: this is the requester correcting their OWN record,
+		// so there is nothing to reconcile and nothing is silently discarded
+		// (H17's silent-discard is a family switch throwing away answers — a
+		// different act entirely). Ask-never slots are correctable this way
+		// too: GF7 R2 bans the PLATFORM's asking, never the requester's
+		// correcting.
+		//
+		// What stays refused: an unresolved slot that was not asked (delivery
+		// order is the taxonomy's, highest weight first — answering ahead of
+		// the questions would let a requester walk the whole set out of order);
+		// an unknown slot; and an off-card SKIP, because a skip takes the
+		// suggestion the CARD served and a slot with no question on this card
+		// served none.
+		correcting := !onCard && !a.Skip && st.resolutionOf(a.ID) != nil
+		if tax.Slot(a.ID) == nil || (!onCard && !correcting) {
 			return fmt.Errorf("%w: slot %q was not asked", ErrBadAnswer, a.ID)
 		}
 		if a.Skip {
@@ -503,7 +526,14 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 		}
 		return st, nil
 	case ActionRePlan:
-		targets, findings, err := replanContest(ans)
+		// The contest is validated against the pair the card was built from —
+		// the artifact version the requester is looking at (S06.1
+		// resume-from-artifact; the same load the approve leg makes).
+		pair, err := p.ensurePair(st, nil)
+		if err != nil {
+			return nil, err
+		}
+		targets, findings, err := replanContest(ans, pair)
 		if err != nil {
 			return nil, err
 		}
@@ -559,7 +589,26 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 // ALONE (§11 OQ-4): a person who cannot point at the step that is wrong, only
 // at the result, has still said something a bounded re-plan can act on. What is
 // refused is an empty send, which asks for a paid revision that names nothing.
-func replanContest(ans Answer) (targets, findings []string, err error) {
+//
+// The FIELD grammar (P3-GF8 R5/R6/R7; operator record r5 §C rule 7, §D.1) rides
+// this same door, and deliberately adds no other. The requester's correction of
+// what the platform understood — the restatement, an outcome, a constraint, an
+// out-of-scope line, a risk, a step's approach — is a REQUEST routed through the
+// machinery that owns that change: one bounded `Planner.Revise` round, landing
+// as a new artifact version under D9/D7/S05 immutability. There is no cheaper
+// artifact-mutation door and this packet does not invent one; what makes the
+// sanctioned road cheap instead is here: a positional target is resolved against
+// the pair, so the reviser receives the field's identity AND its current words
+// rather than a blob to guess at, `specContentEqual` keeps the spec version
+// still when the content did not move, and the landed flow triggers no second
+// paid critique.
+//
+// A positional target that names nothing on this pair is REFUSED, naming what
+// the card does offer: a re-plan that quietly addresses a field the plan does
+// not have is a paid round spent on a misunderstanding. Targets outside the
+// positional grammar — the requester's own words, `assumption:<text>` — keep the
+// permissive fold.
+func replanContest(ans Answer, pair *Pair) (targets, findings []string, err error) {
 	refs := make([]ContestRef, 0, len(ans.Contests)+1)
 	if ans.Contest != nil {
 		refs = append(refs, *ans.Contest)
@@ -569,8 +618,16 @@ func replanContest(ans Answer) (targets, findings []string, err error) {
 		if strings.TrimSpace(c.Target) == "" {
 			return nil, nil, fmt.Errorf("%w: a contested item needs the target it names (S06.9 structured entry)", ErrBadAnswer)
 		}
+		ref, grammar, ok := resolveTarget(pair, c.Target)
+		if grammar && !ok {
+			return nil, nil, fmt.Errorf("%w: this plan has no %s to contest — it offers %s (S06.9 structured entry)",
+				ErrBadAnswer, c.Target, offeredTargets(pair))
+		}
 		targets = append(targets, c.Target)
 		finding := c.Target
+		if ref.Text != "" {
+			finding += fmt.Sprintf(" (%q)", ref.Text)
+		}
 		if c.Note != "" {
 			finding += ": " + c.Note
 		}

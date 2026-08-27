@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
@@ -27,8 +28,32 @@ const deltaDecisionSchemaVersion = 1
 
 // diffPairs computes the delta items between the frozen pair and a
 // proposed revision, deterministically on stable keys.
+//
+// It reads the SAME target vocabulary a Re-plan contest names (target.go, one
+// list two readers), and it covers the whole requester-facing content of the
+// pair (P3-GF8 R8). That coverage is the contract, not a convenience: S06.9
+// binds "every post-approval change to SPEC or PLAN" to a delta card, so a
+// field the diff cannot see is a field that could change under a frozen plan
+// with nothing on screen. Before this, a post-approval correction of the
+// restatement, an outcome, a constraint, an out-of-scope line or a risk was
+// rejected as "changes nothing", and an [A15] approach change — which A15
+// requires to travel through exactly this door — would have been invisible.
 func diffPairs(frozen, next *Pair) []DeltaItem {
 	var items []DeltaItem
+
+	// The SPEC's plain-language halves, index-paired on the AC pattern: the
+	// index is the key and the item carries Old and New, so a reader sees the
+	// words that changed rather than a position.
+	if frozen.Spec.Restatement != next.Spec.Restatement {
+		items = append(items, DeltaItem{
+			Kind: DeltaModified, Target: targetRestatement,
+			Old: frozen.Spec.Restatement, New: next.Spec.Restatement,
+		})
+	}
+	items = append(items, diffList(targetOutcome, frozen.Spec.Outcome, next.Spec.Outcome)...)
+	items = append(items, diffList(targetConstraint, frozen.Spec.Constraints, next.Spec.Constraints)...)
+	items = append(items, diffList(targetOutOfScope, frozen.Spec.OutOfScope, next.Spec.OutOfScope)...)
+	items = append(items, diffList(targetRisk, frozen.Plan.Risks, next.Plan.Risks)...)
 
 	// ACs by stable key over the longer numbering.
 	n := len(frozen.Spec.ACs)
@@ -36,7 +61,7 @@ func diffPairs(frozen, next *Pair) []DeltaItem {
 		n = len(next.Spec.ACs)
 	}
 	for i := 1; i <= n; i++ {
-		key := fmt.Sprintf("AC-%d", i)
+		key := targetAC(i)
 		oldAC, newAC := frozen.Spec.AC(key), next.Spec.AC(key)
 		switch {
 		case oldAC == nil && newAC != nil:
@@ -54,7 +79,7 @@ func diffPairs(frozen, next *Pair) []DeltaItem {
 		n = len(next.Plan.Steps)
 	}
 	for i := 1; i <= n; i++ {
-		key := fmt.Sprintf("S-%d", i)
+		key := targetStep(i)
 		oldS, newS := frozen.Plan.Step(key), next.Plan.Step(key)
 		switch {
 		case oldS == nil && newS != nil:
@@ -68,7 +93,18 @@ func diffPairs(frozen, next *Pair) []DeltaItem {
 			if oldS.Class != newS.Class {
 				// Confinement widening is a plan change requiring delta
 				// re-approval (P-T05-1; Spec S06.6).
-				items = append(items, DeltaItem{Kind: DeltaModified, Target: "confinement:" + key, Old: oldS.Class, New: newS.Class})
+				items = append(items, DeltaItem{Kind: DeltaModified, Target: targetConfinement(key), Old: oldS.Class, New: newS.Class})
+			}
+			// The [A15] approach: the requester approved a METHOD, so a change
+			// to any of its members is a change to what they signed off. The
+			// Old/New carry the whole approach block so the delta card can show
+			// what the method WAS beside what it becomes — a bare "the approach
+			// changed" would be the black box A15 exists to end.
+			if oldApproach, newApproach := approachText(oldS), approachText(newS); oldApproach != newApproach {
+				items = append(items, DeltaItem{
+					Kind: DeltaModified, Target: targetApproach(key),
+					Old: oldApproach, New: newApproach,
+				})
 			}
 		}
 	}
@@ -91,6 +127,54 @@ func diffPairs(frozen, next *Pair) []DeltaItem {
 		}
 	}
 	return items
+}
+
+// diffList index-pairs one plain-language list on the AC pattern: a position
+// gained is ADDED, lost is REMOVED, reworded is MODIFIED, and every item
+// carries the words so the card reads as a change rather than as a coordinate.
+func diffList(key func(int) string, frozen, next []string) []DeltaItem {
+	var items []DeltaItem
+	n := len(frozen)
+	if len(next) > n {
+		n = len(next)
+	}
+	for i := 0; i < n; i++ {
+		var old, cur string
+		if i < len(frozen) {
+			old = frozen[i]
+		}
+		if i < len(next) {
+			cur = next[i]
+		}
+		switch {
+		case old == cur:
+		case old == "":
+			items = append(items, DeltaItem{Kind: DeltaAdded, Target: key(i + 1), New: cur})
+		case cur == "":
+			items = append(items, DeltaItem{Kind: DeltaRemoved, Target: key(i + 1), Old: old})
+		default:
+			items = append(items, DeltaItem{Kind: DeltaModified, Target: key(i + 1), Old: old, New: cur})
+		}
+	}
+	return items
+}
+
+// approachText renders a step's [A15] members as the one block a delta shows.
+// Empty for a pre-A15 step, so an old plan revised without approach content
+// produces no approach item rather than a phantom change.
+func approachText(s *Step) string {
+	if s == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(s.Approach)
+	for _, d := range s.Decisions {
+		fmt.Fprintf(&b, "\n%s (considered instead: %s); why: %s", d.Decision, strings.Join(d.Alternatives, ", "), d.Why)
+	}
+	if s.OrderingRationale != "" {
+		fmt.Fprintf(&b, "\nWhy this step sits here: %s", s.OrderingRationale)
+	}
+	return b.String()
 }
 
 // ProposeDelta diffs a proposed revision against the frozen artifacts and

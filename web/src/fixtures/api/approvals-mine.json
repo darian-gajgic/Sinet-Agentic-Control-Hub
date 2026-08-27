@@ -244,7 +244,7 @@
       "answerable": true,
       "batchable": false,
       "step_up_required": false,
-      "payload_hash": "82cad5038c76c4946067b7d0651fd774f26bdd777ca52b4c108a975db4418d36",
+      "payload_hash": "f4235806c772846ab82785d2d76db8179242e51f560148523f4929b571325d0e",
       "observed_ts": "2026-07-20T09:02:00Z",
       "expiry_at": "2026-07-20T09:02:20Z",
       "stale": true,
@@ -320,12 +320,25 @@
                 "id": "S-1",
                 "title": "Collect the merged changes",
                 "done_when": "every merge since the last tag is listed",
+                "approach": "I read the merge log since the last release tag and list every entry once, newest first.",
+                "decisions": [
+                  {
+                    "decision": "read the merge log rather than the commit log",
+                    "alternatives": [
+                      "walk every commit",
+                      "diff the two release tags"
+                    ],
+                    "why": "one line per merged change is what the notes list, and the merge log already says that"
+                  }
+                ],
+                "ordering_rationale": "nothing can be written up before the list of what changed exists",
                 "class": ""
               },
               {
                 "id": "S-2",
                 "title": "Write one line per change",
                 "done_when": "each listed change has a plain sentence",
+                "approach": "I write one plain sentence per listed change, saying what a reader would notice.",
                 "class": ""
               }
             ],
@@ -342,7 +355,17 @@
               "usd": 0.12,
               "known": true,
               "basis": "median of the last five notes runs"
-            }
+            },
+            "constraints": [
+              "no external publishing"
+            ],
+            "supplied": [
+              {
+                "rule_id": "P47-7",
+                "fact": "the last release tag is v2.3.0, cut on 2026-07-06",
+                "ts": "2026-07-20T09:01:00Z"
+              }
+            ]
           },
           "actions": [
             "approve",
@@ -459,7 +482,7 @@
       "answerable": true,
       "batchable": true,
       "step_up_required": false,
-      "payload_hash": "16554b3e065d67d50833ef9e2ee00d7e84a689629228c22fe92ebd865f86aa80",
+      "payload_hash": "0d1341a2b45312d9d44fa2ca2cdfd33cf651cb903e832e24a0b2027bbd23317e",
       "observed_ts": "2026-07-20T09:02:00Z",
       "expiry_at": "2026-07-20T09:02:20Z",
       "stale": true,
@@ -515,6 +538,7 @@
                 "id": "S-1",
                 "title": "Write the note",
                 "done_when": "the note exists in the household folder",
+                "approach": "I read this week's finished tasks and write one short paragraph naming each.",
                 "class": ""
               }
             ],
@@ -546,7 +570,7 @@
       "answerable": true,
       "batchable": true,
       "step_up_required": false,
-      "payload_hash": "9bd040fe6154893bb45cf38669fdc23a1dfa55a63a0671541531875c55bf9a0e",
+      "payload_hash": "30436c8a46a30d9bdd983091a3282ec45884e24be60c05fa13e6f789f1f72fdf",
       "observed_ts": "2026-07-20T09:02:00Z",
       "expiry_at": "2026-07-20T09:02:20Z",
       "stale": true,
@@ -602,6 +626,7 @@
                 "id": "S-1",
                 "title": "Write the note",
                 "done_when": "the note exists in the household folder",
+                "approach": "I read this week's finished tasks and write one short paragraph naming each.",
                 "class": ""
               }
             ],

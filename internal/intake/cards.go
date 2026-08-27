@@ -279,10 +279,16 @@ const (
 
 // DeltaItem is one change against the frozen artifacts.
 type DeltaItem struct {
-	Kind   DeltaKind `json:"kind"`
-	Target string    `json:"target"` // "AC-2" | "S-3" | "assumption:<text>" | "confinement:S-2" | …
-	Old    string    `json:"old,omitempty"`
-	New    string    `json:"new,omitempty"`
+	Kind DeltaKind `json:"kind"`
+	// Target names the changed field in the ONE declared vocabulary
+	// (target.go): "AC-2" | "S-3" | "confinement:S-2" | "restatement" |
+	// "outcome:1" | "constraint:1" | "out_of_scope:1" | "risk:1" |
+	// "approach:S-2" | "assumption". It is the same vocabulary a Re-plan
+	// contest names, so the field a requester contested before approval and
+	// the field that changed after it carry one name.
+	Target string `json:"target"`
+	Old    string `json:"old,omitempty"`
+	New    string `json:"new,omitempty"`
 }
 
 // DeltaBody is the delta-only card: exactly what changed, nothing else —
@@ -418,7 +424,10 @@ type SlotAnswer struct {
 }
 
 // ContestRef is the structured Re-plan entry: tap the AC, assumption, or
-// step being contested (Spec S06.9).
+// step being contested (Spec S06.9). Target is quoted from the card's own
+// served content in the ONE declared vocabulary (target.go); a POSITIONAL
+// target the served pair does not hold is refused, and the requester's own
+// words keep the permissive fold.
 type ContestRef struct {
 	Target string `json:"target"`
 	Note   string `json:"note,omitempty"`

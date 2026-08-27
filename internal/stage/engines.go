@@ -364,12 +364,19 @@ type EnginePlanner struct{ s *Skeleton }
 
 var _ intake.Planner = (*EnginePlanner)(nil)
 
+// pairSchema is the ONE emission contract for the Stage-1 pair, wrapped by both
+// Draft and Revise so a revision can never be asked for a different artifact
+// than a draft. The per-step approach members carry the [A15] marker: Spec
+// S00.9's A15 row makes the implementing packet annotate its planner-prompt
+// site, and this is that site.
 const pairSchema = `Output EXACTLY one JSON object, nothing else, shaped:
 {"spec":{"restatement":string, "outcome":[string...],
   "acs":[{"n":1,"plain":string,"structured":string?,"structured_kind":"ears"|"gwt"|""}...],
   "constraints":[string...], "assumptions":[{"text":string,"origin":string}...],
   "out_of_scope":[string...], "clarifications":[string...]},
  "plan":{"steps":[{"id":"S-1","title":string,"done_when":string,"class":"C1"|"C2",
+   "approach":string, "decisions":[{"decision":string,"alternatives":[string...],"why":string}...],
+   "ordering_rationale":string?,
    "write_set":[glob...], "outward_effects":[string...], "new_spend":bool,
    "credential_touch":bool, "shared_asset_write":bool, "research":bool}...],
   "coverage":{"AC-1":["S-1"],...}, "research_nodes":[{"rule_id":string,"step_id":"S-n","query":string}...],
@@ -378,7 +385,16 @@ Rules: acceptance criteria numbered 1..n contiguously, plain phrasing on every
 criterion; steps keyed S-1..n, each with a testable done_when and a confinement
 class; EVERY AC key appears in coverage; a research node per open data-bearing
 flag; unresolved consequential ambiguities become NEEDS-CLARIFICATION entries
-in clarifications (they block approval); prefer the smallest honest plan.`
+in clarifications (they block approval); prefer the smallest honest plan.
+Per-step approach [A15]: every step states, in plain words a non-programmer can
+read, HOW it will be built — the method you chose; the material decisions you
+made inside the step, each with the alternatives you considered and why the
+winner won; and, only where the ordering is load-bearing, why this step sits
+where it does. A step naming only its outcome is invalid: the requester reviews
+this plan to catch a wrong approach before the work runs, and an outcome
+sentence cannot be judged for approach. Do not list a decision you had no
+alternative for, and do not pad the ordering rationale where the order does not
+matter.`
 
 func (p *EnginePlanner) Draft(ctx context.Context, in intake.DraftInput) (intake.Pair, error) {
 	extra, err := draftInputItem(in)

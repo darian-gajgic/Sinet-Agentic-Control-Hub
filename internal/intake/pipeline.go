@@ -1645,10 +1645,23 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 	if st.Spine != nil && st.Spine.SizeFinding != "" {
 		l1.SizeNote = st.Spine.SizeDetail // stakes-gated display: non-trivial shows it (2.5)
 	}
+	// Layer 2 serves the WHOLE derived understanding, per field (P3-GF8 R4;
+	// operator record r5 §B.1 + §C rule 7). The constraints and the
+	// requester-supplied inputs were the two understanding fields the drafted-
+	// plan surface did not serve, so a requester could not see — let alone
+	// contest — what the platform believed it had been told to work within.
+	// Everything else in the §B.1 list was already here or on Layer 1: goal
+	// restatement → Layer1.Restatement; acceptance criteria → ACs; users and
+	// data/integrations → the family slots in the Understood recap plus
+	// Supplied and ResearchNodes; out-of-scope → Layer1.WillNotDo; risks →
+	// Layer1.Risks; assumptions and decisions → Layer1.Assumptions plus the
+	// recap. No SPEC member is invented: S06.6's enumeration is untouched, and
+	// Layer 1 stays one phone screen [A15 "What does NOT change"].
 	l2 := ApprovalLayer2{
 		ACs: pair.Spec.ACs, Steps: pair.Plan.Steps, Coverage: pair.Plan.Coverage,
 		Verdicts: st.Verdicts, ResearchNodes: pair.Plan.ResearchNodes,
 		Estimate: pair.Plan.Est, SpecRef: st.SpecRef, PlanRef: st.PlanRef,
+		Constraints: pair.Spec.Constraints, Supplied: pair.Spec.Supplied,
 	}
 	actions := []string{ActionApprove, ActionRePlan, ActionReInterview, ActionCancel}
 	if st.Routing != nil && st.Routing.ComposeEarned && st.Compose == nil {

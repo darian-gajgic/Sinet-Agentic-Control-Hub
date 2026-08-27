@@ -30,9 +30,13 @@ func testPair(task, owner string) Pair {
 		Plan: Plan{
 			TaskID: task, Owner: owner, Version: 1, SpecVersion: 1, Status: StatusDraft,
 			Tier: TierStandard, Provenance: "test-planner v1",
+			// The [A15] approach is required at the boundary (P3-GF8 R11); the
+			// pre-A15 shape is exercised by its own property test below.
 			Steps: []Step{
-				{ID: "S-1", Title: "Implement", DoneWhen: "tests pass", Class: "C1", WriteSet: []string{"src/**"}},
-				{ID: "S-2", Title: "Verify", DoneWhen: "ACs demonstrably hold", Class: "C1"},
+				{ID: "S-1", Title: "Implement", DoneWhen: "tests pass", Class: "C1", WriteSet: []string{"src/**"},
+					Approach: "I change the one module involved and leave its public surface alone."},
+				{ID: "S-2", Title: "Verify", DoneWhen: "ACs demonstrably hold", Class: "C1",
+					Approach: "I run the project's checks and read each criterion against what they report."},
 			},
 			Coverage: map[string][]string{"AC-1": {"S-1"}, "AC-2": {"S-2"}},
 			Risks:    []string{"the estimate may be off"},

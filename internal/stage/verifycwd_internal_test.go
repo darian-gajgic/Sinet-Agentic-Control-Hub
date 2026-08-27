@@ -67,8 +67,10 @@ func cwdPair(taskID string) intake.Pair {
 		},
 		Plan: intake.Plan{
 			Provenance: "cwd-fake v1",
+			// The [A15] approach is required at the boundary (P3-GF8 R11).
 			Steps: []intake.Step{
-				{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists", Class: "C1", WriteSet: []string{"src/**"}},
+				{ID: "S-1", Title: "Write the note", DoneWhen: "the note exists", Class: "C1", WriteSet: []string{"src/**"},
+					Approach: "I write the note into the project's own working copy."},
 			},
 			Coverage: map[string][]string{"AC-1": {"S-1"}},
 			Est:      intake.Estimate{SizeClass: "S", USD: 1.0, Known: true, Basis: "fake"},

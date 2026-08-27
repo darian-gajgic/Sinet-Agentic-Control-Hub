@@ -192,6 +192,19 @@ func (s *State) resolvedSet() map[string]bool {
 	return m
 }
 
+// resolutionOf returns the slot's current resolution, or nil when nothing has
+// settled it yet. It is what makes a slot ADDRESSABLE: the understood block a
+// card serves is built from exactly these, so "the card shows it" and "this
+// returns non-nil" are the same fact (P3-GF8 R2/R3).
+func (s *State) resolutionOf(slotID string) *SlotResolution {
+	for i := range s.Resolutions {
+		if s.Resolutions[i].SlotID == slotID {
+			return &s.Resolutions[i]
+		}
+	}
+	return nil
+}
+
 // resolveSlot records a resolution (idempotent per slot: the last write
 // wins; slots never un-resolve).
 func (s *State) resolveSlot(r SlotResolution) {

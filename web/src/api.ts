@@ -1704,6 +1704,20 @@ export type IntakePlanStep = {
   class?: string
   write_set?: string[]
   unbounded?: boolean
+  /** The per-step approach [A15] (Spec S06.6): HOW this step will be built, in
+   *  plain words at non-IT reading level. Requester-facing plan content —
+   *  rendered under the step with the assumptions treatment (S06.9 Layer 2),
+   *  never a machine-check target, and never validated for reading level.
+   *  Absent on a plan drafted before A15. */
+  approach?: string
+  /** The material decisions made inside the step [A15]: what was decided, what
+   *  else was on the table, and why the winner won. A listed decision is
+   *  always complete — the server refuses a decision with no alternative,
+   *  because that is not a material decision. */
+  decisions?: { decision: string; alternatives?: string[]; why: string }[]
+  /** Why this step sits where it does [A15] — present only where the ordering
+   *  is load-bearing, absent (not empty) otherwise. */
+  ordering_rationale?: string
 }
 
 /** The size/cost guess. `known:false` is the UNPRICED honesty posture — never
@@ -1750,6 +1764,15 @@ export type IntakeApproval = {
     steps?: IntakePlanStep[]
     coverage?: Record<string, string[]>
     estimate?: IntakeEstimate
+    /** The SPEC's constraints (P3-GF8 R4; operator record r5 §B.1): part of
+     *  what the platform understood it must work within, served per field so
+     *  the plan card can show it and the requester can contest it by key
+     *  (`constraint:<n>`). Absent on a card issued before this packet. */
+    constraints?: string[]
+    /** The requester-supplied inputs that dismissed a research trigger
+     *  (S06.3), each with the rule it answered and when it was given — the
+     *  data/integrations half of the same understanding. */
+    supplied?: { rule_id: string; fact: string; ts?: string }[]
   }
   routing?: IntakeRouting
   /** The card's OWN verb vocabulary — a control renders only for a served one. */
@@ -1781,6 +1804,13 @@ export type IntakeCard = {
    *  it. Absent on cards issued before the field existed. */
   clearance_floor?: number
   tier?: string
+  /** The task's family and what resolved it (P3-GF7 R9), carried on every
+   *  issued card as passive data: a silent family guess is what sends a whole
+   *  interview down the wrong template, so the guess is shown and cheaply
+   *  correctable (the `family` field on the interview answer). The family card
+   *  omits both — family is precisely what is unresolved there. */
+  family?: string
+  family_source?: string
   questions?: IntakeQuestion[]
   decision?: IntakeDecision
   approval?: IntakeApproval
@@ -1846,7 +1876,18 @@ export type IntakeAnswerBody = {
   /** The S06.9 multi-contest Re-plan entry (P3-GF3-BE1 R10): every contested
    *  step, criterion or assumption in ONE send, each key quoted from the
    *  card's own vocabulary. All of them, plus the top-level `note`, merge
-   *  into one bounded delta re-plan — one revision, not one per item. */
+   *  into one bounded delta re-plan — one revision, not one per item.
+   *
+   *  The target grammar (P3-GF8 R5), one list the server also mints delta
+   *  keys from: `AC-<n>` · `S-<n>` · `confinement:S-<n>` · `restatement` ·
+   *  `outcome:<n>` · `constraint:<n>` · `out_of_scope:<n>` · `risk:<n>` ·
+   *  `approach:S-<n>` — 1-based indices into the version THIS card served —
+   *  plus `assumption:<text>`, which names by content. A positional target the
+   *  served pair does not hold is REFUSED with the list it does offer, so
+   *  quote the card rather than composing keys. The per-target `note` is where
+   *  "what I want different" goes for that field; the top-level `note` is the
+   *  target-less finding. The server expands a positional target with the
+   *  field's current text before the reviser sees it, so a note may be short. */
   contests?: { target: string; note?: string }[]
   /** The person's own words, riding the same channel the verify/ladder cards
    *  carry (P3-RW-19 R6). The platform honors it on exactly three answers
