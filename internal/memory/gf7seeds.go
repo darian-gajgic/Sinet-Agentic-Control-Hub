@@ -52,8 +52,9 @@ func gf7OriginRef() (string, error) {
 			"options, an effect line on each and exactly one recommended default. TWO slots are added from the live walk: " +
 			"language_locale (9) and quality_bar (8), weights reasoned and recorded in the set's Source. Surviving ids and weights " +
 			"are VERBATIM from v3. The generic set is unchanged and stays on the P3-GF3-BE1 record.",
-		Drafting: "drafted at implementation time with Claude Opus 4.8 on 2026-08-27, per Spec S06.5 (\"drafted at implementation " +
-			"time with the strongest available frontier model\")",
+		Drafting: "drafted at implementation time with claude-opus-5[1m] on 2026-08-27, per Spec S06.5 (\"drafted at implementation " +
+			"time with the strongest available frontier model\") — the exact model identity the drafting runtime reported, and the " +
+			"same model line the P3-RW-12 and P3-GF3-BE1 records name",
 		Ratified: "PENDING: operator ratification is due at the planning-rework exit gate. The content ships governed under this " +
 			"record so the governed file and the runtime seed cannot diverge; a refusal at the gate is executed as its own " +
 			"supersession back to the P3-GF3-BE1 v3 content.",
@@ -73,7 +74,7 @@ func gf7OriginRef() (string, error) {
 // snapshot the way gf3taxonomy_v3.go freezes GF3's, mint your own Ensure with
 // your own provenance, and call it after this one.
 var gf7ContentDigest = map[intake.Family]string{
-	intake.FamilySoftware: "c37a0ab41509bad52192ac42eae0b1f6e6b731a6a505fff1a6b33b8e8911988f",
+	intake.FamilySoftware: "a4dcd1c049caaf6dc99707b6cd5da253dbf33e4c96ab64db1d22f7ce2bb53b22",
 }
 
 // gf7SupersedeFamilies is the one set this packet revised. It already has a

@@ -308,8 +308,9 @@ const rw12Provenance = "drafted P3-RW-12 with claude-opus-5 on 2026-08-13 per Sp
 // yet. The alternative would leave the governed file at v3 while the runtime
 // serves v4 — the live-pointer drift the snapshot doctrine closed. A refusal at
 // the gate is executed as its own supersession back to v3.
-const gf7Provenance = "W2 taxonomy rebuild drafted P3-GF7 with Claude Opus 4.8 on 2026-08-27 per Spec S06.5 " +
-	"(\"drafted at implementation time with the strongest available frontier model\"), from the operator records " +
+const gf7Provenance = "W2 taxonomy rebuild drafted P3-GF7 with claude-opus-5[1m] on 2026-08-27 per Spec S06.5 " +
+	"(\"drafted at implementation time with the strongest available frontier model\") — the same model line the P3-RW-12 and " +
+	"P3-GF3-BE1 taxonomy records name, so the drafting chain is one model line across all three versions. From the operator records " +
 	"b6-gate-operator-findings-r5-2026-08-23 (per-slot verdicts, the seven hard rules, the W2 order) and -r4 §F2, plus the " +
 	"live benchmark walk w1-nexus-live-harvest-2026-08-27 (H2 why-lines, H3 per-option effects, H10 inferred-not-asked, H23 " +
 	"the reference question set). THREE slots the operator killed as questions and one ruled with them (OQ1) keep their ids and " +
@@ -389,18 +390,15 @@ func softwareSeed() *Taxonomy {
 		Slots: []Slot{
 			{
 				ID: "behavior", Name: "What it should do", Weight: 10, Ask: AskNever,
-				MustKnow: "NEVER ASKED — the platform states its reading and the requester corrects it. Derive the intended behavior from " +
-					"the request itself and STATE it: the plain-language restatement on the SPEC is the behavior understanding, and every " +
-					"behavior the request implies without saying outright goes in the assumptions list as a correctable statement (\"I am " +
-					"taking this to mean …\"), never as a question. Asking a person what their own request should do produced, verbatim, " +
-					"\"I have no idea what to answer on this question and what the purpose of this question even is\".",
+				MustKnow: "NEVER ASKED. Derive the intended behavior from the request itself and STATE it: the plain-language restatement " +
+					"on the SPEC is the behavior understanding, and every behavior the request implies without saying outright goes in the " +
+					"assumptions list as a correctable statement (\"I am taking this to mean …\"), never as a question.",
 			},
 			{
 				ID: "terminology", Name: "Words that mean something specific", Weight: 10, Ask: AskNever,
-				MustKnow: "NEVER ASKED — the inversion. State, in the restatement and in the assumptions, the reading of every word in the " +
-					"request that carries a special or trade meaning (\"compatibility here means which cars a part fits\"), as a statement " +
-					"the requester can correct or confirm. A person cannot introspect on what the platform MIGHT have misread; they can " +
-					"read what it did read. Precise form of the underlying ambiguity: a domain term, action, or state is undefined, " +
+				MustKnow: "NEVER ASKED. State, in the restatement and in the assumptions, the reading of every word in the request that " +
+					"carries a special or trade meaning (\"compatibility here means which cars a part fits\"), as a statement the requester " +
+					"can correct or confirm. Precise form of the underlying ambiguity: a domain term, action, or state is undefined, " +
 					"overloaded, or open to multiple interpretations.",
 			},
 			{
@@ -451,9 +449,8 @@ func softwareSeed() *Taxonomy {
 			{
 				ID: "comparison_rules", Name: "The order things are listed in", Weight: 12,
 				MustKnow: "The comparison key, tie-breaking rule, or stability requirement is not specified. " +
-					"Precise form: where things are compared, sorted, or deduplicated, by what key, and how are ties broken? The answer must " +
-					"bind to a NAMED surface — the default list and the results of a search or filter are separate orders, and an option " +
-					"that names neither is unanswerable.",
+					"Precise form: where things are compared, sorted, or deduplicated, by what key, and how are ties broken? Bind the rule " +
+					"to a NAMED surface: the default list and the results of a search or filter are separate orders and are stated separately.",
 				Question: "When this shows a list of things — the main list people browse, and what comes back after they search or filter — " +
 					"what order should they be in?",
 				Why:         "A list nobody set an order for comes out in whatever order the data happened to be stored in, which reads as broken to the person looking at it.",
@@ -482,7 +479,8 @@ func softwareSeed() *Taxonomy {
 				ID: "ordering_atomicity", Name: "Steps that must not be left half-done", Weight: 12,
 				MustKnow: "Temporal order, simultaneity, or indivisible execution assumptions are unclear. " +
 					"Precise form: does order of operations or atomicity matter here — what must happen before what, and what must never interleave? " +
-					"A requester who is not an engineer cannot answer this, so the platform deciding and disclosing is the honest default.",
+					"Where the requester left the decision to the platform, work out the rule for every place a half-finished step would do " +
+					"damage and disclose each decision on the plan.",
 				Question:    "Are there steps here that must happen in a fixed order, or that must finish completely or not at all?",
 				Why:         "It decides whether something that fails halfway leaves a mess behind — a payment taken with no order recorded — or leaves nothing behind.",
 				Recommended: plannerChoosesValue,
@@ -511,15 +509,13 @@ func softwareSeed() *Taxonomy {
 				MustKnow: "NEVER ASKED — settled internally and disclosed. Resolve counting and boundary conventions from the request: thirty " +
 					"items means thirty items, and a range the requester names (\"Monday to Friday\") includes both ends unless they said " +
 					"otherwise. DISCLOSE the choice as a listed assumption wherever it is load-bearing. Raise it as a 1.7 single-question " +
-					"escalation only where the two readings genuinely change the deliverable. Asked as a question it produced, verbatim, " +
-					"\"30 items mean 30 items! This is embarrassing if this question gets asked to a user\".",
+					"escalation only where the two readings genuinely change the deliverable.",
 			},
 			{
 				ID: "output_format", Name: "How you get it", Weight: 8,
 				MustKnow: "How the finished work should ARRIVE, and where it should run, is unstated. Precise form: is the deliverable something " +
 					"the requester starts and uses themselves, changes made in place inside the project, or something deployed where other " +
-					"people reach it — and what does \"done\" therefore mean? The earlier phrasing asked about the shape of the code and " +
-					"files, which the requester could not answer and could not see the point of; the answerable question is about delivery.",
+					"people reach it — and what does \"done\" therefore mean for the requester's own use of it?",
 				Question:    "When this is finished, how should it reach you?",
 				Why:         "It decides whether the work ends with something you can open and use, or with files that still need someone to set them up.",
 				Recommended: "run_locally",
@@ -576,9 +572,7 @@ func softwareSeed() *Taxonomy {
 				MustKnow: "NEVER ASKED — settled internally and disclosed. Take rounding and precision from the kind of number involved: money to " +
 					"two decimal places in the currency the request implies, counts as whole numbers, percentages as the surrounding " +
 					"convention. Disclose it as a listed assumption in the requester's own terms (\"prices are shown as 12.34 euro\"). " +
-					"Raise it as a 1.7 single-question escalation only where the rounding rule genuinely changes what the person gets. It " +
-					"sits in the same natively-handled band as counting and ranges and fails the never-ask-what-you-can-resolve rule the " +
-					"same way (P3-GF7 OQ1, ratified 2026-08-27).",
+					"Raise it as a 1.7 single-question escalation only where the rounding rule genuinely changes what the person gets.",
 			},
 			// ---- The three Deep-Plan slots (P3-RW-12) ----
 			{
@@ -663,9 +657,9 @@ func softwareSeed() *Taxonomy {
 			{
 				ID: "language_locale", Name: "The language it speaks", Weight: 9,
 				MustKnow: "Which language the deliverable's own text is written in, and which locale conventions its dates, numbers and prices " +
-					"follow, is unstated. Every seeded string, label, button and message depends on it, so a change afterwards touches every " +
-					"visible line. Precise form: name the content language(s) and the locale formatting conventions, and state whether the " +
-					"strings must be structured so a second language can be added later.",
+					"follow, is unstated; every seeded string, label, button and message depends on it. Precise form: name the content " +
+					"language(s) and the locale formatting conventions, and state whether the strings must be structured so a second " +
+					"language can be added later.",
 				Question:    "What language should the finished thing speak to the people using it?",
 				Why:         "Every word it shows is written in this language, so changing it afterwards means rewriting all of them.",
 				Recommended: "english",
@@ -692,9 +686,8 @@ func softwareSeed() *Taxonomy {
 			{
 				ID: "quality_bar", Name: "What finished has to pass", Weight: 8,
 				MustKnow: "What the finished work must pass to count as done — feature-correctness alone, or a stated polish, performance or " +
-					"accessibility bar — is unstated. It decides what verification gates on: the acceptance criteria are written against " +
-					"this answer, so a bar chosen after the work is built is a bar the work was never aimed at. Precise form: name the " +
-					"checks the deliverable must pass and whether any of them are measured rather than judged.",
+					"accessibility bar — is unstated. It decides what verification gates on: write the acceptance criteria against this " +
+					"answer. Precise form: name the checks the deliverable must pass and whether any of them are measured rather than judged.",
 				Question:    "What does the finished thing have to pass before you would call it done?",
 				Why:         "This is what the work is checked against at the end, so it decides what gets built along the way — a bar added afterwards means going back.",
 				Recommended: "works_and_polished",
