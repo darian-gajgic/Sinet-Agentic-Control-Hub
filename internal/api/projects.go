@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -810,12 +813,75 @@ func (s *Server) projectIDTaken(ctx context.Context, projectID string) (bool, er
 // cannot carry both meanings — so the door takes the whole set, which is also
 // what an editor renders and submits.
 //
+// THE MEMBER IS A POINTER, AND THAT IS THE DIFFERENCE BETWEEN CLEARING AND
+// DESTROYING (drain r1 F2). Full replacement means an absent slot is erased —
+// which is right when the caller SENT a set, and catastrophic when they sent
+// nothing: readBody promotes an empty body to `{}`, so a request that lost its
+// payload in transit, or a client with a typo'd envelope, decoded to the zero
+// value and wiped every captured command with a 200. Absence of the `commands`
+// key is now a malformed request; `{"commands":{}}` is the explicit clear, and
+// it stays reachable because R4's all-empty set really is a legitimate act.
+//
 // The OWNER is not a field, and neither is the project: authority is the
 // session identity and the entry is the path (S15.2 — the browser is a
 // display). There is no conventions, danger-zone or family member: this door
 // orders commands, and a capture editor is a later packet's act (brief OQ5).
 type projectCommandsBody struct {
-	Commands ProjectCommands `json:"commands"`
+	Commands *json.RawMessage `json:"commands"`
+}
+
+// commandSlotNames is the wire vocabulary of the commands object, derived from
+// ProjectCommands' OWN json tags. Deriving rather than repeating is what keeps
+// the accepted set and the served set from drifting: a slot added to the struct
+// is accepted here the moment it exists, and one nobody added cannot be.
+var commandSlotNames = func() map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeOf(ProjectCommands{})
+	for i := 0; i < t.NumField(); i++ {
+		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
+}()
+
+// readCommandSlots decodes the commands object and REFUSES a key it does not
+// know (drain r1 F2).
+//
+// Unknown keys are refused HERE and nowhere else on this API, and the narrowness
+// is the justification: elsewhere an unknown member is forward-compatible slack
+// that costs a caller nothing, while here it is silent destruction — a `biuld`
+// typo drops the build command the caller meant to send AND erases the one that
+// was captured, under a 200 that says the write succeeded. The refusal names the
+// unknown slot and the set that exists, so the fix is one edit away.
+func readCommandSlots(raw json.RawMessage) (ProjectCommands, error) {
+	var slots map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &slots); err != nil {
+		return ProjectCommands{}, badRequest(`"commands" must be an object of command slots, e.g. {"commands":{"test":"go test ./..."}}: ` + err.Error())
+	}
+	var unknown []string
+	for name := range slots {
+		if !commandSlotNames[name] {
+			unknown = append(unknown, strconv.Quote(name))
+		}
+	}
+	if len(unknown) > 0 {
+		// Sorted, so the same bad request always reads the same way.
+		sort.Strings(unknown)
+		known := make([]string, 0, len(commandSlotNames))
+		for name := range commandSlotNames {
+			known = append(known, name)
+		}
+		sort.Strings(known)
+		return ProjectCommands{}, badRequest(fmt.Sprintf(
+			"unknown command slot %s: a project captures %s (S13.7). Nothing was changed — this write replaces the whole set, so a slot the platform does not know would have been dropped and the commands you meant to keep erased with it",
+			strings.Join(unknown, ", "), strings.Join(known, ", ")))
+	}
+	var cmds ProjectCommands
+	if err := json.Unmarshal(raw, &cmds); err != nil {
+		return ProjectCommands{}, badRequest(`"commands" slots must be strings: ` + err.Error())
+	}
+	return cmds, nil
 }
 
 func (s *Server) handleProjectCommands(w http.ResponseWriter, r *http.Request) {
@@ -876,11 +942,25 @@ func (s *Server) handleProjectCommands(w http.ResponseWriter, r *http.Request) {
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_body", Msg: err.Error()})
 		return
 	}
+	if body.Commands == nil {
+		// A body with no `commands` member is malformed, not an instruction to
+		// erase (drain r1 F2): an empty POST body decodes to `{}`, so accepting
+		// absence would let a request that lost its payload wipe every captured
+		// command and answer 200.
+		s.writeSurface(w, nil, badRequest(`missing "commands": this door replaces the whole captured set, so the object is required. `+
+			`To clear every command — which returns the project to the bootstrap posture, where your review decides the work (S07.8) — send {"commands":{}} and mean it.`))
+		return
+	}
+	commands, err := readCommandSlots(*body.Commands)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
 	// The VALUES are checked by the registry, not here: the one-line/encoding/
 	// length rules live with the store that will hand them to the verification
 	// sandbox, and its refusal arrives as the landed ErrBadInput → 400
 	// translation naming the rule and the slot. One list, one reader (§43).
-	minted, err := s.projCommands.SetCommands(r.Context(), id.UserID, projectID, body.Commands)
+	minted, err := s.projCommands.SetCommands(r.Context(), id.UserID, projectID, commands)
 	if err != nil {
 		s.writeSurface(w, nil, err)
 		return

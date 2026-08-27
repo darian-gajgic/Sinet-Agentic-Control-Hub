@@ -382,6 +382,96 @@ func TestEditCommandsIsOwnerOnlyAndActiveOnly(t *testing.T) {
 	}
 }
 
+// ── R6: the origin member, both directions ──────────────────────────────────
+
+// gf5CapturedPayloads returns every registry.captured payload as RAW stored
+// text, in event order. Raw, because the whole point of an omitempty member is
+// which KEYS are present — a decoded struct answers `""` for "absent" and for
+// "present and empty" alike, and cannot tell the two apart (the GF4 drain-F3c
+// standard).
+func gf5CapturedPayloads(t *testing.T, f *fix) []string {
+	t.Helper()
+	rows, err := f.db.QueryContext(context.Background(),
+		`SELECT payload FROM run_events WHERE type = ? ORDER BY event_seq`, EventCaptured)
+	if err != nil {
+		t.Fatalf("read capture events: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatalf("scan capture event: %v", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("capture events: %v", err)
+	}
+	return out
+}
+
+// TestEditCommandsIsDistinguishableFromAScanInTheAuditTrail [drain r1 F1;
+// brief R6] — S13.7 rows are owner-attributed, and the audit has to say WHICH
+// KIND of act attributed them. A scan's draft and a person's typed edit produce
+// capture rows that read identically: same table, same shape, same actor when
+// the owner onboarded their own project. `origin` is the one member that tells
+// them apart, and it is additive and omitempty, so BOTH directions are the
+// assertion — present on the edit, and the KEY ABSENT on everything else, which
+// is what keeps every pre-existing producer's event bytes unchanged.
+//
+// This test exists because deleting `Origin: OriginEdit` from EditCommands left
+// every other battery green (drain r1 F1): a distinguishing fact nothing reads
+// is a fact nobody would notice losing.
+func TestEditCommandsIsDistinguishableFromAScanInTheAuditTrail(t *testing.T) {
+	f := newFix(t)
+	ctx := context.Background()
+	src := f.fixtureRepo(map[string]string{"README.md": "hi", "Makefile": "build:\n\ttrue\n"})
+
+	// 1 — the SCAN's draft, through the real onboarding path.
+	if _, _, err := f.store.Onboard(ctx, OnboardInput{
+		ProjectID: "shop", Owner: "alice", Name: "shop", Source: src,
+	}); err != nil {
+		t.Fatalf("Onboard: %v", err)
+	}
+	if _, err := f.store.Activate(ctx, "shop", "alice"); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	// 2 — the OWNER's typed edit, through the verb this door rides.
+	if _, minted, err := f.store.EditCommands(ctx, "shop", "alice", Commands{Test: "go test ./..."}); err != nil || !minted {
+		t.Fatalf("EditCommands: minted=%v err=%v", minted, err)
+	}
+	// 3 — a re-scan, which is a scan again and must read as one.
+	if _, err := f.store.Rescan(ctx, "shop", "alice"); err != nil {
+		t.Fatalf("Rescan: %v", err)
+	}
+
+	payloads := gf5CapturedPayloads(t, f)
+	if len(payloads) != 3 {
+		t.Fatalf("registry.captured events = %d, want 3 (draft, edit, re-scan): %v", len(payloads), payloads)
+	}
+	wantOrigin := `"origin":"` + OriginEdit + `"`
+	for _, tc := range []struct {
+		what  string
+		at    int
+		typed bool
+	}{
+		{"the scan's draft", 0, false},
+		{"the owner's edit", 1, true},
+		{"the re-scan", 2, false},
+	} {
+		has := strings.Contains(payloads[tc.at], `"origin"`)
+		switch {
+		case tc.typed && !has:
+			t.Errorf("%s carries no origin member — an owner's edit is indistinguishable from a scan in the audit trail: %s", tc.what, payloads[tc.at])
+		case tc.typed && !strings.Contains(payloads[tc.at], wantOrigin):
+			t.Errorf("%s carries the wrong origin, want %s: %s", tc.what, wantOrigin, payloads[tc.at])
+		case !tc.typed && has:
+			t.Errorf("%s carries an origin KEY; the member is omitempty precisely so every pre-existing producer's event bytes are unchanged: %s", tc.what, payloads[tc.at])
+		}
+	}
+}
+
 // ── T9: the race ────────────────────────────────────────────────────────────
 
 // gf5DeclaredSentinel reports whether err carries one of the package's DECLARED

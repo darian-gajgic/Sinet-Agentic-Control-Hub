@@ -31,6 +31,7 @@ package stage_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -63,6 +64,81 @@ const gf5Owner = "u-operator"
 
 // gf5ProjectID is the registered project the walked task is attached to.
 const gf5ProjectID = "p-scaffold"
+
+// gf5CappedSettings is the harness registry with the two S07.6 round keys
+// lowered, so the drain parks after ONE judged round instead of three.
+//
+// A WRAPPER, NOT A REGISTRY WRITE: the pair carries a cross-key invariant
+// (patience <= rework_rounds, settings/index.go), so both move together or
+// neither does, and overriding at the seam keeps this file from writing ⚙
+// state a later test in the same package could read. The values are the
+// FLOOR of the declared range, not new numbers.
+type gf5CappedSettings struct {
+	base  stage.Settings
+	rooms map[string]int64
+}
+
+func (s gf5CappedSettings) Int(key string) (int64, error) {
+	if v, ok := s.rooms[key]; ok {
+		return v, nil
+	}
+	return s.base.Int(key)
+}
+
+func (s gf5CappedSettings) Float(key string) (float64, error) {
+	if v, ok := s.rooms[key]; ok {
+		return float64(v), nil
+	}
+	return s.base.Float(key)
+}
+
+func (s gf5CappedSettings) FloatFor(key, userID string) (float64, error) {
+	if v, ok := s.rooms[key]; ok {
+		return float64(v), nil
+	}
+	return s.base.FloatFor(key, userID)
+}
+
+func (s gf5CappedSettings) Duration(key string) (time.Duration, error) { return s.base.Duration(key) }
+func (s gf5CappedSettings) String(key string) (string, error)          { return s.base.String(key) }
+func (s gf5CappedSettings) Bool(key string) (bool, error)              { return s.base.Bool(key) }
+func (s gf5CappedSettings) Strings(key string) ([]string, error)       { return s.base.Strings(key) }
+
+// gf5ReviseJudge forces VerdictRevise every round, without ever claiming a
+// criterion failed.
+//
+// It passes each AC with evidence that is NOT a substring of the artifact, so
+// the landed extractive-evidence rule forces the verdict to Unknown
+// ("unknown: non-extractive evidence", verify/v2.go) and the Unknown ESCAPE
+// synthesizes a blocker — the S07.5 rule that an undecided criterion can never
+// dissolve into SHIP. That is the honest way to hold the drain open: the judge
+// is not asserting a defect, it is failing to decide, which is exactly the
+// state the rework ladder exists for.
+type gf5ReviseJudge struct{}
+
+func (gf5ReviseJudge) Compliance(_ context.Context, in verify.JudgeInput) (verify.Axis1Result, error) {
+	var out verify.Axis1Result
+	for _, ac := range in.ACs {
+		out.Verdicts = append(out.Verdicts, verify.ACVerdict{
+			Key: fmt.Sprintf("AC-%d", ac.N), Pass: true,
+			Evidence: "this quotation appears nowhere in the artifact",
+		})
+	}
+	return out, nil
+}
+
+func (gf5ReviseJudge) Sanity(context.Context, verify.JudgeInput) (verify.Axis2Result, error) {
+	return verify.Axis2Result{ProbeNotes: map[verify.Probe]string{
+		verify.ProbeReasonableUser:       "the note reads as asked",
+		verify.ProbeImplicitExpectations: "nothing obvious is missing",
+		verify.ProbeSideEffects:          "no unrequested changes",
+		verify.ProbeExpertStandard:       "competent",
+	}}, nil
+}
+
+func (gf5ReviseJudge) Meta() verify.JudgeMeta {
+	return verify.JudgeMeta{Model: "gf5-revise-judge-1", SelfFamily: true}
+}
 
 // gf5PostureMember is the verdict row's posture member, matched as the exact
 // JSON pair rather than as the bare word. The GF4 rig's judge is named
@@ -129,6 +205,13 @@ type gf5Harness struct {
 
 func newGF5Harness(t *testing.T) *gf5Harness {
 	t.Helper()
+	return newGF5HarnessWith(t, bootstrapJudge{}, nil)
+}
+
+// newGF5HarnessWith is the same rig with the judge and the S07.6 round keys
+// under the test's control, so a drain can be held open to a card.
+func newGF5HarnessWith(t *testing.T, judge verify.Judge, rooms map[string]int64) *gf5Harness {
+	t.Helper()
 	ctx := context.Background()
 	reg := settings.New()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), storage.DBFileName), reg)
@@ -156,7 +239,8 @@ func newGF5Harness(t *testing.T) *gf5Harness {
 	runner := &gf5PassingRunner{}
 
 	sk, err := stage.New(stage.Config{
-		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led, Settings: reg,
+		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led,
+		Settings: gf5CappedSettings{base: reg, rooms: rooms},
 		Adapters: map[string]adapters.Adapter{
 			adapters.SubstrateClaudeCLI: &claudecli.Adapter{
 				Binary: self, HookCmd: "/opt/sinet/bin/sinet engine-hook", Settings: reg,
@@ -168,7 +252,7 @@ func newGF5Harness(t *testing.T) *gf5Harness {
 		RunRoot:      filepath.Join(root, "runs"),
 		CopyAsideDir: filepath.Join(root, "copy-aside"),
 		Review:       rev,
-		Judge:        bootstrapJudge{},
+		Judge:        judge,
 		CheckPackFor: gf5PackResolver(proj),
 		CheckRunner:  runner,
 	})
@@ -277,6 +361,131 @@ func (h *gf5Harness) post(t *testing.T, who, path, body string) (int, string) {
 	rr := httptest.NewRecorder()
 	h.srv(who).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
 	return rr.Code, rr.Body.String()
+}
+
+// gf5RoundPayloads returns the run's verdict.recorded payloads ONE PER ROW, in
+// order. roundRowsFor concatenates them, which cannot answer "did the LAST
+// round carry the posture" — the question the escape sequence turns on.
+func gf5RoundPayloads(t *testing.T, h *gf5Harness, runID string) []string {
+	t.Helper()
+	rows, err := h.db.QueryContext(context.Background(),
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = ? ORDER BY event_seq`, runID, verify.EventRound)
+	if err != nil {
+		t.Fatalf("read verdict rows: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatalf("scan verdict row: %v", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("verdict rows: %v", err)
+	}
+	return out
+}
+
+// TestGF5EscapeFromBootstrapMidLifecycle [drain r1 F3] — the operator's own
+// journey, in one test, with the pack flip coming from the DOOR and nothing
+// else.
+//
+//	round 1 verifies under the BOOTSTRAP posture, through the real seam reading
+//	the real registry  →  the run parks on an answerable card  →  the OWNER
+//	captures the project's commands over HTTP, mid-lifecycle  →  the card is
+//	answered  →  the resumed drain RE-RESOLVES the pack, runs the real ladder,
+//	and its verdict row carries no bootstrap posture.
+//
+// NO CLOSURE FLIPS. `gf5PackResolver` is installed once at composition and
+// never touched again; the only thing that changes between round 1 and round 2
+// is the capture the HTTP door wrote. That is the difference from GF4's retry
+// test, whose seam is flipped by the test itself — there the pack change was
+// simulated, here it is caused.
+//
+// WHY THE CARD IS CAP-HIT AND THE VERB IS `revise_with_guidance` — the one
+// place this departs from the finding's literal wording, because the literal
+// wording is not reachable. `retry` exists in exactly ONE card vocabulary,
+// `infraChoices` (verify/escalate.go), and that card is raised only for an
+// `Escalation.Infrastructure`, whose only builder fires on a
+// `*verify.PreambleRefusal` — an OUTAGE. A bootstrap resolution is not an
+// error: it is a pack, so it raises no infrastructure card and there is no
+// `retry` to answer. Manufacturing one would mean making the resolver fail,
+// which is the closure flip this finding forbids. The reachable terminal after
+// a bootstrap round the judge cannot decide is the S07.6 CAP-HIT card, and its
+// `revise_with_guidance` answer resumes through `ResumeWithGuidance` →
+// `validateInput` → `resolvePack` → a FRESH `CheckPackFor` call. Same
+// mechanism, same proof, reachable vocabulary.
+func TestGF5EscapeFromBootstrapMidLifecycle(t *testing.T) {
+	ctx := context.Background()
+	// One judged round, then the card. The convergence key moves with it: the
+	// two carry a cross-key invariant and a patience above the cap is not a
+	// state the registry accepts.
+	h := newGF5HarnessWith(t, gf5ReviseJudge{}, map[string]int64{
+		"verification.rework_rounds":               1,
+		"verification.convergence_patience_rounds": 1,
+	})
+	h.seedCommandless(t)
+
+	taskID := walkToVerify(t, h.harness, "software")
+	verifyRun := taskID + ".verify"
+
+	// ── round 1: the bootstrap posture, through the real seam ────────────
+	rounds := gf5RoundPayloads(t, h, verifyRun)
+	if len(rounds) != 1 {
+		t.Fatalf("judged rounds before the capture = %d, want exactly 1: %v", len(rounds), rounds)
+	}
+	if !strings.Contains(rounds[0], gf5PostureMember) {
+		t.Fatalf("round 1 did not run under the bootstrap posture — this is not the world under test:\n%s", rounds[0])
+	}
+	if len(h.runner.ran) != 0 {
+		t.Fatalf("the bootstrap round executed rungs %v — bootstrap invents nothing on a project's behalf", h.runner.ran)
+	}
+	if got := h.runState(t, verifyRun); got != "parked" {
+		t.Fatalf("verify run is %q after the bootstrap round, want parked on its card", got)
+	}
+	asks := openAskIDs(t, h.harness, taskID)
+	if len(asks) != 1 {
+		t.Fatalf("open asks = %v, want exactly the round-cap card", asks)
+	}
+	askID := asks[0]
+
+	// ── the owner captures the commands, mid-lifecycle, over HTTP ────────
+	code, body := h.post(t, gf5Owner, "/api/projects/"+gf5ProjectID+"/commands",
+		`{"commands":{"build":"true","test":"true","lint":"true"}}`)
+	if code != http.StatusOK {
+		t.Fatalf("owner commands write = %d; body: %s", code, body)
+	}
+	e, err := h.proj.Get(ctx, gf5ProjectID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if e.CaptureVersion != 2 {
+		t.Fatalf("capture version v%d after the write, want v2", e.CaptureVersion)
+	}
+
+	// ── the card is answered; the resumed drain re-resolves the pack ─────
+	if _, err := h.sur.Answer(ctx, gf5Owner, askID,
+		[]byte(`{"choice":"revise_with_guidance","guidance":[{"text":"quote the artifact when you cite a criterion","criterion":"AC-1"}]}`),
+		false); err != nil {
+		t.Fatalf("Answer(revise_with_guidance): %v", err)
+	}
+
+	after := gf5RoundPayloads(t, h, verifyRun)
+	if len(after) < 2 {
+		t.Fatalf("no further judged round after the answer: %d rows", len(after))
+	}
+	last := after[len(after)-1]
+	if strings.Contains(last, gf5PostureMember) {
+		t.Fatalf("the round after the capture STILL carries the bootstrap posture — the door's write never reached the pack resolution:\n%s", last)
+	}
+	if len(h.runner.ran) == 0 {
+		t.Fatal("no rung ran after the capture — the resumed drain did not run the real ladder")
+	}
+	if strings.Contains(last, verify.BootstrapAttribution) {
+		t.Fatalf("the round after the capture still carries the advisory %q marking:\n%s", verify.BootstrapAttribution, last)
+	}
 }
 
 // TestGF5WithoutTheDoorTheDrainStaysAdvisory is the CONTROL world: nothing is
