@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, FolderOpen, FolderPlus, Inbox as InboxIcon, Sparkles } from 'lucide-react'
+import { BookOpen, FolderOpen, FolderPlus, Inbox as InboxIcon, Sparkles, Terminal } from 'lucide-react'
 
 import {
   ApiError,
   api,
   type Deliverable,
+  type ProjectCommands,
   type ProjectDetail,
   type ProjectListItem,
   type ProjectStarted,
@@ -49,8 +50,16 @@ import { Button, Chip, EmptyState, Modal, Timestamp, type Tone } from './ui'
  * whole journey up front, and the landed answer renders the platform's own
  * sentence, the onboarding task and the approval ref — not this client's
  * paraphrase.
+ *
+ * THE COMMANDS DOOR (P3-GF6, the r4-F1b fix): each card carries a "Commands"
+ * door onto the project's captured build/test/lint/run/preview set — the
+ * OWNER edits it (a full-replacement write through the P3-GF5 route), a
+ * member reads it with an honest sentence naming who can edit, and a pending
+ * entry points at its real door, the onboarding card. `?commands=<id>` is the
+ * door's deep-linkable address, which is what gives the bootstrap-checked
+ * deliverable's card a destination (`hrefForProjectCommands`).
  */
-export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
+export function Projects({ me, stream, search = '' }: { me: string; stream?: EventStream; search?: string }) {
   const tasks = useLive({
     key: `/api/tasks#projects:${me}`,
     read: () => api.tasks(),
@@ -74,6 +83,17 @@ export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
     stream,
   })
   const [creating, setCreating] = useState(false)
+  // The Commands door has two openers: a card's own button, and the
+  // deep-linkable `?commands=<id>` address the bootstrap-checked deliverable
+  // links to. Closing a URL-opened editor also clears the address (replace,
+  // not push — Back should leave the surface, not re-open the modal).
+  const urlCommandsFor = new URLSearchParams(search).get('commands') ?? ''
+  const [localCommandsFor, setLocalCommandsFor] = useState('')
+  const commandsFor = localCommandsFor !== '' ? localCommandsFor : urlCommandsFor
+  const closeCommands = () => {
+    setLocalCommandsFor('')
+    if (urlCommandsFor !== '') navigate(hrefFor('projects'), { replace: true })
+  }
 
   const buckets = useMemo(
     () => projectBuckets(tasks.data?.tasks ?? [], deliverables.data?.deliverables ?? []),
@@ -127,7 +147,14 @@ export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
 
       <div className="proj-grid">
         {cards.map((c) => (
-          <ProjectCard key={c.name} card={c} registryAnswered={registryAnswered} />
+          <ProjectCard
+            key={c.name}
+            card={c}
+            registryAnswered={registryAnswered}
+            onCommands={(id) => {
+              setLocalCommandsFor(id)
+            }}
+          />
         ))}
       </div>
 
@@ -139,8 +166,18 @@ export function Projects({ me, stream }: { me: string; stream?: EventStream }) {
       )}
 
       <CreateProject open={creating} onOpenChange={setCreating} onLanded={registry.reload} />
+      {commandsFor !== '' && (
+        <CommandsEditor projectID={commandsFor} me={me} onClose={closeCommands} onLanded={registry.reload} />
+      )}
     </section>
   )
+}
+
+/** The Commands editor's deep-linkable address — what the bootstrap-checked
+ *  deliverable's card links to (P3-GF6): /projects with the editor open on
+ *  this project. */
+export function hrefForProjectCommands(projectID: string): string {
+  return `${hrefFor('projects')}?commands=${encodeURIComponent(projectID)}`
 }
 
 /* ── the aggregates (client-side over served rows, map §5) ────────────────── */
@@ -269,7 +306,15 @@ function stateChip(state: string): { tone: Tone; label: string } {
 
 /* ── one card ────────────────────────────────────────────────────────────── */
 
-function ProjectCard({ card, registryAnswered }: { card: CardData; registryAnswered: boolean }) {
+function ProjectCard({
+  card,
+  registryAnswered,
+  onCommands,
+}: {
+  card: CardData
+  registryAnswered: boolean
+  onCommands: (id: string) => void
+}) {
   const { setProject } = useProjectScope()
   const { name, entry, bucket } = card
   const noProject = name === '(no project)'
@@ -422,6 +467,24 @@ function ProjectCard({ card, registryAnswered }: { card: CardData; registryAnswe
           >
             <BookOpen size={13} strokeWidth={2} aria-hidden="true" />
             Project record
+          </Button>
+        )}
+        {/* The Commands door (P3-GF6). Rendered for every registry entry, in
+            every state — the modal itself answers honestly for a member (read
+            with the owner named) and for a pending draft (its real door is the
+            onboarding card), so the deep link from a bootstrap-checked
+            deliverable always has a destination that explains itself. */}
+        {entry !== null && (
+          <Button
+            variant="secondary"
+            size="sm"
+            data-proj-commands={entry.project_id}
+            onClick={() => {
+              onCommands(entry.project_id)
+            }}
+          >
+            <Terminal size={13} strokeWidth={2} aria-hidden="true" />
+            Commands
           </Button>
         )}
         {entry !== null && entry.state === 'active' && (
@@ -607,6 +670,349 @@ function ProjectRecord({
               ))
             )}
           </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+/* ── the Commands editor (P3-GF6: the r4-F1b door, via P3-GF5's POST) ────── */
+
+/** The wire vocabulary of the captured set, in the record modal's own order. */
+const commandSlots = ['build', 'test', 'lint', 'run', 'preview'] as const
+type CommandSlot = (typeof commandSlots)[number]
+
+/** What each slot is, in the reader's words — one line, no jargon. */
+const slotHelp: Record<CommandSlot, string> = {
+  build: 'How the project compiles or bundles — e.g. go build ./... or npm run build',
+  test: 'How its tests run — e.g. go test ./... or npm test',
+  lint: 'Its style and static checks — e.g. gofmt -l . or npm run lint',
+  run: 'How the finished thing starts',
+  preview: 'How to start it for a look — a dev server, for example',
+}
+
+function hasChecks(c: ProjectCommands): boolean {
+  return [c.build, c.test, c.lint].some((v) => v !== undefined && v.trim() !== '')
+}
+
+function hasAny(c: ProjectCommands): boolean {
+  return commandSlots.some((k) => c[k] !== undefined && c[k].trim() !== '')
+}
+
+/**
+ * The Commands editor: the owner of an ACTIVE project edits its five captured
+ * command slots and saves the set whole (full replacement on the wire — the
+ * boxes ARE the set, and all-empty is the explicit clear back to the
+ * bootstrap posture, said out loud before the press).
+ *
+ * Anyone else gets the honest read: a member sees the captured set read-only
+ * with a sentence naming the owner; a pending draft points at its real door
+ * (the onboarding card in the Inbox); the not-signed-in dev posture is told
+ * signing in is what makes a capture attributable. Nothing here renders a
+ * control that would only exist to fail — and every refusal the server can
+ * still answer (state moved under us) renders in its own words.
+ *
+ * Nothing executes on save: a captured command runs only inside the
+ * verification sandbox, on the next judged round — the body says so, because
+ * "the platform will run what I type" is exactly the kind of thing a person
+ * should not have to guess about.
+ */
+function CommandsEditor({
+  projectID,
+  me,
+  onClose,
+  onLanded,
+}: {
+  projectID: string
+  me: string
+  onClose: () => void
+  onLanded?: () => void
+}) {
+  const [detail, setDetail] = useState<ProjectDetail | null>(null)
+  const [readRefusal, setReadRefusal] = useState('')
+  const [slots, setSlots] = useState<Record<CommandSlot, string>>({ build: '', test: '', lint: '', run: '', preview: '' })
+  const [busy, setBusy] = useState(false)
+  const [refusal, setRefusal] = useState<{ kind: 'sign-in' | 'plain'; text: string } | null>(null)
+  const [landed, setLanded] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    setDetail(null)
+    setReadRefusal('')
+    setRefusal(null)
+    setLanded('')
+    api.project(projectID).then(
+      (r) => {
+        if (!mounted) return
+        setDetail(r.project)
+        const c = r.project.capture.commands
+        setSlots({
+          build: c.build ?? '',
+          test: c.test ?? '',
+          lint: c.lint ?? '',
+          run: c.run ?? '',
+          preview: c.preview ?? '',
+        })
+      },
+      (err: unknown) => {
+        if (!mounted) return
+        if (err instanceof ApiError && err.status === 404) {
+          setReadRefusal(
+            `No project "${projectID}" is visible to you — either it does not exist, or its record is someone else's. Nothing here can show or edit its commands.`,
+          )
+        } else {
+          setReadRefusal(describeError(err))
+        }
+      },
+    )
+    return () => {
+      mounted = false
+    }
+  }, [projectID])
+
+  const cap = detail?.capture
+  const stored: ProjectCommands = cap?.commands ?? {}
+  const signedOut = me === ''
+  const owner = detail?.owner ?? ''
+  const mine = !signedOut && owner === me
+  const active = detail?.state === 'active'
+  const editable = detail !== null && mine && active
+
+  /** The outgoing set: the boxes as they stand, blanks left out — the wire's
+   *  full-replacement unit, where {} is the sanctioned explicit clear. */
+  const outgoing = (): ProjectCommands => {
+    const out: ProjectCommands = {}
+    for (const k of commandSlots) {
+      const v = slots[k].trim()
+      if (v !== '') out[k] = v
+    }
+    return out
+  }
+  const clearing = detail !== null && !hasAny(outgoing()) && hasAny(stored)
+
+  const save = () => {
+    if (busy || !editable) return
+    setBusy(true)
+    setRefusal(null)
+    setLanded('')
+    api.setProjectCommands(projectID, outgoing()).then(
+      (r) => {
+        setBusy(false)
+        setDetail(r.project)
+        const c = r.project.capture.commands
+        setSlots({
+          build: c.build ?? '',
+          test: c.test ?? '',
+          lint: c.lint ?? '',
+          run: c.run ?? '',
+          preview: c.preview ?? '',
+        })
+        // The sentence is the platform's own — captured as version N, cleared
+        // back to bootstrap, or nothing changed — never re-told here.
+        setLanded(r.detail)
+        onLanded?.()
+      },
+      (err: unknown) => {
+        setBusy(false)
+        if (err instanceof ApiError && err.code === 'dev_identity') {
+          setRefusal({ kind: 'sign-in', text: '' })
+        } else if (err instanceof ApiError) {
+          // The server's refusals here are person-shaped sentences (who owns
+          // it, where the pending draft's real door is, what a bad body
+          // needed) — render them as said.
+          setRefusal({ kind: 'plain', text: err.message })
+        } else {
+          setRefusal({ kind: 'plain', text: describeError(err) })
+        }
+      },
+    )
+  }
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+      // The landed sentence and a long captured set make this taller than a
+      // short viewport; without its own scroll the fixed-centred popup would
+      // clip the act row off-screen (seen live, GF6 walk).
+      className="max-h-[86vh] overflow-y-auto"
+      title={`Commands — ${detail !== null && detail.name !== '' ? detail.name : projectID}`}
+      description="What the platform runs to check work in this project. Captured here as data — nothing runs when you save; a command executes only inside the verification sandbox, on the next round."
+      footer={
+        editable ? (
+          <>
+            <Button variant="primary" disabled={busy} aria-busy={busy} data-commands-save onClick={save}>
+              {busy ? 'Capturing…' : clearing ? 'Clear every command' : 'Capture — replace the set'}
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={onClose}>
+              Close
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        )
+      }
+    >
+      {readRefusal !== '' && (
+        <div className="door-refusal" role="alert">
+          <p className="refusal-detail">{readRefusal}</p>
+        </div>
+      )}
+      {readRefusal === '' && detail === null && <p className="proj-quiet m-0">Reading the project record…</p>}
+
+      {detail !== null && cap !== undefined && (
+        <div data-commands-editor={detail.project_id} data-commands-mode={editable ? 'edit' : 'read'}>
+          <p className="rec-facts">
+            <Chip tone={stateChip(detail.state).tone}>{stateChip(detail.state).label}</Chip>
+            <span>
+              capture v{String(cap.version)}
+              {cap.captured_by !== undefined && cap.captured_by !== '' && (
+                <>
+                  {' '}
+                  · by <Owner id={cap.captured_by} />
+                </>
+              )}
+            </span>
+            {cap.captured_ts !== undefined && cap.captured_ts !== '' && (
+              <span>
+                <Timestamp ts={cap.captured_ts} />
+              </span>
+            )}
+            <span>
+              owner <Owner id={detail.owner} />
+            </span>
+          </p>
+
+          {/* The honest posture, from the STORED capture — what is true now.
+              Only for an ACTIVE entry: a pending draft has no runnable work,
+              so "work in this project is checked in bootstrap mode" would be
+              a claim about rounds that cannot happen yet (seen live, GF6
+              walk — the pending face said it beside the onboarding pointer). */}
+          {detail.state !== 'active' ? null : hasChecks(stored) ? (
+            <p className="cmd-posture" data-cmd-posture="checked">
+              Verification runs the captured build, test and lint below as its checks on every round of work in this
+              project.
+            </p>
+          ) : (
+            <p className="cmd-posture cmd-posture-bootstrap" data-cmd-posture="bootstrap">
+              No check commands are captured, so work in this project is checked in <b>bootstrap mode</b>: the platform
+              runs no build, test or lint of its own, its verdict is advisory, and the requester&apos;s review is what
+              decides. Capturing a build, test or lint command switches the next round to real checks.
+            </p>
+          )}
+
+          {/* ── who may edit, said before any control (or its absence) ── */}
+          {signedOut ? (
+            <p className="cmd-who" data-cmd-why="signed-out">
+              Setting commands is a person&apos;s act, and you are browsing without being signed in — the captured set is
+              shown read-only. <Link to={hrefFor('login')}>Sign in</Link> as the owner (<Owner id={detail.owner} />) to
+              edit it.
+            </p>
+          ) : detail.state === 'pending' && mine ? (
+            <div className="cmd-who" data-cmd-why="pending">
+              <p className="m-0">
+                This project is still waiting for your approval, so its drafted commands are edited on the onboarding
+                card in your Inbox — answering that card captures the draft you approve and turns the project active.
+                This editor serves an active project.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  navigate(hrefForInbox({ project: projectID, task: '', sort: '' }))
+                }}
+              >
+                <InboxIcon size={13} strokeWidth={2} aria-hidden="true" />
+                To its onboarding card
+              </Button>
+            </div>
+          ) : !mine ? (
+            <p className="cmd-who" data-cmd-why="not-owner">
+              Only the project&apos;s owner edits these, and this project is owned by <Owner id={detail.owner} /> — what
+              they capture here is what the platform runs to check everybody&apos;s work in it. The set is shown
+              read-only; ask them for a change.
+            </p>
+          ) : !active ? (
+            <p className="cmd-who" data-cmd-why="not-active">
+              This project&apos;s record is in state &quot;{detail.state}&quot;, and commands are edited on an active
+              project — the set is shown read-only.
+            </p>
+          ) : null}
+
+          {/* ── the set: five slots, editable or honestly read-only ── */}
+          {editable ? (
+            <div className="flex flex-col gap-3 mt-3">
+              {commandSlots.map((k) => (
+                <label className="door-field m-0" key={k}>
+                  <span className="door-label">
+                    {k} <span className="door-optional">{slotHelp[k]}</span>
+                  </span>
+                  <input
+                    className="door-input mono"
+                    type="text"
+                    value={slots[k]}
+                    data-cmd-slot={k}
+                    onChange={(e) => {
+                      setSlots({ ...slots, [k]: e.target.value })
+                    }}
+                  />
+                </label>
+              ))}
+              <p className="cmd-note m-0">
+                Build, test and lint are what checking runs; run and preview are how the platform starts the project
+                when something needs it running. Each is one line, run inside the project&apos;s own sandboxed copy.
+                Saving replaces the whole set — an emptied box is an emptied slot.
+              </p>
+            </div>
+          ) : hasAny(stored) ? (
+            <dl className="rec-cmd mt-3">
+              {commandSlots.map((k) =>
+                stored[k] !== undefined && stored[k] !== '' ? (
+                  <div key={k} className="rec-cmd-row">
+                    <dt>{k}</dt>
+                    <dd className="mono">{stored[k]}</dd>
+                  </div>
+                ) : null,
+              )}
+            </dl>
+          ) : (
+            <p className="proj-quiet mt-3 mb-0">no commands captured</p>
+          )}
+
+          {/* The clear is loud BEFORE the press, not after: all boxes empty
+              while something is captured means the primary act erases the set. */}
+          {editable && clearing && (
+            <p className="cmd-clear-warning" role="status" data-cmd-clearing>
+              Every box is empty, so saving now removes the whole captured set. From the next round on, work in this
+              project is checked in bootstrap mode — no build, test or lint of the platform&apos;s own, advisory
+              verdicts, the requester&apos;s review deciding — until commands are captured again.
+            </p>
+          )}
+
+          {landed !== '' && (
+            <div className="door-saved" role="status" data-commands-landed>
+              {/* The platform's own sentence about what the write did. */}
+              <p className="saved-detail">{landed}</p>
+            </div>
+          )}
+          {refusal !== null &&
+            (refusal.kind === 'sign-in' ? (
+              <div className="door-refusal" role="alert">
+                <p className="refusal-detail">
+                  Setting commands is a person&apos;s act, and you are browsing without being signed in — nothing was
+                  captured. <Link to={hrefFor('login')}>Sign in</Link> as the owner, then capture them again.
+                </p>
+              </div>
+            ) : (
+              <div className="door-refusal" role="alert">
+                <p className="refusal-detail">{refusal.text}</p>
+              </div>
+            ))}
         </div>
       )}
     </Modal>

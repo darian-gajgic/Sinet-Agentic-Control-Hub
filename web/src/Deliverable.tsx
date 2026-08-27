@@ -28,6 +28,7 @@ import type { EventStream } from './events'
 import { deliverableEventTypes, describeError, useLive } from './live'
 import { ActConfirm, OutcomeLine, useAct } from './controls'
 import { Absent, Empty, Freshness, Owner, Section, Stamp, SurfaceHead } from './parts'
+import { hrefForProjectCommands } from './Projects'
 import { Link } from './router'
 import { hrefFor } from './routes'
 import { Button, Chip, EmptyState, cn, toneStyle, type Tone } from './ui'
@@ -281,6 +282,7 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
             {data.deliverable.subject_ref ? <> · {data.deliverable.subject_ref}</> : null}
           </p>
           <StateStory detail={data} me={me} />
+          <VerificationPosture detail={data} />
           <ResultBlock detail={data} />
           <RevisionsBlock detail={data} stale={stale} />
           <ComparisonBlock detail={detailRefs(data)} me={me} stream={stream} />
@@ -290,6 +292,73 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
         </>
       )}
     </section>
+  )
+}
+
+/**
+ * VerificationPosture — the bootstrap disclosure and its door (P3-GF6, the
+ * r4-F1 wall's other half).
+ *
+ * Rendered from the served `verification` member and from NOTHING else — never
+ * by matching a comment's prose or any token in the review stream. The member
+ * is honestly ABSENT for the ordinary posture (and on a server-side read
+ * degrade), and absent renders nothing: an ordinary deliverable carries no
+ * posture banner to reassure anybody with.
+ *
+ * `bootstrap` is the one value the platform serves today: this round was
+ * checked with no captured project commands, so the automated verdict is
+ * advisory and the requester's review is the real gate — said in plain words,
+ * with the DOOR that ends the condition: the project's Commands editor, where
+ * the owner captures build/test/lint once and the next round runs real
+ * checks. A value this build does not know renders as itself with no story
+ * claimed (the board's forward-tolerance, applied here).
+ */
+function VerificationPosture({ detail }: { detail: DeliverableDetail }) {
+  const v = detail.verification
+  if (v === undefined) return null
+  const project = detail.deliverable.project_id ?? ''
+  if (v.posture === 'bootstrap') {
+    return (
+      <div className={cn('boot-posture mb-3', reviewPanel)} data-posture="bootstrap" role="status">
+        <p className="boot-head">Checked in bootstrap mode — your review is what decides here.</p>
+        {/* Round-scoped truth: this ROUND was judged with no commands. Present
+            tense ("has no commands") would turn false the moment the owner
+            captures them, while the served posture — which describes the
+            judged round — honestly stays. */}
+        <p className="boot-body">
+          {project !== '' ? (
+            <>
+              When this round was checked, its project (<b className="mono">{project}</b>) had no captured commands, so
+              the platform could not run a build, tests or lint on the work — the automated verdict is advisory only
+              {v.review_mandatory && <>, and nothing counts as verified until the requester judges it</>}.
+            </>
+          ) : (
+            <>
+              No project stands behind this work, so there were no captured commands the platform could check it with —
+              the automated verdict is advisory only
+              {v.review_mandatory && <>, and nothing counts as verified until the requester judges it</>}.
+            </>
+          )}
+        </p>
+        {project !== '' && (
+          <p className="boot-door">
+            <Link to={hrefForProjectCommands(project)} className="boot-door-act" data-door="project-commands">
+              Set the project&apos;s commands
+            </Link>
+            <span className="boot-door-why">
+              once its build, test and lint are captured, every round after runs real checks.
+            </span>
+          </p>
+        )}
+      </div>
+    )
+  }
+  // A posture this build does not know: state the fact, claim no story.
+  return (
+    <p className={cn('boot-posture mb-3', reviewPanel)} data-posture={v.posture} role="status">
+      This round&apos;s checking ran under the &quot;{v.posture}&quot; posture
+      {v.review_mandatory ? <> — the requester&apos;s review is the deciding gate.</> : <>.</>}
+    </p>
   )
 }
 

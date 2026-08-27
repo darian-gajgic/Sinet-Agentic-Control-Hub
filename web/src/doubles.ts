@@ -27,6 +27,10 @@ import deliverableReworkRaw from './fixtures/api/deliverable-rework.json?raw'
 import placedCommentsRaw from './fixtures/api/placed-comments.json?raw'
 import previewsRaw from './fixtures/api/previews.json?raw'
 import deliverableDetailRaw from './fixtures/api/deliverable-detail.json?raw'
+import deliverableDetailBootstrapRaw from './fixtures/api/deliverable-detail-bootstrap.json?raw'
+import projectsRaw from './fixtures/api/projects.json?raw'
+import projectDetailRaw from './fixtures/api/project-detail.json?raw'
+import projectCommandsRaw from './fixtures/api/project-commands.json?raw'
 import deliverablesRaw from './fixtures/api/deliverables-in-review.json?raw'
 import deliverablesOfTaskRaw from './fixtures/api/deliverables-of-task.json?raw'
 import askAnswerRaw from './fixtures/api/history-ask-answer.json?raw'
@@ -222,6 +226,18 @@ export const fixtures = {
    *  refusal sentence — the shape the lane picker enumerates, never a list a
    *  test spells by hand. */
   pinnableLanes: () => parse<Record<string, unknown>>(intakePinnableLanesRaw),
+  /** The P3-GF5 projects-family bodies the Commands door consumes (P3-GF6):
+   *  alice's registry list (p-shop settled with commands, p-fresh the r4-F1
+   *  scaffold with nothing captured), the p-shop detail, and the commands
+   *  WRITE answer — the entry read back with the platform's own sentence
+   *  about what the write did. */
+  projects: () => parse<Record<string, unknown>>(projectsRaw),
+  projectDetail: () => parse<Record<string, unknown>>(projectDetailRaw),
+  projectCommands: () => parse<Record<string, unknown>>(projectCommandsRaw),
+  /** The bootstrap-checked deliverable (P3-GF5 R9): `verification` carries
+   *  {posture:"bootstrap", review_mandatory:true}, which is the member the
+   *  disclosure and its Commands door render from — never prose-matching. */
+  deliverableBootstrap: () => parse<Record<string, unknown>>(deliverableDetailBootstrapRaw),
   historyViews: () => parse<Record<string, unknown>>(viewsRaw),
   historyCatalog: () => parse<Record<string, unknown>>(catalogRaw),
   historyViewAnswer: () => parse<Record<string, unknown>>(viewAnswerRaw),

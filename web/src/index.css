@@ -3780,6 +3780,130 @@ input[type='radio'] {
   overflow-wrap: anywhere;
 }
 
+/* A landed write's answer: the platform's own sentence, in the green register —
+   the door-refusal anatomy with the opposite meaning. */
+.door-saved {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+  border-inline-start: 4px solid var(--green);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+}
+
+.saved-detail {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ── the Commands editor (P3-GF6) ── */
+
+.cmd-posture {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+  border-inline-start: 3px solid var(--green);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.cmd-posture-bootstrap {
+  border-color: color-mix(in srgb, var(--orange) 30%, transparent);
+  border-inline-start-color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 7%, transparent);
+}
+
+.cmd-posture b {
+  color: var(--fg);
+}
+
+.cmd-who {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.cmd-note {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.cmd-clear-warning {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
+  border-inline-start: 3px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+/* ── the bootstrap-posture disclosure on a deliverable (P3-GF6) ──
+   Rides the review panel's own glass body; the amber rail is what marks the
+   advisory register apart from the state story above it. */
+.boot-posture {
+  border-inline-start: 4px solid var(--orange);
+  background:
+    linear-gradient(color-mix(in srgb, var(--orange) 6%, transparent), color-mix(in srgb, var(--orange) 6%, transparent)),
+    var(--panel-grad);
+  font-size: 13px;
+}
+
+.boot-head {
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.boot-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.boot-door {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 10px 0 0;
+}
+
+.boot-door-act {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.boot-door-act:hover {
+  background: color-mix(in srgb, var(--orange) 20%, transparent);
+}
+
+.boot-door-why {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
 /* ── journey header ── */
 
 .journey-head {

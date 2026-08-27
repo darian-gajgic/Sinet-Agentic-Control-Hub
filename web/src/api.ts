@@ -1936,11 +1936,12 @@ export type ProjectStarted = {
  * posture, or nothing changed because these were already the captured
  * commands. The sentence is the server's; it is not reconstructed here.
  *
- * The TYPE lands here and the client verb does not: GF5 is the backend half,
- * and a declared verb nothing calls is a dead client verb this tree reports
- * rather than accumulates (sweep.test.tsx). The editor that calls
- * `POST /api/projects/{project}/commands` is GF6's, and it brings the verb
- * with it. The route is on the sweep's gap list until then.
+ * The TYPE landed with GF5 (the backend half) and the client verb deliberately
+ * did not: a declared verb nothing calls is a dead client verb this tree
+ * reports rather than accumulates (sweep.test.tsx). LANDED 2026-08-27
+ * (P3-GF6): the Commands editor on the Projects surface calls
+ * `setProjectCommands` below, exactly as this paragraph promised, and the
+ * route's gap entry left the sweep's list the same day.
  */
 export type ProjectCommandsWritten = {
   project: ProjectDetail
@@ -2352,6 +2353,29 @@ export const api = {
    *  task in the project; absent means each task is classified or asked. */
   createProject: (body: { project_id: string; name: string; remote_url?: string; family?: string }) =>
     post<ProjectStarted>('/api/projects', body),
+
+  /**
+   * The S13.7 captured-command write (P3-GF5 backend, P3-GF6 surface): the
+   * OWNER of an ACTIVE project replaces its captured command set whole.
+   *
+   * FULL REPLACEMENT, AND THE OBJECT IS THE UNIT: what `commands` carries IS
+   * the set afterwards — a slot left out of the object is a slot left empty,
+   * so this client sends only the slots that hold text and `{"commands":{}}`
+   * is the explicit all-empty clear, which returns the project to the
+   * bootstrap posture (each round's automated verdict advisory, the
+   * requester's review the real gate) until commands are captured again.
+   * The `commands` member itself is REQUIRED — the server answers a body
+   * without it with a 400 naming that recipe rather than treating absence as
+   * an instruction to erase — and an unknown slot key is a 400 by name.
+   * Owner-only (a visible member gets the honest 403 naming the owner; an
+   * invisible or unknown id is the one 404); a PENDING entry is a 409
+   * pointing at its real door, the onboarding card. Retry-safe: repeating a
+   * write that changes nothing answers 200 with the server's own
+   * nothing-changed sentence, and every answer's `detail` is the platform's
+   * sentence about what the write did — never reconstructed here.
+   */
+  setProjectCommands: (project: string, commands: ProjectCommands) =>
+    post<ProjectCommandsWritten>(`/api/projects/${encodeURIComponent(project)}/commands`, { commands }),
 
   tasks: (f: ListFilters = {}) => request<TaskList>(`/api/tasks${query(f)}`),
   runs: (f: ListFilters = {}) => request<RunList>(`/api/runs${query(f)}`),

@@ -331,7 +331,7 @@ export default function App({ stream }: { stream?: EventStream } = {}) {
                 ) : v === 'new' ? (
                   <DescribeGoal search={window.location.search} stream={stream} session={session} onSignedIn={reload} />
                 ) : v === 'projects' ? (
-                  <Projects me={session.user?.user_id ?? ''} stream={stream} />
+                  <Projects me={session.user?.user_id ?? ''} stream={stream} search={window.location.search} />
                 ) : v === 'board' ? (
                   <Board me={session.user?.user_id ?? ''} stream={stream} />
                 ) : v === 'fleet' ? (
