@@ -68,10 +68,19 @@ type dlvEnv struct {
 type fakePusher struct {
 	reqs     []broker.Request
 	rejected bool
+	// pushErr, when set, is returned as the push outcome — the shape
+	// broker.Client.Push hands back for a broker refusal or transport failure
+	// (client.go's !OK collapse: "broker: <reason>"). No landed test sets it;
+	// the P3-GF11 red suite drives the served-refusal posture with it
+	// (P3/briefs/P3-GF11.md R5/R6, Amendment-A window).
+	pushErr error
 }
 
 func (p *fakePusher) Push(req broker.Request) (broker.PushResult, error) {
 	p.reqs = append(p.reqs, req)
+	if p.pushErr != nil {
+		return broker.PushResult{}, p.pushErr
+	}
 	if p.rejected {
 		return broker.PushResult{Rejected: true}, nil
 	}
