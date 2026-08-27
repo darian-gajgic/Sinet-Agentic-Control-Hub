@@ -91,14 +91,22 @@ func resolveTarget(pair *Pair, target string) (ref targetRef, grammar, ok bool) 
 	case strings.HasPrefix(target, prefixRisk):
 		return indexed(pair.Plan.Risks, strings.TrimPrefix(target, prefixRisk))
 	case strings.HasPrefix(target, prefixApproach):
-		step := pair.Plan.Step(strings.TrimPrefix(target, prefixApproach))
+		suffix := strings.TrimPrefix(target, prefixApproach)
+		if !stepKeyed(suffix) {
+			return targetRef{}, false, false
+		}
+		step := pair.Plan.Step(suffix)
 		if step == nil {
 			return targetRef{}, true, false
 		}
 		return targetRef{Text: step.Approach}, true, true
 	case strings.HasPrefix(target, prefixConfinement):
 		// Landed structural target: validated against the plan, never expanded.
-		return targetRef{}, true, pair.Plan.Step(strings.TrimPrefix(target, prefixConfinement)) != nil
+		suffix := strings.TrimPrefix(target, prefixConfinement)
+		if !stepKeyed(suffix) {
+			return targetRef{}, false, false
+		}
+		return targetRef{}, true, pair.Plan.Step(suffix) != nil
 	case strings.HasPrefix(target, prefixAC):
 		if _, err := strconv.Atoi(strings.TrimPrefix(target, prefixAC)); err != nil {
 			return targetRef{}, false, false
@@ -111,6 +119,21 @@ func resolveTarget(pair *Pair, target string) (ref targetRef, grammar, ok bool) 
 		return targetRef{}, true, pair.Plan.Step(target) != nil
 	}
 	return targetRef{}, false, false
+}
+
+// stepKeyed reports whether a suffix is a step key ("S-3") rather than
+// somebody's own words. It is the step-keyed families' half of the rule the
+// indexed families get from indexed(): `approach: do it simpler overall` and
+// `confinement: this is too loose` are free text a requester typed, and they
+// fold with every other target the grammar does not claim (OQ1). Only a
+// grammar-shaped key that names nothing — `approach:S-9` against a two-step
+// plan — is a refusal.
+func stepKeyed(suffix string) bool {
+	if !strings.HasPrefix(suffix, prefixStep) {
+		return false
+	}
+	_, err := strconv.Atoi(strings.TrimPrefix(suffix, prefixStep))
+	return err == nil
 }
 
 // indexed resolves a 1-based index into a served list. A suffix that is not a
@@ -139,23 +162,27 @@ func offeredTargets(pair *Pair) string {
 	if pair.Spec.Restatement != "" {
 		parts = append(parts, targetRestatement)
 	}
+	steps := len(pair.Plan.Steps)
+	// ONE table over the WHOLE positional vocabulary, including the two
+	// step-keyed families. They sit in the table rather than in a tail of
+	// special cases so a family cannot be answered by resolveTarget and then
+	// left out of the refusal that is supposed to name it.
 	for _, r := range []struct {
 		prefix string
 		n      int
 	}{
 		{prefixAC, len(pair.Spec.ACs)},
-		{prefixStep, len(pair.Plan.Steps)},
+		{prefixStep, steps},
 		{prefixOutcome, len(pair.Spec.Outcome)},
 		{prefixConstraint, len(pair.Spec.Constraints)},
 		{prefixOutOfScope, len(pair.Spec.OutOfScope)},
 		{prefixRisk, len(pair.Plan.Risks)},
+		{prefixApproach + prefixStep, steps},
+		{prefixConfinement + prefixStep, steps},
 	} {
 		if s := countedKeys(r.prefix, r.n); s != "" {
 			parts = append(parts, s)
 		}
-	}
-	if n := len(pair.Plan.Steps); n > 0 {
-		parts = append(parts, countedKeys(prefixApproach+prefixStep, n))
 	}
 	if len(parts) == 0 {
 		return "nothing yet — no plan is drafted"
