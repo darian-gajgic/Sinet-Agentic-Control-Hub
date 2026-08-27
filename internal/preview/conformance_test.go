@@ -123,9 +123,10 @@ func TestNoNewMigration(t *testing.T) {
 		// view re-create) and 0023 by P3-RW-7 (the onboarding arm on that same
 		// task→project edge), 0024 by P3-RW-11 (the capture's task family) and
 		// 0025 by P3-LN-6 (the S10.4 plan-unit automation budget, per (person,
-		// lane, window)); anything beyond those would be an unexpected
+		// lane, window)) and 0026 by P3-GF10 (the revision's producing-run
+		// attribution join key); anything beyond those would be an unexpected
 		// preview-side add.
-		if name >= "0026" {
+		if name >= "0027" {
 			t.Errorf("unexpected migration %q — the preview packet adds none (R23; disposable previews have no durable table)", name)
 		}
 	}

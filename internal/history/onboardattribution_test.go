@@ -468,8 +468,8 @@ func TestOnboardMigrationCeremony(t *testing.T) {
 	if err := f.db.QueryRowContext(f.ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 25 {
-		t.Errorf("user_version = %d, want 25 (migrations through 0025 applied contiguously)", version)
+	if version != 26 {
+		t.Errorf("user_version = %d, want 26 (migrations through 0026 applied contiguously)", version)
 	}
 	for _, view := range []string{"task_project", "cost_per_project"} {
 		var n int
