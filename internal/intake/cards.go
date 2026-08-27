@@ -244,6 +244,13 @@ type ApprovalLayer2 struct {
 	Estimate      Estimate            `json:"estimate"`
 	SpecRef       *ArtifactRef        `json:"spec_ref,omitempty"`
 	PlanRef       *ArtifactRef        `json:"plan_ref,omitempty"`
+	// Constraints and Supplied complete the served understanding on the
+	// drafted-plan surface (P3-GF8; operator record r5 §B.1/§C rule 7): the
+	// SPEC's constraints and the requester-supplied inputs were the two §B.1
+	// understanding fields the card did not serve. Additive and omitempty —
+	// an ask snapshot written before this packet decodes exactly as it did.
+	Constraints []string       `json:"constraints,omitempty"`
+	Supplied    []SuppliedFact `json:"supplied,omitempty"`
 }
 
 // Approval card actions.

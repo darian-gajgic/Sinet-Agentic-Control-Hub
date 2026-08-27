@@ -121,6 +121,17 @@ type ResearchNode struct {
 	Query  string `json:"query,omitempty"`
 }
 
+// StepDecision is one material decision the planner made inside a step
+// [A15, 2026-08-27]: what was decided in plain words, the alternatives it
+// considered, and why the chosen one won (Spec S06.6 per-step approach;
+// operator record r4 §F3). Requester-facing plan content — never a
+// machine-check target.
+type StepDecision struct {
+	Decision     string   `json:"decision"`
+	Alternatives []string `json:"alternatives,omitempty"`
+	Why          string   `json:"why"`
+}
+
 // Step is one numbered plan step (stable key "S-n") with its per-step
 // "Done when" stage contract (consumed by verification, Spec S07) and its
 // declarations: confinement class, write-set, and the effect/spend/
@@ -129,6 +140,20 @@ type Step struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	DoneWhen string `json:"done_when"`
+
+	// Per-step approach [A15, 2026-08-27] — the artifact-schema marker site
+	// the S00.9 A15 row requires annotated. Approach states HOW the step
+	// will be built, in plain words at non-IT reading level; Decisions are
+	// the material decisions with alternatives and why; OrderingRationale
+	// says why this step sits where it does, only where the ordering is
+	// load-bearing. Rendered under the step with the assumptions treatment
+	// (S06.9 Layer 2); verification still binds to the ACs and DoneWhen —
+	// the approach informs the Stage-4 human judgment, it is not a new
+	// machine-check target. All json-omitempty so PRE-A15 artifacts reload
+	// and re-render byte-identically (the CitedEntries precedent).
+	Approach          string         `json:"approach,omitempty"`
+	Decisions         []StepDecision `json:"decisions,omitempty"`
+	OrderingRationale string         `json:"ordering_rationale,omitempty"`
 
 	// Confinement declaration (C0–C2 at v0; Spec S11 owns mechanics). The
 	// class declared here flows to every helper, tighter-only; widening is
