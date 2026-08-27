@@ -1236,8 +1236,10 @@ do_budget() {
     info "one pool means one number, so '$canon' and '$sib' report the IDENTICAL"
     info "pressure ratio at every moment. Selection takes the strictly less"
     info "consumed lane and keeps the earlier candidate on a tie, so between those"
-    info "two the earlier one wins always. Read the walk's head-to-head section"
-    info "before you read a run of '$canon' receipts as a verdict about either."
+    info "two the earlier one wins always — UNPINNED. The per-task lane pin on the"
+    info "give-work door (P3-LN-9/LN-10) is how your hand reaches '$sib'; the"
+    info "walk's head-to-head section is the recipe. Never read a run of"
+    info "'$canon' receipts alone as a verdict about either."
   fi
   note "Re-run '$ENVP$SELF budget' whenever a period has ended. Nothing rolls one"
   info "over — re-declaring IS the act that starts the next period."
@@ -1279,13 +1281,11 @@ do_walk() {
   commissioned="$(grep 'lanes: commissioned' "$CONTROL_LOG" 2>/dev/null | tail -1 \
     | grep -oE 'lanes=[^ ]*' | cut -d= -f2 | tr -d '"' || true)"
 
-  # The head-to-head's facts, derived rather than written down. The candidate
-  # ORDER is the thing the comparison turns on, and it is not a preference: the
-  # duty-map seat's lane comes first and the commissioned lanes follow it sorted
-  # by lane name (opencode.loadLaneDocs returns them "SORTED BY LANE NAME";
-  # CommissionedSeats walks them in that order; worker.chooseFlatLane builds
-  # `covered` as the seat then the alternates).
-  local mine kimi_doc kimi_canon kimi_pool kimi_members kimi_model candidates
+  # The head-to-head's facts, derived rather than written down. (The candidate
+  # ORDER — duty seat's lane first, commissioned lanes sorted by name — matters
+  # only to the UNPINNED tie the walk summarizes; since P3-LN-9/LN-10 the pin
+  # is how the comparison actually runs, so the order is stated, not derived.)
+  local mine kimi_doc kimi_canon kimi_pool kimi_members kimi_model
   mine="$(person_lanes)"
   kimi_doc="$(plan_doc_for "$(printf '%s' "$mine" | tr ' ' '\n' | grep -x 'kimi-cli' || true)" 2>/dev/null || true)"
   if [ -n "$kimi_doc" ]; then
@@ -1296,7 +1296,6 @@ do_walk() {
     # the CLI document rather than repeating an id this tree already dates.
     kimi_model="$(jq -r '.default_model // ""' "$(lane_doc kimi-cli)" 2>/dev/null || true)"
   fi
-  candidates="$BASE_LANE$(printf '%s' "$mine" | tr ' ' '\n' | sort | sed 's/^/, /' | tr -d '\n')"
 
   cat <<EOF
 
@@ -1384,53 +1383,50 @@ $people
     · both are denominated: ${kimi_members:-the two kimi lanes} draw the single
       "${kimi_pool:-shared}" allowance, declared once against ${kimi_canon:-kimi}.
 
-  WHAT YOU CANNOT DO, AND IT IS BETTER TO KNOW IT NOW:
-  There is no way to aim a task at a named lane. No form field, no button, no
-  URL, no environment variable and no CLI flag anywhere in this platform takes a
-  lane from you; every "lane" you can see in the UI is routing READING BACK a
-  decision it already made. The benchmark's direct-arm path is not a way in
-  either — its substrate and lane are compiled constants (claude-cli/anthropic).
+  HOW TO AIM A TASK AT A PATH — the per-task lane pin (P3-LN-9/LN-10, S00.9 A13):
+  On the give-work door, under "Which lane runs this?", the box saying "The
+  platform picks the lane…" IS a button — click "Pin a lane for this task…" and
+  chips appear: "The platform chooses" (the default) beside the pinnable lanes
+  this world actually holds. Pick one and the panel states exactly what pinning
+  means; a pin the platform cannot honor REFUSES the submission with its reason,
+  never a quiet reroute. Left alone, nothing changed: routing picks as before.
 
-  AND ROUTING WILL NOT DO IT FOR YOU. The arithmetic, in full, because the
-  conclusion is uncomfortable and you should be able to check it:
-    · candidates for this duty, in order: ${candidates:-$BASE_LANE} — the duty
-      seat's lane first, then the lanes commissioned for you sorted by NAME;
-    · selection takes the STRICTLY less consumed lane, and a tie keeps the
-      earlier candidate;
-    · ${kimi_members:-the two kimi lanes} share one pool, so their consumption is
-      SUMMED and divided by the SAME single budget. Their pressure ratios are
-      not merely close — they are the same number, always, by construction;
-    · "kimi" sorts before "kimi-cli".
-  Put together: kimi-cli ties kimi at every moment and loses every tie. It can
-  never be picked while kimi is commissioned, and the two commission from one
-  credential, so you cannot hold one without the other. Run ten tasks and you
-  will get ten receipts reading anthropic, kimi or zai, and not one reading
-  kimi-cli. That is the platform behaving exactly as designed — and reporting it
-  as a broken lane would be reporting the wrong defect.
+  WHY YOU MUST PIN FOR THIS COMPARISON (the short arithmetic): unpinned routing
+  takes the strictly less-consumed covered lane, and ${kimi_members:-the two kimi lanes}
+  share one pool — one number — so they TIE at every moment and the tie keeps
+  the earlier candidate ("kimi" sorts first). Unpinned, kimi-cli can never win.
+  That is by design, not a broken lane; the pin exists precisely so your hand
+  can do what pressure arithmetic cannot.
 
-  SO WHAT IS WORTH DOING IN THIS SITTING:
-   1. Run several tasks and watch the Lane column alternate across anthropic,
-      kimi and zai as consumption builds. That is the LN-6 pressure mechanism
-      working, and it is real: it is what a lane winning looks like.
-   2. Read the kimi receipts for the two figures a path comparison is made of —
-      the token count and the "ran for" duration on the task card — and keep
-      them. They are the API path's half of the head-to-head, measured on real
-      work rather than on a smoke test.
-   3. Do NOT read the absence of kimi-cli receipts as a result about the CLI.
-      It is a result about routing.
+  THE RECIPE — same work, both paths, receipts as the verdict:
+   1. Write a task, pin it to kimi, approve, let it finish.
+   2. Give the SAME goal again, pin it to kimi-cli, approve, let it finish.
+   3. Repeat the pair a few times (3+ rounds makes a trend; alternate the order
+      so neither path always goes first on a warm cache).
+   4. Read each task's card and receipt: the Lane column names the path that
+      ACTUALLY ran each call, and the card carries the two comparable figures —
+      the token count and the "ran for" duration ("from its first record to its
+      last"; a still-running task shows elapsed-since-created, a different
+      quantity). Both lanes front the same model seat
+      (${kimi_model:-the same default model}), so the comparison is path vs
+      path, not model vs model.
+   5. In between, run a few UNPINNED tasks and watch the Lane column alternate
+      across anthropic, kimi and zai as consumption builds — that is the LN-6
+      pressure mechanism working, and it is the control group your pinned pairs
+      sit against.
 
-  WHAT WOULD MAKE THE COMPARISON RUNNABLE — named, so nobody re-derives it:
-  a per-task lane pin (an operator surface that puts a lane on the request, the
-  natural home being the settings/approval path), OR routing treating pooled
-  siblings as separable candidates instead of two names for one ratio. Neither
-  exists today. This door will not fake one: a recipe that quietly produced
-  kimi receipts and called them a comparison would be worse than no recipe.
+  ONE HONEST GAP, SO IT DOES NOT SURPRISE YOU (LN-10 review F2, follow-up
+  LN-10b): after you submit, the task card does NOT yet show the pin — no task
+  surface does until dispatch. The pin IS stored (it survives into every intake
+  record), and the proof arrives with the first routing decision: the plan/
+  approval card's routing reason says "…is pinned on this task, so the pin
+  replaced the consumption-pressure comparison", History → routing shows the
+  same sentence, and the receipt's Lane column names the lane per call.
 
-  AND WHEN IT DOES BECOME RUNNABLE, READ IT HERE:
-    · the receipt Lane column (b) tells you which path actually ran the work;
-    · the task card's token count and "ran for" duration are the comparable
-      figures — same membership, and both lane documents front the same model
-      seat (${kimi_model:-the same default model});
+  WHAT THE FIGURES CAN AND CANNOT SAY:
+    · the receipt Lane column tells you which path actually ran the work;
+    · tokens + duration are the comparable figures, plus your own judgment of
+      the RESULT's quality — keep notes per pair;
     · CONSUMPTION IS NOT ONE OF THEM. Both lanes draw one pool, so /fleet's
       consumption and pressure figures are WITHIN-POOL: they tell you what the
       membership spent, never which path spent it. Comparing them lane-to-lane
@@ -1502,9 +1498,9 @@ $people
      is deliberately not part of this door. On the kimi-cli lane there is no
      smoke to fall back on at all: that suite is written to skip even when every
      gate opens, because the FIRST live call on this membership through the CLI
-     path was meant to be your own door run, made deliberately. Since routing
-     will not send one (see the head-to-head), the CLI path's first live call is
-     still ahead of you.
+     path was meant to be your own door run, made deliberately. Your first task
+     PINNED to kimi-cli (the head-to-head recipe, step 2) IS that first live
+     call — you will be making it knowingly, which is exactly the design.
    · YOUR OWN KIMI INSTALL AND ITS DATA ROOT ARE UNTOUCHED. $HOME/.kimi-code
      holds live credentials; nothing in this door reads it, writes it or runs
      the binary inside it. The engine step installed the pin into this world,
