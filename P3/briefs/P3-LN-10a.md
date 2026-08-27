@@ -1,3 +1,5 @@
+> **EXPIRED 2026-08-27 (landed).** Single-use artifact — later grounding reads code + spec only. Post-brief corrections: the regeneration needs `TestRouteInventoryFixture` too (R8's single-command claim was wrong); R9's "declaredButUncalled stays `['health']`" was stale — it is `[]` since 2026-08-05 (eval F1).
+
 # P3-LN-10a — the pinnable-lanes read (grounding brief)
 
 **One verb.** Serve `intake.Pipeline.PinnableLanes` — the startup-composed set of lanes a task-creation pin may name, each row carrying the platform's own verdict — as `GET /api/intake/pinnable-lanes`, so the LN-10 lane picker enumerates from the running world and the set it offers IS the set the boundary honors. Grounded 2026-08-27 against the tree at `c0a06fc`+; every file:line below was read this session.
