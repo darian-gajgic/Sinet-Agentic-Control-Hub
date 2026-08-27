@@ -1,3 +1,5 @@
+> **EXPIRED at P3-GF5 landing (2026-08-27).** Single-use artifact — drain fixes moved the code past this text; never read as truth.
+
 # P3-GF5 — the project-Commands write route (r4-F1b, backend half)
 
 **Contract:** `Spec/drafts/S13-deliverables-review-git-backup.md` §S13.7 (the registry: name/…/**commands** (build/test/lint/run/preview); "Rows are owner-attributed; captured content is versioned"; "Re-scan on demand or when drift is detected") + `Spec/drafts/S15-frontend-api.md` §S15.2 (one seam, equal clients; server-side authority; writes retry-safe; every mutation lands on the event log; additive-first) + `Spec/drafts/S07-verification-quality.md` §S07.8 bootstrap bullet [A14] ("The posture is computed per revision from the registry's current capture — once commands exist, the full ladder resumes and the advisory marking drops") and §S07.3 rule 7 / §S07.9 P-T06-1 (verified-on stamps). Operator record: `P3/design/b6-gate-operator-findings-r4-2026-08-23.md` §F1b ("no spec change needed, build immediately") and the GF2-ratified rule (r2 record, 2026-08-22): **every answerable card carries its real door.**
