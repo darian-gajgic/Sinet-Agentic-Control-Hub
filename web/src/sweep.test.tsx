@@ -523,17 +523,17 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
   // assigned it to a row that did not carry it, which is what kept it invisible.
   // The coordinator amended the UI-4 row to own it (OQ1(a)). CONVENTIONS §46's
   // gap record carries the dated pointer (§50).
+  //
+  // CLOSED 2026-08-27 (P3-LN-10), one entry removed rather than annotated:
+  // GET /api/intake/pinnable-lanes is consumed by the lane picker on the
+  // create form — exactly the consumer its gap entry named — and the
+  // stale-entry test below forced the removal the moment the form called it.
+  // CONVENTIONS §46's gap record carries the dated pointer.
   {
     method: 'POST',
     path: '/api/meters/plan-budget',
     gap: true,
     why: 'REPORTED GAP (P3-LN-6, 2026-08-25): the 13.4 BACKEND half is served — declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need — and no surface exists for it. The S15.9 settings tab is its named consumer and lands with 13.4; the token budget verb sat here the same way in B6-2B until its editor arrived. This is an absence with a date, not a route no client may ever call.',
-  },
-  {
-    method: 'GET',
-    path: '/api/intake/pinnable-lanes',
-    gap: true,
-    why: 'REPORTED GAP (P3-LN-10a, 2026-08-27): the BACKEND half of the lane pin is served — the lanes a task-creation pin may name, composed once at startup and carried verbatim with the verdict the platform itself computed on each, so a picker enumerates the set the boundary actually honors instead of hardcoding a second spelling. Its named consumer is P3-LN-10, the lane picker on the create form, and it lands with that packet. The plan-budget entry above is the same shape of absence: a backend half sitting served-but-unconsumed until its surface arrives. An absence with a date, not a route no client may ever call.',
   },
 ]
 
@@ -625,8 +625,15 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     // enumerates the set the boundary honors rather than spelling it a second
     // time — and its surface is P3-LN-10, the lane picker on the create form.
     // Two routes over two shapes; §46 carries both counts and both dates.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(2)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(2)
+    // MOVED BACK 2026-08-27 (P3-LN-10), 2 → 1 routes over 2 → 1 shapes: the
+    // lane picker landed on the create form and consumed the pinnable-lanes
+    // read — the named consumer its gap entry promised — so its entry was
+    // REMOVED rather than annotated, the stale-entry test forcing it the
+    // moment the form called the route. One route over one shape remains:
+    // the plan-budget verb, still waiting on the S15.9 settings tab.
+    // CONVENTIONS §46 carries the same counts and this date.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(1)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(1)
     // A reported gap names a route the server DOES serve — that is what makes
     // it a gap rather than a phantom, and the phantom check above already bars
     // an exception naming an unserved route. This assertion read `toBe(0)`

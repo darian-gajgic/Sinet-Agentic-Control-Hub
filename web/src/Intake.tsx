@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CircleAlert, CornerDownRight, FolderOpen, Pencil, Sparkles, X } from 'lucide-react'
+import { Check, CircleAlert, CornerDownRight, FolderOpen, Pencil, Pin, Sparkles, X } from 'lucide-react'
 
 import {
   ApiError,
@@ -11,6 +11,7 @@ import {
   type IntakeQuestion,
   type IntakeTaskView,
   type IntakeUnderstood,
+  type PinnableLane,
   type Session,
   type User,
 } from './api'
@@ -231,8 +232,35 @@ function AskForm({
   const [text, setText] = useState('')
   const [title, setTitle] = useState('')
   const [project, setProject] = useState(pinned)
+  // The P3-LN-9 per-task lane pin: '' is the ordinary case — no pin, the
+  // platform chooses — and the member stays OFF the wire entirely (the
+  // unpinned submission is byte-identical to the pre-pin one).
+  const [lane, setLane] = useState('')
+  const [laneOpen, setLaneOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<{ head: string; detail: string } | null>(null)
+
+  // The pinnable set (P3-LN-10a): read ONCE when the form mounts. The set is
+  // composed at control-plane startup — a placed key commissions its lane at
+  // the NEXT start (P3-LN-4) — so no event type moves it under a running
+  // plane, and a live follow here would poll for a fact that cannot change
+  // (S15.12's spirit). A failed read is an honest state of its own, rendered
+  // in the picker; the unpinned default keeps working regardless.
+  const [laneWorld, setLaneWorld] = useState<LaneWorld>(null)
+  useEffect(() => {
+    let gone = false
+    api.pinnableLanes().then(
+      (v) => {
+        if (!gone) setLaneWorld(v)
+      },
+      (err: unknown) => {
+        if (!gone) setLaneWorld({ failed: describeError(err) })
+      },
+    )
+    return () => {
+      gone = true
+    }
+  }, [])
 
   // The registry moves through the onboarding task's own frames (no project.*
   // event type exists), which the inbox set carries.
@@ -266,6 +294,7 @@ function AskForm({
         ...(effectiveTitle !== '' ? { title: effectiveTitle } : {}),
         text: text.trim(),
         ...(project !== '' ? { project } : {}),
+        ...(lane !== '' ? { pinned_lane: lane } : {}),
       })
       .then(
         (v) => {
@@ -285,6 +314,16 @@ function AskForm({
             setRefusal({
               head: `"${project}" is not active yet — nothing was submitted.`,
               detail: `${err.message} Finish the project's onboarding approval first, or submit without the pin.`,
+            })
+          } else if (err instanceof ApiError && err.code === 'lane_pin_refused') {
+            // The S00.9 A13 refusal: a pin the platform cannot honor refuses
+            // the SUBMISSION — never a silent fallback onto routing's own
+            // choice. The detail is the server's whole sentence, which names
+            // the lanes that ARE pinnable; the picker stays open and armed so
+            // the person can re-pick and send again.
+            setRefusal({
+              head: `The pin to lane "${lane}" was refused — nothing was submitted.`,
+              detail: err.message,
             })
           } else {
             setRefusal({ head: 'The submission did not land.', detail: describeError(err) })
@@ -372,6 +411,16 @@ function AskForm({
         </p>
       )}
 
+      <LanePicker
+        world={laneWorld}
+        lane={lane}
+        open={laneOpen}
+        onOpen={() => {
+          setLaneOpen(true)
+        }}
+        onPick={setLane}
+      />
+
       <div className="door-acts">
         <Button variant="primary" onClick={submit} disabled={empty || busy} aria-busy={busy} data-ask="submit">
           {busy ? 'Sending…' : 'Send it — plan this goal'}
@@ -387,6 +436,131 @@ function AskForm({
             <p className="refusal-detail">{refusal.detail}</p>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/* ── the lane pin (P3-LN-10; S00.9 A13) ──────────────────────────────────── */
+
+/** What the ask box knows about the pinnable set: not yet answered, the
+ *  served rows, or the read's own failure — three states, each with its own
+ *  honest face below. Never a hardcoded list: the choices are the P3-LN-10a
+ *  read VERBATIM, which serves the set the submit boundary validates
+ *  `pinned_lane` against. */
+export type LaneWorld = { lanes: PinnableLane[] } | { failed: string } | null
+
+/**
+ * The per-task lane-pin picker (P3-LN-10). The operator holds more than one
+ * flat-rate lane and wants a head-to-head: the same goal pinned to lane A,
+ * then to lane B, the receipts telling which lane ran. This control is that
+ * pin's front door, and it is OPT-IN BY DESIGN: the ordinary task never asks
+ * a person to think about lanes — the collapsed face states the default (the
+ * platform chooses) and offers the pin in one small act.
+ *
+ * The honesty rules, in this form's own tradition:
+ *  - choices are ENUMERATED from the running world; an unpinnable lane is
+ *    never offered as a dead control (finding-5's rule — a control either
+ *    works or is not rendered) but IS stated as a fact, with the platform's
+ *    own refusal sentence verbatim, so "why can't I pin local?" is answered
+ *    where the question arises;
+ *  - a failed read degrades out loud and takes nothing with it: the unpinned
+ *    default keeps working and the degraded face says exactly that;
+ *  - an empty set is an honest absence with its meaning stated, never a
+ *    control that silently vanished.
+ */
+export function LanePicker({
+  world,
+  lane,
+  open,
+  onOpen,
+  onPick,
+}: {
+  world: LaneWorld
+  lane: string
+  open: boolean
+  onOpen: () => void
+  onPick: (lane: string) => void
+}) {
+  const lanes = world !== null && 'lanes' in world ? world.lanes : []
+  const pinnable = lanes.filter((l) => l.pinnable)
+  const unpinnable = lanes.filter((l) => !l.pinnable)
+  const failed = world !== null && 'failed' in world ? world.failed : ''
+  return (
+    <div className="door-field lane-pin" data-ask="lane" data-lane-open={open || undefined} data-lane={lane || undefined}>
+      <span className="door-label" id="lane-pin-label">
+        Which lane runs this? <span className="door-optional">optional — left alone, the platform chooses</span>
+      </span>
+      {!open ? (
+        <p className="lane-closed">
+          <span className="lane-closed-words">
+            The platform picks the lane, favoring the one with the most room left.
+          </span>
+          <Button variant="ghost" size="sm" data-lane-open-act onClick={onOpen}>
+            Pin a lane for this task…
+          </Button>
+        </p>
+      ) : (
+        <>
+          <div className="lane-chips" role="group" aria-labelledby="lane-pin-label">
+            <button
+              type="button"
+              className="q-option"
+              data-lane-choice=""
+              data-active={lane === ''}
+              aria-pressed={lane === ''}
+              onClick={() => {
+                onPick('')
+              }}
+            >
+              The platform chooses
+            </button>
+            {pinnable.map((l) => (
+              <button
+                key={l.lane}
+                type="button"
+                className="q-option mono"
+                data-lane-choice={l.lane}
+                data-active={lane === l.lane}
+                aria-pressed={lane === l.lane}
+                onClick={() => {
+                  onPick(l.lane)
+                }}
+              >
+                {l.lane}
+              </button>
+            ))}
+          </div>
+          {world === null && <p className="lane-aside">reading which lanes can be pinned…</p>}
+          {failed !== '' && (
+            <p className="lane-aside lane-degraded" role="status" data-lane-degraded>
+              The pinnable lanes could not be read. {failed} Submitting unpinned still works — the platform
+              chooses the lane, as it always does.
+            </p>
+          )}
+          {world !== null && failed === '' && pinnable.length === 0 && (
+            <p className="lane-aside" data-lane-empty>
+              No lane on this platform can be pinned right now, so every task runs unpinned — the platform
+              chooses.
+            </p>
+          )}
+          {lane !== '' && (
+            <p className="lane-pinned-note" data-lane-pinned={lane}>
+              <Pin size={14} strokeWidth={1.8} aria-hidden="true" />
+              <span>
+                This task is pinned to lane <b className="mono">{lane}</b>: selection honors the pin instead of
+                comparing what the lanes have consumed, and the run&apos;s receipt will name the lane that ran. A
+                pin the platform cannot honor refuses the submission with its reason — it is never quietly
+                rerouted.
+              </span>
+            </p>
+          )}
+          {unpinnable.map((l) => (
+            <p key={l.lane} className="lane-aside" data-lane-unpinnable={l.lane}>
+              <b className="mono">{l.lane}</b> is not pinnable — {l.not_pinnable}
+            </p>
+          ))}
+        </>
       )}
     </div>
   )

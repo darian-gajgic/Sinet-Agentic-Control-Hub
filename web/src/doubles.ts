@@ -35,6 +35,7 @@ import queryAnswerRaw from './fixtures/api/history-query-answer.json?raw'
 import searchAnswerRaw from './fixtures/api/history-search-answer.json?raw'
 import viewAnswerRaw from './fixtures/api/history-view-answer.json?raw'
 import viewsRaw from './fixtures/api/history-views.json?raw'
+import intakePinnableLanesRaw from './fixtures/api/intake-pinnable-lanes.json?raw'
 import memoryRaw from './fixtures/api/memory.json?raw'
 import memoryEntryRaw from './fixtures/api/memory-entry.json?raw'
 import memoryOperatorRaw from './fixtures/api/memory-operator.json?raw'
@@ -216,6 +217,11 @@ export const fixtures = {
    *  acts on, so "a member is offered their own switch and nobody else's" is a
    *  claim about a served body rather than about a render. */
   metersMember: () => parse<Record<string, unknown>>(metersMemberRaw),
+  /** The P3-LN-10a pinnable-lanes read: three pinnable lanes in composed
+   *  order plus the local engine lane carrying the platform's own verbatim
+   *  refusal sentence — the shape the lane picker enumerates, never a list a
+   *  test spells by hand. */
+  pinnableLanes: () => parse<Record<string, unknown>>(intakePinnableLanesRaw),
   historyViews: () => parse<Record<string, unknown>>(viewsRaw),
   historyCatalog: () => parse<Record<string, unknown>>(catalogRaw),
   historyViewAnswer: () => parse<Record<string, unknown>>(viewAnswerRaw),

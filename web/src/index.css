@@ -3592,6 +3592,79 @@ input[type='radio'] {
   color: var(--accent-2);
 }
 
+/* ── the lane pin (P3-LN-10) ── */
+
+/* The collapsed face: the default said out loud, the pin one small act away. */
+.lane-closed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.lane-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+/* Chip focus: the keyboard's ring in the inputs' own accent — the .q-option
+   family had none, and a Tab that lands invisibly is a dead-looking control
+   (the finding-5 family, keyboard edition). */
+.q-option:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Small print under the chips: the loading beat, the empty set, an
+   unpinnable lane's verbatim refusal sentence, the degraded read. */
+.lane-aside {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  max-width: 72ch;
+}
+
+.lane-aside .mono {
+  color: var(--text-dim);
+}
+
+.lane-degraded {
+  color: var(--orange);
+}
+
+/* "This task is pinned to lane …" — the door-world note's anatomy in the
+   routing accent, so a standing pin cannot be missed above the send. */
+.lane-pinned-note {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 4px 0 0;
+  padding: 10px 13px;
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(124, 92, 255, 0.07);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.lane-pinned-note svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.lane-pinned-note b {
+  color: var(--fg);
+}
+
 /* The act row: button + its reason on ONE line. A disabled act always says
    why, right where the eye lands. */
 .door-acts {

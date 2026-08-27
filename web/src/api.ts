@@ -1775,6 +1775,21 @@ export type IntakeCard = {
   understood?: IntakeUnderstood
 }
 
+/**
+ * One lane a task-creation pin may name, with the verdict the platform itself
+ * computed (P3-LN-10a; S00.9 A13). The set is composed ONCE at startup from
+ * the same coverage value selection honors, so what this enumerates is the
+ * set the boundary actually accepts — never a second spelling of it.
+ * `not_pinnable` is the selection layer's own sentence saying why a pin
+ * naming this lane would refuse; it rides only an unpinnable row and renders
+ * VERBATIM — the refusal a person reads is the refusal the platform computed.
+ */
+export type PinnableLane = {
+  lane: string
+  pinnable: boolean
+  not_pinnable?: string
+}
+
 /** The pipeline's own task view, returned by BOTH intake writes: where the
  *  task stands and — while a gate is open — the card that opens it. */
 export type IntakeTaskView = {
@@ -2239,9 +2254,28 @@ export const api = {
    * registry seam (owner-or-member and ACTIVE) and an invalid pin REFUSES the
    * submission (404 not_found / 409 project_not_active) rather than quietly
    * dropping it. The text match stays for unpinned submissions.
+   *
+   * `pinned_lane` is the P3-LN-9 per-task lane pin (S00.9 A13): the lane name
+   * VERBATIM from the pinnable-lanes read below — selection honors it in
+   * place of the consumption-pressure comparison, and a pin the platform
+   * cannot honor REFUSES the submission (400 `lane_pin_refused`, the detail
+   * naming the lanes that ARE pinnable) rather than quietly dropping it or
+   * falling back to routing's own choice. Absent means the ordinary thing:
+   * the platform chooses.
    */
-  submitRequest: (body: { title?: string; text: string; project?: string }) =>
+  submitRequest: (body: { title?: string; text: string; project?: string; pinned_lane?: string }) =>
     post<IntakeTaskView>('/api/intake/requests', body),
+  /**
+   * The lanes a task-creation pin may name (P3-LN-10a), served VERBATIM from
+   * the set composed once at control-plane startup — the SAME value the
+   * submit boundary validates `pinned_lane` against, so a picker enumerating
+   * this offers exactly the set the platform honors, never a second spelling.
+   * Composed order (the platform's own lane first, the local engine lane
+   * last); `{"lanes":[]}` is an honest "nothing here is pinnable". The set
+   * moves only at restart (a placed key commissions its lane at the next
+   * start), so one read per form is the truthful cadence.
+   */
+  pinnableLanes: () => request<{ lanes: PinnableLane[] }>('/api/intake/pinnable-lanes'),
   /**
    * The intake-native answer verb: one card answer, and the pipeline resumes
    * in place (4.3). `pin` rides the same request for High-tier approval
