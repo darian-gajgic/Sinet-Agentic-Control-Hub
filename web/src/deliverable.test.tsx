@@ -807,6 +807,31 @@ test('the accept card renders every served field, trailers byte-for-byte', async
   expect(rendered.textContent).toContain(card.signing.statement)
 })
 
+test('a CLOSED accept door leads with the served reason and stops promising the act (GF9; walk W1)', async () => {
+  // The walk's wall: the open door's consent copy ("accepting it makes it
+  // the official version") rendered over a door the platform had closed, and
+  // the why lived only in the technical panel. Closed now leads with the
+  // truth, and the read affordance stops promising the act.
+  const detail = fixtures.deliverableDetail() as unknown as Record<string, unknown>
+  const doors = (detail.doors as { verb: string; available: boolean; reason: string }[]).map((d) =>
+    d.verb === 'accept'
+      ? { ...d, available: false, reason: 'the minting run records no engine substrate, so the attribution cannot be rendered' }
+      : d,
+  )
+  const { view } = await review(reviewDeliverableID, {
+    [`GET /api/deliverables/${reviewDeliverableID}`]: { body: { ...detail, doors } },
+  })
+  const closed = at(view, '[data-accept-closed="true"]')!
+  expect(closed, 'the closed door does not lead with its state').not.toBeNull()
+  expect(closed.textContent).toContain('Accepting is closed right now.')
+  expect(closed.textContent).toContain('no engine substrate')
+  // The old promise is gone from the closed face…
+  expect(view.container.querySelector('.accept-plain')?.textContent).not.toContain('makes it the official version')
+  // …and the record is still readable, without promising the act.
+  expect(at(view, '[data-action="read-accept-card"]')?.textContent).toContain('See the accept record anyway')
+  view.unmount()
+})
+
 test('acceptable:false renders the reason and NO act affordance', async () => {
   const closed = { ...(fixtures.acceptCard() as unknown as AcceptCard), acceptable: false, reason: 'this deliverable is accepted' }
   const { view } = await acceptCard({ [`GET /api/deliverables/${reviewDeliverableID}/accept-card`]: { body: closed } })
@@ -2008,11 +2033,15 @@ test('RA-B1: the accept card speaks the owner’s language, mechanics one fold a
   click(at(view, '[data-action="read-accept-card"]'))
   await flush()
 
-  // The plain half: what accepting MEANS, unfolded.
+  // The plain half: what accepting MEANS, unfolded — including WHERE the
+  // official copy lands, from the served `landing` fact (P3-GF11: the golden
+  // is a local-only project, so the truthful sentence is the project's own
+  // store, and "nothing is sent anywhere" — never a promised push).
   const plain = at(view, '[data-accept-plain]')!
+  expect(plain.getAttribute('data-landing')).toBe('local-store')
   expect(plain.textContent).toContain('revision 2')
-  expect(plain.textContent).toContain('permanent record')
-  expect(plain.textContent).toContain('your own decision')
+  expect(plain.textContent).toContain('own store on this machine')
+  expect(plain.textContent).toContain('nothing is sent anywhere')
 
   // The mechanics — pins, trailers, provenance, the signing statement — are
   // ALL still on the surface, inside the one technical fold.

@@ -228,6 +228,28 @@ export function StageName({ stage }: { stage: string }) {
   )
 }
 
+/** A recorded event type in the reader's words (P3-GF9; walk W4 — the
+ *  timeline wore "intake.state" and friends as raw tokens on a requester
+ *  surface). Known types get a plain label; anything else renders its token
+ *  with the separators spaced — the §42 forward tolerance: jargon reduced,
+ *  never hidden. */
+const eventTypePlain: Record<string, string> = {
+  'stage.boundary': 'stage boundary',
+  'intake.state': 'planning moved',
+  'intake.delta_decision': 'a plan change was decided',
+  'decision.recorded': 'decision recorded',
+  'run.state_changed': 'the run moved',
+  'engine.call': 'engine call',
+  'engine.gate_ask': 'a question opened',
+  'artifact.produced': 'work produced',
+  'verdict.recorded': 'check verdict',
+  'review.comment': 'review note',
+}
+
+export function eventTypeWords(t: string): string {
+  return eventTypePlain[t] ?? t.replace(/[._]/g, ' ')
+}
+
 /** The receipt purpose tokens, in the reader's words (W2-6). The two values
  *  are the S10 receipt vocabulary; anything new renders verbatim (§42). */
 const purposeWords: Record<string, string> = {
@@ -710,7 +732,7 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
           <p className="activity-line break-words">
             {card.last_activity ? (
               <>
-                <span className="muted">{card.last_activity.type}</span> {card.last_activity.line}{' '}
+                <span className="muted">{eventTypeWords(card.last_activity.type)}</span> {card.last_activity.line}{' '}
                 <Timestamp ts={card.last_activity.ts} variant="live" />
               </>
             ) : (
@@ -806,7 +828,7 @@ function stepNode(s: Detail['stage_progress'][number]): RailNode {
     head: (
       <>
         {s.stage === '' ? <Absent reason="unnamed stage" /> : <StageName stage={s.stage} />}
-        <span className="muted text-xs"> {s.type}</span>
+        <span className="muted text-xs"> {eventTypeWords(s.type)}</span>
         {s.kind !== '' && <span className="muted text-xs"> · {s.kind}</span>}
         {s.outcome && (
           <span

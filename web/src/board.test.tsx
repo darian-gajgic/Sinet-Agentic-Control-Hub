@@ -563,10 +563,12 @@ test('a card parked on a CLOCK renders its horizon verbatim with the label besid
   const stamp = face.querySelector('.parked-until time')!
   expect(stamp, 'the park horizon rendered no instant').not.toBeNull()
   expect(stamp.getAttribute('dateTime')).toBe(served)
-  // A FUTURE horizon is the freeze direction that OVERSTATES: between frames the
-  // label reads as more time left than there is, and only this instant corrects
-  // it. The server enforces the real horizon regardless.
-  expect(stamp.textContent, 'the verbatim UTC was dropped').toBe(served)
+  // A FUTURE horizon is the freeze direction that OVERSTATES: between frames
+  // the label reads as more time left than there is, and the exact instant
+  // corrects it — on the element's title and dateTime since P3-GF9 (walk W5:
+  // the raw string left the visible line, never the DOM).
+  expect(stamp.getAttribute('title'), 'the exact instant left the hover').toBe(served)
+  expect(stamp.textContent, 'no relative words rendered').not.toBe('')
   expect(face.querySelector('.parked-until')!.textContent).toContain('parked until')
 
   // THE CARD FACE IS STILL THE PINNED S1.3 SET on the new anatomy: whose and

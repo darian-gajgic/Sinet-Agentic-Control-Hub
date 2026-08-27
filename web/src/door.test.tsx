@@ -15,6 +15,7 @@ import {
   InterviewForm,
   PlanCard,
   ReviewForm,
+  UnderstoodPanel,
   deltaOriginWords,
   humanValue,
 } from './Intake'
@@ -254,6 +255,98 @@ describe('the plan card verbs (design §2.E/§2.F)', () => {
     return { view, card }
   }
 
+  test('the understood panel: ordinary rows are correctable, carried-over and escalation rows are read-only with their why', () => {
+    // GF9's exception, pinned: an off-card correction is offered ONLY where
+    // the wire honors it. A carried-over cross-family item (its slot left the
+    // question set at a family switch — the producer appends it with the raw
+    // slot id as its display name, intake/pipeline.go understoodBlock) is
+    // REFUSED server-side ("slot was not asked"), so no affordance renders
+    // and the row says why; an answered escalation is not a slot at all.
+    const corrected: Record<string, string> = {}
+    const m = mount(
+      <UnderstoodPanel
+        heading="What it understood so far"
+        understood={{
+          items: [
+            { slot_id: 'look_feel', name: 'Look and feel', how: 'answered', value: 'plain and calm' },
+            { slot_id: 'audience_profile', name: 'audience_profile', how: 'assumption', assumption: 'carried over' },
+            { slot_id: 'escalation-1', name: 'Which city is the shop in?', how: 'escalation', value: 'Bonn' },
+          ],
+        }}
+        correct={{
+          corrected,
+          onCorrect: (slot, v) => {
+            corrected[slot] = v
+          },
+          onRevert: () => undefined,
+        }}
+      />,
+    )
+    // The ordinary row wears its fix affordance…
+    expect(m.container.querySelector('[data-understood-fix="look_feel"]')).not.toBeNull()
+    // …the carried row does not, and says why in plain words with no raw id
+    // as its display name…
+    const carried = m.container.querySelector('li[data-carried]')!
+    expect(carried, 'the carried-over row lost its marker').not.toBeNull()
+    expect(carried.querySelector('.understood-fix')).toBeNull()
+    expect(carried.textContent).toContain('kept from before the kind of work changed')
+    expect(carried.querySelector('.understood-name')?.textContent).toBe('audience profile')
+    // …and the escalation row is read-only too.
+    expect(m.container.querySelector('[data-understood-fix="escalation-1"]')).toBeNull()
+    m.unmount()
+  })
+
+  test('a redraft opens with WHAT CHANGED between the two served cards (RA-1), framed as this page’s own comparison', () => {
+    // The RA-1 promise: "Change the plan" says "shows exactly what changed",
+    // and pre-approval the pipeline serves no delta card — so the page
+    // compares the two cards it rendered, and says the comparison is its
+    // own. Live driving hit a backend wall (the reviser's redraft blows the
+    // A15 approach cap and tombstones — reported), so the block is pinned
+    // here over two served-shaped snapshots.
+    const { view, card } = planView()
+    const next: IntakeCard = JSON.parse(JSON.stringify(card)) as IntakeCard
+    next.approval!.layer1.restatement = 'Build a webshop for car parts, with the phone number shown.'
+    next.approval!.layer2!.acs = [
+      { n: 1, plain: 'A visitor can browse parts.' },
+      { n: 2, plain: 'Search comes back ordered by relevance.' },
+      { n: 3, plain: 'The phone number is visible on every page.' },
+    ]
+    next.approval!.layer2!.steps = [{ id: 'S-1', title: 'Scaffold' }] // S-2 removed
+    const m = mount(<PlanCard view={view} card={next} busy={false} previous={card} onAnswer={onAnswer} />)
+    const block = m.container.querySelector('[data-plan="changed"]')!
+    expect(block, 'no what-changed block on a redraft').not.toBeNull()
+    const text = block.textContent ?? ''
+    // The restatement change is legible old → now.
+    expect(text).toContain('Build a webshop for car parts.')
+    expect(text).toContain('with the phone number shown')
+    // A changed check, an added check, and the REMOVED step all render — a
+    // silently disappearing item is the exact thing this block exists to end.
+    expect(text).toContain('ordered by relevance')
+    expect(text).toContain('The phone number is visible on every page.')
+    expect(text).toContain('Catalog')
+    expect(block.querySelector('[data-change-kind="removed"]')).not.toBeNull()
+    // The framing: the comparison is the page's, the cards the platform's.
+    expect(text).toContain('the comparison this page')
+    m.unmount()
+  })
+
+  test('a first draft and a cold resume carry NO what-changed block — only what this browser saw is compared', () => {
+    const { view, card } = planView()
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    expect(m.container.querySelector('[data-plan="changed"]')).toBeNull()
+    m.unmount()
+  })
+
+  test('an unchanged redraft says so honestly instead of rendering an empty diff', () => {
+    const { view, card } = planView()
+    const same: IntakeCard = JSON.parse(JSON.stringify(card)) as IntakeCard
+    const m = mount(<PlanCard view={view} card={same} busy={false} previous={card} onAnswer={onAnswer} />)
+    const block = m.container.querySelector('[data-plan="changed"]')!
+    expect(block).not.toBeNull()
+    expect(block.querySelector('[data-plan-unchanged]')?.textContent).toContain('Nothing this comparison covers moved')
+    m.unmount()
+  })
+
   test('every verb states its consequence beside its plain name', () => {
     const { view, card } = planView()
     const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
@@ -266,22 +359,47 @@ describe('the plan card verbs (design §2.E/§2.F)', () => {
     m.unmount()
   })
 
-  test('the contest pane sends ANY number of tapped targets plus the note in ONE send', () => {
+  test('contest-in-place sends ANY number of tapped fields, each with ITS OWN note, in ONE send', () => {
+    // REWRITTEN 2026-08-27 (P3-GF9): the contest moved IN PLACE — every field
+    // of the plan wears its tap where the field is (r5 §C rule 7), and an
+    // armed field opens its own note box (the wire's per-target note). The
+    // send contract is the same one verb, one redraft.
     const { view, card } = planView()
     const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
     click(m.container.querySelector('[data-plan-act="replan"]'))
-    const chips = [...m.container.querySelectorAll('.contest-target')]
-    click(chips.find((c) => c.textContent?.includes('S-2')) ?? null)
-    click(chips.find((c) => c.textContent?.includes('AC-2')) ?? null)
+    const tap = (target: string) =>
+      click(m.container.querySelector(`[data-contest-item="${target}"] .contest-tap`))
+    tap('S-2')
+    tap('AC-2')
+    // The per-target note lands on the field it is about.
+    typeInto(
+      m.container.querySelector('[data-contest-note-for="S-2"]') as HTMLInputElement,
+      'skip the animations here',
+    )
     const note = m.container.querySelector('[data-field="contest-note"]') as HTMLTextAreaElement
     typeInto(note, 'softer colors, in my own words')
     click(m.container.querySelector('[data-plan-act="send-replan"]'))
     expect(sent).toHaveLength(1)
     expect(sent[0]).toEqual({
       action: 'replan',
-      contests: [{ target: 'S-2' }, { target: 'AC-2' }],
+      contests: [{ target: 'S-2', note: 'skip the animations here' }, { target: 'AC-2' }],
       note: 'softer colors, in my own words',
     })
+    m.unmount()
+  })
+
+  test('leaving contest mode KEEPS the armed taps (RA-12), and the verb says what it holds', () => {
+    const { view, card } = planView()
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    click(m.container.querySelector('[data-plan-act="replan"]'))
+    click(m.container.querySelector('[data-contest-item="S-2"] .contest-tap'))
+    click(m.container.querySelector('[data-plan-act="contest-back"]'))
+    // Back on the plan: nothing fired, and the Re-plan verb carries the count.
+    expect(sent).toHaveLength(0)
+    expect(m.container.querySelector('[data-plan-act="replan"]')?.textContent).toContain('1 tapped')
+    click(m.container.querySelector('[data-plan-act="replan"]'))
+    click(m.container.querySelector('[data-plan-act="send-replan"]'))
+    expect(sent[0]).toEqual({ action: 'replan', contests: [{ target: 'S-2' }] })
     m.unmount()
   })
 

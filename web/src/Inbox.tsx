@@ -15,7 +15,7 @@ import {
   type TaskList,
 } from './api'
 import { ActConfirm, OutcomeLine, outcomeOf, useAct } from './controls'
-import { UnderstoodPanel } from './Intake'
+import { UnderstoodPanel, originWords } from './Intake'
 import type { EventStream } from './events'
 import { describeError, inboxEventTypes, useLive, type Live } from './live'
 import { useProjectScope } from './project'
@@ -2170,7 +2170,17 @@ function isVerifyCard(snap: AskSnapshot): boolean {
  *  loudly today. Mirroring that here keeps the buttons honest: a verb the
  *  platform would refuse renders disabled WITH the reason, never as a live
  *  control that fails on press. */
-function verifyVerbLive(snap: AskSnapshot, action: string): boolean {
+function verifyVerbLive(snap: AskSnapshot, action: string, itemID = ''): boolean {
+  // The recovery-ladder terminal card (P3-RW-14 R1/R2) carries NO category
+  // and no infrastructure flag BY DESIGN — a ladder terminal is not a
+  // verification finding. Its identity is the sanctioned `ask-ladder-`
+  // prefix (CONVENTIONS §16 dispatch key), and the server's own
+  // AnswerLadderAsk accepts exactly retry|cancel on it. Found live (GF9
+  // walk, 2026-08-28): a tombstoned intake draft raised this card and the
+  // old mirror greyed BOTH verbs with a false "machinery lands with a later
+  // build" story — a dead-end card whose printed choices could not be
+  // pressed, the exact defect class walk W1 named.
+  if (itemID.startsWith('ask:ask-ladder-')) return action === 'retry' || action === 'cancel'
   if (snap.infrastructure === true) return action === 'retry' || action === 'cancel'
   const answerable = snap.category === 'CAP-HIT' || snap.category === 'AC-BLOCKER' || snap.category === 'SANITY-BLOCKER'
   if (!answerable) return false
@@ -2215,7 +2225,10 @@ function ApprovalCard({ snap, expanded }: { snap: AskSnapshot; expanded: boolean
           {(l1.assumptions ?? []).map((a) => (
             <li key={a.text} className="wrap-anywhere" data-assumption={a.text}>
               {a.text}
-              {a.origin && <span className="muted"> ({a.origin})</span>}
+              {/* The origin in the reader's words (P3-GF9; RA-5's inbox
+                  side): one shared map with the plan card, raw tags never
+                  on a requester surface. */}
+              {a.origin && <span className="muted"> ({originWords(a.origin)})</span>}
             </li>
           ))}
         </ul>
@@ -2716,7 +2729,7 @@ function Acts({
       )}
       {envelope === 'verify' &&
         actions.includes('revise_with_guidance') &&
-        verifyVerbLive(asSnapshot(item.card), 'revise_with_guidance') && (
+        verifyVerbLive(asSnapshot(item.card), 'revise_with_guidance', item.id) && (
           <label className="contest">
             <span>What should change (recorded as your guidance — the send-back needs at least this one line)</span>
             <input
@@ -2776,7 +2789,7 @@ function Acts({
         </label>
       )}
 
-      {envelope === 'verify' && actions.some((a) => !verifyVerbLive(asSnapshot(item.card), a)) && (
+      {envelope === 'verify' && actions.some((a) => !verifyVerbLive(asSnapshot(item.card), a, item.id)) && (
         <p className="text-sm text-muted-foreground" data-verify-verbs="deferred">
           The greyed verbs are declared by this card, but their machinery lands with a later build — the platform
           refuses them today, and the card stands as the record until then. Nothing is lost by leaving it open.
@@ -2888,7 +2901,10 @@ const plainVerbs: Record<string, string> = {
   dispose: 'Record my decision',
   resolve: 'Resolve',
   // The S07.7 verify card verbs (P3-RW-14): frozen ids, plain names.
-  retry: 'Retry — run verification again',
+  // `retry` rides EVERY infrastructure card — an intake draft that
+  // tombstoned answers it too (seen live, GF9 walk) — so its words name the
+  // act, never one stage's name.
+  retry: 'Retry — start a fresh attempt',
   accept_best_effort: 'Accept it as it stands (best effort)',
   revise_with_guidance: 'Send it back with guidance',
   fix_suite: 'The checks are fixed — clear the quarantine',
@@ -2970,7 +2986,7 @@ function canFire(item: ApprovalItem, action: string, form: { verdict: string; gu
     // A verb the landed server would refuse does not arm (the note beside the
     // buttons says why), and a revise with no guidance text does not arm —
     // verify.ValidateAnswer requires at least one guidance point.
-    if (!verifyVerbLive(asSnapshot(item.card), action)) return false
+    if (!verifyVerbLive(asSnapshot(item.card), action, item.id)) return false
     if (action === 'revise_with_guidance') return (form.contest ?? '') !== ''
   }
   // A conflict card with no readable row number has nothing to resolve, so the

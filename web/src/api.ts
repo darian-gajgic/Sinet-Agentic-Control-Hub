@@ -1241,6 +1241,12 @@ export type AcceptSigning = {
  *  why the trailers could not be rendered, when they could not. */
 export type AcceptProvenance = {
   minting_run_id?: string
+  /** The execute leg whose settled S08.8 selection made the work — usually a
+   *  DIFFERENT run from the verification handoff that froze the content
+   *  (minting_run_id). Both are served because they answer different
+   *  questions; a revision minted before migration 0026 records no producing
+   *  run and resolves through its minting run. */
+  producing_run_id?: string
   engine?: string
   model?: string
   lane?: string
@@ -1263,6 +1269,14 @@ export type AcceptCard = {
   content_pin: string
   project_id: string
   protected_ref?: string
+  /** WHERE the official copy lands if the accept is made (P3-GF11 R4/OQ2):
+   *  `remote-push` (the CAS push to the project's remote) · `local-store`
+   *  (no remote registered — the attributed commit in the project's own
+   *  store IS the official copy) · `decision-record` (content-pinned work —
+   *  the recorded decision against the pin is the durable record). A fact
+   *  about the act, never a refusal taxonomy — `acceptable` + `reason` stay
+   *  the one gate. Absent on a card served before the member existed. */
+  landing?: string
   trailers: string
   provenance: AcceptProvenance
   signing: AcceptSigning
@@ -1653,7 +1667,16 @@ export type IntakeQuestion = {
    *  into `options`). A suggestion without it is a recommended pre-fill for
    *  the free-text field, not a chip. */
   suggested_option?: string
-  options?: { label: string; value: string }[]
+  /** The slot's AUTHORED default (P3-GF7 R7; intake.Question.Recommended):
+   *  the option value the platform recommends when no per-goal suggestion was
+   *  made. `suggested_option`, when present, is the per-goal recommendation
+   *  and overrides this at render time — the producer's own rule. */
+  recommended?: string
+  /** Options carry the plain-words consequence line per choice (`effect`,
+   *  P3-GF7 R7; harvest H3's tradeoff lines): what picking THIS option does
+   *  to the result. Additive and optional — rendered when served, never
+   *  synthesized. */
+  options?: { label: string; value: string; effect?: string }[]
   weight?: number
   /** On the S06.9 review card only (P3-GF3-BE1 R8, "Change my answers"): how
    *  this slot is CURRENTLY settled — the platform's own record, the same
@@ -1863,6 +1886,15 @@ export type IntakeAnswerBody = {
    *  THAT slot to an explicit assumption carrying the suggestion the card
    *  served. A skipped slot is resolved, so it is never re-asked. */
   answers?: { id: string; value?: string; skip?: boolean }[]
+  /** The family CORRECTION on an interview answer (P3-GF7 R9; intake
+   *  Answer.Family): a requester who reads "I'm treating this as software
+   *  work — my guess" and disagrees says so in the same send, instead of
+   *  discovering the misclassification through four wrong questions. The
+   *  server validates against its own family vocabulary and refuses an
+   *  unknown value loudly, naming the accepted set; answers on the same body
+   *  are applied FIRST, against the set that was actually asked, and nothing
+   *  already given is discarded. */
+  family?: string
   assume?: { id: string; value: string }[]
   force_proceed?: boolean
   text?: string

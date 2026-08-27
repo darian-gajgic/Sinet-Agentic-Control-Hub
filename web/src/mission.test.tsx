@@ -115,7 +115,13 @@ test('a finished run leaves the recently-finished bucket once it is no longer re
 test('parked items show "parked until…" when the row carries one, and no time when it does not', async () => {
   const { view } = await mission()
   const text = view.container.textContent ?? ''
-  expect(text, 'a park horizon the platform recorded was dropped').toContain('2026-07-20T12:00:00Z')
+  // Since P3-GF9 (walk W5) the verbatim horizon rides the <time> element's
+  // dateTime and title rather than the visible line.
+  const horizon = [...view.container.querySelectorAll('time')].find(
+    (t) => t.getAttribute('dateTime') === '2026-07-20T12:00:00Z',
+  )
+  expect(horizon, 'a park horizon the platform recorded was dropped').toBeDefined()
+  expect(horizon!.getAttribute('title'), 'the exact horizon left the hover').toBe('2026-07-20T12:00:00Z')
   expect(text, 'a park with no recorded horizon was given a fabricated one').toContain('parked, no horizon given')
 })
 
@@ -852,7 +858,9 @@ test('a run line renders relative time beside its served instant, never instead 
   )!
   expect(row, 'the parked run did not reach the screen').toBeDefined()
 
-  const stamps = [...row.querySelectorAll('time')].map((t) => [t.getAttribute('dateTime'), t.textContent])
+  // Since P3-GF9 (walk W5): the verbatim instant rides dateTime AND title on
+  // the same element while the visible words are the relative label.
+  const stamps = [...row.querySelectorAll('time')].map((t) => [t.getAttribute('dateTime'), t.getAttribute('title')])
   for (const served of [parked.parked_until!, parked.last_activity_ts!]) {
     expect(stamps, `the served instant ${served} was dropped or rewritten`).toContainEqual([served, served])
   }

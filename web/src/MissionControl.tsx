@@ -13,6 +13,7 @@ import {
 import type { EventStream } from './events'
 import { FilterBar, FilterView, filterFromSearch } from './Filters'
 import { AnswerView } from './History'
+import { needsYou } from './Inbox'
 import { inboxEventTypes, missionEventTypes, useLive } from './live'
 import { Absent, Freshness, Money, Owner, ParkedUntil, Section, StallBanner, ThresholdRing } from './parts'
 import { useProjectScope } from './project'
@@ -241,9 +242,26 @@ export function MissionControl({
           icon={<UserCheck size={15} strokeWidth={1.8} aria-hidden="true" />}
           value={answered ? String(bucket('blocked').runs.length) : '—'}
           foot={
+            // W3 (walk 2026-08-27): this caption said "· N open cards" over
+            // the WHOLE served queue — notices and other people's cards
+            // included — while the sidebar badge counted only what needs this
+            // person, three numbers with no reconciliation. The caption now
+            // counts with the BADGE's own filter (one function, two readers)
+            // and names what the remainder is.
             <>
-              answered from the <Link to={hrefFor('inbox')}>Inbox</Link>
-              {asks.data !== null && <> · {String(asks.data.items.length)} open cards</>}
+              runs paused for a person
+              {asks.data !== null &&
+                (() => {
+                  const yours = asks.data.items.filter(needsYou).length
+                  const rest = asks.data.items.length - yours
+                  return (
+                    <>
+                      {' '}
+                      · <Link to={hrefFor('inbox')}>{String(yours)} Inbox card{yours === 1 ? '' : 's'} for you</Link>
+                      {rest > 0 && <> (+{String(rest)} notices or other people&apos;s)</>}
+                    </>
+                  )
+                })()}
             </>
           }
         />
@@ -793,6 +811,13 @@ function ActivityPanel({
   taskOf: Map<string, TaskListItem>
   answered: boolean
 }) {
+  // A row's words are plain words (P3-GF9; walk W4's family): an untitled
+  // platform-housekeeping run used to print its raw machine id
+  // ("platform.advisory.watchlist.1787867499…") and an ask row its raw kind
+  // token ("drift_card"). The id stays on the href/key; the words drop the
+  // nanosecond tail and read the separators as spaces — reduced, never
+  // hidden (§42's forward tolerance).
+  const plainRunWords = (id: string) => id.replace(/\.\d{9,}$/, '').replace(/[._]/g, ' ')
   const items: FeedItem[] = []
   for (const r of runs) {
     const at = r.last_activity_ts ?? r.updated_ts
@@ -802,7 +827,7 @@ function ActivityPanel({
       key: `run:${r.run_id}`,
       ts: at,
       tone: stateTone(r),
-      text: `${title !== '' ? title : r.run_id} — ${r.wedged ? 'wedged' : r.state}${r.stage !== '' ? ` at ${r.stage}` : ''}`,
+      text: `${title !== '' ? title : plainRunWords(r.run_id)} — ${r.wedged ? 'wedged' : r.state}${r.stage !== '' ? ` at ${r.stage.split('.')[0]}` : ''}`,
       owner: r.owner,
       href: r.task_id !== '' ? hrefFor('task', { id: r.task_id }) : undefined,
       live: r.state === 'running',
@@ -813,7 +838,7 @@ function ActivityPanel({
       key: `ask:${a.id}`,
       ts: a.observed_ts,
       tone: a.tier === 'high' ? 'red' : 'orange',
-      text: `${a.kind} waits on a person (${a.tier} tier)`,
+      text: `${a.kind.replace(/[._]/g, ' ')} waits on a person (${a.tier} tier)`,
       owner: a.owner,
       href: hrefFor('inbox-item', { id: a.id }),
     })

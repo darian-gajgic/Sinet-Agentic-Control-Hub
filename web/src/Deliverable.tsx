@@ -2930,6 +2930,22 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
     <Section title="Accept">
       {door === undefined ? (
         <Absent reason="the platform named no accept door on this deliverable" />
+      ) : door.available === false ? (
+        <>
+          {/* GF9 (walk W1): a CLOSED door leads with the truth. The old face
+              printed the open door's promise ("accepting it makes it the
+              official version") over a card that could not accept, and the
+              why lived only in the technical door-state panel below. The
+              served reason is the primary copy now, and the read affordance
+              stops promising the act. */}
+          <p className="accept-plain mt-0 mb-1 text-sm" data-accept-closed="true">
+            <strong>Accepting is closed right now.</strong>{' '}
+            {door.reason !== '' ? door.reason : <Absent reason="the platform gave no reason" />}
+          </p>
+          <Button variant="secondary" size="sm" data-action="read-accept-card" onClick={read}>
+            See the accept record anyway…
+          </Button>
+        </>
       ) : (
         <>
           {/* The owner's sentence first (RA-B1 item 3): what accepting MEANS,
@@ -2978,11 +2994,8 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
               onPinRefused={setPinRefused}
               onFailure={setFailure}
             />
-          ) : (
-            <p className="my-2 text-sm text-muted-foreground" data-not-acceptable="true">
-              {card.reason}
-            </p>
-          )}
+          ) : null /* acceptable:false leads the card itself now (GF9) — the
+              served reason is its PRIMARY copy, not a footnote under it. */}
           {pinRefused !== '' && (
             <p className="error my-2 text-sm" data-pin-refused="true">
               {pinRefused} Enter your PIN again — nothing was accepted.
@@ -3009,19 +3022,52 @@ function AcceptBlock({ detail, me, onApplied }: { detail: DeliverableDetail; me:
 function AcceptCardView({ card }: { card: AcceptCard }) {
   return (
     <div className={cn('accept-card my-2', reviewPanel)} data-acceptable={card.acceptable ? 'true' : 'false'}>
-      <p className="mt-0 mb-2 text-sm" data-accept-plain="true">
-        You are accepting <strong>revision {String(card.revision_n)}</strong> — the version this page shows.{' '}
-        {card.project_id === '' ? (
-          <>The accepted copy stays filed here as the official version of this work, recorded as your own decision.</>
-        ) : (
-          <>
-            The official copy is written into <strong>{card.project_id}</strong>&apos;s permanent record, in your name,
-            as your own decision.
-          </>
-        )}{' '}
-        The exact record — pins, attribution, the platform&apos;s signing posture — is under &quot;what happens
-        technically&quot;, worth a look before your first accept.
-      </p>
+      {card.acceptable ? (
+        <p className="mt-0 mb-2 text-sm" data-accept-plain="true" data-landing={card.landing}>
+          You are accepting <strong>revision {String(card.revision_n)}</strong> — the version this page shows.{' '}
+          {/* WHERE the copy lands, from the served `landing` fact (P3-GF11
+              R4/OQ2) — for a fresh local-only project that is the project's
+              own store, not a push, and saying "permanent record" without
+              saying which would leave the difference to be discovered in the
+              outcome. A card without the member keeps the older wording. */}
+          {card.landing === 'remote-push' ? (
+            <>
+              The official copy is pushed to <strong>{card.project_id}</strong>&apos;s shared branch, in your name, as
+              your own decision.
+            </>
+          ) : card.landing === 'local-store' ? (
+            <>
+              The official copy becomes a commit in <strong>{card.project_id}</strong>&apos;s own store on this
+              machine, in your name — this project has no shared remote, so nothing is sent anywhere.
+            </>
+          ) : card.landing === 'decision-record' ? (
+            <>
+              This work pins its exact content rather than a repository commit, so accepting records your decision
+              against that content — that recorded decision is the official version; nothing is pushed.
+            </>
+          ) : card.project_id === '' ? (
+            <>The accepted copy stays filed here as the official version of this work, recorded as your own decision.</>
+          ) : (
+            <>
+              The official copy is written into <strong>{card.project_id}</strong>&apos;s permanent record, in your
+              name, as your own decision.
+            </>
+          )}{' '}
+          The exact record — pins, attribution, the platform&apos;s signing posture — is under &quot;what happens
+          technically&quot;, worth a look before your first accept.
+        </p>
+      ) : (
+        // GF9 (walk W1 / the accept-card seam, §70): when the platform says
+        // this cannot be accepted, the card's FACE says so first, in the
+        // platform's own words — never consent copy promising an act with no
+        // control behind it. The reason is the served sentence verbatim.
+        <p className="mt-0 mb-2 text-sm" data-accept-plain="true" data-not-acceptable="true">
+          <strong>Revision {String(card.revision_n)} cannot be accepted as it stands.</strong>{' '}
+          {card.reason !== '' ? card.reason : <Absent reason="the platform gave no reason — worth reporting" />}{' '}
+          The exact record is under &quot;what happens technically&quot;; once the condition clears, opening this card
+          again offers the accept.
+        </p>
+      )}
       <details className="accept-tech mb-1">
         <summary className="cursor-pointer text-sm text-muted-foreground">What happens technically</summary>
         {/* `.signing` KEEPS its rule — it is the LAST selector of the group
@@ -3094,7 +3140,15 @@ function AcceptCardView({ card }: { card: AcceptCard }) {
             <Absent reason="no minting run recorded" />
           ) : (
             <>
-              from run {card.provenance.minting_run_id} · engine {card.provenance.engine ?? ''} · model{' '}
+              {/* The two run refs answer different questions (GF10 wire): the
+                  PRODUCING run did the work — its settled selection is what
+                  the attribution names — and the minting run is the
+                  verification handoff that froze the content. A revision from
+                  before that wire resolves through its minting run alone. */}
+              {card.provenance.producing_run_id !== undefined && card.provenance.producing_run_id !== '' && (
+                <>made by run {card.provenance.producing_run_id} · </>
+              )}
+              frozen by run {card.provenance.minting_run_id} · engine {card.provenance.engine ?? ''} · model{' '}
               {card.provenance.model ?? ''} · lane {card.provenance.lane ?? ''} · {card.provenance.vendor_noreply ?? ''}
             </>
           )}

@@ -201,12 +201,14 @@ test('a filter is live like every other view and marks itself while catching up'
  * would depend on when the suite runs.
  */
 function assertLiveStamp(stamp: Element | null | undefined, served: string, what: string): void {
+  // REWRITTEN 2026-08-27 (P3-GF9; walk W5): the raw UTC string left the
+  // visible line — it rides the SAME element's dateTime and title now, one
+  // hover away and machine-readable, while the visible words are relative.
   expect(stamp, `${what}: no timestamp rendered`).toBeTruthy()
   expect(stamp!.getAttribute('dateTime'), `${what}: dateTime is not the served instant`).toBe(served)
-  expect(stamp!.textContent, `${what}: the verbatim UTC was dropped`).toBe(served)
-  const beside = stamp!.parentElement!.parentElement!.textContent ?? ''
-  expect(beside.endsWith(served), `${what}: the instant is not rendered beside its label`).toBe(true)
-  expect(beside.length, `${what}: no relative label renders beside the instant`).toBeGreaterThan(served.length)
+  expect(stamp!.getAttribute('title'), `${what}: the exact instant left the hover`).toBe(served)
+  expect(stamp!.textContent, `${what}: no relative words rendered`).not.toBe('')
+  expect(stamp!.textContent, `${what}: the raw stamp is back on the visible line`).not.toBe(served)
 }
 
 test('what-needs-me renders relative time beside the verbatim instant, never instead of it', async () => {

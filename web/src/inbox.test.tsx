@@ -1269,12 +1269,14 @@ test('the consent position re-reads on the frame the flip itself mints', async (
  *  stamps point FORWARD: a frozen "in 3h" overstates the time left, and only
  *  the instant beside it corrects that. Clock-independent by design. */
 function assertBeside(stamp: Element | null | undefined, served: string, what: string): void {
+  // REWRITTEN 2026-08-27 (P3-GF9; walk W5): the raw UTC string left the
+  // visible line — it rides the SAME element's dateTime and title now, one
+  // hover away and machine-readable, while the visible words are relative.
   expect(stamp, `${what}: no timestamp rendered`).toBeTruthy()
   expect(stamp!.getAttribute('dateTime'), `${what}: dateTime is not the served instant`).toBe(served)
-  expect(stamp!.textContent, `${what}: the verbatim UTC was dropped`).toBe(served)
-  const beside = stamp!.parentElement!.parentElement!.textContent ?? ''
-  expect(beside.includes(served), `${what}: the instant is not beside its label`).toBe(true)
-  expect(beside.length, `${what}: a relative label replaced the instant`).toBeGreaterThan(served.length)
+  expect(stamp!.getAttribute('title'), `${what}: the exact instant left the hover`).toBe(served)
+  expect(stamp!.textContent, `${what}: no relative words rendered`).not.toBe('')
+  expect(stamp!.textContent, `${what}: the raw stamp is back on the visible line`).not.toBe(served)
 }
 
 test('a card renders its observed and expiry instants verbatim, with the labels beside them', async () => {

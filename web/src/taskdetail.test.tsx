@@ -2,7 +2,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
-import { ReceiptView, fmtDuration } from './TaskDetail'
+import { ReceiptView, eventTypeWords, fmtDuration } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
 import { intakeResumeHref } from './Inbox'
@@ -291,8 +291,10 @@ test('the task detail renders the active run&apos;s live activity, not just stag
 
   const served = fixtures.runDetail() as unknown as RunDetail
   const text = panel.textContent ?? ''
-  // The last-activity line and the monotonic counters, as served.
-  expect(text).toContain(served.card.last_activity?.type ?? '')
+  // The last-activity line and the monotonic counters, as served — the type
+  // through its plain-words map since P3-GF9 (walk W4: raw event tokens on a
+  // requester surface), the fact itself never dropped.
+  expect(text).toContain(eventTypeWords(served.card.last_activity?.type ?? ''))
   expect(text).toContain(`${String(served.card.counters.tokens)} tokens`)
   // Human-readable elapsed (C2-13): the monotonic counter renders through
   // fmtDuration, and the raw-seconds form is the banned class.
@@ -1054,12 +1056,14 @@ test('the operator cancels another owner’s run, and the act really fires', asy
  *  against a device clock and freezes between frames, so what stays true is the
  *  string the platform served. Clock-independent by design. */
 function assertBeside(stamp: Element | null | undefined, served: string, what: string): void {
+  // REWRITTEN 2026-08-27 (P3-GF9; walk W5): the raw UTC string left the
+  // visible line — it rides the SAME element's dateTime and title now, while
+  // the visible words are the relative label.
   expect(stamp, `${what}: no timestamp rendered`).toBeTruthy()
   expect(stamp!.getAttribute('dateTime'), `${what}: dateTime is not the served instant`).toBe(served)
-  expect(stamp!.textContent, `${what}: the verbatim UTC was dropped`).toBe(served)
-  const beside = stamp!.parentElement!.parentElement!.textContent ?? ''
-  expect(beside.endsWith(served), `${what}: the instant is not beside its label`).toBe(true)
-  expect(beside.length, `${what}: a relative label replaced the instant`).toBeGreaterThan(served.length)
+  expect(stamp!.getAttribute('title'), `${what}: the exact instant left the hover`).toBe(served)
+  expect(stamp!.textContent, `${what}: no relative words rendered`).not.toBe('')
+  expect(stamp!.textContent, `${what}: the raw stamp is back on the visible line`).not.toBe(served)
 }
 
 test('opened, last activity and each stage boundary all render relative beside verbatim', async () => {
@@ -1173,7 +1177,10 @@ test('the rail runs in served-instant order, and every stage fact still renders'
   // full step id differs from its family, as the visible mono id beside the
   // words. The other served facts render verbatim.
   expect(text, 'the rail dropped the plain words for verify').toContain('checking the work')
-  for (const fact of ['stage.finished', 'execute-step', 'completed']) {
+  // Since P3-GF9 (walk W4) the event type renders through its plain-words map
+  // — the fact is never dropped, only the raw dotted token is; kind and
+  // outcome render verbatim as before.
+  for (const fact of [eventTypeWords('stage.finished'), 'execute-step', 'completed']) {
     expect(text, `the rail dropped the served ${fact}`).toContain(fact)
   }
   expect(verify.querySelector('time')?.getAttribute('dateTime')).toBe('2026-07-20T09:05:00Z')
@@ -1525,10 +1532,11 @@ test('a parked run on the live lane says until WHEN, and an absent horizon is no
   const banner = view.container.querySelector('[data-stall="parked"]')!
   expect(banner, 'a parked run on the live lane carries no horizon').not.toBeNull()
   expect(banner.textContent).toContain('parked until')
-  // Through the landed idiom: relative BESIDE the verbatim UTC, never instead.
+  // Through the landed idiom since P3-GF9 (walk W5): the visible words are
+  // relative; the verbatim UTC rides dateTime and title on the same element.
   const stamp = banner.querySelector('time')!
   expect(stamp.getAttribute('dateTime')).toBe('2026-07-20T12:00:00Z')
-  expect(stamp.textContent).toBe('2026-07-20T12:00:00Z')
+  expect(stamp.getAttribute('title')).toBe('2026-07-20T12:00:00Z')
   expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox')
   view.unmount()
 

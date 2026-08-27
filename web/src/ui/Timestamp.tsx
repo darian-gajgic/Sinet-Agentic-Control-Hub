@@ -1,6 +1,5 @@
 import { useEffect, useReducer } from 'react'
 
-import { cn } from '../lib/utils'
 import { Absent } from '../parts'
 
 /**
@@ -8,11 +7,16 @@ import { Absent } from '../parts'
  *
  * Every instant this platform stores and serves is UTC RFC3339, and the
  * verbatim string is the thing that is TRUE — "3m ago" is a convenience
- * computed against a device clock nobody controls. So the two variants differ
- * in what they ADD, never in what they drop:
+ * computed against a device clock nobody controls.
  *
- *   live  — relative time BESIDE the verbatim UTC. The UTC is never replaced.
- *   audit — verbatim UTC alone, which is what a record needs.
+ *   live  — the relative words are the visible text; the verbatim UTC rides
+ *           the same element's `dateTime` and `title`, one hover away and
+ *           machine-readable, never replaced. AMENDED 2026-08-27 (P3-GF9;
+ *           walk W5): the D5 answer's first rendering printed the raw
+ *           nanosecond string INLINE beside every friendly time, and the walk
+ *           read it as noise on every requester surface — the record is kept
+ *           on the element, off the visible line.
+ *   audit — verbatim UTC alone, as visible text, which is what a record needs.
  *
  * Absence is rendered, not filled: an empty stamp says so through the landed
  * `Absent` primitive rather than printing an epoch or a blank (§42).
@@ -51,20 +55,26 @@ export function Timestamp({ ts, variant = 'audit', className }: TimestampProps) 
 
   if (!ts) return <Absent reason="not recorded" />
 
-  const stamp = (
-    <time dateTime={ts} className="font-mono tabular-nums">
-      {ts}
-    </time>
-  )
   // An unparseable stamp still renders verbatim and gains nothing: the served
   // string is the record, and inventing a relative label for an instant we
   // could not read would be the one thing this primitive must not do.
-  if (variant === 'audit' || relative === '') return <span className={className}>{stamp}</span>
+  if (variant === 'audit' || relative === '')
+    return (
+      <span className={className}>
+        <time dateTime={ts} className="font-mono tabular-nums">
+          {ts}
+        </time>
+      </span>
+    )
 
+  // The live face: relative words visible, the exact served instant on the
+  // SAME element — `dateTime` for machines, `title` for a hover — so the
+  // verbatim UTC never leaves the DOM while the line reads like a sentence.
   return (
-    <span className={cn('inline-flex flex-wrap items-baseline gap-1.5', className)}>
-      <span>{relative}</span>
-      <span className="text-xs text-muted-foreground">{stamp}</span>
+    <span className={className}>
+      <time dateTime={ts} title={ts}>
+        {relative}
+      </time>
     </span>
   )
 }

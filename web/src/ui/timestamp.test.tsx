@@ -31,17 +31,20 @@ test('audit is the default, so a call site that says nothing gets the record', (
   view.unmount()
 })
 
-test('the live variant puts relative time BESIDE the verbatim UTC, never instead of it', () => {
+test('the live variant keeps the verbatim UTC on the element while the words read relative', () => {
+  // REWRITTEN 2026-08-27 (P3-GF9; walk W5): the first rendering printed the
+  // raw UTC string INLINE beside every friendly time and the walk read it as
+  // noise on every requester surface. The load-bearing property is unchanged
+  // — the served string survives into the DOM, machine-readable and one
+  // hover away — but it is no longer the visible text.
   const view = mount(<Timestamp ts={served} variant="live" />)
-  const text = view.container.textContent ?? ''
-  // The UTC is present in the DOM, in its own <time dateTime>.
   const time = view.container.querySelector('time')!
   expect(time.getAttribute('dateTime')).toBe(served)
-  expect(time.textContent).toBe(served)
-  // And the relative label is an ADDITION: the rendered text is strictly longer
-  // than the stamp alone.
-  expect(text).toContain(served)
-  expect(text.length, 'the live variant added no relative label').toBeGreaterThan(served.length)
+  expect(time.getAttribute('title'), 'the exact instant left the hover').toBe(served)
+  // The visible words are the relative label, not the raw stamp.
+  const text = view.container.textContent ?? ''
+  expect(text, 'the raw stamp is back on the visible line').not.toContain(served)
+  expect(text, 'the live variant rendered no relative label').not.toBe('')
   view.unmount()
 })
 

@@ -572,6 +572,18 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                   A stored status the board has no name for — shown under its own value rather than hidden.
                 </p>
               )}
+              {/* W12 (walk 2026-08-27): a task lands in Done when the
+                  PLATFORM's work is finished, while its deliverable may still
+                  wait on the requester's review — the position alone read as
+                  "all settled". The column says what Done means; the board
+                  list serves no per-task deliverable state, so this is copy,
+                  not a per-card chip (mechanics untouched by design). */}
+              {col.status === 'done' && inCol.length > 0 && (
+                <p className="col-note" data-done-note>
+                  The platform&apos;s work here is finished. A finished task&apos;s deliverable can still be waiting on
+                  your review — its task card says so, and holds the door to the review.
+                </p>
+              )}
               <ColumnBody label={col.label} count={inCol.length}>
                 {inCol.length === 0 && answered && (
                   <p className="col-empty">

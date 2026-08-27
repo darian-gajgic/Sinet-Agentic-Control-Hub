@@ -1444,11 +1444,11 @@ test('an exchange file renders its upload instant verbatim, with the relative la
   const stamp = node.querySelector('time')!
   expect(stamp, 'the file lost its stamp').not.toBeNull()
   expect(stamp.getAttribute('dateTime')).toBe(file.uploaded_ts)
-  // The verbatim instant never leaves: the label beside it is derived from a
-  // device clock and freezes between frames, and only this string stays true.
-  expect(stamp.textContent, 'the verbatim UTC was dropped').toBe(file.uploaded_ts)
-  const beside = stamp.parentElement!.parentElement!.textContent ?? ''
-  expect(beside.endsWith(file.uploaded_ts), 'the instant is not beside its label').toBe(true)
-  expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(file.uploaded_ts.length)
+  // The verbatim instant never leaves the DOM: since P3-GF9 (walk W5) it
+  // rides the element's dateTime and title while the visible words are the
+  // relative label.
+  expect(stamp.getAttribute('title'), 'the exact instant left the hover').toBe(file.uploaded_ts)
+  expect(stamp.textContent, 'no relative words rendered').not.toBe('')
+  expect(stamp.textContent, 'the raw stamp is back on the visible line').not.toBe(file.uploaded_ts)
   view.unmount()
 })

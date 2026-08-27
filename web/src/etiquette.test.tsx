@@ -150,7 +150,12 @@ test('an opening frame lights the dot of the route you are NOT on, and arriving 
   // length that rides a useLive re-read (rework step 1, map §2 "glowing
   // pending badge"), so digits inside the badge are the served count and
   // digits anywhere ELSE in the link are still a violation.
-  const link = view.container.querySelector(`a[href="${hrefFor('inbox')}"]`)!
+  // Scoped to the NAV's link (2026-08-27, P3-GF9): the rule this asserts is
+  // about the nav dot and badge, and the page BODY may legitimately carry
+  // other inbox links whose text is a served count (Home's waiting tile
+  // reconciles its caption with the badge's own filter — walk W3). The
+  // page-wide selector was grabbing whichever inbox link came first.
+  const link = view.container.querySelector(`.shell-nav a[href="${hrefFor('inbox')}"]`)!
   const badge = link.querySelector('.nav-badge')
   const outsideBadge = (link.textContent ?? '').replace(badge?.textContent ?? '', '')
   expect(outsideBadge, 'the dot carries a count the frames cannot justify').not.toMatch(/\d/)

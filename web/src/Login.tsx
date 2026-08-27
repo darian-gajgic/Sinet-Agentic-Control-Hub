@@ -118,6 +118,7 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               autoComplete="new-password"
+              aria-label="PIN"
               required
             />
           </label>
@@ -140,10 +141,14 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
         // The dev-fallback explainer (W1-2: the picker gave no clue who these
         // people are or whose work is whose). Only the fallback posture shows
         // it — in production these are simply the household's accounts.
+        // W2 (walk 2026-08-27): this line said "this demo world's seeded
+        // household" on a FRESH world that was somebody's real household —
+        // the copy now fits both, because the page cannot tell them apart
+        // and should not guess.
         <p className="text-sm text-muted-foreground" data-seeded-note>
-          These accounts are this demo world&apos;s seeded household. Pick who you are: what you create is owned,
-          answered and approved by the account you pick, and the other accounts will not see it in their lists. The
-          operator can additionally see house-wide work.
+          These are this platform&apos;s household accounts. Pick who you are: what you create is owned, answered and
+          approved by the account you pick, and the other accounts will not see it in their lists. The operator can
+          additionally see house-wide work.
         </p>
       )}
       {session.hint?.device_login && (
@@ -191,6 +196,7 @@ export function Login({ session, onSignedIn }: { session: Session; onSignedIn: (
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             autoComplete="current-password"
+            aria-label="PIN"
             required={!autoLogin}
           />
         </label>

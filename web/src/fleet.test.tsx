@@ -103,7 +103,11 @@ test('a lane whose park DOES carry a horizon renders it verbatim', async () => {
   const view = await fleet({ 'GET /api/meters': { body: meters } })
   const row = view.container.querySelector('.fleet-lanes tbody tr[data-lane="zai"]')!
   expect(row.textContent).toContain('parked until')
-  expect(row.textContent).toContain('2026-07-20T12:00:00Z')
+  // The verbatim horizon rides the element since P3-GF9 (walk W5) — the
+  // visible words are relative, the exact instant on dateTime and title.
+  const stamp = row.querySelector('time')!
+  expect(stamp.getAttribute('dateTime')).toBe('2026-07-20T12:00:00Z')
+  expect(stamp.getAttribute('title')).toBe('2026-07-20T12:00:00Z')
 })
 
 test('the person and lane filters narrow the display only', async () => {
@@ -766,11 +770,11 @@ test('a lane with parked runs and no served horizon says so; one with a horizon 
   const v2 = await fleet({ 'GET /api/meters': { body: withHorizon } })
   const time = v2.container.querySelector('.parked-until time')!
   expect(time, 'the served horizon rendered no instant').not.toBeNull()
+  // Since P3-GF9 (walk W5): dateTime + title carry the verbatim instant, the
+  // visible words are the relative label.
   expect(time.getAttribute('dateTime')).toBe(stamp)
-  expect(time.textContent, 'the verbatim UTC was dropped').toBe(stamp)
-  const beside = time.parentElement!.parentElement!.textContent ?? ''
-  expect(beside.endsWith(stamp), 'the instant is not beside its label').toBe(true)
-  expect(beside.length, 'a relative label replaced the instant').toBeGreaterThan(stamp.length)
+  expect(time.getAttribute('title'), 'the exact instant left the hover').toBe(stamp)
+  expect(time.textContent, 'no relative words rendered').not.toBe('')
   v2.unmount()
 })
 

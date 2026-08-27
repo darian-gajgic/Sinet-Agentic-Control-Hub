@@ -4139,6 +4139,50 @@ input[type='radio'] {
   color: var(--accent-2);
 }
 
+/* ── rich options (P3-GF9): a choice wearing its consequence line (H3) ──
+   When any option of a question carries its served `effect`, the row turns
+   into stacked cards so the tradeoff line has room under its label. */
+.q-options-rich {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.q-options-rich .q-option {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  text-align: start;
+}
+
+.q-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.q-option-effect {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.q-option[data-active='true'] .q-option-effect {
+  color: var(--text-dim);
+}
+
+/* The authored-default banner's why: the recommended option's own effect. */
+.q-rec-why {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
 .q-own {
   font-size: 12.5px;
 }
@@ -4527,6 +4571,59 @@ input[type='radio'] {
   color: var(--yellow);
 }
 
+/* ── the record, correctable where it is shown (P3-GF9; r5 §C rule 3) ── */
+
+.understood-fix {
+  border: none;
+  padding: 0;
+  background: none;
+  font-size: 11px;
+  color: var(--accent-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  /* Rides the row's end: when the wrap puts it on its own line it pins to
+     the right edge instead of floating mid-row (GF9 walk polish). */
+  margin-inline-start: auto;
+}
+
+.understood-fix:hover {
+  color: var(--fg);
+}
+
+.understood-corrected {
+  color: var(--accent-2);
+}
+
+/* The carried-over row's honest why: quiet, full width under its row. */
+.understood-carried-why {
+  flex-basis: 100%;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.understood-items li[data-carried] .understood-how {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-faint);
+}
+
+/* The inline correction editor: input + save + never-mind on one wrapping row. */
+.understood-editor {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+}
+
+.understood-editor .door-input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
 /* ── the composing face: the honest long-wait state (never-stall-silently) ── */
 
 .composing {
@@ -4670,6 +4767,60 @@ input[type='radio'] {
   color: var(--text-dim);
 }
 
+/* ── the family line (P3-GF9; H18 kill): the guess said out loud, correctable ── */
+
+.family-line {
+  padding: 9px 13px;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: rgba(124, 92, 255, 0.05);
+}
+
+.family-line-said {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.family-line-src {
+  color: var(--text-faint);
+}
+
+.family-line-change {
+  margin-inline-start: 10px;
+  border: none;
+  padding: 0;
+  background: none;
+  font-size: 11.5px;
+  color: var(--accent-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.family-line-change:hover {
+  color: var(--fg);
+}
+
+.family-line-pick {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border);
+}
+
+.family-line-why {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.family-line-pick .door-acts {
+  margin-top: 2px;
+}
+
 /* ── the plan card ── */
 
 .plan-card {
@@ -4780,6 +4931,114 @@ input[type='radio'] {
   color: var(--text-faint);
 }
 
+/* ── the step's HOW (P3-GF9; S06.6 A15): approach, decisions, ordering —
+   the Layer-2 treatment under the step it explains ── */
+
+.step-how {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.step-how-summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--accent-2);
+}
+
+.step-how-summary:hover {
+  color: var(--fg);
+}
+
+.step-how-approach {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.step-how-decisions {
+  margin: 6px 0 0;
+  padding-inline-start: 1.1em;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.step-how-decided {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.step-how-alt {
+  color: var(--text-faint);
+}
+
+.step-how-why {
+  color: var(--text-dim);
+}
+
+.step-how-order {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ── the full-contract fold (P3-GF9): checks, constraints, supplied ── */
+
+.plan-fold-summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.plan-fold-summary:hover {
+  color: var(--fg);
+}
+
+.plan-fold[open] .plan-fold-summary {
+  margin-bottom: 8px;
+}
+
+.plan-fold-h {
+  margin: 10px 0 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.plan-acs {
+  list-style: decimal;
+}
+
+/* ── what changed since the last draft (P3-GF9; RA-1) ── */
+
+.plan-changes {
+  border-color: rgba(94, 234, 212, 0.35);
+  background: rgba(94, 234, 212, 0.05);
+}
+
+.plan-changes .plan-h {
+  color: var(--accent-2);
+}
+
+.plan-change-list {
+  list-style: none;
+  padding-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.plan-changes-frame {
+  margin-top: 8px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
 /* Assumptions are the card's centerpiece: the violet frame marks them. */
 .plan-assumptions {
   border-color: rgba(124, 92, 255, 0.4);
@@ -4869,6 +5128,73 @@ input[type='radio'] {
   border-radius: 8px;
   max-width: 100%;
   text-align: start;
+}
+
+/* ── contest-in-place (P3-GF9; r5 §C rule 7 "tap what is wrong") ──
+   In contest mode every field wears its tap where the field IS; an armed
+   field opens its own note box — the per-target note the wire carries. */
+
+.contestable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 4px 7px;
+  margin: -4px -7px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.contestable[data-armed='true'] {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--orange) 55%, transparent);
+  background: color-mix(in srgb, var(--orange) 7%, transparent);
+}
+
+.contestable-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.contest-tap {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-l);
+  border-radius: 999px;
+  padding: 1px 9px;
+  background: rgba(20, 20, 32, 0.55);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.contest-tap:hover {
+  border-color: var(--orange);
+  color: var(--fg);
+}
+
+.contest-tap[aria-pressed='true'] {
+  border-color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 16%, transparent);
+  color: var(--orange);
+}
+
+.contest-note-inline {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.contest-armed {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
 }
 
 /* ── landed / cancelled / no-card ── */
