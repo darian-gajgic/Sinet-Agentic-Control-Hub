@@ -351,7 +351,12 @@ func validateFindings(round int, fs []Finding, acs []ledger.AcceptanceCriterion,
 			f.Severity = SeverityNote
 			f.Demoted = true
 		}
-		if round > 1 && f.Severity == SeverityNote && !priorKeys[f.Key()] {
+		// The bootstrap posture disclosure is exempt: it is not a new goalpost
+		// but a statement about how this round was verified, and a capture
+		// that regresses mid-drain (or a resume whose carried history is all
+		// full-posture) would otherwise mint it at a later round and have it
+		// swallowed — the requester would never learn nothing was checked.
+		if round > 1 && f.Severity == SeverityNote && !priorKeys[f.Key()] && !isPostureDisclosure(f) {
 			suppressed++
 			continue
 		}

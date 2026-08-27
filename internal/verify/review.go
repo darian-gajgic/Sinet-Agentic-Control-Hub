@@ -29,7 +29,9 @@ type ReviewSink interface {
 	// comments against the candidate revision. The caller passes
 	// deliverable-defect findings only — CHECK-INTEGRITY findings are
 	// suite defects whose sink is the decision card + quarantine, never
-	// the review stream (CONVENTIONS §15).
+	// the review stream (CONVENTIONS §15) — plus the bootstrap posture
+	// disclosure, the one integrity-category finding that is a statement to
+	// the requester rather than a suite defect (see reviewable).
 	RecordFindings(ctx context.Context, d Deliverable, findings []Finding) error
 	// RecordVerdict fills the revision's verification-verdict ref with the
 	// round's verify.round event seq (fill-once; Spec S13.1).
@@ -64,10 +66,17 @@ func MintRef(runID string, round int) string {
 // EXCLUDING check-integrity — a suite defect routes to its card +
 // quarantine and never re-enters the deliverable's rework channel
 // (Spec S07.7; CONVENTIONS §15).
+//
+// The bootstrap posture disclosure is the one exception, admitted by its
+// stable identity and never by its category (isPostureDisclosure): it is not
+// a suite defect but the requester's answer to "why was nothing checked", and
+// the review surface is where the mandatory V3 decision it exists for is
+// actually made (Spec S07.8). Quarantine skips and runner failures still stay
+// out.
 func reviewable(fs []Finding) []Finding {
 	out := make([]Finding, 0, len(fs))
 	for _, f := range fs {
-		if f.Category == CatCheckIntegrity {
+		if f.Category == CatCheckIntegrity && !isPostureDisclosure(f) {
 			continue
 		}
 		out = append(out, f)

@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
@@ -295,6 +297,14 @@ func TestGF4VerdictRowCarriesThePostureBothDirections(t *testing.T) {
 	if payload.Retention != "keep-forever" {
 		t.Fatalf("retention %q, want keep-forever (G2 Def.11)", payload.Retention)
 	}
+	// The members are proven on the WIRE, not on a decoded struct whose zero
+	// values are indistinguishable from absence.
+	bootstrapKeys := lastRoundKeys(t, bootstrapFix)
+	for _, key := range postureKeys {
+		if _, ok := bootstrapKeys[key]; !ok {
+			t.Fatalf("verdict.recorded for a bootstrap round has no %q key: %v", key, sortedKeys(bootstrapKeys))
+		}
+	}
 
 	fullFix := newFix(t)
 	fullFix.seedTask("t1", "r1")
@@ -305,6 +315,170 @@ func TestGF4VerdictRowCarriesThePostureBothDirections(t *testing.T) {
 	full := lastRoundPayload(t, fullFix)
 	if full.Posture != "" || full.PostureNote != "" || full.ReviewMandatory {
 		t.Fatalf("a full-posture round carries bootstrap members: %+v — the members are omitempty in both directions", full)
+	}
+	fullKeys := lastRoundKeys(t, fullFix)
+	for _, key := range postureKeys {
+		if _, ok := fullKeys[key]; ok {
+			t.Fatalf("verdict.recorded for a full-posture round emits the %q key — omitempty must drop it from the wire, not just decode to a zero value", key)
+		}
+	}
+}
+
+// postureKeys are the payload members this packet adds, by wire name.
+var postureKeys = []string{"posture", "posture_note", "review_mandatory"}
+
+// lastRoundKeys returns the raw top-level keys of the newest verdict.recorded
+// payload — absence on the wire, not a zero value after decoding.
+func lastRoundKeys(t *testing.T, f *fix) map[string]json.RawMessage {
+	t.Helper()
+	rows := f.events(verify.EventRound)
+	if len(rows) == 0 {
+		t.Fatal("no verdict.recorded row")
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(rows[len(rows)-1].Payload, &out); err != nil {
+		t.Fatalf("decode verdict.recorded keys: %v", err)
+	}
+	return out
+}
+
+func sortedKeys(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestGF4PostureNoteSurvivesLateBootstrapEntry [drain r1 F1]: the disclosure
+// must not depend on WHICH round the posture first appears in. A capture that
+// regresses mid-drain (full ladder at round 1, nothing to run at round 2) mints
+// the note with a first-seen key at a later round, where the S07.6 new-note
+// suppression would otherwise swallow it and leave the requester never told
+// that nothing was checked.
+func TestGF4PostureNoteSurvivesLateBootstrapEntry(t *testing.T) {
+	ctx := context.Background()
+	f := newFix(t)
+	f.seedTask("t1", "r1")
+	j := &fakeJudge{compliance: func(in verify.JudgeInput) (verify.Axis1Result, error) {
+		if in.Round == 1 {
+			return blockerOn("AC-1", "main.go:3", "the demo panics on empty input")(in)
+		}
+		return passAll(in), nil
+	}}
+	v := f.verifier(j, &scriptRunner{}, nil)
+	resolutions := 0
+	v.ResolvePack = func(context.Context) (*verify.CheckPack, error) {
+		resolutions++
+		if resolutions == 1 {
+			return passPack(), nil
+		}
+		return bootstrapPack(), nil
+	}
+	v.Revise = func(_ context.Context, pkg verify.RetryPackage) (verify.Deliverable, error) {
+		d := pkg.Deliverable
+		d.Content += "// fixed per F1\n"
+		return d, nil
+	}
+
+	out, err := v.Verify(ctx, input(deliverable("t1", "r1")))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(out.Rounds) != 2 {
+		t.Fatalf("rounds = %d, want 2 (full round 1, bootstrap round 2)", len(out.Rounds))
+	}
+	r2 := out.Rounds[1]
+	if r2.Posture != verify.PostureBootstrap {
+		t.Fatalf("round 2 posture %q, want bootstrap", r2.Posture)
+	}
+	found := false
+	for _, fd := range r2.Findings {
+		if strings.Contains(fd.Text, "restores the full ladder") {
+			found = true
+			if fd.Severity != verify.SeverityNote {
+				t.Fatalf("the late posture disclosure is %q severity, want note", fd.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("round 2 suppressed the posture disclosure (suppressed=%d, findings=%+v) — the requester is never told nothing was checked",
+			r2.SuppressedNotes, r2.Findings)
+	}
+	if out.Verdict != verify.VerdictShipWithNotes {
+		t.Fatalf("verdict %s, want SHIP-with-notes — a late bootstrap round is still advisory", out.Verdict)
+	}
+}
+
+// postureSink captures exactly what reaches the S13 review stream.
+type postureSink struct{ recorded []verify.Finding }
+
+func (s *postureSink) MintCandidate(context.Context, verify.Deliverable, int) error { return nil }
+func (s *postureSink) RecordFindings(_ context.Context, _ verify.Deliverable, fs []verify.Finding) error {
+	s.recorded = append(s.recorded, fs...)
+	return nil
+}
+func (s *postureSink) RecordVerdict(context.Context, verify.Deliverable, int64) error { return nil }
+func (s *postureSink) RecordGuidance(context.Context, verify.Deliverable, string, []verify.RequesterComment) error {
+	return nil
+}
+func (s *postureSink) DrainOpen(context.Context, verify.Deliverable, string) ([]verify.Finding, error) {
+	return nil, nil
+}
+
+// TestGF4PostureNoteReachesReviewButSuiteDefectsDoNot [drain r1 F2]: the
+// review surface is where the mandatory V3 decision happens, so the posture
+// disclosure has to arrive there — while every other CHECK-INTEGRITY finding
+// stays out of the deliverable's review channel, exactly as before.
+func TestGF4PostureNoteReachesReviewButSuiteDefectsDoNot(t *testing.T) {
+	ctx := context.Background()
+
+	bootstrapFix := newFix(t)
+	bootstrapFix.seedTask("t1", "r1")
+	bv := bootstrapFix.verifier(&fakeJudge{}, nil, bootstrapPack())
+	sink := &postureSink{}
+	bv.Review = sink
+	if _, err := bv.Verify(ctx, input(deliverable("t1", "r1"))); err != nil {
+		t.Fatalf("bootstrap Verify: %v", err)
+	}
+	found := false
+	for _, f := range sink.recorded {
+		if strings.Contains(f.Text, "restores the full ladder") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the posture disclosure never reached the review stream: %+v — the requester decides V3 on that surface (Spec S07.8)", sink.recorded)
+	}
+
+	// The suite-defect rule is untouched: a quarantine skip is a broken check,
+	// which regenerating the deliverable cannot fix, so it stays on its card.
+	quarantineFix := newFix(t)
+	quarantineFix.seedTask("t1", "r1")
+	pack := passPack()
+	if err := pack.QuarantineCheck(verify.Quarantine{
+		CheckID: "build", Owner: "u1", Reason: "flaky", FixBy: time.Now().Add(48 * time.Hour),
+	}); err != nil {
+		t.Fatalf("QuarantineCheck: %v", err)
+	}
+	qv := quarantineFix.verifier(&fakeJudge{}, &scriptRunner{}, pack)
+	qsink := &postureSink{}
+	qv.Review = qsink
+	if _, err := qv.Verify(ctx, input(deliverable("t1", "r1"))); err != nil {
+		t.Fatalf("quarantine Verify: %v", err)
+	}
+	sawQuarantineNote := false
+	for _, f := range qsink.recorded {
+		if f.Category == verify.CatCheckIntegrity {
+			t.Fatalf("a suite defect reached the review stream: %+v — only the posture disclosure is exempt", f)
+		}
+		if strings.Contains(f.Text, "quarantined") {
+			sawQuarantineNote = true
+		}
+	}
+	if sawQuarantineNote {
+		t.Fatal("the quarantine-skip note reached the review stream")
 	}
 }
 

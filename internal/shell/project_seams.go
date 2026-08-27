@@ -413,11 +413,11 @@ func packFromCapture(domain string, e project.Entry) (*verify.CheckPack, error) 
 	checks := packChecks(e.Capture.Commands)
 	if len(checks) == 0 {
 		// The fresh-scaffold case: a REGISTERED project holding no build, test
-		// or lint command has no executable rung, which Spec S07.8's bootstrap
-		// posture defines a landing for (A14, 2026-08-27) instead of the
-		// refusal this used to be. The drain runs, records every rung
-		// UNVERIFIABLE-HERE and marks its verdict advisory; capturing the
-		// project's commands restores the full ladder on the next revision.
+		// or lint command has no executable rung, and Spec S07.8's bootstrap
+		// posture (A14, 2026-08-27) is its landing. The drain runs, records
+		// every rung UNVERIFIABLE-HERE and marks its verdict advisory;
+		// capturing the project's commands restores the full ladder on the
+		// next revision.
 		//
 		// The capture date is deliberately not required here: it stamps a
 		// suite's freshness (rule 7) and there is no suite to stamp.

@@ -70,14 +70,16 @@ func packPosture(pack *CheckPack) Posture {
 	return ""
 }
 
-// bootstrapPostureFinding carries the posture into the round's findings, the
-// review comments and the judge's prior-findings scope. Note severity by
-// construction — a permanent blocker would drive REVISE to the cap and park
-// the run, which is the wall S07.8 abolishes — under the CHECK-INTEGRITY
-// category, the suite-fact class the quarantine-skip note already uses (Spec
-// S07.7). That category's card raiser fires only on blockers, so the
-// disclosure spams no inbox. Its key (criterion + anchor + category) is fixed,
-// so the note survives the S07.6 note suppression across rounds.
+// bootstrapPostureFinding carries the posture into the round's findings, from
+// where it reaches the requester on the review surface (through reviewable's
+// posture exemption), the judge's prior-findings scope, and the durable round
+// record. Note severity by construction — a permanent blocker would drive
+// REVISE to the cap and park the run, which is the wall S07.8 abolishes —
+// under the CHECK-INTEGRITY category (the ratified reading: it is a fact about
+// the suite, like the quarantine-skip note). That category's card raiser fires
+// only on blockers, so the disclosure spams no inbox, and ComputeVerdict
+// excludes the category from its note count, which is why the drain states the
+// advisory SHIP-with-notes downgrade itself.
 func bootstrapPostureFinding() Finding {
 	return Finding{
 		Severity: SeverityNote,
@@ -86,6 +88,29 @@ func bootstrapPostureFinding() Finding {
 		Text:     BootstrapPostureNote,
 	}
 }
+
+// bootstrapPostureKey is the disclosure's stable identity (criterion + anchor
+// + category). It is fixed, so the note is the SAME finding in every round it
+// is raised in — which is what both exemptions below key on, by IDENTITY and
+// never by category.
+var bootstrapPostureKey = bootstrapPostureFinding().Key()
+
+// isPostureDisclosure reports whether f is the bootstrap posture disclosure.
+//
+// Two rules exempt exactly this finding, and nothing else:
+//
+//   - the S07.6 new-note suppression (validateFindings). Suppression exists to
+//     stop goalposts drifting round by round; the posture is not a new goalpost
+//     but a fact about how THIS round was verified, and which round the
+//     bootstrap posture first appears in must never decide whether the
+//     requester is told about it.
+//   - the review-stream strip (reviewable). Suite defects stay out of the
+//     deliverable's review channel because regenerating the deliverable cannot
+//     fix a broken check; the posture is the requester's answer to "why was
+//     nothing checked", and the review surface is exactly where the mandatory
+//     V3 decision is made (Spec S07.8). It rides as a note, so it still
+//     triggers no rework round.
+func isPostureDisclosure(f Finding) bool { return f.Key() == bootstrapPostureKey }
 
 // bootstrapV1 is the V1 result of a bootstrap round (Spec S07.8): every
 // executable-ladder rung the missing commands would have populated records
