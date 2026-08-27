@@ -1,0 +1,48 @@
+{
+  "projects": [
+    {
+      "project_id": "p-fresh",
+      "name": "Car webshop",
+      "owner": "alice",
+      "members": [],
+      "state": "active",
+      "default_branch": "main",
+      "has_remote": false,
+      "capture_version": 1,
+      "created_ts": "2026-08-27T09:00:00Z",
+      "updated_ts": "2026-08-27T09:00:00Z",
+      "capture": {
+        "version": 1,
+        "conventions": 0,
+        "danger_zones": 0,
+        "captured_by": "alice",
+        "captured_ts": "2026-08-27T09:00:00Z"
+      }
+    },
+    {
+      "project_id": "p-shop",
+      "name": "Shop backend",
+      "owner": "alice",
+      "members": [
+        "bob"
+      ],
+      "state": "active",
+      "default_branch": "main",
+      "has_remote": false,
+      "capture_version": 1,
+      "created_ts": "2026-08-27T09:00:00Z",
+      "updated_ts": "2026-08-27T09:00:00Z",
+      "capture": {
+        "version": 1,
+        "conventions": 2,
+        "danger_zones": 1,
+        "test_command": "go test ./...",
+        "captured_by": "alice",
+        "captured_ts": "2026-08-27T09:00:00Z"
+      }
+    }
+  ],
+  "visibility": "the projects you own, plus the projects you have been invited to as a member (S13.7). Your own onboardings appear while they are still pending your approval; another person's never appear, at any state. The operator role bit opens nothing here: a project's captured content is project content, and D10 is authority over what the platform DOES, not a read into another person's work.",
+  "cursor": 11,
+  "truncated": false
+}

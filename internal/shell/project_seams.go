@@ -187,6 +187,62 @@ func onboardRefusal(err error) error {
 	}
 }
 
+// commandsDoor is the api-facing S13.7 captured-command write seam
+// (api.ProjectCommandsSurface, P3-GF5): the HTTP door reaches the registry
+// through it, and only through it.
+//
+// It is composed HERE for the onboardDoor reason: `internal/api` imports
+// neither internal/project nor internal/broker (§40-B), so a registry write
+// from a transport handler has to cross a narrow interface at the root that
+// already holds both sides. The door OWNS no rule — the owner check, the
+// active check, the one-line/encoding/length validation, the carry-forward and
+// the retry-safety all live in the store verb, so there is one authority on
+// what a captured command may be and one place a later packet changes it.
+type commandsDoor struct{ proj *project.Store }
+
+var _ api.ProjectCommandsSurface = commandsDoor{}
+
+// SetCommands captures the submitted set as a new immutable version, reporting
+// whether one was actually minted (an identical resubmission mints nothing).
+func (d commandsDoor) SetCommands(ctx context.Context, caller, projectID string, c api.ProjectCommands) (bool, error) {
+	_, minted, err := d.proj.EditCommands(ctx, projectID, caller, project.Commands{
+		Build: c.Build, Test: c.Test, Lint: c.Lint, Run: c.Run, Preview: c.Preview,
+	})
+	if err != nil {
+		return false, commandsRefusal(err)
+	}
+	return minted, nil
+}
+
+// commandsRefusal translates the store's refusals into transport errors on the
+// SENTINEL, never on the message text (§38's ban) — onboardRefusal's discipline
+// one door over. Anything unmarked stays itself and answers 500 with the cause
+// in the ops log: a platform fault is not the caller's fault.
+//
+// ErrNotFound is answered with the family's OWN not-found words rather than the
+// store's, because the store names the id it could not find and this refusal is
+// shared with an entry the caller may not see — the one answer that keeps the
+// door from becoming an existence oracle (the noSuchPin discipline). The
+// handler resolves visibility before calling here, so this arm is the race
+// where the entry vanished underneath a write; it must not read differently
+// from the handler's own 404.
+func commandsRefusal(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, project.ErrNotFound):
+		return &api.SurfaceError{Status: http.StatusNotFound, Code: "not_found", Msg: "project not found"}
+	case errors.Is(err, project.ErrNotOwner):
+		return &api.SurfaceError{Status: http.StatusForbidden, Code: "not_owner", Msg: err.Error()}
+	case errors.Is(err, project.ErrNotActive):
+		return &api.SurfaceError{Status: http.StatusConflict, Code: "not_active", Msg: err.Error()}
+	case errors.Is(err, project.ErrBadInput):
+		return &api.SurfaceError{Status: http.StatusBadRequest, Code: "bad_request", Msg: err.Error()}
+	default:
+		return err
+	}
+}
+
 // toRegistrySlice projects an active entry's current capture into the intake
 // shape. Danger zones carry their source hashes (the ledger §2 pin, S05.1);
 // commands flatten to the intake []string surface with their slot names.

@@ -1099,11 +1099,26 @@ export type FollowUpSpawned = {
   task?: unknown
 }
 
+/**
+ * The CURRENT revision's verification posture (S07.8 [A14]; P3-GF5 R9).
+ *
+ * `posture` is a closed server vocabulary — `bootstrap` is the only value at
+ * v0 — and `review_mandatory` says requester review is the real gate for that
+ * round's verdict rather than a formality. Deliberately no note text: the
+ * plain-words disclosure already reaches the reader as a review comment and in
+ * the receipt, and this member exists so a surface can DECIDE (offer the
+ * Commands door, mark the verdict advisory) without string-matching prose.
+ */
+export type RevisionVerification = { posture: string; review_mandatory: boolean }
+
 export type DeliverableDetail = {
   deliverable: DeliverableRow
   revisions: Revision[]
   lineage: TaskLineage
   doors: Door[]
+  /** ABSENT for the ordinary posture — the key is missing, not zero-valued, so
+   *  `verification === undefined` is the only correct test. */
+  verification?: RevisionVerification
   cursor: number
 }
 
@@ -1910,6 +1925,25 @@ export type ProjectStarted = {
   project: ProjectDetail
   task_id: string
   ask_ref: string
+  detail: string
+  cursor: number
+}
+
+/**
+ * The commands write door's answer (P3-GF5): the entry as it now stands, read
+ * back through the family's own read path, plus a plain-words sentence saying
+ * what the write did — captured as version N, cleared back to the bootstrap
+ * posture, or nothing changed because these were already the captured
+ * commands. The sentence is the server's; it is not reconstructed here.
+ *
+ * The TYPE lands here and the client verb does not: GF5 is the backend half,
+ * and a declared verb nothing calls is a dead client verb this tree reports
+ * rather than accumulates (sweep.test.tsx). The editor that calls
+ * `POST /api/projects/{project}/commands` is GF6's, and it brings the verb
+ * with it. The route is on the sweep's gap list until then.
+ */
+export type ProjectCommandsWritten = {
+  project: ProjectDetail
   detail: string
   cursor: number
 }

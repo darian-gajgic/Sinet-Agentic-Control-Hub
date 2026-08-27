@@ -256,8 +256,26 @@ func TestEditCommandsChangesOnlyCommands(t *testing.T) {
 				i, seed, before.Capture.Family, after.Capture.Family)
 		}
 
-		// The prior rows are still there, byte for byte.
+		// The carry-forward is BYTE-equal, not merely decode-equal. A stored
+		// column that round-trips to the same Go value while holding different
+		// bytes (`[]` vs `null`) is a difference nothing in the decoded world
+		// notices and that a committed golden fixture reads — which is how this
+		// assertion earned its place.
 		rowsAfter := gf5CaptureRows(t, f, id)
+		if wantMinted {
+			was := strings.Split(rowsBefore[before.CaptureVersion], "\x1f")
+			now := strings.Split(rowsAfter[after.CaptureVersion], "\x1f")
+			// column order: conventions, commands, danger_zones, scan_hash, family, by, ts
+			for _, col := range []struct {
+				name string
+				at   int
+			}{{"conventions", 0}, {"danger_zones", 2}, {"scan_hash", 3}, {"family", 4}} {
+				if was[col.at] != now[col.at] {
+					t.Fatalf("world %d (seed %d): stored %s is not byte-equal across the edit:\n was: %q\n now: %q",
+						i, seed, col.name, was[col.at], now[col.at])
+				}
+			}
+		}
 		for v, was := range rowsBefore {
 			now, ok := rowsAfter[v]
 			if !ok {

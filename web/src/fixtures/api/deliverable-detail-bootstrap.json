@@ -1,0 +1,84 @@
+{
+  "deliverable": {
+    "id": "dlv-t-fresh",
+    "owner": "alice",
+    "task_id": "t-fresh",
+    "project_id": "p-fresh",
+    "type": "code",
+    "current_revision": 1,
+    "state": "in-review",
+    "created_ts": "2026-08-27T09:01:00Z",
+    "updated_ts": "2026-08-27T09:01:00Z"
+  },
+  "revisions": [
+    {
+      "deliverable_id": "dlv-t-fresh",
+      "n": 1,
+      "owner": "alice",
+      "run_id": "t-fresh.verify",
+      "attempt_ref": "t-fresh.verify#round-1",
+      "pin_kind": "content",
+      "content_sha256": "55a60bb97151b2b4b680462447ce60ec34511b14fa10d77440c97b9777101566",
+      "platform_ref": "refs/sinet/deliverable/dlv-t-fresh/rev-1",
+      "objects": [
+        {
+          "name": "main.go",
+          "size": 29,
+          "sha256": "55a60bb97151b2b4b680462447ce60ec34511b14fa10d77440c97b9777101566",
+          "type": "text"
+        }
+      ],
+      "verdict_ref": 11,
+      "created_ts": "2026-08-27T09:01:00Z"
+    }
+  ],
+  "lineage": {
+    "project": "p-fresh",
+    "project_choices": 1,
+    "succeeds": [],
+    "succeeded_by": []
+  },
+  "doors": [
+    {
+      "verb": "accept",
+      "method": "POST",
+      "route": "/api/deliverables/dlv-t-fresh/accept",
+      "available": false,
+      "reason": "no accept orchestration is composed in this process",
+      "pin_from": "GET /api/deliverables/dlv-t-fresh/accept-card"
+    },
+    {
+      "verb": "request-revision",
+      "method": "",
+      "route": "",
+      "available": false,
+      "reason": "closed for now: the work is in review and no rework card is open. A bounded revision travels as the revise_with_guidance answer once the platform asks; until then, comments on the revision are what the next round drains (S13.3/S13.4)"
+    },
+    {
+      "verb": "follow-up",
+      "method": "POST",
+      "route": "/api/deliverables/dlv-t-fresh/follow-up",
+      "available": true,
+      "reason": "open: A successor task links to a numbered revision of this deliverable (S13.9); the framings are presets over that one link."
+    },
+    {
+      "verb": "preview",
+      "method": "POST",
+      "route": "/api/deliverables/dlv-t-fresh/preview",
+      "available": false,
+      "reason": "no preview surface is composed in this process"
+    },
+    {
+      "verb": "preview-compare",
+      "method": "POST",
+      "route": "/api/deliverables/dlv-t-fresh/preview/compare",
+      "available": false,
+      "reason": "no preview surface is composed in this process; with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"
+    }
+  ],
+  "verification": {
+    "posture": "bootstrap",
+    "review_mandatory": true
+  },
+  "cursor": 11
+}

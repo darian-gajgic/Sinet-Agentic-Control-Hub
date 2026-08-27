@@ -123,6 +123,30 @@ type OnboardFamilySurface interface {
 	StartOnboardingWithFamily(ctx context.Context, owner, projectID, name, remoteURL, family string) (OnboardRefs, error)
 }
 
+// ProjectCommandsSurface is the api-facing door to the S13.7 captured command
+// set (P3-GF5): the one seam through which this package can cause a registry
+// write, composed at the root over internal/project's `EditCommands`.
+//
+// It exists because the registry is READ here and never written (the §40-B
+// wall): `internal/api` imports neither internal/project nor internal/broker,
+// so the door's only path to the store is this interface, and the store's
+// refusals arrive as the landed sentinel→SurfaceError translation the
+// composition root performs (§38: never on message text).
+//
+// The interface reports whether a NEW capture version was minted rather than
+// returning the capture, because that is the one fact the handler needs and
+// cannot derive: the trimming the store performs is the store's, so comparing
+// submitted bytes here would be a second implementation of it. The state itself
+// is read back through the family's own read path, so the write door and the
+// detail door describe a project in exactly one way.
+type ProjectCommandsSurface interface {
+	// SetCommands replaces the project's captured command set as caller,
+	// minting a new immutable capture version with everything else carried
+	// forward. minted=false is the retry-safe answer: the submitted set is
+	// already the captured one, so nothing was written and nothing evented.
+	SetCommands(ctx context.Context, caller, projectID string, c ProjectCommands) (minted bool, err error)
+}
+
 // ── the wire shapes ─────────────────────────────────────────────────────────
 
 // ProjectEntry is the registry row as this family serves it: the facts a card
@@ -240,6 +264,16 @@ type ProjectStarted struct {
 	Project ProjectDetail `json:"project"`
 	TaskID  string        `json:"task_id"`
 	AskRef  string        `json:"ask_ref"`
+	Detail  string        `json:"detail"`
+	Cursor  int64         `json:"cursor"`
+}
+
+// ProjectCommandsWritten is the commands door's answer: the entry as it now
+// stands, read back through the family's own read path, and an honest sentence
+// about what the write did. 200, not 201 — no route on this API answers 201,
+// and this is an edit of an existing entry in any case.
+type ProjectCommandsWritten struct {
+	Project ProjectDetail `json:"project"`
 	Detail  string        `json:"detail"`
 	Cursor  int64         `json:"cursor"`
 }
@@ -763,6 +797,154 @@ func (s *Server) projectIDTaken(ctx context.Context, projectID string) (bool, er
 		return false, fmt.Errorf("read project registry: %w", err)
 	}
 	return true, nil
+}
+
+// ── POST /api/projects/{project}/commands ───────────────────────────────────
+
+// projectCommandsBody is the write as it arrives (P3-GF5 R1).
+//
+// FULL REPLACEMENT, AND THE OBJECT IS THE UNIT. The submitted `commands` object
+// becomes the capture's whole command member: a slot the caller omits is
+// CLEARED, not left alone. Per-slot patching would need a way to say "leave
+// this one" that is distinguishable from "clear this one", and JSON absence
+// cannot carry both meanings — so the door takes the whole set, which is also
+// what an editor renders and submits.
+//
+// The OWNER is not a field, and neither is the project: authority is the
+// session identity and the entry is the path (S15.2 — the browser is a
+// display). There is no conventions, danger-zone or family member: this door
+// orders commands, and a capture editor is a later packet's act (brief OQ5).
+type projectCommandsBody struct {
+	Commands ProjectCommands `json:"commands"`
+}
+
+func (s *Server) handleProjectCommands(w http.ResponseWriter, r *http.Request) {
+	if !s.projReady(w) || !s.projCommandsReady(w) {
+		return
+	}
+	id, _ := IdentityFrom(r.Context())
+	if id.Dev {
+		// Browsing is not filing (§9; the create door's own rule): a capture is
+		// attributed to the person who typed it, and the dev-posture fallback is
+		// nobody. Checked BEFORE the entry is resolved, so the answer does not
+		// depend on which projects the fallback identity happens not to own.
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "dev_identity",
+			Msg: "the dev-posture identity browses but never captures: a project's commands are attributed to the person who set them (15.6). Sign in as a person and set them again."})
+		return
+	}
+	projectID := r.PathValue("project")
+	rows, err := s.visibleProjectRows(r.Context(), id.UserID, projectID)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	if len(rows) == 0 {
+		// An unknown id and an entry the caller cannot see are ONE answer, so
+		// this door cannot become an existence oracle for another person's
+		// projects (§38 404-before-403; the noSuchPin discipline).
+		s.writeSurfaceErr(w, errNoSuchProject)
+		return
+	}
+	row := rows[0]
+	if row.entry.Owner != id.UserID {
+		// A VISIBLE member is told the truth, including who to ask: they can
+		// already read `owner` on the detail, so naming it discloses nothing and
+		// saves them guessing (brief OQ3 — widening to members is a later
+		// ratified act, not an omission here).
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "not_owner",
+			Msg: fmt.Sprintf("only the owner sets a project's commands, and this project is owned by %q. "+
+				"They decide what the verification sandbox runs for everybody's work in it (S13.7, D10) — ask them to set it.", row.entry.Owner)})
+		return
+	}
+	if row.entry.State != projectStateActive {
+		// The pending draft's door is the onboarding approval card, where the
+		// owner edits the whole draft and answering activates the entry. A
+		// second write path onto that draft would be one act with two audit
+		// stories — the "three doors and no fourth" shape.
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusConflict, Code: "not_active",
+			Msg: "this project is still waiting for your approval, so its drafted commands are edited on the onboarding card in your Inbox — " +
+				"answering it there captures the draft you approve and activates the entry. This door serves an active project."})
+		return
+	}
+
+	raw, ok := s.readBody(w, r)
+	if !ok {
+		return
+	}
+	var body projectCommandsBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_body", Msg: err.Error()})
+		return
+	}
+	// The VALUES are checked by the registry, not here: the one-line/encoding/
+	// length rules live with the store that will hand them to the verification
+	// sandbox, and its refusal arrives as the landed ErrBadInput → 400
+	// translation naming the rule and the slot. One list, one reader (§43).
+	minted, err := s.projCommands.SetCommands(r.Context(), id.UserID, projectID, body.Commands)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	// Read back through the family's own read path, so the write door and the
+	// detail door describe a project in exactly one way (the create door's
+	// precedent).
+	rows, err = s.visibleProjectRows(r.Context(), id.UserID, projectID)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	if len(rows) == 0 {
+		s.logger.Error("projects: commands written but the entry could not be read back", "project", projectID, "owner", id.UserID)
+		s.writeSurface(w, nil, fmt.Errorf("the commands were captured but the entry could not be read back"))
+		return
+	}
+	cursor, err := s.head(r.Context())
+	if err != nil {
+		s.writeSurface(w, nil, fmt.Errorf("read head cursor: %w", err))
+		return
+	}
+	s.writeReadJSON(w, ProjectCommandsWritten{
+		Project: rows[0].detail(),
+		Detail:  commandsDetail(minted, rows[0].capture),
+		Cursor:  cursor,
+	})
+}
+
+// commandsDetail says what the write actually did, in plain words for the
+// person who pressed the button (S15.5: surfaces speak operator language).
+//
+// The three sentences are three different FACTS, and collapsing them would make
+// the surface claim something it did not observe: a repeated submission is the
+// S15.2 retry answer and captured nothing, an emptied set really does return
+// the project to Spec S07.8's bootstrap posture, and only the third case can
+// promise the ladder.
+func commandsDetail(minted bool, c ProjectCapture) string {
+	version := fmt.Sprintf("version %d", c.Version)
+	if !minted {
+		return "nothing changed: these are already the commands captured as " + version +
+			", so no new version was recorded and nothing was added to the audit trail. A repeated write returns the state that is already there."
+	}
+	if c.Commands == (ProjectCommands{}) {
+		return "the commands are cleared, captured as " + version +
+			". With no build, test or lint command the platform has no check to run, so work in this project verifies under the bootstrap posture: " +
+			"every check rung is recorded as unverifiable and your review is what decides it (S07.8). The previous version is kept, never overwritten."
+	}
+	return "captured as " + version +
+		": the next verification round for a task in this project runs these commands as its check ladder (S07.3), and the advisory bootstrap marking drops from that round on (S07.8). " +
+		"Nothing was run just now — a captured command executes only inside the verification sandbox. The previous version is kept, never overwritten."
+}
+
+// projCommandsReady reports the commands seam, or writes the not-wired answer.
+// The READ doors deliberately do not gate on it, for the onboardReady reason: a
+// process composed without the write half still answers honestly about the
+// projects that exist.
+func (s *Server) projCommandsReady(w http.ResponseWriter) bool {
+	if s.projCommands == nil {
+		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
+			Msg: "the S13.7 project-commands door is not wired in this process: capturing a project's commands is a registry write, and this process composes no registry writer"})
+		return false
+	}
+	return true
 }
 
 // onboardReady reports the onboarding seam, or writes the not-wired answer.

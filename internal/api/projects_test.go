@@ -90,6 +90,10 @@ func (e *projEnv) server(who string) *api.Server {
 		// shell composes *stage.Surface for IntakeSurface/CancelSurface/…
 		Onboard: e.onboard,
 		Intake:  e.onboard,
+		// The S13.7 commands door (P3-GF5), wired at this ONE place per the
+		// seam note above. The adapter is the composition root's, mirrored in
+		// projectfixtures_gf5_test.go; the store verb behind it is real.
+		ProjectCommands: gf5CommandsSeam{proj: e.proj},
 	})
 }
 
@@ -659,10 +663,18 @@ func TestOnboardApprovalStillActivatesThroughTheOneDoor(t *testing.T) {
 }
 
 // TestProjectsRouteTableIsTheThreeDoors — R6 as a structural fact rather than a
-// promise: the family registers exactly the read pair and the create door, all
-// session-required, and NO approve / rescan / member / delete verb exists at
-// any shape under /api/projects. Re-scan on demand (S13.7) is real and is a
-// deliberate absence here; activation lives on the landed ask-answer route.
+// promise: the family registers exactly the read pair, the create door and the
+// commands write, all session-required, and NO approve / rescan / member /
+// delete verb exists at any shape under /api/projects. Re-scan on demand
+// (S13.7) is real and is a deliberate absence here; activation lives on the
+// landed ask-answer route.
+//
+// THE FOURTH DOOR IS P3-GF5's, and it is added to the allowed set rather than
+// silencing the check: `POST /api/projects/{project}/commands` is the S13.7
+// captured-command write the operator record r4-F1b ordered built ("no spec
+// change needed, build immediately"), so RW-2's three-door scope is superseded
+// by a ratified act, not by an executor's convenience. Every OTHER verb is
+// still refused by the sweep below, which is the assertion that has teeth.
 func TestProjectsRouteTableIsTheThreeDoors(t *testing.T) {
 	e := newProjEnv(t)
 	srv := e.server("alice")
@@ -681,9 +693,10 @@ func TestProjectsRouteTableIsTheThreeDoors(t *testing.T) {
 		got[r.Method+" "+r.Path] = true
 	}
 	want := map[string]bool{
-		"GET /api/projects":           true,
-		"POST /api/projects":          true,
-		"GET /api/projects/{project}": true,
+		"GET /api/projects":                     true,
+		"POST /api/projects":                    true,
+		"GET /api/projects/{project}":           true,
+		"POST /api/projects/{project}/commands": true,
 	}
 	for w := range want {
 		if !got[w] {

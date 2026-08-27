@@ -64,6 +64,13 @@ const gf5Owner = "u-operator"
 // gf5ProjectID is the registered project the walked task is attached to.
 const gf5ProjectID = "p-scaffold"
 
+// gf5PostureMember is the verdict row's posture member, matched as the exact
+// JSON pair rather than as the bare word. The GF4 rig's judge is named
+// `bootstrap-judge-1`, so a substring search for "bootstrap" matches EVERY
+// verdict row this file produces — which would make the control below vacuous
+// and the escape assertion below that permanently red.
+const gf5PostureMember = `"posture":"` + string(verify.PostureBootstrap) + `"`
+
 // gf5PassingRunner is this file's check runner: every rung exits 0. What is
 // under test is WHICH ladder the drain resolves, not what a real toolchain says
 // about a fixture repo — a runner that could fail would make the verdict depend
@@ -285,7 +292,7 @@ func TestGF5WithoutTheDoorTheDrainStaysAdvisory(t *testing.T) {
 	if got := h.runState(t, verifyRun); got != "completed" {
 		t.Fatalf("verify run is %q, want completed — the bootstrap drain reaches a verdict (Spec S07.8)", got)
 	}
-	if !strings.Contains(roundRowsFor(t, h.harness, verifyRun), string(verify.PostureBootstrap)) {
+	if !strings.Contains(roundRowsFor(t, h.harness, verifyRun), gf5PostureMember) {
 		t.Fatal("no verdict row carries the bootstrap posture in the command-less world")
 	}
 	if len(h.runner.ran) != 0 {
@@ -330,7 +337,7 @@ func TestGF5EscapeFromBootstrapThroughTheDoor(t *testing.T) {
 		t.Fatal("no rung ran after the capture — the write never reached the round's pack resolution, and r4-F1b is not fixed")
 	}
 	rows := roundRowsFor(t, h.harness, verifyRun)
-	if strings.Contains(rows, string(verify.PostureBootstrap)) {
+	if strings.Contains(rows, gf5PostureMember) {
 		t.Fatalf("a verdict row still carries the bootstrap posture after the capture:\n%s", rows)
 	}
 	if strings.Contains(rows, verify.BootstrapAttribution) {

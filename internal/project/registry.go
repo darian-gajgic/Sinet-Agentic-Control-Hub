@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 )
@@ -216,7 +217,18 @@ type CaptureInput struct {
 	ScanHash    string
 	// Family is the owner-declared task family (P3-RW-11 R2). "" = none.
 	Family string
+	// Origin names what produced this version, for the audit trail alone
+	// (P3-GF5 R6): "" for a scan-derived capture — every caller that predates
+	// this field, so their event bytes are unchanged — and OriginEdit for an
+	// owner's direct command edit. It distinguishes a person's act from the
+	// scan's draft on a row that otherwise looks identical; nothing branches
+	// on it.
+	Origin string
 }
+
+// OriginEdit marks a capture an owner typed rather than one a scan derived
+// (Spec S13.7 rows are owner-attributed; P3-GF5 R6).
+const OriginEdit = "edit"
 
 // Capture writes a new captured-content version and advances the entry's
 // pointer (Spec S13.7: captured content is versioned, re-capture bumps
@@ -228,11 +240,9 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 	if !validFamily(in.Family) {
 		return Capture{}, badFamily(in.Family)
 	}
-	e, err := s.Get(ctx, in.ProjectID)
-	if err != nil {
+	if _, err := s.Get(ctx, in.ProjectID); err != nil {
 		return Capture{}, err
 	}
-	version := e.CaptureVersion + 1
 	conventions := marshalStrings(in.Conventions)
 	commands, err := json.Marshal(in.Commands)
 	if err != nil {
@@ -243,7 +253,23 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 		return Capture{}, fmt.Errorf("project: marshal danger zones: %w", err)
 	}
 	now := s.nowRFC3339()
+	// The version is allocated INSIDE the write transaction (P3-GF5 R7). Read
+	// before it, two writers racing the same entry both computed the same
+	// version+1 and the loser died on the (project_id, version) primary key —
+	// a raw constraint abort with no meaning for the person who pressed the
+	// button. BEGIN IMMEDIATE serializes the readers with the writers, so the
+	// number the insert uses is the number the pointer actually holds.
+	var version int
 	err = s.db.WriteTx(ctx, func(tx *sql.Tx) error {
+		var current int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT capture_version FROM repo_registry WHERE project_id = ?`, in.ProjectID).Scan(&current); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %q", ErrNotFound, in.ProjectID)
+			}
+			return fmt.Errorf("project: read capture pointer: %w", err)
+		}
+		version = current + 1
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO repo_registry_captures (project_id, version, conventions, commands,
 			                                    danger_zones, scan_hash, family, captured_by, captured_ts)
@@ -264,7 +290,12 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 			Family      string `json:"family,omitempty"`
 			Conventions int    `json:"conventions"`
 			DangerZones int    `json:"danger_zones"`
-		}{in.ProjectID, version, in.ScanHash, in.Family, len(in.Conventions), len(in.DangerZones)})
+			// Origin is additive and omitempty (P3-GF5 R6): every caller that
+			// predates it leaves it empty, so their event bytes are unchanged,
+			// and an owner's direct edit is distinguishable from a scan draft
+			// on a row that otherwise reads identically.
+			Origin string `json:"origin,omitempty"`
+		}{in.ProjectID, version, in.ScanHash, in.Family, len(in.Conventions), len(in.DangerZones), in.Origin})
 		if err != nil {
 			return err
 		}
@@ -274,6 +305,136 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 		return Capture{}, err
 	}
 	return s.captureAt(ctx, in.ProjectID, version)
+}
+
+// commandMaxRunes bounds one captured command.
+//
+// A structural constant with its reason, not a ⚙ key (the cancelReasonMaxRunes
+// / sseBatchSize pattern; S13.7 and S18 ratify nothing here): a captured
+// command is ONE shell line, and anything longer than this is a script, which
+// belongs in the repository the command calls. Interim under the standing
+// settings-tab directive.
+//
+// The bound counts RUNES, because it describes what a person typed and a byte
+// count would refuse a shorter command written in a language with wider
+// characters.
+const commandMaxRunes = 500
+
+// commandSlots names each command slot with its accessor, so validation and
+// carry-forward run over ALL FIVE rather than over whichever ones somebody
+// remembered (Spec S13.7: build/test/lint/run/preview).
+var commandSlots = []struct {
+	name string
+	get  func(Commands) string
+	set  func(*Commands, string)
+}{
+	{"build", func(c Commands) string { return c.Build }, func(c *Commands, v string) { c.Build = v }},
+	{"test", func(c Commands) string { return c.Test }, func(c *Commands, v string) { c.Test = v }},
+	{"lint", func(c Commands) string { return c.Lint }, func(c *Commands, v string) { c.Lint = v }},
+	{"run", func(c Commands) string { return c.Run }, func(c *Commands, v string) { c.Run = v }},
+	{"preview", func(c Commands) string { return c.Preview }, func(c *Commands, v string) { c.Preview = v }},
+}
+
+// validCommands trims each slot and refuses anything the verification sandbox
+// could not run as one shell line (P3-GF5 R4).
+//
+// WHAT IS CHECKED AND WHAT DELIBERATELY IS NOT. A captured command is executed
+// only later, inside the network-off C2 verification sandbox, as
+// `/bin/sh -lc <cmd>`, and the platform reads the exit status (Spec S07.3 rule
+// 1/3; S11). So the shape has to survive that: one line (a multi-line value
+// smuggles a script body past the one-rung-one-line contract), no NUL (it
+// cannot cross an argv), valid UTF-8 (text the platform can vouch for), and a
+// bound.
+//
+// There is NO token allowlist and no shell-safety filter, deliberately. The
+// owner already owns arbitrary code execution inside their own repository —
+// its Makefile is theirs — so a filter here would refuse honest commands while
+// stopping nothing, which is theater posing as a boundary. NOTHING is executed,
+// resolved or dialed at capture time on any path through this function.
+//
+// An all-empty set is ACCEPTED: it returns the project to Spec S07.8's
+// bootstrap posture, which is the honest recompute, not an error.
+func validCommands(c Commands) (Commands, error) {
+	var out Commands
+	for _, slot := range commandSlots {
+		v := strings.TrimSpace(slot.get(c))
+		switch {
+		case strings.ContainsAny(v, "\n\r"):
+			return Commands{}, fmt.Errorf("%w: the %s command must be a single line — a check rung runs as one shell line, and a multi-line value would be a script the platform cannot report a rung for", ErrBadInput, slot.name)
+		case strings.ContainsRune(v, 0):
+			return Commands{}, fmt.Errorf("%w: the %s command contains a NUL byte, which cannot be passed to a program", ErrBadInput, slot.name)
+		case !utf8.ValidString(v):
+			return Commands{}, fmt.Errorf("%w: the %s command is not valid UTF-8", ErrBadInput, slot.name)
+		case utf8.RuneCountInString(v) > commandMaxRunes:
+			return Commands{}, fmt.Errorf("%w: the %s command is %d characters; the limit is %d — a command this long is a script, which belongs in the project it calls",
+				ErrBadInput, slot.name, utf8.RuneCountInString(v), commandMaxRunes)
+		}
+		slot.set(&out, v)
+	}
+	return out, nil
+}
+
+// EditCommands replaces an ACTIVE entry's captured command set and returns the
+// capture that now stands, plus whether a new version was minted (Spec S13.7:
+// the registry holds a project's build/test/lint/run/preview commands, rows are
+// owner-attributed, captured content is versioned; migration 0008's own comment
+// names this writer — "the version bumps on every re-capture/re-scan/EDIT").
+//
+// FULL REPLACEMENT, CARRY-FORWARD FOR EVERYTHING ELSE. The submitted set
+// becomes the capture's whole `commands` member — an omitted slot is CLEARED,
+// because a capture nobody can empty is a capture whose wrong command can only
+// be replaced, never withdrawn. Conventions, danger zones, the scan hash and
+// the family are carried forward byte-equal, which is the Rescan discipline for
+// the same reason: dropping the scan hash would leave DriftCheck comparing
+// against nothing, and dropping owner-approved conventions or zones would unset
+// them with no event and no card behind it.
+//
+// RETRY-SAFE (Spec S15.2: "a repeated answer returns the already-resolved
+// state — a phone retry can never double-fire"). A submission whose validated
+// set equals what is already captured mints no version and appends no event; it
+// returns the capture that stands with minted=false, and the caller says so.
+//
+// OWNER-ONLY AND ACTIVE-ONLY. D10 is authority over one's own object, and the
+// captured commands decide what the verification sandbox executes for every
+// member's runs. A PENDING entry is refused with ErrNotActive rather than
+// edited: its draft's door is the onboarding approval card, where the owner
+// edits the whole draft and approving activates the entry — a second write path
+// onto a pending draft would be one act with two audit stories.
+func (s *Store) EditCommands(ctx context.Context, projectID, by string, cmds Commands) (Capture, bool, error) {
+	if projectID == "" || by == "" {
+		return Capture{}, false, fmt.Errorf("%w: editing commands needs a project and an actor", ErrBadInput)
+	}
+	wanted, err := validCommands(cmds)
+	if err != nil {
+		return Capture{}, false, err
+	}
+	e, err := s.Get(ctx, projectID)
+	if err != nil {
+		return Capture{}, false, err
+	}
+	if by != e.Owner {
+		return Capture{}, false, fmt.Errorf("%w: entry %q is owned by %q", ErrNotOwner, projectID, e.Owner)
+	}
+	if !e.Active() {
+		return Capture{}, false, fmt.Errorf("%w: %q", ErrNotActive, projectID)
+	}
+	if e.CaptureVersion > 0 && e.Capture.Commands == wanted {
+		return e.Capture, false, nil
+	}
+	c, err := s.Capture(ctx, CaptureInput{
+		ProjectID:   projectID,
+		By:          by,
+		Conventions: e.Capture.Conventions,
+		Commands:    wanted,
+		DangerZones: e.Capture.DangerZones,
+		ScanHash:    e.Capture.ScanHash,
+		Family:      e.Capture.Family,
+		Origin:      OriginEdit,
+	})
+	if err != nil {
+		return Capture{}, false, err
+	}
+	return c, true, nil
 }
 
 // Activate makes a pending entry active on owner approval (Spec S13.7 → D10:
@@ -470,8 +631,19 @@ func unmarshalStrings(s string) []string {
 	return v
 }
 
+// dangerZonesOrEmpty normalizes the stored zone list: sorted by path, and the
+// EMPTY list stored as `[]` rather than `null`.
+//
+// The length test rather than a nil test is the point (found by P3-GF5's
+// carry-forward property). `append([]DangerZone(nil))` over an empty-but-
+// non-nil slice returns NIL, which marshals to `null` — so a capture that
+// carried an empty zone list forward stored `null` where the capture it copied
+// stored `[]`, and the next carry-forward flipped it back. The decoded value was
+// identical either way, so nothing noticed; the stored BYTES were not, which is
+// exactly what "carried forward byte-equal" is supposed to mean, and what a
+// committed golden fixture reads.
 func dangerZonesOrEmpty(z []DangerZone) []DangerZone {
-	if z == nil {
+	if len(z) == 0 {
 		return []DangerZone{}
 	}
 	sorted := append([]DangerZone(nil), z...)

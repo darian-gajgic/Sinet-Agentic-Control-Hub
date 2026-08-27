@@ -531,6 +531,12 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
   // CONVENTIONS §46's gap record carries the dated pointer.
   {
     method: 'POST',
+    path: '/api/projects/{}/commands',
+    gap: true,
+    why: 'REPORTED GAP (P3-GF5, 2026-08-27): the S13.7 BACKEND half is served — the owner captures their project\'s build/test/lint/run/preview commands, which is what lets a fresh project\'s verification run a real ladder instead of the S07.8 bootstrap posture — and the editor that calls it is P3-GF6, the packet immediately after this one. The response TYPE (ProjectCommandsWritten) and the R9 posture member already mirror in api.ts because GF6 consumes both; the client verb lands with the surface that calls it, so this tree never carries a declared-but-uncalled member. This is an absence with a date and a named consumer, not a route no client may ever call.',
+  },
+  {
+    method: 'POST',
     path: '/api/meters/plan-budget',
     gap: true,
     why: 'REPORTED GAP (P3-LN-6, 2026-08-25): the 13.4 BACKEND half is served — declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need — and no surface exists for it. The S15.9 settings tab is its named consumer and lands with 13.4; the token budget verb sat here the same way in B6-2B until its editor arrived. This is an absence with a date, not a route no client may ever call.',
@@ -632,8 +638,16 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     // moment the form called the route. One route over one shape remains:
     // the plan-budget verb, still waiting on the S15.9 settings tab.
     // CONVENTIONS §46 carries the same counts and this date.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(1)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(1)
+    // MOVED 2026-08-27 (P3-GF5), 1 → 2 routes over 1 → 2 shapes:
+    // POST /api/projects/{}/commands is the S13.7 captured-command write — the
+    // door that lets a fresh project's verification run a real ladder instead
+    // of the S07.8 bootstrap posture — and its surface is P3-GF6, the packet
+    // immediately after this one. Its response type already mirrors in api.ts
+    // because GF6 consumes it; the client verb lands with the editor that
+    // calls it, so no declared-but-uncalled member accumulates here. §46
+    // carries both counts and both dates.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(2)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(2)
     // A reported gap names a route the server DOES serve — that is what makes
     // it a gap rather than a phantom, and the phantom check above already bars
     // an exception naming an unserved route. This assertion read `toBe(0)`

@@ -1,0 +1,44 @@
+{
+  "project": {
+    "project_id": "p-shop",
+    "name": "Shop backend",
+    "owner": "alice",
+    "members": [
+      "bob"
+    ],
+    "state": "active",
+    "default_branch": "main",
+    "has_remote": false,
+    "capture_version": 1,
+    "created_ts": "2026-08-27T09:00:00Z",
+    "updated_ts": "2026-08-27T09:00:00Z",
+    "protected_refs": [
+      "main"
+    ],
+    "capture": {
+      "version": 1,
+      "conventions": [
+        "tabs, not spaces",
+        "every change ships with a test"
+      ],
+      "commands": {
+        "build": "go build ./...",
+        "test": "go test ./...",
+        "lint": "gofmt -l .",
+        "run": "go run ./cmd/shop",
+        "preview": "go run ./cmd/shop --port 8080"
+      },
+      "danger_zones": [
+        {
+          "path": "deploy/",
+          "action": "never",
+          "rule": "deployment manifests are changed by hand"
+        }
+      ],
+      "scan_hash": "scan-shop-v1",
+      "captured_by": "alice",
+      "captured_ts": "2026-08-27T09:00:00Z"
+    }
+  },
+  "cursor": 11
+}

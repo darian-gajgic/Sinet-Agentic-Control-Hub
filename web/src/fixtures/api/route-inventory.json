@@ -417,6 +417,11 @@
       "session_required": true
     },
     {
+      "method": "POST",
+      "path": "/api/projects/{project}/commands",
+      "session_required": true
+    },
+    {
       "method": "GET",
       "path": "/api/memory",
       "session_required": true

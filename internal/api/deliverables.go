@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,7 +225,34 @@ type DeliverableDetail struct {
 	Revisions []review.Revision `json:"revisions"`
 	Lineage   TaskLineage       `json:"lineage"`
 	Doors     []Door            `json:"doors"`
-	Cursor    int64             `json:"cursor"`
+	// Verification is the CURRENT revision's verification posture, and it is
+	// ABSENT for the ordinary one (P3-GF5 R9; Spec S07.8 [A14]).
+	//
+	// A pointer, so the KEY disappears rather than the member arriving
+	// zero-valued: a client cannot tell `{"posture":"","review_mandatory":false}`
+	// apart from a posture it has never heard of, and absence is the answer
+	// (the GF4 drain-F3c lesson).
+	Verification *RevisionVerification `json:"verification,omitempty"`
+	Cursor       int64                 `json:"cursor"`
+}
+
+// RevisionVerification is the machine-readable half of what a round's verdict
+// row already records (Spec S07.8 [A14] "the verdict card … names the bootstrap
+// posture"): which posture the current revision was judged under, and whether
+// requester review is the real gate for it.
+//
+// CLOSED VOCABULARY AND A BOOLEAN, AND NOTHING ELSE. The plain-words disclosure
+// already reaches the person twice — as a review comment on the revision and in
+// the run receipt — and a third copy here would be prose on a structural field.
+// What a surface cannot do without this member is DECIDE: with only prose to go
+// on it would have to string-match a sentence, or the raw `check-pack:absent`
+// token, to know whether to offer the door that fixes the posture. That is the
+// jargon-coupling §38's ban on matching text exists to prevent. A closed-
+// vocabulary structural field lifted out of a payload is §38 ruling (b)'s
+// exempt shape, so the enumerated redaction edge is unchanged.
+type RevisionVerification struct {
+	Posture         string `json:"posture"`
+	ReviewMandatory bool   `json:"review_mandatory"`
 }
 
 func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request) {
@@ -254,12 +282,57 @@ func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.writeReadJSON(w, DeliverableDetail{
-		Deliverable: d,
-		Revisions:   revs,
-		Lineage:     lineage,
-		Doors:       s.doorsFor(r.Context(), d, revs),
-		Cursor:      cursor,
+		Deliverable:  d,
+		Revisions:    revs,
+		Lineage:      lineage,
+		Doors:        s.doorsFor(r.Context(), d, revs),
+		Verification: s.revisionVerification(r.Context(), currentRevision(revs, d.CurrentRevision)),
+		Cursor:       cursor,
 	})
+}
+
+// revisionVerification reads the posture off the revision's OWN verdict row.
+//
+// The chain is the landed one and nothing here re-derives it: a minted revision
+// records the `verify.round` event seq that judged it (review.Revision.VerdictRef,
+// filled once by the stage's review sink), and that row's payload carries the
+// posture and the mandatory-review obligation the verification pipeline
+// recorded. Reading it means a later surface inherits the obligation rather
+// than computing a second opinion about it.
+//
+// Every honest absence answers nil: no minted revision, no verdict ref yet (the
+// round is still running), a row that has gone (compaction elides payload
+// BODIES, never these rows, but the read must not assume), and the ordinary
+// posture. A read failure is LOGGED and answered nil rather than failing the
+// detail: the posture is one member of a resource read, and refusing the whole
+// deliverable because an advisory marker could not be resolved would be worse
+// than serving the deliverable without it.
+func (s *Server) revisionVerification(ctx context.Context, rev review.Revision) *RevisionVerification {
+	if rev.VerdictRef == 0 {
+		return nil
+	}
+	var raw string
+	err := s.proj.db.QueryRowContext(ctx,
+		`SELECT payload FROM run_events WHERE event_seq = ?`, rev.VerdictRef).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		s.logger.Warn("deliverables: read verdict row for the posture", "verdict_ref", rev.VerdictRef, "err", err)
+		return nil
+	}
+	var row struct {
+		Posture         string `json:"posture"`
+		ReviewMandatory bool   `json:"review_mandatory"`
+	}
+	if err := json.Unmarshal([]byte(raw), &row); err != nil {
+		s.logger.Warn("deliverables: verdict row does not decode", "verdict_ref", rev.VerdictRef, "err", err)
+		return nil
+	}
+	if row.Posture == "" {
+		return nil
+	}
+	return &RevisionVerification{Posture: row.Posture, ReviewMandatory: row.ReviewMandatory}
 }
 
 // doorsFor names every live verb on this deliverable with its preconditions

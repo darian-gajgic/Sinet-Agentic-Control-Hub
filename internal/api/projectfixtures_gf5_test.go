@@ -165,8 +165,12 @@ func gf5DriveFixtures(t *testing.T) gf5Fixtures {
 	gf5Exec(t, b, `INSERT INTO runs (run_id, user_id, task_id, state, lane, generation, created_ts, updated_ts)
 	                VALUES (?, ?, ?, 'completed', 'anthropic', 0, ?, ?)`,
 		"t-fresh.verify", "alice", "t-fresh", gf5FxT0, gf5FxT1)
-	gf5Exec(t, b, `INSERT INTO task_project (task_id, project_id, project_choices) VALUES (?, ?, 1)`,
-		"t-fresh", "p-fresh")
+	// task_project is a VIEW over the artifact claims (migration 0023), so the
+	// task→project linkage the lineage renders is seeded where it actually
+	// comes from rather than written to a projection that cannot be written.
+	gf5Exec(t, b, `INSERT INTO artifact_claims (task_id, project, user_id, path_globs, mode, status, created_ts)
+	                VALUES (?, ?, ?, '["**"]', 'W', 'claimed', ?)`,
+		"t-fresh", "p-fresh", "alice", gf5FxT0)
 	if _, err := rev.EnsureDeliverable(ctx, review.EnsureInput{
 		ID: "dlv-t-fresh", Owner: "alice", TaskID: "t-fresh", ProjectID: "p-fresh", Type: "code",
 	}); err != nil {

@@ -110,10 +110,10 @@ func (e *commandsEnv) do(t *testing.T, who, method, path, body string) (int, str
 // seedCommandless registers, captures (with NO command) and activates one
 // project — the r4-F1 fresh-scaffold shape, whose tasks verify under the GF4
 // bootstrap posture until this door captures commands.
-func (e *commandsEnv) seedCommandless(t *testing.T, id, owner string) {
+func (e *commandsEnv) seedCommandless(t *testing.T, id, owner string, members ...string) {
 	t.Helper()
 	if _, err := e.proj.Register(e.ctx, project.RegisterInput{
-		ProjectID: id, Owner: owner, Name: id, StorePath: filepath.Join(t.TempDir(), id),
+		ProjectID: id, Owner: owner, Name: id, StorePath: filepath.Join(t.TempDir(), id), Members: members,
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestEditedCaptureRefreshesTheVerifiedOnStamp(t *testing.T) {
 // text (§38) — the onboardRefusal discipline one door over.
 func TestCommandsDoorTranslatesRefusalsOnSentinels(t *testing.T) {
 	e := newCommandsEnv(t)
-	e.seedCommandless(t, "p-ref", "alice")
+	e.seedCommandless(t, "p-ref", "alice", "bob")
 	const body = `{"commands":{"test":"go test ./..."}}`
 
 	if code, out := e.do(t, "bob", http.MethodPost, "/api/projects/p-ref/commands", body); code != http.StatusForbidden {

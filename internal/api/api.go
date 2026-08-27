@@ -380,6 +380,14 @@ type Config struct {
 	// internal/stage, which is why internal/api still imports neither. nil
 	// leaves the create door answering 503; the read doors are unaffected.
 	Onboard OnboardSurface
+	// ProjectCommands is the S13.7 captured-command write door behind
+	// `POST /api/projects/{project}/commands` (projects.go, P3-GF5),
+	// implemented by the composition root's own `commandsDoor` over
+	// internal/project's EditCommands verb. It is the ONE seam through which
+	// this package can cause a registry write — the §40-B wall is why the
+	// registry is otherwise read here and never written. nil leaves the write
+	// door answering 503; the read doors are unaffected.
+	ProjectCommands ProjectCommandsSurface
 	// PollInterval is the idle re-poll cadence of the SSE tail loop. It is
 	// deliberately not a ⚙ setting — no such key is ratified; transport
 	// refinement belongs to Spec S14 (B5). 0 = default 250ms.
@@ -457,6 +465,8 @@ type Server struct {
 	proj *projector
 	// onboard is the S13.7 onboarding door behind POST /api/projects (P3-RW-2).
 	onboard OnboardSurface
+	// projCommands is the S13.7 captured-command write door (P3-GF5).
+	projCommands ProjectCommandsSurface
 	// routes records every pattern Handler registered, in registration order.
 	//
 	// It exists so the S15.12 "the SPA consumes every API" check (B6-9 R17) can
@@ -511,6 +521,7 @@ func New(cfg Config) *Server {
 		intake:        cfg.Intake,
 		pinnableLanes: cfg.PinnableLanes,
 		onboard:       cfg.Onboard,
+		projCommands:  cfg.ProjectCommands,
 		review:        cfg.Review,
 		accept:        cfg.Accept,
 		followUp:      cfg.FollowUp,
@@ -774,9 +785,20 @@ func (s *Server) Handler() http.Handler {
 	// path (D10), and a second door onto that act would be the double-mint shape
 	// in transport form. No route here performs an outward effect — registering a
 	// project releases nothing (D7).
+	//
+	// The commands door (P3-GF5) is the family's fourth route and its first
+	// registry WRITE: an owner captures the S13.7 build/test/lint/run/preview
+	// commands their project's verification runs, which is what closes the
+	// r4-F1b wall — the platform told people to capture their commands and had
+	// no door that could. It is a POST like every other act on this API (one
+	// vocabulary for one kind of act), it edits an entry that already exists so
+	// it answers 200, and it releases nothing outward either. Re-scan on demand
+	// (S13.7) remains a stated deliberate absence: a re-scan reads repository
+	// content, and the fresh scaffold this door exists for has none to read.
 	protected("GET /api/projects", s.handleProjectList)
 	protected("POST /api/projects", s.handleProjectCreate)
 	protected("GET /api/projects/{project}", s.handleProjectDetail)
+	protected("POST /api/projects/{project}/commands", s.handleProjectCommands)
 
 	protected("GET /api/memory", s.handleMemoryList)
 	protected("POST /api/memory", s.handleMemoryCreate)

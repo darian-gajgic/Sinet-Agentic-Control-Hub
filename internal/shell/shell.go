@@ -262,6 +262,11 @@ func Run(ctx context.Context, opts Options) error {
 	// nil under injected admission, which leaves that ONE route at 503 rather
 	// than pretending a process with no run substrate can perform a task.
 	var onboardSurface api.OnboardSurface
+	// commandsSurface is the S13.7 captured-command write door behind
+	// POST /api/projects/{project}/commands (P3-GF5). Unlike its sibling above
+	// it needs NO run substrate — capturing commands is a registry write and
+	// nothing else — so it is composed as soon as the project store exists.
+	var commandsSurface api.ProjectCommandsSurface
 	var acceptSurf *acceptSurface
 	var previewSurf *preview.Manager
 	// reviewStore is the S13.1–S13.4 store (B4-1): the stage pipeline mints and
@@ -391,6 +396,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		committer := proj.Committer()
 		pseams := &projectSeams{proj: proj, runs: runs, db: db, prices: priceTable}
+		// The S13.7 commands door (P3-GF5): the registry half only. It is what
+		// closes the r4-F1b wall — an owner capturing the build/test/lint
+		// commands their project's verification runs — and the pack resolution
+		// above reads the result on the very next round with no verify-side
+		// change (S07.8 [A14]).
+		commandsSurface = commandsDoor{proj: proj}
 		// The BENCH-REG §2 direct-arm seams (B6-2C). Both halves are late-bound
 		// below — the intake pipeline is the skeleton's and the benchmark store is
 		// composed after the scheduler the practice enqueues onto — so the holder
@@ -985,8 +996,10 @@ func Run(ctx context.Context, opts Options) error {
 		// (P3-LN-10a), composed once at stage.New and carried verbatim.
 		PinnableLanes: pinnableLanes,
 		Onboard:       onboardSurface, // S13.7 projects family: the create door (P3-RW-2)
-		Cancel:        cancelSurface,  // S15.6 / 4.5 cancel verbs (B6-2A)
-		Effects:       effects,        // S02.7 journal behind the S15.6 effect approvals
+		// S13.7 projects family: the captured-command write door (P3-GF5).
+		ProjectCommands: commandsSurface,
+		Cancel:          cancelSurface, // S15.6 / 4.5 cancel verbs (B6-2A)
+		Effects:         effects,       // S02.7 journal behind the S15.6 effect approvals
 		// The B6-2B decision-plane seams: the S10.4 meters mutations, the S15.5
 		// board drag, and the two oversight verbs over landed internals. wd is
 		// nil under injected admission, which leaves the suppress route at 503
