@@ -3594,16 +3594,55 @@ input[type='radio'] {
 
 /* ── the lane pin (P3-LN-10) ── */
 
-/* The collapsed face: the default said out loud, the pin one small act away. */
+/* The collapsed face: the default said out loud, the pin one small act away.
+   It is a BUTTON wearing the form's own boxed-control body (.door-input's
+   border/background/radius) — every other value control on this form sits in
+   a bordered box, and a bare caption read as no control at all (review F3).
+   The quietness survives inside the box: faint words, the act in accent. */
 .lane-closed {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 4px 14px;
+  width: 100%;
   margin: 0;
+  padding: 9px 12px;
+  background: rgba(7, 7, 13, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
   font-size: 12px;
   line-height: 1.5;
+  text-align: left;
   color: var(--text-faint);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lane-closed {
+    transition: border-color 0.12s;
+  }
+}
+
+.lane-closed:hover {
+  border-color: var(--accent);
+}
+
+.lane-closed:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.lane-closed-words {
+  flex: 1 1 26ch;
+}
+
+.lane-closed-act {
+  flex: none;
+  color: var(--accent-2);
+  font-weight: 500;
 }
 
 .lane-chips {
@@ -3637,6 +3676,32 @@ input[type='radio'] {
 
 .lane-degraded {
   color: var(--orange);
+}
+
+/* The unpinnable lane: the fact on the face, the platform's whole verbatim
+   sentence one quiet click behind it (review F4) — a native disclosure, so
+   the keyboard's place survives its own toggle. */
+.lane-unpinnable summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.lane-unpinnable summary::marker {
+  color: var(--text-faint);
+}
+
+.lane-unpinnable summary:focus-visible {
+  outline: none;
+  border-radius: 4px;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.lane-why {
+  color: var(--accent-2);
+}
+
+.lane-unpinnable-words {
+  margin: 4px 0 0 14px;
 }
 
 /* "This task is pinned to lane …" — the door-world note's anatomy in the

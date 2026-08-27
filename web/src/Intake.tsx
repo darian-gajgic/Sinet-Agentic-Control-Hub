@@ -486,23 +486,51 @@ export function LanePicker({
   const pinnable = lanes.filter((l) => l.pinnable)
   const unpinnable = lanes.filter((l) => !l.pinnable)
   const failed = world !== null && 'failed' in world ? world.failed : ''
+
+  // Opening REPLACES the trigger with the chips, and a control that unmounts
+  // under the keyboard drops focus to BODY (review F1 — a real Enter died
+  // there). The hand-off: when the picker opens, focus lands on the standing
+  // choice — the active chip — so the keyboard arrives ON its current answer.
+  // There is no collapse act (the pin is one-way opt-in per form), so open is
+  // the only transition to hand off; the why-disclosure below is a native
+  // <details>, whose summary keeps focus across its own toggle.
+  const chipsRef = useRef<HTMLDivElement | null>(null)
+  const wasOpen = useRef(open)
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      const c = chipsRef.current
+      const target =
+        c?.querySelector<HTMLButtonElement>('[data-lane-choice][data-active="true"]') ??
+        c?.querySelector<HTMLButtonElement>('[data-lane-choice]')
+      target?.focus()
+    }
+    wasOpen.current = open
+  }, [open])
+
   return (
     <div className="door-field lane-pin" data-ask="lane" data-lane-open={open || undefined} data-lane={lane || undefined}>
-      <span className="door-label" id="lane-pin-label">
-        Which lane runs this? <span className="door-optional">optional — left alone, the platform chooses</span>
+      <span className="door-label">
+        {/* The id wraps the QUESTION alone: it is the chip group's accessible
+            name (review F5), and a name is a name — the optional-ness aside
+            stays visible text without riding into the accName. */}
+        <span id="lane-pin-label">Which lane runs this?</span>{' '}
+        <span className="door-optional">optional — left alone, the platform chooses</span>
       </span>
       {!open ? (
-        <p className="lane-closed">
+        /* ONE bordered box, like every other value control on this form
+           (review F3): the goal, the name and the project all sit in the
+           .door-input rhythm, and the lane's answer-at-rest deserves the same
+           body — the stated default inside it, the pin one small act away.
+           The whole box is the trigger; the words stay quiet. */
+        <button type="button" className="lane-closed" data-lane-open-act onClick={onOpen}>
           <span className="lane-closed-words">
             The platform picks the lane, favoring the one with the most room left.
           </span>
-          <Button variant="ghost" size="sm" data-lane-open-act onClick={onOpen}>
-            Pin a lane for this task…
-          </Button>
-        </p>
+          <span className="lane-closed-act">Pin a lane for this task…</span>
+        </button>
       ) : (
         <>
-          <div className="lane-chips" role="group" aria-labelledby="lane-pin-label">
+          <div className="lane-chips" role="group" aria-labelledby="lane-pin-label" ref={chipsRef}>
             <button
               type="button"
               className="q-option"
@@ -555,10 +583,18 @@ export function LanePicker({
               </span>
             </p>
           )}
+          {/* The unpinnable FACT stays on the face — a lane that cannot be
+              pinned is never a dead control and never a silence. The platform's
+              whole sentence (the served one-spelling, VERBATIM — engineer-
+              register, and ending in the same list the chips above already are)
+              waits one quiet click behind it (review F4). */}
           {unpinnable.map((l) => (
-            <p key={l.lane} className="lane-aside" data-lane-unpinnable={l.lane}>
-              <b className="mono">{l.lane}</b> is not pinnable — {l.not_pinnable}
-            </p>
+            <details key={l.lane} className="lane-aside lane-unpinnable" data-lane-unpinnable={l.lane}>
+              <summary>
+                <b className="mono">{l.lane}</b> is not pinnable<span className="lane-why"> — why?</span>
+              </summary>
+              <p className="lane-unpinnable-words">{l.not_pinnable}</p>
+            </details>
           ))}
         </>
       )}

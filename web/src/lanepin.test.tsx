@@ -190,3 +190,42 @@ test('an empty served set is an honest absence with its meaning stated', async (
   expect(empty?.textContent).toContain('No lane on this platform can be pinned')
   expect(view.container.querySelectorAll('[data-lane-choice]')).toHaveLength(1)
 })
+
+test('opening the picker hands focus to the standing choice — never to BODY (review F1)', async () => {
+  const { view } = await openDoor()
+  // Opening replaces the trigger with the chips; the trigger's unmount must
+  // not take the keyboard's place with it. The hand-off target is the ACTIVE
+  // chip — the standing answer, which on a fresh form is the default.
+  click(view.container.querySelector('[data-lane-open-act]'))
+  await flush()
+  expect(document.activeElement?.getAttribute('data-lane-choice')).toBe('')
+  expect(document.activeElement?.getAttribute('data-active')).toBe('true')
+})
+
+test('the verbatim not-pinnable sentence waits behind a CLOSED disclosure, fact on the face (review F4)', async () => {
+  const { view } = await openDoor()
+  click(view.container.querySelector('[data-lane-open-act]'))
+  const local = fixtureLanes().find((l) => !l.pinnable)
+  const stated = view.container.querySelector(`[data-lane-unpinnable="${local?.lane ?? ''}"]`)
+  expect(stated).not.toBeNull()
+  // A native disclosure, resting closed: the FACT is the visible face…
+  expect(stated?.tagName).toBe('DETAILS')
+  expect((stated as HTMLDetailsElement).open).toBe(false)
+  const face = stated?.querySelector('summary')
+  expect(face?.textContent).toContain(`${local?.lane ?? ''} is not pinnable`)
+  expect(face?.textContent).not.toContain(local?.not_pinnable ?? '--missing--')
+  // …and the platform's whole sentence is AVAILABLE behind it, verbatim —
+  // never rewritten, never dropped (the served one-spelling).
+  expect(stated?.querySelector('.lane-unpinnable-words')?.textContent).toBe(local?.not_pinnable)
+})
+
+test('the chip group is NAMED by the question alone (review F5)', async () => {
+  const { view } = await openDoor()
+  click(view.container.querySelector('[data-lane-open-act]'))
+  const group = view.container.querySelector('[role="group"]')
+  const labelId = group?.getAttribute('aria-labelledby') ?? ''
+  expect(labelId).not.toBe('')
+  // The accName is the question itself — not the question plus the
+  // optional-ness aside, which stays visible text outside the label id.
+  expect(document.getElementById(labelId)?.textContent).toBe('Which lane runs this?')
+})
