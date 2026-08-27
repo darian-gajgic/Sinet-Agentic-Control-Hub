@@ -44,7 +44,7 @@ func (p *Pipeline) Answer(ctx context.Context, actor, askID string, raw json.Raw
 
 	switch card.Kind {
 	case CardInterview:
-		if err := p.applyInterviewAnswer(st, card, ans); err != nil {
+		if err := p.applyInterviewAnswer(ctx, st, card, ans); err != nil {
 			return nil, err
 		}
 	case CardClarification:
@@ -147,11 +147,20 @@ func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status 
 
 // ---- Per-kind answer application ----
 
-func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error {
+func (p *Pipeline) applyInterviewAnswer(ctx context.Context, st *State, card *Card, ans Answer) error {
 	tax := p.taxonomyFor(st.Family)
 	asked := make(map[string]Question, len(card.Questions))
 	for _, q := range card.Questions {
 		asked[q.ID] = q
+	}
+	// The family correction is VALIDATED before anything is applied, for the same
+	// reason the arm conflict below is: a refused body must change nothing at all
+	// (P3-GF7 R9). It is APPLIED last, after the answers have landed against the
+	// set that was actually asked.
+	correction := Family(ans.Family)
+	if ans.Family != "" && !ValidFamily(correction) {
+		return fmt.Errorf("%w: task family %q is not one this platform offers — it offers %s",
+			ErrBadAnswer, ans.Family, familyVocabularySentence())
 	}
 	// One slot, ONE arm. The per-entry check below refuses a single entry that
 	// carries both a value and a skip; this refuses the same contradiction
@@ -212,6 +221,27 @@ func (p *Pipeline) applyInterviewAnswer(st *State, card *Card, ans Answer) error
 		st.ForceProceeded = true
 	}
 	st.Clearance = tax.Clearance(st.resolvedSet())
+
+	// The guess was wrong and the requester said so. The switch runs AFTER the
+	// answers, so what they already told the platform is kept on the record and
+	// simply stops counting toward Clearance where the new set has no such slot —
+	// applyFamilyTaxonomy re-keys the question set, re-applies the registry's
+	// pre-answered slots and re-settles the never-asked ones against THAT set,
+	// and the next advance asks the right questions (P3-GF7 R9; H17 REJECT).
+	if correction != "" && correction != st.Family {
+		st.Family, st.FamilySource = correction, FamilySourceRequester
+		fallback := p.applyFamilyTaxonomy(st)
+		// The correction is the REQUESTER'S, so it is human-authored in the
+		// ledger — the same authorship the family card's own answer carries.
+		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "triage",
+			"requester corrected the task family to "+string(correction),
+			"interview card (S06.5; the family guess is shown and correctable before it shapes the questions)", 0); err != nil {
+			return err
+		}
+		if err := p.recordTaxonomyFallback(ctx, st, fallback); err != nil {
+			return err
+		}
+	}
 	if !st.NeedsDraft {
 		// A pair exists (re-interview / TIER-UP): fold the new answers in
 		// via a bounded revision, then re-verify.

@@ -22,3 +22,10 @@ func RW12SoftwareContentHashForTest() string {
 	}
 	return contentHash(content)
 }
+
+// GF3SoftwareTaxonomyForTest returns the frozen P3-GF3-BE1 software question set
+// — what EnsureGF3TaxonomyGovernance writes, which since P3-GF7 is no longer
+// what the runtime seed says.
+func GF3SoftwareTaxonomyForTest() *intake.Taxonomy {
+	return gf3TaxonomySnapshot()[intake.FamilySoftware]
+}

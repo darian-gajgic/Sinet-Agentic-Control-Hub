@@ -59,10 +59,11 @@ func TestSeedTaxonomiesCoverSixFamilies(t *testing.T) {
 	}
 
 	soft := seeds[FamilySoftware]
-	// P3-GF3-BE1 §11 OQ-1 sanction 1: the version pin moves to v3 (the
-	// requester-facing revision; ids, weights, count and order verbatim).
-	if soft.Version != "v3" {
-		t.Errorf("software seed version = %q, want v3 (the GF3 requester-facing revision)", soft.Version)
+	// P3-GF7: the version pin moves to v4 (the operator's W2 rebuild — four
+	// slots settled instead of asked, every surviving question redrafted, two
+	// added; surviving ids and weights still verbatim).
+	if soft.Version != "v4" {
+		t.Errorf("software seed version = %q, want v4 (the W2 taxonomy rebuild)", soft.Version)
 	}
 	for _, id := range append(append([]string{}, ccbSlotIDs...), rw12SoftwareSlotIDs...) {
 		if soft.Slot(id) == nil {
@@ -95,25 +96,36 @@ func TestSeedTaxonomiesCoverSixFamilies(t *testing.T) {
 	}
 }
 
-// TestSeedWeightsMeetTierFloorShape (P3-RW-12 §7 T2; R10): depth scales by
-// tier through the EXISTING ⚙ clearance floors alone — so every seeded set's
-// weight distribution must let highest-weight-first questioning cross the low
-// floor (60) within two cards and the standard floor (75) within three, at the
-// ratified defaults. No per-tier question caps exist to rescue a flat set
-// (G1 P8 rejected them).
+// TestSeedWeightsMeetTierFloorShape (P3-RW-12 §7 T2; R10; re-derived at P3-GF7
+// §8.3): depth scales by tier through the EXISTING ⚙ clearance floors alone — so
+// every seeded set's weight distribution must let highest-weight-first
+// questioning cross the low floor (60) within two cards and the standard floor
+// (75) within three, at the ratified defaults. No per-tier question caps exist to
+// rescue a flat set (G1 P8 rejected them).
+//
+// The measurement is re-derived because v4 changed what a card can carry. A
+// never-asked slot's weight is resolved at interview ENTRY, before any card, so
+// it belongs in the starting clearance — and it must NOT be counted as one of the
+// four questions a card delivers, which is what the pre-v4 formula did. Counting
+// it as a question would let a set with a large never-asked mass look like it
+// crosses its floors on questions it can never ask.
 func TestSeedWeightsMeetTierFloorShape(t *testing.T) {
 	for fam, tax := range SeedTaxonomies() {
-		total := 0
+		total, entry := 0, 0
 		for _, s := range tax.Slots {
 			total += s.Weight
+			if s.neverAsked() {
+				entry += s.Weight
+			}
 		}
-		// Unresolved(nil) IS the pipeline's own ordering: highest weight first.
-		order := tax.Unresolved(nil)
+		// UnresolvedAskable(nil) IS the pipeline's own delivery ordering:
+		// highest weight first, never-asked slots removed.
+		order := tax.UnresolvedAskable(nil)
 		cum := func(n int) float64 {
 			if n > len(order) {
 				n = len(order)
 			}
-			sum := 0
+			sum := entry
 			for _, s := range order[:n] {
 				sum += s.Weight
 			}

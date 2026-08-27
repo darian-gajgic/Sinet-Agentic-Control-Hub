@@ -1401,8 +1401,12 @@ func TestRegistrySuppliedSlots(t *testing.T) {
 		DangerZones:   []intake.DangerZone{{Path: "infra/**", Rule: "never touch"}},
 	}}
 	st := f.start(stdRequest())
-	if len(st.Resolutions) != 2 {
-		t.Fatalf("registry resolutions %+v", st.Resolutions)
+	// The two registry-supplied slots, plus the ones the software set settles
+	// without asking — both are resolved when the question set is keyed
+	// (P3-GF7 R3).
+	wantResolutions := 2 + gf7NeverAskedCount(intake.FamilySoftware)
+	if len(st.Resolutions) != wantResolutions {
+		t.Fatalf("registry resolutions %+v, want %d", st.Resolutions, wantResolutions)
 	}
 	f.admit(st.RunID)
 	f.advance(st.TaskID)

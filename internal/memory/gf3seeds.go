@@ -70,10 +70,18 @@ var gf3TaxonomyTitles = map[intake.Family]string{
 	intake.FamilyGeneric:  "Interview must-know taxonomy — generic fallback family (v3)",
 }
 
-// gf3TaxonomyContent renders the v3 content: the LIVE in-code seed, which is
-// what this packet ships and what its digests pin.
+// gf3TaxonomyContent renders the GF3-RATIFIED content of one family — the
+// frozen snapshot, never the live seed (gf3taxonomy_v3.go).
+//
+// This function used to read intake.SeedTaxonomies(), which made every GF3
+// governed entry a pointer at whatever the code says today; P3-GF7 revises the
+// software set to v4, so the pointer would now write v4 content under this
+// packet's record. The v4 content enters as its own supersession instead
+// (gf7seeds.go). It is the same move this packet made to RW-12's
+// taxonomyContent, one packet later and for the same reason — the ONE edit a
+// later packet makes to an earlier packet's governance file.
 func gf3TaxonomyContent(fam intake.Family) (string, error) {
-	return taxonomyContentOf(fam, intake.SeedTaxonomies()[fam])
+	return taxonomyContentOf(fam, gf3TaxonomySnapshot()[fam])
 }
 
 // verifyGF3Snapshot checks both revised families against the ratified digest,

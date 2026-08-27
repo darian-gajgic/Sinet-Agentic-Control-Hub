@@ -57,24 +57,49 @@ func gf3ToApproval(t *testing.T, f *fix) (string, *intake.State) {
 
 // ---- T1: taxonomy v3 delivery contract (brief R1; design §2.A; S06.5) ----
 
+// gf7NeverAskedCount counts the slots a family's shipping set settles without
+// asking (P3-GF7 R2) — read from the SEED rather than from a copy of it, so
+// every expectation derived from it moves when the taxonomy does.
+func gf7NeverAskedCount(fam intake.Family) int {
+	n := 0
+	for _, s := range intake.SeedTaxonomies()[fam].Slots {
+		if s.Ask == intake.AskNever {
+			n++
+		}
+	}
+	return n
+}
+
 // TestGF3TaxonomyV3EverySlotCarriesOptionsAndWhy: the S06.5 delivery contract
-// — "each with 2–4 labeled options plus free text" — holds on EVERY slot of
-// the software and generic v3 seeds, and every slot carries the plain-words
-// why line the FE renders. (The Version=="v3" assertion is deliberately
-// absent until the OQ-1 sanction lands — brief §8 T1.)
+// — "each with 2–4 labeled options plus free text" — holds on every ASKED slot
+// of the software and generic seeds, and every asked slot carries the
+// plain-words why line the FE renders.
+//
+// SUPERSEDED at P3-GF7 (brief §8 item 2), on the two counts the packet moved:
+// the version label is v4, and the contract is re-scoped to ASKED slots. A
+// never-asked slot ships no question, so a question's option-and-why contract
+// cannot bind it — what binds it instead is its must-know, which is the planner
+// instruction that settles it (asserted by the GF7 matrix test).
 func TestGF3TaxonomyV3EverySlotCarriesOptionsAndWhy(t *testing.T) {
 	seeds := intake.SeedTaxonomies()
+	wantVersion := map[intake.Family]string{
+		intake.FamilySoftware: "v4", // the W2 rebuild
+		intake.FamilyGeneric:  "v3", // untouched by P3-GF7: no operator finding names it
+	}
 	for _, fam := range []intake.Family{intake.FamilySoftware, intake.FamilyGeneric} {
 		tax := seeds[fam]
-		// Added by the implementation commit with the OQ-1 sanction (brief §8
-		// T1): one revision label across both revised sets — generic jumps
-		// v1 → v3, because the version is provenance, not a per-set sequence.
-		if tax.Version != "v3" {
-			t.Errorf("%s seed version = %q, want v3 (the GF3 revision label, OQ-5)", fam, tax.Version)
+		if tax.Version != wantVersion[fam] {
+			t.Errorf("%s seed version = %q, want %q", fam, tax.Version, wantVersion[fam])
 		}
 		for _, s := range tax.Slots {
+			if s.Ask == intake.AskNever {
+				if s.Question != "" || len(s.Options) > 0 || s.Why != "" {
+					t.Errorf("%s/%s is never asked yet still carries asked-slot content", fam, s.ID)
+				}
+				continue
+			}
 			if len(s.Options) < 2 || len(s.Options) > 4 {
-				t.Errorf("%s/%s carries %d options, want 2–4 on every v3 slot (S06.5; design §2.A(ii))",
+				t.Errorf("%s/%s carries %d options, want 2–4 on every asked slot (S06.5; design §2.A(ii))",
 					fam, s.ID, len(s.Options))
 			}
 			if strings.TrimSpace(s.Why) == "" {
@@ -87,18 +112,28 @@ func TestGF3TaxonomyV3EverySlotCarriesOptionsAndWhy(t *testing.T) {
 // ---- T7: the verbatim wall (brief R1) — GREEN guard, must stay green ----
 
 // TestGF3WeightsAndIDsStayVerbatim pins ids, weights, slot count and order
-// for both revised sets: the measured/ratified thing the v3 redraft may not
-// move.
+// for both revised sets: the measured/ratified thing a redraft may not move.
+//
+// SUPERSEDED at P3-GF7 (brief §8 item 1) into the v4 wall. The operator moved
+// CONTENT, not weights, so every slot v3 carried is still here at its own
+// weight, in its own place — the four the platform now settles itself KEEP
+// their id and weight precisely so coverage stays accounted (R2/H10) — and the
+// two new slots are APPENDED, which is what leaves the v3 prefix verbatim and
+// readable as such. The v3 pin itself now lives on the frozen memory snapshot
+// (internal/memory/gf3taxonomy_v3.go, guarded by the GF3 digest tripwire).
 func TestGF3WeightsAndIDsStayVerbatim(t *testing.T) {
 	want := map[intake.Family][]struct {
 		id string
 		w  int
 	}{
 		intake.FamilySoftware: {
+			// ---- the v3 prefix, verbatim ----
 			{"behavior", 10}, {"terminology", 10}, {"edge_cases", 10},
 			{"collection_semantics", 12}, {"comparison_rules", 12}, {"ordering_atomicity", 12},
 			{"indices_ranges", 8}, {"output_format", 8}, {"units", 6}, {"numerical_precision", 6},
 			{"technology_stack", 11}, {"assets_media", 10}, {"look_feel", 10},
+			// ---- appended at P3-GF7, weights REASONED (recorded in Source) ----
+			{"language_locale", 9}, {"quality_bar", 8},
 		},
 		intake.FamilyGeneric: {
 			{"goal", 12}, {"deliverable", 10}, {"scope", 10}, {"inputs", 8},
@@ -320,11 +355,17 @@ func TestGF3SkipRefusals(t *testing.T) {
 // ---- T4: the re-interview review card (brief R8/R9; design §2.D) ----
 
 // TestGF3ReinterviewIssuesTheFullReviewCard: Re-interview returns to Stage 1
-// with artifacts intact (S06.9) and re-presents the WHOLE question set —
-// every slot, taxonomy order, each resolved one carrying its CURRENT
+// with artifacts intact (S06.9) and re-presents the whole ASKED question set —
+// every asked slot, taxonomy order, each resolved one carrying its CURRENT
 // resolution so the surface renders review-and-adjust instead of re-asking
 // blind. The NORMAL interview selection is untouched (pipeline_test.go's ≤4
 // pin keeps guarding it).
+//
+// SUPERSEDED at P3-GF7, forced by ratified OQ5 + R2: a re-interview is still a
+// question card, so it may not present a never-asked slot either. Those slots'
+// current resolutions ride the understood block this card already carries
+// (asserted by TestGF7ReviewCardOmitsTheNeverAskedSlots), and correction stays
+// available through Assume, free text and the approval card's Re-plan contest.
 func TestGF3ReinterviewIssuesTheFullReviewCard(t *testing.T) {
 	f := newFix(t)
 	askID, st := gf3ToApproval(t, f)
@@ -334,17 +375,23 @@ func TestGF3ReinterviewIssuesTheFullReviewCard(t *testing.T) {
 	}
 	_, card := f.openAsk(st.RunID)
 	tax := intake.SeedTaxonomies()[intake.FamilySoftware]
-	if len(card.Questions) != len(tax.Slots) {
-		t.Fatalf("review card carries %d questions, want ALL %d family slots (design §2.D)",
-			len(card.Questions), len(tax.Slots))
+	var asked []intake.Slot
+	for _, s := range tax.Slots {
+		if s.Ask != intake.AskNever {
+			asked = append(asked, s)
+		}
+	}
+	if len(card.Questions) != len(asked) {
+		t.Fatalf("review card carries %d questions, want all %d ASKED family slots (design §2.D; P3-GF7 OQ5)",
+			len(card.Questions), len(asked))
 	}
 	res := map[string]intake.SlotResolution{}
 	for _, r := range st.Resolutions {
 		res[r.SlotID] = r
 	}
 	for i, q := range card.Questions {
-		if q.ID != tax.Slots[i].ID {
-			t.Fatalf("review card question %d = %q, want taxonomy order %q", i, q.ID, tax.Slots[i].ID)
+		if q.ID != asked[i].ID {
+			t.Fatalf("review card question %d = %q, want taxonomy order %q", i, q.ID, asked[i].ID)
 		}
 		r, resolved := res[q.ID]
 		switch {
@@ -357,8 +404,8 @@ func TestGF3ReinterviewIssuesTheFullReviewCard(t *testing.T) {
 		case !resolved && q.Resolution != nil:
 			t.Errorf("slot %q is unresolved but carries %+v", q.ID, q.Resolution)
 		}
-		if q.Why != tax.Slots[i].Why {
-			t.Errorf("slot %q why = %q, want the taxonomy's %q", q.ID, q.Why, tax.Slots[i].Why)
+		if q.Why != asked[i].Why {
+			t.Errorf("slot %q why = %q, want the taxonomy's %q", q.ID, q.Why, asked[i].Why)
 		}
 	}
 

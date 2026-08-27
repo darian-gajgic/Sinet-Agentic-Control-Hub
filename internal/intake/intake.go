@@ -285,12 +285,26 @@ type SlotResolution struct {
 	How        string `json:"how"` // "registry" | "answered" | "assumption"
 	Value      string `json:"value,omitempty"`
 	Assumption string `json:"assumption,omitempty"`
+	// Via names WHAT produced an assumption-kind resolution when it was not the
+	// requester (P3-GF7 R3): ViaSystem for a slot the taxonomy marks never-asked,
+	// which the platform settles at interview entry. Empty everywhere else — a
+	// per-slot skip, a force-proceed and a band conversion all carry their own
+	// prose and their own reason.
+	//
+	// It exists so a surface can tell a SKIP from a SETTLEMENT without reading
+	// the sentence. The operator accepted "you skipped this one, so I will pick
+	// something sensible" for a question they were ASKED; a slot they were never
+	// asked must not claim they skipped it.
+	Via string `json:"via,omitempty"`
 }
 
 const (
 	ResolvedRegistry   = "registry"
 	ResolvedAnswered   = "answered"
 	ResolvedAssumption = "assumption"
+	// ViaSystem marks an assumption the PLATFORM settled without asking, because
+	// the taxonomy marks that slot never-asked (Slot.Ask == AskNever).
+	ViaSystem = "system"
 )
 
 // EscalationAnswer records one answered 1.7 single-question escalation.

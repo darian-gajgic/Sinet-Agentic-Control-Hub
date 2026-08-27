@@ -242,7 +242,16 @@ func TestFamilyCardFiresWhenUnresolved(t *testing.T) {
 		}
 	}
 	tax := intake.SeedTaxonomies()[intake.FamilySoftware]
-	if want := tax.Clearance(map[string]bool{}); st.Clearance != want {
+	// Nothing was answered yet, but the slots the software set settles without
+	// asking resolved when the set was keyed, so the meter starts at their share
+	// rather than at zero (P3-GF7 R3; harvest H10 — inferred slots are COUNTED).
+	settled := map[string]bool{}
+	for _, s := range tax.Slots {
+		if s.Ask == intake.AskNever {
+			settled[s.ID] = true
+		}
+	}
+	if want := tax.Clearance(settled); st.Clearance != want {
 		t.Errorf("clearance = %v, want %v (recomputed over the software set)", st.Clearance, want)
 	}
 }

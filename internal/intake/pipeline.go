@@ -462,12 +462,50 @@ func (p *Pipeline) applyFamilyTaxonomy(st *State) string {
 			}
 		}
 	}
+	// The never-asked slots settle HERE, at the same moment the question set is
+	// keyed — which is what makes the Clearance meter count them from the very
+	// first card rather than discovering them at the end (P3-GF7 R3; harvest H10).
+	// They resolve as explicit assumptions, S06.5's third arm, so acceptEmission's
+	// existing guarantee mints each one onto the SPEC where it can be contested.
+	//
+	// Skip-if-already-resolved is what makes it idempotent across re-entry AND
+	// across a family switch: a settlement whose text the planner later made
+	// concrete (the back-fill in acceptEmission) is not overwritten with the
+	// generic sentence on the next pass.
+	held := st.resolvedSet()
+	for i := range tax.Slots {
+		s := &tax.Slots[i]
+		if !s.neverAsked() || held[s.ID] {
+			continue
+		}
+		st.resolveSlot(SlotResolution{
+			SlotID: s.ID, How: ResolvedAssumption, Via: ViaSystem,
+			Assumption: systemAssumption(s),
+		})
+	}
 	st.Clearance = tax.Clearance(st.resolvedSet())
 	if _, seeded := p.taxonomies()[st.Family]; seeded {
 		return ""
 	}
 	return fmt.Sprintf("no question set is seeded for the %s family yet: the interview uses the generic set, "+
 		"while the task's family stays %s for planning and routing (S06.5)", st.Family, st.Family)
+}
+
+// systemAssumption writes the placeholder a never-asked slot carries until the
+// planner states its own concrete resolution, in words for the PERSON who will
+// read it on the approval card (CONVENTIONS §57 drafting rule 1, §59).
+//
+// It says its own reason, because this arm's reason is genuinely its own: the
+// band was never asked, the force-proceed was asked and declined the lot, the
+// skip was asked and waved through — and this one was never a question at all.
+// So it must not borrow the skip's sentence: a person who was never asked did
+// not skip anything.
+func systemAssumption(s *Slot) string {
+	name := s.ID
+	if s.Name != "" {
+		name = s.Name
+	}
+	return fmt.Sprintf("%s: I settle this one myself rather than asking — what I picked is on the plan below, and you can change it there.", name)
 }
 
 // recordTaxonomyFallback writes the disclosure as a platform decision. A no-op
@@ -737,14 +775,21 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 		if err != nil {
 			return false, pair, err
 		}
-		unresolved := tax.Unresolved(resolved)
+		// ASKABLE-unresolved on both halves: the slots that go on the card and
+		// the condition that decides whether a card ships at all read the same
+		// list, so an interview below its floor whose only unresolved slots are
+		// never-asked ones stops instead of issuing an empty card (P3-GF7 R2).
+		unresolved := tax.UnresolvedAskable(resolved)
 		if st.Clearance < floor && len(unresolved) > 0 {
 			qs := make([]Question, 0, maxQuestionsPerCard)
 			for _, s := range unresolved {
 				if len(qs) == maxQuestionsPerCard {
 					break
 				}
-				qs = append(qs, Question{ID: s.ID, Text: s.Question, Why: s.Why, Options: s.Options, Weight: s.Weight})
+				qs = append(qs, Question{
+					ID: s.ID, Text: s.Question, Why: s.Why,
+					Options: s.Options, Weight: s.Weight, Recommended: s.Recommended,
+				})
 			}
 			return true, pair, p.issueCard(ctx, st, p.buildInterviewCard(ctx, st, tax, qs))
 		}
@@ -908,7 +953,18 @@ func reviewQuestions(st *State, tax *Taxonomy) []Question {
 	}
 	qs := make([]Question, 0, len(tax.Slots))
 	for _, s := range tax.Slots {
-		q := Question{ID: s.ID, Text: s.Question, Why: s.Why, Options: s.Options, Weight: s.Weight}
+		if s.neverAsked() {
+			// A re-interview is still a question card, so it must not present
+			// the guess-my-misread question either (P3-GF7 R2, ratified OQ5).
+			// These slots' current resolutions ride the understood block this
+			// card already carries, and correction stays available through
+			// Assume, free text, and the approval card's Re-plan contest.
+			continue
+		}
+		q := Question{
+			ID: s.ID, Text: s.Question, Why: s.Why,
+			Options: s.Options, Weight: s.Weight, Recommended: s.Recommended,
+		}
 		if r, ok := res[s.ID]; ok {
 			q.Resolution = &UnderstoodItem{
 				SlotID: r.SlotID, Name: s.Name, How: r.How,
@@ -1397,6 +1453,29 @@ func (p *Pipeline) acceptEmission(ctx context.Context, st *State, prior *Pair, n
 		}
 	}
 
+	// A slot the platform settled without asking carries a placeholder sentence
+	// until the planner says what it actually settled on. Where the planner DID
+	// state it — "prices are shown as 12.34 euro" rather than "I settle this one
+	// myself" — that is what the requester should read everywhere the resolution
+	// appears, so the record takes its text from the accepted artifact (P3-GF7 R3).
+	//
+	// Platform code COPYING from the artifact, never prose invented pipeline-side:
+	// the loop above has already guaranteed an entry exists for every one of
+	// these origins, so this only ever replaces the placeholder with the
+	// planner's own words, and only for the slots the platform settled itself.
+	for i := range st.Resolutions {
+		r := &st.Resolutions[i]
+		if r.Via != ViaSystem {
+			continue
+		}
+		for _, a := range next.Spec.Assumptions {
+			if a.Origin == "slot:"+r.SlotID && strings.TrimSpace(a.Text) != "" {
+				r.Assumption = a.Text
+				break
+			}
+		}
+	}
+
 	// Version assignment: plan bumps on every emission; spec bumps only on
 	// content change.
 	specV, planV := st.SpecVersion+1, st.PlanVersion+1
@@ -1492,6 +1571,15 @@ func (p *Pipeline) issueCard(ctx context.Context, st *State, card *Card) error {
 	card.Clearance = st.Clearance
 	card.ClearanceFloor = floor
 	card.Tier = st.Tier
+	if card.Kind != CardFamily {
+		// The family guess travels on every card that HAS one, from the single
+		// site that issues them all (P3-GF7 R9): a surface can say "I am
+		// treating this as software work — my guess" before a question renders,
+		// instead of leaving the requester to discover a misclassification
+		// through four wrong questions (harvest H18). The family card omits it,
+		// because family is exactly what is unresolved there.
+		card.Family, card.FamilySource = st.Family, st.FamilySource
+	}
 	st.OpenAskID, st.OpenAskKind = askID, card.Kind
 	st.CardIssuedTS = card.IssuedTS
 	st.StaleFlag, st.StaleReasons = false, nil

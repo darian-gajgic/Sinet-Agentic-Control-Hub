@@ -66,7 +66,13 @@ func TestGF3TaxonomyGovernanceSupersedesUnderAPendingRecord(t *testing.T) {
 		t.Errorf("clean world result = %+v, want supersessions only", res)
 	}
 
-	seeds := intake.SeedTaxonomies()
+	// The content THIS record covers, which since P3-GF7 is the frozen v3
+	// snapshot for software rather than the live seed: a ratification record
+	// that follows the code is not a record (CONVENTIONS §57).
+	seeds := map[intake.Family]*intake.Taxonomy{
+		intake.FamilySoftware: memory.GF3SoftwareTaxonomyForTest(),
+		intake.FamilyGeneric:  intake.SeedTaxonomies()[intake.FamilyGeneric],
+	}
 	for _, fam := range gf3Revised {
 		cur, err := f.store.HouseObject(ctx, "intake/taxonomy/"+string(fam))
 		if err != nil {
@@ -100,7 +106,7 @@ func TestGF3TaxonomyGovernanceSupersedesUnderAPendingRecord(t *testing.T) {
 			t.Fatalf("governed %s taxonomy fails LoadTaxonomy: %v", fam, err)
 		}
 		if !reflect.DeepEqual(got, seeds[fam]) {
-			t.Errorf("governed %s file diverges from the in-code v3 seed", fam)
+			t.Errorf("governed %s file diverges from the v3 content this record covers", fam)
 		}
 		if got.Version != "v3" {
 			t.Errorf("governed %s file is %q, want v3", fam, got.Version)
@@ -356,7 +362,7 @@ func TestGF3GovernanceRepairsATornFileItOwns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repaired file fails LoadTaxonomy: %v", err)
 	}
-	if !reflect.DeepEqual(got, intake.SeedTaxonomies()[intake.FamilySoftware]) {
+	if !reflect.DeepEqual(got, memory.GF3SoftwareTaxonomyForTest()) {
 		t.Error("the repaired file is not the content the row attests to")
 	}
 }

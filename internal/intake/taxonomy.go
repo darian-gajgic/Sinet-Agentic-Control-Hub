@@ -23,12 +23,30 @@ import (
 // needed to make that work: an answered slot is an answered slot.
 const plannerChoosesValue = "planner_chooses"
 
+// AskNever is the Slot.Ask posture of a must-know slot the platform settles
+// itself and NEVER delivers as a question (P3-GF7 R2; operator record
+// b6-gate-operator-findings-r5-2026-08-23 §C rules 2+3).
+//
+// The slot keeps its id and its weight, so coverage stays accounted: it is
+// resolved at interview entry as an explicit assumption — S06.5's third
+// resolution arm — which the Clearance meter counts from the start and which
+// lands on the approval card's centerpiece where it can be contested. That is
+// the harvest's H10 rule: an inferred slot is a CONFIRMABLE assumption, never
+// silently filled state.
+const AskNever = "never"
+
 // Option is one labeled answer option of an interview question (Spec
 // S06.5: 2–4 labeled options plus free text; free text is always
 // available and is not an Option).
 type Option struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
+	// Effect is the plain-words consequence line: what picking THIS option does
+	// to the result (P3-GF7 R7; operator rule C.4 — "no options whose referent
+	// is ambiguous", live-proven by the W1 H3 tradeoff lines). Additive and
+	// optional: a set that does not carry the vocabulary is unaffected, and
+	// rendering it is the surface's (GF9).
+	Effect string `json:"effect,omitempty"`
 }
 
 // Slot is one must-know slot of a family taxonomy. Weight is shipped in
@@ -44,7 +62,23 @@ type Slot struct {
 	// requester-facing where MustKnow is the internal rationale.
 	Why     string   `json:"why,omitempty"`
 	Options []Option `json:"options,omitempty"`
+	// Ask is the slot's delivery posture: "" (the zero value) is asked, AskNever
+	// is settled by the platform and never delivered as a question on any card
+	// kind (P3-GF7 R2). Additive and omitempty, so every set written before this
+	// packet reads back exactly as it did.
+	Ask string `json:"ask,omitempty"`
+	// Recommended names the Option VALUE this slot recommends by default — the
+	// "exactly one recommended default, and why" half of operator rule C.4
+	// (P3-GF7 R7). The recommended option's own Effect carries why it is the
+	// recommendation. A per-goal recommendation from the utility seat
+	// (Question.SuggestedOption) overrides it at render time; this is the
+	// authored default the platform stands behind when no seat answered.
+	Recommended string `json:"recommended,omitempty"`
 }
+
+// neverAsked reports whether this slot is settled by the platform rather than
+// delivered as a question.
+func (s *Slot) neverAsked() bool { return s.Ask == AskNever }
 
 // Taxonomy is one versioned family question set.
 type Taxonomy struct {
@@ -72,16 +106,57 @@ func (t *Taxonomy) Validate() error {
 			return fmt.Errorf("%w: duplicate slot %q in %q", ErrTaxonomy, s.ID, t.ID)
 		case s.Weight <= 0:
 			return fmt.Errorf("%w: slot %q needs a positive weight", ErrTaxonomy, s.ID)
-		case s.Question == "":
+		case s.Ask != "" && s.Ask != AskNever:
+			return fmt.Errorf("%w: slot %q has ask posture %q — a slot is asked (empty) or %q", ErrTaxonomy, s.ID, s.Ask, AskNever)
+		case s.neverAsked() && s.MustKnow == "":
+			// A never-asked slot IS its must-know: that text is the planner's
+			// instruction for settling it, and without one the slot resolves to
+			// an assumption nothing authored (P3-GF7 R2/R4).
+			return fmt.Errorf("%w: slot %q is never asked and states no must-know — the must-know is what settles it", ErrTaxonomy, s.ID)
+		case !s.neverAsked() && s.Question == "":
 			return fmt.Errorf("%w: slot %q without a question", ErrTaxonomy, s.ID)
 		case len(s.Options) == 1 || len(s.Options) > 4:
 			// S06.5: options come as 2–4 labeled choices (or none — free
 			// text only).
 			return fmt.Errorf("%w: slot %q must carry 0 or 2–4 options", ErrTaxonomy, s.ID)
 		}
+		// The recommendation vocabulary is all-or-nothing per slot: a slot that
+		// carries a recommendation or an effect line must carry the choices the
+		// recommendation names and an effect on every one of them. Half of it is
+		// a card a surface cannot render honestly — a recommendation nobody can
+		// pick, or a set of options where only some say what they do (P3-GF7 R7,
+		// operator rule C.4). Absence of the whole vocabulary stays legal: the
+		// five other families are raised at their own next revision (OQ3).
+		if s.Recommended != "" || anyEffect(s.Options) {
+			if len(s.Options) < 2 {
+				return fmt.Errorf("%w: slot %q carries the recommendation vocabulary with %d options — a recommendation needs choices to name",
+					ErrTaxonomy, s.ID, len(s.Options))
+			}
+			if s.Recommended == "" {
+				return fmt.Errorf("%w: slot %q carries option effects but recommends none of them — exactly one recommended default (C.4)", ErrTaxonomy, s.ID)
+			}
+			if !hasOptionValue(s.Options, s.Recommended) {
+				return fmt.Errorf("%w: slot %q recommends %q, which names none of its own options", ErrTaxonomy, s.ID, s.Recommended)
+			}
+			for _, o := range s.Options {
+				if o.Effect == "" {
+					return fmt.Errorf("%w: slot %q option %q states no effect — every option says what picking it does (C.4)", ErrTaxonomy, s.ID, o.Value)
+				}
+			}
+		}
 		seen[s.ID] = true
 	}
 	return nil
+}
+
+// anyEffect reports whether any option of this slot carries an effect line.
+func anyEffect(opts []Option) bool {
+	for _, o := range opts {
+		if o.Effect != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Slot returns the slot by id, or nil.
@@ -122,6 +197,30 @@ func (t *Taxonomy) Unresolved(resolved map[string]bool) []Slot {
 	for i := 1; i < len(out); i++ { // insertion sort: stable, tiny n
 		for j := i; j > 0 && out[j].Weight > out[j-1].Weight; j-- {
 			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+// UnresolvedAskable returns the unresolved slots this set may actually ASK,
+// highest weight first — the S06.5 card ordering with the never-asked slots
+// removed (P3-GF7 R2).
+//
+// It is the ONE list interview delivery reads, for both halves of the loop: the
+// slots that go on the card AND the condition that decides whether a card ships
+// at all. Two lists would be the empty-card bug — an interview below its floor
+// whose only unresolved slots are never-asked ones would keep issuing cards with
+// nothing on them.
+//
+// Unresolved() keeps its whole-set meaning: force-proceed and the
+// zero-interaction band convert EVERY unresolved slot to a listed assumption,
+// never only the askable ones.
+func (t *Taxonomy) UnresolvedAskable(resolved map[string]bool) []Slot {
+	all := t.Unresolved(resolved)
+	out := make([]Slot, 0, len(all))
+	for _, s := range all {
+		if !s.neverAsked() {
+			out = append(out, s)
 		}
 	}
 	return out
@@ -199,27 +298,73 @@ const rw12Provenance = "drafted P3-RW-12 with claude-opus-5 on 2026-08-13 per Sp
 // gate rules, and a refusal is executed as its own supersession back to v2.
 // The alternative would leave the governed file at v2 while the runtime serves
 // v3, which is the live-pointer drift the snapshot doctrine closed.
+// gf7Provenance is the drafting record the software set carries at v4 — the
+// operator's W2 taxonomy rebuild, driven by three real transcripts and a live
+// benchmark walk rather than by a benchmark table.
+//
+// Ratification is stated as PENDING for the same reason the v3 record states it:
+// the content ships and is governed under its own supersession from the first
+// boot (S09.8), with the record saying plainly that the operator has not seen it
+// yet. The alternative would leave the governed file at v3 while the runtime
+// serves v4 — the live-pointer drift the snapshot doctrine closed. A refusal at
+// the gate is executed as its own supersession back to v3.
+const gf7Provenance = "W2 taxonomy rebuild drafted P3-GF7 with Claude Opus 4.8 on 2026-08-27 per Spec S06.5 " +
+	"(\"drafted at implementation time with the strongest available frontier model\"), from the operator records " +
+	"b6-gate-operator-findings-r5-2026-08-23 (per-slot verdicts, the seven hard rules, the W2 order) and -r4 §F2, plus the " +
+	"live benchmark walk w1-nexus-live-harvest-2026-08-27 (H2 why-lines, H3 per-option effects, H10 inferred-not-asked, H23 " +
+	"the reference question set). THREE slots the operator killed as questions and one ruled with them (OQ1) keep their ids and " +
+	"weights and are never asked: behavior and terminology INVERT — the platform states its understanding and the requester " +
+	"corrects it — while indices_ranges and numerical_precision are settled internally and disclosed as assumptions. Every " +
+	"surviving asked slot was redrafted to the r5 §C bar: a plain purpose saying what breaks if unanswered, concrete options a " +
+	"non-programmer can pick between, exactly one recommended default, and an effect line on every option. TWO slots are NEW, " +
+	"their weights REASONED and never outranking the measured 12s: language_locale 9, because every seeded string, label and " +
+	"message in the deliverable is written in the language it names and changing it afterwards rewrites all of them — placing it " +
+	"above the delivery-shape and finishing-bar slots and below the technology choice everything else is built on; quality_bar 8, " +
+	"because it decides what verification gates on rather than what gets built, which is consequential but narrower — level with " +
+	"output_format, whose delivery shape it judges. Slot ids and weights of every surviving slot are VERBATIM from v3 (the " +
+	"measured thing, untouched). Operator ratification PENDING at the planning-rework exit gate."
+
 const gf3Provenance = "Requester-facing v3 revision drafted P3-GF3-BE1 with claude-opus-5 on 2026-08-23 per Spec S06.5: " +
 	"every slot asks a question a person who is not a programmer can answer, offers 2 to 4 concrete labeled options, and " +
 	"carries a one-line plain-words why; the precise engineering form of each question moved into MustKnow, which is read by " +
 	"the planner and never shown as the asked question. Slot ids, weights, count and order are VERBATIM from v2 (the measured " +
 	"thing, untouched). Operator ratification PENDING at the resumed B6 gate."
 
-// softwareSeed is the software family's question set (v3).
+// softwareSeed is the software family's question set (v4).
 //
 // The ten ClarifyCodeBench clarity types (arXiv:2607.00711 Table 2) are kept
 // verbatim from the B2-2 seed, ids and weights intact — they are the one
 // MEASURED thing in this file. P3-RW-12 added the three questions a requester
 // who is not a programmer is never asked but always has an answer to: what to
 // build it with, where the pictures come from, and what it should look like.
+// P3-GF3-BE1 rewrote what is ASKED so a person who is not a programmer could
+// answer it at all.
 //
-// P3-GF3-BE1 rewrites what is ASKED, and nothing else. The benchmark's own
-// phrasings ("what belongs in the collections, and how are they updated or
-// accessed?") describe a clarity type to an engineer; the operator watched a
-// non-programmer meet them on a real card and have nothing to type. Each slot
-// now asks a question in the requester's world, offers concrete options, and
-// says in one plain line why it is worth answering; the precise form moved into
-// MustKnow, which the planner reads and the requester never sees.
+// P3-GF7 is the operator's own verdict on that card deck, question by question,
+// after running a real project through it. Three things came out of it.
+//
+// FOUR SLOTS ARE NEVER ASKED AGAIN. "What new ability will this give your
+// customers" and "are there words in your request that mean something particular
+// in your industry" are questions nobody can answer about their own request —
+// the second one asks a person to introspect on what the platform might have
+// misread. The mechanism inverts: the platform states what it understood, in the
+// restatement and in the assumptions, and the requester corrects it. "Do we count
+// both the start and the end number" and "do any numbers need rounding" are
+// details the platform settles itself. All four keep their id and their weight
+// and resolve at interview entry as explicit assumptions, so the Clearance meter
+// still counts them and every one of them lands on the approval card where it can
+// be contested — inferred, never silently filled.
+//
+// EVERY SURVIVING QUESTION MEETS THE BAR THE OPERATOR SET. Its why-line says what
+// breaks if nobody answers, in the project's own terms. Its options are things a
+// person can actually choose between, each saying what picking it does. Exactly
+// one is recommended, and the recommended option's effect line says why. Where the
+// requester genuinely cannot know the answer — the order of operations question —
+// the platform deciding and showing what it decided IS the recommendation.
+//
+// TWO QUESTIONS ARE NEW, from the live walk: which language the finished thing
+// speaks, and what it has to pass before it counts as done. Neither was asked
+// anywhere, and both change every later decision.
 //
 // Where a slot asks for a DECISION the requester may have no opinion about, the
 // planner-chooses option leads (the §57 rule). The three benchmark-failed slots
@@ -232,176 +377,342 @@ func softwareSeed() *Taxonomy {
 	return &Taxonomy{
 		ID:      "software",
 		Family:  FamilySoftware,
-		Version: "v3",
+		Version: "v4",
 		Source: "ClarifyCodeBench 10-type taxonomy (arXiv:2607.00711, Table 2) for the ten clarity slots, seeded P3-B2-2 — " +
 			"weights EVIDENCE-INFORMED from that benchmark: the types every model measurably fails (collection semantics, " +
 			"comparison rules, ordering & atomicity) weigh 12, ordinary clarity types 10/8, the types models natively handle " +
 			"(units, numerical precision) weigh 6. The three Deep-Plan slots (technology_stack 11, assets_media 10, look_feel 10) " +
 			"are REASONED, not measured: for a requester who is not a programmer they shape the deliverable more than output " +
 			"format or units do, so they sit above the natively-handled types — and strictly below the benchmark-failed 12, " +
-			"because reasoning does not outrank measurement. Deep-Plan revision " + rw12Provenance + ". " + gf3Provenance,
+			"because reasoning does not outrank measurement. Deep-Plan revision " + rw12Provenance + ". " + gf3Provenance +
+			" " + gf7Provenance,
 		Slots: []Slot{
 			{
-				ID: "behavior", Name: "What it should do", Weight: 10,
-				MustKnow: "The required function, objective, or side effect is underspecified, so the intended behavior is not uniquely determined. " +
-					"Precise form: what exactly should this do — what behavior or outcome makes it correct?",
-				Question: "What should this do for the people who end up using it?",
-				Why:      "Everything else in the plan is built to make this one thing true.",
-				Options: []Option{
-					{Label: "Let people do something they cannot do today", Value: "new_capability"},
-					{Label: "Fix or improve something that already exists", Value: "improve_existing"},
-					{Label: "Take over a job somebody does by hand today", Value: "automate_manual"},
-					{Label: "I will describe it in my own words", Value: "specify"},
-				},
+				ID: "behavior", Name: "What it should do", Weight: 10, Ask: AskNever,
+				MustKnow: "NEVER ASKED — the platform states its reading and the requester corrects it. Derive the intended behavior from " +
+					"the request itself and STATE it: the plain-language restatement on the SPEC is the behavior understanding, and every " +
+					"behavior the request implies without saying outright goes in the assumptions list as a correctable statement (\"I am " +
+					"taking this to mean …\"), never as a question. Asking a person what their own request should do produced, verbatim, " +
+					"\"I have no idea what to answer on this question and what the purpose of this question even is\".",
 			},
 			{
-				ID: "terminology", Name: "Words that mean something specific", Weight: 10,
-				MustKnow: "A domain term, action, or state is undefined, overloaded, or open to multiple interpretations. " +
-					"Precise form: are there terms in the request that need pinning down — what do they mean here?",
-				Question: "Do any words in your request mean something particular in your line of work?",
-				Why:      "One word can mean two things, and building the other one is expensive to undo.",
-				Options: []Option{
-					{Label: "No, everything means what it usually means", Value: "none"},
-					{Label: "Yes, a few words do and I will explain them", Value: "some_explain"},
-					{Label: "Yes, and there is a list or a page I can point you at", Value: "glossary"},
-				},
+				ID: "terminology", Name: "Words that mean something specific", Weight: 10, Ask: AskNever,
+				MustKnow: "NEVER ASKED — the inversion. State, in the restatement and in the assumptions, the reading of every word in the " +
+					"request that carries a special or trade meaning (\"compatibility here means which cars a part fits\"), as a statement " +
+					"the requester can correct or confirm. A person cannot introspect on what the platform MIGHT have misread; they can " +
+					"read what it did read. Precise form of the underlying ambiguity: a domain term, action, or state is undefined, " +
+					"overloaded, or open to multiple interpretations.",
 			},
 			{
 				ID: "edge_cases", Name: "When something unexpected happens", Weight: 10,
 				MustKnow: "Boundary or exceptional conditions are not specified, leaving behavior unclear for special inputs. " +
 					"Precise form: how should boundary and exceptional inputs be handled (empty, missing, malformed, extreme)?",
-				Question: "When something turns up that nobody planned for, what should happen?",
-				Why:      "Most unpleasant surprises live here, and this decides whether they are loud or quiet.",
+				Question:    "When something turns up that nobody planned for, what should happen?",
+				Why:         "Bad input either stops the work loudly or slips through quietly, and this is where that is decided.",
+				Recommended: "fail_loud",
 				Options: []Option{
-					{Label: "Stop and say clearly that something is wrong", Value: "fail_loud"},
-					{Label: "Carry on with a sensible default and make a note of it", Value: "graceful"},
-					{Label: "I will say what to do, case by case", Value: "specify"},
+					{
+						Label: "Stop and say clearly that something is wrong", Value: "fail_loud",
+						Effect: "Nothing wrong passes silently: whoever hit it sees a plain message instead of a result built on bad input. " +
+							"Recommended, because a loud stop annoys someone once and a quiet wrong answer gets trusted for months.",
+					},
+					{
+						Label: "Carry on with a sensible default and make a note of it", Value: "graceful",
+						Effect: "The work keeps running through odd input and records what it did — nothing ever halts, and a wrong result can go unnoticed.",
+					},
+					{
+						Label: "I will say what to do, case by case", Value: "specify",
+						Effect: "The cases you name are handled the way you said, and the rest fall back to stopping loudly.",
+					},
 				},
 			},
 			{
 				ID: "collection_semantics", Name: "The things it keeps track of", Weight: 12,
 				MustKnow: "A collection, container, or state object is mentioned, but its membership, update rule, or access semantics are underspecified. " +
 					"Precise form: for the collections/state involved, what belongs in them, and how are they updated or accessed?",
-				Question: "What things does this keep track of, and what should happen when the same one turns up twice?",
-				Why:      "Repeats are the most common mess in anything that keeps a list, and the rule has to be decided once.",
+				Question:    "What things does this keep track of, and what should happen when the same one turns up twice?",
+				Why:         "With no rule for repeats, the same thing appears twice in the list people see and gets counted twice in every total.",
+				Recommended: "merge_newest",
 				Options: []Option{
-					{Label: "Merge them into one and keep the newest details", Value: "merge_newest"},
-					{Label: "Keep both and flag them for me to look at", Value: "keep_both_flag"},
-					{Label: "Turn the second one away and say why", Value: "reject_new"},
+					{
+						Label: "Merge them into one and keep the newest details", Value: "merge_newest",
+						Effect: "One entry per thing, always showing the latest information. Recommended: nothing disappears from view and nothing is shown twice.",
+					},
+					{
+						Label: "Keep both and flag them for me to look at", Value: "keep_both_flag",
+						Effect: "Nothing is decided for you — both entries stay, marked as possible repeats, and you sort them out.",
+					},
+					{
+						Label: "Turn the second one away and say why", Value: "reject_new",
+						Effect: "The second one never gets in and whoever added it is told why; strict, and a genuine entry that only looked like a repeat is refused too.",
+					},
 				},
 			},
 			{
-				ID: "comparison_rules", Name: "What order things come in", Weight: 12,
+				ID: "comparison_rules", Name: "The order things are listed in", Weight: 12,
 				MustKnow: "The comparison key, tie-breaking rule, or stability requirement is not specified. " +
-					"Precise form: where things are compared, sorted, or deduplicated, by what key, and how are ties broken?",
-				Question: "When things get listed or ranked, what order should they be in?",
-				Why:      "A list in the wrong order looks broken to whoever reads it, and the rule is cheap to set now.",
+					"Precise form: where things are compared, sorted, or deduplicated, by what key, and how are ties broken? The answer must " +
+					"bind to a NAMED surface — the default list and the results of a search or filter are separate orders, and an option " +
+					"that names neither is unanswerable.",
+				Question: "When this shows a list of things — the main list people browse, and what comes back after they search or filter — " +
+					"what order should they be in?",
+				Why:         "A list nobody set an order for comes out in whatever order the data happened to be stored in, which reads as broken to the person looking at it.",
+				Recommended: "match_then_newest",
 				Options: []Option{
-					{Label: "Newest first", Value: "newest_first"},
-					{Label: "Alphabetical, by name", Value: "alphabetical"},
-					{Label: "Closest to what the person was looking for", Value: "best_match"},
-					{Label: "I will describe the order I want", Value: "specify"},
+					{
+						Label: "Closest match to what they typed when they search; newest first in the main list", Value: "match_then_newest",
+						Effect: "Searching puts the items matching the most of their words and filters at the top; the untouched main list leads with " +
+							"the most recently added. Recommended: it is the order people already expect from a list they can search.",
+					},
+					{
+						Label: "Newest first, in both", Value: "newest_first",
+						Effect: "The main list and every search result lead with the most recently added item, so new things are always found first and older ones sink.",
+					},
+					{
+						Label: "A to Z by name, in both", Value: "alphabetical",
+						Effect: "Both lists read like an index — the same order every time, easy to scan, and new items are no easier to find than old ones.",
+					},
+					{
+						Label: "I will describe the order I want", Value: "specify",
+						Effect: "Both lists follow the rule you describe, and the plan repeats back what it understood before anything is built.",
+					},
 				},
 			},
 			{
-				ID: "ordering_atomicity", Name: "What has to happen in order", Weight: 12,
+				ID: "ordering_atomicity", Name: "Steps that must not be left half-done", Weight: 12,
 				MustKnow: "Temporal order, simultaneity, or indivisible execution assumptions are unclear. " +
-					"Precise form: does order of operations or atomicity matter here — what must happen before what, and what must never interleave?",
-				Question: "Does anything here have to happen in a strict order, or happen completely or not at all?",
-				Why:      "This is what stands between you and a half-finished job, like a payment taken with no order recorded.",
+					"Precise form: does order of operations or atomicity matter here — what must happen before what, and what must never interleave? " +
+					"A requester who is not an engineer cannot answer this, so the platform deciding and disclosing is the honest default.",
+				Question:    "Are there steps here that must happen in a fixed order, or that must finish completely or not at all?",
+				Why:         "It decides whether something that fails halfway leaves a mess behind — a payment taken with no order recorded — or leaves nothing behind.",
+				Recommended: plannerChoosesValue,
 				Options: []Option{
-					{Label: "Yes, some steps must happen in a set order and I will say which", Value: "strict_order"},
-					{Label: "Yes, some things must either finish completely or not happen at all", Value: "all_or_nothing"},
-					{Label: "No, nothing here depends on order", Value: "no_constraint"},
+					{
+						Label: "You choose for me and show me what you picked", Value: plannerChoosesValue,
+						Effect: "I go through the request for the places where stopping halfway would do damage, decide the rule there, and list every " +
+							"one of those decisions on the plan for you to check. Recommended: this is genuinely the platform's job to work out, not yours.",
+					},
+					{
+						Label: "Yes, some steps must happen in a set order and I will say which", Value: "strict_order",
+						Effect: "The order you name is fixed in the plan and the finished work is checked against it.",
+					},
+					{
+						Label: "Yes, some things must either finish completely or not happen at all", Value: "all_or_nothing",
+						Effect: "Those steps are built so a failure halfway undoes itself, instead of leaving half a result behind.",
+					},
+					{
+						Label: "No, nothing here depends on order", Value: "no_constraint",
+						Effect: "Steps are built in whatever order is simplest — faster to build, with nothing guarding against a half-finished run.",
+					},
 				},
 			},
 			{
-				ID: "indices_ranges", Name: "Counting and ranges", Weight: 8,
-				MustKnow: "Index bases, interval boundaries, or inclusion rules are underspecified. " +
-					"Precise form: for indices and ranges, zero- or one-based, and are boundaries inclusive or exclusive?",
-				Question: "When you say something like the first ten, or Monday to Friday, should both ends be counted in?",
-				Why:      "Being out by one comes from here, and it is far easier to prevent than to find later.",
-				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "Count both ends in, so Monday to Friday is five days", Value: "inclusive"},
-					{Label: "Count the start in but not the end", Value: "start_only"},
-					{Label: "I will say, case by case", Value: "specify"},
-				},
+				ID: "indices_ranges", Name: "Counting and ranges", Weight: 8, Ask: AskNever,
+				MustKnow: "NEVER ASKED — settled internally and disclosed. Resolve counting and boundary conventions from the request: thirty " +
+					"items means thirty items, and a range the requester names (\"Monday to Friday\") includes both ends unless they said " +
+					"otherwise. DISCLOSE the choice as a listed assumption wherever it is load-bearing. Raise it as a 1.7 single-question " +
+					"escalation only where the two readings genuinely change the deliverable. Asked as a question it produced, verbatim, " +
+					"\"30 items mean 30 items! This is embarrassing if this question gets asked to a user\".",
 			},
 			{
-				ID: "output_format", Name: "The shape of what comes out", Weight: 8,
-				MustKnow: "The required output structure, layout, or presentation rule is missing or unclear. " +
-					"Precise form: what shape should the output take?",
-				Question: "What should the result look like when it comes out?",
-				Why:      "This is the part you will actually see, so it is worth a moment now.",
+				ID: "output_format", Name: "How you get it", Weight: 8,
+				MustKnow: "How the finished work should ARRIVE, and where it should run, is unstated. Precise form: is the deliverable something " +
+					"the requester starts and uses themselves, changes made in place inside the project, or something deployed where other " +
+					"people reach it — and what does \"done\" therefore mean? The earlier phrasing asked about the shape of the code and " +
+					"files, which the requester could not answer and could not see the point of; the answerable question is about delivery.",
+				Question:    "When this is finished, how should it reach you?",
+				Why:         "It decides whether the work ends with something you can open and use, or with files that still need someone to set them up.",
+				Recommended: "run_locally",
 				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "Match whatever this project already does", Value: "conventional"},
-					{Label: "The exact shape matters and I will describe it", Value: "specify"},
-					{Label: "Anything clear and readable is fine", Value: "any"},
+					{
+						Label: "You choose for me and show me what you picked", Value: plannerChoosesValue,
+						Effect: "I pick the arrival shape that fits the goal and say on the plan exactly how the finished work will turn up.",
+					},
+					{
+						Label: "Something I can open and use on my own computer", Value: "run_locally",
+						Effect: "It is finished when it starts on your machine with one command and you can click through it. Recommended: it is the " +
+							"only shape you can check for yourself, and anything else can still be built from it later.",
+					},
+					{
+						Label: "Changes made inside the project, ready for whoever runs it", Value: "in_project",
+						Effect: "The work lands in the project's own layout and conventions; there is nothing to click at the end, so it is judged by reading it rather than using it.",
+					},
+					{
+						Label: "Live on the internet where other people can reach it", Value: "deployed",
+						Effect: "The work includes putting it somewhere public and everything that comes with that — an address, hosting, and the extra " +
+							"checks before real people see it. Slower, and it is the one shape you cannot quietly undo.",
+					},
 				},
 			},
 			{
 				ID: "units", Name: "Units and measurements", Weight: 6,
 				MustKnow: "A quantity is specified without a clear unit, scale, prefix, or dimensional convention. " +
 					"Precise form: are all quantities' units and scales unambiguous — if not, which convention applies?",
-				Question: "Are there measurements involved, and which units should they be in?",
-				Why:      "Mixed-up units stay invisible: everything looks right until a number is ten times off.",
+				Question:    "Are there measurements involved, and which units should they be in?",
+				Why:         "Every size, weight and distance the finished thing shows is written in these units, and changing them later means going back through every one.",
+				Recommended: plannerChoosesValue,
 				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "Metric: millimetres, kilograms, degrees Celsius", Value: "metric"},
-					{Label: "Imperial: inches, pounds, degrees Fahrenheit", Value: "imperial"},
-					{Label: "There are no measurements in this", Value: "none"},
+					{
+						Label: "You choose for me and show me what you picked", Value: plannerChoosesValue,
+						Effect: "I take the units from your own words and from anything the project already uses, and say on the plan which ones I " +
+							"picked. Recommended: your request usually already contains the answer.",
+					},
+					{
+						Label: "Metric: millimetres, kilograms, degrees Celsius", Value: "metric",
+						Effect: "Everything shown and everything typed in is metric, and anything arriving in other units is converted before it is displayed.",
+					},
+					{
+						Label: "Imperial: inches, pounds, degrees Fahrenheit", Value: "imperial",
+						Effect: "Everything shown and everything typed in is imperial, with the same conversion rule the other way.",
+					},
+					{
+						Label: "There are no measurements in this", Value: "none",
+						Effect: "Numbers are treated as plain counts and money, and nothing is converted.",
+					},
 				},
 			},
 			{
-				ID: "numerical_precision", Name: "Rounding", Weight: 6,
-				MustKnow: "Precision, rounding, tolerance, or error handling requirements are unclear. " +
-					"Precise form: do precision, rounding, or tolerance requirements apply to numeric results?",
-				Question: "Do any numbers need rounding a particular way, like money or percentages?",
-				Why:      "Rounding decides whether totals add up the way the person reading them expects.",
-				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "Money: two decimal places, rounded the usual way", Value: "money"},
-					{Label: "Whole numbers only", Value: "whole"},
-					{Label: "I will say what needs rounding and how", Value: "specify"},
-				},
+				ID: "numerical_precision", Name: "Rounding", Weight: 6, Ask: AskNever,
+				MustKnow: "NEVER ASKED — settled internally and disclosed. Take rounding and precision from the kind of number involved: money to " +
+					"two decimal places in the currency the request implies, counts as whole numbers, percentages as the surrounding " +
+					"convention. Disclose it as a listed assumption in the requester's own terms (\"prices are shown as 12.34 euro\"). " +
+					"Raise it as a 1.7 single-question escalation only where the rounding rule genuinely changes what the person gets. It " +
+					"sits in the same natively-handled band as counting and ranges and fails the never-ask-what-you-can-resolve rule the " +
+					"same way (P3-GF7 OQ1, ratified 2026-08-27).",
 			},
 			// ---- The three Deep-Plan slots (P3-RW-12) ----
 			{
 				ID: "technology_stack", Name: "Technology choice", Weight: 11,
-				MustKnow: "Which language, framework, or platform the work should use is unstated — and everything else gets built on top of that choice, so a wrong one is expensive to undo later.",
-				Question: "What should this be built with?",
-				Why:      "Everything else gets built on top of this, so it is the choice that is hardest to change later.",
+				MustKnow:    "Which language, framework, or platform the work should use is unstated — and everything else gets built on top of that choice, so a wrong one is expensive to undo later.",
+				Question:    "What should this be built with?",
+				Why:         "Everything else gets built on top of this, so it is the choice that is hardest to change later.",
+				Recommended: plannerChoosesValue,
 				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "Match whatever this project already uses", Value: "match_existing"},
-					{Label: "The simplest thing that does the job", Value: "simplest"},
-					{Label: "I have something specific in mind and I will say what", Value: "specify"},
+					{
+						Label: "You choose for me and show me what you picked", Value: plannerChoosesValue,
+						Effect: "I read what this project already contains and what the goal actually needs, pick from that, and name the choice on " +
+							"the plan before anything is built. Recommended: reading the project beats guessing at it, and you can still say no on the plan.",
+					},
+					{
+						Label: "Match whatever this project already uses", Value: "match_existing",
+						Effect: "Nothing new is introduced — the work stays inside the tools already there, so it fits in from the first day and adds nothing to learn.",
+					},
+					{
+						Label: "The simplest thing that does the job", Value: "simplest",
+						Effect: "Fewest moving parts, quickest to get working, easiest for you to run yourself — and least headroom if this grows later.",
+					},
+					{
+						Label: "I have something specific in mind and I will say what", Value: "specify",
+						Effect: "The plan is built on exactly what you name, and says so plainly if any part of the goal does not fit it.",
+					},
 				},
 			},
 			{
 				ID: "assets_media", Name: "Pictures and other media", Weight: 10,
-				MustKnow: "Where the images, logos, or other media come from is unstated, so anything visible either stalls waiting for them or gets built around invented ones.",
-				Question: "Where should pictures, logos, and any other media come from?",
-				Why:      "Anything people look at needs pictures from somewhere, and sorting that out late stalls the work.",
+				MustKnow:    "Where the images, logos, or other media come from is unstated, so anything visible either stalls waiting for them or gets built around invented ones.",
+				Question:    "Where should pictures, logos, and any other media come from?",
+				Why:         "Anything people look at needs pictures from somewhere, and sorting that out late stalls the work.",
+				Recommended: "placeholders",
 				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "I will supply the files", Value: "i_supply"},
-					{Label: "Use free images that are licensed for this", Value: "free_stock"},
-					{Label: "Plain placeholders for now", Value: "placeholders"},
+					{
+						Label: "You choose for me and show me what you picked", Value: plannerChoosesValue,
+						Effect: "I pick a source that fits the look you asked for and name it on the plan before anything is built.",
+					},
+					{
+						Label: "I will supply the files", Value: "i_supply",
+						Effect: "The work is built around your own images; until they arrive the pages hold marked stand-ins in the right shapes, so nothing waits.",
+					},
+					{
+						Label: "Use free images that are licensed for this", Value: "free_stock",
+						Effect: "Real photographs, legally usable, copied into the project so nothing breaks when a website changes — but they will not be your actual products.",
+					},
+					{
+						Label: "Plain placeholders for now", Value: "placeholders",
+						Effect: "Simple generated graphics stand in for every picture, so everything is built and checkable straight away. Recommended: " +
+							"nothing waits on files or licences, and swapping real pictures in later is a small job.",
+					},
 				},
 			},
 			{
 				ID: "look_feel", Name: "Look and feel", Weight: 10,
-				MustKnow: "The intended visual style is unstated, so anything the requester will actually look at gets built to somebody else's taste.",
-				Question: "How should it look?",
-				Why:      "You are the one who will look at it, so this is your call rather than anyone else's taste.",
+				MustKnow:    "The intended visual style is unstated, so anything the requester will actually look at gets built to somebody else's taste.",
+				Question:    "How should it look?",
+				Why:         "You are the one who will look at it, so this is your call rather than anyone else's taste.",
+				Recommended: plannerChoosesValue,
 				Options: []Option{
-					{Label: "You choose for me and show me what you picked", Value: plannerChoosesValue},
-					{Label: "Plain and clean, nothing fancy", Value: "plain"},
-					{Label: "Like something that already exists, and I will point at it", Value: "match_reference"},
-					{Label: "I will describe the style I want", Value: "specify"},
+					{
+						Label: "You choose for me and show me what you picked", Value: plannerChoosesValue,
+						Effect: "I take the style out of your own description of the project and show you the direction on the plan before anything is " +
+							"built. Recommended: this is the question your own words usually already answer.",
+					},
+					{
+						Label: "Plain and clean, nothing fancy", Value: "plain",
+						Effect: "Nothing decorative — quick to build and easy to read, and it will not look like a designed product.",
+					},
+					{
+						Label: "Like something that already exists, and I will point at it", Value: "match_reference",
+						Effect: "The layout, spacing and feel of what you point at are copied as closely as they can be, and the plan says which parts cannot be matched.",
+					},
+					{
+						Label: "I will describe the style I want", Value: "specify",
+						Effect: "Your words become the style brief the finished work is checked against.",
+					},
+				},
+			},
+			// ---- The two slots the live walk found nobody asks (P3-GF7 R8) ----
+			{
+				ID: "language_locale", Name: "The language it speaks", Weight: 9,
+				MustKnow: "Which language the deliverable's own text is written in, and which locale conventions its dates, numbers and prices " +
+					"follow, is unstated. Every seeded string, label, button and message depends on it, so a change afterwards touches every " +
+					"visible line. Precise form: name the content language(s) and the locale formatting conventions, and state whether the " +
+					"strings must be structured so a second language can be added later.",
+				Question:    "What language should the finished thing speak to the people using it?",
+				Why:         "Every word it shows is written in this language, so changing it afterwards means rewriting all of them.",
+				Recommended: "english",
+				Options: []Option{
+					{
+						Label: "English", Value: "english",
+						Effect: "All the visible text is English, written so a second language can be added later without moving anything around. " +
+							"Recommended: it is the safest single choice and it closes no door.",
+					},
+					{
+						Label: "The language I am writing to you in", Value: "my_language",
+						Effect: "All the visible text is in the language of your request, and dates, numbers and prices follow that language's conventions.",
+					},
+					{
+						Label: "Two languages, with a switch", Value: "bilingual",
+						Effect: "Every piece of text exists twice and whoever is using it can switch — roughly a third more work now, and every later change has to be made in both.",
+					},
+					{
+						Label: "I will name the languages", Value: "specify",
+						Effect: "The plan is built for exactly the languages you name and says what each one adds to the work.",
+					},
+				},
+			},
+			{
+				ID: "quality_bar", Name: "What finished has to pass", Weight: 8,
+				MustKnow: "What the finished work must pass to count as done — feature-correctness alone, or a stated polish, performance or " +
+					"accessibility bar — is unstated. It decides what verification gates on: the acceptance criteria are written against " +
+					"this answer, so a bar chosen after the work is built is a bar the work was never aimed at. Precise form: name the " +
+					"checks the deliverable must pass and whether any of them are measured rather than judged.",
+				Question:    "What does the finished thing have to pass before you would call it done?",
+				Why:         "This is what the work is checked against at the end, so it decides what gets built along the way — a bar added afterwards means going back.",
+				Recommended: "works_and_polished",
+				Options: []Option{
+					{
+						Label: "Everything I asked for works", Value: "feature_correct",
+						Effect: "Checking asks one question per thing you asked for: does it do that? Quickest route to something usable, and nothing is judged on looks, speed or accessibility.",
+					},
+					{
+						Label: "Everything works, and it looks and behaves properly", Value: "works_and_polished",
+						Effect: "On top of the feature checks, the finished thing is judged on readable text and contrast, nothing jumping around as it " +
+							"loads, and no errors running underneath. Recommended: it catches what you would notice in the first minute of using it, without a formal audit.",
+					},
+					{
+						Label: "It has to pass a named standard, and I will say which", Value: "audited",
+						Effect: "The standard you name becomes part of the acceptance criteria and is measured on the built thing rather than assumed. " +
+							"Slower, and it can send back work that already does everything you asked for.",
+					},
 				},
 			},
 		},

@@ -64,6 +64,14 @@ type Question struct {
 	Phrased string   `json:"phrased,omitempty"`
 	Options []Option `json:"options,omitempty"` // 2–4 labeled options; free text always available
 	Weight  int      `json:"weight,omitempty"`
+	// Recommended is the slot's AUTHORED default: the option value the platform
+	// recommends when no per-goal suggestion was made (P3-GF7 R7; taxonomy
+	// Slot.Recommended). The recommended option's own Effect says why it is the
+	// recommendation. SuggestedOption, when the seat produced one, is the
+	// per-goal recommendation and overrides this at render time — the look_feel
+	// round-3 proof, where a recommendation written for THIS project is what the
+	// operator praised. Additive and optional.
+	Recommended string `json:"recommended,omitempty"`
 	// Why is the slot's plain-words reason line (P3-GF3-BE1 R1/R8; taxonomy
 	// Slot.Why), served so the card can say why the question is worth
 	// answering. Additive and optional.
@@ -145,6 +153,19 @@ type Card struct {
 	// floor VALUE and its consumption stay exactly as landed.
 	ClearanceFloor float64 `json:"clearance_floor,omitempty"`
 	Tier           Tier    `json:"tier"`
+
+	// Family and FamilySource carry the task's family and what resolved it onto
+	// every issued card (P3-GF7 R9; harvest H18, where a silent family guess sent
+	// a whole interview down the wrong template and the only cue was a chip).
+	// They are PASSIVE DATA on cards that already exist: the classifier path
+	// gains no card, no click and no new ask (RW-13 zero-touch), and rendering
+	// the chip plus its correction affordance is the surface's (GF9).
+	//
+	// The family card omits them, because family is precisely what is unresolved
+	// there. Additive and omitempty, so an ask snapshot written before this
+	// packet decodes exactly as it did.
+	Family       Family `json:"family,omitempty"`
+	FamilySource string `json:"family_source,omitempty"`
 
 	Questions []Question    `json:"questions,omitempty"` // interview / clarification / escalation
 	Decision  *DecisionBody `json:"decision,omitempty"`  // coverage / research / spec_doubt
@@ -330,6 +351,18 @@ type Answer struct {
 	Answers      []SlotAnswer `json:"answers,omitempty"`
 	Assume       []SlotAnswer `json:"assume,omitempty"`
 	ForceProceed bool         `json:"force_proceed,omitempty"`
+	// Family CORRECTS the family shown on the card (P3-GF7 R9): a requester who
+	// sees "I am treating this as software work (my guess)" and disagrees says so
+	// in the same answer, instead of discovering the misclassification through
+	// four wrong questions. Validated against the SAME ValidFamily vocabulary the
+	// family card offers (§43: one list, two readers).
+	//
+	// The answers on the body are applied FIRST, against the set that was
+	// actually asked, and the switch follows: every resolution already given is
+	// retained on the record and simply stops counting toward Clearance if the
+	// new set does not carry that slot. Silently discarding them is the harvest's
+	// H17, rejected.
+	Family string `json:"family,omitempty"`
 
 	// Escalation card.
 	Text string `json:"text,omitempty"`

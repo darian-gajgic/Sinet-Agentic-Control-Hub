@@ -237,8 +237,13 @@ func TestPhrasingAbsenceIsVerbatimZeroClicks(t *testing.T) {
 	}
 
 	base, baseAsks := card(nil)
-	if base.Understood == nil || len(base.Understood.Items) != 1 {
-		t.Fatalf("understood items = %+v, want the one registry-resolved slot (R8)", base.Understood)
+	// The registry-resolved slot, plus the ones the v4 set settles without ever
+	// asking — those resolve at interview entry and are shown as confirmable
+	// assumptions from the first card (P3-GF7 R3; harvest H10).
+	wantItems := 1 + gf7NeverAskedCount(intake.FamilySoftware)
+	if base.Understood == nil || len(base.Understood.Items) != wantItems {
+		t.Fatalf("understood items = %+v, want the registry-resolved slot plus the %d the platform settles itself (R8)",
+			base.Understood, wantItems-1)
 	}
 	if base.Understood.Text != "" {
 		t.Errorf("understood prose = %q with no seat — deterministic items are never dressed as model prose", base.Understood.Text)
@@ -272,14 +277,22 @@ func TestUnderstoodAccumulatesAcrossRounds(t *testing.T) {
 	f.admit(st.RunID)
 	st = f.advance(st.TaskID)
 	askID, card := f.openAsk(st.RunID)
-	if card.Understood == nil || len(card.Understood.Items) != 1 {
-		t.Fatalf("round 1 understood = %+v, want the registry slot", card.Understood)
+	// Round 1 holds the registry slot plus the slots the v4 set settles itself
+	// (P3-GF7 R3), and the block is in TAXONOMY order, so the registry item is
+	// found by id rather than by position.
+	settled := gf7NeverAskedCount(intake.FamilySoftware)
+	if card.Understood == nil || len(card.Understood.Items) != 1+settled {
+		t.Fatalf("round 1 understood = %+v, want the registry slot plus the %d settled ones", card.Understood, settled)
 	}
-	if card.Understood.Items[0].SlotID != "units" || card.Understood.Items[0].How != intake.ResolvedRegistry {
-		t.Errorf("registry item = %+v", card.Understood.Items[0])
+	round1 := map[string]intake.UnderstoodItem{}
+	for _, it := range card.Understood.Items {
+		round1[it.SlotID] = it
 	}
-	if card.Understood.Items[0].Value != "millimetres" {
-		t.Errorf("registry item value = %q", card.Understood.Items[0].Value)
+	if round1["units"].How != intake.ResolvedRegistry {
+		t.Errorf("registry item = %+v", round1["units"])
+	}
+	if round1["units"].Value != "millimetres" {
+		t.Errorf("registry item value = %q", round1["units"].Value)
 	}
 
 	st = f.answer("u1", askID, intake.Answer{Answers: []intake.SlotAnswer{
@@ -290,8 +303,8 @@ func TestUnderstoodAccumulatesAcrossRounds(t *testing.T) {
 		t.Fatalf("round 2 card = %q, want another interview card", st.OpenAskKind)
 	}
 	askID2, card2 := f.openAsk(st.RunID)
-	if card2.Understood == nil || len(card2.Understood.Items) != 3 {
-		t.Fatalf("round 2 understood = %+v, want 3 items", card2.Understood)
+	if card2.Understood == nil || len(card2.Understood.Items) != 3+settled {
+		t.Fatalf("round 2 understood = %+v, want 3 items plus the %d settled ones", card2.Understood, settled)
 	}
 	byID := map[string]intake.UnderstoodItem{}
 	for _, it := range card2.Understood.Items {
