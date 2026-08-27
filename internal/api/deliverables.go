@@ -405,7 +405,11 @@ func (s *Server) acceptDoor(ctx context.Context, d review.Deliverable, revs []re
 	if s.accept != nil && d.State == review.StateInReview && rev.N >= 1 {
 		prov = s.acceptProvenance(ctx, rev)
 	}
-	door.Available, door.Reason = acceptable(s.accept != nil, d, rev, prov)
+	// The landing is left unresolved here ("") on purpose: the door replaces the
+	// open reason with its own per-arm sentence below, so resolving the S13.7
+	// registry per deliverable would buy one query per row for a string this
+	// surface never serves (P3-GF11 R4).
+	door.Available, door.Reason = acceptable(s.accept != nil, d, rev, prov, "")
 	if !door.Available {
 		return door
 	}

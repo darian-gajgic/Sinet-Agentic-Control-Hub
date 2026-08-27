@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -78,6 +79,16 @@ type fakePusher struct {
 
 func (p *fakePusher) Push(req broker.Request) (broker.PushResult, error) {
 	p.reqs = append(p.reqs, req)
+	// FIXTURE FAITHFULNESS (P3-GF11 R6). The REAL broker refuses a push request
+	// with no remote before it touches git (internal/broker/git.go:65-67) and
+	// broker.Client.Push collapses that refusal to an error, so a fake that OKs
+	// the same request lets this suite green an act production cannot perform —
+	// which is exactly how the E5-rewalk's three 500s reached a live walker with
+	// every api accept test passing. This refusal is the fake's own default, not
+	// an opt-in: the gap closes for every test in the package at once.
+	if req.Remote == "" {
+		return broker.PushResult{}, errors.New("broker: push with no remote")
+	}
 	if p.pushErr != nil {
 		return broker.PushResult{}, p.pushErr
 	}

@@ -62,6 +62,24 @@ const (
 	OptAbortToNewAttempt = "abort-to-new-attempt" // a fresh attempt off the moved HEAD
 )
 
+// ErrPushFailed names a push the broker could not perform — its own refusal or
+// a transport failure — so the answer layer maps it ON THE ERROR'S TYPE and
+// never by matching an error string (CONVENTIONS §38). It wraps the broker's
+// own cause, which belongs in the ops log and never on the wire: an internal
+// error chain served as a response detail is the crash-shaped answer this
+// sentinel exists to replace (P3-GF11 R5).
+//
+// A stale-lease rejection is NOT this error. The broker reports it as a normal
+// rejection and S13.6 answers it with a merge card, which is a decision the
+// human makes rather than a failure anybody has to be told about.
+var ErrPushFailed = errors.New("accept: the broker could not perform the push")
+
+// landingLocal is the additive member the succeeded accept effect's result
+// carries when the landing was local (P3-GF11 R2/OQ1). The PUSH arm's result
+// stays byte-identical to the landed one — the commit and nothing else — so
+// only the local landing names itself.
+const landingLocal = "local"
+
 // MergeCard is the reviewable collision surface (Spec S13.6 step 1): a
 // candidate that does not apply cleanly onto current HEAD, or whose CAS lease
 // went stale at push, surfaces here with exactly three options — never a silent
@@ -446,10 +464,15 @@ func (a *Accepter) ReDriveApproved(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// executeAccept is the shared execute phase (BeginExecute BEFORE the push →
-// squash → CAS push → Succeed|Fail), driven by a fresh Accept or a re-drive. The
-// push is always blind against the pinned expect-sha; a lease rejection is a
-// merge card, never a new-sha retry (S13.6 step 4 / R8).
+// executeAccept is the shared execute phase (BeginExecute BEFORE the landing →
+// squash → CAS push or local advance → Succeed|Fail), driven by a fresh Accept
+// or a re-drive. The push is always blind against the pinned expect-sha; a lease
+// rejection is a merge card, never a new-sha retry (S13.6 step 4 / R8).
+//
+// It carries the ONE arm decision the S13.7 registry makes: a project entry that
+// records a remote lands through the broker's CAS push, one that records none
+// lands in its own store (landLocal). Both arms run every other step of the same
+// act, and both go through the same class-A effect with the same payload shape.
 func (a *Accepter) executeAccept(ctx context.Context, s executeSpec) (Outcome, error) {
 	if _, err := a.cfg.Journal.BeginExecute(ctx, s.effectID); err != nil {
 		return Outcome{}, err
@@ -480,6 +503,24 @@ func (a *Accepter) executeAccept(ctx context.Context, s executeSpec) (Outcome, e
 		a.failEffect(ctx, s.effectID, "squash failed")
 		return Outcome{}, err
 	}
+	// THE ARM IS THE REGISTRY'S FACT, AND IT IS READ HERE (P3-GF11 §3). The
+	// S13.7 entry's remote URL is the ONE authority for whether this ceremony
+	// has a transport step: S13.6 step 4 ("push as the user over broker-held SSH
+	// keys with explicit CAS") is defined in every word over a remote and a
+	// credential, and S13.7 blesses by name the project that has neither. The
+	// read happens in the SHARED execute phase so a fresh accept and a
+	// crash-window re-drive take the same arm from the same fact — never from a
+	// payload member and never from a caller's flag.
+	//
+	// The BROKER stays the guardrail on the other side of this branch: its
+	// refusal of a push request with no remote (internal/broker/git.go) is
+	// correct and untouched. Teaching it to no-op such a request "successfully"
+	// would silently mask a genuinely missing remote on a store that should have
+	// one, and would put registry knowledge into a component that deliberately
+	// imports no DB.
+	if e.RemoteURL == "" {
+		return a.landLocal(ctx, s, commit)
+	}
 	res, err := a.cfg.Push.Push(broker.Request{
 		RepoDir: e.StorePath, Remote: e.RemoteURL,
 		Refs:       []broker.RefUpdate{{Ref: s.protectedRef, ExpectSHA: s.onto, SrcSHA: commit}},
@@ -489,7 +530,7 @@ func (a *Accepter) executeAccept(ctx context.Context, s executeSpec) (Outcome, e
 	})
 	if err != nil {
 		a.failEffect(ctx, s.effectID, "push failed")
-		return Outcome{}, fmt.Errorf("accept: broker push: %w", err)
+		return Outcome{}, fmt.Errorf("%w: %w", ErrPushFailed, err)
 	}
 	if res.Rejected {
 		a.failEffect(ctx, s.effectID, "lease rejected")
@@ -516,6 +557,69 @@ func (a *Accepter) executeAccept(ctx context.Context, s executeSpec) (Outcome, e
 		return Outcome{}, err
 	}
 	if err := a.cfg.Project.AdvanceDefaultBranch(ctx, s.projectID, commit); err != nil {
+		return Outcome{}, err
+	}
+	routed, err := a.fireSibling(ctx, s.projectID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Accepted: true, Commit: commit, EffectID: s.effectID, Superseded: acc.Superseded, RoutedRuns: routed}, nil
+}
+
+// landLocal is the S13.6 ceremony MINUS TRANSPORT (P3-GF11 R1): on a project
+// whose S13.7 registry entry records no remote there is no push to compose, and
+// the attributed commit advanced onto the store's own default branch IS the
+// official landing. That store is not a scratch copy — S13.1 keeps minted
+// revision refs "in the platform-owned project store under a platform ref
+// namespace" and S13.5 has snapshot commits never reach a user-facing remote at
+// all, so the platform-owned store is already the permanent record for a
+// project that has no outward one.
+//
+// EVERY OTHER STEP IS THE SAME ACT. The applies-cleanly gate, the trailer
+// invariant, the payload-hash pin, the PIN step-up and the platform squash all
+// ran before this function; only the transport differs, and the difference is
+// read from the registry rather than chosen by anybody.
+//
+// WHY THIS ARM STILL JOURNALS (R2), where the RW-17 pinned arm does not: the
+// pinned arm moves DB rows only, whose exactly-once is the transaction's own,
+// while this arm mutates the git store — a side effect OUTSIDE the transaction's
+// guarantee, which is precisely the non-atomic shape S02.7's two-phase
+// discipline exists for. Succeed comes AFTER the advance for the same reason it
+// comes after the push on the other arm: an effect is recorded as done only once
+// it has happened.
+//
+// The crash-window replay is idempotent by construction: the squash is
+// content-addressed and pinned to the effect's approval time (same bytes ⇒ same
+// sha) and AdvanceDefaultBranch no-ops on a sha the branch already carries or
+// has incorporated. A branch that moved somewhere the pinned sha cannot
+// fast-forward onto is the S13.6 collision answer — the same reviewable merge
+// card a stale CAS lease earns on the push arm, never a silent overwrite and
+// never a raw fault.
+//
+// There is deliberately no markInflight here. That window is "the commit is on
+// the remote and the local branch is not yet advanced", and on this arm the
+// advance IS the landing — the next candidate for the project reads the moved
+// HEAD directly, so a look-ahead would be a claim about a state that never
+// exists.
+func (a *Accepter) landLocal(ctx context.Context, s executeSpec, commit string) (Outcome, error) {
+	if err := a.cfg.Project.AdvanceDefaultBranch(ctx, s.projectID, commit); err != nil {
+		if errors.Is(err, project.ErrNotFastForward) {
+			a.failEffect(ctx, s.effectID, "default branch moved")
+			return Outcome{
+				EffectID: s.effectID,
+				Card: mergeCard(s.deliverableID, s.projectID, s.onto, s.candidate,
+					"lease-rejected", "the project's default branch moved since approval"),
+			}, nil
+		}
+		a.failEffect(ctx, s.effectID, "local landing failed")
+		return Outcome{}, err
+	}
+	if _, err := a.cfg.Journal.Succeed(ctx, s.effectID,
+		mustJSON(map[string]string{"commit": commit, "landing": landingLocal})); err != nil {
+		return Outcome{}, err
+	}
+	acc, err := a.cfg.Review.Accept(ctx, s.deliverableID, s.acceptingUser)
+	if err != nil {
 		return Outcome{}, err
 	}
 	routed, err := a.fireSibling(ctx, s.projectID)

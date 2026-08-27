@@ -115,6 +115,43 @@ func TestCASOnlyBareForceRefused(t *testing.T) {
 	}
 }
 
+// TestPushWithNoRemoteIsRefused pins the guardrail P3-GF11 leaves standing
+// (brief R3). A push request carrying no remote is MALFORMED — every word of
+// S13.6 step 4 is defined over a remote and a credential — and the broker
+// refuses it before it touches git, with nothing moving anywhere.
+//
+// The refusal is deliberately NOT relaxed into a silent success. GF11 stops the
+// accept from composing such a request for a project the S13.7 registry records
+// no remote for, and that decision lives in the accept, which can read the
+// registry. Teaching the broker to no-op instead would mask a genuinely missing
+// remote on a store that should have one, and would put registry knowledge into
+// a component that deliberately imports no DB (P-T12-1; CONVENTIONS §29). No
+// landed test covered this limb, so a refactor could have quietly deleted the
+// honest-absence answer the accept now depends on.
+func TestPushWithNoRemoteIsRefused(t *testing.T) {
+	remote, source, _, eSHA, cSHA := pushFixture(t)
+	srv := &Server{store: nil, log: discardLog()}
+	resp := srv.dispatch(Request{
+		Op: OpPush, RepoDir: source, Remote: "", Authorized: true,
+		Refs:      []RefUpdate{{Ref: "refs/heads/main", ExpectSHA: eSHA, SrcSHA: cSHA}},
+		Protected: []string{"refs/heads/main"},
+	})
+	if resp.OK {
+		t.Fatalf("a push request with no remote was not refused: %+v", resp)
+	}
+	// A refusal, not a lease rejection: there is nothing to have a stale lease
+	// AGAINST, and the two answers route to different places in the accept.
+	if resp.Rejected {
+		t.Errorf("the missing remote was reported as a lease rejection: %+v", resp)
+	}
+	if !strings.Contains(resp.Error, "no remote") {
+		t.Errorf("refusal reason %q does not name the missing remote", resp.Error)
+	}
+	if got := remoteMain(t, remote); got != eSHA {
+		t.Errorf("SECURITY: a ref moved on a refused push: %s -> %s", eSHA, got)
+	}
+}
+
 // TestLeaseRejectionRoutesToMergeCard: a stale lease is a NORMAL collision
 // (Rejected=true), never a blind retry and never a generic error — the accept
 // path routes it back to a merge card (S13.6 step 4).

@@ -112,6 +112,26 @@ func acceptSigningPosture() AcceptSigning {
 	}
 }
 
+// The landing vocabulary (P3-GF11 R4/OQ2): where the official copy of this
+// work ends up if the accept is made. It is a FACT ABOUT THE ACT, never a
+// refusal taxonomy — `acceptable` + `reason` stay the one gate for whether the
+// act is open at all.
+//
+// The value is derived from the S13.7 registry entry and the revision's own
+// pin, which are the same two facts the accept orchestration reads to select
+// its arm, so the card can never name a landing the verb will not make.
+const (
+	// LandingRemotePush: the S13.6 step-4 CAS push to the project's remote.
+	LandingRemotePush = "remote-push"
+	// LandingLocalStore: the project registers no remote, so the attributed
+	// commit on the store's own default branch is the official copy (S13.7).
+	LandingLocalStore = "local-store"
+	// LandingDecisionRecord: the RW-17 pinned arm — the revision pins content
+	// rather than a snapshot commit, so the durable record is the decision
+	// against that immutable pin (S13.1).
+	LandingDecisionRecord = "decision-record"
+)
+
 // AcceptCard is the accept decision data, displayed BEFORE the accept (S13.6
 // step 3 — the mis-attribution lesson: trailers are shown, not discovered in
 // the commit afterwards).
@@ -125,6 +145,12 @@ type AcceptCard struct {
 	ContentPin   string `json:"content_pin"`
 	ProjectID    string `json:"project_id"`
 	ProtectedRef string `json:"protected_ref,omitempty"`
+	// Landing says where the official copy of this work lands — one of the three
+	// values above. It is absent, rather than guessed, for a card whose arm is
+	// not yet determinable: a deliverable with no minted revision, and a
+	// repo-backed one belonging to no project (which the accept refuses anyway,
+	// so there is no landing to name).
+	Landing string `json:"landing,omitempty"`
 	// Trailers are the rendered attribution lines, byte-for-byte what the commit
 	// will carry. Their inputs are platform facts (below), never model output.
 	// On the payload-pinned arm no commit is made, so they are the revision's
@@ -176,11 +202,20 @@ type AcceptProvenance struct {
 // accept-family uniformity: one act, one posture, and an owner who never has to
 // wonder which kind of accept they are making. Relaxing it later is an
 // operator-visible change, which is the right direction for that decision.
+// The local-store arm's tier is the SAME conservative sub-choice for the same
+// reason (P3-GF11 R4): the ceremony is identical minus its transport, and one
+// accept family keeps one posture. What its statement must not do is claim the
+// push it will not make — a tier sentence about a shared branch, shown to
+// someone accepting into a store that has no remote, is untrue at the moment it
+// matters most.
 const (
 	acceptTierStatement = "High tier: this pushes a commit to a shared branch, so it is never batched and your PIN is re-prompted in the same " +
 		"request. No elevation is inherited from an idle session (S15.6; S01.9)."
 	acceptPinnedTierStatement = "High tier: your PIN is re-prompted in the same request and this is never batched. Nothing is pushed — this " +
 		"deliverable pins its content, so the accept records your decision against that immutable pin. The accept family keeps one posture " +
+		"whichever way the work lands. No elevation is inherited from an idle session (S15.6; S01.9)."
+	acceptLocalTierStatement = "High tier: your PIN is re-prompted in the same request and this is never batched. Nothing is sent anywhere — this " +
+		"project registers no remote, so the commit is written into its own store on this machine. The accept family keeps one posture " +
 		"whichever way the work lands. No elevation is inherited from an idle session (S15.6; S01.9)."
 )
 
@@ -229,7 +264,7 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 	if rev.SnapshotSHA == "" {
 		// The pinned arm: the act is a recorded decision, not an outward push, and
 		// the tier statement says which one the person is about to make.
-		card.TierStatement = acceptPinnedTierStatement
+		card.TierStatement, card.Landing = acceptPinnedTierStatement, LandingDecisionRecord
 	}
 	card.ContentPin = revisionContentPin(rev)
 	card.Provenance = s.acceptProvenance(ctx, rev)
@@ -241,6 +276,17 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 	// accept will not touch would be the card claiming a target it has none of.
 	if rev.SnapshotSHA != "" && d.ProjectID != "" {
 		card.ProtectedRef = s.protectedRef(ctx, d.ProjectID)
+		// The repo arm's landing is the registry's own fact — the same column the
+		// accept orchestration reads to choose its transport (P3-GF11 §3). The
+		// protected ref is served on BOTH repo landings because both advance that
+		// branch: on the local one it is the branch the official copy lands on, so
+		// naming it is not a claim about a target the act does not have.
+		if remote, ok := s.projectRemote(ctx, d.ProjectID); ok {
+			card.Landing = LandingRemotePush
+			if remote == "" {
+				card.Landing, card.TierStatement = LandingLocalStore, acceptLocalTierStatement
+			}
+		}
 	}
 	hash, err := gates.CanonicalHash(mustMarshal(acceptPinCore{
 		DeliverableID: d.ID, RevisionN: rev.N, ContentPin: card.ContentPin, Trailers: card.Trailers,
@@ -249,7 +295,7 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 		return AcceptCard{}, fmt.Errorf("pin accept card: %w", err)
 	}
 	card.PayloadHash = hash
-	card.Acceptable, card.Reason = acceptable(s.accept != nil, d, rev, card.Provenance)
+	card.Acceptable, card.Reason = acceptable(s.accept != nil, d, rev, card.Provenance, card.Landing)
 	return card, nil
 }
 
@@ -266,7 +312,15 @@ func (s *Server) acceptCard(ctx context.Context, d review.Deliverable) (AcceptCa
 // content hash and needs neither, because a commit that is never made cannot
 // mis-attribute anybody. Refusing the pinned arm for want of a push target was
 // the defect this shape removes.
-func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov AcceptProvenance) (bool, string) {
+//
+// LANDING IS COPY, NEVER A PRECONDITION (P3-GF11 R4). The landing argument
+// changes only WHICH true sentence an open repo-backed act gets — a project
+// with no remote is as acceptable as one with a remote, and S13.7 blesses it by
+// name. Callers that do not resolve the arm pass "" and get the landing-neutral
+// sentence; the accept door does exactly that, because it replaces this reason
+// with its own per-arm open sentence anyway and resolving the registry per
+// deliverable would buy a query per row for a string nobody reads.
+func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov AcceptProvenance, landing string) (bool, string) {
 	switch {
 	case !wired:
 		return false, "no accept orchestration is composed in this process"
@@ -284,6 +338,11 @@ func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov Acce
 		return false, "this deliverable belongs to no project, so there is no protected ref to push to (S13.7)"
 	case prov.Absent != "":
 		return false, prov.Absent
+	}
+	if landing == LandingLocalStore {
+		return true, "open: accept with this payload_hash and your PIN in the same request. This project registers no remote, so the official copy is " +
+			"the attributed commit written into the project's own local store on this machine, on its default branch — nothing is sent anywhere " +
+			"(S13.7; S13.1)"
 	}
 	return true, "open: accept with this payload_hash and your PIN in the same request"
 }
@@ -416,6 +475,30 @@ func (s *Server) protectedRef(ctx context.Context, projectID string) string {
 	return "refs/heads/" + branch
 }
 
+// projectRemote reads the project's stored remote URL from the same S13.7
+// registry row, as a second one-column SELECT beside protectedRef and for the
+// same reason: internal/api imports neither internal/project nor internal/broker
+// (§40-B), and an import to read one column would be the widening the accept
+// walls forbid.
+//
+// It reports the column's value AND whether a registry row exists at all, so an
+// unregistered project produces no landing claim rather than a false
+// "local-store" — the empty string means "this project registers no remote",
+// which is a different fact from "there is no project row to ask".
+func (s *Server) projectRemote(ctx context.Context, projectID string) (string, bool) {
+	var remote string
+	err := s.proj.db.QueryRowContext(ctx,
+		`SELECT remote_url FROM repo_registry WHERE project_id = ?`, projectID).Scan(&remote)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false
+	}
+	if err != nil {
+		s.logger.Warn("accept: read project remote", "project", projectID, "err", err)
+		return "", false
+	}
+	return remote, true
+}
+
 // ── POST /api/deliverables/{deliverable}/accept ─────────────────────────────
 
 // acceptRequest is the accept body: the pin the card was shown with, the PIN
@@ -534,10 +617,36 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	out, err := s.accept.Accept(r.Context(),
 		acceptInput(d, card, id.UserID, s.acceptingName(r.Context(), id.UserID), body))
 	if err != nil {
-		s.writeSurface(w, nil, s.reviewErr(err))
+		s.writeSurface(w, nil, s.acceptErr(err))
 		return
 	}
 	s.writeReadJSON(w, acceptOutcome(d, card, out))
+}
+
+// acceptPushFailedMsg is the served answer for a push the broker could not
+// perform. It says what did NOT happen, what state the work is in, and what the
+// person can do — and it carries no internal error chain, because the cause is
+// a platform fact the ops log records and a caller can neither read nor act on.
+const acceptPushFailedMsg = "the commit could not be pushed to this project's remote, so nothing was accepted: the deliverable is still in review and " +
+	"the accept can be made again once the remote is reachable. Nothing was left half-applied — the accept's effect is recorded as failed and no " +
+	"branch moved. The underlying cause is in the platform's ops log."
+
+// acceptErr maps the accept orchestration's own refusals ON THE ERROR'S TYPE
+// (CONVENTIONS §38), then falls through to the review store's mapping for
+// everything the accept passes up unchanged.
+//
+// THE 502 REPLACES A CRASH-SHAPED ANSWER. A push the broker could not perform
+// used to arrive here unmarked and reviewErr answered it 500 `internal` with
+// `err.Error()` as the detail, which put the raw internal chain on the wire for
+// a legitimate act on a legitimately-configured project. A failure to reach a
+// remote is an upstream failure, which is what 502 says, and the deliverable is
+// honestly still in review afterwards.
+func (s *Server) acceptErr(err error) error {
+	if errors.Is(err, accept.ErrPushFailed) {
+		s.logger.Error("accept: the broker could not perform the push", "err", err)
+		return &SurfaceError{Status: http.StatusBadGateway, Code: "push_failed", Msg: acceptPushFailedMsg}
+	}
+	return s.reviewErr(err)
 }
 
 // acceptingName resolves the human-readable name the squash commit is authored
@@ -598,6 +707,13 @@ func acceptOutcome(d review.Deliverable, card AcceptCard, out accept.Outcome) Ac
 	res.Applied, res.State, res.Commit = true, review.StateAccepted, out.Commit
 	res.Detail = "accepted: one attributed commit is on the protected ref through the effect journal and the broker's CAS push, the deliverable is " +
 		"accepted, and the project's active runs were fired for S02.6 re-validation (S13.6; S02.8)."
+	if card.Landing == LandingLocalStore {
+		// The local landing: the same ceremony minus its transport, and the answer
+		// says so rather than reporting a push that was never composed.
+		res.Detail = "accepted: one attributed commit is on this project's default branch in its own store through the effect journal, the deliverable " +
+			"is accepted, and the project's active runs were fired for S02.6 re-validation. This project registers no remote, so that commit is the " +
+			"official copy and nothing was sent anywhere (S13.6; S13.7; S02.8)."
+	}
 	if out.EffectID == "" {
 		// The payload-pinned arm: no effect was proposed because nothing outward
 		// happened. What is durable is the decision itself, against a pin that
