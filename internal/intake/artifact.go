@@ -147,6 +147,21 @@ const (
 	orderingMaxRunes = 400
 )
 
+// The exported cap aliases exist so the ONE emission contract states its own
+// bounds FROM these constants (P3-GF12: the pairSchema prompt interpolates
+// them — a second literal would be a second spelling that drifts, the §65 D4
+// class of defect). The unexported names stay the validator's; these are the
+// prompt's, and they are the same numbers by construction.
+//
+// [GF12 inert type surface at grounding — Amendment-A; the prompt-side
+// consumer lands with the implementation commit.]
+const (
+	ApproachMaxRunes      = approachMaxRunes
+	DecisionFieldMaxRunes = decisionFieldMaxRunes
+	MaxStepDecisions      = maxStepDecisions
+	OrderingMaxRunes      = orderingMaxRunes
+)
+
 // StepDecision is one material decision the planner made inside a step
 // [A15, 2026-08-27]: what was decided in plain words, the alternatives it
 // considered, and why the chosen one won (Spec S06.6 per-step approach;

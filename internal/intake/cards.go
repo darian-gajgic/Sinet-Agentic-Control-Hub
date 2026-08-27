@@ -48,6 +48,19 @@ const (
 	// question, because six choices exceed S06.5's ratified 2–4 option bound on
 	// questions while decision choices are unbounded (the SPEC-DOUBT precedent).
 	CardFamily CardKind = "decision.family"
+	// CardEmission is the honest landing after the planner seat's bounded
+	// re-emission exhausts on a contract-invalid emission (the A15-cap class:
+	// "step S-1 approach is 1294 characters (cap 1200)") — a served decision
+	// card in place of the witnessed crash→fork→tombstone (P3-GF12; Spec
+	// S06.6 [A15]; CONVENTIONS §60: content is never trimmed, so an emission
+	// the platform must refuse ends in a human door, never a dead lineage).
+	// Choices reuse the existing vocabulary: ChoiceReplan grants one more
+	// paid round (the S06.7(a) requester-granted-round precedent);
+	// ChoiceRethink cancels (the SPEC-DOUBT mapping).
+	//
+	// [GF12 inert type surface at grounding — Amendment-A; behavior lands
+	// with the implementation commit.]
+	CardEmission CardKind = "decision.emission"
 )
 
 // Question is one card question.
