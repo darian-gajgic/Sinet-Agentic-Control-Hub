@@ -1,3 +1,5 @@
+> **EXPIRED at P3-GF7 landing (2026-08-27).** Single-use artifact — drain fixes moved the code past this text; never read as truth.
+
 # P3-GF7 — Interview taxonomy v4 (the W2 merge)
 
 **Grounding brief, 2026-08-27.** Backend four-stage packet. The operator benchmarked Sinet's
