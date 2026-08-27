@@ -148,9 +148,9 @@ type Revision struct {
 	// ProducedBy names the run whose settled S08.8 selection produced this
 	// revision's content — the attribution join key the S13.6 accept resolves
 	// trailers through, distinct from the MINTING run above (the verification
-	// handoff, which records no routing decision). P3-GF10 RED WINDOW: the
-	// member is inert type surface until the GF10 implementation persists it
-	// (migration 0026) and fills it at the drain mint.
+	// handoff, which records no routing decision of its own). Empty on a
+	// revision minted before migration 0026, which records no producer at all;
+	// such a revision resolves through its minting run, unchanged.
 	ProducedBy    string      `json:"produced_by,omitempty"`
 	PinKind       string      `json:"pin_kind"` // content | objects
 	ContentSHA256 string      `json:"content_sha256,omitempty"`

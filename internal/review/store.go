@@ -185,10 +185,13 @@ type MintInput struct {
 	RunID      string
 	AttemptRef string
 	// ProducedBy names the run whose settled S08.8 selection produced this
-	// revision's content (the accept's attribution join key — P3-GF10). The
-	// MINTING run above stays the verification handoff. P3-GF10 RED WINDOW:
-	// ignored (not persisted) until the implementation packet lands the 0026
-	// column and the mint fill.
+	// revision's content — the join key the S13.6 accept resolves attribution
+	// through (migration 0026). The MINTING run above stays the verification
+	// handoff, which records no routing decision of its own. Recorded at insert
+	// and FIRST-WRITE-WINS: an idempotent re-mint (the S07.7 resume, whose
+	// lineage may have advanced meanwhile) keeps the producer the frozen content
+	// was minted with. Empty records no producer, which is honest for a caller
+	// that does not know one.
 	ProducedBy string
 	// Files is the text content per logical path (single-blob deliverables
 	// use one entry; trees arrive with S13.5).
@@ -259,7 +262,10 @@ func (s *Store) MintRevision(ctx context.Context, in MintInput) (Revision, error
 	}
 
 	// Idempotent re-mint of an existing revision: same pin → no-op read
-	// back; a different pin violates immutability (Spec S13.1).
+	// back; a different pin violates immutability (Spec S13.1). The pin is the
+	// whole comparison: ProducedBy is first-write-wins, so a resume offering a
+	// lineage tip that advanced since the mint reads the recorded producer back
+	// rather than erroring on it or rewriting the row.
 	if existing, err := s.RevisionAt(ctx, in.DeliverableID, in.N); err == nil {
 		if existing.PinKind == pinKind && existing.ContentSHA256 == contentSHA && sameRefs(existing.Objects, refs) {
 			return existing, nil
@@ -281,7 +287,7 @@ func (s *Store) MintRevision(ctx context.Context, in MintInput) (Revision, error
 	now := s.nowRFC3339()
 	rev := Revision{
 		DeliverableID: in.DeliverableID, N: in.N, Owner: d.Owner,
-		RunID: in.RunID, AttemptRef: in.AttemptRef,
+		RunID: in.RunID, AttemptRef: in.AttemptRef, ProducedBy: in.ProducedBy,
 		PinKind: pinKind, ContentSHA256: contentSHA,
 		SnapshotSHA: in.SnapshotSHA,
 		PlatformRef: RevisionRef(in.DeliverableID, in.N),
@@ -289,10 +295,10 @@ func (s *Store) MintRevision(ctx context.Context, in MintInput) (Revision, error
 	}
 	err = s.DB.WriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO deliverable_revisions (deliverable_id, n, user_id, run_id, attempt_ref,
+			`INSERT INTO deliverable_revisions (deliverable_id, n, user_id, run_id, attempt_ref, produced_by_run_id,
 			                                    pin_kind, content_sha256, snapshot_sha, platform_ref, objects, created_ts)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			rev.DeliverableID, rev.N, rev.Owner, rev.RunID, rev.AttemptRef,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rev.DeliverableID, rev.N, rev.Owner, rev.RunID, rev.AttemptRef, nullString(rev.ProducedBy),
 			rev.PinKind, rev.ContentSHA256, nullString(rev.SnapshotSHA), rev.PlatformRef, string(objJSON), now); err != nil {
 			return fmt.Errorf("review: mint revision: %w", err)
 		}
@@ -370,22 +376,26 @@ func sameRefs(a, b []ObjectRef) bool {
 // RevisionAt reads one minted revision row.
 func (s *Store) RevisionAt(ctx context.Context, deliverableID string, n int) (Revision, error) {
 	var (
-		r       Revision
-		objJSON string
-		snap    sql.NullString
-		verdict sql.NullInt64
+		r        Revision
+		objJSON  string
+		snap     sql.NullString
+		producer sql.NullString
+		verdict  sql.NullInt64
 	)
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT deliverable_id, n, user_id, run_id, attempt_ref, pin_kind, content_sha256,
+		`SELECT deliverable_id, n, user_id, run_id, attempt_ref, produced_by_run_id, pin_kind, content_sha256,
 		        snapshot_sha, platform_ref, objects, verdict_ref, created_ts
 		 FROM deliverable_revisions WHERE deliverable_id = ? AND n = ?`, deliverableID, n).
-		Scan(&r.DeliverableID, &r.N, &r.Owner, &r.RunID, &r.AttemptRef, &r.PinKind,
+		Scan(&r.DeliverableID, &r.N, &r.Owner, &r.RunID, &r.AttemptRef, &producer, &r.PinKind,
 			&r.ContentSHA256, &snap, &r.PlatformRef, &objJSON, &verdict, &r.CreatedTS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Revision{}, fmt.Errorf("%w: %s rev %d", ErrNotFound, deliverableID, n)
 	}
 	if err != nil {
 		return Revision{}, fmt.Errorf("review: read revision: %w", err)
+	}
+	if producer.Valid {
+		r.ProducedBy = producer.String
 	}
 	if snap.Valid {
 		r.SnapshotSHA = snap.String

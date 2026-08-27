@@ -261,6 +261,19 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 	if in.ProjectID == "" {
 		return Outcome{}, fmt.Errorf("accept: repo-backed deliverable %q needs a project to push to", in.DeliverableID)
 	}
+	// S13.6 step 3 is an invariant of the ACT, so the act's owner enforces it.
+	// The trailers rendered below go into a permanent commit; rendering the
+	// templates around an empty engine, model or vendor address would push a
+	// co-author line naming nobody, which is the mis-attribution failure step 3
+	// exists to prevent. Refused HERE — before Propose, so no effect row records
+	// an authorization for an act that must not happen, and before the squash,
+	// so no commit object is ever made. The API's card-level guard stays where
+	// it is; a wall only the caller upholds is not a wall.
+	if in.Engine == "" || in.Model == "" || in.VendorNoreply == "" {
+		return Outcome{}, fmt.Errorf("accept: deliverable %q has no renderable attribution (engine %q, model %q, vendor address %q): "+
+			"an accept never pushes a Co-Authored-By line naming nobody (S13.6 step 3)",
+			in.DeliverableID, in.Engine, in.Model, in.VendorNoreply)
+	}
 	candidate := rev.SnapshotSHA
 
 	e, err := a.cfg.Project.Get(ctx, in.ProjectID)

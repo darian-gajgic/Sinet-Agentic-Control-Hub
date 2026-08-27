@@ -143,12 +143,20 @@ type AcceptCard struct {
 }
 
 // AcceptProvenance names WHERE each trailer input came from. Every one is a
-// platform fact read off the revision's minting run — the routing record the
-// stage skeleton emitted and the engine session's substrate — so no string a
-// model produced can name a co-author (the model-output-is-untrusted-input
-// rule).
+// platform fact read off the run that PRODUCED the revision — the routing
+// record the stage skeleton emitted and the engine session's substrate — so no
+// string a model produced can name a co-author (the model-output-is-untrusted-
+// input rule).
+//
+// The two run refs are both served because they answer different questions and
+// are usually different runs: MintingRunID is the verification handoff that
+// froze the content (Spec S13.1), ProducingRunID the execute leg whose settled
+// S08.8 selection made it. A revision minted before migration 0026 records no
+// producing run and resolves through its minting run.
 type AcceptProvenance struct {
-	MintingRunID  string `json:"minting_run_id,omitempty"`
+	MintingRunID   string `json:"minting_run_id,omitempty"`
+	ProducingRunID string `json:"producing_run_id,omitempty"`
+
 	Engine        string `json:"engine,omitempty"`
 	Model         string `json:"model,omitempty"`
 	Lane          string `json:"lane,omitempty"`
@@ -296,35 +304,53 @@ func revisionContentPin(rev review.Revision) string {
 	return rev.ContentSHA256
 }
 
-// acceptProvenance derives the trailer inputs from the revision's minting run.
+// acceptProvenance derives the trailer inputs from the run that PRODUCED the
+// revision.
 //
-// Engine comes from the run's engine session substrate and model from the
-// settled `routing.decided` record — both platform facts recorded by the
-// machinery that made the decision. The vendor address is derived
-// STRUCTURALLY from the lane rather than looked up: the platform does not
-// invent a mailbox at a company it does not speak for, and the RFC 2606
+// Engine comes from the run's engine session substrate (Spec S03) and model
+// from its settled `routing.decided` record (Spec S08.8) — both platform facts
+// recorded by the machinery that made the decision. The vendor address is
+// derived STRUCTURALLY from the lane rather than looked up: the platform does
+// not invent a mailbox at a company it does not speak for, and the RFC 2606
 // `.invalid` TLD is reserved so the address can never resolve or deliver. The
 // form mirrors the landed committer noreply convention in internal/project.
 //
-// A revision with no resolvable engine attribution gets NO trailers and says
-// so. The alternative — rendering `Co-Authored-By:` around empty strings —
-// would put a co-author line naming nobody into a permanent commit, which is
-// the mis-attribution failure S13.6 step 3 exists to prevent.
+// WHICH RUN IS ASKED. The producing run when the revision records one, else the
+// minting run. The drain mints on the VERIFY leg (the verification tax rides
+// it, S07.11) while the routing decision is emitted by the EXECUTE dispatch and
+// only there, so resolving the minting run asked the wrong leg for facts it
+// never records and closed the accept on correct work. The fallback is not a
+// second guess at the same question — it is the unchanged read for a revision
+// minted before the producing run was recorded at all (migration 0026), and
+// there is deliberately no fallback FROM a recorded producing run: crediting
+// the verify leg's engine for content the execute leg made would be a truthful-
+// looking trailer about the wrong run.
+//
+// A revision with no resolvable attribution gets NO trailers and says exactly
+// which facts are missing (never one that IS recorded). The alternative —
+// rendering `Co-Authored-By:` around empty strings — would put a co-author line
+// naming nobody into a permanent commit, which is the mis-attribution failure
+// S13.6 step 3 exists to prevent.
 func (s *Server) acceptProvenance(ctx context.Context, rev review.Revision) AcceptProvenance {
-	p := AcceptProvenance{MintingRunID: rev.RunID}
-	if rev.RunID == "" {
-		p.Absent = "this revision records no minting run, so the attribution trailers have no platform facts to render from (S13.6 step 3)"
+	p := AcceptProvenance{MintingRunID: rev.RunID, ProducingRunID: rev.ProducedBy}
+	runID, role := rev.ProducedBy, "producing"
+	if runID == "" {
+		runID, role = rev.RunID, "minting"
+	}
+	if runID == "" {
+		p.Absent = "this revision records neither a producing run nor a minting run, so the attribution trailers have no platform facts to " +
+			"render from (S13.6 step 3)"
 		return p
 	}
-	if pay, ok := s.proj.latestPayload(ctx, rev.RunID, "routing.decided"); ok {
+	if pay, ok := s.proj.latestPayload(ctx, runID, "routing.decided"); ok {
 		p.Model = firstString(pay, "model")
 		p.Lane = firstString(pay, "lane")
 	}
 	var substrate sql.NullString
 	if err := s.proj.db.QueryRowContext(ctx,
 		`SELECT substrate FROM engine_sessions WHERE run_id = ? ORDER BY session_key DESC LIMIT 1`,
-		rev.RunID).Scan(&substrate); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Warn("accept: read engine session substrate", "run", rev.RunID, "err", err)
+		runID).Scan(&substrate); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		s.logger.Warn("accept: read engine session substrate", "run", runID, "err", err)
 	}
 	if substrate.Valid {
 		p.Engine = substrate.String
@@ -333,12 +359,33 @@ func (s *Server) acceptProvenance(ctx context.Context, rev review.Revision) Acce
 		p.Engine = p.Lane
 	}
 	if p.Engine == "" || p.Model == "" {
-		p.Absent = "the minting run " + rev.RunID + " records no engine substrate or routing decision, so the attribution trailers cannot be " +
-			"rendered from platform facts — and an accept must never push a Co-Authored-By line naming nobody (S13.6 step 3)"
+		p.Absent = attributionAbsence(role, runID, p.Engine, p.Model)
 		return p
 	}
 	p.VendorNoreply = vendorNoreply(p.Lane, p.Engine)
 	return p
+}
+
+// attributionAbsence states which trailer facts the resolution run is missing —
+// exactly those, and never one the database records.
+//
+// The single sentence this replaced asserted BOTH absences whatever was
+// actually missing, so a run that recorded its engine substrate and lacked only
+// the routing decision was told "records no engine substrate": a withheld
+// reason the platform's own rows contradict. A person reading a closed door has
+// no way to check the claim, so the claim has to be true.
+func attributionAbsence(role, runID, engine, model string) string {
+	const cannot = "the attribution trailers cannot be rendered from platform facts, and an accept must never push a Co-Authored-By line " +
+		"naming nobody (S13.6 step 3)"
+	who := "the " + role + " run " + runID + " "
+	switch {
+	case engine == "" && model == "":
+		return who + "records neither a routing decision nor an engine substrate, so " + cannot
+	case model == "":
+		return who + "records an engine substrate but no settled routing decision, so the model that made this work is unnamed and " + cannot
+	default:
+		return who + "records a routing decision but no engine substrate, so the engine that made this work is unnamed and " + cannot
+	}
 }
 
 // vendorNoreply is the structural per-lane co-author address. See

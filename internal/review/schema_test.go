@@ -34,7 +34,7 @@ func TestSchemaWalls(t *testing.T) {
 	// The state MAY move (accept mechanics are S13.6's; the column moves).
 	f.exec(`UPDATE deliverables SET state = 'accepted' WHERE deliverable_id = 'dlv-t1'`)
 
-	// deliverable_revisions: immutable once minted; never deleted; the two
+	// deliverable_revisions: immutable once minted; never deleted; the three
 	// fill-once slots fill once.
 	f.mustAbort(`DELETE FROM deliverable_revisions WHERE deliverable_id = 'dlv-t1' AND n = 1`)
 	f.mustAbort(`UPDATE deliverable_revisions SET content_sha256 = 'beef' WHERE deliverable_id = 'dlv-t1' AND n = 1`)
@@ -43,6 +43,12 @@ func TestSchemaWalls(t *testing.T) {
 	f.mustAbort(`UPDATE deliverable_revisions SET snapshot_sha = 'def456' WHERE deliverable_id = 'dlv-t1' AND n = 1`)
 	f.exec(`UPDATE deliverable_revisions SET verdict_ref = 7 WHERE deliverable_id = 'dlv-t1' AND n = 1`)
 	f.mustAbort(`UPDATE deliverable_revisions SET verdict_ref = 8 WHERE deliverable_id = 'dlv-t1' AND n = 1`)
+	// produced_by_run_id (0026): the attribution join key the S13.6 accept
+	// resolves through, so a rewrite would re-credit finished work to another
+	// run. Fill-once like its two siblings — the still-NULL slot on a revision
+	// minted before 0026 stays open, and what is recorded is final.
+	f.exec(`UPDATE deliverable_revisions SET produced_by_run_id = 't1.execute' WHERE deliverable_id = 'dlv-t1' AND n = 1`)
+	f.mustAbort(`UPDATE deliverable_revisions SET produced_by_run_id = 't1.execute.fork-1' WHERE deliverable_id = 'dlv-t1' AND n = 1`)
 
 	// review_comments: never dropped; content immutable; consumption
 	// stamps move only as the complete one-way batch stamp.

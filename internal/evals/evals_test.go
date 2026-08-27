@@ -34,10 +34,11 @@ func TestMigrationContiguousUserVersion(t *testing.T) {
 	// (the S10.3 price table's durable home), 0022 is P3-RW-3's (the
 	// pre-approval project-attribution view re-create), 0023 is P3-RW-7's
 	// (the onboarding arm on the same edge), 0024 is P3-RW-11's (the
-	// capture's task family) and 0025 is P3-LN-6's (the S10.4 plan-unit
-	// automation budget). A floor would let an unnoticed migration slip in.
-	if v != 25 {
-		t.Fatalf("user_version = %d, want 25 (migrations through 0025 applied contiguously)", v)
+	// capture's task family), 0025 is P3-LN-6's (the S10.4 plan-unit
+	// automation budget) and 0026 is P3-GF10's (the revision's producing-run
+	// attribution join key). A floor would let an unnoticed migration slip in.
+	if v != 26 {
+		t.Fatalf("user_version = %d, want 26 (migrations through 0026 applied contiguously)", v)
 	}
 	for _, table := range []string{"eval_floors", "revalidation_stamps"} {
 		var n int
