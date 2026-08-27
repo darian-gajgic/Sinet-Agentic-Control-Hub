@@ -1,3 +1,5 @@
+> **EXPIRED at P3-GF4 landing (2026-08-27).** Single-use artifact — drain fixes moved the code past this text; never read as truth.
+
 # P3-GF4 — bootstrap verification posture for command-less launch-domain tasks (Amendment A14)
 
 **Contract:** `Spec/drafts/S07-verification-quality.md` §S07.8 bootstrap bullet (line 120, carries the A14 tag) + the A14 changelog row `Spec/drafts/S00-front-matter.md` line 194. Siblings this packet touches: S07.3 (stage contracts + the ratified vocabulary), S07.5/S07.11 (verdict/recording/receipt), S07.7 (route table, refusal terminals), S06.4 (stakes tiers, trivial band), S13.7 (the registry capture that feeds packs). Operator record: `P3/design/b6-gate-operator-findings-r4-2026-08-23.md` §F1/F1a ("Fix it for good now" — the order IS the order to execute).

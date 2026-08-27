@@ -34,6 +34,10 @@ func (s *fakeSink) MintCandidate(_ context.Context, d verify.Deliverable, round 
 func (s *fakeSink) RecordFindings(_ context.Context, d verify.Deliverable, findings []verify.Finding) error {
 	s.calls = append(s.calls, sinkCall{op: "findings", rev: d.Revision, n: len(findings)})
 	for _, f := range findings {
+		// The bootstrap posture disclosure is the one sanctioned CatCheckIntegrity
+		// finding allowed into the review stream (reviewable()'s identity-keyed
+		// exemption). This harness runs full-posture worlds only, so any
+		// check-integrity finding arriving here is a real leak, not that exception.
 		if f.Category == verify.CatCheckIntegrity {
 			return fmt.Errorf("check-integrity finding reached the review stream: %+v", f)
 		}
