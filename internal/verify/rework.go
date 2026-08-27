@@ -96,6 +96,20 @@ type RoundRecord struct {
 	// run (Spec S07.8) — recorded, never silent.
 	Axis2Skipped string `json:"axis2_skipped,omitempty"`
 
+	// Posture names the verification posture this round ran under; absent is
+	// the full posture (Spec S07.8 [A14, 2026-08-27]). A bootstrap round's V2
+	// verdict is advisory and non-authoritative, so progression across
+	// revisions shows exactly which rounds were advisory.
+	Posture Posture `json:"posture,omitempty"`
+	// PostureNote is the plain-words disclosure carried with a non-default
+	// posture — the same sentence the card and the receipt serve.
+	PostureNote string `json:"posture_note,omitempty"`
+	// ReviewMandatory records that requester review is the real gate for this
+	// round's verdict (Spec S07.8: V3 blocks at every stakes tier, trivial
+	// band included). It is DATA so any later completion or auto-deliver
+	// surface inherits the obligation rather than re-deriving it.
+	ReviewMandatory bool `json:"review_mandatory,omitempty"`
+
 	Findings        []Finding `json:"findings,omitempty"`
 	SuppressedNotes int       `json:"suppressed_notes,omitempty"`
 

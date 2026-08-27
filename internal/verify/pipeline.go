@@ -56,6 +56,12 @@ type Verifier struct {
 	// S07.8 graduation; a nil pack outside launch domains is the degraded
 	// mode of Spec S07.8, V1 empty, arriving v1).
 	Pack *CheckPack
+	// ResolvePack recomputes the pack resolution for each judged round, so
+	// the posture is derived from the registry's CURRENT capture per revision
+	// and captured commands resume the full ladder with no residue (Spec
+	// S07.8 [A14, 2026-08-27]). Nil = the static Pack for every round, which
+	// stays the dev/test posture.
+	ResolvePack func(ctx context.Context) (*CheckPack, error)
 	// Runner executes checks in the network-off sandbox (required when a
 	// pack is present).
 	Runner CheckRunner

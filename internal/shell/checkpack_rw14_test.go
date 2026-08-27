@@ -95,22 +95,33 @@ func TestRW14CapturedCommandsBecomeTheLadderRungs(t *testing.T) {
 }
 
 // TestRW14NoCapturedCommandsNamesWhatToCapture: the live `shop` shape
-// (commands = {}). The refusal carries ErrNoCheckPack — the class the verify
-// leg turns into a card — and says exactly what is missing and what to do
-// (OQ3(i): invent nothing, degrade nothing).
+// (commands = {}). REWRITTEN at P3-GF4 — Spec S07.8 gained the bootstrap
+// posture (A14, 2026-08-27) and the refusal this test used to pin is
+// abolished: a REGISTERED project with nothing to run "is NEVER a
+// verification refusal and never parks the run". What survives from RW-14's
+// OQ3(i) is the other half, and it is the half that mattered: the resolver
+// still invents nothing.
 func TestRW14NoCapturedCommandsNamesWhatToCapture(t *testing.T) {
 	e := registeredProject(t, project.Commands{})
 	pack, err := packFromCapture(verify.DomainSoftware, e)
-	if pack != nil {
-		t.Fatalf("a command-less project produced a pack: %+v — that is an invented inventory", pack)
+	if err != nil {
+		t.Fatalf("packFromCapture: %v — a command-less registered project is the bootstrap posture, not an error (Spec S07.8, A14)", err)
 	}
-	if !errors.Is(err, verify.ErrNoCheckPack) {
-		t.Fatalf("err = %v, want the ErrNoCheckPack class (the card's own class)", err)
+	if pack == nil {
+		t.Fatal("no resolution at all — bootstrap must stay distinguishable from the (nil, nil) no-pack-machinery answer")
 	}
-	for _, want := range []string{"commands", "shop", "retry"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("refusal %q does not tell the operator about %q", err, want)
-		}
+	if pack.Posture != verify.PostureBootstrap {
+		t.Fatalf("posture %q, want %q", pack.Posture, verify.PostureBootstrap)
+	}
+	if pack.Domain != verify.DomainSoftware || pack.Version != e.CaptureVersion {
+		t.Fatalf("resolution = domain %q v%d, want the registered project's own domain and capture version %d",
+			pack.Domain, pack.Version, e.CaptureVersion)
+	}
+	if len(pack.Checks) != 0 {
+		t.Fatalf("bootstrap resolution carries checks %+v — that is an invented inventory", pack.Checks)
+	}
+	if err := pack.Validate(); err == nil {
+		t.Fatal("the bootstrap resolution passes CheckPack.Validate — a pack without checks must still fail its own S07.3 contract; the drain branches on the posture instead of running it")
 	}
 }
 

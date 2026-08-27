@@ -63,6 +63,18 @@ type Receipt struct {
 	// DirectUse is the honesty keystone (Spec S10.10, 3.6).
 	DirectUse DirectUseEstimate `json:"direct_use"`
 
+	// Verification is the plain-words verification-posture statement for a run
+	// whose drain ran under a posture the receipt must disclose (Spec S07.8
+	// via S07.11: "the verdict card and receipt name the posture in plain
+	// words"). Absent for the ordinary posture, which is every run whose
+	// domain check pack executed.
+	//
+	// A neutral string, not a verification type: this package materializes
+	// receipts from the metering ledger and never imports internal/verify, so
+	// the value is composed where the verification facts are already in reach
+	// — the serving side (P3-GF4 OQ5).
+	Verification string `json:"verification,omitempty"`
+
 	MaterializedTS time.Time `json:"materialized_ts"`
 }
 

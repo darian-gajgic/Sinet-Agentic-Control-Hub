@@ -180,12 +180,18 @@ func TestRW14MechanicalDrainFailureStillCrashesForTheLadder(t *testing.T) {
 }
 
 // TestRW14PackResolverRefusalBecomesTheCard: whatever the pack seam refuses
-// with — here a project whose capture has no commands — reaches the operator
-// VERBATIM on the card; the run parks, the board says attention, and nothing
-// crashes.
+// with — here a software task attached to no registered project — reaches the
+// operator VERBATIM on the card; the run parks, the board says attention, and
+// nothing crashes.
+//
+// The cause was reworded at P3-GF4: the command-less-project refusal it used
+// to name is abolished by Spec S07.8's bootstrap posture (A14, 2026-08-27), so
+// the fake seam now refuses with a world that still exists — the surviving
+// S07.7 integrity case whose door (register the project, attach the task) can
+// actually be walked through. The behavior under test is untouched.
 func TestRW14PackResolverRefusalBecomesTheCard(t *testing.T) {
 	ctx := context.Background()
-	const missing = `no build, test or lint commands are captured for project "shop" — capture them, then retry`
+	const missing = `this software task is not attached to a registered project — register it (Projects tab), attach the task, then retry`
 	h := outageHarness(t, nil, func(context.Context, string, string) (*verify.CheckPack, error) {
 		return nil, fmt.Errorf("%w: %s", verify.ErrNoCheckPack, missing)
 	})

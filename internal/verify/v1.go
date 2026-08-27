@@ -131,6 +131,15 @@ type CheckPack struct {
 	Checks     []Check   `json:"checks"`
 	// Quarantines maps check id → active quarantine.
 	Quarantines map[string]Quarantine `json:"quarantines,omitempty"`
+	// Posture, when set, marks a resolution that is not a runnable suite —
+	// today only PostureBootstrap, the registered project holding no
+	// executable rung (Spec S07.8 [A14, 2026-08-27]; see bootstrap.go). The
+	// flag lives on the pack because the resolver seam answers with a pack:
+	// it keeps "this project has nothing to run yet" distinguishable from the
+	// (nil, nil) "this domain has no pack machinery" absence without
+	// overloading either. A posture-carrying pack is deliberately not a valid
+	// one — Validate still refuses a pack without checks.
+	Posture Posture `json:"posture,omitempty"`
 }
 
 // Validate checks the pack contract (Spec S07.3): known ladder stages,
