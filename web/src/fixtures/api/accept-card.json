@@ -5,6 +5,7 @@
   "content_pin": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
   "project_id": "release-notes",
   "protected_ref": "refs/heads/main",
+  "landing": "local-store",
   "trailers": "Co-Authored-By: claude-cli claude \u003canthropic@vendor.noreply.sinet.invalid\u003e\nAssisted-by: claude-cli (claude) via Sinet",
   "provenance": {
     "minting_run_id": "r-ship",
@@ -20,9 +21,9 @@
     "statement": "signing is your structural posture, not an option on this card: it is all-or-nothing per user (S13.6 step 5), the broker holds the git-ssh-key and does the signing, and no key material or per-call flag crosses this surface. Whether YOUR commits are signed is a broker fact this transport does not probe — asking would mean reaching past the accept orchestration that owns it."
   },
   "tier": "high",
-  "tier_statement": "High tier: this pushes a commit to a shared branch, so it is never batched and your PIN is re-prompted in the same request. No elevation is inherited from an idle session (S15.6; S01.9).",
+  "tier_statement": "High tier: your PIN is re-prompted in the same request and this is never batched. Nothing is sent anywhere — this project registers no remote, so the commit is written into its own store on this machine. The accept family keeps one posture whichever way the work lands. No elevation is inherited from an idle session (S15.6; S01.9).",
   "payload_hash": "4f738c8df1b4cf6250d0031ddb4e354e33a38e59dfcc83a503d316913ab627b1",
   "acceptable": true,
-  "reason": "open: accept with this payload_hash and your PIN in the same request",
+  "reason": "open: accept with this payload_hash and your PIN in the same request. This project registers no remote, so the official copy is the attributed commit written into the project's own local store on this machine, on its default branch — nothing is sent anywhere (S13.7; S13.1)",
   "route": "POST /api/deliverables/d-site/accept"
 }
