@@ -121,6 +121,31 @@ type ResearchNode struct {
 	Query  string `json:"query,omitempty"`
 }
 
+// The [A15] per-step approach carries four STRUCTURAL constants, not ⚙ keys:
+// S18 declares none, and none of these changes what the platform decides —
+// they bound how much text one step may carry so a card and an artifact stay
+// readable and one emission cannot balloon the pair (the maxQuestionsPerCard /
+// sseBatchSize precedent). They are flagged to the operator gate under the
+// settings-tab directive, like every other constant of this class.
+const (
+	// approachMaxRunes bounds the plain-words HOW. The approach is a few
+	// sentences a non-programmer reads on a card, never an essay; the cap is
+	// an abuse guard on card and artifact size, not an editorial rule.
+	approachMaxRunes = 1200
+	// decisionFieldMaxRunes bounds each Decision / Alternative / Why string.
+	// One material decision states itself in a sentence or two; more than that
+	// is the approach text's job.
+	decisionFieldMaxRunes = 400
+	// maxStepDecisions bounds the listed material decisions per step. A step
+	// making more than this many separate calls is a step that should be split
+	// — which is a planning defect the requester should see as one, not a wall
+	// of decisions on one card.
+	maxStepDecisions = 8
+	// orderingMaxRunes bounds the ordering rationale: one load-bearing
+	// sentence or two saying why this step sits where it does.
+	orderingMaxRunes = 400
+)
+
 // StepDecision is one material decision the planner made inside a step
 // [A15, 2026-08-27]: what was decided in plain words, the alternatives it
 // considered, and why the chosen one won (Spec S06.6 per-step approach;

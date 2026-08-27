@@ -1,6 +1,8 @@
 package intake
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +139,152 @@ func TestWriteGlobs(t *testing.T) {
 	p.Steps[1].Unbounded = true
 	if _, unbounded := p.WriteGlobs(); !unbounded {
 		t.Fatal("unbounded step not reported")
+	}
+}
+
+// ---- P3-GF8: pre-A15 re-render integrity (brief §9 property mark (b)) ----
+
+// gf8PreA15Golden holds the markdown of record for a seeded family of plans
+// whose [A15] members are all empty, rendered by the PRE-A15 renderer and
+// committed with the packet's red tests. It is the ORACLE the property below
+// needs: "byte-identical" is only checkable against bytes minted before the
+// change, and every other formulation would compare the new renderer with
+// itself.
+//
+// Regenerate deliberately (it is a contract change, not a refresh):
+//
+//	SINET_WRITE_PREA15_GOLDEN=1 go test ./internal/intake -run PreA15
+const gf8PreA15Golden = "testdata/gf8-prea15-plans.md"
+
+const gf8PreA15WriteEnv = "SINET_WRITE_PREA15_GOLDEN"
+
+// gf8Rand is a tiny deterministic xorshift, deliberately NOT math/rand: the
+// golden bytes must stay reproducible across Go releases, and the standard
+// library's generator does not promise that its stream never changes.
+type gf8Rand uint64
+
+func (r *gf8Rand) next() uint64 {
+	x := uint64(*r)
+	x ^= x << 13
+	x ^= x >> 7
+	x ^= x << 17
+	*r = gf8Rand(x)
+	return x
+}
+
+func (r *gf8Rand) intn(n int) int { return int(r.next() % uint64(n)) }
+
+func (r *gf8Rand) pick(from []string) string { return from[r.intn(len(from))] }
+
+// gf8PreA15Plan generates one plan with NO [A15] content — the shape every
+// artifact stored before this packet has on disk.
+func gf8PreA15Plan(r *gf8Rand, i int) Plan {
+	titles := []string{"Implement the change", "Verify against the criteria", "Collect the merged changes", "Write the note"}
+	dones := []string{"tests pass", "all ACs demonstrably hold", "the note exists", "the checks are green"}
+	globs := []string{"src/**", "app/**", "docs/*.md"}
+	classes := []string{"C0", "C1", "C2"}
+
+	n := 1 + r.intn(4)
+	steps := make([]Step, 0, n)
+	coverage := map[string][]string{}
+	for k := 1; k <= n; k++ {
+		s := Step{
+			ID:       fmt.Sprintf("S-%d", k),
+			Title:    r.pick(titles),
+			DoneWhen: r.pick(dones),
+			Class:    r.pick(classes),
+		}
+		if r.intn(2) == 0 {
+			s.WriteSet = []string{r.pick(globs)}
+		}
+		if r.intn(3) == 0 {
+			s.ReadSet = []string{r.pick(globs)}
+		}
+		if r.intn(4) == 0 {
+			s.Unbounded = true
+		}
+		if r.intn(4) == 0 {
+			s.OutwardEffects = []string{"publishes the note"}
+		}
+		s.NewSpend = r.intn(4) == 0
+		s.CredentialTouch = r.intn(5) == 0
+		s.SharedAssetWrite = r.intn(5) == 0
+		if r.intn(4) == 0 {
+			s.NewTools = []string{"ripgrep"}
+		}
+		s.Research = r.intn(3) == 0
+		steps = append(steps, s)
+		coverage[fmt.Sprintf("AC-%d", k)] = []string{s.ID}
+	}
+	p := Plan{
+		TaskID: fmt.Sprintf("t-%d", i), Owner: "u1", Version: 1 + r.intn(3), SpecVersion: 1,
+		Status: StatusDraft, Tier: TierStandard, Provenance: "pre-A15 planner",
+		Steps: steps, Coverage: coverage,
+	}
+	p.SpecVersion = p.Version
+	if r.intn(2) == 0 {
+		p.Risks = []string{"the estimate may be off"}
+	}
+	if r.intn(3) == 0 {
+		p.CitedEntries = []string{"project:conventions"}
+	}
+	if steps[0].Research {
+		p.ResearchNodes = []ResearchNode{{RuleID: "P47-7", StepID: "S-1", Query: "verify the current version"}}
+	}
+	if r.intn(2) == 0 {
+		p.Est = Estimate{SizeClass: "S", USD: 1.25, Known: true, Basis: "median of the last five"}
+	} else {
+		p.Est = Estimate{SizeClass: "M", Known: false}
+	}
+	return p
+}
+
+// TestPreA15RerenderIntegrityProperty — PROPERTY (brief R12; §9 mark (b)):
+// over a seeded family of plans carrying NO [A15] content, the markdown of
+// record is byte-identical to what the pre-A15 renderer produced, and each one
+// still survives the S06.6 write/load round-trip (sha256 + byte-identical
+// re-render). This is the CitedEntries precedent held as a property rather than
+// as one example: R12's step lines are GUARDED, so every artifact stored before
+// this packet keeps loading.
+func TestPreA15RerenderIntegrityProperty(t *testing.T) {
+	r := gf8Rand(0xA15C0FFEE)
+	store := artifactStore{root: t.TempDir()}
+	var all bytes.Buffer
+	for i := 0; i < 64; i++ {
+		plan := gf8PreA15Plan(&r, i)
+		md := renderPlanMD(&plan)
+		all.Write(md)
+
+		for _, marker := range []string{"Approach", "Decision", "Alternatives", "Ordering"} {
+			if bytes.Contains(md, []byte(marker)) {
+				t.Fatalf("plan %d has no [A15] content but its markdown of record carries %q:\n%s", i, marker, md)
+			}
+		}
+		ref, err := store.write(store.planPath(plan.TaskID, plan.Version), md, &plan, plan.Version)
+		if err != nil {
+			t.Fatalf("write plan %d: %v", i, err)
+		}
+		if _, err := store.loadPlan(&ref); err != nil {
+			t.Fatalf("a pre-A15 plan no longer loads: %v", err)
+		}
+	}
+
+	if os.Getenv(gf8PreA15WriteEnv) == "1" {
+		if err := os.MkdirAll(filepath.Dir(gf8PreA15Golden), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(gf8PreA15Golden, all.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("wrote %s — unset %s to run the comparison", gf8PreA15Golden, gf8PreA15WriteEnv)
+	}
+	want, err := os.ReadFile(gf8PreA15Golden)
+	if err != nil {
+		t.Fatalf("read the pre-A15 oracle: %v", err)
+	}
+	if !bytes.Equal(all.Bytes(), want) {
+		t.Errorf("the markdown of record for pre-A15 plans changed: %d bytes now, %d in %s — every stored artifact would fail its re-render check (S06.6)",
+			all.Len(), len(want), gf8PreA15Golden)
 	}
 }
 
