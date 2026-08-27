@@ -1,3 +1,5 @@
+> **EXPIRED at P3-GF8 landing (2026-08-27).** Single-use artifact — drain fixes moved the code past this text; never read as truth.
+
 # P3-GF8 — The editable understood-spec WIRE + the A15 per-step approach (W3, backend half)
 
 **Status: ACTIVE (grounding committed 2026-08-27). EXPIRES when P3/STATE.md marks the packet landed.**
