@@ -140,11 +140,18 @@ type ObjectRef struct {
 
 // Revision is one deliverable_revisions row.
 type Revision struct {
-	DeliverableID string      `json:"deliverable_id"`
-	N             int         `json:"n"`
-	Owner         string      `json:"owner"`
-	RunID         string      `json:"run_id,omitempty"`
-	AttemptRef    string      `json:"attempt_ref,omitempty"`
+	DeliverableID string `json:"deliverable_id"`
+	N             int    `json:"n"`
+	Owner         string `json:"owner"`
+	RunID         string `json:"run_id,omitempty"`
+	AttemptRef    string `json:"attempt_ref,omitempty"`
+	// ProducedBy names the run whose settled S08.8 selection produced this
+	// revision's content — the attribution join key the S13.6 accept resolves
+	// trailers through, distinct from the MINTING run above (the verification
+	// handoff, which records no routing decision). P3-GF10 RED WINDOW: the
+	// member is inert type surface until the GF10 implementation persists it
+	// (migration 0026) and fills it at the drain mint.
+	ProducedBy    string      `json:"produced_by,omitempty"`
 	PinKind       string      `json:"pin_kind"` // content | objects
 	ContentSHA256 string      `json:"content_sha256,omitempty"`
 	SnapshotSHA   string      `json:"snapshot_sha,omitempty"` // S13.5 fill (B4-2)

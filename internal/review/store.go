@@ -184,6 +184,12 @@ type MintInput struct {
 	N          int
 	RunID      string
 	AttemptRef string
+	// ProducedBy names the run whose settled S08.8 selection produced this
+	// revision's content (the accept's attribution join key — P3-GF10). The
+	// MINTING run above stays the verification handoff. P3-GF10 RED WINDOW:
+	// ignored (not persisted) until the implementation packet lands the 0026
+	// column and the mint fill.
+	ProducedBy string
 	// Files is the text content per logical path (single-blob deliverables
 	// use one entry; trees arrive with S13.5).
 	Files map[string]string
