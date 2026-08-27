@@ -82,6 +82,17 @@ type roundPayload struct {
 	// StaleAudit flags a check suite past its audit interval (P-T06-1).
 	StaleAudit bool `json:"stale_audit,omitempty"`
 
+	// Posture / PostureNote / ReviewMandatory mark a round the domain's check
+	// pack did not decide (Spec S07.8 [A14, 2026-08-27]): the verdict is
+	// advisory and non-authoritative, the plain-words disclosure is carried
+	// verbatim, and requester review is the real gate. Absent for the ordinary
+	// posture, so progression across revisions shows exactly which rounds were
+	// advisory — and a later completion surface reads the obligation off the
+	// row rather than re-deriving it.
+	Posture         Posture `json:"posture,omitempty"`
+	PostureNote     string  `json:"posture_note,omitempty"`
+	ReviewMandatory bool    `json:"review_mandatory,omitempty"`
+
 	Domain     string `json:"domain"`
 	Revision   int    `json:"revision"`
 	ContentSHA string `json:"content_sha256"`
@@ -165,6 +176,9 @@ func (r *Recorder) RecordRound(ctx context.Context, runID string, d Deliverable,
 		Revision:        d.Revision,
 		ContentSHA:      rec.ContentSHA,
 		Entailment:      entailment,
+		Posture:         rec.Posture,
+		PostureNote:     rec.PostureNote,
+		ReviewMandatory: rec.ReviewMandatory,
 		Retention:       retentionKeepForever,
 	}
 	if rec.V1 != nil {

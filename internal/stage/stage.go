@@ -258,10 +258,17 @@ type Config struct {
 	//
 	// Nil (the test posture) resolves no pack at all. A nil pack with a nil
 	// error is an HONEST absence — non-launch domains verify with V1 empty,
-	// the ratified degraded mode (Spec S07.8). An absence the operator must
-	// act on comes back as an error wrapping verify.ErrNoCheckPack, naming the
-	// exact missing thing; the verify leg turns that into its decision card
-	// and parks, and NEVER runs a silently degraded launch domain.
+	// the ratified degraded mode (Spec S07.8). A registered project holding no
+	// build/test/lint command comes back as a BOOTSTRAP resolution
+	// (verify.BootstrapPack): there is no rung to run yet, which Spec S07.8's
+	// bootstrap posture (A14, 2026-08-27) defines a landing for rather than a
+	// refusal. An absence the operator must act on still comes back as an
+	// error wrapping verify.ErrNoCheckPack, naming the exact missing thing;
+	// the verify leg turns that into its decision card and parks, and NEVER
+	// runs a silently degraded launch domain.
+	//
+	// The resolver is called once per judged round, so its answer must reflect
+	// the registry's CURRENT capture each time it is asked.
 	CheckPackFor func(ctx context.Context, domain, taskID string) (*verify.CheckPack, error)
 	// CheckRunner executes V1 checks (required when a pack is present).
 	CheckRunner verify.CheckRunner

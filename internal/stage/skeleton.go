@@ -960,10 +960,6 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 			return nil, verify.NewPreambleRefusal(err)
 		}
 	}
-	pack, err := s.checkPack(ctx, domain, taskID)
-	if err != nil {
-		return nil, err
-	}
 	revise := s.cfg.Revise
 	if revise == nil {
 		revise = s.engineRevise
@@ -979,9 +975,15 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 		Settings: s.cfg.Settings,
 		Judge:    judge,
 		Rubric:   rubric,
-		Pack:     pack,
-		Runner:   s.cfg.CheckRunner,
-		Review:   sink,
+		// The pack is resolved per judged round rather than pinned at
+		// construction, so the posture follows the registry's CURRENT capture
+		// across a drain's revisions (Spec S07.8 [A14, 2026-08-27]): commands
+		// captured mid-drain restore the executable ladder on the next round.
+		ResolvePack: func(ctx context.Context) (*verify.CheckPack, error) {
+			return s.checkPack(ctx, domain, taskID)
+		},
+		Runner: s.cfg.CheckRunner,
+		Review: sink,
 		// The S13 verification-workspace seam (Spec S07.3 rule 1): V1 checks
 		// run against the revision's stripped content, not the execute leg's
 		// scratch cwd, whenever the task is project-backed (P3-RW-14 R6).
@@ -1000,10 +1002,15 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 //
 //   - (nil, nil) — no pack applies here (no seam wired, or a non-launch domain
 //     whose ratified degraded mode is V1 empty, Spec S07.8);
-//   - an error wrapping ErrNoCheckPack / ErrBadPack — the pack the launch
-//     domain REQUIRES is absent or unusable, and the error names exactly what
-//     is missing. That is the preamble refusal class: it becomes the operator's
-//     decision card, never a crash and never a silently degraded launch domain;
+//   - a bootstrap resolution — the registered project holds no build/test/lint
+//     command, so there is no rung to run yet. Spec S07.8's bootstrap posture
+//     (A14, 2026-08-27) runs the drain and records every rung
+//     UNVERIFIABLE-HERE; it is an ANSWER, forwarded like any pack;
+//   - an error wrapping ErrNoCheckPack / ErrBadPack — a genuine S07.7
+//     integrity case (no registered project at all; a capture the platform
+//     cannot read), and the error names exactly what is missing. That is the
+//     preamble refusal class: it becomes the operator's decision card, never a
+//     crash and never a silently degraded launch domain;
 //   - any other error — the registry itself failed. Mechanical: it crashes for
 //     the ladder, because the next sweep may well read the registry fine.
 func (s *Skeleton) checkPack(ctx context.Context, domain, taskID string) (*verify.CheckPack, error) {

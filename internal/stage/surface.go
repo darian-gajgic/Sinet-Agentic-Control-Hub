@@ -11,6 +11,7 @@ import (
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/api"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/metering"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/scheduler"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
@@ -449,7 +450,15 @@ func mapResumeErr(err error) error {
 }
 
 // Receipt implements api.IntakeSurface: the materialized receipt row
-// (Spec S10.10), verbatim.
+// (Spec S10.10), verbatim — plus, for a run whose drain judged under a
+// non-default verification posture, the plain-words statement Spec S07.8
+// requires the receipt to carry.
+//
+// The statement is composed HERE rather than at materialization because
+// internal/metering never learns verification's vocabulary (it owns the
+// receipt's shape and the neutral omitempty member); this layer already holds
+// both halves. A run with nothing to disclose is served byte for byte as it
+// was materialized.
 func (u *Surface) Receipt(ctx context.Context, runID string) (json.RawMessage, error) {
 	var usage string
 	err := u.sk.cfg.DB.QueryRowContext(ctx,
@@ -461,7 +470,58 @@ func (u *Surface) Receipt(ctx context.Context, runID string) (json.RawMessage, e
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(usage), nil
+	posture, err := u.sk.verificationPosture(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if posture == "" {
+		return json.RawMessage(usage), nil
+	}
+	var r metering.Receipt
+	if err := json.Unmarshal([]byte(usage), &r); err != nil {
+		return nil, fmt.Errorf("stage: decode receipt for %q: %w", runID, err)
+	}
+	r.Verification = posture
+	out, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("stage: encode receipt for %q: %w", runID, err)
+	}
+	return out, nil
+}
+
+// verificationPosture reads the run's posture disclosure off its keep-forever
+// verdict rows (Spec S07.11), "" when every judged round ran the full ladder.
+// The last disclosing round wins: a drain whose later revisions ran the real
+// pack has no residue to disclose, and one that stayed under the posture
+// serves the same sentence its card did.
+func (s *Skeleton) verificationPosture(ctx context.Context, runID string) (string, error) {
+	rows, err := s.cfg.DB.QueryContext(ctx,
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = ? ORDER BY event_seq`,
+		runID, verify.EventRound)
+	if err != nil {
+		return "", fmt.Errorf("stage: read verdict rows for %q: %w", runID, err)
+	}
+	defer rows.Close()
+	var note string
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return "", fmt.Errorf("stage: scan verdict row: %w", err)
+		}
+		var p struct {
+			Posture     verify.Posture `json:"posture"`
+			PostureNote string         `json:"posture_note"`
+		}
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			continue // tolerant: a malformed historical payload discloses nothing
+		}
+		if p.Posture == verify.PostureBootstrap {
+			note = p.PostureNote
+		} else {
+			note = ""
+		}
+	}
+	return note, rows.Err()
 }
 
 // ---- the task view ----

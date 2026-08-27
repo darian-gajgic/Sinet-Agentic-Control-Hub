@@ -241,15 +241,22 @@ func toRegistrySlice(e project.Entry) intake.RegistrySlice {
 // stamp (P-T06-1): a suite is exactly as fresh as the scan it came from, and
 // ⚙ verification.check_audit_interval_days flags the verdict stale from there.
 //
-// Three honest answers, and the drain depends on the difference:
+// Four honest answers, and the drain depends on the difference:
 //
 //   - (nil, nil) — this domain has no pack machinery (non-launch domains keep
 //     the ratified degraded mode, Spec S07.8);
 //   - (pack, nil) — run it;
-//   - an ErrNoCheckPack error NAMING WHAT IS MISSING — the launch domain has no
-//     inventory to verify with. The verify leg turns that into the operator's
-//     decision card and parks (R4). Nothing is invented on the project's behalf
-//     and no launch domain is ever silently degraded (OQ3(i)).
+//   - (bootstrap pack, nil) — the project is registered and holds no
+//     build/test/lint command, so there is no rung to run YET. Spec S07.8's
+//     bootstrap posture (A14, 2026-08-27) defines that landing: the drain runs
+//     and records every rung UNVERIFIABLE-HERE rather than refusing;
+//   - an ErrNoCheckPack error NAMING WHAT IS MISSING — a genuine integrity
+//     case, which after A14 means the task is attached to no registered
+//     project at all: there is no capture to compute a posture from, and its
+//     door (register the project, attach the task) exists today. The verify leg
+//     turns that into the operator's decision card and parks (R4). Nothing is
+//     invented on the project's behalf and no launch domain is ever silently
+//     degraded (OQ3(i)).
 func (s *projectSeams) CheckPackFor(ctx context.Context, domain, taskID string) (*verify.CheckPack, error) {
 	if !verify.LaunchDomain(domain) {
 		return nil, nil
@@ -405,8 +412,16 @@ func (s *projectSeams) RepoFacts(ctx context.Context, taskID string) (snapshot, 
 func packFromCapture(domain string, e project.Entry) (*verify.CheckPack, error) {
 	checks := packChecks(e.Capture.Commands)
 	if len(checks) == 0 {
-		return nil, fmt.Errorf("%w: no build, test or lint commands are captured for project %q, so there is nothing to check this work with — capture them for the project (its Commands), then retry",
-			verify.ErrNoCheckPack, e.Name)
+		// The fresh-scaffold case: a REGISTERED project holding no build, test
+		// or lint command has no executable rung, which Spec S07.8's bootstrap
+		// posture defines a landing for (A14, 2026-08-27) instead of the
+		// refusal this used to be. The drain runs, records every rung
+		// UNVERIFIABLE-HERE and marks its verdict advisory; capturing the
+		// project's commands restores the full ladder on the next revision.
+		//
+		// The capture date is deliberately not required here: it stamps a
+		// suite's freshness (rule 7) and there is no suite to stamp.
+		return verify.BootstrapPack(domain, e.Capture.Version), nil
 	}
 	capturedAt, err := time.Parse(time.RFC3339Nano, e.Capture.CapturedTS)
 	if err != nil {

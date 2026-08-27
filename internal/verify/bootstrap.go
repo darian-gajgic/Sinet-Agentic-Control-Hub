@@ -1,6 +1,8 @@
 package verify
 
 import (
+	"fmt"
+
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 )
 
@@ -92,7 +94,31 @@ func bootstrapPostureFinding() Finding {
 // evidence ref, no exit status, no invented executable check — and nothing is
 // skipped silently.
 func bootstrapV1(pack *CheckPack, steps []intake.Step) V1Result {
-	return V1Result{} // P3-GF4 red window: behavior lands with the implementation commit.
+	res := V1Result{Findings: []Finding{bootstrapPostureFinding()}}
+	if pack != nil {
+		res.PackVersion = pack.Version
+	}
+	for _, stage := range ladderOrder {
+		res.Checks = append(res.Checks, CheckOutcome{
+			CheckID:      "ladder:" + string(stage),
+			Stage:        stage,
+			State:        CheckUnverifiable,
+			AttributedTo: BootstrapAttribution,
+			Detail: fmt.Sprintf("the %s rung has no captured command to run, so it is recorded unverifiable here rather than passed (Spec S07.8)",
+				stage),
+		})
+	}
+	for _, s := range steps {
+		res.Steps = append(res.Steps, StepContract{
+			StepID:       s.ID,
+			DoneWhen:     s.DoneWhen,
+			State:        ContractUnverifiable,
+			AttributedTo: BootstrapAttribution,
+			Category:     CatACBlocker,
+			Route:        RouteTable[CatACBlocker].Sink,
+		})
+	}
+	return res
 }
 
 // postureDetail appends the disclosure to a card's detail lines so every
@@ -101,5 +127,7 @@ func postureDetail(detail []string, p Posture) []string {
 	if p != PostureBootstrap {
 		return detail
 	}
-	return append(detail, BootstrapPostureNote)
+	out := make([]string, 0, len(detail)+1)
+	out = append(out, detail...)
+	return append(out, BootstrapPostureNote)
 }

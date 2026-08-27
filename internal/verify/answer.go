@@ -265,7 +265,7 @@ func CloseAnsweredTx(ctx context.Context, tx *sql.Tx, askID string, answer json.
 // and the fence rejects any superseded stage session (Spec S02.5 step 4).
 func (v *Verifier) ResumeWithGuidance(ctx context.Context, in VerifyInput, card Card, guidance []RequesterComment) (Outcome, error) {
 	d := in.Deliverable
-	rubric, err := v.validateInput(d)
+	rubric, pack, err := v.validateInput(ctx, d)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -309,7 +309,7 @@ func (v *Verifier) ResumeWithGuidance(ctx context.Context, in VerifyInput, card 
 	}
 	// The 1.9 research gate runs per drain invocation (deterministic,
 	// pre-judge); an exhausted budget cards exactly as on the fresh path.
-	researchNotes, cardOut, err := v.researchGate(ctx, esc, owner, d, in.ResearchNodes)
+	researchNotes, cardOut, err := v.researchGate(ctx, esc, owner, d, in.ResearchNodes, packPosture(pack))
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -368,7 +368,7 @@ func (v *Verifier) ResumeWithGuidance(ctx context.Context, in VerifyInput, card 
 		guidance:      gfs,
 		researchNotes: researchNotes,
 	}
-	return v.drain(ctx, in, nd, seed, esc, owner, rubric)
+	return v.drain(ctx, in, nd, seed, esc, owner, rubric, pack)
 }
 
 // historyKeys collects every finding key across a carried round history —

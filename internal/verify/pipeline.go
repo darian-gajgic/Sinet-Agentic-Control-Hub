@@ -237,28 +237,50 @@ func AsPreambleRefusal(err error) (*PreambleRefusal, bool) {
 	return nil, false
 }
 
-// validateInput checks the drain's structural preconditions and resolves
-// the rubric bundle (shared by the fresh entry and the S07.7 resume entry).
-// The three infrastructure absences are marked as the preamble refusal class;
-// a malformed deliverable is NOT — that is a caller defect, not an outage.
-func (v *Verifier) validateInput(d Deliverable) (*RubricBundle, error) {
+// resolvePack answers the pack resolution for one judged round: the seam when
+// wired (Spec S07.8 [A14]: the posture is computed per revision from the
+// registry's current capture), else the static Pack.
+func (v *Verifier) resolvePack(ctx context.Context) (*CheckPack, error) {
+	if v.ResolvePack == nil {
+		return v.Pack, nil
+	}
+	return v.ResolvePack(ctx)
+}
+
+// validateInput checks the drain's structural preconditions and resolves the
+// rubric bundle and the round-1 check pack (shared by the fresh entry and the
+// S07.7 resume entry). The infrastructure absences are marked as the preamble
+// refusal class; a malformed deliverable is NOT — that is a caller defect, not
+// an outage.
+func (v *Verifier) validateInput(ctx context.Context, d Deliverable) (*RubricBundle, *CheckPack, error) {
 	if d.TaskID == "" || d.RunID == "" || d.Domain == "" || d.Revision < 1 {
-		return nil, fmt.Errorf("%w: deliverable requires task, run, domain, revision", ErrBadInput)
+		return nil, nil, fmt.Errorf("%w: deliverable requires task, run, domain, revision", ErrBadInput)
 	}
 	if v.Judge == nil {
-		return nil, NewPreambleRefusal(fmt.Errorf("%w: V2 requires the Judge seam (Spec S07.5)", ErrSeamMissing))
+		return nil, nil, NewPreambleRefusal(fmt.Errorf("%w: V2 requires the Judge seam (Spec S07.5)", ErrSeamMissing))
 	}
 	rubric := v.Rubric
 	if rubric == nil {
 		rubric = SeedSoftwareRubric()
 	}
-	if LaunchDomain(d.Domain) && v.Pack == nil {
-		return nil, NewPreambleRefusal(ErrNoCheckPack)
+	pack, err := v.resolvePack(ctx)
+	if err != nil {
+		// The seam names what is missing (or that the registry itself failed)
+		// and marks its own class; re-wrapping would only bury the sentence
+		// the card is written from.
+		return nil, nil, err
 	}
-	if v.Pack != nil && v.Runner == nil {
-		return nil, NewPreambleRefusal(fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing))
+	// A launch domain with NO resolution at all is a wiring defect, not the
+	// bootstrap posture: bootstrap is computed from a registered project's
+	// capture and is never a default for an absent seam (Spec S07.8 [A14] —
+	// refusal terminals remain for genuine integrity cases).
+	if LaunchDomain(d.Domain) && pack == nil {
+		return nil, nil, NewPreambleRefusal(ErrNoCheckPack)
 	}
-	return rubric, nil
+	if pack.executes() && v.Runner == nil {
+		return nil, nil, NewPreambleRefusal(fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing))
+	}
+	return rubric, pack, nil
 }
 
 // drainSeed carries a drain invocation's starting state. The fresh entry
@@ -291,7 +313,7 @@ type drainSeed struct {
 // Verify runs the full drain for one deliverable revision.
 func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) {
 	d := in.Deliverable
-	rubric, err := v.validateInput(d)
+	rubric, pack, err := v.validateInput(ctx, d)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -303,14 +325,14 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 
 	// ---- Did-research-actually-run (1.9; Spec S07.3): deterministic,
 	// pre-judge, with its bounded fresh-session re-run. ----
-	researchNotes, card, err := v.researchGate(ctx, esc, owner, d, in.ResearchNodes)
+	researchNotes, card, err := v.researchGate(ctx, esc, owner, d, in.ResearchNodes, packPosture(pack))
 	if err != nil {
 		return Outcome{}, err
 	}
 	if card != nil {
 		return Outcome{Verdict: VerdictEscalate, Card: card}, nil
 	}
-	return v.drain(ctx, in, d, drainSeed{researchNotes: researchNotes, comments: in.Comments}, esc, owner, rubric)
+	return v.drain(ctx, in, d, drainSeed{researchNotes: researchNotes, comments: in.Comments}, esc, owner, rubric, pack)
 }
 
 // drain is the one S07.6 rework loop, entered fresh (Verify) or resumed
@@ -319,7 +341,7 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (Outcome, error) 
 // of a fresh bounded budget (the intake coverage-card "one more round"
 // precedent) — while round NUMBERING continues across the carried history
 // so the durable record stays one coherent progression.
-func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, seed drainSeed, esc *Escalator, owner string, rubric *RubricBundle) (Outcome, error) {
+func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, seed drainSeed, esc *Escalator, owner string, rubric *RubricBundle, pack *CheckPack) (Outcome, error) {
 	rec := v.recorder()
 	cap64, err := v.Settings.Int(keyReworkRounds)
 	if err != nil {
@@ -347,7 +369,38 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 	// judged rounds (Spec S07.6: ⚙ verification.rework_rounds bounds the
 	// drain; blockers-only re-entry makes late rounds rare).
 	for round := startRound; ; round++ {
-		record := RoundRecord{Round: round, ContentSHA: d.SHA256(), Revision: d.Revision}
+		// The posture is resolved fresh for every judged round beyond the
+		// first, from the registry's CURRENT capture (Spec S07.8 [A14]):
+		// commands captured mid-drain restore the executable ladder on the
+		// next revision and the advisory marking drops, with no residue. Flake
+		// quarantines recorded during THIS drain ride the new resolution —
+		// quarantined stays quarantined pending fix (S07.3 rule 6).
+		if round > startRound {
+			next, err := v.resolvePack(ctx)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if LaunchDomain(d.Domain) && next == nil {
+				// The seam stopped resolving anything for a launch domain
+				// mid-drain. That is no posture: a launch domain is never
+				// silently degraded, so it crashes for the recovery ladder,
+				// where a fork may well read the registry fine.
+				return Outcome{}, fmt.Errorf("%w: resolved nothing for domain %q at round %d", ErrNoCheckPack, d.Domain, round)
+			}
+			if next != nil && pack != nil {
+				next.Quarantines = pack.Quarantines
+			}
+			pack = next
+		}
+		posture := packPosture(pack)
+		record := RoundRecord{Round: round, ContentSHA: d.SHA256(), Revision: d.Revision, Posture: posture}
+		if posture == PostureBootstrap {
+			record.PostureNote = BootstrapPostureNote
+			// Requester review is the real gate under an advisory verdict, and
+			// it is recorded as DATA so no later completion or auto-deliver
+			// surface has to remember it (Spec S07.8; S06.4 band rule).
+			record.ReviewMandatory = true
+		}
 
 		// ---- S13.1 minting: the candidate passes to review — one
 		// revision per round (idempotent when the resume path re-enters on
@@ -389,7 +442,7 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatCapHit, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 				Summary: "artifact malformed after the one-regeneration V0 bound (Spec S07.2)",
-				Detail:  v0.Reasons, Rounds: out.Rounds,
+				Detail:  postureDetail(v0.Reasons, posture), Rounds: out.Rounds,
 				BestEffort: fmt.Sprintf("revision %d (sha256 %s) is the best-effort state; V0 reasons attached", d.Revision, record.ContentSHA),
 			})
 			if err != nil {
@@ -401,12 +454,24 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 
 		// ---- V1 (Spec S07.3). ----
 		var v1res *V1Result
-		if v.Pack != nil {
+		switch {
+		case posture == PostureBootstrap:
+			// The ladder has nothing it could run, so V1 still RUNS and says
+			// so: every rung and every step contract records UNVERIFIABLE-HERE
+			// (Spec S07.8 [A14]). No workspace is materialized — there is
+			// nothing to materialize it for.
+			res := bootstrapV1(pack, in.Steps)
+			v1res = &res
+			record.V1 = v1res
+			if _, err := rec.RecordV1(ctx, d.RunID, res); err != nil {
+				return Outcome{}, err
+			}
+		case pack != nil:
 			ws, cleanup, err := v.workspace(ctx, d, in.Workspace)
 			if err != nil {
 				return Outcome{}, err
 			}
-			res, err := RunV1(ctx, v.Pack, v.Runner,
+			res, err := RunV1(ctx, pack, v.Runner,
 				CheckRequest{RunID: d.RunID, Workspace: ws, EvidenceDir: in.EvidenceDir},
 				in.Steps, v.now(), v.Settings)
 			if cleanup != nil {
@@ -482,7 +547,13 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 
 		// ---- Verdict (Spec S07.5). ----
 		verdict := ComputeVerdict(ax2, findings, ax1.Escalate)
-		if verdict == VerdictShip && suppressed > 0 {
+		// A bootstrap round's verdict is advisory: nothing mechanical decided
+		// anything, so it never lands as a clean SHIP (Spec S07.8 — the
+		// degraded-mode treatment marks the verdict visibly non-authoritative).
+		// The posture disclosure rides the CHECK-INTEGRITY category, which
+		// ComputeVerdict excludes from the note count by design, so the
+		// downgrade is stated here rather than smuggled through a finding.
+		if verdict == VerdictShip && (suppressed > 0 || posture == PostureBootstrap) {
 			verdict = VerdictShipWithNotes
 		}
 		record.Verdict = verdict
@@ -521,7 +592,7 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 				continue
 			}
 			raisedIntegrity[f.Key()] = true
-			c, err := v.raiseIntegrity(ctx, esc, owner, d, f)
+			c, err := v.raiseIntegrity(ctx, esc, owner, d, f, pack)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -530,21 +601,30 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 
 		switch verdict {
 		case VerdictShip, VerdictShipWithNotes:
+			out.Verdict = verdict
+			if posture == PostureBootstrap {
+				// An advisory verdict flips nothing to verified: SetVerified
+				// stays the only path to verified status and it demands an
+				// authoritative verdict (Spec S05.1/S07.11). The items stay
+				// done_unverified for the mandatory requester review, and the
+				// keep-forever verdict row above records everything anyway.
+				return out, nil
+			}
 			verified, err := VerifyLedgerItems(ctx, v.Ledger, d.RunID, d.TaskID, verdicts, seq)
 			if err != nil {
 				return Outcome{}, err
 			}
-			out.Verdict, out.VerifiedItems = verdict, verified
+			out.VerifiedItems = verified
 			return out, nil
 
 		case VerdictReopenSpec:
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatReopenSpec, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 				Summary: "axis 2 reopens the specification: " + ax2.ReopenSpec,
-				Detail: []string{
+				Detail: postureDetail([]string{
 					"REOPEN-SPEC is a human decision; the judge can never change the spec itself (Spec S07.5; D10).",
 					"An accepted adjustment lands as an S06.9 ADDED/MODIFIED/REMOVED delta and re-freezes the ACs; later rounds judge against the amended frozen set.",
-				},
+				}, posture),
 				Findings: findings, Rounds: out.Rounds,
 			})
 			if err != nil {
@@ -562,6 +642,7 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			c, err := esc.Raise(ctx, Escalation{
 				Category: cat, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 				Summary:  "judge escalated instead of another round: " + reason,
+				Detail:   postureDetail(nil, posture),
 				Findings: findings, Rounds: out.Rounds,
 				BestEffort: fmt.Sprintf("revision %d (sha256 %s)", d.Revision, record.ContentSHA),
 			})
@@ -586,8 +667,9 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			}
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatCapHit, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
-				Summary:  "rework stopped without SHIP: " + reason,
-				Detail:   []string{"Every round's findings and verdicts are attached — never a silent stop (Spec S07.6)."},
+				Summary: "rework stopped without SHIP: " + reason,
+				Detail: postureDetail(
+					[]string{"Every round's findings and verdicts are attached — never a silent stop (Spec S07.6)."}, posture),
 				Findings: findings, Rounds: out.Rounds,
 				BestEffort: fmt.Sprintf("revision %d (sha256 %s) is the best-effort state", d.Revision, record.ContentSHA),
 			})
@@ -651,7 +733,7 @@ func fixupRevision(nd, prev Deliverable) Deliverable {
 // RESEARCH-NOT-RUN card when the budget is exhausted (Spec S07.3/S07.7).
 // The returned notes carry UNVERIFIABLE-HERE outcomes into the round record
 // — loud, never a fake pass.
-func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner string, d Deliverable, nodes []intake.ResearchNode) ([]Finding, *Card, error) {
+func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner string, d Deliverable, nodes []intake.ResearchNode, posture Posture) ([]Finding, *Card, error) {
 	if len(nodes) == 0 {
 		return nil, nil, nil
 	}
@@ -704,7 +786,7 @@ func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner strin
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatResearchNotRun, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 				Summary: "research node(s) never invoked a research tool (1.9) — correctness on world-facts is never left to model memory",
-				Detail:  detail,
+				Detail:  postureDetail(detail, posture),
 			})
 			if err != nil {
 				return nil, nil, err
@@ -727,16 +809,16 @@ func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner strin
 // implicated check pending fix (Spec S07.7 route). The quarantine owner is
 // the card holder and the fix-by date is the card's push deadline
 // [coordinator-draft reading: the route fixes the sink, not the dates].
-func (v *Verifier) raiseIntegrity(ctx context.Context, esc *Escalator, owner string, d Deliverable, f Finding) (Card, error) {
+func (v *Verifier) raiseIntegrity(ctx context.Context, esc *Escalator, owner string, d Deliverable, f Finding, pack *CheckPack) (Card, error) {
 	quarantined := ""
-	if v.Pack != nil && f.Criterion != "" {
-		for _, c := range v.Pack.Checks {
+	if pack != nil && f.Criterion != "" {
+		for _, c := range pack.Checks {
 			if c.ACKey == f.Criterion {
 				push, err := v.Settings.Int(keyCardPushHours)
 				if err != nil {
 					return Card{}, fmt.Errorf("verify: read ⚙ %s: %w", keyCardPushHours, err)
 				}
-				if err := v.Pack.QuarantineCheck(Quarantine{
+				if err := pack.QuarantineCheck(Quarantine{
 					CheckID: c.ID, Owner: owner, Reason: f.Text,
 					FixBy: v.now().Add(time.Duration(push) * time.Hour),
 				}); err != nil {
@@ -778,12 +860,16 @@ func (v *Verifier) RecordAuditFailure(ctx context.Context, d Deliverable, checkI
 	if err != nil {
 		return Card{}, err
 	}
-	if v.Pack != nil {
+	pack, err := v.resolvePack(ctx)
+	if err != nil {
+		return Card{}, err
+	}
+	if pack != nil {
 		push, err := v.Settings.Int(keyCardPushHours)
 		if err != nil {
 			return Card{}, fmt.Errorf("verify: read ⚙ %s: %w", keyCardPushHours, err)
 		}
-		if err := v.Pack.QuarantineCheck(Quarantine{
+		if err := pack.QuarantineCheck(Quarantine{
 			CheckID: checkID, Owner: owner,
 			Reason: "planted-defect audit failure: " + detail,
 			FixBy:  v.now().Add(time.Duration(push) * time.Hour),
