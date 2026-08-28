@@ -11,10 +11,13 @@ expressly kept — cannot appear). Classes:
 `\(S[0-9]+\.` · `\(S[0-9]+;` · `\(Spec S` · `\(D[0-9]+` · `P47-` ·
 `\([0-9]+\.[0-9]+\)` · `\bD10\b` · `\bB[0-9]-[0-9]\b` · `\bA1[0-9]\b`.
 
-**Census.** 728 hits at `61d7df7` → **553** after the purge + drain r1.
-Of those, **86** are class-(c) `%w:` internal sentinels (the flagged deferred
-conduit). The remaining 467 fall in the families below. **Zero unexplained
-requester-surface survivors.**
+**Census (trued at drain r2 from a fresh sweep).** 728 hits at `61d7df7` →
+**547**. Of those, **86** are class-(c) `%w:` internal sentinels (the flagged
+deferred conduit) and the remaining **461** fall in the families below. **Zero
+unexplained requester-surface survivors.**
+
+Round history: 728 → 553 (purge + drain r1) → 547 (drain r2 closed six door
+strings and the onboarding activity line).
 
 ---
 
@@ -74,8 +77,8 @@ record · `:436` Stage-0 triage classification · `:519` question-set fallback �
 `:1804` spent-re-emission basis.
 
 `intake/delta.go:301` delta-only card · `stage/answer.go:81`, `:164`, `:215`
-(retry / accept-best-effort / guidance bases) · `stage/onboard.go:428`
-onboarding scan-draft · `stage/compose.go:194`, `:296` composition ceremony ·
+(retry / accept-best-effort / guidance bases) · `stage/compose.go:194`, `:296`
+composition ceremony ·
 `stage/skeleton.go:470/:524/:645/:748/:850/:1136` stage-work labels ·
 `stage/split.go:129` · `stage/ladderanswer.go:91` retry basis ·
 `stage/engines.go:598` stage-input label · `verify/v2.go:146` verification
@@ -136,9 +139,44 @@ forbidding the model from quoting internal ids back at a requester (R1).
 
 ---
 
+## G. Corrections made at drain r2
+
+**Filed wrong, now REWRITTEN.** `stage/onboard.go:428` was listed under family
+C as a ledger basis. It is not: it is a `TransitionOptions.Reason`, which is
+served as the activity line on the owner's onboarding run card — the exact
+class drain r1's F3 purged. It now reads like its F3 siblings. The ledger
+entry is withdrawn, and the lesson is that "which STRUCT FIELD carries it"
+decides the audience, never which package it sits in.
+
+**Contract-class survivors on requester doors, now REWRITTEN.** Six strings the
+class scan caught but no family explained, all served to a person standing at a
+door: `api/actions.go:244` and `:262` (the follow-up door's bad-version and
+no-such-version refusals), `api/objects.go:103` (the 404 on a requester's own
+object read), `api/previewapi.go:187` (the preview-stop answer, which now names
+all four things the stop actually did).
+
+**Genuine ops keeps on the same handler, LEDGERED here per string.**
+
+| String | Site | Reason |
+|---|---|---|
+| `this revision pins an object whose bytes are not in the object dir (S13.1 retention)` | `api/objects.go:124` | 500-class platform-integrity answer: the pinned bytes are GONE. The caller cannot ask this differently, it is paired with an `Error` log naming the deliverable and sha, and the retention rule it cites is what an operator needs to chase it. Not a door a requester can act on. |
+| `this revision pins an object whose stored bytes hash differently (S13.2 content addressing)` | `api/objects.go:132` | Same class, same posture: the bytes are present and are NOT the bytes the URL names. One vocabulary for one failure, deliberately shared with `reviewErr`'s content-drift answer. |
+
+---
+
 ## Deferred-ledger items raised by this packet
 
 1. **The `writeSurface` `err.Error()` fallback** (§A) — sentinel-not-text
    coverage owed; 86 literals one unmapped error from the wire.
 2. **`chooseFlatLane`'s raw `%v`** (`worker/routing.go`) — a Go error rendered
    into requester prose. Pre-existing; coordinator ruled do-not-fix here.
+3. **Bare-token citations OUTSIDE the declared classes** (evaluator's nit,
+   drain r2). The sweep's regex requires a paren or a known prefix, so a spec
+   id written as bare prose slips it: `api/actions.go:253` ("the S13.9 framings
+   are the landed set", a served `badRequest` on the follow-up door) and the
+   "S10.4 pause switch" not-wired family. Coordinator's disposition: these ride
+   this deferred conduit item rather than being fixed piecemeal, because
+   closing the CLASS needs a widened scan, not four hand edits. **Note for
+   whoever takes it:** `actions.go:253` sits one line from two refusals drain
+   r2 rewrote, so that door is knowingly half-purged until then — it is the
+   cheapest first target and the most visible.

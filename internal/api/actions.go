@@ -241,7 +241,8 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 		body.Revision = current
 	}
 	if body.Revision < 1 {
-		s.writeSurface(w, nil, badRequest("bad revision: a follow-up links to a numbered revision of the source deliverable (S13.9)"))
+		// S13.9: a follow-up carries ONE link, to a numbered revision.
+		s.writeSurface(w, nil, badRequest("bad version: a follow-up is linked to a numbered version of the work it follows, and versions start at 1"))
 		return
 	}
 	// Client input is validated HERE, at the boundary, so the spawn call below
@@ -259,7 +260,8 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 		deliverableID, body.Revision).Scan(&exists); {
 	case errors.Is(err, sql.ErrNoRows):
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-			"no revision %d of %s: a follow-up links to a revision that exists (S13.9)", body.Revision, deliverableID)))
+			// S13.9: the one successor link must resolve.
+			"there is no version %d of %s: a follow-up can only be linked to a version that exists", body.Revision, deliverableID)))
 		return
 	case err != nil:
 		s.writeSurface(w, nil, fmt.Errorf("read deliverable revision: %w", err))

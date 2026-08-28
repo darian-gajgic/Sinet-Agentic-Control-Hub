@@ -100,7 +100,8 @@ func (s *Server) handleDeliverableObject(w http.ResponseWriter, r *http.Request)
 		// dir holds it. The alternative would answer differently for a sha that
 		// exists elsewhere, which is the existence oracle the scope rule bars.
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusNotFound, Code: "not_found",
-			Msg: fmt.Sprintf("no revision of this deliverable pins object %q (S13.2)", sha)})
+			// S13.2 content addressing: a revision pins objects by hash.
+			Msg: fmt.Sprintf("no version of this work refers to a file with that fingerprint (%q)", sha)})
 		return
 	}
 

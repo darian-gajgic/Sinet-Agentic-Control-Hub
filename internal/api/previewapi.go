@@ -184,7 +184,9 @@ func (s *Server) handlePreviewStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeReadJSON(w, PreviewStopped{SessionID: sessionID, Stopped: true,
-		Detail: "stopped: the backend is down, the port is back in the pool, any route is removed and the disposable substrate is deleted (S13.8)"})
+		// S13.8: stop tears down the backend, the port, the route and the
+		// disposable substrate — all four, or the stop is not complete.
+		Detail: "stopped: the preview is shut down, its port is free again, its web address no longer points anywhere, and the temporary copy it ran from is deleted"})
 }
 
 // previewErr maps the preview module's refusals ON THE ERROR'S TYPE. The

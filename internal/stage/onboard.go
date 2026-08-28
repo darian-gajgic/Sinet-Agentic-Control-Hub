@@ -425,7 +425,10 @@ func (s *Skeleton) dispatchOnboard(ctx context.Context, r run.Run) error {
 		return errors.New("stage: onboarding seam not wired")
 	}
 	if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateRunning, run.TransitionOptions{
-		Reason: "onboarding scan/draft (Spec S13.7)", Actor: run.ActorPlatform,
+		// Served as the activity line on the owner's onboarding run card, so
+		// it speaks plain words like its F3 siblings (Spec S13.7 register→
+		// clone→scan→draft).
+		Reason: "looking through the project and drafting what it found", Actor: run.ActorPlatform,
 	}); err != nil {
 		return err
 	}
