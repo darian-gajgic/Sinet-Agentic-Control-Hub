@@ -90,7 +90,7 @@ func TestZAISeatResolvesUnderCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no coverage: %v", err)
 	}
-	if !strings.Contains(gap, "Subscription gap (2.7)") {
+	if !strings.Contains(gap, "Not covered by a subscription") {
 		t.Errorf("gap advice = %q, want the unchanged 2.7 leg", gap)
 	}
 }
@@ -120,7 +120,7 @@ func TestFlatLaneSelectionIgnoresDollars(t *testing.T) {
 			t.Errorf("%s: chose lane %q, want %q — selection between flat lanes is the pressure gauge's (S08.8; D5)",
 				tc.name, seat.Lane, tc.wantLane)
 		}
-		if !strings.Contains(strings.ToLower(reason), "pressure") {
+		if !strings.Contains(reason, "by how much of each is left") {
 			t.Errorf("%s: the plain reason does not say the choice was made on consumption pressure: %q", tc.name, reason)
 		}
 	}
@@ -233,7 +233,7 @@ func TestUtilityDutyStillDegradesWithCorrectedReason(t *testing.T) {
 		if strings.Contains(reason, "no second adapter") {
 			t.Errorf("LocalAvailable=%v: the reason still claims no second adapter exists — LN-1 landed one: %q", localUp, reason)
 		}
-		if localUp && !strings.Contains(strings.ToLower(reason), "provider entry") {
+		if localUp && !strings.Contains(reason, "nothing is set up yet to send a task's own work to them") {
 			t.Errorf("LocalAvailable=%v: the corrected reason does not name the absent local PROVIDER ENTRY: %q", localUp, reason)
 		}
 	}

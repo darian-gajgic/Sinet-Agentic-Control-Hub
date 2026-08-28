@@ -76,12 +76,12 @@ func TestLN9LanePinRefusalIsOnePredicateWithDistinctDetail(t *testing.T) {
 		t.Fatal("a pin to the local engine lane was accepted — it carries no v0 consumer, so honoring it could " +
 			"only mean riding the paid seat (brief R8(b))")
 	}
-	for _, want := range []string{"local", "S12.1 class (a)", "no local provider entry"} {
+	for _, want := range []string{"local", "nothing is set up", "paid model"} {
 		if !strings.Contains(local, want) {
 			t.Errorf("the local refusal does not say %q: %q", want, local)
 		}
 	}
-	if strings.Contains(local, "Subscription gap") || strings.Contains(local, "2.7") {
+	if strings.Contains(local, "Not covered by a subscription") {
 		t.Errorf("the local refusal borrowed the subscription-gap wording, which tells an operator to buy "+
 			"something they already hold: %q", local)
 	}
@@ -96,7 +96,7 @@ func TestLN9LanePinRefusalIsOnePredicateWithDistinctDetail(t *testing.T) {
 		t.Error("the uncovered-lane refusal and the local-lane refusal are the same sentence — they are different " +
 			"situations with different remedies (OQ-5: one code, distinct detail)")
 	}
-	if !strings.Contains(uncovered, "flat-rate") {
+	if !strings.Contains(uncovered, "not covered by any subscription") {
 		t.Errorf("the uncovered refusal does not name coverage as the reason: %q", uncovered)
 	}
 	// Both name what IS pinnable, the way the plan-budget verb names the
@@ -174,7 +174,7 @@ func TestLN9BoundPinSkipsTheFlatLaneComparison(t *testing.T) {
 	if !strings.Contains(reason, `"zai"`) {
 		t.Errorf("the reason does not name the pinned lane: %q", reason)
 	}
-	if !strings.Contains(reason, "REPLACED") || !strings.Contains(reason, "consumption-pressure") {
+	if !strings.Contains(reason, "instead of comparing") || !strings.Contains(reason, "headroom") {
 		t.Errorf("the reason does not say the pressure comparison was replaced: %q", reason)
 	}
 	if !strings.Contains(reason, "pinned on this task") {
@@ -190,7 +190,7 @@ func TestLN9BoundPinSkipsTheFlatLaneComparison(t *testing.T) {
 				banned, reason)
 		}
 	}
-	if !strings.Contains(reason, "never dollars — D5") {
+	if !strings.Contains(reason, "never about money") {
 		t.Errorf("the pin reason drops the D5 disclaimer the flat-lane reasons carry: %q", reason)
 	}
 }
@@ -208,7 +208,7 @@ func TestLN9PinOnTheConfiguredLaneAlsoBinds(t *testing.T) {
 	if seat.Lane != "anthropic" {
 		t.Fatalf("seated lane %q, want anthropic", seat.Lane)
 	}
-	if !strings.Contains(reason, "REPLACED") {
+	if !strings.Contains(reason, "instead of comparing") {
 		t.Errorf("a pin on the configured lane did not replace the comparison: %q", reason)
 	}
 }
@@ -260,7 +260,7 @@ func TestLN9CoveredLaneWithNoSeatForTheDutyRefuses(t *testing.T) {
 	// The message names the TRUE cause. r1 F1 corrected it: it used to blame
 	// the duty ("this duty resolves to no model there"), which sent a reader to
 	// the template when the missing thing is a commissioned execution seat.
-	if !strings.Contains(err.Error(), "no execution seat on it") {
+	if !strings.Contains(err.Error(), "no model on that lane has been set up here") {
 		t.Errorf("the refusal does not say what is missing: %v", err)
 	}
 	if strings.Contains(err.Error(), "this duty resolves to no model there") {
@@ -292,7 +292,7 @@ func TestLN9TaskPinSupersedesTheTemplateModelPin(t *testing.T) {
 		t.Error("the template's pinned model was carried onto the pinned lane — the lane's seat is the lane " +
 			"document's own, and moving a model between lanes invents a fact")
 	}
-	if !strings.Contains(reason, "SUPERSEDES") {
+	if !strings.Contains(reason, "OVERRIDES the model this specialist normally asks for") {
 		t.Errorf("the reason does not record the supersession: %q", reason)
 	}
 	if !strings.Contains(reason, profile.ModelPinReason) {

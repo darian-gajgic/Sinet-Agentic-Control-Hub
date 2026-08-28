@@ -214,7 +214,7 @@ func TestLN9R1SelectionRefusalIsLoudAndAttributable(t *testing.T) {
 	if !strings.Contains(err.Error(), adapters.LaneZAI) {
 		t.Errorf("the refusal does not name the pin: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no execution seat on it") {
+	if !strings.Contains(err.Error(), "no model on that lane has been set up here") {
 		t.Errorf("the refusal does not name the true cause: %v", err)
 	}
 	if !strings.Contains(err.Error(), "lane pin cannot be honored") {

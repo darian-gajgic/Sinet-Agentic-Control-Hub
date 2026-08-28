@@ -221,12 +221,12 @@ func (m *Manager) Launch(ctx context.Context, req LaunchRequest) (*Session, erro
 	case LaneCLI:
 		return m.launchCLI(ctx, s, runner)
 	case LaneNotebook:
-		return m.finishAndRelease(ctx, s, StateSelfPreview, "notebook self-preview (S13.8)", m.artifactURL(s)), nil
+		return m.finishAndRelease(ctx, s, StateSelfPreview, "this kind of file previews itself; no separate preview is started", m.artifactURL(s)), nil
 	case LaneSidecar:
 		return m.finishAndRelease(ctx, s, StateRequiresContainer,
-			"project needs a sidecar (Postgres/Redis-class); the rootless-podman container tier is deferred (S13.8)", ""), nil
+			"project needs a sidecar (Postgres/Redis-class); the rootless-podman container tier is deferred", ""), nil
 	default: // LaneNone
-		return m.finishAndRelease(ctx, s, StateNoPreview, "no preview available for this type (S13.8)", ""), nil
+		return m.finishAndRelease(ctx, s, StateNoPreview, "there is no way to preview work of this kind", ""), nil
 	}
 }
 
@@ -236,13 +236,13 @@ func (m *Manager) finishUnbacked(s *Session, dtype string) *Session {
 	if lane, _ := Detect("", dtype, ""); lane == LaneNotebook {
 		s.Lane = LaneNotebook
 		s.State = StateSelfPreview
-		s.Reason = "notebook self-preview (S13.8)"
+		s.Reason = "this kind of file previews itself; no separate preview is started"
 		s.URL = m.artifactURL(s)
 		return s
 	}
 	s.Lane = LaneNone
 	s.State = StateNoPreview
-	s.Reason = "no repo-backed revision to preview (S13.8)"
+	s.Reason = "there is no saved version of this work to preview"
 	return s
 }
 
@@ -269,7 +269,7 @@ func (m *Manager) launchStatic(ctx context.Context, s *Session) (*Session, error
 	if err != nil {
 		m.unreserve(s)
 		if errors.Is(err, errPortExhausted) {
-			return m.finishAndRelease(ctx, s, StateAtCapacity, "no bindable preview port in the range (S13.8)", ""), nil
+			return m.finishAndRelease(ctx, s, StateAtCapacity, "every port set aside for previews is in use", ""), nil
 		}
 		return nil, err
 	}
@@ -531,7 +531,7 @@ func (m *Manager) reserveSlot(s *Session) (ok bool, reason string) {
 	}
 	port, err := m.cfg.Ports.Allocate(s.ID)
 	if err != nil {
-		return false, "port pool exhausted (S13.8)"
+		return false, "every port set aside for previews is in use"
 	}
 	s.PoolPort = port
 	m.sessions[s.ID] = s // hold the slot before releasing the lock
@@ -551,7 +551,7 @@ func (m *Manager) unreserve(s *Session) {
 }
 
 func capacityReason(capN int64) string {
-	return fmt.Sprintf("at the concurrent-preview cap (⚙ preview.max_concurrent=%d); preview dev servers compete with interactive host use (S13.8/3.11)", capN)
+	return fmt.Sprintf("already running the most previews allowed at once (⚙ preview.max_concurrent=%d); previews compete with what you are doing on this machine", capN)
 }
 
 // markUnavailable records the honest unavailable/deferred state on a session

@@ -42,7 +42,7 @@
       }
     }
   ],
-  "visibility": "the projects you own, plus the projects you have been invited to as a member (S13.7). Your own onboardings appear while they are still pending your approval; another person's never appear, at any state. The operator role bit opens nothing here: a project's captured content is project content, and D10 is authority over what the platform DOES, not a read into another person's work.",
+  "visibility": "the projects you own, plus the projects you have been invited to. A project you are setting up shows here while it is still waiting for your approval; somebody else's never shows, at any stage. Being the household's operator does not open this list any wider: what a project holds is the work of the people in it, and running the platform is not the same as reading their work.",
   "cursor": 11,
   "truncated": false
 }

@@ -29,7 +29,7 @@ func TestResolveSeatLocalAvailableDegradesNotError(t *testing.T) {
 	if seat.Model != exec.Model || seat.Lane != exec.Lane {
 		t.Errorf("seat = %+v, want the paid execution seat %+v", seat, exec)
 	}
-	if !strings.Contains(reason, "engine lane carries no v0 consumer") {
+	if !strings.Contains(reason, "nothing is set up yet to send a task's own work to them") {
 		t.Errorf("reason = %q, want the refined class-(a) honest reason", reason)
 	}
 	// Mechanical helper duties degrade the same way.
@@ -37,7 +37,7 @@ func TestResolveSeatLocalAvailableDegradesNotError(t *testing.T) {
 	if err2 != nil {
 		t.Fatalf("mechanical dispatch errored: %v", err2)
 	}
-	if !strings.Contains(reason2, "engine lane carries no v0 consumer") {
+	if !strings.Contains(reason2, "nothing is set up yet to send a task's own work to them") {
 		t.Errorf("mechanical reason = %q, want the refined reason", reason2)
 	}
 }
@@ -55,7 +55,7 @@ func TestResolveSeatLocalAbsentDegradesWithAbsenceReason(t *testing.T) {
 	if seat.Model != exec.Model {
 		t.Errorf("seat model = %q, want the execution seat %q", seat.Model, exec.Model)
 	}
-	if !strings.Contains(reason, "not configured") {
+	if !strings.Contains(reason, "none are set up here") {
 		t.Errorf("reason = %q, want the not-configured reason", reason)
 	}
 }

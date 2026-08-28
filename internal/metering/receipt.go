@@ -171,7 +171,9 @@ func (rc *Receipts) MaterializeTx(ctx context.Context, tx *sql.Tx, runID string)
 		ParkHistory:        parks,
 		RequestIDs:         requestIDs,
 		Mode: ModeSummary{
-			Note: "no mode change (S10.6 downgrade ladder lands with routing S08/local tier S12)",
+			// S10.6's downgrade ladder lands with routing (S08) and the local
+			// tier (S12); until then no run ever changes mode.
+			Note: "no change of mode during this work",
 		},
 		DirectUse:      directUse(cons),
 		MaterializedTS: time.Now().UTC(),

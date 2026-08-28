@@ -429,7 +429,8 @@ func (j *Journal) ReconcileInDoubt(ctx context.Context) ([]InDoubtResolution, er
 		case ClassD:
 			if _, err := j.MarkUnknown(ctx, e.ID,
 				"crash window on an idempotency-less channel: the provider may or may not have acted; "+
-					"check the provider's own record before deciding (Spec S02.7 class D)"); err != nil {
+					// Spec S02.7 class D: no idempotency key, so replay is unsafe.
+					"check the provider's own record before deciding"); err != nil {
 				return out, err
 			}
 			out = append(out, InDoubtResolution{EffectID: e.ID, Class: e.Class, To: EffectUnknown})

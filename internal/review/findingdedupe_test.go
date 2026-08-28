@@ -40,7 +40,7 @@ func TestIdenticalFindingsInOneBatchFileOnce(t *testing.T) {
 	dup := review.FindingInput{
 		Author: "u1", RunID: "r1", Severity: review.SeverityNote,
 		Category:  "RESEARCH-NOT-RUN",
-		Body:      "did-research-actually-run undecidable for S-1: per-step usage counters not wired (S10 seam; B2-4) — recorded, not silently passed",
+		Body:      "There is no record proving step S-1 actually did its research on prices & costs: the platform does not yet keep a per-step record of what was looked up, so this could not be checked either way — recorded, not silently passed",
 		RawAnchor: "step:S-1",
 	}
 	if _, err := f.store.AddFindings(context.Background(), "dlv-t1", 1, []review.FindingInput{dup, dup}); err != nil {
@@ -62,7 +62,7 @@ func TestRefilingTheSameFindingIsIdempotent(t *testing.T) {
 	one := review.FindingInput{
 		Author: "u1", RunID: "r1", Severity: review.SeverityNote,
 		Category:  "RESEARCH-NOT-RUN",
-		Body:      "did-research-actually-run undecidable for S-1: per-step usage counters not wired (S10 seam; B2-4) — recorded, not silently passed",
+		Body:      "There is no record proving step S-1 actually did its research on prices & costs: the platform does not yet keep a per-step record of what was looked up, so this could not be checked either way — recorded, not silently passed",
 		RawAnchor: "step:S-1",
 	}
 	if _, err := f.store.AddFindings(context.Background(), "dlv-t1", 1, []review.FindingInput{one}); err != nil {
@@ -89,11 +89,11 @@ func TestDistinctFindingsAllFile(t *testing.T) {
 	a := review.FindingInput{
 		Author: "u1", RunID: "r1", Severity: review.SeverityNote,
 		Category:  "RESEARCH-NOT-RUN",
-		Body:      "did-research-actually-run undecidable for S-1 [P47-1]: per-step usage counters not wired",
+		Body:      "There is no record proving step S-1 actually did its research on prices & costs: no per-step record",
 		RawAnchor: "step:S-1",
 	}
 	b := a
-	b.Body = "did-research-actually-run undecidable for S-1 [P47-8]: per-step usage counters not wired"
+	b.Body = "There is no record proving step S-1 actually did its research on locality cues: no per-step record"
 	if _, err := f.store.AddFindings(context.Background(), "dlv-t1", 1, []review.FindingInput{a, b}); err != nil {
 		t.Fatalf("AddFindings: %v", err)
 	}

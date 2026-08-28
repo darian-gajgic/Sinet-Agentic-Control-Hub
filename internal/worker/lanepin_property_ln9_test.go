@@ -214,7 +214,7 @@ func TestLN9UnpinnedPropertyCanFail(t *testing.T) {
 		t.Error("the plain reason did not move under a pin — the pin reaches the approval card, the Workforce row " +
 			"and routing.decided through this string alone")
 	}
-	if !strings.Contains(withPin.PlainReason, "REPLACED") {
+	if !strings.Contains(withPin.PlainReason, "instead of comparing") {
 		t.Errorf("the pinned reason does not say the pressure comparison was replaced: %q", withPin.PlainReason)
 	}
 	// The other direction of the pin's own claim: the unpinned twin, in this

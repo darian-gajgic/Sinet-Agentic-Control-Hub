@@ -216,7 +216,7 @@ func TestRouteNoFitWritesGapAndEarnsCompose(t *testing.T) {
 	if !d.Degraded {
 		t.Fatalf("unknown domain must be degraded-marked (2.1 honesty)")
 	}
-	if !strings.Contains(d.PlainReason, "generalist-with-injected-knowledge") {
+	if !strings.Contains(d.PlainReason, "all-rounder") {
 		t.Fatalf("reason = %q", d.PlainReason)
 	}
 
@@ -231,7 +231,7 @@ func TestRouteNoFitWritesGapAndEarnsCompose(t *testing.T) {
 	if !d.ComposeEarned {
 		t.Fatalf("compose not earned at the ⚙ threshold: %+v", d)
 	}
-	if !strings.Contains(d.PlainReason, "EARNED") {
+	if !strings.Contains(d.PlainReason, "worth training") {
 		t.Fatalf("earned reason missing: %q", d.PlainReason)
 	}
 }
@@ -254,7 +254,7 @@ func TestRouteSubscriptionCoverageBinds(t *testing.T) {
 	if d.GapAdvice == "" || d.Model != "" {
 		t.Fatalf("uncovered seat must carry gap advice and no model: %+v", d)
 	}
-	if !strings.Contains(d.GapAdvice, "config-derived") {
+	if !strings.Contains(d.GapAdvice, "read from this platform's own configuration") {
 		t.Fatalf("advice must disclose its config-derived basis (P-T17-3 machinery is B5): %q", d.GapAdvice)
 	}
 
@@ -326,7 +326,7 @@ func TestRouteMechanicalHelperDegradesLocalAbsence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if !strings.Contains(d.PlainReason, "local free tier") || !strings.Contains(d.PlainReason, "not configured") {
+	if !strings.Contains(d.PlainReason, "free models on this machine") || !strings.Contains(d.PlainReason, "none are set up here") {
 		t.Fatalf("local-tier absence not recorded: %q", d.PlainReason)
 	}
 	if d.Model != "claude-sonnet-5" {

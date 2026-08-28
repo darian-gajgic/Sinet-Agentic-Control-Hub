@@ -135,7 +135,7 @@ func TestNoForkFinalizeNamesItsReason(t *testing.T) {
 		  ORDER BY event_seq DESC LIMIT 1`, direct.ID).Scan(&payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"finalized", "never forked", "BENCH-REG §2", "no_fork_reason"} {
+	for _, want := range []string{"finalized", "never restarted after an interruption", "BENCH-REG §2", "no_fork_reason"} {
 		if !strings.Contains(payload, want) {
 			t.Errorf("the finalize record does not carry %q: %s", want, payload)
 		}

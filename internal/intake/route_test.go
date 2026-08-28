@@ -104,7 +104,7 @@ func TestRerouteAndPinRecordedWithActor(t *testing.T) {
 	doc := f.ledgerDoc(st.TaskID)
 	found := false
 	for _, d := range doc.Decisions {
-		if strings.Contains(d.Text, "routing override") && d.Author == ledger.AuthorHuman {
+		if strings.Contains(d.Text, "was changed by hand on the approval card") && d.Author == ledger.AuthorHuman {
 			found = true
 		}
 	}
@@ -174,10 +174,10 @@ func TestNoFitTwoStageCardContent(t *testing.T) {
 	f.p.Router = &fakeRouter{block: intake.RouteBlock{
 		Cause: "no-fit-generalist", Generalist: true, Degraded: true,
 		Model: "claude-haiku-4-5", Lane: "anthropic", WindowTokens: 200_000,
-		PlainReason:   "No specialist fits; running as generalist-with-injected-knowledge, DEGRADED-MARKED.",
+		PlainReason:   "No trained specialist matches this work, so it runs on the platform's all-rounder. The result is marked lower-confidence: DEGRADED.",
 		GapSignature:  "family=software;domain=software;classes=C1;tools=",
 		ComposeEarned: true,
-		GapAdvice:     "Subscription gap (2.7): config-derived advice.",
+		GapAdvice:     "Not covered by a subscription: advice read from this platform's own configuration.",
 	}}
 
 	_, _, card := approvalCard(t, f)

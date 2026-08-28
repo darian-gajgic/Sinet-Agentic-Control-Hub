@@ -487,8 +487,9 @@ func (p *Pipeline) applyFamilyTaxonomy(st *State) string {
 	if _, seeded := p.taxonomies()[st.Family]; seeded {
 		return ""
 	}
-	return fmt.Sprintf("no question set is seeded for the %s family yet: the interview uses the generic set, "+
-		"while the task's family stays %s for planning and routing (S06.5)", st.Family, st.Family)
+	// S06.5: the fallback is disclosed, never performed silently.
+	return fmt.Sprintf("no question set has been written for %s work yet, so the interview asks the general "+
+		"questions; the task is still treated as %s when the plan is made and the work is assigned", st.Family, st.Family)
 }
 
 // systemAssumption writes the placeholder a never-asked slot carries until the
@@ -653,7 +654,8 @@ func (p *Pipeline) rebind(ctx context.Context, st *State, runID string) (bool, e
 			return nil
 		}
 		_, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateParked, run.TransitionOptions{
-			Reason: fmt.Sprintf("intake gate open on the superseding run: %s — gates wait (S06.1)", st.OpenAskKind),
+			// S06.1: an open gate parks the run until it is answered.
+			Reason: fmt.Sprintf("the newer run for this task is waiting on your answer to the %s — nothing moves until that card is answered", plainCardKind(CardKind(st.OpenAskKind))),
 			Actor:  run.ActorPlatform,
 		})
 		return err
@@ -886,23 +888,26 @@ func understoodBlock(st *State, tax *Taxonomy) *UnderstoodBlock {
 		return nil
 	}
 	items := make([]UnderstoodItem, 0, len(st.Resolutions))
-	add := func(r SlotResolution, name string) {
+	add := func(r SlotResolution, name string, s *Slot) {
 		items = append(items, UnderstoodItem{
 			SlotID: r.SlotID, Name: name, How: r.How,
-			Value: r.Value, Assumption: r.Assumption,
+			Value: r.Value, Label: optionLabel(s, r.Value), Assumption: r.Assumption,
 		})
 	}
-	for _, s := range tax.Slots {
+	for i := range tax.Slots {
+		s := &tax.Slots[i]
 		for _, r := range st.Resolutions {
 			if r.SlotID == s.ID {
-				add(r, s.Name)
+				add(r, s.Name, s)
 				break
 			}
 		}
 	}
 	for _, r := range st.Resolutions {
 		if tax.Slot(r.SlotID) == nil {
-			add(r, r.SlotID) // carried over from another family's set
+			// Carried over from another family's set: no options here to
+			// match, so no label — honest absence, never a guess.
+			add(r, r.SlotID, nil)
 		}
 	}
 	return &UnderstoodBlock{Items: items}
@@ -976,12 +981,66 @@ func reviewQuestions(st *State, tax *Taxonomy) []Question {
 		if r, ok := res[s.ID]; ok {
 			q.Resolution = &UnderstoodItem{
 				SlotID: r.SlotID, Name: s.Name, How: r.How,
-				Value: r.Value, Assumption: r.Assumption,
+				Value: r.Value, Label: optionLabel(&s, r.Value), Assumption: r.Assumption,
 			}
 		}
 		qs = append(qs, q)
 	}
 	return qs
+}
+
+// researchGapSummary writes the research card's headline: what the plan still
+// has to go and look up, named by SUBJECT rather than by the P47 rule id the
+// spine collected (P3-GF13 R1 — the card used to read "…research steps for:
+// P47-5"). The ids stay in Detail, which is a machine member.
+//
+// A rule the seed table does not carry has no plain subject to name, so the
+// sentence says the general thing rather than inventing a specific one.
+func researchGapSummary(st *State, ruleIDs []string) string {
+	const lead = "This task depends on facts about the world that can change, and the plan has no step that goes and checks them"
+	subjects := make([]string, 0, len(ruleIDs))
+	seen := make(map[string]bool, len(ruleIDs))
+	for _, id := range ruleIDs {
+		name := strings.ToLower(ResearchSubject(id))
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		subjects = append(subjects, name)
+	}
+	if len(subjects) == 0 {
+		return lead + "."
+	}
+	return lead + ": " + strings.Join(subjects, ", ") + "."
+}
+
+// pinnedSuffix says, in words, what the routing block's `pinned` boolean means
+// for the requester — the record used to render it as a Go bool (`pin=true`).
+func pinnedSuffix(pinned bool) string {
+	if pinned {
+		return " The choice is pinned, so a re-plan keeps it."
+	}
+	return ""
+}
+
+// optionLabel resolves the plain wording the requester clicked from the machine
+// value the record stores. The machine value is left exactly where it is: it is
+// the key the answer fold and the FE's edit box round-trip through, and
+// replacing it would turn a re-submitted CHOICE into free text (P3-GF13 R9).
+//
+// "" is the honest answer in both absence cases — a slot with no options to
+// match against, and an answer the requester typed in their own words, where
+// the value already IS the plain wording.
+func optionLabel(s *Slot, value string) string {
+	if s == nil || value == "" {
+		return ""
+	}
+	for _, o := range s.Options {
+		if o.Value == value {
+			return o.Label
+		}
+	}
+	return ""
 }
 
 // hasOptionValue reports whether v names one of this question's own option
@@ -1205,14 +1264,17 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 			return false, pair, p.appendState(ctx, st)
 		}
 		card := &Card{Kind: CardResearch, Decision: &DecisionBody{
-			Summary: "The task depends on facts in the world, but the plan still lacks required research steps for: " + joinKeys(res.MissingResearch),
+			// The SENTENCE names the plain SUBJECT of each missing lookup;
+			// Detail keeps the raw rule ids, which are machine members.
+			Summary: researchGapSummary(st, res.MissingResearch),
 			Detail:  res.MissingResearch,
 			Choices: []Option{
 				{Label: "I'll supply the fact myself", Value: ChoiceSupplyFact},
 				{Label: "Re-plan to add the research step", Value: ChoiceReplan},
 			},
 			Help: HelpBlock{
-				What:      "Live research is required by policy for data-bearing tasks (1.9).",
+				// 1.9: live research is required, never model memory.
+				What:      "When a result rests on facts that can change — prices, dates, versions, what is available — the platform looks them up rather than trusting what a model happens to remember.",
 				Wrong:     "Without it the result may rest on stale or invented facts.",
 				Recommend: "Let the plan research it — or supply the fact if you already own it.",
 			},
@@ -1813,7 +1875,8 @@ func (p *Pipeline) issueCard(ctx context.Context, st *State, card *Card) error {
 			return err
 		}
 		if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateParked, run.TransitionOptions{
-			Reason: fmt.Sprintf("intake gate open: %s — gates wait (S06.1)", card.Kind),
+			// S06.1: an open gate parks the run until it is answered.
+			Reason: fmt.Sprintf("waiting for your answer on the %s — nothing else happens until that card is answered", plainCardKind(card.Kind)),
 			Actor:  run.ActorPlatform,
 		}); err != nil {
 			return err
@@ -1843,7 +1906,9 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 	}
 	costTime := "UNPRICED (no price table; measured usage will appear on the receipt)"
 	if pair.Plan.Est.Known {
-		costTime = fmt.Sprintf("~%.2f USD (API-equivalent, D5)", pair.Plan.Est.USD)
+		// D5: the figure is API-equivalent, never a bill — said the way the
+		// receipt's own UNPRICED copy says it.
+		costTime = fmt.Sprintf("about %.2f USD if these calls were bought one at a time — a size guide, not a bill: they ride a subscription and cost nothing extra", pair.Plan.Est.USD)
 	}
 	l1 := ApprovalLayer1{
 		Restatement: pair.Spec.Restatement,

@@ -408,16 +408,21 @@ func (s *Server) handleWorkforceRead(w http.ResponseWriter, r *http.Request) {
 
 func rosterScopeStatement(scope ownerScope) string {
 	if scope.Operator {
-		return "every worker in the registry (the operator reads the whole roster — D10)"
+		// D10: a worker is audited platform machinery, so house authority DOES
+		// reach it — the runs/telemetry posture (CONVENTIONS §30), not the
+		// content line that binds personal memory and conversations.
+		return "every worker on the platform — as the household's operator you see the whole set"
 	}
-	return "your own personal workers plus the household roster (S15.10)"
+	// S15.10: own personal workers plus the household roster.
+	return "the workers you made yourself, plus the ones the whole household shares"
 }
 
 func outcomeScopeStatement(scope ownerScope) string {
 	if scope.Operator {
 		return "runs of every owner"
 	}
-	return "your own runs only — a shared worker's other runs belong to whoever launched them (D2)"
+	// D2: another person's runs are theirs, even on a shared worker.
+	return "your own runs only — when a shared worker runs for somebody else, that run is theirs, not yours to read"
 }
 
 // workforceWorker projects one roster entry onto the wire.
@@ -478,7 +483,8 @@ func workforceVersion(rv worker.RosterVersion, dom worker.Domain, outcomes versi
 			out.Granted.BudgetSteps = &steps
 		}
 	} else {
-		out.GrantedAbsent = "never approved — approval is the only writer of enforcement state (S08.2)"
+		// S08.2: approval is the only writer of enforcement state.
+		out.GrantedAbsent = "nobody has approved this worker yet, and approving is the only thing that ever grants it anything"
 	}
 	if rec := rv.Validation; rec != nil {
 		out.Validation = &WorkforceValidation{

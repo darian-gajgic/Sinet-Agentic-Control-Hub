@@ -59,7 +59,7 @@ func TestLN9PinRefusalCarriesItsStatusCodeAndTheLanesThatExist(t *testing.T) {
 		{"no-such-lane", []string{`"no-such-lane"`, "Pinnable lanes:", `"anthropic"`}},
 		// The local ENGINE lane refuses in its OWN words, citing the absent
 		// provider entry rather than a subscription the operator already holds.
-		{"local", []string{"S12.1 class (a)", "no local provider entry", `"anthropic"`}},
+		{"local", []string{"nothing is set up", "paid model", `"anthropic"`}},
 	} {
 		t.Run(tc.lane, func(t *testing.T) {
 			before := countTasks(t, h)

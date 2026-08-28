@@ -185,9 +185,14 @@ type MemoryList struct {
 	Truncated bool     `json:"truncated"`
 }
 
-const memoryVisibilityRule = "your own entries in every scope you own (S4.1), plus house-scope entries (house defaults address everyone, S4.5), " +
-	"plus project-scope entries of the projects you own or are invited to (S09.6). " +
-	"The operator role bit does not open another person's user-scope entries: memory is personal content, and D10 is authority over the HOUSE scope."
+// S4.1 (your own scopes), S4.5 (house defaults address everyone), S09.6
+// (project scope follows membership) and D10 — house authority is authority
+// over the HOUSE scope, never a read into a person's own notes (CONVENTIONS
+// §40-C's content-vs-telemetry line). Said plainly for the person reading it.
+const memoryVisibilityRule = "everything you have saved, in every place you own it, plus anything saved for the whole household " +
+	"(house notes are meant for everyone), plus the notes of projects you own or have been invited to. " +
+	"Being the household's operator does not open another person's own notes: what someone writes down is theirs, and running the " +
+	"platform is the right to curate the household's shared notes, not to read anybody's."
 
 func (s *Server) handleMemoryList(w http.ResponseWriter, r *http.Request) {
 	if !s.memoryReady(w) || !s.projReady(w) {
@@ -437,13 +442,16 @@ func (s *Server) memoryWriteRequest(w http.ResponseWriter, r *http.Request) (mem
 		// entry with an origin that says a curator vouched for it.
 		if !s.readScope(r).Operator {
 			s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-				Msg: "the imported origin is the operator's N20 house-KB import ceremony, where the import IS the approval (S09.4); a member's own entry is human_direct"})
+				// S09.4: the operator's import IS the approval; a member's own
+				// entry is human_direct.
+				Msg: "only the household's operator can mark an entry as imported — importing it is itself the act of vouching for it. An entry you write yourself is recorded as written by you."})
 			return memoryWriteBody{}, "", false
 		}
 	default:
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusBadRequest, Code: "bad_request",
-			Msg: fmt.Sprintf("unknown origin %q: this surface writes %q (the workspace entry) or %q (the operator's import). "+
-				"adopted_from is the v1 browse-and-adopt surface and proposed_from belongs to the station-2 drafter, which is dormant at v0 (S09.4)",
+			// S09.4's origin vocabulary; adopted_from/proposed_from arrive later.
+			Msg: fmt.Sprintf("unknown origin %q: this door writes %q (something you wrote) or %q (the operator's import). "+
+				"Adopting somebody else's entry and having the platform propose one are not built yet",
 				body.Origin, originHumanDirect, originImported)})
 		return memoryWriteBody{}, "", false
 	}
@@ -483,8 +491,9 @@ func (s *Server) callerInProject(w http.ResponseWriter, r *http.Request, project
 		}
 	}
 	s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-		Msg: fmt.Sprintf("project %q is not one you own or are invited to: project knowledge is shared by scope membership (S09.6), "+
-			"and it enters every run of that project", projectID)})
+		// S09.6: project knowledge is shared by scope membership.
+		Msg: fmt.Sprintf("project %q is not one you own or have been invited to. What is saved on a project is shared with everyone in it "+
+			"and goes into every piece of work it does", projectID)})
 	return false
 }
 
@@ -501,9 +510,11 @@ type MemoryRemoved struct {
 	Detail    string                `json:"detail"`
 }
 
-const removedDetail = "removed: the entry leaves every future assembly immediately — deterministic selection makes removal exact (S09.5). " +
-	"Its content stays in git history and its row stays for audit; true deletion is the owner's separate right. " +
-	"The influence list names the runs it was injected into; offering to queue re-verification of the deliverables they touched is the workspace UI's act over this data (B6-6)."
+// S09.5: selection is deterministic, so removal takes effect exactly and at
+// once; true deletion stays the owner's separate right.
+const removedDetail = "removed: from now on this entry goes into nothing the platform does — the choice of what to include is exact, so " +
+	"removal is exact too. Its text stays in the project's history and its record stays for the audit trail; erasing it for good is a " +
+	"separate right, and it is yours. The list below names the work this entry was fed into."
 
 // handleMemoryRemove routes Gate.Remove. Removal is owner-or-operator (§17
 // reading 4) and the gate enforces that itself; the influence list comes back
@@ -550,9 +561,11 @@ const deletedDetail = "content purged: the working-tree file is gone and the row
 
 var deletionLimits = []string{
 	"the knowledge file's git history still holds the content until a git-history purge is run, which is an S13 operation on the scope's knowledge dir",
-	"the database file releases the purged bytes at the next VACUUM INTO snapshot (S02.1)",
-	"artifacts already accepted while this entry was live remain exactly as they were — history is not rewritten (D9, S09.5)",
-	"no unlearning-from-weights is needed or possible: no fine-tuning exists anywhere in the loop, so a lesson only ever lived as retrievable, injectable, removable text (S09.5)",
+	// S02.1 snapshot mechanics, D9/S09.5 history integrity, S09.5's
+	// retrievable-text-only shape (nothing is ever trained into a model).
+	"the database gives the freed space back at its next scheduled snapshot",
+	"work you already accepted while this entry was live stays exactly as it was — the platform does not rewrite what happened",
+	"nothing has to be un-learned from a model: nothing here is ever trained into one, so an entry only ever existed as text that could be looked up, handed over, and removed",
 }
 
 // handleMemoryDelete routes Gate.TrueDelete — STRICTLY the owner's right (S4.1;
@@ -590,8 +603,11 @@ type MemoryConflictResolved struct {
 	Detail   string          `json:"detail"`
 }
 
+// S09.7: closing the question changes neither entry — a correction is its own
+// recorded write, which is what stops a conflict being settled silently.
 const conflictResolvedDetail = "the question is closed. Closing it records who answered and when; it does not change either entry — " +
-	"correcting, retiring or superseding one of them is a further write through the gate, which is what keeps a conflict from being resolved silently (S09.7)."
+	"correcting one, retiring it, or replacing it with a newer one is a separate change you make on purpose, and that is what keeps " +
+	"a disagreement from being settled quietly."
 
 // conflictStatusOpen is the stored status a resolvable edge carries (S09.7; the
 // 0004 CHECK admits `open` and `resolved`).
@@ -639,7 +655,8 @@ func (s *Server) handleMemoryConflictResolve(w http.ResponseWriter, r *http.Requ
 	}
 	if !mayAnswerConflict(c, s.callerID(r)) {
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-			Msg: "this question card is addressed to the affected entry's owner (S09.7); it is theirs to answer"})
+			// S09.7: the affected entry's owner answers the conflict.
+			Msg: "this question is addressed to the person whose entry it is about; it is theirs to answer"})
 		return
 	}
 	// Resolved first: a repeat serves the already-closed question back rather

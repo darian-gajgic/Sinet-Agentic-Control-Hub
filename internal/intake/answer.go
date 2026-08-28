@@ -126,7 +126,8 @@ func (p *Pipeline) closeAndResume(ctx context.Context, st *State, askID, status 
 		}
 		if r.State == run.StateParked {
 			to := run.StateRunning
-			reason := "intake gate answered: pipeline resumes in place (4.3)"
+			// 4.3: answering resumes the run in place, never a fresh start.
+			reason := "you answered the card, so the task picks up exactly where it left off"
 			opts := run.TransitionOptions{Reason: reason, Actor: run.ActorPlatform}
 			if st.Phase == PhaseCancelled {
 				// 15.6 attribution: a cancel is a human act, so its transition
@@ -535,7 +536,9 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 				return nil, err
 			}
 			if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "approval",
-				fmt.Sprintf("routing override (S08.8 re-route/pin): %s (pin=%v)", st.Routing.PlainReason, st.Routing.Pinned),
+				// S08.8: an override is recorded with its actor. The DECISION
+				// sentence is requester copy; the basis below keeps the citation.
+				"who does this work was changed by hand on the approval card: "+st.Routing.PlainReason+pinnedSuffix(st.Routing.Pinned),
 				"approval card routing block (S08.8; override recorded with its actor)", 0); err != nil {
 				return nil, err
 			}
@@ -782,7 +785,8 @@ func (p *Pipeline) approve(ctx context.Context, st *State, pair *Pair, approver 
 	// Approval record → ledger §3 (S06.1 Stage 4: who/when/card version).
 	note := "gated"
 	if ungated {
-		note = "zero-interaction band, ungated (S06.4)"
+		// S06.4's zero-interaction band.
+		note = "ungated — small and cheap enough that the platform did not stop to ask"
 	}
 	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, author, actor, "approval",
 		fmt.Sprintf("plan approved (%s): %s; spec sha256=%s; plan sha256=%s", note, spv, specRef.SHA256, planRef.SHA256),
@@ -820,7 +824,8 @@ func (p *Pipeline) approve(ctx context.Context, st *State, pair *Pair, approver 
 				// Approval is a ratified resume trigger (Spec S02.3); the
 				// resume bumps the generation. What runs next is B2-4's.
 				if _, err := p.Runs.TransitionTx(ctx, tx, st.RunID, run.StateRunning, run.TransitionOptions{
-					Reason: "plan approved: pipeline resumes (S02.3 approval resume)", Actor: run.ActorPlatform,
+					// S02.3: approval is a ratified resume trigger.
+					Reason: "you approved the plan, so the work starts", Actor: run.ActorPlatform,
 				}); err != nil {
 					return err
 				}
@@ -839,7 +844,8 @@ func (p *Pipeline) approve(ctx context.Context, st *State, pair *Pair, approver 
 	p.Leases.Beat(ctx, st.RunID, leaseHolderIntake)
 	if collisionHolder != "" {
 		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "approval",
-			fmt.Sprintf("write-set overlaps active claim of task %s: sequenced behind the holder (S02.8)", collisionHolder),
+			// S02.8: overlapping write sets are sequenced, never run together.
+			fmt.Sprintf("this plan writes files that task %s is already working on, so it waits its turn behind it", collisionHolder),
 			"claim collision surfaced at plan time (S1.11)", 0); err != nil {
 			return err
 		}

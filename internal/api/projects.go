@@ -281,10 +281,15 @@ type ProjectCommandsWritten struct {
 	Cursor  int64         `json:"cursor"`
 }
 
-const projectsVisibilityRule = "the projects you own, plus the projects you have been invited to as a member (S13.7). " +
-	"Your own onboardings appear while they are still pending your approval; another person's never appear, at any state. " +
-	"The operator role bit opens nothing here: a project's captured content is project content, and D10 is authority over what the platform DOES, " +
-	"not a read into another person's work."
+// The three facts, in the register a member reads them in (P3-GF13 R4). The
+// citations: S13.7 sets the own-plus-invited scope, and D10 — house authority
+// over what the platform DOES — deliberately opens nothing here, because a
+// project's captured content is somebody's work, not platform telemetry
+// (CONVENTIONS §40-C's content-vs-telemetry line).
+const projectsVisibilityRule = "the projects you own, plus the projects you have been invited to. " +
+	"A project you are setting up shows here while it is still waiting for your approval; somebody else's never shows, at any stage. " +
+	"Being the household's operator does not open this list any wider: what a project holds is the work of the people in it, and running " +
+	"the platform is not the same as reading their work."
 
 // onboardStartedDetail and onboardInFlightDetail are honest about the card.
 //
@@ -304,7 +309,7 @@ const projectsVisibilityRule = "the projects you own, plus the projects you have
 // so prose and reference stay cleanly split (S15.5: surfaces speak operator
 // language).
 const onboardStartedDetail = "onboarding started: the entry is registered, its store initialized and scanned, and its drafted " +
-	"conventions, commands and danger zones are captured as version 1 — pending your approval (D10). The approval card lands in your " +
+	"conventions, commands and danger zones are captured as version 1 — pending your approval, and yours alone as its owner. The approval card lands in your " +
 	"Inbox once the onboarding run dispatches; it is not open yet. Answering it there activates the entry, and no other door does."
 
 const onboardInFlightDetail = "this onboarding was already started and is still pending your approval: what follows is the entry that " +
@@ -618,7 +623,8 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		// the refusal belongs here. Reads stay dev-accessible: browsing is not
 		// filing.
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "dev_identity",
-			Msg: "the dev-posture identity browses but never onboards: a project is attributed to the person who owns it (15.6). Sign in as a person and start it again."})
+			// 15.6: a project is attributed to a PERSON.
+			Msg: "the developer fallback can look around but cannot start a project: a project belongs to the person who owns it, and the fallback is nobody. Sign in as yourself and start it again."})
 		return
 	}
 	raw, ok := s.readBody(w, r)
@@ -637,7 +643,7 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if name == "" {
-		s.writeSurface(w, nil, badRequest(`missing "name": the registry entry needs the name a person calls the project by (S13.7)`))
+		s.writeSurface(w, nil, badRequest(`missing "name": the entry needs the name you call this project by`))
 		return
 	}
 	if strings.TrimSpace(body.Source) != "" {
@@ -874,7 +880,7 @@ func readCommandSlots(raw json.RawMessage) (ProjectCommands, error) {
 		}
 		sort.Strings(known)
 		return ProjectCommands{}, badRequest(fmt.Sprintf(
-			"unknown command slot %s: a project captures %s (S13.7). Nothing was changed — this write replaces the whole set, so a slot the platform does not know would have been dropped and the commands you meant to keep erased with it",
+			"unknown command slot %s: a project captures %s. Nothing was changed — this write replaces the whole set, so a slot the platform does not know would have been dropped and the commands you meant to keep erased with it",
 			strings.Join(unknown, ", "), strings.Join(known, ", ")))
 	}
 	var cmds ProjectCommands
@@ -895,7 +901,8 @@ func (s *Server) handleProjectCommands(w http.ResponseWriter, r *http.Request) {
 		// nobody. Checked BEFORE the entry is resolved, so the answer does not
 		// depend on which projects the fallback identity happens not to own.
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "dev_identity",
-			Msg: "the dev-posture identity browses but never captures: a project's commands are attributed to the person who set them (15.6). Sign in as a person and set them again."})
+			// 15.6: a capture is attributed to a PERSON.
+			Msg: "the developer fallback can look around but cannot set commands: a project's commands are recorded against the person who set them, and the fallback is nobody. Sign in as yourself and set them again."})
 		return
 	}
 	projectID := r.PathValue("project")
@@ -919,7 +926,7 @@ func (s *Server) handleProjectCommands(w http.ResponseWriter, r *http.Request) {
 		// ratified act, not an omission here).
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "not_owner",
 			Msg: fmt.Sprintf("only the owner sets a project's commands, and this project is owned by %q. "+
-				"They decide what the verification sandbox runs for everybody's work in it (S13.7, D10) — ask them to set it.", row.entry.Owner)})
+				"They decide what gets run to check everybody's work in it — ask them to set it.", row.entry.Owner)})
 		return
 	}
 	if row.entry.State != projectStateActive {
@@ -947,8 +954,9 @@ func (s *Server) handleProjectCommands(w http.ResponseWriter, r *http.Request) {
 		// erase (drain r1 F2): an empty POST body decodes to `{}`, so accepting
 		// absence would let a request that lost its payload wipe every captured
 		// command and answer 200.
+		// S07.8: an empty capture returns the project to the bootstrap posture.
 		s.writeSurface(w, nil, badRequest(`missing "commands": this door replaces the whole captured set, so the object is required. `+
-			`To clear every command — which returns the project to the bootstrap posture, where your review decides the work (S07.8) — send {"commands":{}} and mean it.`))
+			`To clear every command — which leaves the platform with nothing to check the work with, so your review decides it — send {"commands":{}} and mean it.`))
 		return
 	}
 	commands, err := readCommandSlots(*body.Commands)
@@ -1004,14 +1012,18 @@ func commandsDetail(minted bool, c ProjectCapture) string {
 		return "nothing changed: these are already the commands captured as " + version +
 			", so no new version was recorded and nothing was added to the audit trail. A repeated write returns the state that is already there."
 	}
+	// S07.8's bootstrap posture and S07.3's check ladder, said for the person
+	// who just pressed the button (P3-GF13 R6).
 	if c.Commands == (ProjectCommands{}) {
 		return "the commands are cleared, captured as " + version +
-			". With no build, test or lint command the platform has no check to run, so work in this project verifies under the bootstrap posture: " +
-			"every check rung is recorded as unverifiable and your review is what decides it (S07.8). The previous version is kept, never overwritten."
+			". With no build, test or lint command the platform has nothing to run against this project's work, so checking falls back to " +
+			"bootstrap mode: every check is recorded as unproven, and your review is what decides whether the work is right. " +
+			"The previous version is kept, never overwritten."
 	}
 	return "captured as " + version +
-		": the next verification round for a task in this project runs these commands as its check ladder (S07.3), and the advisory bootstrap marking drops from that round on (S07.8). " +
-		"Nothing was run just now — a captured command executes only inside the verification sandbox. The previous version is kept, never overwritten."
+		": from the next round of checking on, work in this project is checked by running these commands, and the note saying the verdict is " +
+		"advisory only drops away. Nothing was run just now — a captured command runs only inside the sealed checking sandbox. " +
+		"The previous version is kept, never overwritten."
 }
 
 // projCommandsReady reports the commands seam, or writes the not-wired answer.

@@ -84,7 +84,8 @@ func EvaluateFreshness(settings FreshnessSettings, in FreshnessInput, now time.T
 	reasons = append(reasons, fingerprintDrift(in.Stored, in.Current)...)
 	reasons = append(reasons, versionDrift(in.StoredVersions, in.CurrentVersions)...)
 	if in.SiblingAccept {
-		reasons = append(reasons, "sibling-accept event in the project (S02.8)")
+		// S02.8: a sibling accept in the project invalidates freshness.
+		reasons = append(reasons, "other work in this project was accepted since this was planned")
 	}
 	return Freshness{Fresh: len(reasons) == 0, Reasons: reasons}, nil
 }

@@ -311,7 +311,7 @@ func TestLN6CommissionedLaneWinsAndLosesOnConsumption(t *testing.T) {
 			// consumption pressure", which contains it — so a reverted
 			// production reader would leave this direction green while proving
 			// the opposite of what it claims.
-			if !strings.Contains(d.PlainReason, "Chosen among") || !strings.Contains(d.PlainReason, "consumption pressure") {
+			if !strings.Contains(d.PlainReason, "Chosen among") || !strings.Contains(d.PlainReason, "by how much of each is left") {
 				t.Errorf("the reason does not record that two ratios were compared: %q", d.PlainReason)
 			}
 			if !strings.Contains(d.PlainReason, tc.wantLane) {
@@ -341,7 +341,7 @@ func TestLN6DeterministicOrderStandsWithNoPlanBudget(t *testing.T) {
 		t.Fatalf("selection seated %q with no comparable reading on the second lane, want the deterministic "+
 			"duty-map order.\nreason: %s", d.Lane, d.PlainReason)
 	}
-	for _, want := range []string{"no declared automation budget", "never dollars — D5", adapters.LaneZAI} {
+	for _, want := range []string{"no declared automation budget", "never about money", adapters.LaneZAI} {
 		if !strings.Contains(d.PlainReason, want) {
 			t.Errorf("the reason does not carry %q: %q", want, d.PlainReason)
 		}

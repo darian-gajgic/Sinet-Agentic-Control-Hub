@@ -45,7 +45,7 @@ type ResumeOpenAskError struct {
 }
 
 func (e *ResumeOpenAskError) Error() string {
-	return fmt.Sprintf("stage: run %s is parked on open ask %s — answering that card is what resumes it (S07.7; CONVENTIONS §16)", e.RunID, e.AskID)
+	return fmt.Sprintf("stage: run %s is waiting on card %s — answering that card is what starts it again", e.RunID, e.AskID)
 }
 
 // ResumeOutcome is one run's resume disposition, made legible: which edge was
@@ -83,7 +83,8 @@ func (s *Skeleton) ResumeRun(ctx context.Context, actor, runID string) (ResumeOu
 		return ResumeOutcome{}, &ResumeOpenAskError{RunID: runID, AskID: askID}
 	}
 	resumed, err := s.cfg.Runs.Transition(ctx, runID, run.StateRunning, run.TransitionOptions{
-		Reason: "resumed by " + actor + " — the park was released by a person (S14.4 \"resume, I was wrong\")",
+		// S14.4's "resume, I was wrong": a person releases the park.
+		Reason: "resumed by " + actor + " — a person decided the work should carry on",
 		Actor:  actor,
 		Detail: resumeDetail(actor),
 	})
@@ -104,7 +105,8 @@ func (s *Skeleton) ResumeRun(ctx context.Context, actor, runID string) (ResumeOu
 	return ResumeOutcome{
 		RunID: runID, From: string(run.StateParked), To: string(run.StateRunning),
 		Applied: true, Generation: resumed.Generation,
-		Detail: "resumed: the park is released and the run's open watchdog flags are superseded by this transition (S14.4)",
+		// S14.4: resuming supersedes the run's open watchdog flags.
+		Detail: "resumed: the work is moving again, and the warnings that stopped it no longer stand",
 	}, nil
 }
 

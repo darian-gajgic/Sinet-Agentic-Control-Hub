@@ -419,7 +419,15 @@ clarification-answer blocks of your input — is SETTLED. Never emit a
 NEEDS-CLARIFICATION entry that re-asks, re-confirms, or restates a settled fact.
 Clarifications are only for new consequential ambiguities that nothing in your
 input resolves, and each one is a QUESTION — never a disclosure, a summary, or a
-confirmation of something you were already told.`,
+confirmation of something you were already told.
+Plain words for the person, always [P3-GF13]: every sentence a requester reads —
+the restatement, each criterion, the assumptions, the clarifications and any
+NEEDS-CLARIFICATION marker — is written in ordinary language. Never quote an
+internal identifier back to them: not a research rule id (P47-1), not a spec
+section (S06.6), not a decision id (D5), not a build-packet id (B2-4). Your input
+lists each data-bearing hit with a plain CLASS beside its rule id — name the
+class, never the id. And never explain the FORMAT a criterion is written in
+inside the criterion itself; the surface says that, not you.`,
 	intake.ApproachMaxRunes, intake.DecisionFieldMaxRunes, intake.MaxStepDecisions, intake.OrderingMaxRunes)
 
 func (p *EnginePlanner) Draft(ctx context.Context, in intake.DraftInput) (intake.Pair, error) {

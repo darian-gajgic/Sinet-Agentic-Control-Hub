@@ -173,7 +173,8 @@ func (s *Skeleton) answerAccept(ctx context.Context, actor, askID string, card v
 			return err
 		}
 		_, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateCompleted, run.TransitionOptions{
-			Reason: "verification resolved: requester accepted best-effort (S07.7)", Actor: run.ActorPlatform,
+			// S07.7: the requester's accept-best-effort answer resolves it.
+			Reason: "you accepted the work as it stands, so checking is finished here", Actor: run.ActorPlatform,
 		})
 		return err
 	})

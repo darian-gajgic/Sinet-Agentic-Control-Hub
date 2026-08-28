@@ -33,10 +33,10 @@ type toolchainRule struct {
 var toolchainRules = []toolchainRule{
 	{marker: "go.mod", build: "go build ./...", test: "go test ./...", lint: "go vet ./...", run: "go run .", conv: "Go project: gofmt-clean, go vet-clean"},
 	{marker: "Cargo.toml", build: "cargo build", test: "cargo test", lint: "cargo clippy", run: "cargo run", conv: "Rust project: cargo fmt / clippy"},
-	{marker: "pyproject.toml", test: "pytest", lint: "ruff check .", run: "python -m app", conv: "Python project: uv-managed (Spec S13.8)"},
+	{marker: "pyproject.toml", test: "pytest", lint: "ruff check .", run: "python -m app", conv: "Python project: uv-managed"},
 	{marker: "package.json", build: "npm run build", test: "npm test", lint: "npm run lint", run: "npm start", preview: "npm run preview", conv: "Node project"},
 	{marker: "Makefile", build: "make", test: "make test", lint: "make lint", run: "make run"},
-	{marker: "index.html", preview: "static server (Spec S13.8)", conv: "Static site"},
+	{marker: "index.html", preview: "static server", conv: "Static site"},
 }
 
 // dangerRule maps a hazardous path to a danger-zone rule. A file that exists
@@ -135,9 +135,15 @@ func (s *Store) Scan(store, defaultBranch string) (Draft, error) {
 	if branch == "" {
 		branch = "main"
 	}
+	// The Rule sentences are served VERBATIM on the onboarding approval card
+	// (stage/onboard.go), which makes them requester copy: they say what the
+	// rule protects in plain words, and their spec citations live here in the
+	// comment instead (P3-GF13). The first is D2 (the broker holds every
+	// credential; a workspace never does), the second Spec S13.6 (a protected
+	// ref only ever gains accepted work — force-push is not a landing verb).
 	d.DangerZones = append(d.DangerZones,
-		DangerZone{Path: "**/*credential*", Action: "read", Rule: "credentials are broker-held, never in a workspace (D2)"},
-		DangerZone{Path: branch, Action: "force-push", Rule: "never force-push a protected ref — accepts only (Spec S13.6)"},
+		DangerZone{Path: "**/*credential*", Action: "read", Rule: "passwords and access keys never live in a project's files — the platform holds them and hands one over only for the moment a step needs it"},
+		DangerZone{Path: branch, Action: "force-push", Rule: "this branch is only ever added to — accepted work lands on it, and nothing rewrites what is already there"},
 	)
 	sort.SliceStable(d.DangerZones, func(i, j int) bool { return d.DangerZones[i].Path < d.DangerZones[j].Path })
 

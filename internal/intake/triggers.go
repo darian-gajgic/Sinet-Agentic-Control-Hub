@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // The P47 research-trigger list (Spec S06.3, discharging R03-OQ5): tasks
@@ -100,6 +101,29 @@ func (f *TriggerFile) Detect(text string) []TriggerHit {
 	}
 	return hits
 }
+
+// seedClasses maps a seed rule id to its plain Class, built once.
+var seedClasses = sync.OnceValue(func() map[string]string {
+	m := make(map[string]string, 16)
+	for _, r := range SeedTriggers().Rules {
+		m[r.ID] = r.Class
+	}
+	return m
+})
+
+// ResearchSubject names, in plain words, the KIND of outside fact a P47 rule
+// covers — the seed table's own Class ("Prices & costs" for P47-1, and so on).
+// Every requester-facing sentence about a research obligation says THIS and
+// never the rule id: the id is a machine value and stays in machine members
+// (P3-GF13). The classes are distinct per rule, which is what keeps two rules
+// landing on one step two visibly different facts once the id has left the
+// sentence (the P3-RW-18 D3-R2 lesson).
+//
+// An id the seed table does not carry — the local classifier's own flag, or a
+// rule an operator added to the file — has no class to name here, so the caller
+// gets "" and says the honest generic thing rather than a confidently wrong
+// specific one.
+func ResearchSubject(ruleID string) string { return seedClasses()[ruleID] }
 
 // Rule returns the rule by id, or nil.
 func (f *TriggerFile) Rule(id string) *TriggerRule {

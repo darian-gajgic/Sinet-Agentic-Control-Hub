@@ -1082,7 +1082,7 @@ func TestClaims(t *testing.T) {
 	doc := f.ledgerDoc(st2.TaskID)
 	foundCollision := false
 	for _, d := range doc.Decisions {
-		if strings.Contains(d.Text, "overlaps active claim") {
+		if strings.Contains(d.Text, "writes files that task") {
 			foundCollision = true
 		}
 	}

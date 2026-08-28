@@ -202,7 +202,7 @@ func TestGeneralistExecuteEmitsRoutingDecidedAndGapRecord(t *testing.T) {
 	if !strings.Contains(cardJSON, `"routing"`) || !strings.Contains(cardJSON, `"plain_reason"`) {
 		t.Fatalf("approval card missing the routing block: %s", cardJSON)
 	}
-	if !strings.Contains(cardJSON, "generalist-with-injected-knowledge") {
+	if !strings.Contains(cardJSON, "all-rounder") {
 		t.Fatalf("no-fit generalist default not on the card: %s", cardJSON)
 	}
 
@@ -232,7 +232,7 @@ func TestGeneralistExecuteEmitsRoutingDecidedAndGapRecord(t *testing.T) {
 	if d["generalist"] != true || d["model"] != "claude-sonnet-5" || d["lane"] != "anthropic" {
 		t.Fatalf("routing.decided payload = %v", d)
 	}
-	if s, _ := d["plain_reason"].(string); !strings.Contains(s, "generalist") {
+	if s, _ := d["plain_reason"].(string); !strings.Contains(s, "all-rounder") {
 		t.Fatalf("plain_reason = %q", s)
 	}
 	if d["window_tokens"].(float64) != 200_000 {

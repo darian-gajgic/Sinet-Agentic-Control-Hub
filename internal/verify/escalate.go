@@ -228,8 +228,10 @@ func InfrastructureEscalation(d Deliverable, owner string, cause error) Escalati
 		Owner:          owner,
 		Summary:        "verification cannot run — " + cause.Error(),
 		Detail: []string{
-			"The checks that decide whether this work is correct are missing, so the platform stopped instead of guessing (Spec S07.2: a screen outage escalates rather than approves).",
-			"Nothing was marked verified and nothing was delivered — the work waits here until the checks exist (Spec S07.1: the quality gate is never the effects gate).",
+			// Spec S07.2 (a screen outage escalates rather than approves) and
+			// S07.1 (the quality gate is never the effects gate), said plainly.
+			"The checks that decide whether this work is correct are missing, so the platform stopped instead of guessing.",
+			"Nothing was marked verified and nothing was delivered — the work waits here until the checks exist.",
 			"Fix what the summary names, then answer `retry` to run verification again; `cancel` ends the task.",
 		},
 		// The suite that cannot decide anything is quarantined pending fix —

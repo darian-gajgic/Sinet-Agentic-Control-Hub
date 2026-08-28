@@ -51,21 +51,22 @@ func TestLN9R1PinIsHonoredForANonExecutionDuty(t *testing.T) {
 		// search simply found nothing on that duty. Riding the lane's
 		// execution seat IS a substitution here, so the reason must say so.
 		{"a template declaring the planning duty", DutyPlanning,
-			[]string{"REPLACED", "EXECUTION only", "S07.5", DutyPlanning}, nil},
+			[]string{"instead of comparing", "only set up for doing the work",
+				"measured against the quality bars", plainDuty(DutyPlanning)}, nil},
 		// An unknown duty degrades onto the execution SEAT while `duty` keeps
 		// its original value — the second door to the same refusal. Here the
 		// substitution is the degrade selection ALREADY records in its own
 		// sentence, so the pin adds no second claim: the effective duty is
 		// execution before the pin is consulted at all.
 		{"a template declaring an unknown duty", "reviewer",
-			[]string{"REPLACED", "has no seat in the v0 duty map; riding the execution seat"},
+			[]string{"instead of comparing", "No model is assigned to work of this kind (reviewer)"},
 			// And NOT the execution-seat substitution clause. Selection already
 			// degraded this duty onto the execution seat and said so in its own
 			// sentence, so the effective duty IS execution by the time the pin
 			// is consulted. Saying it a second time would describe two
 			// substitutions where one happened — which is what tracking the
 			// EFFECTIVE duty (rather than re-deriving from the template's) buys.
-			[]string{"EXECUTION only"}},
+			[]string{"only set up for doing the work"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := ln9r1Router()
@@ -132,7 +133,7 @@ func TestLN9R1RefusalNamesTheTrueCauseNotTheDuty(t *testing.T) {
 			t.Fatalf("duty %q: a pin to a lane this platform seats nothing on was honored — there is no model "+
 				"to run there, and riding another lane's seat is the substitution the pin exists to end", duty)
 		}
-		if !strings.Contains(err.Error(), "no execution seat on it") {
+		if !strings.Contains(err.Error(), "no model on that lane has been set up here") {
 			t.Errorf("duty %q: the refusal does not name the true cause: %v", duty, err)
 		}
 		if strings.Contains(err.Error(), "this duty resolves to no model there") {

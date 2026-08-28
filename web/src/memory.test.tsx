@@ -110,8 +110,9 @@ test('the browse renders the SERVED visibility rule verbatim, and the membership
   const rule = view.container.querySelector('[data-visibility-rule="served"]')
   expect(rule?.textContent, 'the scope rule is not the served sentence').toBe(memberList().visibility)
   // Not a paraphrase: the served sentence names the operator limb that does NOT
-  // exist, and the surface prints that rather than summarising it away.
-  expect(rule?.textContent).toContain('The operator role bit does not open another person')
+  // exist, and the surface prints that rather than summarising it away. The
+  // clause says it in plain words since P3-GF13; the duty is unchanged.
+  expect(rule?.textContent).toContain("does not open another person's own notes")
   expect(view.container.querySelector('[data-projects="served"]')?.textContent).toContain('release-notes')
   view.unmount()
 })

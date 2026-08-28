@@ -201,7 +201,7 @@ func TestWorkforceRosterRendersEveryIdentityFact(t *testing.T) {
 	if !digest.Delivery.RequiresReview {
 		t.Error("a degraded-domain worker must render as requiring review (S08.7 is structural, not advisory)")
 	}
-	if !hasReasonAbout(digest.Delivery.Reasons, "degraded") {
+	if !hasReasonAbout(digest.Delivery.Reasons, "no proven way to check the quality") {
 		t.Errorf("the degraded consequence carries no reason: %v", digest.Delivery.Reasons)
 	}
 

@@ -146,7 +146,7 @@ func TestLN4PlacedCredentialIsSelectedByRouting(t *testing.T) {
 			"(anthropic). Forcing the commissioned lane to win here would be inventing a rule S10.4 "+
 			"does not have.", seat.Lane)
 	}
-	if !strings.Contains(reason, "2 flat-rate lanes") {
+	if !strings.Contains(reason, "2 covered lanes") {
 		t.Errorf("the reason does not record that TWO lanes covered this duty: %q\n"+
 			"That number is the observable proof the placed credential entered selection at all.", reason)
 	}
@@ -205,7 +205,7 @@ func TestLN4PlacedCredentialIsSelectedByRouting(t *testing.T) {
 				t.Errorf("the commissioned lane was chosen but seated on %q, want the document's own default "+
 					"model %q — no model id is a constant in this package", seat.Model, zai.DefaultModel)
 			}
-			if !strings.Contains(reason, "consumption pressure") {
+			if !strings.Contains(reason, "by how much of each is left") {
 				t.Errorf("the reason does not record what the choice was made on: %q", reason)
 			}
 			if seat.WindowTokens <= 0 {
@@ -269,7 +269,7 @@ func TestLN4NothingPlacedIsNotSelectable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSeat(no coverage): %v", err)
 	}
-	if !strings.Contains(gap, "Subscription gap (2.7)") {
+	if !strings.Contains(gap, "Not covered by a subscription") {
 		t.Errorf("gap advice = %q, want the unchanged 2.7 leg", gap)
 	}
 }

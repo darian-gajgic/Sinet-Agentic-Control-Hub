@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
@@ -66,7 +67,7 @@ func OnboardAskID(projectID string) string  { return onboardAskPrefix + projectI
 
 // errOnboardNotOwner is D10: only the entry's owner approves onboarding (a
 // non-owner answer is refused). The Surface maps it to 403.
-var errOnboardNotOwner = errors.New("stage: only the project owner may approve onboarding (D10)")
+var errOnboardNotOwner = errors.New("stage: only the person who owns this project may approve its onboarding")
 
 // mapOnboardErr maps the onboarding answer-path errors onto transport
 // statuses (the surface error contract).
@@ -285,9 +286,9 @@ func onboardDigest(draft json.RawMessage) []string {
 		}
 	}
 	for _, z := range d.DangerZones {
-		line := "Danger zone: " + z.Path
-		if z.Action != "" {
-			line += " (" + z.Action + ")"
+		line := "Danger zone: " + plainDangerSubject(z.Path, z.Action)
+		if a := plainDangerAction(z.Action); a != "" {
+			line += " (" + a + ")"
 		}
 		if z.Rule != "" {
 			line += " — " + z.Rule
@@ -298,6 +299,45 @@ func onboardDigest(draft json.RawMessage) []string {
 		lines = append(lines, "The scan captured no conventions, commands or danger zones: approving activates the entry with the empty capture it has.")
 	}
 	return lines
+}
+
+// plainDangerSubject says in plain words WHAT a danger zone covers. The stored
+// Path is a machine value — a glob, a file name, or a branch name, and a drift
+// input to project.scanHash — so the card TRANSLATES it and never edits it: a
+// person who cannot read a glob still has to understand the line (WALK-F1 W4).
+// A path with no pattern in it is already plain and passes through unchanged.
+func plainDangerSubject(path, action string) string {
+	switch {
+	case action == "force-push":
+		return "the " + path + " branch"
+	case strings.HasPrefix(path, "**/"):
+		if core := strings.Trim(path[len("**/"):], "*?"); core != "" && !strings.ContainsAny(core, "*?[/") {
+			return "any file whose name contains " + strconv.Quote(core) + ", anywhere in the project"
+		}
+		return "any file matching " + path + ", anywhere in the project"
+	case strings.ContainsAny(path, "*?["):
+		return "any file matching " + path
+	default:
+		return path
+	}
+}
+
+// plainDangerAction names the guarded act the way a requester would say it.
+// An action the scanner has not taught it passes through verbatim rather than
+// being dropped — an unnamed hazard is worse than an unpolished word.
+func plainDangerAction(action string) string {
+	switch action {
+	case "":
+		return ""
+	case "read":
+		return "reading it"
+	case "write":
+		return "changing it"
+	case "force-push":
+		return "rewriting its history"
+	default:
+		return action
+	}
 }
 
 // onboardCardBody drafts the card's declaration for one project's draft:
@@ -425,7 +465,10 @@ func (s *Skeleton) dispatchOnboard(ctx context.Context, r run.Run) error {
 			return fmt.Errorf("stage: insert onboarding ask: %w", err)
 		}
 		_, err := s.cfg.Runs.TransitionTx(ctx, tx, r.ID, run.StateParked, run.TransitionOptions{
-			Reason: "onboarding draft awaiting owner approval — gates wait (D10)", Actor: run.ActorPlatform,
+			// The reason is served as the run card's last-activity line, so it
+			// speaks plain words; D10 (only the owner may answer this card) and
+			// the gates-wait rule are stated here rather than on the wire.
+			Reason: "waiting for the project's owner to approve what the scan found — nothing else happens until that card is answered", Actor: run.ActorPlatform,
 		})
 		return err
 	})
@@ -482,7 +525,8 @@ func (s *Skeleton) AnswerOnboarding(ctx context.Context, userID, askID string, a
 		}
 		// Resume then complete: the onboarding task's work ends at activation.
 		if _, err := s.cfg.Runs.TransitionTx(ctx, tx, runID, run.StateRunning, run.TransitionOptions{
-			Reason: "onboarding approved (D10) — activating", Actor: run.ActorPlatform,
+			// D10: the owner approved; the entry activates.
+			Reason: "the owner approved what the scan found — the project is being switched on", Actor: run.ActorPlatform,
 		}); err != nil {
 			return err
 		}

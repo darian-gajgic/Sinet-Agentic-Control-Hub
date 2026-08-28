@@ -89,7 +89,7 @@ func TestEveryFamilyUsesItsOwnSetNoFallbackDisclosure(t *testing.T) {
 				t.Errorf("taxonomy version = %q, want %q", st.TaxonomyVersion, seed.Version)
 			}
 			for _, txt := range platformDecisionTexts(t, f, st.TaskID) {
-				if strings.Contains(txt, "no question set is seeded") {
+				if strings.Contains(txt, "no question set has been written") {
 					t.Errorf("the disclosed fallback still fires for %s: %q", fam, txt)
 				}
 			}
@@ -126,7 +126,7 @@ func TestEveryFamilyUsesItsOwnSetNoFallbackDisclosure(t *testing.T) {
 		}
 		var disclosed bool
 		for _, txt := range platformDecisionTexts(t, f, st.TaskID) {
-			if strings.Contains(txt, "no question set is seeded") {
+			if strings.Contains(txt, "no question set has been written") {
 				disclosed = true
 			}
 		}

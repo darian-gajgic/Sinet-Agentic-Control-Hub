@@ -229,7 +229,8 @@ func (s *Store) rosterEntry(ctx context.Context, t Template) (RosterEntry, error
 		// through the store's wrapped ErrNotActive: a worker nobody approved has
 		// no active version, so there is no definition to read and no equipment
 		// to show. That is not a failure.
-		e.DefinitionError = fmt.Sprintf("no active version — status %s, so nothing is equipped yet (S08.6)", t.Status)
+		// S08.6: equipment is read from the APPROVED version, and a draft has none.
+		e.DefinitionError = fmt.Sprintf("nobody has approved a version of this worker yet (it is %s), so it has no tools or knowledge to show", t.Status)
 	default:
 		e.DefinitionError = derr.Error()
 	}

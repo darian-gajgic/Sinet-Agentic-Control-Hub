@@ -486,7 +486,8 @@ func (l *Ladder) harvest(ctx context.Context, r run.Run, recs []HarvestRecord, s
 			return fmt.Errorf("recovery: marshal harvest detail: %w", err)
 		}
 		_, err = l.cfg.Runs.TransitionTx(ctx, tx, r.ID, run.StateCompleted, run.TransitionOptions{
-			Reason: "harvest: finished-during-outage (Spec S02.5)",
+			// Spec S02.5 harvest.
+			Reason: "this work actually finished while the platform was down; the result was picked back up",
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		})
@@ -527,7 +528,8 @@ func (l *Ladder) crashAndBound(ctx context.Context, r run.Run, interrupted time.
 			return fmt.Errorf("recovery: marshal crash detail: %w", err)
 		}
 		crashed, err := l.cfg.Runs.TransitionTx(ctx, tx, r.ID, run.StateCrashed, run.TransitionOptions{
-			Reason: "recovery: DEAD (Spec S02.5)",
+			// Spec S02.5 crash-and-bound.
+			Reason: "this work stopped without finishing and could not be picked back up",
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		})
@@ -608,7 +610,8 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 			return fmt.Errorf("recovery: marshal no-fork finalize detail: %w", err)
 		}
 		if _, err := l.cfg.Runs.TransitionTx(ctx, tx, crashed.ID, run.StateFinalized, run.TransitionOptions{
-			Reason: "recovery: this run class is finalized, never forked (Spec S02.5 step 3; BENCH-REG §2 for the single-shot arm)",
+			// Spec S02.5 step 3; BENCH-REG §2 for the single-shot arm.
+			Reason: "work of this kind is never restarted after an interruption — it is closed instead",
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		}); err != nil {
@@ -629,7 +632,8 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 		// the S02.6 freshness pass precedes any RESUME regardless — here
 		// there is no resume at all). Card surfaces arrive at B5/B6; the
 		// durable substance is the terminal state + its event.
-		const staleGround = "interrupted longer than ⚙ recovery.stale_finalize, so the platform finalized it rather than blindly resuming (Spec S02.5 step 3)"
+		// Spec S02.5 step 3.
+		const staleGround = "interrupted for longer than ⚙ recovery.stale_finalize, so the platform closed it rather than picking it back up blindly"
 		detail, err := json.Marshal(struct {
 			InterruptedS int64  `json:"interrupted_s"`
 			AskID        string `json:"ask_id"`
@@ -638,7 +642,7 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 			return fmt.Errorf("recovery: marshal finalize detail: %w", err)
 		}
 		if _, err := l.cfg.Runs.TransitionTx(ctx, tx, crashed.ID, run.StateFinalized, run.TransitionOptions{
-			Reason: "recovery: stale interruption (Spec S02.5 step 3)",
+			Reason: "interrupted too long ago to safely carry on",
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		}); err != nil {
@@ -657,7 +661,8 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 		// tombstone-review card — the ladder can never fix a deterministic
 		// failure, so the lineage ends here and a human is the only thing that
 		// can move it (P3-RW-14 R1).
-		const tombstoneGround = "⚙ recovery.max_attempts exhausted: every retry ended the same way, so the platform stopped retrying (Spec S02.5 step 3)"
+		// Spec S02.5 step 3.
+		const tombstoneGround = "⚙ recovery.max_attempts is used up: every retry ended the same way, so the platform stopped retrying"
 		detail, err := json.Marshal(struct {
 			RecoveryAttempts int64  `json:"recovery_attempts"`
 			AskID            string `json:"ask_id"`
@@ -666,7 +671,7 @@ func (l *Ladder) boundTx(ctx context.Context, tx *sql.Tx, crashed run.Run, inter
 			return fmt.Errorf("recovery: marshal tombstone detail: %w", err)
 		}
 		if _, err := l.cfg.Runs.TransitionTx(ctx, tx, crashed.ID, run.StateTombstoned, run.TransitionOptions{
-			Reason: "recovery: repeat offender (Spec S02.5 step 3)",
+			Reason: "retried the maximum number of times and failed the same way each time",
 			Actor:  run.ActorPlatform,
 			Detail: detail,
 		}); err != nil {

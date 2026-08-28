@@ -250,7 +250,8 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 			EngineExpiryTS: a.EngineExpiryTS, Actions: a.Actions, Card: a.Snapshot,
 		}
 		setAnswerable(&it, mayAnswerAsk(scope, a.Owner),
-			"the card's owner answers it (D10); you can read it but not decide it")
+			// D10: the card's owner is the only one who may decide it.
+			"this card is the owner's to answer; you can read it, but the decision is not yours")
 		applyTierRules(&it)
 		applyExpiryAndStaleness(&it, expiry, stale, now, a.StoredStale, a.StoredStaleReasons)
 		out = append(out, it)
@@ -279,7 +280,8 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 		}
 		it.Approvals = &appr
 		setAnswerable(&it, mayAnswerEffect(scope, e),
-			"this effect is its owner's decision; the operator co-approves only a platform-level one (D10)")
+			// D10: the operator co-approves only platform-level effects.
+			"this is its owner's decision to make; as the household's operator you co-approve only the platform-wide ones")
 		applyTierRules(&it)
 		applyExpiryAndStaleness(&it, expiry, stale, now, false, nil)
 		out = append(out, it)
@@ -598,7 +600,8 @@ func applyExpiryAndStaleness(it *ApprovalItem, expiry, stale time.Duration, now 
 	if !it.ObservedTS.IsZero() && stale > 0 && now.Sub(it.ObservedTS) > stale {
 		it.Stale = true
 		it.StaleReasons = append(it.StaleReasons,
-			fmt.Sprintf("pending longer than ⚙ %s — assumptions may be stale; re-plan is one click (S06.9)", keyFreshnessMaxAge))
+			fmt.Sprintf( // S06.9: re-plan is the one-click door off a stale card.
+				"waiting longer than ⚙ %s — what it assumed may have gone out of date; re-planning is one click", keyFreshnessMaxAge))
 	}
 	if len(it.StaleReasons) == 0 {
 		it.StaleReasons = nil
@@ -944,8 +947,9 @@ type staleAnswerError struct {
 	item ApprovalItem
 }
 
+// S15.2: an answer is pinned to the payload hash it was shown for.
 func (e *staleAnswerError) Error() string {
-	return "the card changed since it was shown: re-read it and answer the current card (S15.2 payload-hash pin)"
+	return "this card changed since it was shown to you: read it again and answer the card as it now stands"
 }
 
 func (s *Server) handleApprovalAnswer(w http.ResponseWriter, r *http.Request) {
@@ -1013,7 +1017,7 @@ func (s *Server) handleApprovalAnswerBatch(w http.ResponseWriter, r *http.Reques
 	}
 	switch {
 	case len(body.Items) == 0:
-		s.writeSurface(w, nil, badRequest(`missing "items": a batch answers a selected set (S15.6)`))
+		s.writeSurface(w, nil, badRequest(`missing "items": answering several cards at once needs the set you picked`))
 		return
 	case len(body.Items) > answerBatchCap:
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf("batch of %d exceeds the %d-item bound", len(body.Items), answerBatchCap)))
@@ -1234,7 +1238,8 @@ func (s *Server) answerEffect(ctx context.Context, id Identity, scope ownerScope
 			return ApprovalAnswerResult{}, err
 		}
 		return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(e.State), Result: e.Result,
-			Detail: "denied: the effect is terminal and was never executed (S02.7)"}, nil
+			Detail:// S02.7: a denied effect is terminal and never executed.
+			"denied: this is settled for good, and it never ran"}, nil
 	}
 
 	// An approval is a SIGNATURE. Whether it also completes the conjunction
@@ -1259,7 +1264,8 @@ func (s *Server) answerEffect(ctx context.Context, id Identity, scope ownerScope
 		}
 		return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(gates.EffectProposed),
 			Approvals: &appr,
-			Detail:    "recorded: a platform-level effect needs both the owner's and the operator's approval before it is approved (S15.6; D10)"}, nil
+			Detail:// S15.6 + D10: a platform-level effect needs both approvals.
+			"recorded: something this far-reaching needs both its owner and the household's operator to say yes before it counts as approved"}, nil
 	}
 	if scope.UserID == card.Owner {
 		appr.OwnerApproved, appr.OwnerApprovedBy = true, scope.UserID
@@ -1277,7 +1283,8 @@ func (s *Server) answerEffect(ctx context.Context, id Identity, scope ownerScope
 		}
 	}
 	return ApprovalAnswerResult{ID: routeID, Applied: true, State: string(e.State), Approvals: &appr,
-		Detail: "approved: execution is still the journal's two-phase path, never this verb (D7)"}, nil
+		Detail:// D7: execution stays the journal's two-phase path.
+		"approved: saying yes does not run it — the platform records the intent first and carries it out separately, so nothing happens twice"}, nil
 }
 
 // effectState reads the journal row's state AND its result. The result is not
@@ -1303,7 +1310,7 @@ func (s *Server) effectState(ctx context.Context, effectID string) (string, json
 // happens in ONE place, before any verb dispatch.
 func checkPin(item ApprovalItem, given string) error {
 	if strings.TrimSpace(given) == "" {
-		return badRequest(`missing "payload_hash": an answer is pinned to the payload hash it was shown for (S15.2)`)
+		return badRequest(`missing "payload_hash": an answer has to quote the card it was shown for`)
 	}
 	if given != item.PayloadHash {
 		return &staleAnswerError{item: item}
@@ -1314,7 +1321,8 @@ func checkPin(item ApprovalItem, given string) error {
 func checkBatchable(item ApprovalItem, batched bool) error {
 	if batched && !item.Batchable {
 		return &SurfaceError{Status: http.StatusConflict, Code: "not_batchable",
-			Msg: fmt.Sprintf("a %s-tier card is answered individually, never in a batch (S15.6)", item.Tier)}
+			Msg: fmt.Sprintf( // S15.6: a high-tier card is answered one at a time.
+				"a %s-stakes card is answered on its own, never together with others", item.Tier)}
 	}
 	return nil
 }
@@ -1332,13 +1340,14 @@ func (s *Server) stepUp(ctx context.Context, id Identity, item ApprovalItem, pin
 	}
 	if id.Dev {
 		return false, &SurfaceError{Status: http.StatusForbidden, Code: "dev_identity",
-			Msg: "the dev identity cannot step up (S01.9); log in as a real user"}
+			Msg:// S01.9: the dev fallback has no PIN and cannot step up.
+			"the developer fallback cannot confirm with a PIN; sign in as yourself"}
 	}
 	if s.sessions == nil {
 		return false, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
 			Msg: "no session store is wired: a High-tier answer cannot be stepped up"}
 	}
-	if err := s.sessions.VerifyPIN(ctx, id.UserID, pin, "High-tier approval step-up (S01.9; S15.6)"); err != nil {
+	if err := s.sessions.VerifyPIN(ctx, id.UserID, pin, "confirming a high-stakes approval"); err != nil {
 		return false, &SurfaceError{Status: http.StatusUnauthorized, Code: "pin_rejected", Msg: "PIN verification failed"}
 	}
 	return true, nil
@@ -1354,10 +1363,11 @@ func resolvedAnswer(routeID, state string, stored, given json.RawMessage) (Appro
 	}
 	if !same {
 		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
-			Msg: "this card was already answered differently; the recorded answer stands and is never re-applied (S15.2)"}
+			Msg:// S15.2: the recorded answer stands, and is never re-applied.
+			"this card was already answered a different way; that answer stands and is never applied a second time"}
 	}
 	return ApprovalAnswerResult{ID: routeID, Applied: false, State: state, Result: stored,
-		Detail: "already answered: the recorded answer is returned and nothing fired again (S15.2 retry-safety)"}, nil
+		Detail: "already answered: this is the answer that was recorded, and nothing ran again"}, nil
 }
 
 // resolvedEffect is the (b)/(c) limb for effects, read off the journal state
@@ -1383,13 +1393,14 @@ func resolvedEffect(routeID, state, action string, result json.RawMessage) (Appr
 	case action == effectActionDeny && denied:
 	case action == effectActionApprove && denied:
 		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
-			Msg: "this effect was DENIED; a denial is terminal and is never converted into an approval (S15.2; OQ2)"}
+			Msg:// S15.2: a denial is terminal, never converted into an approval.
+			"this was DENIED; a denial is final and is never turned into an approval"}
 	default:
 		return ApprovalAnswerResult{}, &SurfaceError{Status: http.StatusConflict, Code: "already_answered",
-			Msg: fmt.Sprintf("this effect is already %s; the recorded decision stands and is never re-applied (S15.2)", state)}
+			Msg: fmt.Sprintf("this is already %s; the recorded decision stands and is never applied a second time", state)}
 	}
 	return ApprovalAnswerResult{ID: routeID, Applied: false, State: state, Result: result,
-		Detail: "already decided: the recorded state is returned and nothing fired again (S15.2 retry-safety)"}, nil
+		Detail: "already decided: this is what was recorded, and nothing ran again"}, nil
 }
 
 // isDenialResult reports the OQ2 denial marker on a `failed` row.

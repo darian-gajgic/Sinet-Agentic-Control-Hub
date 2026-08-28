@@ -51,7 +51,7 @@
       "updated_ts": "2026-07-20T09:02:00Z"
     }
   ],
-  "visibility": "your own entries in every scope you own (S4.1), plus house-scope entries (house defaults address everyone, S4.5), plus project-scope entries of the projects you own or are invited to (S09.6). The operator role bit does not open another person's user-scope entries: memory is personal content, and D10 is authority over the HOUSE scope.",
+  "visibility": "everything you have saved, in every place you own it, plus anything saved for the whole household (house notes are meant for everyone), plus the notes of projects you own or have been invited to. Being the household's operator does not open another person's own notes: what someone writes down is theirs, and running the platform is the right to curate the household's shared notes, not to read anybody's.",
   "projects": [
     "release-notes"
   ],

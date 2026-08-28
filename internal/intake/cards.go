@@ -65,6 +65,39 @@ const (
 	CardEmission CardKind = "decision.emission"
 )
 
+// plainCardKind names a card the way the person waiting on it would name it.
+// The KIND STRING itself is a machine value and stays one — it is the wire
+// contract the surfaces switch on — so only the prose that mentions a card
+// (park and resume reasons, which a requester reads as the task's own activity
+// line) goes through here (P3-GF13 R1). An unknown kind falls through as itself
+// rather than vanishing: a token beats a blank.
+func plainCardKind(k CardKind) string {
+	switch k {
+	case CardInterview:
+		return "interview questions"
+	case CardClarification:
+		return "open points on the draft"
+	case CardEscalation:
+		return "question raised while planning"
+	case CardCoverage:
+		return "decision about the criteria the plan does not cover"
+	case CardResearch:
+		return "decision about the research this task needs"
+	case CardSpecDoubt:
+		return "doubt raised against the plan"
+	case CardFamily:
+		return "question about what kind of task this is"
+	case CardEmission:
+		return "decision about a plan the platform had to refuse"
+	case CardApproval:
+		return "plan approval card"
+	case CardDelta:
+		return "approval of the changed plan"
+	default:
+		return string(k)
+	}
+}
+
 // Question is one card question.
 type Question struct {
 	ID   string `json:"id"` // slot id, or "marker-<n>" on clarification cards
@@ -120,8 +153,21 @@ type UnderstoodItem struct {
 	// How is the origin label: ResolvedRegistry | ResolvedAnswered |
 	// ResolvedAssumption for taxonomy slots, UnderstoodEscalation for an
 	// answered 1.7 single-question escalation.
-	How        string `json:"how"`
-	Value      string `json:"value,omitempty"`
+	How string `json:"how"`
+	// Value is the MACHINE token the record stores — the option's Value, or
+	// the requester's own words when they typed an answer. It is also the
+	// round-trip key (the answer fold matches option values; the edit box is
+	// seeded from it), so it stays byte-for-byte what State.Resolutions holds.
+	Value string `json:"value,omitempty"`
+	// Label is what the requester actually CLICKED: the plain wording of the
+	// option whose Value this row carries, resolved at composition time from
+	// the slot's own option list (P3-GF13 R9; WALK-F1 W6 saw "graceful" and
+	// "simplest" served where a person had chosen a sentence). It rides
+	// ALONGSIDE Value and never replaces it. Empty is honest absence, and it
+	// means one of two things: the answer was the requester's own words (the
+	// value IS the words), or the slot is carried over from another family's
+	// set and has no options here to match against.
+	Label      string `json:"label,omitempty"`
 	Assumption string `json:"assumption,omitempty"`
 }
 

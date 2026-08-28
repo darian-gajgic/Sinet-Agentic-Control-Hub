@@ -321,7 +321,8 @@ func UnknownEscapes(verdicts []ACVerdict) []Finding {
 			Category:  CatACBlocker,
 			Criterion: v.Key,
 			Anchor:    "unknown:" + v.Key,
-			Text: fmt.Sprintf("%s could not be verified (%s): an undecided criterion cannot ship (Spec S07.5 Unknown escape) — make the deliverable decidable against it, or the drain escalates",
+			// Spec S07.5's Unknown escape: an undecided criterion never ships.
+			Text: fmt.Sprintf("%s could not be decided (%s): work nobody can check against a criterion cannot ship — make it checkable against this one, or the decision comes to you",
 				v.Key, reason),
 		})
 	}

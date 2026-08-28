@@ -363,7 +363,8 @@ func (s *Store) Delivery(ctx context.Context, templateID string) (DeliveryPolicy
 		// S08.10a).
 		p.Deliverable = true
 		p.RequiresReview = true
-		p.Reasons = append(p.Reasons, "status flagged — revalidation pending (S08.10)")
+		// S08.10: a flagged worker runs supervised until revalidation clears it.
+		p.Reasons = append(p.Reasons, "this worker is flagged and is waiting to be re-checked, so its work is reviewed before it is delivered")
 	default:
 		p.Reasons = append(p.Reasons, fmt.Sprintf("status %s — not deliverable", t.Status))
 		return p, nil
@@ -376,7 +377,8 @@ func (s *Store) Delivery(ctx context.Context, templateID string) (DeliveryPolicy
 		// Structural, not advisory (Spec S08.7): cannot deliver without
 		// requester review while the domain lacks a real quality check.
 		p.RequiresReview = true
-		p.Reasons = append(p.Reasons, fmt.Sprintf("domain %s is degraded (S08.7)", d.Name))
+		// S08.7: a domain with no verified quality check cannot deliver unreviewed.
+		p.Reasons = append(p.Reasons, fmt.Sprintf("there is no proven way to check the quality of %s work here, so a person reviews it before it is delivered", d.Name))
 	}
 	if t.ActiveVersion != "" {
 		g, err := s.Guardrails(ctx, t.ActiveVersion)
@@ -385,7 +387,8 @@ func (s *Store) Delivery(ctx context.Context, templateID string) (DeliveryPolicy
 		}
 		if g.FirstNRemaining > 0 {
 			p.RequiresReview = true
-			p.Reasons = append(p.Reasons, fmt.Sprintf("supervised first-N: %d reviews remaining (S08.6)", g.FirstNRemaining))
+			// S08.6's supervised first-N window.
+			p.Reasons = append(p.Reasons, fmt.Sprintf("this worker is new: its next %d pieces of work are reviewed by a person before delivery", g.FirstNRemaining))
 		}
 	}
 	return p, nil

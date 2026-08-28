@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
@@ -181,7 +183,8 @@ func (v *Verifier) axis2Required(d Deliverable, tier intake.Tier) (bool, string,
 	if tierRank[tier] >= tierRank[intake.Tier(floor)] {
 		return true, "", nil
 	}
-	return false, fmt.Sprintf("stakes-gated: domain %q is not a launch domain and tier %q is below ⚙ %s=%q (Spec S07.8)",
+	// Spec S07.8's scope rule for the judge's second axis.
+	return false, fmt.Sprintf("the deeper judgement pass was not run: %q work is not one of the kinds that always get it, and %q stakes are below ⚙ %s=%q",
 		d.Domain, tier, keySanityStakesFloor, floor), nil
 }
 
@@ -441,7 +444,8 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			out.Rounds = append(out.Rounds, record)
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatCapHit, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
-				Summary: "artifact malformed after the one-regeneration V0 bound (Spec S07.2)",
+				// Spec S07.2's one-regeneration bound, said for the requester.
+				Summary: "the work came back in a shape the platform could not read, and the one re-generation it is allowed did not fix it",
 				Detail:  postureDetail(v0.Reasons, posture), Rounds: out.Rounds,
 				BestEffort: fmt.Sprintf("revision %d (sha256 %s) is the best-effort state; V0 reasons attached", d.Revision, record.ContentSHA),
 			})
@@ -622,8 +626,11 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 				Category: CatReopenSpec, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 				Summary: "axis 2 reopens the specification: " + ax2.ReopenSpec,
 				Detail: postureDetail([]string{
-					"REOPEN-SPEC is a human decision; the judge can never change the spec itself (Spec S07.5; D10).",
-					"An accepted adjustment lands as an S06.9 ADDED/MODIFIED/REMOVED delta and re-freezes the ACs; later rounds judge against the amended frozen set.",
+					// Spec S07.5 + D10: the judge may raise the question, only a
+					// person answers it; an accepted adjustment lands as an S06.9
+					// ADDED/MODIFIED/REMOVED delta and re-freezes the AC set.
+					"Changing what this work is supposed to do is yours to decide: the automatic check can raise the question, never answer it.",
+					"If you accept an adjustment, it is recorded as something added, changed or removed, the agreed list is fixed again, and every later check is made against the new list.",
 				}, posture),
 				Findings: findings, Rounds: out.Rounds,
 			})
@@ -663,13 +670,15 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			case atCap:
 				reason = fmt.Sprintf("hard cap ⚙ %s=%d reached", keyReworkRounds, cap64)
 			case v.Revise == nil:
-				reason = "rework unavailable (fresh-session executor seam not wired; B2-4)"
+				// The fresh-session executor seam is not wired yet (B2-4).
+				reason = "another attempt cannot be started from here yet"
 			}
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatCapHit, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 				Summary: "rework stopped without SHIP: " + reason,
 				Detail: postureDetail(
-					[]string{"Every round's findings and verdicts are attached — never a silent stop (Spec S07.6)."}, posture),
+					// Spec S07.6: every round's record rides the card.
+					[]string{"Every round's findings and verdicts are attached — never a silent stop."}, posture),
 				Findings: findings, Rounds: out.Rounds,
 				BestEffort: fmt.Sprintf("revision %d (sha256 %s) is the best-effort state", d.Revision, record.ContentSHA),
 			})
@@ -732,6 +741,24 @@ func fixupRevision(nd, prev Deliverable) Deliverable {
 // researchGate runs the 1.9 check with its bounded re-run, terminating in a
 // RESEARCH-NOT-RUN card when the budget is exhausted (Spec S07.3/S07.7).
 // The returned notes carry UNVERIFIABLE-HERE outcomes into the round record
+// researchSubject names, for the person reading the verdict, WHAT a research
+// node was supposed to look up. The rule's plain class is the primary source
+// and it is distinct per rule id, which is what keeps two research rules on ONE
+// step two visibly different facts now that the id itself has left the sentence
+// (the P3-RW-18 D3-R2 lesson; the Anchor stays `step:<id>` and carries the
+// cross-round suppression semantics either way). A rule the seed table does not
+// carry falls back to the node's own query — also per-node, so the distinctness
+// survives — and then to an honest generic phrase.
+func researchSubject(n intake.ResearchNode) string {
+	if class := intake.ResearchSubject(n.RuleID); class != "" {
+		return strings.ToLower(class)
+	}
+	if q := strings.TrimSpace(n.Query); q != "" {
+		return strconv.Quote(q)
+	}
+	return "the outside facts it depends on"
+}
+
 // — loud, never a fake pass.
 func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner string, d Deliverable, nodes []intake.ResearchNode, posture Posture) ([]Finding, *Card, error) {
 	if len(nodes) == 0 {
@@ -756,7 +783,8 @@ func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner strin
 				if v.ResearchRerun == nil {
 					// No re-run path: the node cannot be fixed here — card,
 					// never a silent pass (Spec S07.7 P46).
-					o.Detail += " (re-run seam not wired; B2-4)"
+					// No re-run path is wired yet (B2-4), said plainly on the card.
+					o.Detail += " The platform cannot start that lookup again from here yet, so the decision comes to you."
 					cardNodes = append(cardNodes, o)
 					continue
 				}
@@ -773,19 +801,19 @@ func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner strin
 				notes = append(notes, Finding{
 					Severity: SeverityNote, Category: CatResearchNotRun,
 					Anchor: "step:" + o.Node.StepID,
-					Text: fmt.Sprintf("did-research-actually-run undecidable for %s [%s]: %s",
-						o.Node.StepID, o.Node.RuleID, o.Detail),
+					Text: fmt.Sprintf("There is no record proving step %s actually did its research on %s: %s",
+						o.Node.StepID, researchSubject(o.Node), o.Detail),
 				})
 			}
 		}
 		if len(cardNodes) > 0 {
 			detail := make([]string, 0, len(cardNodes))
 			for _, o := range cardNodes {
-				detail = append(detail, fmt.Sprintf("%s (%s): %s", o.Node.RuleID, o.Node.StepID, o.Detail))
+				detail = append(detail, fmt.Sprintf("Step %s, %s: %s", o.Node.StepID, researchSubject(o.Node), o.Detail))
 			}
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatResearchNotRun, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
-				Summary: "research node(s) never invoked a research tool (1.9) — correctness on world-facts is never left to model memory",
+				Summary: "a step that was supposed to look something up never did — correctness on world-facts is never left to model memory",
 				Detail:  postureDetail(detail, posture),
 			})
 			if err != nil {
@@ -848,7 +876,8 @@ func (v *Verifier) ChallengeCheck(ctx context.Context, d Deliverable, checkID, c
 	return v.escalator().Raise(ctx, Escalation{
 		Category: CatCheckIntegrity, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,
 		Summary: fmt.Sprintf("executor challenges check %q: %s", checkID, challenge),
-		Detail:  []string{"Sanctioned challenge in place of test edit access (Spec S07.3 rule 5); the suite is under human review."},
+		// Spec S07.3 rule 5: a worker challenges a check instead of editing it.
+		Detail: []string{"The worker was allowed to challenge this check rather than change it — nothing may edit the checks that judge its own work. The check is now waiting for a person to look at it."},
 	})
 }
 

@@ -108,7 +108,7 @@ func TestFlatLaneSelectionAcrossTwoFlatLanes(t *testing.T) {
 				t.Errorf("seat lane = %q, want %q — selection between flat lanes is by consumption pressure (S08.8/D5)", seat.Lane, tc.want)
 			}
 			low := strings.ToLower(reason)
-			if !strings.Contains(low, "pressure") && !strings.Contains(low, "consum") {
+			if !strings.Contains(low, "by how much of each is left") && !strings.Contains(low, "used") {
 				t.Errorf("the reason does not say WHY the lane was chosen: %q", reason)
 			}
 			for _, money := range []string{"$", "usd", "cost", "price", "cheap"} {

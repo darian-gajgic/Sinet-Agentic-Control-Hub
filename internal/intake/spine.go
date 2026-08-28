@@ -93,14 +93,16 @@ func (p *Pipeline) bandRecheck(st *State, plan *Plan) (ok bool, why string) {
 			return false, "plan expects outward-effect proposals"
 		}
 		if len(s.NewTools) > 0 {
-			return false, "plan needs new tools/workers/grants (S06.4 condition 4)"
+			// S06.4 condition 4.
+			return false, "plan needs tools, workers or permissions it does not already have"
 		}
 		if s.NewSpend || s.CredentialTouch || s.SharedAssetWrite {
 			return false, "plan trips a deterministic floor class"
 		}
 	}
 	if len(st.openDataBearing()) > 0 {
-		return false, "data-bearing flag set (S06.3)"
+		// S06.3: the task rests on facts in the world.
+		return false, "the task rests on facts in the world that have to be looked up"
 	}
 	capUSD, err := p.Settings.FloatFor(keyZeroInteractionCost, st.Owner)
 	if err != nil {
@@ -118,7 +120,8 @@ func (p *Pipeline) bandRecheck(st *State, plan *Plan) (ok bool, why string) {
 // sizeDelta is spine (c): plan-derived estimate vs the Stage-0 guess.
 func sizeDelta(guess, plan Estimate, factor float64) (finding, detail string) {
 	if !guess.Known || !plan.Known {
-		return "incomparable", "size classification cannot be compared numerically (unpriced side) — surfaced, never silent (2.5)"
+		// 2.5: an incomparable size is surfaced, never silent.
+		return "incomparable", "one of the two size estimates has no number attached, so they cannot be compared — said out loud rather than passed over"
 	}
 	switch {
 	case plan.USD > guess.USD*factor:

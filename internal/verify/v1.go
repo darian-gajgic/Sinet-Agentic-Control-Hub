@@ -584,7 +584,8 @@ func CheckResearch(ctx context.Context, usage ResearchUsage, taskID string, node
 		ro := ResearchOutcome{Node: node}
 		if usage == nil {
 			ro.State = ContractUnverifiable
-			ro.Detail = "per-step usage counters not wired (S10 seam; B2-4) — recorded, not silently passed"
+			// The S10 per-step usage seam is not wired yet (B2-4); said plainly.
+			ro.Detail = "the platform does not yet keep a per-step record of what was looked up, so this could not be checked either way — recorded, not silently passed"
 			out = append(out, ro)
 			continue
 		}

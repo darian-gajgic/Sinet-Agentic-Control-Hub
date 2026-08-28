@@ -88,6 +88,27 @@ const (
 	DutyUtility   = "utility"
 )
 
+// plainDuty says what a duty class IS, for the requester reading the
+// selection's own sentence. The duty string itself is a machine token and
+// stays one — it keys the duty map, rides the routing block's structured
+// members and is what an operator configures; only the PROSE translates
+// (P3-GF13). An unrecognised duty falls through as itself rather than being
+// hidden: a name the requester cannot place still beats a silent omission.
+func plainDuty(duty string) string {
+	switch duty {
+	case DutyExecution:
+		return "doing the work"
+	case DutyPlanning:
+		return "working out the plan"
+	case DutyJudge:
+		return "checking the finished work"
+	case DutyUtility:
+		return "small internal chores"
+	default:
+		return duty
+	}
+}
+
 // Seat is one duty-map row: the concrete model a duty class resolves to on
 // which lane, plus the model's context-window record (a MODEL FACT riding
 // the seat row — the S05.3 stage-fit budget measures against it; this is
@@ -299,12 +320,15 @@ func LanePinRefusal(cov Coverage, lane string) string {
 	case cov.laneCovered(lane):
 		return ""
 	case cov.LocalLane != "" && lane == cov.LocalLane:
-		return fmt.Sprintf("lane %q is the local ENGINE lane, which carries no v0 consumer: no local provider entry is "+
-			"commissioned, so honoring a pin to it could only mean riding the paid seat instead (S12.1 class (a)). "+
-			"The lanes a task may pin are: %s", lane, pinnableList(cov))
+		// S12.1 class (a): the local ENGINE lane has no v0 consumer because no
+		// local provider entry is commissioned. Said plainly on the wire.
+		return fmt.Sprintf("lane %q is the on-machine model lane, and no task can be sent to it yet: nothing is set "+
+			"up to dispatch a task's work there, so pinning to it would quietly run this task on a paid model "+
+			"instead. The lanes a task may pin are: %s", lane, pinnableList(cov))
 	default:
-		return fmt.Sprintf("lane %q is not one this platform holds flat-rate coverage on, and subscription coverage "+
-			"binds every choice (S08.8 step 3). The lanes a task may pin are: %s", lane, pinnableList(cov))
+		// S08.8 step 3: subscription coverage binds every choice.
+		return fmt.Sprintf("lane %q is not covered by any subscription this household holds, and every choice the "+
+			"platform makes stays inside that coverage. The lanes a task may pin are: %s", lane, pinnableList(cov))
 	}
 }
 
@@ -831,12 +855,15 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	// dispatch) resolves to the paid execution seat either way, never a fake
 	// dispatch onto a lane nothing is commissioned on, never an error (absent
 	// duties degrade, never faked — S08.8/CONVENTIONS §19).
+	// These notes are served on the requester's WHO-DOES-IT surface, so they
+	// speak plain words; the citations (S12.1's class (a)/(b) consumer split,
+	// S12's local tier) stay in the comment above (P3-GF13).
 	localNote := ""
 	if q.Mechanical || duty == DutyUtility {
 		if r.Coverage.LocalAvailable {
-			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is serving; its engine lane carries no v0 consumer because no local provider entry is commissioned (S12.1 class (a) — platform duty calls ride the tier directly), so this dispatch rides the paid seat.", duty)
+			localNote = fmt.Sprintf("Work of this kind (%s) prefers the free models running on this machine, and they are serving — but nothing is set up yet to send a task's own work to them, so this one runs on a paid model.", plainDuty(duty))
 		} else {
-			localNote = fmt.Sprintf("Duty %q prefers the local free tier, which is not configured (S12) and has no commissioned provider entry; riding the paid seat instead.", duty)
+			localNote = fmt.Sprintf("Work of this kind (%s) prefers the free models on this machine, but none are set up here, so it runs on a paid model instead.", plainDuty(duty))
 		}
 		duty = DutyExecution
 	}
@@ -850,7 +877,7 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	seat, ok := r.DutyMap[duty]
 	seatDuty := duty
 	if !ok {
-		localNote = fmt.Sprintf("Duty %q has no seat in the v0 duty map; riding the execution seat.", duty) + " " + localNote
+		localNote = strings.TrimSpace(fmt.Sprintf("No model is assigned to work of this kind (%s), so it runs on the one that does the ordinary work.", plainDuty(duty)) + " " + localNote)
 		seat, ok = r.DutyMap[DutyExecution]
 		if !ok {
 			return Seat{}, "", "", "", fmt.Errorf("%w: duty map has no execution seat", ErrInvalid)
@@ -881,9 +908,12 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	pinNote := ""
 	if p.ModelPin != "" && !lanePinned {
 		if !r.modelCovered(p.ModelPin, seat.Lane) {
-			advice := fmt.Sprintf("Subscription gap (2.7): the worker pins model %q, which no flat-rate lane covers "+
-				"(config-derived; observed-list diffing arrives with the S03.6 watch, B5). "+
-				"Options: run the generalist on the covered seat, or extend coverage.", p.ModelPin)
+			// The 2.7 model-gap leg, in plain words. The observed-list diffing
+			// this note admits is missing arrives with the S03.6 watch (B5).
+			advice := fmt.Sprintf("Not covered by a subscription: this specialist asks for the model %q, and none of "+
+				"the household's plans include it. (The covered list is read from this platform's own configuration; "+
+				"it is not yet checked against what the provider actually offers.) You can run the all-rounder on a "+
+				"covered model instead, or add coverage for that one.", p.ModelPin)
 			return Seat{}, "", "", advice, nil
 		}
 		seat = Seat{Model: p.ModelPin, Lane: seat.Lane, WindowTokens: seat.WindowTokens}
@@ -905,8 +935,9 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 			// at v0 (G1 P7). The branch exists so the refusal is testable.
 			return Seat{}, "", "", "", fmt.Errorf("%w: metered selection is structurally disabled at v0 (D5/G1 P7)", ErrInvalid)
 		}
-		advice := fmt.Sprintf("Subscription gap (2.7): duty %q resolves to lane %q, which the owner does not hold flat-rate "+
-			"(config-derived; observed-list diffing arrives with the S03.6 watch, B5).", duty, seat.Lane)
+		advice := fmt.Sprintf("Not covered by a subscription: work of this kind (%s) is assigned to %s, and the "+
+			"household holds no plan for it. (The covered list is read from this platform's own configuration; it is "+
+			"not yet checked against what the provider actually offers.)", plainDuty(duty), seat.Lane)
 		return Seat{}, "", "", advice, nil
 	}
 
@@ -915,12 +946,17 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	}
 
 	effort := p.EffortFloor
-	reason := fmt.Sprintf("Runs on %s (%s lane) per the %s duty seat; flat-rate coverage bound (D5).", seat.Model, seat.Lane, duty)
+	// The seat sentence is the WHO-DOES-IT line the requester reads, so it names
+	// the model, the lane and what the seat is FOR in plain words. D5 (never
+	// dollars, flat-rate coverage binds), S08.8 step 4 (research nodes take the
+	// search-capable lane) and S10's effort ladder are cited here, not on the
+	// wire (P3-GF13).
+	reason := fmt.Sprintf("Runs on %s (the %s lane), the model assigned here to %s; the choice is bound to what the household's subscriptions cover, so nothing is billed per call.", seat.Model, seat.Lane, plainDuty(duty))
 	if effort != "" {
-		reason += fmt.Sprintf(" Effort floor %s (ladder mechanics are S10's).", effort)
+		reason += fmt.Sprintf(" It works at %s effort or higher, never less.", effort)
 	}
 	if q.Research {
-		reason += " Research nodes route on the search-capable lane (S08.8 step 4)."
+		reason += " Steps that have to look something up run on a lane whose model can search."
 	}
 	if laneNote != "" {
 		reason += " " + laneNote
@@ -990,21 +1026,29 @@ func (r *Router) resolveLanePin(pin, seatDuty string, seat Seat, p ExecutionProf
 		// end. (The cause is this platform's seat set, NOT the duty: saying
 		// "this duty resolves to no model there" sent a reader to the template
 		// when the missing thing is a commissioned seat — r1 F1.)
-		return Seat{}, "", fmt.Errorf("%w: lane %q is pinned on this task and is held flat-rate, but this "+
-			"platform has no execution seat on it — no lane document contributed one, so there is no model to "+
-			"run there (S08.8 step 3; seat rows are the lane documents' own, S03.6)", ErrLanePinUnhonorable, pin)
+		// Served on the wire as an honest refusal (LN-9), so it says the same
+		// thing without the citations: S08.8 step 3 (coverage binds) and S03.6
+		// (seat rows come from the lane documents, never invented here).
+		return Seat{}, "", fmt.Errorf("%w: lane %q is pinned on this task and the household does hold a plan for it, "+
+			"but no model on that lane has been set up here to run work, so there is nothing to run this task on. "+
+			"Adding one is a change to this platform's own lane setup, not to the task", ErrLanePinUnhonorable, pin)
 	}
 	if chosen.WindowTokens == 0 {
 		chosen.WindowTokens = DefaultWindowTokens
 	}
 
-	note := fmt.Sprintf("Lane %q is pinned on this task, so the pin REPLACED the consumption-pressure comparison "+
-		"across the %d covered flat-rate lanes and selection honored it (S08.8 visible-and-overridable [S00.9 A13]; "+
-		"never dollars — D5).", pin, coveredLaneCount(r.Coverage))
+	// The honored-pin note is requester copy (the pin is visible and
+	// overridable, S08.8 [S00.9 A13]) and the comparison it replaced is about
+	// subscription headroom, never dollars (D5) — both said plainly here.
+	note := fmt.Sprintf("Lane %q is pinned on this task, so the platform used it instead of comparing how much "+
+		"subscription headroom is left across the %d covered lanes. That comparison is never about money — and this "+
+		"pin is shown here so you can change it.", pin, coveredLaneCount(r.Coverage))
 	if viaExecution {
-		note += fmt.Sprintf(" Lane %q seats EXECUTION only — planning and judge keep their ratified seats because "+
-			"no second lane's models have been measured against the S07.5 bars — so duty %q rides that lane's "+
-			"execution seat (%s).", pin, seatDuty, chosen.Model)
+		// S07.5 sets the quality bars planning and judging have to clear.
+		note += fmt.Sprintf(" Lane %q is only set up for doing the work — planning and checking keep the models "+
+			"chosen for them, because no other lane's models have been measured against the quality bars those two "+
+			"jobs have to clear — so %s runs on that lane's working model (%s).",
+			pin, plainDuty(seatDuty), chosen.Model)
 	}
 	if laneNote := r.Coverage.PinNotes[pin]; laneNote != "" {
 		note += " " + laneNote
@@ -1019,9 +1063,11 @@ func (r *Router) resolveLanePin(pin, seatDuty string, seat Seat, p ExecutionProf
 			note += fmt.Sprintf(" Model pinned by the template (%s), which the lane pin leaves standing "+
 				"because it names this seat's own lane.", p.ModelPinReason)
 		} else {
-			note += fmt.Sprintf(" It SUPERSEDES the template's own model pin, whose recorded reason was %q: "+
-				"an override is recorded with its actor (S08.8), and a person's choice on this task outranks a "+
-				"standing template default (S08.4 8.9).", p.ModelPinReason)
+			// S08.8 records an override with its actor; S08.4 8.9 puts the
+			// task's own spec above a template's standing baseline.
+			note += fmt.Sprintf(" It OVERRIDES the model this specialist normally asks for, whose recorded "+
+				"reason was %q: the change is recorded against the person who made it, and a choice made on "+
+				"this task outranks a standing default.", p.ModelPinReason)
 		}
 	}
 	return chosen, note, nil
@@ -1071,7 +1117,7 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 	}
 
 	if r.Pressure == nil {
-		return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty and no consumption gauge is wired, so the configured order stands (never dollars — D5).",
+		return covered[0], fmt.Sprintf("%d covered lanes can do this work and nothing is measuring how much of each is left, so the configured order stands. The choice is never about money.",
 			len(covered))
 	}
 	best, bestP := covered[0], 0.0
@@ -1080,7 +1126,7 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 		if err != nil {
 			// A gauge that cannot answer degrades to the configured order
 			// rather than failing the dispatch, and says so.
-			return covered[0], fmt.Sprintf("Consumption pressure was unavailable (%v), so the configured lane order stands (never dollars — D5).", err)
+			return covered[0], fmt.Sprintf("How much of each lane is left could not be read (%v), so the configured lane order stands. The choice is never about money.", err)
 		}
 		if !p.Applicable {
 			// No comparable ratio on a lane means no comparison. The
@@ -1098,15 +1144,17 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 			if p.Reason != "" {
 				why = "cannot be compared: " + p.Reason
 			}
-			return covered[0], fmt.Sprintf("%d flat-rate lanes cover this duty but lane %s %s, "+
-				"so there is no comparable consumption pressure and the deterministic duty-map order stands (S10.4; never dollars — D5).",
+			return covered[0], fmt.Sprintf("%d covered lanes can do this work, but %s %s, "+
+				"so there is nothing comparable to weigh and the configured order stands. The choice is never about money.",
 				len(covered), c.Lane, why)
 		}
 		if i == 0 || p.Ratio < bestP {
 			best, bestP = c, p.Ratio
 		}
 	}
-	return best, fmt.Sprintf("Chosen among %d covered flat-rate lanes on consumption pressure — %s sits at %.0f%% of its declared automation budget, the least consumed (D5: never dollars).",
+	// S10.4's gauge, D5's never-dollars rule: the comparison is headroom, said
+	// plainly for the requester reading the selection.
+	return best, fmt.Sprintf("Chosen among %d covered lanes by how much of each is left — %s has used %.0f%% of the automation budget declared for it, the least of any. The choice is never about money.",
 		len(covered), best.Lane, bestP*100)
 }
 
@@ -1153,20 +1201,25 @@ func (r *Router) noFit(ctx context.Context, q RouteQuery, signals []string, degr
 		rec, due = &fresh, freshDue
 	}
 
-	reason := "No specialist fits; running as generalist-with-injected-knowledge (the default for one-offs, S08.8)."
+	// The no-fit sentence is the headline of the requester's WHO-DOES-IT card,
+	// so it carries none of its rules' ids: S08.8 (the generalist with injected
+	// knowledge is the default for a one-off), S08.7 (a domain with no verified
+	// quality check marks its results degraded) and S08.6 (a recurring task
+	// family EARNS a composed specialist) are cited here (P3-GF13).
+	reason := "No trained specialist matches this work, so it runs on the platform's all-rounder, with the knowledge this task needs handed to it up front — the ordinary way a one-off job is done."
 	if degraded {
-		reason = "No specialist fits; running as generalist-with-injected-knowledge, DEGRADED-MARKED — the domain lacks a verified quality check (S08.7)."
+		reason = "No trained specialist matches this work, so it runs on the platform's all-rounder, with the knowledge this task needs handed to it up front. The result is marked lower-confidence: for work of this kind the platform has no proven way to check the quality of what comes back."
 	}
 	if len(refusedWrite) > 0 {
 		// Say WHY first, in the requester's language: these specialists
 		// matched the work and were refused the EQUIPMENT for it, which is a
 		// different — and actionable — fact from nobody matching at all (R8).
 		reason = fmt.Sprintf(
-			"This plan writes files, and %s cannot write it (a read-only workspace, or no editing tool granted). ",
+			"This plan changes files, and %s cannot do that — they are set up to read a project, not write to it. ",
 			humanList(refusedWrite)) + reason
 	}
 	if due {
-		reason += fmt.Sprintf(" This task family has now recurred %d times — composing a specialist is EARNED (S08.6); a composition proposal is open.", rec.Occurrences)
+		reason += fmt.Sprintf(" Work like this has now come up %d times, which is enough for a specialist to be worth training for it — a proposal to do that is open for you.", rec.Occurrences)
 	}
 	reason += " " + seatReason
 

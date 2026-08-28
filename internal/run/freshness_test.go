@@ -69,7 +69,7 @@ func TestEvaluateFreshness(t *testing.T) {
 		}, false, "no longer observable"},
 		{"sibling accept", func(in *run.FreshnessInput) {
 			in.SiblingAccept = true
-		}, false, "sibling-accept"},
+		}, false, "was accepted since this was planned"},
 		{"model id changed", func(in *run.FreshnessInput) {
 			in.CurrentVersions.ModelID = "m2"
 		}, false, "model id"},

@@ -15,7 +15,7 @@
     {
       "lane": "local",
       "pinnable": false,
-      "not_pinnable": "lane \"local\" is the local ENGINE lane, which carries no v0 consumer: no local provider entry is commissioned, so honoring a pin to it could only mean riding the paid seat instead (S12.1 class (a)). The lanes a task may pin are: \"anthropic\", \"kimi\", \"zai\""
+      "not_pinnable": "lane \"local\" is the on-machine model lane, and no task can be sent to it yet: nothing is set up to dispatch a task's work there, so pinning to it would quietly run this task on a paid model instead. The lanes a task may pin are: \"anthropic\", \"kimi\", \"zai\""
     }
   ]
 }

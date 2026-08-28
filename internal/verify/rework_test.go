@@ -319,7 +319,7 @@ func TestReviseSeamMissingEscalates(t *testing.T) {
 	if out.Card == nil || out.Card.Category != verify.CatCapHit {
 		t.Fatalf("want CAP-HIT card when rework is unavailable, got %+v", out.Card)
 	}
-	if !strings.Contains(out.Card.Summary, "rework unavailable") {
+	if !strings.Contains(out.Card.Summary, "another attempt cannot be started") {
 		t.Fatalf("card summary: %q", out.Card.Summary)
 	}
 }

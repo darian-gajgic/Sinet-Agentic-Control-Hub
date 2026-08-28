@@ -292,7 +292,8 @@ func (s *Scheduler) ParkInFlightRuns(ctx context.Context) error {
 			continue
 		}
 		if _, err := s.runs.Transition(ctx, runID, run.StateParked, run.TransitionOptions{
-			Reason: "maintenance drain grace expired (S01.6); parked, resumable", Actor: run.ActorPlatform,
+			// S01.6 maintenance drain.
+			Reason: "the platform is shutting down for maintenance and this work ran past its grace period; it is stopped, not lost", Actor: run.ActorPlatform,
 		}); err != nil && !errors.Is(err, run.ErrInvalidTransition) {
 			s.logger.WarnContext(ctx, "scheduler: park in-flight run", "run", runID, "err", err)
 		}
@@ -363,7 +364,8 @@ func (s *Scheduler) Enqueue(ctx context.Context, runID string, class WorkloadCla
 		switch r.State {
 		case run.StateNew:
 			if _, err := s.runs.TransitionTx(ctx, tx, runID, run.StateQueued, run.TransitionOptions{
-				Reason: "admitted to the claim queue (S10.7)", Actor: run.ActorPlatform,
+				// S10.7 claim queue.
+				Reason: "queued and waiting its turn", Actor: run.ActorPlatform,
 			}); err != nil {
 				return err
 			}
@@ -560,7 +562,8 @@ func (s *Scheduler) claimOne(ctx context.Context, c candidate) (run.Run, bool, e
 			return nil // lost the race; won stays false
 		}
 		if r, err = s.runs.TransitionTx(ctx, tx, c.runID, run.StateClaimed, run.TransitionOptions{
-			Reason: "CAS-claimed by the scheduler (S10.7)", Actor: run.ActorPlatform,
+			// S10.7: one claimer wins the compare-and-swap.
+			Reason: "picked up and started", Actor: run.ActorPlatform,
 		}); err != nil {
 			return err
 		}

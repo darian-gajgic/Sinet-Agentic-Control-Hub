@@ -320,7 +320,7 @@ func TestFamilyCardChoiceGenericExplicit(t *testing.T) {
 		}
 		var disclosed bool
 		for _, txt := range platformDecisionTexts(t, f, st.TaskID) {
-			if strings.Contains(txt, "research") && strings.Contains(txt, "generic") {
+			if strings.Contains(txt, "research") && strings.Contains(txt, "general questions") {
 				disclosed = true
 			}
 		}

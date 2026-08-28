@@ -74,7 +74,8 @@ func (s *Skeleton) pauseParkPoint(ctx context.Context, r run.Run, nextStage stri
 		return false
 	}
 	if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateParked, run.TransitionOptions{
-		Reason: "automation paused by " + r.UserID + ": parked at the stage-session boundary (S10.4; the v0 checkpoint approximation)",
+		// S10.4 pause; the stage-session boundary is v0's checkpoint approximation.
+		Reason: "automation paused by " + r.UserID + ": stopped at the last safe point rather than mid-step",
 		// The PLATFORM takes the edge; the AUTHORITY is the person's standing
 		// switch, which the detail names. Attributing the transition to the
 		// person would claim they acted at this instant, and they did not.
@@ -86,7 +87,7 @@ func (s *Skeleton) pauseParkPoint(ctx context.Context, r run.Run, nextStage stri
 		s.logger().Warn("stage: pause park refused", "run", r.ID, "err", err)
 		return false
 	}
-	s.logger().Info("stage: automation paused — run parked at the stage-session boundary (S10.4)",
+	s.logger().Info("stage: automation paused — run parked at the stage-session boundary",
 		"run", r.ID, "owner", r.UserID, "next_stage", nextStage)
 	return true
 }
@@ -97,7 +98,7 @@ func pauseParkDetail(owner, nextStage string) json.RawMessage {
 		Owner     string `json:"owner"`
 		NextStage string `json:"next_stage"`
 		Seam      string `json:"seam"`
-	}{"automation paused (S10.4)", owner, nextStage, pausedPerPaidCallGate})
+	}{"automation paused", owner, nextStage, pausedPerPaidCallGate})
 	if err != nil {
 		return nil
 	}

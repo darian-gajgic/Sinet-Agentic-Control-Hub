@@ -23,7 +23,7 @@
         ]
       },
       "definition": null,
-      "definition_absent": "no active version — status draft, so nothing is equipped yet (S08.6)",
+      "definition_absent": "nobody has approved a version of this worker yet (it is draft), so it has no tools or knowledge to show",
       "versions": [
         {
           "version_id": "wtv-audit-1",
@@ -47,7 +47,7 @@
             "egress": "none"
           },
           "granted": null,
-          "granted_absent": "never approved — approval is the only writer of enforcement state (S08.2)",
+          "granted_absent": "nobody has approved this worker yet, and approving is the only thing that ever grants it anything",
           "validation": null,
           "validation_absent": "the S08.6 battery has not run for this version",
           "revalidation": null,
@@ -81,8 +81,8 @@
         "deliverable": true,
         "requires_review": true,
         "reasons": [
-          "domain chore is degraded (S08.7)",
-          "supervised first-N: 3 reviews remaining (S08.6)"
+          "there is no proven way to check the quality of chore work here, so a person reviews it before it is delivered",
+          "this worker is new: its next 3 pieces of work are reviewed by a person before delivery"
         ]
       },
       "definition": {
@@ -202,7 +202,7 @@
         "deliverable": true,
         "requires_review": true,
         "reasons": [
-          "supervised first-N: 3 reviews remaining (S08.6)"
+          "this worker is new: its next 3 pieces of work are reviewed by a person before delivery"
         ]
       },
       "definition": {
@@ -432,7 +432,7 @@
       "versions_truncated": false
     }
   ],
-  "roster_scope": "every worker in the registry (the operator reads the whole roster — D10)",
+  "roster_scope": "every worker on the platform — as the household's operator you see the whole set",
   "outcome_scope": "runs of every owner",
   "truncated": false,
   "outcomes_truncated": false,

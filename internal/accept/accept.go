@@ -289,7 +289,7 @@ func (a *Accepter) Accept(ctx context.Context, in Input) (Outcome, error) {
 	// it is; a wall only the caller upholds is not a wall.
 	if in.Engine == "" || in.Model == "" || in.VendorNoreply == "" {
 		return Outcome{}, fmt.Errorf("accept: deliverable %q has no renderable attribution (engine %q, model %q, vendor address %q): "+
-			"an accept never pushes a Co-Authored-By line naming nobody (S13.6 step 3)",
+			"an accept never signs off work in the name of nobody",
 			in.DeliverableID, in.Engine, in.Model, in.VendorNoreply)
 	}
 	candidate := rev.SnapshotSHA

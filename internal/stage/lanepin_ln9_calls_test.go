@@ -274,7 +274,7 @@ func TestLN9PinnedLaneWinsAtTheRealCallSite(t *testing.T) {
 			"the unpinned body is byte-identical to the one served before this packet", unpinned.LanePin)
 	}
 
-	for _, want := range []string{`"zai"`, "REPLACED", "pinned on this task"} {
+	for _, want := range []string{`"zai"`, "instead of comparing", "pinned on this task"} {
 		if !strings.Contains(pinned.PlainReason, want) {
 			t.Errorf("the recorded reason does not say %q: %q", want, pinned.PlainReason)
 		}

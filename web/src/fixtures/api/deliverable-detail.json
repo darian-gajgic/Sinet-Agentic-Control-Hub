@@ -45,7 +45,7 @@
       "method": "POST",
       "route": "/api/deliverables/d-notes/accept",
       "available": false,
-      "reason": "this deliverable is accepted: only an in-review deliverable is accepted (S13.1/S13.6)",
+      "reason": "this work is accepted: only work that is still in review can be accepted",
       "pin_from": "GET /api/deliverables/d-notes/accept-card"
     },
     {

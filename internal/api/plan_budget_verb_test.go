@@ -222,7 +222,10 @@ func TestLN6PlanBudgetVerbAuthorityAndValidation(t *testing.T) {
 			if code != tc.want {
 				t.Fatalf("status %d, want %d: %s", code, tc.want, out)
 			}
-			if tc.want == http.StatusForbidden && (!strings.Contains(out, "S15.2") || !strings.Contains(out, "D10")) {
+			// The refusal names the authority in PLAIN WORDS now (P3-GF13): a
+			// spec citation on a served refusal is exactly what that packet
+			// removed, so the assertion tracks the sentence, not the id.
+			if tc.want == http.StatusForbidden && (!strings.Contains(out, "your own") || !strings.Contains(out, "operator")) {
 				t.Errorf("the refusal does not name the authority it rests on: %s", out)
 			}
 			if tc.want != http.StatusOK {

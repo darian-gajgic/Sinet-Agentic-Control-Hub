@@ -49,7 +49,8 @@ type BudgetRecord struct {
 
 // budgetUnit is the unit label served with every budget. It is a LABEL, not a
 // conversion: nothing here turns the number into anything else.
-const budgetUnit = "weighted-consumption units (S10.4)"
+// S10.4's weighted consumption gauge.
+const budgetUnit = "weighted-consumption units"
 
 // BudgetStore is the S10.4 durable budget seam (migration 0017). The shell
 // adapts *metering.Budgets to it; nil leaves the budget verb answering 503.
@@ -228,7 +229,7 @@ func (s *Server) handleBudgetDeclare(w http.ResponseWriter, r *http.Request) {
 	}
 	if owner != scope.UserID && !scope.Operator {
 		s.writeSurface(w, nil, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-			Msg: "declaring another person's automation budget is the operator's (S15.2 \"budget edits (own)\"; D10)"})
+			Msg: "you can set your own automation budget; setting somebody else's is the household operator's to do"})
 		return
 	}
 	if !s.requirePerson(w, r, owner) {
@@ -237,7 +238,7 @@ func (s *Server) handleBudgetDeclare(w http.ResponseWriter, r *http.Request) {
 	lane := strings.TrimSpace(body.Lane)
 	switch {
 	case lane == "":
-		s.writeSurface(w, nil, badRequest(`missing "lane": a budget is declared per (person, lane) — the grain the S10.4 gauge reads at (D4)`))
+		s.writeSurface(w, nil, badRequest(`missing "lane": a budget is set for one person on one lane — that is the grain the platform measures at`))
 		return
 	case body.PeriodTokens <= 0:
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
@@ -372,7 +373,7 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 	}
 	if owner != scope.UserID && !scope.Operator {
 		s.writeSurface(w, nil, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-			Msg: "declaring another person's automation budget is the operator's (S15.2 \"budget edits (own)\"; D10)"})
+			Msg: "you can set your own automation budget; setting somebody else's is the household operator's to do"})
 		return
 	}
 	if !s.requirePerson(w, r, owner) {
@@ -382,7 +383,7 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 	window := strings.TrimSpace(body.Window)
 	switch {
 	case lane == "":
-		s.writeSurface(w, nil, badRequest(`missing "lane": a plan budget is declared per (person, lane, window) — the grain the tier-3 reading denominates at (S18.3)`))
+		s.writeSurface(w, nil, badRequest(`missing "lane": a plan budget is set for one person, on one lane, over one window — that is the grain the reading is measured against`))
 		return
 	case window == "":
 		s.writeSurface(w, nil, badRequest(`missing "window": a plan's windows are separate allowances in possibly different units, so a budget for "the lane" is a budget in no particular unit`))
@@ -478,7 +479,7 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 	if !ends.After(now) {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
 			"that period is already over: a %v-hour period starting %s ended at %s. A budget is declared for a period "+
-				"that is still running, and re-declaring is what starts the next one — nothing rolls one over (S10.4)",
+				"that is still running, and declaring again is what starts the next one — nothing carries over",
 			rec.PeriodHours, rec.PeriodStart.UTC().Format(time.RFC3339), ends.UTC().Format(time.RFC3339))))
 		return
 	}
@@ -501,7 +502,7 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 			"against it immediately, in %s. The period runs %v hours and ends at %s — after that the reading stops "+
 			"applying and this lane returns to the deterministic routing order until you declare the next period; "+
 			"nothing rolls one over. Nothing is enforced by the budget either: it is what makes the lane's pressure "+
-			"comparable when routing picks between flat-rate lanes (S08.8)",
+			"comparable when the platform picks between covered lanes",
 			lane, window, rec.Unit, rec.PeriodHours, ends.UTC().Format(time.RFC3339))}
 	if existed {
 		out.Prior = &prior
@@ -618,7 +619,7 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 	// audited with its actor.
 	if owner != scope.UserID && !scope.Operator {
 		s.writeSurface(w, nil, &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-			Msg: "pausing another person's automation is the operator's (D10)"})
+			Msg: "pausing somebody else's background work is the household operator's to do"})
 		return
 	}
 	if !s.requirePerson(w, r, owner) {
@@ -631,9 +632,9 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 	}
 	out := AutomationPause{Owner: owner, Paused: *body.Paused, Changed: prior != *body.Paused}
 	if *body.Paused {
-		out.Detail = "paused: no background work is admitted for this person, and an in-flight run parks at its next stage-session boundary. Nothing queued or parked is discarded, and interactive work is not gated at all (S10.4)"
+		out.Detail = "paused: no background work starts for this person, and anything already running stops at its next safe point. Nothing waiting or stopped is thrown away, and work you are doing yourself is not held up at all"
 	} else {
-		out.Detail = "resumed: background admission is open again and the preserved queue proceeds. A run that parked while paused is released by its own resume (S14.4)"
+		out.Detail = "resumed: background work starts again and everything that was waiting carries on. Anything that stopped while paused is released by its own resume"
 	}
 	if err := s.recordDecision(r.Context(), decisionPayload{
 		Actor: scope.UserID, ActorIsOperator: scope.Operator,
@@ -722,7 +723,7 @@ func (s *Server) handlePriorityHint(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Rank < -hintRankBound || body.Rank > hintRankBound {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-			"bad rank %d: the drag hint is an ordering position within ±%d (S15.5)", body.Rank, hintRankBound)))
+			"bad position %d: dragging moves an item within %d places of where it is", body.Rank, hintRankBound)))
 		return
 	}
 	runs, err := s.proj.queuedRunsOfTask(r.Context(), taskID)
@@ -742,7 +743,7 @@ func (s *Server) handlePriorityHint(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if out.Applied {
-		out.Detail = "hint recorded: it breaks ties among your own same-class queued work. It never outranks the workload class ladder and never reaches another person's queue (S15.5; S10.7)"
+		out.Detail = "recorded: it settles the order among your own waiting work of the same kind. It never jumps ahead of more urgent kinds of work, and it never touches anybody else's queue"
 	} else {
 		// The honest stale board: the work moved on between the render and the
 		// drag. Not an error — an error here would imply the drag had an

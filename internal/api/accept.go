@@ -106,9 +106,11 @@ type AcceptSigning struct {
 func acceptSigningPosture() AcceptSigning {
 	return AcceptSigning{
 		Structural: true, PerCallFlag: false, KeyLeavesBroker: false,
-		Statement: "signing is your structural posture, not an option on this card: it is all-or-nothing per user (S13.6 step 5), the broker holds the " +
-			"git-ssh-key and does the signing, and no key material or per-call flag crosses this surface. Whether YOUR commits are signed is a broker " +
-			"fact this transport does not probe — asking would mean reaching past the accept orchestration that owns it.",
+		// S13.6 step 5: signing is all-or-nothing per user, set once and not
+		// per accept; the broker holds the key and no key material crosses here.
+		Statement: "Whether your commits are signed is settled once for your account, not chosen here: it is all your commits or none of them. " +
+			"The signing key is held by the credential broker, which does the signing — the key never reaches this page, and there is no per-accept " +
+			"switch. This page does not ask the broker whether your signing is on, so it does not claim either way.",
 	}
 }
 
@@ -209,14 +211,16 @@ type AcceptProvenance struct {
 // someone accepting into a store that has no remote, is untrue at the moment it
 // matters most.
 const (
-	acceptTierStatement = "High tier: this pushes a commit to a shared branch, so it is never batched and your PIN is re-prompted in the same " +
-		"request. No elevation is inherited from an idle session (S15.6; S01.9)."
-	acceptPinnedTierStatement = "High tier: your PIN is re-prompted in the same request and this is never batched. Nothing is pushed — this " +
-		"deliverable pins its content, so the accept records your decision against that immutable pin. The accept family keeps one posture " +
-		"whichever way the work lands. No elevation is inherited from an idle session (S15.6; S01.9)."
-	acceptLocalTierStatement = "High tier: your PIN is re-prompted in the same request and this is never batched. Nothing is sent anywhere — this " +
-		"project registers no remote, so the commit is written into its own store on this machine. The accept family keeps one posture " +
-		"whichever way the work lands. No elevation is inherited from an idle session (S15.6; S01.9)."
+	// S15.6 tier + S01.9 step-up: a high-tier act re-asks for the PIN in the
+	// same request and never rides an idle session's elevation.
+	acceptTierStatement = "This is a high-stakes act: it puts a commit on a branch other people work from, so it is never bundled with other " +
+		"answers and you type your PIN again as part of this request. Having signed in earlier is not enough."
+	acceptPinnedTierStatement = "This is a high-stakes act: you type your PIN again as part of this request and it is never bundled with other " +
+		"answers. Nothing is pushed — this deliverable is pinned to its exact content, so your decision is recorded against that pin, which " +
+		"cannot change afterwards. Accepting works the same way wherever the work lands. Having signed in earlier is not enough."
+	acceptLocalTierStatement = "This is a high-stakes act: you type your PIN again as part of this request and it is never bundled with other " +
+		"answers. Nothing is sent anywhere — this project has no remote address, so the commit is written into its own store on this machine. " +
+		"Accepting works the same way wherever the work lands. Having signed in earlier is not enough."
 )
 
 // acceptPinCore is the canonical accept-card core the payload hash covers.
@@ -325,24 +329,27 @@ func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov Acce
 	case !wired:
 		return false, "no accept orchestration is composed in this process"
 	case d.State != review.StateInReview:
-		return false, fmt.Sprintf("this deliverable is %s: only an in-review deliverable is accepted (S13.1/S13.6)", d.State)
+		// S13.1/S13.6: only an in-review deliverable is acceptable.
+		return false, fmt.Sprintf("this work is %s: only work that is still in review can be accepted", d.State)
 	case rev.N < 1:
 		return false, acceptNoRevisionReason
 	}
 	if rev.SnapshotSHA == "" {
-		return true, fmt.Sprintf("open: accept with this payload_hash and your PIN in the same request. Nothing is pushed — revision %d pins "+
-			"its content, so the accept records your decision against that immutable pin and files the work as accepted (S13.1; 5.8)", rev.N)
+		// S13.1 content pin; 5.8 durable decision.
+		return true, fmt.Sprintf("open: accept with this payload_hash and your PIN in the same request. Nothing is pushed — version %d is "+
+			"pinned to its exact content, so your decision is recorded against that pin and the work is filed as accepted", rev.N)
 	}
 	switch {
 	case d.ProjectID == "":
-		return false, "this deliverable belongs to no project, so there is no protected ref to push to (S13.7)"
+		// S13.7: without a registry entry there is no protected ref.
+		return false, "this work belongs to no project, so there is no branch to put it on"
 	case prov.Absent != "":
 		return false, prov.Absent
 	}
 	if landing == LandingLocalStore {
-		return true, "open: accept with this payload_hash and your PIN in the same request. This project registers no remote, so the official copy is " +
-			"the attributed commit written into the project's own local store on this machine, on its default branch — nothing is sent anywhere " +
-			"(S13.7; S13.1)"
+		// S13.7 registry + S13.1 landing: local store, no remote.
+		return true, "open: accept with this payload_hash and your PIN in the same request. This project has no remote address, so the official " +
+			"copy is the commit written into the project's own local store on this machine, on its main branch — nothing is sent anywhere"
 	}
 	return true, "open: accept with this payload_hash and your PIN in the same request"
 }
@@ -350,7 +357,8 @@ func acceptable(wired bool, d review.Deliverable, rev review.Revision, prov Acce
 // acceptNoRevisionReason is the pre-mint answer, shared by the card (which
 // cannot read a revision that does not exist) and by acceptable itself, so the
 // two cannot drift apart.
-const acceptNoRevisionReason = "no revision is minted yet, so there is nothing to accept (S13.1)"
+// (S13.1: a revision is minted at the verification handoff.)
+const acceptNoRevisionReason = "no version of this work has been produced yet, so there is nothing to accept"
 
 // revisionContentPin is the revision's immutable content pin as ONE string
 // (Spec S13.1: repo-backed types pin a snapshot-commit sha, content types pin
@@ -397,8 +405,8 @@ func (s *Server) acceptProvenance(ctx context.Context, rev review.Revision) Acce
 		runID, role = rev.RunID, "minting"
 	}
 	if runID == "" {
-		p.Absent = "this revision records neither a producing run nor a minting run, so the attribution trailers have no platform facts to " +
-			"render from (S13.6 step 3)"
+		// S13.6 step 3.
+		p.Absent = "nothing recorded which run produced this version, so the credit lines on the commit have no facts to be built from"
 		return p
 	}
 	if pay, ok := s.proj.latestPayload(ctx, runID, "routing.decided"); ok {
@@ -434,8 +442,9 @@ func (s *Server) acceptProvenance(ctx context.Context, rev review.Revision) Acce
 // reason the platform's own rows contradict. A person reading a closed door has
 // no way to check the claim, so the claim has to be true.
 func attributionAbsence(role, runID, engine, model string) string {
-	const cannot = "the attribution trailers cannot be rendered from platform facts, and an accept must never push a Co-Authored-By line " +
-		"naming nobody (S13.6 step 3)"
+	// S13.6 step 3: an accept never pushes a Co-Authored-By line naming nobody.
+	const cannot = "the credit lines on the commit cannot be filled in from what the platform actually recorded — and an accept never " +
+		"signs off work in the name of nobody"
 	who := "the " + role + " run " + runID + " "
 	switch {
 	case engine == "" && model == "":
@@ -568,7 +577,8 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	case review.StateSuperseded:
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusConflict, Code: "conflict",
-			Msg: "this deliverable is superseded: a newer accepted version replaced it and the old one is never accepted afterwards (S13.1)"})
+			// S13.1: a superseded deliverable is never accepted afterwards.
+			Msg: "this work has been superseded: a newer version was accepted in its place, and an older one is never accepted after that"})
 		return
 	}
 
@@ -700,27 +710,32 @@ func acceptOutcome(d review.Deliverable, card AcceptCard, out accept.Outcome) Ac
 	if out.Card != nil {
 		res.State = review.StateInReview
 		res.MergeCard = &MergeCardView{Card: out.Card, Options: mergeCardOptions(d.ID), Durability: mergeCardDurability}
-		res.Detail = "not accepted: the candidate does not apply cleanly, so it surfaces as a reviewable merge card rather than a silent overwrite " +
-			"(S13.6 step 1; S1.11). The deliverable is still in review and nothing was pushed."
+		// S13.6 step 1 + S1.11: a conflict surfaces, never overwrites.
+		res.Detail = "not accepted: this work does not fit cleanly onto the branch as it stands now, so it comes back to you as a merge to look " +
+			"at rather than quietly overwriting what is there. The work is still in review and nothing was pushed."
 		return res
 	}
 	res.Applied, res.State, res.Commit = true, review.StateAccepted, out.Commit
-	res.Detail = "accepted: one attributed commit is on the protected ref through the effect journal and the broker's CAS push, the deliverable is " +
-		"accepted, and the project's active runs were fired for S02.6 re-validation (S13.6; S02.8)."
+	// S13.6 push through the journal + the broker's CAS; S02.8 fires the
+	// project's active runs for S02.6 re-validation.
+	res.Detail = "accepted: one commit, credited to you, is now on the project's branch, this work is filed as accepted, and the project's " +
+		"other running tasks were told to re-check themselves against it."
 	if card.Landing == LandingLocalStore {
 		// The local landing: the same ceremony minus its transport, and the answer
 		// says so rather than reporting a push that was never composed.
-		res.Detail = "accepted: one attributed commit is on this project's default branch in its own store through the effect journal, the deliverable " +
-			"is accepted, and the project's active runs were fired for S02.6 re-validation. This project registers no remote, so that commit is the " +
-			"official copy and nothing was sent anywhere (S13.6; S13.7; S02.8)."
+		// S13.6/S13.7 local landing + S02.8 sibling re-validation.
+		res.Detail = "accepted: one commit, credited to you, is now on this project's main branch in its own store on this machine, this work is " +
+			"filed as accepted, and the project's other running tasks were told to re-check themselves against it. This project has no remote " +
+			"address, so that commit is the official copy and nothing was sent anywhere."
 	}
 	if out.EffectID == "" {
 		// The payload-pinned arm: no effect was proposed because nothing outward
 		// happened. What is durable is the decision itself, against a pin that
 		// cannot change (S13.1).
-		res.Detail = fmt.Sprintf("accepted: your decision is recorded against revision %d's immutable content pin and the deliverable is filed as "+
-			"accepted, owner-attributed in the event log. Nothing was pushed — this deliverable pins content rather than a snapshot commit, so "+
-			"there is no commit and no outward effect to journal (S13.1; 5.8/D10).", card.RevisionN)
+		// S13.1 content pin; 5.8/D10 durable, owner-attributed record.
+		res.Detail = fmt.Sprintf("accepted: your decision is recorded against version %d's exact content, which cannot change afterwards, and "+
+			"the work is filed as accepted in your name. Nothing was pushed — this work is pinned to its content rather than to a commit, so "+
+			"there is no commit and nothing went outward.", card.RevisionN)
 	}
 	return res
 }
@@ -735,8 +750,9 @@ func (s *Server) acceptedReadBack(ctx context.Context, d review.Deliverable) (Ac
 	out := AcceptOutcome{
 		DeliverableID: d.ID, Applied: false, State: d.State, RevisionN: rev.N,
 		Superseded: []string{}, RoutedRuns: []string{},
-		Detail: "already accepted: the recorded outcome is returned and nothing fired again (S15.2 retry-safety). " +
-			"A repeated accept can never produce a second commit — the deliverable-state guard inside the accept is the structural backstop.",
+		// S15.2 retry-safety: a repeat returns the recorded outcome.
+		Detail: "already accepted: this is the answer that was recorded the first time, and nothing ran again. " +
+			"Accepting twice can never produce a second commit.",
 	}
 	out.EffectID, out.Commit = s.acceptedEffect(ctx, d.ID)
 	return out, nil
@@ -772,7 +788,8 @@ func (s *Server) acceptedEffect(ctx context.Context, deliverableID string) (effe
 type staleAcceptError struct{ card AcceptCard }
 
 func (e *staleAcceptError) Error() string {
-	return "the accept card moved since you read it: re-read the card and accept the pin it now shows (S15.2)"
+	// S15.2: an answer is pinned to the payload it was shown for.
+	return "this card changed since you opened it: read it again and accept the version it now shows"
 }
 
 // checkAcceptPin is the S15.2 hash-pin limb for the ONE answerable act in this
@@ -785,7 +802,8 @@ func (s *Server) checkAcceptPin(card AcceptCard, given string) error {
 	// caller to different places — 400 "you did not quote a hash" versus 409
 	// "re-read the card".
 	if strings.TrimSpace(given) == "" {
-		return badRequest(`missing "payload_hash": an accept is pinned to the card it was shown for (S15.2)`)
+		// S15.2 hash pin.
+		return badRequest(`missing "payload_hash": an accept has to quote the card it was shown for`)
 	}
 	if given != card.PayloadHash {
 		return &staleAcceptError{card: card}

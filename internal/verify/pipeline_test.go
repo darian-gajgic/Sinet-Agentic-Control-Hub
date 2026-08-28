@@ -209,7 +209,7 @@ func TestResearchCountersUnknownIsLoudNotSilent(t *testing.T) {
 	}
 	found := false
 	for _, fd := range out.Rounds[0].Findings {
-		if fd.Category == verify.CatResearchNotRun && strings.Contains(fd.Text, "undecidable") {
+		if fd.Category == verify.CatResearchNotRun && strings.Contains(fd.Text, "no record proving") {
 			found = true
 		}
 	}

@@ -27,6 +27,6 @@
       "captured_ts": "2026-08-27T09:00:00Z"
     }
   },
-  "detail": "captured as version 2: the next verification round for a task in this project runs these commands as its check ladder (S07.3), and the advisory bootstrap marking drops from that round on (S07.8). Nothing was run just now — a captured command executes only inside the verification sandbox. The previous version is kept, never overwritten.",
+  "detail": "captured as version 2: from the next round of checking on, work in this project is checked by running these commands, and the note saying the verdict is advisory only drops away. Nothing was run just now — a captured command runs only inside the sealed checking sandbox. The previous version is kept, never overwritten.",
   "cursor": 12
 }

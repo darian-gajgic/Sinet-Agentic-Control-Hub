@@ -272,7 +272,8 @@ func applyRouteOverride(st *State, ov *RouteOverride, actor string) error {
 		r.TemplateID, r.TemplateName, r.VersionID = "", "", ""
 		r.Generalist = true
 		r.Cause = "override"
-		r.PlainReason = fmt.Sprintf("Re-routed to the generalist default by %s (override recorded, S08.8). %s", actor, r.PlainReason)
+		// S08.8 records an override with its actor.
+		r.PlainReason = fmt.Sprintf("Sent to the all-rounder instead, by %s — the change is recorded against them. %s", actor, r.PlainReason)
 	case ov.Target != "":
 		found := false
 		for _, c := range r.Candidates {
@@ -281,7 +282,8 @@ func applyRouteOverride(st *State, ov *RouteOverride, actor string) error {
 				r.Generalist = false
 				r.Score = c.Score
 				r.Cause = "override"
-				r.PlainReason = fmt.Sprintf("Re-routed to %q by %s (override recorded, S08.8). %s", c.Name, actor, c.Reason)
+				// S08.8 records an override with its actor.
+				r.PlainReason = fmt.Sprintf("Sent to %q instead, by %s — the change is recorded against them. %s", c.Name, actor, c.Reason)
 				found = true
 				break
 			}

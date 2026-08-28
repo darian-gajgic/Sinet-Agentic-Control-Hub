@@ -129,7 +129,8 @@ func bootstrapV1(pack *CheckPack, steps []intake.Step) V1Result {
 			Stage:        stage,
 			State:        CheckUnverifiable,
 			AttributedTo: BootstrapAttribution,
-			Detail: fmt.Sprintf("the %s rung has no captured command to run, so it is recorded unverifiable here rather than passed (Spec S07.8)",
+			// Spec S07.8's bootstrap posture, in the disclosure's own register.
+			Detail: fmt.Sprintf("no %s command is captured for this project, so this rung is recorded as unproven here rather than passed",
 				stage),
 		})
 	}
