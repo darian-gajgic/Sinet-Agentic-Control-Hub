@@ -83,7 +83,7 @@
       "method": "POST",
       "route": "/api/deliverables/d-site/accept",
       "available": true,
-      "reason": "open: read the card for the trailers and the pin, then accept with your PIN in the same request (High tier, S15.6)",
+      "reason": "open: read the card for the credit lines and the pin, then accept with your PIN typed in as part of the same request — this is a high-stakes act",
       "pin_from": "GET /api/deliverables/d-site/accept-card"
     },
     {
@@ -91,28 +91,28 @@
       "method": "",
       "route": "",
       "available": false,
-      "reason": "closed for now: the work is in review and no rework card is open. A bounded revision travels as the revise_with_guidance answer once the platform asks; until then, comments on the revision are what the next round drains (S13.3/S13.4)"
+      "reason": "closed for now: the work is in review and no rework card is open. A bounded revision travels as the revise_with_guidance answer once the platform asks; until then, your comments on this version are what the next round works from"
     },
     {
       "verb": "follow-up",
       "method": "POST",
       "route": "/api/deliverables/d-site/follow-up",
       "available": true,
-      "reason": "open: A successor task links to a numbered revision of this deliverable (S13.9); the framings are presets over that one link."
+      "reason": "open: A follow-up task is linked to one numbered version of this work; the choices offered are ready-made framings of that one link."
     },
     {
       "verb": "preview",
       "method": "POST",
       "route": "/api/deliverables/d-site/preview",
       "available": true,
-      "reason": "a preview launches from a minted revision and answers a defined state for every type — no-preview and requires-container-tier are answers, not failures (S13.8)"
+      "reason": "a preview is built from a saved version of the work, and every kind of work gets a straight answer here — \"there is no preview for this\" is an answer, not a fault"
     },
     {
       "verb": "preview-compare",
       "method": "POST",
       "route": "/api/deliverables/d-site/preview/compare",
       "available": true,
-      "reason": "a preview launches from a minted revision and answers a defined state for every type — no-preview and requires-container-tier are answers, not failures (S13.8); with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"
+      "reason": "a preview is built from a saved version of the work, and every kind of work gets a straight answer here — \"there is no preview for this\" is an answer, not a fault. With nothing accepted yet to compare against, this shows the one version there is rather than a pair"
     }
   ],
   "cursor": 89

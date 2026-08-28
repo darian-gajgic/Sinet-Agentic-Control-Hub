@@ -346,7 +346,7 @@ func TestLN6ElapsedPeriodStopsApplying(t *testing.T) {
 			"against a five-hour allowance reports a pressure that only rises and calls it headroom",
 			budget.PeriodHours, elapsed)
 	}
-	if !strings.Contains(elapsed.InapplicableNote, "re-declaring") {
+	if !strings.Contains(elapsed.InapplicableNote, "declaring again is what starts the next period") {
 		t.Errorf("the expired reading does not say what re-opens it: %q", elapsed.InapplicableNote)
 	}
 	// The consumption figure survives: only the DENOMINATOR expired.

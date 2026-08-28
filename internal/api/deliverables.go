@@ -137,7 +137,7 @@ func (s *Server) handleDeliverableList(w http.ResponseWriter, r *http.Request) {
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
 	if state != "" && !deliverableStates[state] {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-			"unknown state %q: a deliverable is in-review, accepted or superseded (S13.1)", state)))
+			"unknown state %q: work is either in review, accepted, or superseded by a newer accepted version", state)))
 		return
 	}
 
@@ -347,21 +347,27 @@ func (s *Server) doorsFor(ctx context.Context, d review.Deliverable, revs []revi
 	doors = append(doors, Door{
 		Verb: doorFollowUp, Method: http.MethodPost, Route: base + "/follow-up",
 		Available: d.CurrentRevision >= 1,
+		// S13.9: a follow-up is a successor task over ONE numbered link; the
+		// framings are presets over that link, never separate mechanisms.
 		Reason: followUpReason(d.CurrentRevision >= 1) +
-			" A successor task links to a numbered revision of this deliverable (S13.9); the framings are presets over that one link.",
+			" A follow-up task is linked to one numbered version of this work; the choices offered are ready-made framings of that one link.",
 	})
 	previewOK := s.preview != nil && d.CurrentRevision >= 1
-	previewWhy := "a preview launches from a minted revision and answers a defined state for every type — no-preview and requires-container-tier are answers, not failures (S13.8)"
+	// S13.8: every type has a defined preview state, so a no-preview answer is
+	// an answer rather than a failure.
+	previewWhy := "a preview is built from a saved version of the work, and every kind of work gets a straight answer here — \"there is no preview for this\" is an answer, not a fault"
 	switch {
 	case s.preview == nil:
 		previewWhy = "no preview surface is composed in this process"
 	case d.CurrentRevision < 1:
-		previewWhy = "no revision is minted yet, so there is nothing to preview (S13.1)"
+		previewWhy = "no version of this work has been produced yet, so there is nothing to preview"
 	}
 	doors = append(doors,
 		Door{Verb: doorPreview, Method: http.MethodPost, Route: base + "/preview", Available: previewOK, Reason: previewWhy},
 		Door{Verb: doorPreviewCompare, Method: http.MethodPost, Route: base + "/preview/compare", Available: previewOK,
-			Reason: previewWhy + "; with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"},
+			// S13.8/S1.9: with nothing accepted to compare against, the pair
+			// answers with the single instance it does have.
+			Reason: previewWhy + ". With nothing accepted yet to compare against, this shows the one version there is rather than a pair"},
 	)
 	return doors
 }
@@ -416,10 +422,12 @@ func (s *Server) acceptDoor(ctx context.Context, d review.Deliverable, revs []re
 	if rev.SnapshotSHA == "" {
 		door.Reason = "open: nothing is pushed — revision " + strconv.Itoa(rev.N) +
 			" pins its content, so accepting records your decision against that immutable pin and files the work as accepted. " +
-			"Read the card for the pin, then accept with your PIN in the same request (High tier, S13.1/S15.6)"
+			// High tier (S15.6): the PIN is re-prompted in the same request.
+			"Read the card for the pin, then accept with your PIN typed in as part of the same request — this is a high-stakes act"
 		return door
 	}
-	door.Reason = "open: read the card for the trailers and the pin, then accept with your PIN in the same request (High tier, S15.6)"
+	// High tier (S15.6): the PIN is re-prompted in the same request.
+	door.Reason = "open: read the card for the credit lines and the pin, then accept with your PIN typed in as part of the same request — this is a high-stakes act"
 	return door
 }
 
@@ -442,7 +450,9 @@ func (s *Server) reviseDoor(ctx context.Context, d review.Deliverable, base stri
 			door.Available, door.Answer, door.AskID, door.PayloadHash = true, verbReviseWithGuidance, ask, hash
 			door.PinFrom = "GET /api/approvals"
 			door.Reason = "open: this deliverable is parked on a rework-family card, so a bounded revision is that card's " +
-				verbReviseWithGuidance + " answer — the guidance lands as durable requester comments and enters the next attempt through THE drain (S07.7/S13.4)"
+				// S07.7/S13.4: guidance becomes durable comments and feeds the
+				// one rework drain — never a second, parallel path.
+				verbReviseWithGuidance + " answer — what you write is kept as your comments on the work, and it is what the next attempt is given"
 			return door
 		}
 		// No concrete target exists yet, so the door names NO route: the verb it
@@ -452,14 +462,16 @@ func (s *Server) reviseDoor(ctx context.Context, d review.Deliverable, base stri
 		// honesty rule exists to prevent — the reason carries the narrative
 		// instead.
 		door.Reason = "closed for now: the work is in review and no rework card is open. A bounded revision travels as the " +
-			verbReviseWithGuidance + " answer once the platform asks; until then, comments on the revision are what the next round drains (S13.3/S13.4)"
+			// S13.3/S13.4: comments are the durable channel the next round reads.
+			verbReviseWithGuidance + " answer once the platform asks; until then, your comments on this version are what the next round works from"
 		return door
 	}
 	door.Method, door.Route, door.Preset = http.MethodPost, base+"/follow-up", string(intake.PresetRevision)
 	door.Available = d.CurrentRevision >= 1
-	door.Reason = "open: this deliverable is finished, so a bounded revision is a successor task under the S13.9 `revision` framing over the one successor link"
+	// S13.9: the `revision` framing over the one successor link.
+	door.Reason = "open: this work is finished, so asking for a change starts a follow-up task linked to it"
 	if !door.Available {
-		door.Reason = "closed: there is no minted revision for a successor to link to (S13.9)"
+		door.Reason = "closed: no version of this work has been produced yet, so there is nothing for a follow-up to be linked to"
 	}
 	return door
 }
@@ -553,7 +565,7 @@ func (s *Server) handleDeliverableCompare(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if d.CurrentRevision < 1 {
-		s.writeSurface(w, nil, badRequest("this deliverable has no minted revision to compare (S13.1)"))
+		s.writeSurface(w, nil, badRequest("no version of this work has been produced yet, so there is nothing to compare"))
 		return
 	}
 	// The FC-v1 §2 round-over-round view is the DEFAULT read: new = current,
@@ -571,7 +583,7 @@ func (s *Server) handleDeliverableCompare(w http.ResponseWriter, r *http.Request
 	}
 	if newN < 1 || oldN < 0 || oldN == newN {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-			"compare needs distinct revisions (old %d, new %d); old=0 is the pre-task base (S13.1)", oldN, newN)))
+			"comparing needs two different versions (old %d, new %d); old=0 means how things stood before the task started", oldN, newN)))
 		return
 	}
 	cmp, err := s.review.Compare(r.Context(), d.ID, oldN, newN)
@@ -629,7 +641,7 @@ func (s *Server) handleCommentList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n < 1 {
-		s.writeSurface(w, nil, badRequest("this deliverable has no minted revision to place comments against (S13.1)"))
+		s.writeSurface(w, nil, badRequest("no version of this work has been produced yet, so there is nothing to put comments on"))
 		return
 	}
 	comments, placements, err := s.review.PlacedComments(r.Context(), d.ID, n)
@@ -692,12 +704,13 @@ func (s *Server) handleCommentCreate(w http.ResponseWriter, r *http.Request) {
 	// Caller input is validated HERE, at the boundary, so a failure from the
 	// store below can only be the platform's own (the §39 drain-D7 principle).
 	if strings.TrimSpace(body.Body) == "" {
-		s.writeSurface(w, nil, badRequest(`missing "body": a comment says something (S13.3)`))
+		s.writeSurface(w, nil, badRequest(`missing "body": a comment has to say something`))
 		return
 	}
 	if body.Severity != "" && body.Severity != review.SeverityBlocker && body.Severity != review.SeverityNote {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-			"unknown severity %q: the S13.4 vocabulary is %q (another round) or %q (polish travels along)",
+			// S13.4's two severities: a blocker earns a round, a note travels.
+			"unknown severity %q: a comment is either %q (worth another round of work) or %q (polish, which travels along with the next one)",
 			body.Severity, review.SeverityBlocker, review.SeverityNote)))
 		return
 	}

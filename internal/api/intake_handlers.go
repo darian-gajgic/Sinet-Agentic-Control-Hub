@@ -60,7 +60,7 @@ func (e *SurfaceError) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.M
 // ErrPINRequired is the step-up demand (Spec S01.9 verify-at-act: High-tier
 // approval answers re-prompt the actor's own PIN in the same request).
 var ErrPINRequired = &SurfaceError{Status: http.StatusUnauthorized, Code: "pin_required",
-	Msg: "this answer requires your PIN in the same request (S01.9 step-up)"}
+	Msg: "this answer needs your PIN typed in as part of the same request"}
 
 // maxIntakeBody bounds intake request/answer bodies (transport hygiene;
 // not a ⚙ — S18 ratifies no such key, the sseBatchSize precedent).
@@ -222,10 +222,11 @@ func (s *Server) handleAskAnswer(w http.ResponseWriter, r *http.Request) {
 	if body.PIN != "" {
 		if id.Dev {
 			s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusForbidden, Code: "dev_identity",
-				Msg: "the dev identity cannot step up (S01.9); log in as a real user"})
+				// S01.9: the dev fallback has no PIN and cannot step up.
+				Msg: "the developer fallback cannot confirm with a PIN; sign in as yourself"})
 			return
 		}
-		if err := s.sessions.VerifyPIN(r.Context(), id.UserID, body.PIN, "intake approval step-up (S01.9)"); err != nil {
+		if err := s.sessions.VerifyPIN(r.Context(), id.UserID, body.PIN, "confirming a plan approval"); err != nil {
 			s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusUnauthorized, Code: "pin_rejected", Msg: "PIN verification failed"})
 			return
 		}

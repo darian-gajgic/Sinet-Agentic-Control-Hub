@@ -525,7 +525,7 @@ func TestLN6MetersReadAgreesWithTheRouter(t *testing.T) {
 		t.Errorf("an elapsed period still serves a pressure: %v", *expired.Plan.Pressure)
 	case expired.Plan.Budget == nil:
 		t.Error("an elapsed period hides the declaration it refused — the row still exists and a reader must see it")
-	case !strings.Contains(expired.Plan.InapplicableNote, "re-declaring"):
+	case !strings.Contains(expired.Plan.InapplicableNote, "declaring again is what starts the next period"):
 		t.Errorf("the expired note does not say what re-opens it: %q", expired.Plan.InapplicableNote)
 	}
 	if p, perr := e.rp.Pressure(ctx, "alice", adapters.LaneZAI); perr != nil {

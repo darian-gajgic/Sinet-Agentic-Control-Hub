@@ -224,7 +224,9 @@ func (m *Manager) Launch(ctx context.Context, req LaunchRequest) (*Session, erro
 		return m.finishAndRelease(ctx, s, StateSelfPreview, "this kind of file previews itself; no separate preview is started", m.artifactURL(s)), nil
 	case LaneSidecar:
 		return m.finishAndRelease(ctx, s, StateRequiresContainer,
-			"project needs a sidecar (Postgres/Redis-class); the rootless-podman container tier is deferred", ""), nil
+			// S13.8: the container tier that would run a companion service is
+			// deferred.
+			"this project needs a database or a similar service running beside it, and the platform cannot start one for a preview yet", ""), nil
 	default: // LaneNone
 		return m.finishAndRelease(ctx, s, StateNoPreview, "there is no way to preview work of this kind", ""), nil
 	}
@@ -369,7 +371,9 @@ func (m *Manager) launchSandboxed(ctx context.Context, s *Session, runner *Runne
 // cannot serve live yet (F6): the true dependency is the deferred host
 // substrate PLUS bring-up activation code — NOT a zero-code flip.
 func deferredReason(lane string) string {
-	return lane + " preview composes (class C2), but live serving is DEFERRED: it needs the host egress + socket-activation substrate (S11.4/§8 reading 5) AND the spawn/probe/route lane-activation code — both bring-up work, not a zero-code flip"
+	// The true dependency is the deferred host substrate (S11.4/§8 reading 5)
+	// PLUS the spawn/probe/route activation code — not a zero-code flip.
+	return "a " + lane + " preview can be prepared, but it cannot be served live yet: the parts of the host that would let a preview be reached are not built, and neither is the code that starts and routes one"
 }
 
 // launchCLI serves a captured CLI over ttyd inside the sandbox, over the same

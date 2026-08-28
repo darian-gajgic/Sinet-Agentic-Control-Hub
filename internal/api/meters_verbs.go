@@ -273,7 +273,8 @@ func (s *Server) handleBudgetDeclare(w http.ResponseWriter, r *http.Request) {
 	// record of an edit that never committed would be a record of something that
 	// did not happen.
 	out := BudgetDeclared{Budget: rec,
-		Detail: "declared: the S10.4 gauge measures this person's " + lane + " consumption against it immediately, in " + budgetUnit}
+		// The S10.4 gauge starts measuring against it at once.
+		Detail: "declared: from now on this person's " + lane + " use is measured against it, in " + budgetUnit}
 	if existed {
 		prior.Unit = budgetUnit
 		out.Prior = &prior
@@ -498,8 +499,9 @@ func (s *Server) handlePlanBudgetDeclare(w http.ResponseWriter, r *http.Request)
 	// off pressure routing is the surprise this sentence exists to prevent
 	// (drain r2 R4).
 	out := PlanBudgetDeclared{Budget: rec,
-		Detail: fmt.Sprintf("declared: the S10.4 tier-3 reading measures this person's %s consumption in the %s window "+
-			"against it immediately, in %s. The period runs %v hours and ends at %s — after that the reading stops "+
+		// The S10.4 tier-3 reading starts measuring against it at once.
+		Detail: fmt.Sprintf("declared: from now on this person's %s use over the %s window is measured "+
+			"against it, in %s. The period runs %v hours and ends at %s — after that the reading stops "+
 			"applying and this lane returns to the deterministic routing order until you declare the next period; "+
 			"nothing rolls one over. Nothing is enforced by the budget either: it is what makes the lane's pressure "+
 			"comparable when the platform picks between covered lanes",

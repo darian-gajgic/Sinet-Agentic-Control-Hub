@@ -1033,7 +1033,8 @@ func commandsDetail(minted bool, c ProjectCapture) string {
 func (s *Server) projCommandsReady(w http.ResponseWriter) bool {
 	if s.projCommands == nil {
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
-			Msg: "the S13.7 project-commands door is not wired in this process: capturing a project's commands is a registry write, and this process composes no registry writer"})
+			// S13.7: capturing commands is a project-registry write.
+			Msg: "setting a project's commands is not available here: saving them writes to the project registry, and nothing in this process can write to it"})
 		return false
 	}
 	return true
@@ -1050,7 +1051,8 @@ func (s *Server) projCommandsReady(w http.ResponseWriter) bool {
 func (s *Server) onboardReady(w http.ResponseWriter) bool {
 	if s.onboard == nil {
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
-			Msg: "the S13.7 onboarding task surface is not wired in this process: starting a project is a task the platform performs, and this process runs none"})
+			// S13.7: onboarding a project is itself a task the platform runs.
+			Msg: "starting a project is not available here: setting one up is a task the platform performs, and this process runs no tasks"})
 		return false
 	}
 	return true

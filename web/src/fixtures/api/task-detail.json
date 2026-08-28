@@ -165,7 +165,7 @@
           }
         ],
         "mode": {
-          "note": "no mode change (S10.6 downgrade ladder lands with routing S08/local tier S12)"
+          "note": "no change of mode during this work"
         },
         "direct_use": {
           "label": "direct-use estimate (heuristic)",

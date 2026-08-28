@@ -316,7 +316,8 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 			it.Actions = append(it.Actions, oversightActionResume)
 		}
 		setAnswerable(&it, mayAnswerWatchdogFlag(scope, f.Owner),
-			"suppressing a flag is its owner's or the operator's (POST /api/watchdog/flags/suppress, S14.4)")
+			// S14.4: a flag is suppressed by its owner or the operator.
+			"suppressing a flag is its owner's to do, or the household operator's (POST /api/watchdog/flags/suppress)")
 		out = append(out, it)
 	}
 	for _, c := range snap.ConformanceCards {
@@ -346,7 +347,8 @@ func (p *projector) approvalItems(ctx context.Context, scope ownerScope, snap In
 			tierMedium, v.SampledTS, v)
 		it.Actions = []string{benchmarkActionVerdict, benchmarkActionDecline}
 		setAnswerable(&it, mayAnswerVerdict(scope, v.Owner),
-			"a blind-pair verdict is its REQUESTER's own judgement and is not delegable — you can see the card and cannot vote it (POST /api/approvals/{id}/verdict, BENCH-REG §3.3)")
+			// BENCH-REG §3.3: the arm guess is per pair and not delegable.
+			"a verdict on a blind pair is its own requester's judgement and nobody else's — you can see the card, and you cannot vote on it (POST /api/approvals/{id}/verdict)")
 		out = append(out, it)
 	}
 	for _, f := range snap.BenchmarkFailedPairs {
@@ -438,7 +440,8 @@ func (s *Server) memoryConflictCards(ctx context.Context, scope ownerScope) ([]A
 			c.Affected, "", tierMedium, parseTS(c.DetectedTS), c)
 		it.Actions = []string{memoryActionResolve}
 		setAnswerable(&it, mayAnswerConflict(c, scope.UserID),
-			"a memory conflict is answered by the person it was addressed to (POST /api/memory/conflicts/{conflict}/resolve, S09.7)")
+			// S09.7: the affected entry's owner answers the conflict.
+			"this question is answered by the person it was addressed to (POST /api/memory/conflicts/{conflict}/resolve)")
 		applyTierRules(&it)
 		out = append(out, it)
 	}

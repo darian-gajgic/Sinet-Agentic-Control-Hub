@@ -458,7 +458,7 @@ func PlanPoolRefusal(doc PlanDoc, lane string) string {
 	}
 	return fmt.Sprintf("lane %q draws the shared %q allowance, which is declared ONCE against lane %q — "+
 		"declaring it here as well would put two independent budget rows against one allowance, and either "+
-		"could bind the lane (S10.4)", lane, doc.Pool, doc.Lane)
+		"could bind the lane", lane, doc.Pool, doc.Lane)
 }
 
 // LoadPlanDoc parses and VALIDATES one plan document. A denominator nobody can
@@ -683,7 +683,7 @@ func PlanBudgetWindowRefusal(doc PlanDoc, window string) string {
 	if unit := doc.QuotaUnit(q.Name); unit != doc.Unit {
 		return fmt.Sprintf("the %s plan's %q window is denominated in %s while this lane's consumption is counted in %s, "+
 			"so a budget on it would divide %s by %s and report the answer in neither — the window's allowance is still "+
-			"reported, it just cannot be a denominator (S10.4/D4)",
+			"reported, it just cannot be what the reading is measured against",
 			doc.Lane, q.Name, unit, doc.Unit, doc.Unit, unit)
 	}
 	return ""
@@ -818,8 +818,10 @@ func (g *PressureGauge) ReadPlanUnits(ctx context.Context, userID, lane string, 
 		case refusal != "":
 			r.InapplicableNote = refusal
 		case planPeriodEnded(budget, now):
+			// S10.4: an elapsed period is not a budget for the current one, and
+			// nothing rolls over — declaring again is what starts the next.
 			r.InapplicableNote = fmt.Sprintf("the declared %v-hour period started %s and has ended, so it is not a budget for the "+
-				"current one; re-declaring is the act that starts the next period (S10.4; nothing rolls one over)",
+				"current one; declaring again is what starts the next period, and nothing carries over",
 				budget.PeriodHours, budget.PeriodStart.UTC().Format(time.RFC3339))
 		default:
 			r.Applicable = true

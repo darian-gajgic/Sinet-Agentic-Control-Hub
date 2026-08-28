@@ -226,7 +226,11 @@ var (
 	// its domain check pack: the launch domain has a purpose-built pack by
 	// definition (Spec S07.8 graduation rule); running without one would be
 	// a silent degraded mode.
-	ErrNoCheckPack = errors.New("verify: launch-domain deliverable without a domain check pack (Spec S07.8)")
+	// Its text is SERVED, not merely mapped: escalate.go composes the
+	// infrastructure card's summary as "verification cannot run — " + cause,
+	// so this sentence is requester copy and speaks plain words (P3-GF13
+	// drain r1; the Spec S07.8 graduation rule is cited above, not on the wire).
+	ErrNoCheckPack = errors.New("verify: this project is set up to have its work checked automatically, but no set of checks is configured for it")
 	// ErrBadPack covers check-pack contract violations (Spec S07.3).
 	ErrBadPack = errors.New("verify: invalid check pack")
 	// ErrSeamMissing is returned when a required seam is not wired (e.g. no

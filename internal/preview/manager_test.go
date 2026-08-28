@@ -306,7 +306,7 @@ func TestDevServerComposesThroughSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	if s.State != StateUnavailable || !strings.Contains(s.Reason, "composes") {
+	if s.State != StateUnavailable || !strings.Contains(s.Reason, "can be prepared, but it cannot be served live yet") {
 		t.Fatalf("state=%s reason=%q, want a composes/deferred unavailable state", s.State, s.Reason)
 	}
 	if s.PoolPort != 0 {

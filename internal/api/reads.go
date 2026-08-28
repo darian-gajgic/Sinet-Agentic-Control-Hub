@@ -208,7 +208,8 @@ func readPerson(r *http.Request, scope ownerScope) (string, error) {
 	}
 	if !scope.Operator && person != scope.UserID {
 		return "", &SurfaceError{Status: http.StatusForbidden, Code: "forbidden",
-			Msg: "reading another person's work is the operator's (S01.9)"}
+			// S01.9: cross-person reads are the operator's.
+			Msg: "reading another person's work is the household operator's to do"}
 	}
 	return person, nil
 }
@@ -998,7 +999,8 @@ func (p *projector) taskRuns(ctx context.Context, taskID string) ([]TaskRunView,
 		if usage.Valid && usage.String != "" {
 			v.Receipt = json.RawMessage(usage.String)
 		} else {
-			v.ReceiptAbsent = "no receipt yet — receipts materialize at the run's terminal transition (S10.1)"
+			// S10.1: a receipt materializes at the run's terminal transition.
+			v.ReceiptAbsent = "no receipt yet — one is written when the work finishes"
 		}
 		out = append(out, v)
 	}

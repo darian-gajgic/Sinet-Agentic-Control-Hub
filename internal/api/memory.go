@@ -223,7 +223,8 @@ func (s *Server) handleMemoryList(w http.ResponseWriter, r *http.Request) {
 		}
 		if !f.vocabulary[v] {
 			s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-				"unknown %s %q: the S09.2 %s vocabulary is closed", f.what, v, f.what)))
+				// S09.2 fixes each of these vocabularies; the set is closed.
+				"unknown %s %q: %s is chosen from a fixed set, and this is not one of them", f.what, v, f.what)))
 			return
 		}
 		*f.dst = v

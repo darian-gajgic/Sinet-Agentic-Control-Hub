@@ -738,33 +738,83 @@ func fixupRevision(nd, prev Deliverable) Deliverable {
 	return nd
 }
 
+// researchKey identifies one research node: a rule on a step. researchCheck
+// admits at most one node per rule, so the pair is the node's identity.
+func researchKey(n intake.ResearchNode) string { return n.RuleID + "\x00" + n.StepID }
+
+// unnamableResearch reports that neither of the plain handles a node can be
+// described by is present: no seed class for its rule, and no query of its own.
+func unnamableResearch(n intake.ResearchNode) bool {
+	return intake.ResearchSubject(n.RuleID) == "" && strings.TrimSpace(n.Query) == ""
+}
+
+// researchSubjects names, for the person reading a verdict, WHAT each research
+// node was supposed to look up — keyed by researchKey over the plan's whole
+// node list.
+//
+// The rule's plain class is the primary source, and it is DISTINCT PER RULE:
+// that is what keeps two research rules landing on one step two visibly
+// different facts now that the rule id has left the sentence (the P3-RW-18
+// D3-R2 lesson). The Anchor stays `step:<id>` and carries the cross-round
+// suppression semantics either way, so it is the TEXT that has to differ, and
+// review's dedupe is anchor-AND-body.
+//
+// A rule the seed table does not carry — an operator's own addition, or the
+// local classifier's flag — has no class to name, so the ladder falls to the
+// node's own query, and then to a NUMBERED generic phrase. The number is the
+// node's position among that step's other unnamable lookups, taken from the
+// plan's own node order: a plan is a frozen artifact, so the order is stable
+// across every round judged against it, and a re-plan that reorders it mints
+// its own findings anyway. Numbering is what stops two unnamable lookups on
+// one step collapsing back into a single finding — the collapse the rule id
+// used to prevent, restored without quoting an internal id at a requester
+// (P3-GF13 drain r1 F8). A step with exactly one unnamable lookup needs no
+// number and does not get one.
+func researchSubjects(nodes []intake.ResearchNode) map[string]string {
+	total := make(map[string]int, len(nodes))
+	for _, n := range nodes {
+		if unnamableResearch(n) {
+			total[n.StepID]++
+		}
+	}
+	out := make(map[string]string, len(nodes))
+	seen := make(map[string]int, len(nodes))
+	for _, n := range nodes {
+		key := researchKey(n)
+		switch {
+		case intake.ResearchSubject(n.RuleID) != "":
+			out[key] = strings.ToLower(intake.ResearchSubject(n.RuleID))
+		case strings.TrimSpace(n.Query) != "":
+			out[key] = strconv.Quote(strings.TrimSpace(n.Query))
+		case total[n.StepID] == 1:
+			out[key] = "the outside fact it depends on"
+		default:
+			seen[n.StepID]++
+			out[key] = fmt.Sprintf("outside fact %d of the %d it depends on", seen[n.StepID], total[n.StepID])
+		}
+	}
+	return out
+}
+
+// researchSubjectOf reads one node's subject out of a prepared map, falling
+// back to the honest generic phrase if the node was never in the plan's list.
+func researchSubjectOf(subjects map[string]string, n intake.ResearchNode) string {
+	if s := subjects[researchKey(n)]; s != "" {
+		return s
+	}
+	return "the outside fact it depends on"
+}
+
 // researchGate runs the 1.9 check with its bounded re-run, terminating in a
 // RESEARCH-NOT-RUN card when the budget is exhausted (Spec S07.3/S07.7).
 // The returned notes carry UNVERIFIABLE-HERE outcomes into the round record
-// researchSubject names, for the person reading the verdict, WHAT a research
-// node was supposed to look up. The rule's plain class is the primary source
-// and it is distinct per rule id, which is what keeps two research rules on ONE
-// step two visibly different facts now that the id itself has left the sentence
-// (the P3-RW-18 D3-R2 lesson; the Anchor stays `step:<id>` and carries the
-// cross-round suppression semantics either way). A rule the seed table does not
-// carry falls back to the node's own query — also per-node, so the distinctness
-// survives — and then to an honest generic phrase.
-func researchSubject(n intake.ResearchNode) string {
-	if class := intake.ResearchSubject(n.RuleID); class != "" {
-		return strings.ToLower(class)
-	}
-	if q := strings.TrimSpace(n.Query); q != "" {
-		return strconv.Quote(q)
-	}
-	return "the outside facts it depends on"
-}
-
 // — loud, never a fake pass.
 func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner string, d Deliverable, nodes []intake.ResearchNode, posture Posture) ([]Finding, *Card, error) {
 	if len(nodes) == 0 {
 		return nil, nil, nil
 	}
 	reruns := map[string]int{}
+	subjects := researchSubjects(nodes)
 	for {
 		outcomes, err := CheckResearch(ctx, v.Research, d.TaskID, nodes, reruns, v.Settings)
 		if err != nil {
@@ -802,14 +852,14 @@ func (v *Verifier) researchGate(ctx context.Context, esc *Escalator, owner strin
 					Severity: SeverityNote, Category: CatResearchNotRun,
 					Anchor: "step:" + o.Node.StepID,
 					Text: fmt.Sprintf("There is no record proving step %s actually did its research on %s: %s",
-						o.Node.StepID, researchSubject(o.Node), o.Detail),
+						o.Node.StepID, researchSubjectOf(subjects, o.Node), o.Detail),
 				})
 			}
 		}
 		if len(cardNodes) > 0 {
 			detail := make([]string, 0, len(cardNodes))
 			for _, o := range cardNodes {
-				detail = append(detail, fmt.Sprintf("Step %s, %s: %s", o.Node.StepID, researchSubject(o.Node), o.Detail))
+				detail = append(detail, fmt.Sprintf("Step %s, %s: %s", o.Node.StepID, researchSubjectOf(subjects, o.Node), o.Detail))
 			}
 			c, err := esc.Raise(ctx, Escalation{
 				Category: CatResearchNotRun, TaskID: d.TaskID, RunID: d.RunID, Owner: owner,

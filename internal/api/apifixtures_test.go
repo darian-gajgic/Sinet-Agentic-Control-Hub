@@ -186,8 +186,10 @@ func (fixtureMeter) LaneMeter(_ context.Context, _, lane string) (api.LaneMeter,
 			MultiplierWindow: "off-peak",
 			Pressure:         nil,
 			BudgetDeclared:   true,
+			// Byte-identical to what internal/metering writes; moved with that
+			// sentence at P3-GF13 drain r1 (F5).
 			InapplicableNote: "the declared 5-hour period started 2026-07-20T09:00:00Z and has ended, so it is not a budget " +
-				"for the current one; re-declaring is the act that starts the next period (S10.4; nothing rolls one over)",
+				"for the current one; declaring again is what starts the next period, and nothing carries over",
 			Budget: &api.LanePlanBudget{
 				PeriodUnits: fxZAIPlanBudget, Unit: "credits", Window: "rolling-5h",
 				PeriodStart: fxT0, PeriodHours: 5,
@@ -1731,7 +1733,9 @@ func fixtureReceiptJSON(t *testing.T) string {
 		// The S10.6 seam note, byte-identical to what internal/metering writes
 		// on every real receipt today — the view renders it VERBATIM, so the
 		// fixture has to carry the real sentence rather than a placeholder.
-		Mode: metering.ModeSummary{Note: "no mode change (S10.6 downgrade ladder lands with routing S08/local tier S12)"},
+		// Moved with the sentence at P3-GF13 drain r1 (F5): a museum seed that
+		// keeps the retired copy alive is how a purged citation comes back.
+		Mode: metering.ModeSummary{Note: "no change of mode during this work"},
 		ParkHistory: []metering.ParkEpisode{{
 			ParkedAt:        mustTime(t, "2026-07-20T09:02:00Z"),
 			ResumedAt:       mustTime(t, "2026-07-20T09:03:00Z"),

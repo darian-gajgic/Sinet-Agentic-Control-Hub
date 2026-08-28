@@ -52,14 +52,14 @@
       "method": "",
       "route": "",
       "available": false,
-      "reason": "closed for now: the work is in review and no rework card is open. A bounded revision travels as the revise_with_guidance answer once the platform asks; until then, comments on the revision are what the next round drains (S13.3/S13.4)"
+      "reason": "closed for now: the work is in review and no rework card is open. A bounded revision travels as the revise_with_guidance answer once the platform asks; until then, your comments on this version are what the next round works from"
     },
     {
       "verb": "follow-up",
       "method": "POST",
       "route": "/api/deliverables/dlv-t-fresh/follow-up",
       "available": true,
-      "reason": "open: A successor task links to a numbered revision of this deliverable (S13.9); the framings are presets over that one link."
+      "reason": "open: A follow-up task is linked to one numbered version of this work; the choices offered are ready-made framings of that one link."
     },
     {
       "verb": "preview",
@@ -73,7 +73,7 @@
       "method": "POST",
       "route": "/api/deliverables/dlv-t-fresh/preview/compare",
       "available": false,
-      "reason": "no preview surface is composed in this process; with no accepted revision yet the pair answers the honest single-instance state (S13.8 S1.9)"
+      "reason": "no preview surface is composed in this process. With nothing accepted yet to compare against, this shows the one version there is rather than a pair"
     }
   ],
   "verification": {

@@ -996,7 +996,7 @@ func reviewQuestions(st *State, tax *Taxonomy) []Question {
 //
 // A rule the seed table does not carry has no plain subject to name, so the
 // sentence says the general thing rather than inventing a specific one.
-func researchGapSummary(st *State, ruleIDs []string) string {
+func researchGapSummary(ruleIDs []string) string {
 	const lead = "This task depends on facts about the world that can change, and the plan has no step that goes and checks them"
 	subjects := make([]string, 0, len(ruleIDs))
 	seen := make(map[string]bool, len(ruleIDs))
@@ -1266,7 +1266,7 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 		card := &Card{Kind: CardResearch, Decision: &DecisionBody{
 			// The SENTENCE names the plain SUBJECT of each missing lookup;
 			// Detail keeps the raw rule ids, which are machine members.
-			Summary: researchGapSummary(st, res.MissingResearch),
+			Summary: researchGapSummary(res.MissingResearch),
 			Detail:  res.MissingResearch,
 			Choices: []Option{
 				{Label: "I'll supply the fact myself", Value: ChoiceSupplyFact},

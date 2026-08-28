@@ -71,7 +71,8 @@ func priceLocal(cur Currency, tableVersion string) PricedCost {
 		CostUSD:      0,
 		Currency:     cur,
 		TableVersion: tableVersion,
-		Source:       "local free tier / zero allowance (S12.1)",
+		// S12.1: the on-machine tier is permanently free.
+		Source: "free tier on this machine / no allowance consumed",
 	}
 }
 

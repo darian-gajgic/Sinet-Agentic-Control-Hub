@@ -86,7 +86,8 @@ func (s *Skeleton) answerInfraRetry(ctx context.Context, actor, askID string, ca
 			return err
 		}
 		_, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateRunning, run.TransitionOptions{
-			Reason: "infrastructure card answered: verification runs again (4.3; S07.7)", Actor: run.ActorPlatform,
+			// 4.3 / S07.7: answering resumes the run in place.
+			Reason: "you answered the card, so checking runs again", Actor: run.ActorPlatform,
 		})
 		return err
 	})
@@ -168,7 +169,8 @@ func (s *Skeleton) answerAccept(ctx context.Context, actor, askID string, card v
 			return err
 		}
 		if _, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateRunning, run.TransitionOptions{
-			Reason: "card answered: pipeline resumes in place (4.3; S07.7)", Actor: run.ActorPlatform,
+			// 4.3 / S07.7: answering resumes the run in place.
+			Reason: "you answered the card, so the task picks up exactly where it left off", Actor: run.ActorPlatform,
 		}); err != nil {
 			return err
 		}
@@ -218,7 +220,8 @@ func (s *Skeleton) answerRevise(ctx context.Context, actor, askID string, card v
 			return err
 		}
 		_, err := s.cfg.Runs.TransitionTx(ctx, tx, card.RunID, run.StateRunning, run.TransitionOptions{
-			Reason: "card answered with guidance: pipeline resumes in place (4.3; S07.7)", Actor: run.ActorPlatform,
+			// 4.3 / S07.7: answering resumes the run in place.
+			Reason: "you answered the card with guidance, so the task picks up exactly where it left off", Actor: run.ActorPlatform,
 		})
 		return err
 	})

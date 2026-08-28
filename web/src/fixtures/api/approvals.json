@@ -522,7 +522,7 @@
       "owner": "alice",
       "tier": "medium",
       "answerable": false,
-      "not_answerable_reason": "a blind-pair verdict is its REQUESTER's own judgement and is not delegable — you can see the card and cannot vote it (POST /api/approvals/{id}/verdict, BENCH-REG §3.3)",
+      "not_answerable_reason": "a verdict on a blind pair is its own requester's judgement and nobody else's — you can see the card, and you cannot vote on it (POST /api/approvals/{id}/verdict)",
       "batchable": false,
       "step_up_required": false,
       "observed_ts": "2026-07-20T09:02:00Z",

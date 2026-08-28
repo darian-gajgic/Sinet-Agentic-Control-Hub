@@ -187,7 +187,7 @@ func TestTheAcceptDoorNeverContradictsTheCardOnEitherArm(t *testing.T) {
 			// The reason is what a person reads immediately before a High-tier
 			// press, so it carries THIS arm's consequence and never the other's.
 			if arm.pushes {
-				if !strings.Contains(door.Reason, "trailers") {
+				if !strings.Contains(door.Reason, "credit lines") {
 					t.Errorf("the repo arm pushes an attributed commit, so its door names the trailers: %q", door.Reason)
 				}
 				return
