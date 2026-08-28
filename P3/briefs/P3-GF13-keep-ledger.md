@@ -172,11 +172,16 @@ all four things the stop actually did).
    into requester prose. Pre-existing; coordinator ruled do-not-fix here.
 3. **Bare-token citations OUTSIDE the declared classes** (evaluator's nit,
    drain r2). The sweep's regex requires a paren or a known prefix, so a spec
-   id written as bare prose slips it: `api/actions.go:253` ("the S13.9 framings
-   are the landed set", a served `badRequest` on the follow-up door) and the
-   "S10.4 pause switch" not-wired family. Coordinator's disposition: these ride
-   this deferred conduit item rather than being fixed piecemeal, because
-   closing the CLASS needs a widened scan, not four hand edits. **Note for
-   whoever takes it:** `actions.go:253` sits one line from two refusals drain
-   r2 rewrote, so that door is knowingly half-purged until then — it is the
-   cheapest first target and the most visible.
+   id written as bare prose slips it entirely — the census cannot see this
+   class, and closing it needs a WIDENED SCAN, not hand edits. The "S10.4
+   pause switch" not-wired family rides this item and stays deferred.
+
+   **Closed at r2b, coordinator-sanctioned:** the follow-up door's own two
+   instances, `api/actions.go:253` ("the S13.9 framings are the landed set")
+   and `:204` ("the S13.9 follow-up surface is not wired"). Both sat inside
+   `handleFollowUpSpawn`, whose other refusals drain r2 had just rewritten, so
+   deferring them would have left one door half-purged — the r1-F4 shape, and
+   process over honesty. The CLASS remains open and deferred; only this door
+   was finished. **Note for whoever takes the class:** the widened scan wants
+   `\bS[0-9]{2}\.[0-9]` and `\bD[0-9]+\b` unanchored by a paren, run over
+   string literals the same way.

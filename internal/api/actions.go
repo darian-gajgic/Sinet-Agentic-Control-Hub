@@ -201,7 +201,8 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.followUp == nil {
 		s.writeSurfaceErr(w, &SurfaceError{Status: http.StatusServiceUnavailable, Code: "not_wired",
-			Msg: "the S13.9 follow-up surface is not wired in this process"})
+			// S13.9: a follow-up is spawned as a successor task.
+			Msg: "following up on this work is not available here: a follow-up starts a new task, and this process cannot start one"})
 		return
 	}
 	deliverableID := r.PathValue("deliverable")
@@ -251,7 +252,8 @@ func (s *Server) handleFollowUpSpawn(w http.ResponseWriter, r *http.Request) {
 	// two failure classes are genuinely different answers and now read as such.
 	if !landedPresets[body.Preset] {
 		s.writeSurface(w, nil, badRequest(fmt.Sprintf(
-			"unknown preset %q: the S13.9 framings are the landed set (revision / extension / counterpart, or none)", body.Preset)))
+			// S13.9's landed framings; the preset is a preset over the one link.
+			"unknown preset %q: a follow-up is framed as a revision, an extension, or a counterpart — or as none of those", body.Preset)))
 		return
 	}
 	var exists int
