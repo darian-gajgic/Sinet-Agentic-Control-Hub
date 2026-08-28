@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
@@ -50,6 +51,39 @@ type ReviseReq struct {
 	Findings    []string         `json:"findings,omitempty"`
 	Resolutions []SlotResolution `json:"resolutions,omitempty"`
 }
+
+// EmissionFault is one Stage-1 emission the platform REFUSED — the seam's
+// bounded re-emission spent, the refusal still standing — parked on the S06.6
+// emission card instead of crashing the run (P3-GF12 R3).
+//
+// It is durable for the same reason PendingEscalation is: the requester's answer
+// arrives later, on a fresh process if need be, and the granted round has to
+// re-drive the SAME operation with nothing lost. The refusal is the platform's
+// own validator sentence; where a validator quotes the offending field back, the
+// quoted fragment travels with it — which is exactly what lets the card name
+// WHICH step and field was refused instead of saying "something went wrong".
+type EmissionFault struct {
+	// Op names which operation faulted: "draft" or "revise" — the same
+	// vocabulary PendingEscalation uses, so the granted round re-enters the
+	// phase that owns it.
+	Op string `json:"op"`
+	// Refusal is the platform's own refusal sentence, verbatim ("step S-1
+	// approach is 1294 characters (cap 1200)"), so the card can say what
+	// actually happened rather than "something went wrong".
+	Refusal string `json:"refusal"`
+	// Rounds counts the planning rounds this task has spent on this one
+	// emission and had REFUSED, the rounds the requester granted included. It
+	// is the platform's own count of pipeline rounds, not the seam's internal
+	// bounce count — intake cannot see that one and does not claim it.
+	Rounds int    `json:"rounds"`
+	TS     string `json:"ts"`
+}
+
+// Emission-fault operations (EmissionFault.Op).
+const (
+	EmissionOpDraft  = "draft"
+	EmissionOpRevise = "revise"
+)
 
 // ApprovalRecord is the Stage-4 record: who/when/card version/choices
 // (Spec S06.1 Stage 4).
@@ -137,16 +171,30 @@ type State struct {
 	PendingEscalation    string             `json:"pending_escalation,omitempty"` // "draft" | "revise" | "critique"
 	NeedsDraft           bool               `json:"needs_draft"`
 	PendingRevise        *ReviseReq         `json:"pending_revise,omitempty"`
-	SpecVersion          int                `json:"spec_version"`
-	PlanVersion          int                `json:"plan_version"`
-	SpecRef              *ArtifactRef       `json:"spec_ref,omitempty"`
-	PlanRef              *ArtifactRef       `json:"plan_ref,omitempty"`
+	// EmissionFault parks a refused emission on its own card (P3-GF12 R3).
+	// Additive and omitempty: a state event written before this packet reads
+	// back nil and behaves exactly as it did.
+	EmissionFault *EmissionFault `json:"emission_fault,omitempty"`
+	// SettledMarkers is the durable answered-marker record (P3-GF12 R5): the
+	// proof a point was already asked and answered, which is what lets the
+	// platform settle a re-emitted marker from the record instead of asking a
+	// person the same question twice.
+	SettledMarkers []SettledMarker `json:"settled_markers,omitempty"`
+	SpecVersion    int             `json:"spec_version"`
+	PlanVersion    int             `json:"plan_version"`
+	SpecRef        *ArtifactRef    `json:"spec_ref,omitempty"`
+	PlanRef        *ArtifactRef    `json:"plan_ref,omitempty"`
 
 	// Stage 2 — spine bookkeeping (Spec S06.7).
-	Spine             *SpineResult `json:"spine,omitempty"`
-	CoverageRounds    int          `json:"coverage_rounds"`
-	ResearchBounced   bool         `json:"research_bounced"`
-	AcceptedUncovered []string     `json:"accepted_uncovered,omitempty"` // requester-accepted gaps
+	Spine           *SpineResult `json:"spine,omitempty"`
+	CoverageRounds  int          `json:"coverage_rounds"`
+	ResearchBounced bool         `json:"research_bounced"`
+	// ClarificationRounds counts the NEEDS-CLARIFICATION cards this intake has
+	// issued (P3-GF12 R7). Coverage has its ⚙ auto-fix bound and research has
+	// its one bounce; the marker loop had NOTHING, which is how a live intake
+	// reached a fourth clarification round re-confirming settled facts.
+	ClarificationRounds int      `json:"clarification_rounds"`
+	AcceptedUncovered   []string `json:"accepted_uncovered,omitempty"` // requester-accepted gaps
 
 	// Stage 3 — critique (Spec S06.8).
 	CritiqueRounds int             `json:"critique_rounds"`
@@ -215,6 +263,43 @@ func (s *State) resolveSlot(r SlotResolution) {
 		}
 	}
 	s.Resolutions = append(s.Resolutions, r)
+}
+
+// normalizeMarker is the marker-identity rule: whitespace collapsed, nothing
+// else touched (P3-GF12 OQ-2).
+//
+// EXACT-after-normalization is the whole point. Deciding that two differently
+// worded markers "mean the same thing" is a semantic judgement on model text,
+// and a platform that made it silently would eventually swallow a genuinely new
+// question — so it is not made here at all. Re-wordings are the prompt rule's
+// job (the settled-facts contract) and the round bound's (conversion to a listed
+// assumption); this catches only the class the evidence proves is real, where
+// ask 6 came back byte-identical to the answered ask 5.
+func normalizeMarker(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// settleMarker records an answered marker (last answer wins per marker text —
+// the requester correcting their own answer is not a second question).
+func (s *State) settleMarker(marker, answer, ts string) {
+	key := normalizeMarker(marker)
+	for i := range s.SettledMarkers {
+		if normalizeMarker(s.SettledMarkers[i].Marker) == key {
+			s.SettledMarkers[i].Answer, s.SettledMarkers[i].TS = answer, ts
+			return
+		}
+	}
+	s.SettledMarkers = append(s.SettledMarkers, SettledMarker{Marker: marker, Answer: answer, TS: ts})
+}
+
+// settledMarker returns the record for a marker the requester already answered,
+// or nil — the deterministic backstop the re-emitted-marker guard reads.
+func (s *State) settledMarker(marker string) *SettledMarker {
+	key := normalizeMarker(marker)
+	for i := range s.SettledMarkers {
+		if normalizeMarker(s.SettledMarkers[i].Marker) == key {
+			return &s.SettledMarkers[i]
+		}
+	}
+	return nil
 }
 
 // dismissed reports whether a P47 rule id has a requester-supplied fact.

@@ -58,8 +58,10 @@ const (
 	// paid round (the S06.7(a) requester-granted-round precedent);
 	// ChoiceRethink cancels (the SPEC-DOUBT mapping).
 	//
-	// [GF12 inert type surface at grounding — Amendment-A; behavior lands
-	// with the implementation commit.]
+	// A new kind STRING was unavoidable where a new card SHAPE was not: it is
+	// an ordinary DecisionBody rendered by the ordinary decision form, but every
+	// existing kind carries wrong semantics on its face, and lying on the kind
+	// line is worse than one additive word of vocabulary.
 	CardEmission CardKind = "decision.emission"
 )
 

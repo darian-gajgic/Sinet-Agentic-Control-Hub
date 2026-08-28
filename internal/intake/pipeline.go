@@ -836,7 +836,10 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 		Registry: st.Registry, Taxonomy: tax,
 		Resolutions: st.Resolutions, DataHits: st.openDataBearing(),
 		Supplied: st.Supplied, Escalations: st.Escalations,
-		SpecVersion: st.SpecVersion + 1, PlanVersion: st.PlanVersion + 1,
+		// Everything the requester has already settled travels with the ask
+		// (R5): the contract's settled-facts rule binds against this block.
+		SettledMarkers: st.SettledMarkers,
+		SpecVersion:    st.SpecVersion + 1, PlanVersion: st.PlanVersion + 1,
 	}
 	if st.SpecRef != nil {
 		prior, err := p.loadPair(st)
@@ -847,7 +850,12 @@ func (p *Pipeline) phaseInterview(ctx context.Context, st *State, pair *Pair) (b
 	}
 	next, err := p.Planner.Draft(ctx, in)
 	if blocked, herr := p.handleEscalation(ctx, st, err, "draft"); blocked || herr != nil {
-		return blocked, pair, herr
+		if herr == nil {
+			return true, pair, nil // the 1.7 escalation card is open
+		}
+		// A contract-invalid emission lands on a card, never in the ladder (R3).
+		faulted, ferr := p.handleEmissionFault(ctx, st, herr, EmissionOpDraft)
+		return faulted, pair, ferr
 	}
 	newPair, err := p.acceptEmission(ctx, st, in.Prior, &next)
 	if err != nil {
@@ -1114,11 +1122,21 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 			RunID: st.RunID, // the consuming run (R7)
 			Pair:  *pair, Reason: req.Reason, Findings: req.Findings,
 			Resolutions: req.Resolutions, Escalations: st.Escalations,
-			SpecVersion: st.SpecVersion + 1, PlanVersion: st.PlanVersion + 1,
+			// The answered-marker record rides the revise leg too — this is the
+			// leg the witnessed confirm-loop actually lived on (R5).
+			SettledMarkers: st.SettledMarkers,
+			SpecVersion:    st.SpecVersion + 1, PlanVersion: st.PlanVersion + 1,
 		}
 		next, err := p.Planner.Revise(ctx, in)
 		if blocked, herr := p.handleEscalation(ctx, st, err, "revise"); blocked || herr != nil {
-			return blocked, pair, herr
+			if herr == nil {
+				return true, pair, nil // the 1.7 escalation card is open
+			}
+			// PendingRevise is deliberately still set here — it is cleared only
+			// after acceptEmission succeeds — so the granted round re-drives this
+			// revision with the requester's findings intact (R3).
+			faulted, ferr := p.handleEmissionFault(ctx, st, herr, EmissionOpRevise)
+			return faulted, pair, ferr
 		}
 		pair, err = p.acceptEmission(ctx, st, pair, &next)
 		if err != nil {
@@ -1202,8 +1220,12 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 		return true, pair, p.issueCard(ctx, st, card)
 	}
 
-	// Open NEEDS-CLARIFICATION markers cannot reach approval (S06.6).
-	if len(res.OpenMarkers) > 0 {
+	// Open NEEDS-CLARIFICATION markers cannot reach approval (S06.6). The loop
+	// is BOUNDED (R7): what is still open at the bound was converted to a listed
+	// assumption by acceptEmission before the spine ever saw it, so reaching
+	// here past the bound would mean a marker arrived on a pair nobody accepted.
+	if len(res.OpenMarkers) > 0 && st.ClarificationRounds < clarificationRoundLimit {
+		st.ClarificationRounds++
 		qs := make([]Question, 0, maxQuestionsPerCard)
 		for i, m := range res.OpenMarkers {
 			if len(qs) == maxQuestionsPerCard {
@@ -1476,6 +1498,16 @@ func (p *Pipeline) acceptEmission(ctx context.Context, st *State, prior *Pair, n
 		}
 	}
 
+	// The NEEDS-CLARIFICATION markers, against the platform's own record
+	// (P3-GF12 R6/R7). Both arms are S06.6's own sentence — "each marker is
+	// either asked (S06.5) or converted to a listed assumption" — applied to the
+	// two cases the landed pipeline had no answer for: a marker that WAS asked
+	// and answered and came back anyway, and a marker still open when the rounds
+	// ran out. Neither arm is model-output repair: this function already
+	// normalizes the SPEC's platform-guaranteed content above, and a marker is
+	// not dropped here, it is RESOLVED — with the resolution visible.
+	disclosures := settleMarkers(st, next)
+
 	// Version assignment: plan bumps on every emission; spec bumps only on
 	// content change.
 	specV, planV := st.SpecVersion+1, st.PlanVersion+1
@@ -1514,7 +1546,116 @@ func (p *Pipeline) acceptEmission(ctx context.Context, st *State, prior *Pair, n
 	if _, err := verbs.Artifact(ctx, planRef.Path, "plan", fmt.Sprintf("PLAN %s (S06.6)", next.Plan.VersionKey()), planRef.SHA256); err != nil {
 		return nil, err
 	}
+	// Nothing the marker guard did is silent (§60's spirit; S06.7(a)'s "never
+	// disappears silently"): each settle and each conversion says on the ledger
+	// exactly what was taken off the open list and what stands in its place.
+	for _, d := range disclosures {
+		if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "plan",
+			d.line, d.why, 0); err != nil {
+			return nil, err
+		}
+	}
+
+	// The emission was ACCEPTED, so any refused-emission fault this task was
+	// parked on is spent (P3-GF12 R3): the next refusal starts its own count.
+	st.EmissionFault = nil
 	return next, nil
+}
+
+// markerDisclosure is one ledger line the marker guard owes.
+type markerDisclosure struct{ line, why string }
+
+// settleMarkers applies the two S06.6 marker arms to an emission's open
+// NEEDS-CLARIFICATION list and returns what must be disclosed (P3-GF12 R6/R7).
+//
+// (1) SETTLED FROM THE RECORD. A marker whose text the requester already
+// answered is not an open question — it was asked (S06.5) and it was answered,
+// and the record proves it. Re-carding it is the witnessed confirm-loop: four
+// rounds of a person re-confirming their own shop details, the last ask
+// byte-identical to the one they had just answered. So it comes off the open
+// list and the answer lands on the SPEC where the requester can see it, rather
+// than evaporating with the one-shot ReviseReq that used to carry it.
+//
+// (2) CONVERTED AT THE BOUND. A marker still open when the clarification rounds
+// are spent becomes a LISTED assumption — S06.6's own second arm, verbatim. It
+// is never swallowed: it lands on the approval card's centerpiece, in the
+// planner's own words, on the very card the requester was going to answer
+// anyway, and Re-plan contests it. That is the difference between a bound and a
+// gag.
+//
+// The disposition in both arms is a listed assumption (OQ-4) rather than a
+// silent fact, because an arbitrary marker answer is not necessarily a P47
+// supplied fact — and where the answer IS already recorded as one, the supplied
+// entry stands alone and no duplicate is minted.
+func settleMarkers(st *State, next *Pair) []markerDisclosure {
+	if len(next.Spec.Clarifications) == 0 {
+		return nil
+	}
+	var disclosures []markerDisclosure
+	open := make([]string, 0, len(next.Spec.Clarifications))
+	list := func(text string) {
+		for _, a := range next.Spec.Assumptions {
+			if a.Text == text {
+				return
+			}
+		}
+		next.Spec.Assumptions = append(next.Spec.Assumptions, Assumption{Text: text, Origin: AssumptionOriginMarker})
+	}
+	for _, m := range next.Spec.Clarifications {
+		marker := strings.TrimSpace(m)
+		if rec := st.settledMarker(marker); rec != nil {
+			answer := strings.TrimSpace(rec.Answer)
+			if !suppliedSays(next.Spec.Supplied, answer) {
+				list(fmt.Sprintf("You were already asked this and you answered it — %s You said: %s", plainQuestion(marker), answer))
+			}
+			disclosures = append(disclosures, markerDisclosure{
+				line: fmt.Sprintf("settled from the record: the plan raised an open point the requester had already answered (%q → %q); it is listed on the SPEC instead of being asked again", marker, answer),
+				why:  "S06.6 first arm — the marker was asked (S06.5) and answered; the answered-marker record is the proof (P3-GF12 R6)",
+			})
+			continue
+		}
+		if st.ClarificationRounds >= clarificationRoundLimit {
+			list(fmt.Sprintf("Still open when the questions ran out, so I am going ahead on my own best reading of it — change it here if I have read it wrong: %s", plainQuestion(marker)))
+			disclosures = append(disclosures, markerDisclosure{
+				line: fmt.Sprintf("converted to a listed assumption after %d clarification rounds: %q", clarificationRoundLimit, marker),
+				why:  "S06.6 second arm — each marker is either asked or converted to a listed assumption; the assumption is contestable on the approval card (P3-GF12 R7)",
+			})
+			continue
+		}
+		open = append(open, m)
+	}
+	if len(open) == 0 {
+		next.Spec.Clarifications = nil
+	} else {
+		next.Spec.Clarifications = open
+	}
+	return disclosures
+}
+
+// plainQuestion renders a marker as one sentence inside an assumption line: the
+// planner's own words, punctuated so the assumption reads as prose rather than
+// as two sentences colliding.
+func plainQuestion(marker string) string {
+	switch {
+	case marker == "",
+		strings.HasSuffix(marker, "."),
+		strings.HasSuffix(marker, "?"),
+		strings.HasSuffix(marker, "!"):
+		return marker
+	}
+	return marker + "."
+}
+
+// suppliedSays reports whether a requester-supplied fact already carries this
+// answer, in which case the supplied entry IS the record and a second listing
+// of the same words would only make the card longer (OQ-4).
+func suppliedSays(supplied []SuppliedFact, answer string) bool {
+	for _, f := range supplied {
+		if strings.TrimSpace(f.Fact) == answer {
+			return true
+		}
+	}
+	return false
 }
 
 // specContentEqual compares spec content modulo version/status.
@@ -1546,6 +1687,90 @@ func (p *Pipeline) handleEscalation(ctx context.Context, st *State, err error, f
 		return false, ierr
 	}
 	return true, nil
+}
+
+// clarificationRoundLimit bounds the S06.6 marker loop: at most this many
+// NEEDS-CLARIFICATION cards per intake, after which what is still open converts
+// to a listed assumption (S06.6's own second arm).
+//
+// A plain structural constant, not a ⚙ — S18 declares no key for it, and it is
+// the same class as maxQuestionsPerCard: it bounds CEREMONY, not a decision the
+// platform makes (flagged to the operator gate under the standing settings-tab
+// directive). It follows the shape its two siblings already have: coverage has
+// ⚙ intake.coverage_autofix_rounds, research has its one bounce, and the marker
+// loop had nothing at all — which is how a live intake reached a fourth round
+// with a person re-confirming facts they had supplied in round one.
+//
+// G1 P8's "no fixed question caps" governs the S06.5 interview taxonomy, where
+// the questions come from a weighted must-know set and stopping early costs
+// understanding. This bounds a different thing: a model's own re-raised doubts,
+// which do not run out on their own, and whose leftovers are LISTED rather than
+// dropped — so nothing is lost, it just stops costing a human round.
+const clarificationRoundLimit = 2
+
+// handleEmissionFault lands a contract-invalid Stage-1 emission on a served
+// decision card instead of crashing the run (P3-GF12 R3). It reports whether the
+// pipeline is now parked on that card; any other error passes straight through
+// unchanged.
+//
+// WHY A CARD. The seam has already spent its bounded re-emission with the
+// refusal fed back verbatim, so what remains is a deterministic refusal — and
+// the recovery ladder "can never fix a deterministic failure". The witnessed
+// alternative was exactly that: the drive errored, mapDriveErr crashed the run,
+// and the ladder forked the same Draft with the same prompt and ZERO new
+// information until ⚙ recovery.max_attempts tombstoned the lineage — twice, on
+// one task, with the second round opened by the tombstone card's own retry. The
+// crash doctrine is right for infrastructure death (§56) and stays untouched;
+// this class simply stops entering it.
+//
+// A BAND TASK CARDS TOO. S06.4's zero-interaction band bounds intake CEREMONY —
+// questions, approval — and this is not ceremony: it is the platform saying it
+// has nothing to give. The alternative is a dead run nobody was told about, and
+// "no blocking gate" never meant "die silently".
+func (p *Pipeline) handleEmissionFault(ctx context.Context, st *State, err error, op string) (bool, error) {
+	if err == nil || !errors.Is(err, ErrBadArtifact) {
+		return false, err
+	}
+	rounds := 1
+	if st.EmissionFault != nil && st.EmissionFault.Op == op {
+		rounds = st.EmissionFault.Rounds + 1
+	}
+	refusal := strings.TrimSpace(err.Error())
+	st.EmissionFault = &EmissionFault{Op: op, Refusal: refusal, Rounds: rounds, TS: p.nowRFC3339()}
+	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "plan",
+		"planner emission refused by the artifact contract and NOT accepted: "+refusal,
+		"the seam's bounded re-emission is spent; the refusal goes to the requester as a decision card rather than to the recovery ladder (S06.6 [A15]; P3-GF12 R3)", 0); err != nil {
+		return false, err
+	}
+	return true, p.issueCard(ctx, st, emissionCard(st.EmissionFault))
+}
+
+// emissionCard is the honest landing: what the platform tried, why it stopped,
+// and the requester's real choices — in words for the person, not in the
+// platform's vocabulary (CONVENTIONS §57 drafting rule 1, §59).
+func emissionCard(fault *EmissionFault) *Card {
+	what := "the plan"
+	if fault.Op == EmissionOpRevise {
+		what = "the revised plan"
+	}
+	detail := []string{
+		"This is the platform's own check refusing what came back — not something that went wrong inside your task. Nothing was saved, nothing about your request changed, and no work has run.",
+		"The planning model gets a bounded number of corrections, with this exact refusal handed back to it each time, before any of this reaches you. Those are spent. Nothing was shortened or rewritten on your behalf: what a model writes, the platform re-asks or refuses — it never edits it.",
+		fmt.Sprintf("Planning rounds spent on %s and refused so far: %d.", what, fault.Rounds),
+	}
+	return &Card{Kind: CardEmission, Decision: &DecisionBody{
+		Summary: fmt.Sprintf("I could not get %s into a shape this platform will accept: %s", what, fault.Refusal),
+		Detail:  detail,
+		Choices: []Option{
+			{Label: "Try once more", Value: ChoiceReplan},
+			{Label: "Stop here (cancel this task)", Value: ChoiceRethink},
+		},
+		Help: HelpBlock{
+			What:      "Trying once more starts one more planning round, and that round costs what a planning round costs. Stopping here cancels this task; nothing has run either way, so nothing has to be undone.",
+			Wrong:     "A fresh round can come back over the same limit again — the planning model writes the plan, and the platform will refuse it again rather than quietly cut it down to size.",
+			Recommend: "Try once more first: the model is told the exact limit it overran. If it fails again, stop here and start over with a smaller or more specific request — a narrower job is easier to describe inside the limits.",
+		},
+	}}
 }
 
 // ---- Cards & gates ----

@@ -622,6 +622,8 @@ const kindLine: Record<string, string> = {
   'decision.spec_doubt': 'It is not sure it understood you correctly. Read its doubt and decide; this card is never skipped.',
   'decision.family':
     'One question before the interview: what KIND of work is this? The questions it asks next, and who does the work, follow from your answer.',
+  'decision.emission':
+    'It could not get the plan into a shape this platform accepts, and it will not quietly cut one down to fit. Give it one more round, or stop here.',
   approval: 'The plan. Nothing runs and nothing spends until you approve it.',
   'approval.delta': 'The plan changed after your approval. Exactly what changed is below; nothing else moved.',
 }
@@ -1691,9 +1693,16 @@ function CardPanel({
             ))}
           {kind === 'clarification' && <QuestionForm card={card} busy={busy} onAnswer={answer} />}
           {kind === 'escalation' && <EscalationForm card={card} busy={busy} onAnswer={answer} />}
-          {(kind === 'decision.coverage' || kind === 'decision.research' || kind === 'decision.spec_doubt') && (
-            <DecisionForm card={card} busy={busy} onAnswer={answer} />
-          )}
+          {(kind === 'decision.coverage' ||
+            kind === 'decision.research' ||
+            kind === 'decision.spec_doubt' ||
+            // The refused-emission card (P3-GF12): an ordinary DecisionBody with
+            // the ordinary choices, so the ordinary form answers it. Naming it
+            // here rather than leaving it to the body-shape fallback is what
+            // gets it the kind line above — a card that says only "a card this
+            // page has no words of its own for" is a card the platform is
+            // hiding behind.
+            kind === 'decision.emission') && <DecisionForm card={card} busy={busy} onAnswer={answer} />}
           {kind === 'decision.family' && <FamilyForm card={card} busy={busy} onAnswer={answer} />}
           {kind === 'approval' && (
             <PlanCard view={view} card={card} busy={busy} previous={previousPlan} onAnswer={answer} />

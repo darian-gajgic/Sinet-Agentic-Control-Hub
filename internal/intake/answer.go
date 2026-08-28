@@ -84,6 +84,10 @@ func (p *Pipeline) Answer(ctx context.Context, actor, askID string, raw json.Raw
 		if err := p.applySpecDoubtAnswer(ctx, st, ans); err != nil {
 			return nil, err
 		}
+	case CardEmission:
+		if err := p.applyEmissionAnswer(ctx, st, ans); err != nil {
+			return nil, err
+		}
 	case CardApproval:
 		return p.applyApprovalAnswer(ctx, st, card, ans, raw)
 	case CardDelta:
@@ -320,6 +324,14 @@ func (p *Pipeline) applyClarificationAnswer(st *State, card *Card, ans Answer) e
 			return fmt.Errorf("%w: empty answer for %q", ErrBadAnswer, a.ID)
 		}
 		req.Resolutions = append(req.Resolutions, SlotResolution{SlotID: a.ID, How: ResolvedAnswered, Value: text + " → " + a.Value})
+		// The DURABLE half (P3-GF12 R5). The resolution above is one-shot: the
+		// next Revise consumes it and PendingRevise goes nil, after which nothing
+		// remembered that this point had ever been settled — which is why the
+		// witnessed planner could re-ask it, round after round, and the platform
+		// could only card it again. This record outlives the revision, rides
+		// every later planning session, and is what the settle-from-record guard
+		// checks a re-emitted marker against.
+		st.settleMarker(text, a.Value, p.nowRFC3339())
 	}
 	if len(req.Resolutions) == 0 {
 		return fmt.Errorf("%w: clarification card needs answers", ErrBadAnswer)
@@ -462,6 +474,50 @@ func (p *Pipeline) applySpecDoubtAnswer(ctx context.Context, st *State, ans Answ
 		st.Phase = PhaseCancelled
 	default:
 		return fmt.Errorf("%w: spec-doubt choice %q", ErrBadAnswer, ans.Choice)
+	}
+	return nil
+}
+
+// applyEmissionAnswer answers the refused-emission card (P3-GF12 R3).
+//
+// Re-plan is an EXPLICIT human grant of one more paid round — the S06.7(a)
+// coverage precedent, where the requester grants a revision beyond the ⚙ bound —
+// and it re-drives the SAME operation with nothing lost: a refused draft
+// re-enters Stage 1 with every resolution intact and NeedsDraft still true, a
+// refused revision re-enters the spine with its PendingRevise (and so the
+// requester's contest findings) still set, because that request is cleared only
+// after an emission is actually accepted.
+//
+// Rethink cancels, the SPEC-DOUBT card's own mapping. It is the third
+// cancel-shaped answer, so the requester's Note becomes the cancel's recorded
+// reason through closeAndResume exactly as the other two do (P3-RW-19).
+func (p *Pipeline) applyEmissionAnswer(ctx context.Context, st *State, ans Answer) error {
+	fault := st.EmissionFault
+	if fault == nil {
+		return fmt.Errorf("%w: no refused emission is open on this task", ErrBadAnswer)
+	}
+	record := func(text string) error {
+		_, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, "plan",
+			text, "refused-emission decision card (S06.6 [A15]; P3-GF12 R3)", 0)
+		return err
+	}
+	switch ans.Choice {
+	case ChoiceReplan:
+		if err := record(fmt.Sprintf("requester granted one more planning round after a refused %s emission", fault.Op)); err != nil {
+			return err
+		}
+		if fault.Op == EmissionOpRevise {
+			st.Phase = PhaseSpine
+		} else {
+			st.Phase = PhaseInterview
+		}
+	case ChoiceRethink:
+		if err := record("requester: stop here — intake cancelled after a refused emission"); err != nil {
+			return err
+		}
+		st.Phase = PhaseCancelled
+	default:
+		return fmt.Errorf("%w: refused-emission choice %q", ErrBadAnswer, ans.Choice)
 	}
 	return nil
 }

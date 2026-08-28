@@ -315,6 +315,28 @@ type EscalationAnswer struct {
 	TS       string `json:"ts"`
 }
 
+// SettledMarker is one answered NEEDS-CLARIFICATION marker, kept durably on the
+// State and handed to every later planning session (P3-GF12 R5; Spec S06.5 "a
+// resolved slot must never re-ask").
+//
+// It exists because the answer used to EVAPORATE: `applyClarificationAnswer`
+// folded it into a one-shot ReviseReq, the next Revise consumed it, and
+// PendingRevise went nil — after which nothing durable said this point had ever
+// been settled. The witnessed consequence was a content-family planner
+// re-emitting the same marker round after round (ask 6 byte-identical to the
+// answered ask 5, four rounds of a person re-confirming the same shop details).
+// The record is what lets the platform recognize a repeat deterministically
+// (S06.6's first arm: the marker WAS asked, and it WAS answered) instead of
+// asking a model to remember.
+type SettledMarker struct {
+	// Marker is the marker text as the planner emitted it and the requester
+	// was asked it — the durable question.
+	Marker string `json:"marker"`
+	// Answer is the requester's own words.
+	Answer string `json:"answer"`
+	TS     string `json:"ts"`
+}
+
 // DraftInput is everything the Stage-1 planning session receives to emit
 // the artifact pair (Spec S06.5–S06.6). The taxonomy carries the interview
 // coverage; the resolutions carry its outcome. Data-bearing hits oblige
@@ -338,9 +360,15 @@ type DraftInput struct {
 	DataHits    []TriggerHit
 	Supplied    []SuppliedFact
 	Escalations []EscalationAnswer
-	SpecVersion int   // version the emitted SPEC must carry
-	PlanVersion int   // version the emitted PLAN must carry
-	Prior       *Pair // set on re-interview: artifacts stay intact (S06.9 Re-interview)
+	// SettledMarkers are the NEEDS-CLARIFICATION markers this requester has
+	// already answered (P3-GF12 R5). They ride every planning session so the
+	// contract's settled-facts rule has something to bind against: a seat that
+	// cannot see what was already settled can only guess, and the witnessed
+	// guess was to re-ask. Additive — a seat that ignores them is unharmed.
+	SettledMarkers []SettledMarker
+	SpecVersion    int   // version the emitted SPEC must carry
+	PlanVersion    int   // version the emitted PLAN must carry
+	Prior          *Pair // set on re-interview: artifacts stay intact (S06.9 Re-interview)
 }
 
 // Revision reasons (ReviseInput.Reason).
@@ -366,8 +394,14 @@ type ReviseInput struct {
 	Findings    []string
 	Resolutions []SlotResolution
 	Escalations []EscalationAnswer
-	SpecVersion int
-	PlanVersion int
+	// SettledMarkers is the DraftInput member of the same name (P3-GF12 R5) —
+	// the revise leg is where the witnessed confirm-loop actually lived, so this
+	// is the copy that matters. It carries a json tag where its siblings carry
+	// none because this struct is marshaled WHOLE into the prompt item: an empty
+	// member would be one more line of noise for the planner to read past.
+	SettledMarkers []SettledMarker `json:"settled_markers,omitempty"`
+	SpecVersion    int
+	PlanVersion    int
 }
 
 // Planner is the Stage-1 seam: the requester's designated planning model

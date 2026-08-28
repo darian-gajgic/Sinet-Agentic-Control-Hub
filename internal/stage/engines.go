@@ -369,7 +369,18 @@ var _ intake.Planner = (*EnginePlanner)(nil)
 // than a draft. The per-step approach members carry the [A15] marker: Spec
 // S00.9's A15 row makes the implementing packet annotate its planner-prompt
 // site, and this is that site.
-const pairSchema = `Output EXACTLY one JSON object, nothing else, shaped:
+//
+// It is BUILT rather than written (P3-GF12 R1): the four [A15] length bounds are
+// interpolated from `internal/intake`'s own exported cap constants, so the
+// contract the planner is given and the boundary that refuses it are the same
+// numbers by construction. A second literal here would be a second spelling of
+// one fact, which drifts (§65 D4) — and the drift is not theoretical: GF8 landed
+// the caps as boundary validation while the contract stated only the duty, and
+// eleven witnessed emissions overshot the approach cap by 1.03–1.31× and crashed
+// the drive apiece.
+// The bounds are stated in the reader's units — "characters", the same plain
+// word the refusal itself uses — never in "runes".
+var pairSchema = fmt.Sprintf(`Output EXACTLY one JSON object, nothing else, shaped:
 {"spec":{"restatement":string, "outcome":[string...],
   "acs":[{"n":1,"plain":string,"structured":string?,"structured_kind":"ears"|"gwt"|""}...],
   "constraints":[string...], "assumptions":[{"text":string,"origin":string}...],
@@ -394,7 +405,22 @@ where it does. A step naming only its outcome is invalid: the requester reviews
 this plan to catch a wrong approach before the work runs, and an outcome
 sentence cannot be judged for approach. Do not list a decision you had no
 alternative for, and do not pad the ordering rationale where the order does not
-matter.`
+matter.
+Length bounds [A15] — these are the sizes the platform ACCEPTS, and it refuses
+an emission that exceeds any of them rather than shortening it for you: a step's
+approach is at most %d characters (a few honest sentences — the decisions have
+their own fields and do not belong in it); each decision, each alternative and
+each why is at most %d characters; a step lists at most %d decisions; the
+ordering rationale is at most %d characters. Write within them the first time:
+say less, never pad, and never drop a required member to fit.
+Settled facts stay settled: a fact the requester answered, supplied, or
+confirmed — anything carried in the resolutions, supplied-facts or
+clarification-answer blocks of your input — is SETTLED. Never emit a
+NEEDS-CLARIFICATION entry that re-asks, re-confirms, or restates a settled fact.
+Clarifications are only for new consequential ambiguities that nothing in your
+input resolves, and each one is a QUESTION — never a disclosure, a summary, or a
+confirmation of something you were already told.`,
+	intake.ApproachMaxRunes, intake.DecisionFieldMaxRunes, intake.MaxStepDecisions, intake.OrderingMaxRunes)
 
 func (p *EnginePlanner) Draft(ctx context.Context, in intake.DraftInput) (intake.Pair, error) {
 	extra, err := draftInputItem(in)
@@ -435,37 +461,125 @@ func (p *EnginePlanner) pairSession(ctx context.Context, runID, taskID, owner st
 	if runID == "" {
 		runID = taskID + RunSuffixIntake
 	}
-	var pair intake.Pair
-	err := p.s.jsonSession(ctx, SessionInput{
-		RunID:    runID,
-		Stage:    "plan",
-		Assemble: true,
-		// Knowledge wired at B3-1 (Spec S09.3 house/project/user slices);
-		// conventions/worker sources remain B4/B3-2 seams.
-		Sources:      ledger.Sources{Knowledge: p.s.cfg.Knowledge},
-		Extra:        []ledger.Item{extra},
-		Instructions: instructions,
-		Kind:         kind,
-		Class:        "C1", // read-only planning sandbox (Spec S06.6, P-T05-1)
-	}, &pair)
-	if err != nil {
-		return intake.Pair{}, fmt.Errorf("planner session: %w", err)
-	}
 	// Platform-owned bookkeeping fields are stamped here, not trusted from
 	// the engine (the spine re-validates content; identity/version
 	// bookkeeping is the platform's).
-	pair.Spec.TaskID, pair.Plan.TaskID = taskID, taskID
-	pair.Spec.Owner, pair.Plan.Owner = owner, owner
-	pair.Spec.Version, pair.Plan.Version = specV, planV
-	pair.Plan.SpecVersion = specV
-	pair.Spec.Status, pair.Plan.Status = intake.StatusDraft, intake.StatusDraft
-	pair.Spec.Tier, pair.Plan.Tier = tier, tier
-	prov := "planning-model session (" + p.s.modelFor("") + ")"
-	pair.Spec.Provenance, pair.Plan.Provenance = prov, prov
-	if err := pair.Validate(); err != nil {
-		return intake.Pair{}, fmt.Errorf("planner output: %w", err)
+	stamp := func(pair *intake.Pair) {
+		pair.Spec.TaskID, pair.Plan.TaskID = taskID, taskID
+		pair.Spec.Owner, pair.Plan.Owner = owner, owner
+		pair.Spec.Version, pair.Plan.Version = specV, planV
+		pair.Plan.SpecVersion = specV
+		pair.Spec.Status, pair.Plan.Status = intake.StatusDraft, intake.StatusDraft
+		pair.Spec.Tier, pair.Plan.Tier = tier, tier
+		prov := "planning-model session (" + p.s.modelFor("") + ")"
+		pair.Spec.Provenance, pair.Plan.Provenance = prov, prov
 	}
-	return pair, nil
+	runSession := func(note string) (intake.Pair, error) {
+		var pair intake.Pair
+		err := p.s.jsonSession(ctx, SessionInput{
+			RunID:    runID,
+			Stage:    "plan",
+			Assemble: true,
+			// Knowledge wired at B3-1 (Spec S09.3 house/project/user slices);
+			// conventions/worker sources remain B4/B3-2 seams.
+			Sources:      ledger.Sources{Knowledge: p.s.cfg.Knowledge},
+			Extra:        []ledger.Item{extra},
+			Instructions: instructions + note,
+			Kind:         kind,
+			Class:        "C1", // read-only planning sandbox (Spec S06.6, P-T05-1)
+		}, &pair)
+		if err != nil {
+			return intake.Pair{}, fmt.Errorf("planner session: %w", err)
+		}
+		return pair, nil
+	}
+	return pairWithRetry(runSession, stamp, func(attempt int, retrying bool, refusal error) {
+		msg := "stage: planner emission refused by the artifact contract; the bounded re-emission is exhausted and the refusal goes to the pipeline (P3-GF12 R2)"
+		if retrying {
+			msg = "stage: planner emission refused by the artifact contract; re-asking once with the refusal fed back verbatim (P3-GF12 R2)"
+		}
+		// Platform-authored fields (S01.11): run, stage, session kind, attempt
+		// counters, and the refusal — which is intake's OWN validator sentence.
+		// Stated precisely, because it is not a blanket claim: some of those
+		// sentences quote the offending field back ("decision %q gives no reason
+		// it won"), so a fragment of model output can ride a refusal. That is
+		// deliberate and bounded — the alternative is a log line naming a defect
+		// nobody can then find — and it is the ONLY model-written text on this
+		// path; nothing here ever logs a brief, a plan body, or a request.
+		p.s.logger().Warn(msg,
+			"run", runID, "stage", "plan", "kind", kind,
+			"attempt", attempt, "attempts_allowed", emissionRetryLimit+1, "refusal", refusal)
+	})
+}
+
+// emissionRetryLimit bounds the re-asks of a planning session whose reply
+// PARSED but failed the artifact contract — the §60 bounce, extended from a
+// malformed ENVELOPE to a malformed CONTRACT under the same trust posture: the
+// platform validates, the seam re-asks, and content is never repaired.
+//
+// A plain structural constant, not a ⚙ (S18 declares no such key — the
+// jsonRetryLimit / v0RegenerationLimit / maxJSONCompletionClosers precedent;
+// flagged to the operator gate under the standing settings-tab directive).
+//
+// Two, where the house parse bounce is one: a parse bounce corrects a format
+// slip deterministically and one shot is enough, while a length refusal corrects
+// a stochastic author against a numeric budget it has just been shown — the
+// second chance is what keeps the human door rare. Three planning sessions per
+// emission is the worst case, which stays inside S06.10's "bounded single
+// revisions" economics, and what follows the third is a person, not a fourth try.
+const emissionRetryLimit = 2
+
+// emissionRetryNote is the platform-authored note appended to a re-ask: the
+// refusal's OWN specifics, verbatim, so the next attempt corrects the thing that
+// was actually refused instead of guessing. It never proposes an edit and the
+// platform never makes one (§60: model output is re-asked or refused, never
+// trimmed) — a shortened approach nobody wrote is a fabrication with a syntax
+// check's clothes on.
+func emissionRetryNote(refusal error) string {
+	return "\nYour previous emission PARSED but was REFUSED by the platform's artifact contract: " +
+		refusal.Error() + "\n" +
+		"Re-emit the COMPLETE object, corrected so that refusal cannot repeat. " +
+		"Where the refusal names a size, restate that content INSIDE the bound — shorten by saying less, " +
+		"never by padding, and never by dropping a required member. Change nothing the refusal did not name.\n"
+}
+
+// pairWithRetry drives a planning session through runSession (called with the
+// note to append on a re-ask), stamps the platform-owned bookkeeping fields, and
+// validates the result — re-asking at most emissionRetryLimit times when the
+// emission is contract-invalid, with the refusal's exact specifics fed back.
+//
+// It is the jsonWithRetryReporting shape one layer up: that bounce owns "is this
+// the contracted JSON object", this one owns "is this a valid artifact". A
+// SESSION error (infrastructure) is never retried here — that is the S02.5
+// ladder's, and it stays the ladder's (§60). Exhaustion returns the refusal
+// wrapped exactly as the un-bounced seam always did, so the pipeline's own
+// landing (P3-GF12 R3) sees the error shape it was built for.
+func pairWithRetry(runSession func(retryNote string) (intake.Pair, error), stamp func(*intake.Pair),
+	onRefusal func(attempt int, retrying bool, refusal error)) (intake.Pair, error) {
+	var refused error
+	for attempt := 1; ; attempt++ {
+		note := ""
+		if refused != nil {
+			note = emissionRetryNote(refused)
+		}
+		pair, err := runSession(note)
+		if err != nil {
+			return intake.Pair{}, err
+		}
+		stamp(&pair)
+		verr := pair.Validate()
+		if verr == nil {
+			return pair, nil
+		}
+		refused = verr
+		retrying := attempt <= emissionRetryLimit
+		if onRefusal != nil {
+			onRefusal(attempt, retrying, refused)
+		}
+		if !retrying {
+			return intake.Pair{}, fmt.Errorf("planner output: %w", refused)
+		}
+	}
 }
 
 // Draft-input item identities on the assembly manifest (Spec S05.4).

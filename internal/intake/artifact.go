@@ -48,8 +48,17 @@ func (a AC) Key() string { return fmt.Sprintf("AC-%d", a.N) }
 // card's centerpiece (Spec S06.9).
 type Assumption struct {
 	Text   string `json:"text"`
-	Origin string `json:"origin,omitempty"` // "slot:<id>" | "force_proceed" | "planner" | "band"
+	Origin string `json:"origin,omitempty"` // "slot:<id>" | "force_proceed" | "planner" | "band" | "marker"
 }
+
+// AssumptionOriginMarker labels an assumption minted from a NEEDS-CLARIFICATION
+// marker (P3-GF12 R6/R7): either one the requester answered and the planner
+// re-raised — settled from the record, carrying question and answer — or one
+// still open when the clarification rounds ran out, converted rather than
+// swallowed (S06.6: "each marker is either asked or converted to a listed
+// assumption"). Both land on the approval card's centerpiece, where a wrong
+// reading is contestable via Re-plan.
+const AssumptionOriginMarker = "marker"
 
 // Spec is the SPEC artifact — the contract all later work is measured
 // against (feature 1.3; Spec S06.6).
@@ -153,8 +162,14 @@ const (
 // class of defect). The unexported names stay the validator's; these are the
 // prompt's, and they are the same numbers by construction.
 //
-// [GF12 inert type surface at grounding — Amendment-A; the prompt-side
-// consumer lands with the implementation commit.]
+// The NUMBERS do not move (P3-GF12 R8). Every witnessed overshoot was within
+// 1.31× of 1200 — the signature of an author who was never told the budget, not
+// of a budget that cannot hold an honest approach; 1200 characters is roughly
+// 200 words, which fits S06.6's "plain words, a few sentences" comfortably with
+// the decisions carried in their own capped fields; and the cap guards card and
+// artifact size, which a raise without the prompt statement would move rather
+// than fix. If a told-the-bound planner still overruns routinely, the constant
+// moves then, with that as its stated reason.
 const (
 	ApproachMaxRunes      = approachMaxRunes
 	DecisionFieldMaxRunes = decisionFieldMaxRunes

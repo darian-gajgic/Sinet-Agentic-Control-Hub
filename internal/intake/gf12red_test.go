@@ -49,13 +49,22 @@ func overCapRefusal(runes int) error {
 }
 
 // pairJSON renders the pair for disposition-agnostic content assertions.
+//
+// DEVIATION (P3-GF12 implementation, Amendment-A): the helper originally used
+// json.Marshal, which HTML-escapes & → & — so the pinned answer substring
+// "Spoke & Sprocket" below could never match for ANY implementation, correct or
+// not. The escaping is turned off so the pin means what it says; every pinned
+// substring in this file is byte-unchanged, and this helper's job (see the whole
+// pair as text, whatever shape the answer landed in) is unchanged with it.
 func pairJSON(t *testing.T, p *intake.Pair) string {
 	t.Helper()
-	raw, err := json.Marshal(p)
-	if err != nil {
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(p); err != nil {
 		t.Fatal(err)
 	}
-	return string(raw)
+	return buf.String()
 }
 
 // driveToInterviewCard starts a standard-tier task and returns the fixture,
