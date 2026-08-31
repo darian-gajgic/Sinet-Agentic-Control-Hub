@@ -31,7 +31,7 @@ import { Absent, Empty, Freshness, Owner, Section, Stamp, SurfaceHead } from './
 import { hrefForProjectCommands } from './Projects'
 import { Link } from './router'
 import { hrefFor } from './routes'
-import { Button, Chip, EmptyState, cn, toneStyle, type Tone } from './ui'
+import { Button, Chip, EmptyState, Timestamp, cn, toneStyle, type Tone } from './ui'
 
 /**
  * The review surface (Spec S15.8; S13.1–S13.4, S13.6, S13.8; FC-v1 §2).
@@ -259,7 +259,11 @@ export function Deliverable({ id, me, stream }: { id: string; me: string; stream
             ? ''
             : !data.deliverable.project_id
               ? ' Accepting makes a revision the official version — the accepted copy is filed right here, recorded as your own decision, and nothing is pushed anywhere — and nothing on this page takes an accept back.'
-              : ' Accepting makes a revision the official version — a commit pushed under your own credentials — and nothing on this page takes an accept back.')
+              : // The push claim was a lie on a remote-less store (review L7):
+                // where the official copy LANDS is the accept card's served
+                // fact (`landing`), so this intro claims only what is true on
+                // every arm — the card below states the exact destination.
+                ' Accepting makes a revision the official version — a commit in the project\u2019s own store, made in your name; the accept card states exactly where it lands — and nothing on this page takes an accept back.')
         }
       />
       <Freshness stale={stale} error={error} hasData={data !== null} />
@@ -823,8 +827,11 @@ function RevisionsBlock({ detail, stale }: { detail: DeliverableDetail; stale: b
                 )}
               </span>
               <span className={cn('text-xs text-muted-foreground', figure)}>
+                {/* Live-face instant (review M7): the raw nanosecond string
+                    read as noise on the review page; the verbatim UTC stays
+                    on the element per the D5 primitive. */}
                 {' '}
-                · <Stamp ts={r.created_ts} />
+                · <Timestamp ts={r.created_ts} variant="live" />
               </span>
             </li>
           ))}
@@ -1678,7 +1685,7 @@ function CommentCard({ comment, placement }: { comment: Comment; placement?: Pla
           {severityMeaning(c.severity)}
         </ToneSpan>{' '}
         <span className={cn('text-muted-foreground', figure)}>
-          {c.kind} · said about revision {String(c.revision_n)} · <Stamp ts={c.created_ts} />
+          {c.kind} · said about revision {String(c.revision_n)} · <Timestamp ts={c.created_ts} variant="live" />
         </span>
       </p>
       {/* `.comment-body` KEEPS its rule (`overflow-wrap: anywhere`, the LAST-but-one
@@ -3095,13 +3102,23 @@ function AcceptCardView({ card }: { card: AcceptCard }) {
             {card.pin_kind}{' '}
             {card.content_pin === '' ? <Absent reason="no pin recorded" /> : <code>{card.content_pin}</code>}
           </dd>
-          <dt>Pushes to</dt>
+          {/* The label tells the served `landing` arm's truth (review L7):
+              "Pushes to" on a remote-less store contradicted the GF11
+              sentence one line above it. An absent member (a card served
+              before it existed) gets the words true on every arm. */}
+          <dt>{card.landing === 'remote-push' ? 'Pushes to' : 'Lands in'}</dt>
           <dd>
             {card.project_id === '' ? <Absent reason="this deliverable belongs to no project" /> : card.project_id}
             {card.protected_ref !== undefined && card.protected_ref !== '' ? (
               <> · {card.protected_ref}</>
             ) : (
               <> · <Absent reason="no protected ref is registered for this project" /></>
+            )}
+            {card.landing === 'local-store' && (
+              <span className="text-muted-foreground"> — the project&apos;s own store on this machine; nothing is sent anywhere</span>
+            )}
+            {card.landing === 'decision-record' && (
+              <span className="text-muted-foreground"> — recorded as your decision against the content pin</span>
             )}
           </dd>
           <dt>Tier</dt>

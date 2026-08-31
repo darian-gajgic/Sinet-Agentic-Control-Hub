@@ -199,9 +199,12 @@ function safeUrl(url: string): string | null {
  * markdownDocument renders markdown as a readable document, escape-first.
  *
  * A deliberate SUBSET: headings, paragraphs, lists, blockquotes, rules, code
- * (fenced and inline), emphasis, links and images. What the subset does not
- * know renders as the escaped text it is — the failure mode is plain-looking
- * prose, never markup execution. Tables and footnotes wait for a real need.
+ * (fenced and inline), emphasis, links, images and pipe tables. What the
+ * subset does not know renders as the escaped text it is — the failure mode
+ * is plain-looking prose, never markup execution. Footnotes wait for a real
+ * need; tables joined the subset when the real need arrived (review M9: the
+ * flagship deliverable was a price table, shown as raw pipe syntax in the
+ * view that called itself "rendered").
  */
 export function markdownToHtml(md: string): string {
   const out: string[] = []
@@ -284,6 +287,17 @@ export function markdownToHtml(md: string): string {
       continue
     }
 
+    // A pipe table: a header row over a delimiter row (review M9). Recognized
+    // strictly — the delimiter's cell count must match the header's — so
+    // anything short of a real table stays the escaped text it is.
+    const table = tableAt(lines, i)
+    if (table !== null) {
+      flushAll()
+      out.push(table.html)
+      i = table.next
+      continue
+    }
+
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line)
     const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line)
     if (bullet !== null || numbered !== null) {
@@ -307,6 +321,72 @@ export function markdownToHtml(md: string): string {
   }
   flushAll()
   return out.join('\n')
+}
+
+/* ── the pipe-table pass (review M9) ─────────────────────────────────────────
+ *
+ * GitHub-shape pipe tables: a header row, a delimiter row whose cell count
+ * MATCHES the header's, then body rows until the first line without a pipe.
+ * Cells run through `inline()` — the same escape-first path as every other
+ * span, so a table cell can carry emphasis or a link and can never carry
+ * markup. Alignment comes only from the delimiter's own `:` marks — a closed
+ * three-value set, never author-controlled text in an attribute. */
+
+/** One row's cells: outer pipes stripped, `\|` kept as a literal pipe. */
+export function splitTableRow(line: string): string[] {
+  let t = line.trim()
+  if (t.startsWith('|')) t = t.slice(1)
+  if (t.endsWith('|') && !t.endsWith('\\|')) t = t.slice(0, -1)
+  return t.split(/(?<!\\)\|/).map((c) => c.trim().replaceAll('\\|', '|'))
+}
+
+/** The delimiter row's cells (`---`, `:--`, `--:`, `:-:`) — or null where the
+ *  line is not a delimiter row. */
+function delimiterCells(line: string): string[] | null {
+  if (!line.includes('|') || !line.includes('-')) return null
+  const cells = splitTableRow(line)
+  if (cells.length === 0) return null
+  for (const c of cells) if (!/^:?-+:?$/.test(c)) return null
+  return cells
+}
+
+function tableAt(lines: string[], i: number): { html: string; next: number } | null {
+  const header = lines[i]
+  if (!header.includes('|') || i + 1 >= lines.length) return null
+  const delim = delimiterCells(lines[i + 1])
+  if (delim === null) return null
+  const heads = splitTableRow(header)
+  if (heads.length !== delim.length) return null
+
+  const align = delim.map((c) =>
+    c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : '',
+  )
+  const cellHtml = (tag: string, cells: string[]): string =>
+    cells
+      .map((c, k) => {
+        const a = align[k] ?? '' // a ragged row's extra cells have no column
+        const at = a === '' ? '' : ` style="text-align:${a}"`
+        return `<${tag}${at}>${inline(c)}</${tag}>`
+      })
+      .join('')
+
+  let next = i + 2
+  const body: string[] = []
+  while (next < lines.length && lines[next].includes('|') && !/^\s*$/.test(lines[next])) {
+    // Ragged rows keep every served cell: short rows pad, long rows keep
+    // their extras rather than dropping content.
+    const cells = splitTableRow(lines[next])
+    while (cells.length < heads.length) cells.push('')
+    body.push(`<tr>${cellHtml('td', cells)}</tr>`)
+    next++
+  }
+
+  const html =
+    '<div class="tablewrap"><table>' +
+    `<thead><tr>${cellHtml('th', heads)}</tr></thead>` +
+    (body.length > 0 ? `<tbody>${body.join('')}</tbody>` : '') +
+    '</table></div>'
+  return { html, next }
 }
 
 /**
@@ -365,6 +445,11 @@ export function markdownDocument(md: string): string {
     'pre{overflow-x:auto;background:#f4f0e8;border:1px solid #e2dccc;border-radius:6px;padding:.85rem 1rem}',
     'code{font:.9em/1.5 ui-monospace,monospace}',
     'blockquote{margin:0;padding-left:1rem;border-left:3px solid #d9c9ae;color:#57534e}',
+    '.tablewrap{overflow-x:auto}',
+    'table{border-collapse:collapse;margin:1rem 0;width:100%}',
+    'th,td{border:1px solid #e2dccc;padding:.45rem .7rem;text-align:left;vertical-align:top}',
+    'th{background:#f4f0e8}',
+    'tbody tr:nth-child(even){background:#faf7f0}',
     'img{max-width:100%;height:auto}',
     'a{color:#8250df}',
     'hr{border:none;border-top:1px solid #e2dccc;margin:2rem 0}',

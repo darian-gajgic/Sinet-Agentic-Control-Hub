@@ -1598,8 +1598,14 @@ test('R11: the head says what the surface is, and its overclaims are absent', as
   for (const fact of ['revision', 'compare', 'comment', 'try', 'accept']) {
     expect(line.toLowerCase(), `the head does not name ${fact}`).toContain(fact)
   }
-  // And the fact that makes the accept worth warning about at all.
-  expect(line).toContain('your own credentials')
+  // And the facts that make the accept worth warning about at all: the commit
+  // is made in the requester's own name, and nothing takes it back.
+  // (Reworded in the GF9 drain — review L7: "a commit pushed under your own
+  // credentials" claimed a push on a remote-less store one sentence before
+  // the card said nothing is sent anywhere; where the commit LANDS is the
+  // accept card's served fact, and this head now defers to it.)
+  expect(line).toContain('in your name')
+  expect(line).toContain('nothing on this page takes an accept back')
 
   // THE OVERCLAIMS. Approval state is served PER ARTIFACT (§38 ruling (a)), so
   // this page may not call anything approved or signed off; and no verb at any

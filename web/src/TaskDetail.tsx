@@ -3,6 +3,7 @@ import { ArrowUpRight, X } from 'lucide-react'
 
 import {
   api,
+  type AC,
   type CancelOutcome,
   type DeliverableDetail,
   type Receipt,
@@ -329,22 +330,19 @@ function SpecBlock({ detail, stale }: { detail: Detail; stale: boolean }) {
           <StatusLine what="Specification" status={spec.status} version={spec.version} />
           <p>{spec.restatement}</p>
           <h4>Acceptance criteria</h4>
+          {/* The plain line is what the requester reads (review M6): the old
+              render doubled every criterion (plain, then formal restatement)
+              and repeated the notation parenthetical on each — jargon ×N.
+              The formal wording is still the record, one fold below, with
+              the notation named ONCE for the set. */}
           <ol className="acs">
             {spec.acs.map((ac) => (
               <li key={ac.n} data-ac={`AC-${ac.n}`}>
                 <span className="ac-key">AC-{ac.n}</span> {ac.plain}
-                {ac.structured && (
-                  <span className="muted">
-                    {' '}
-                    — {ac.structured}
-                    {ac.structured_kind !== undefined && ac.structured_kind !== '' && (
-                      <> ({structuredKindWords(ac.structured_kind)})</>
-                    )}
-                  </span>
-                )}
               </li>
             ))}
           </ol>
+          <FormalACs acs={spec.acs} />
           <SpecLists spec={spec} />
 
           <StatusLine what="Plan" status={plan.status} version={plan.version} />
@@ -389,6 +387,43 @@ function StatusLine({ what, status, version }: { what: string; status: string; v
         {approved ? 'confirmed' : `${status} (not approved — nobody has signed this off yet)`}
       </span>
     </h3>
+  )
+}
+
+/**
+ * The formal restatements, one fold below the plain criteria (review M6).
+ * The plain line is what the requester reads; the formal wording is still the
+ * record — behind a summary that says what it is, with the notation named
+ * ONCE for the whole set instead of a parenthetical per criterion. Criteria
+ * whose kinds differ keep a per-row note (nothing served is dropped).
+ */
+function FormalACs({ acs }: { acs: AC[] }) {
+  const formal = acs.filter((ac) => ac.structured !== undefined && ac.structured !== '')
+  if (formal.length === 0) return null
+  const kinds = [...new Set(formal.map((ac) => ac.structured_kind ?? ''))].filter((k) => k !== '')
+  const oneKind = kinds.length === 1 ? kinds[0] : undefined
+  return (
+    <details className="acs-formal" data-acs-formal>
+      <summary className="cursor-pointer">The formal wording — the same checks, as the checker reads them</summary>
+      {oneKind !== undefined && (
+        <p className="muted acs-formal-note">
+          Each of these is {structuredKindWords(oneKind)} — a shape the platform can check mechanically. The plain
+          list above says the same things.
+        </p>
+      )}
+      {/* Its own class on purpose: `.acs li` is a pinned selector for the
+          PLAIN list, and this fold must not leak into it. */}
+      <ol className="formal-acs">
+        {formal.map((ac) => (
+          <li key={ac.n} value={ac.n} data-ac-formal={`AC-${ac.n}`}>
+            <span className="ac-key">AC-{ac.n}</span> <span className="muted">{ac.structured}</span>
+            {oneKind === undefined && ac.structured_kind !== undefined && ac.structured_kind !== '' && (
+              <span className="muted"> ({structuredKindWords(ac.structured_kind)})</span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
   )
 }
 
@@ -809,6 +844,15 @@ type RailNode = {
   note?: ReactNode
   /** Stopped states carry the door to where they are answered. */
   door?: string
+  /** The step's fact signature (stage|type|kind|outcome). Consecutive rows
+   *  with the SAME signature fold into one counted row (review L5: the rail
+   *  opened with six visually identical lines and no way to tell them
+   *  apart) — only plain steps carry one; marked nodes never fold. */
+  sig?: string
+  /** How many identical consecutive rows this node stands for (≥2 when
+   *  folded); `firstAt` keeps the earliest served instant of the run. */
+  count?: number
+  firstAt?: string
 }
 
 /** The tone one served outcome takes; anything unrecognized is neutral —
@@ -825,6 +869,9 @@ function stepNode(s: Detail['stage_progress'][number]): RailNode {
     kind,
     tone: kind === 'error' ? 'red' : kind === 'split' ? 'blue' : 'green',
     stage: s.stage,
+    // Only an unmarked step may fold (error/split rows each tell their own
+    // story and stay individual).
+    sig: kind === 'step' ? `${s.stage}|${s.type}|${s.kind}|${s.outcome ?? ''}` : undefined,
     head: (
       <>
         {s.stage === '' ? <Absent reason="unnamed stage" /> : <StageName stage={s.stage} />}
@@ -930,9 +977,25 @@ export function railNodes(detail: Detail): RailNode[] {
     if (Number.isNaN(ta) || Number.isNaN(tb) || ta === tb) return a.servedAt - b.servedAt
     return ta - tb
   })
+  // Consecutive rows with the SAME fact signature fold into one counted row
+  // (review L5): nothing served is dropped — the count, the first and the
+  // latest instant of the run all render — but six indistinguishable lines
+  // stop posing as six separate stories.
+  const folded: RailNode[] = []
+  for (const { node } of placed) {
+    const prev = folded[folded.length - 1]
+    if (prev !== undefined && prev.sig !== undefined && prev.sig === node.sig) {
+      prev.count = (prev.count ?? 1) + 1
+      prev.firstAt = prev.firstAt ?? prev.at
+      prev.at = node.at
+      continue
+    }
+    folded.push({ ...node })
+  }
+
   // The run-standing nodes close the rail in served order: a run's state
   // carries no instant of its own on this read.
-  return [...placed.map((p) => p.node), ...detail.runs.map(terminalNode)]
+  return [...folded, ...detail.runs.map(terminalNode)]
 }
 
 /** R11: the stage story, as the rail. Counters are monotonic facts; nothing
@@ -970,7 +1033,19 @@ function RailStep({ node }: { node: RailNode }) {
       <StatusDot tone={node.tone} className="absolute start-0 top-3 -translate-x-1/2" />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {node.head}
+        {node.count !== undefined && node.count > 1 && (
+          // A folded run of identical boundaries says its count out loud
+          // (review L5) — the instants stay: first on the left, latest right.
+          <span className="muted text-xs" data-folded={String(node.count)}>
+            · {String(node.count)} of these in a row
+          </span>
+        )}
         <span className="muted ms-auto text-xs">
+          {node.count !== undefined && node.count > 1 && node.firstAt !== undefined && (
+            <>
+              first <Timestamp ts={node.firstAt} variant="live" /> · latest{' '}
+            </>
+          )}
           {node.atLabel !== undefined && `${node.atLabel} `}
           <Timestamp ts={node.at} variant="live" />
         </span>
@@ -1199,7 +1274,7 @@ function DeliverablesBlock({ taskID, ended, stream }: { taskID: string; ended?: 
                   <Link to={hrefFor('deliverable', { id: d.deliverable.id })}>revision {String(r.n)}</Link>{' '}
                   <span className="muted">
                     {r.pin_kind}
-                    {r.content_sha256 ? ` ${r.content_sha256.slice(0, 12)}` : ''} · <Stamp ts={r.created_ts} />
+                    {r.content_sha256 ? ` ${r.content_sha256.slice(0, 12)}` : ''} · <Timestamp ts={r.created_ts} variant="live" />
                   </span>
                 </li>
               ))}
@@ -1351,8 +1426,20 @@ export function ReceiptView({
         <ul className="parks">
           {receipt.park_history?.map((p, i) => (
             <li key={i}>
-              <Stamp ts={p.parked_at} /> →{' '}
-              {p.ongoing ? <span className="warn-flag">still parked</span> : <Stamp ts={p.resumed_at} />}
+              {/* Live-face instants (review M7): the raw nanosecond pair read
+                  as noise on a requester surface — the verbatim UTC stays on
+                  each element per the D5 primitive, one hover away. */}
+              parked <Timestamp ts={p.parked_at} variant="live" />
+              {p.ongoing ? (
+                <span className="warn-flag"> · still parked</span>
+              ) : p.duration_seconds !== undefined ? (
+                <span> · resumed after {fmtDuration(p.duration_seconds)}</span>
+              ) : (
+                <span>
+                  {' '}
+                  · resumed <Timestamp ts={p.resumed_at} variant="live" />
+                </span>
+              )}
               {p.park_reason && <span className="muted"> — {p.park_reason}</span>}
               {p.resume_cause && <span className="muted"> · resumed on {p.resume_cause}</span>}
             </li>

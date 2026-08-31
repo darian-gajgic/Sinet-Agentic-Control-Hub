@@ -82,6 +82,23 @@ test('an approved pair reads as confirmed and its numbered ACs render in order',
   expect(view.container.querySelector('.steps')?.textContent).toContain('AC-1')
 })
 
+test('the plain criterion is what the requester reads; the formal wording sits one fold below, notation named once (review M6)', async () => {
+  const { view } = await task('t-ship', detailRoutes())
+  // The plain row carries the plain sentence ONLY — no formal restatement,
+  // no notation parenthetical repeated per criterion.
+  const plain = view.container.querySelector('[data-ac="AC-2"]')
+  expect(plain?.textContent).toContain('Each entry says what changed in plain language.')
+  expect(plain?.textContent).not.toContain('WHEN a reader opens the notes')
+  // The formal wording is still the record, one fold below…
+  const fold = view.container.querySelector('[data-acs-formal]')!
+  expect(fold, 'the formal wording vanished instead of folding').not.toBeNull()
+  expect(fold.textContent).toContain('WHEN a reader opens the notes THEN each entry reads as a sentence')
+  // …with the notation said ONCE for the set, in plain words.
+  const notation = (fold.textContent ?? '').split('Given / When / Then').length - 1
+  expect(notation, 'the notation is repeated per criterion (or dropped)').toBe(1)
+  view.unmount()
+})
+
 test('a DRAFT pair is labelled a draft and never presented as the confirmed specification', async () => {
   const { view } = await task('t-triage', detailRoutes())
   const statuses = [...view.container.querySelectorAll('[data-artifact-status]')].map((n) =>
@@ -1080,8 +1097,11 @@ test('opened, last activity and each stage boundary all render relative beside v
   expect(stage, 'the served task no longer records a stage boundary').toBeDefined()
   assertBeside(view.container.querySelector(`.stages [data-stage="${stage.stage}"] time`), stage.ts, 'a stage boundary')
 
-  // The AUDIT sites on this same surface deliberately did NOT move: a decision
-  // and a revision are records, and a record needs the instant alone.
+  // The AUDIT site on this same surface deliberately did NOT move: a decision
+  // is a record, and a record needs the instant alone. (The revision rows DID
+  // move to the live face in the GF9 drain — review M7 cited them first-hand
+  // as raw nanosecond noise on a requester surface; the verbatim UTC stays on
+  // the element per the D5 primitive.)
   const decision = view.container.querySelector('.decisions time')
   expect(decision, 'the decision record lost its stamp').not.toBeNull()
   expect(decision!.textContent, 'an audit record dropped its verbatim instant').toBe(decision!.getAttribute('dateTime'))
@@ -1152,6 +1172,34 @@ test('the rail places every served node class, and an ordinary step acquires non
   // The recovery and failure nodes say what they MEAN, not just their token.
   expect(nodesOf(view, 'error')[0].textContent).toContain('ended short of completing')
   expect(nodesOf(view, 'split')[0].textContent).toContain('carried on in a successor session')
+  view.unmount()
+})
+
+test('consecutive identical boundaries fold into ONE counted row with both instants; distinct rows never fold (review L5)', async () => {
+  // The instants sit AFTER the fixture's own decisions (09:04) and park
+  // (09:02–09:03): the fold merges only ADJACENT identical rows, and an
+  // intervening decision or park node correctly breaks the run — a fold
+  // across one would re-order the story.
+  const body = railBody({
+    stage_progress: [
+      stageRow({ seq: 1, stage: 'interview', type: 'intake.state', kind: '', ts: '2026-07-20T10:01:00Z' }),
+      stageRow({ seq: 2, stage: 'interview', type: 'intake.state', kind: '', ts: '2026-07-20T10:02:00Z' }),
+      stageRow({ seq: 3, stage: 'interview', type: 'intake.state', kind: '', ts: '2026-07-20T10:03:00Z' }),
+      stageRow({ seq: 4, stage: 'plan', type: 'intake.state', kind: '', ts: '2026-07-20T10:04:00Z' }),
+    ] as Detail['stage_progress'],
+  })
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body } })
+  const steps = nodesOf(view, 'step')
+  // Three identical interview boundaries are ONE row; the plan row stays its own.
+  expect(steps, 'identical consecutive rows did not fold (or distinct ones did)').toHaveLength(2)
+  const folded = steps.find((n) => n.getAttribute('data-stage') === 'interview')!
+  expect(folded.textContent).toContain('3 of these in a row')
+  // Nothing served is dropped: the FIRST and the LATEST instants both render.
+  const instants = [...folded.querySelectorAll('time')].map((t) => t.getAttribute('dateTime'))
+  expect(instants).toEqual(['2026-07-20T10:01:00Z', '2026-07-20T10:03:00Z'])
+  // The un-folded row carries no count chip.
+  const plan = steps.find((n) => n.getAttribute('data-stage') === 'plan')!
+  expect(plan.textContent).not.toContain('of these in a row')
   view.unmount()
 })
 

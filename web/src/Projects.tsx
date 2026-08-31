@@ -1153,6 +1153,7 @@ function CreateProject({
             <input
               className="door-input"
               type="text"
+              aria-label="Project id"
               placeholder="e.g. shop-backend"
               value={projectID}
               onChange={(e) => {
@@ -1165,6 +1166,7 @@ function CreateProject({
             <input
               className="door-input"
               type="text"
+              aria-label="Name"
               placeholder="e.g. The shop's backend"
               value={name}
               onChange={(e) => {
@@ -1182,6 +1184,7 @@ function CreateProject({
             <input
               className="door-input"
               type="text"
+              aria-label="Start from an existing repository"
               placeholder="e.g. https://github.com/you/repo.git"
               value={remote}
               onChange={(e) => {

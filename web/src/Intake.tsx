@@ -628,6 +628,12 @@ const kindLine: Record<string, string> = {
   'approval.delta': 'The plan changed after your approval. Exactly what changed is below; nothing else moved.',
 }
 
+/** What the last thing this tab SENT was — the waiting face names the actual
+ *  state with it (review L2: after a contest the panel still claimed the
+ *  machine was "choosing the next questions"). Tab-local on purpose: a cold
+ *  resume honestly does not know, and the generic copy is the honest fallback. */
+export type SentKind = 'answers' | 'contest' | 'force-proceed' | 'reinterview'
+
 function Journey({
   view,
   onView,
@@ -650,6 +656,9 @@ function Journey({
   // 2026-08-16). Seeded from the URL stamp on a resume; each fold restamps.
   const [beats, setBeats] = useState(answeredRounds)
   const beatsRef = useRef(answeredRounds)
+  // What the last send WAS (review L2) — so the wait face can say "redrafting
+  // the plan with your changes" instead of the generic story.
+  const [lastSent, setLastSent] = useState<SentKind | undefined>(undefined)
   // The beat lands AT SEND, not at response: the answer request carries the
   // next round's compose and takes minutes, while the live approvals read
   // closes the card within seconds — so the card panel unmounts long before
@@ -657,7 +666,7 @@ function Journey({
   // drain r1: the wait between rounds greeted the task as newborn — review
   // #7's second path). Sending IS this browser answering; the stamp rides the
   // address in the same breath (§41-B: the URL is the one pocket).
-  const sent = () => {
+  const sent = (kind: SentKind) => {
     beatsRef.current += 1
     window.history.replaceState(
       null,
@@ -665,6 +674,7 @@ function Journey({
       `${hrefFor('new')}?task=${encodeURIComponent(view.task_id)}&r=${String(beatsRef.current)}`,
     )
     setBeats(beatsRef.current)
+    setLastSent(kind)
   }
   const fold = (v: IntakeTaskView) => {
     onView(v)
@@ -691,7 +701,15 @@ function Journey({
       ) : phase === 'cancelled' ? (
         <Cancelled view={view} />
       ) : (
-        <FollowTask view={view} onView={fold} onSent={sent} onCard={setLiveCard} answered={beats > 0} stream={stream} />
+        <FollowTask
+          view={view}
+          onView={fold}
+          onSent={sent}
+          onCard={setLiveCard}
+          answered={beats > 0}
+          lastSent={lastSent}
+          stream={stream}
+        />
       )}
     </div>
   )
@@ -710,16 +728,20 @@ function FollowTask({
   onSent,
   onCard,
   answered = false,
+  lastSent,
   stream,
 }: {
   view: IntakeTaskView
   onView: (v: IntakeTaskView) => void
-  /** Fired the moment an answer LEAVES this tab (see Journey.sent). */
-  onSent?: () => void
+  /** Fired the moment an answer LEAVES this tab, with what KIND of send it
+   *  was (see Journey.sent; review L2). */
+  onSent?: (kind: SentKind) => void
   /** Hands the live card up so the journey header can wear its stakes and
    *  clearance (review #20). */
   onCard?: (c: IntakeCard | null) => void
   answered?: boolean
+  /** The last send this tab made — the wait face names the state with it. */
+  lastSent?: SentKind
   stream?: EventStream
 }) {
   const asks = useLive({
@@ -754,9 +776,9 @@ function FollowTask({
       ownSend.current = false
     }
   }, [cardKey])
-  const sentHere = () => {
+  const sentHere = (kind: SentKind) => {
     ownSend.current = true
-    onSent?.()
+    onSent?.(kind)
   }
 
   // RA-1's memory: the last APPROVAL card this browser rendered for this
@@ -812,7 +834,15 @@ function FollowTask({
       />
     )
   }
-  return <NoCardYet view={view} waiting={asks.data !== null} answered={answered} />
+  return (
+    <NoCardYet
+      view={view}
+      waiting={asks.data !== null}
+      live={!asks.stale}
+      answered={answered}
+      lastSent={lastSent}
+    />
+  )
 }
 
 /** The journey's standing header: whose task, where it stands, the clearance
@@ -1172,6 +1202,26 @@ export function isAssumedDefaultBoilerplate(name: string, text: string): boolean
   return /so I assumed a sensible default\.?$/.test(r) || /^I settle this one myself rather than asking/.test(r)
 }
 
+/**
+ * The skip template's two halves, split (review M5): the platform's
+ * per-skipped-slot prose is NARRATION AROUND A VALUE — "you skipped this one,
+ * so I am going with what was suggested on the card: <X>" (intake/answer.go
+ * skipAssumption) — and rendering the whole sentence AS the value put
+ * boilerplate one edit-slip from being submitted as an answer. Recognized, it
+ * splits into the VALUE (what was actually assumed) and the WHY (the
+ * narration, which is provenance context). The suggestion-less arm ("…so I
+ * will pick something sensible…") carries no value — honest absence. Prose
+ * the recognition does not match returns null and renders as itself.
+ */
+export function skipNarration(remainder: string): { value: string; why: string } | null {
+  const withValue = /^you skipped this one, so I am going with what was suggested on the card:\s*(.+)$/s.exec(remainder)
+  if (withValue !== null)
+    return { value: withValue[1].trim(), why: 'you skipped this one, so it went with what was suggested on the card' }
+  if (/^you skipped this one, so I will pick something sensible/.test(remainder))
+    return { value: '', why: 'you skipped this one, so it picks something sensible and shows it on the plan' }
+  return null
+}
+
 /** The slots an origin tag names: `assumption:a,b` → [a,b]; `slot:a` → [a];
  *  anything else → []. Reading, not inventing — the tags are the wire's.
  *  `interview:<slot> (assumption)` is the PLANNER'S spelling of the same
@@ -1293,7 +1343,23 @@ export function UnderstoodPanel({
   // Rows in card order; boilerplate-assumed slots with a resolution GROUP by
   // that resolution (one sentence can cover five slots — say it once), and
   // ones without any stated value collect into the single skipped line.
-  type Row = { key: string; names: string[]; slots: string[]; value: string; how: string; carried: boolean }
+  //
+  // `value` is what the row SHOWS; `seed` is what its editor opens with. They
+  // differ on purpose (review M4/M5): an option-backed answer shows the LABEL
+  // the person clicked but seeds and sends only the machine value (cards.go:
+  // the answer fold matches option values, and the label never rides back);
+  // an assumed row shows the assumed VALUE with the narration demoted to
+  // provenance context, and seeds that value alone — never the sentence.
+  type Row = {
+    key: string
+    names: string[]
+    slots: string[]
+    value: string
+    seed: string
+    why?: string
+    how: string
+    carried: boolean
+  }
   const rows: Row[] = []
   const byValue = new Map<string, Row>()
   const skipped: { name: string; slot: string }[] = []
@@ -1321,6 +1387,7 @@ export function UnderstoodPanel({
             names: [it.name],
             slots: [it.slot_id],
             value: resolved,
+            seed: '',
             how: it.how,
             carried: false,
           }
@@ -1332,11 +1399,27 @@ export function UnderstoodPanel({
       }
       continue
     }
+    const remainder = stated === '' ? '' : assumptionRemainder(it.name, stated)
+    const narration = it.how === 'assumption' && remainder !== '' ? skipNarration(remainder) : null
+    const label = it.label ?? ''
     rows.push({
       key: `${it.slot_id}:${it.how}`,
       names: [isCarriedOver(it) ? humanSlot(it.name) : it.name],
       slots: [it.slot_id],
-      value: stated === '' ? '—' : humanValue(assumptionRemainder(it.name, stated)),
+      value:
+        narration !== null
+          ? narration.value !== ''
+            ? narration.value
+            : (resolutions?.get(it.slot_id) ?? '—')
+          : label !== ''
+            ? label
+            : remainder === ''
+              ? '—'
+              : humanValue(remainder),
+      // The machine value stays the editor's seed even where the label shows:
+      // the label is display-only and must never ride back as the answer.
+      seed: narration !== null ? narration.value : (it.value ?? ''),
+      why: narration?.why,
       how: it.how,
       carried: isCarriedOver(it),
     })
@@ -1344,7 +1427,7 @@ export function UnderstoodPanel({
 
   const open = (r: Row) => {
     setEditing(r.slots[0])
-    setDraft(correct?.corrected[r.slots[0]] ?? (r.value === '—' ? '' : r.value))
+    setDraft(correct?.corrected[r.slots[0]] ?? r.seed)
   }
 
   return (
@@ -1370,6 +1453,13 @@ export function UnderstoodPanel({
                   <span className="understood-value">{r.value}</span>
                 )}
                 <span className="understood-how">{howWords(r.how)}</span>
+                {r.why !== undefined && pending === undefined && (
+                  // The narration is provenance, not the value (review M5):
+                  // it explains HOW the row got its value, on its own quiet
+                  // line, and never rides the editor. A corrected row drops
+                  // it — the row no longer goes with what was suggested.
+                  <span className="understood-assume-why">{r.why}</span>
+                )}
                 {r.carried && (
                   <span className="understood-carried-why">
                     kept from before the kind of work changed — fixed only by changing the kind again, never edited
@@ -1477,22 +1567,37 @@ function elapsedWords(s: number): string {
  * shows the true elapsed the moment frames resume.
  */
 function useElapsedSeconds(active: boolean): number {
-  const [seconds, setSeconds] = useState(0)
+  // The anchor lives in a ref and the RETURN is derived AT RENDER (review
+  // L1): the animation-frame loop only drives re-renders, so a throttled or
+  // paused frame source (a backgrounded phone tab, a virtualized display)
+  // can no longer freeze the readout at a stale count — any repaint, from
+  // any cause, shows the true elapsed. Coming back to the tab re-derives
+  // immediately (the Timestamp primitive's own return-visit pattern).
+  const startedRef = useRef(0)
+  if (active && startedRef.current === 0) startedRef.current = Date.now()
+  const [, setBeat] = useState(0)
   useEffect(() => {
     if (!active) return
-    const started = Date.now()
     let frame = 0
+    const derive = () => {
+      const s = Math.floor((Date.now() - startedRef.current) / 1000)
+      setBeat((prev) => (prev === s ? prev : s))
+    }
     const tick = () => {
-      const s = Math.floor((Date.now() - started) / 1000)
-      setSeconds((prev) => (prev === s ? prev : s))
+      derive()
       frame = window.requestAnimationFrame(tick)
     }
     frame = window.requestAnimationFrame(tick)
+    window.addEventListener('focus', derive)
+    document.addEventListener('visibilitychange', derive)
     return () => {
       window.cancelAnimationFrame(frame)
+      window.removeEventListener('focus', derive)
+      document.removeEventListener('visibilitychange', derive)
     }
   }, [active])
-  return seconds
+  if (!active) return 0
+  return Math.floor((Date.now() - startedRef.current) / 1000)
 }
 
 /**
@@ -1560,7 +1665,7 @@ function CardPanel({
    *  RA-1 what-changed comparison's other half (see FollowTask). */
   previousPlan?: IntakeCard
   onView: (v: IntakeTaskView) => void
-  onSent?: () => void
+  onSent?: (kind: SentKind) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState('')
@@ -1595,7 +1700,17 @@ function CardPanel({
     if (busy) return
     setBusy(true)
     setRefusal('')
-    onSent?.()
+    // What KIND of send this is (review L2) — read off the body, so the wait
+    // face that replaces this card can name the actual state.
+    onSent?.(
+      body.action === 'replan'
+        ? 'contest'
+        : body.action === 'reinterview'
+          ? 'reinterview'
+          : body.force_proceed === true
+            ? 'force-proceed'
+            : 'answers',
+    )
     api.answerAsk(askID, { answer: body, ...(pin !== '' ? { pin } : {}) }).then(
       (v) => {
         setBusy(false)
@@ -1705,11 +1820,11 @@ function CardPanel({
             kind === 'decision.emission') && <DecisionForm card={card} busy={busy} onAnswer={answer} />}
           {kind === 'decision.family' && <FamilyForm card={card} busy={busy} onAnswer={answer} />}
           {kind === 'approval' && (
-            <PlanCard view={view} card={card} busy={busy} previous={previousPlan} onAnswer={answer} />
+            <PlanCard view={view} card={card} busy={busy} previous={previousPlan} pinArmed={needPin} onAnswer={answer} />
           )}
           {kind === 'approval.delta' && <DeltaForm card={card} busy={busy} onAnswer={answer} />}
           {fallbackForm === 'approval' && (
-            <PlanCard view={view} card={card} busy={busy} previous={previousPlan} onAnswer={answer} />
+            <PlanCard view={view} card={card} busy={busy} previous={previousPlan} pinArmed={needPin} onAnswer={answer} />
           )}
           {fallbackForm === 'delta' && <DeltaForm card={card} busy={busy} onAnswer={answer} />}
           {fallbackForm === 'decision' && <DecisionForm card={card} busy={busy} onAnswer={answer} />}
@@ -2326,6 +2441,7 @@ function QuestionEditor({
       <input
         className="door-input q-own"
         type="text"
+        aria-label="Or say it in your own words"
         placeholder="or say it in your own words…"
         value={typed}
         onChange={(e) => {
@@ -3128,13 +3244,15 @@ function planChanges(prev: IntakeApproval, next: IntakeApproval): PlanChange[] {
   // Finish-line checks by their number.
   const pACs = new Map((prev.layer2?.acs ?? []).map((ac) => [ac.n, ac.plain]))
   const nACs = new Map((next.layer2?.acs ?? []).map((ac) => [ac.n, ac.plain]))
+  // "Finish-line check" is the plan card's own name for these (review L4:
+  // "Check AC-2" was the one machine token left on this block).
   for (const [n, plain] of nACs) {
     const was = pACs.get(n)
-    if (was === undefined) out.push({ what: `Check AC-${String(n)}`, kind: 'added', now: plain })
-    else if (was !== plain) out.push({ what: `Check AC-${String(n)}`, kind: 'changed', old: was, now: plain })
+    if (was === undefined) out.push({ what: `Finish-line check ${String(n)}`, kind: 'added', now: plain })
+    else if (was !== plain) out.push({ what: `Finish-line check ${String(n)}`, kind: 'changed', old: was, now: plain })
   }
   for (const [n, plain] of pACs)
-    if (!nACs.has(n)) out.push({ what: `Check AC-${String(n)}`, kind: 'removed', old: plain })
+    if (!nACs.has(n)) out.push({ what: `Finish-line check ${String(n)}`, kind: 'removed', old: plain })
 
   out.push(...diffList('What I will NOT do', p1.will_not_do ?? [], n1.will_not_do ?? []))
   out.push(...diffList('Risks', p1.risks ?? [], n1.risks ?? []))
@@ -3186,9 +3304,8 @@ function PlanChanged({ previous, current }: { previous: IntakeApproval; current:
         </ul>
       )}
       <p className="plan-changes-frame m-0">
-        Compared by this page between the card you sent changes from and this fresh draft — both the platform&apos;s
-        own cards, the comparison this page&apos;s. After you approve, any later change arrives as the
-        platform&apos;s own change card.
+        Both cards are the platform&apos;s own; the comparison between them is this page&apos;s own reading. After you
+        approve, any later change arrives as the platform&apos;s own change card.
       </p>
     </section>
   )
@@ -3240,6 +3357,7 @@ export function PlanCard({
   card,
   busy,
   previous,
+  pinArmed = false,
   onAnswer,
 }: {
   view: IntakeTaskView
@@ -3250,6 +3368,10 @@ export function PlanCard({
    *  half. Absent on a first draft and on a cold resume (only what this
    *  browser actually saw is ever compared). */
   previous?: IntakeCard
+  /** True while the caller's PIN step-up holds an act of THIS card (review
+   *  L11): the verb list collapses so the armed confirm below is the one
+   *  actionable thing, instead of two same-shaped verb sets both live. */
+  pinArmed?: boolean
   onAnswer: (b: IntakeAnswerBody) => void
 }) {
   const a = card.approval
@@ -3265,6 +3387,10 @@ export function PlanCard({
   if (a === undefined) return <p className="muted">This approval card carried no body — approve it from its inbox card.</p>
 
   const l1 = a.layer1
+  // slot_id → plain name, off THIS card's own understood items — the one map
+  // that lets a slot reference anywhere below read as the question the person
+  // saw (review M5). Reading the record, never inventing.
+  const slotNames = new Map((l1.understood?.items ?? []).map((it) => [it.slot_id, it.name]))
   const steps = a.layer2?.steps ?? []
   const acs = a.layer2?.acs ?? []
   const constraints = a.layer2?.constraints ?? []
@@ -3398,7 +3524,7 @@ export function PlanCard({
 
       <section className="plan-sec plan-assumptions" data-plan="assumptions">
         <h3 className="plan-h">Assumptions — read these first</h3>
-        <AssumptionList assumptions={l1.assumptions ?? []} contest={contest} />
+        <AssumptionList assumptions={l1.assumptions ?? []} contest={contest} names={slotNames} />
       </section>
 
       {(l1.risks ?? []).length > 0 && (
@@ -3460,22 +3586,27 @@ export function PlanCard({
               </ul>
             </>
           )}
-          {supplied.length > 0 && (
-            <>
-              <h4 className="plan-fold-h">What you supplied</h4>
-              <ul className="plan-list">
-                {supplied.map((f) => (
-                  <li key={`${f.rule_id}:${f.fact}`} data-supplied={f.rule_id}>
-                    {f.fact}
-                    <span className="assume-origin">
-                      {' '}
-                      · you supplied this{f.ts !== undefined && f.ts !== '' ? ' during planning' : ''} — it is on the
-                      record as yours
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </>
+          <h4 className="plan-fold-h">What you supplied</h4>
+          {supplied.length > 0 ? (
+            <ul className="plan-list">
+              {supplied.map((f) => (
+                <li key={`${f.rule_id}:${f.fact}`} data-supplied={f.rule_id}>
+                  {f.fact}
+                  <span className="assume-origin">
+                    {' '}
+                    · you supplied this{f.ts !== undefined && f.ts !== '' ? ' during planning' : ''} — it is on the
+                    record as yours
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            // The drawer's title promises this section, so its emptiness is
+            // said instead of the section silently missing (review L9).
+            <p className="muted m-0" data-supplied-empty>
+              You supplied nothing here — every fact this plan works from was answered on the cards or assumed out
+              loud, and each is listed above under its own label.
+            </p>
           )}
         </details>
       )}
@@ -3563,7 +3694,15 @@ export function PlanCard({
 
       <HelpNote help={l1.help} />
 
-      {!contesting && !cancelling ? (
+      {pinArmed ? (
+        // The step-up below is armed and holds the act (review L11): the verb
+        // list folds away so there are not two live verb sets on one page —
+        // the reviewer mis-read exactly that and navigated off mid-cancel.
+        <p className="plan-verbs-armed" data-plan="armed-note">
+          One act is armed just below and waits for your PIN — nothing has happened yet. Confirm it there to make
+          it real, or stand it down to come back to these choices.
+        </p>
+      ) : !contesting && !cancelling ? (
         <div className="plan-verbs" data-plan-verbs>
           {actions.includes('approve') && (
             <div className="plan-verb">
@@ -3659,7 +3798,10 @@ export function PlanCard({
                 onAnswer({ action: 'cancel', ...(why.trim() !== '' ? { note: why } : {}) })
               }}
             >
-              {busy ? 'Cancelling…' : 'Cancel the task'}
+              {/* Distinct from the verb that OPENED this panel (review L11):
+                  two controls both reading "Cancel the task" — one a door,
+                  one the act — invited a mis-fire the reviewer hit live. */}
+              {busy ? 'Cancelling…' : 'Yes — cancel it'}
             </Button>
             <Button
               variant="ghost"
@@ -3774,14 +3916,21 @@ export function PlanCard({
 function AssumptionList({
   assumptions,
   contest,
+  names,
 }: {
   assumptions: { text: string; origin?: string }[]
   contest?: ContestCtl | null
+  /** slot_id → the question's plain name, read off the card's own understood
+   *  items — so a slot reference renders as "Examples to follow", never as
+   *  the raw token "references" (review M5). */
+  names?: Map<string, string>
 }) {
   const ctl = contest ?? null
   if (assumptions.length === 0) return <p className="muted m-0">None. Everything it needed, you answered.</p>
   const covered = new Set(slotResolutions(assumptions).keys())
-  const shown: typeof assumptions = []
+  const plainName = (slot: string) => names?.get(slot) ?? humanSlot(slot)
+  type Shown = (typeof assumptions)[number] & { display?: { name: string; value: string; why: string } }
+  const shown: Shown[] = []
   const skipped: string[] = []
   for (const as of assumptions) {
     // In contest mode NOTHING collapses: the contest key is `assumption:<its
@@ -3795,20 +3944,43 @@ function AssumptionList({
       const nameFromText = /^(.+?)(?: — |: )/.exec(as.text)?.[1] ?? ''
       if (slotOrigin.length > 0 && isAssumedDefaultBoilerplate(nameFromText, as.text)) {
         if (slotOrigin.every((s) => covered.has(s))) continue // the substantive row above already states the default
-        skipped.push(nameFromText !== '' ? nameFromText : humanSlot(slotOrigin[0]))
+        skipped.push(nameFromText !== '' ? nameFromText : plainName(slotOrigin[0]))
         continue
       }
-      // W7 (RA-11 family): the planner's own `interview:<slot>` row and the
-      // platform's `slot:<slot>` template row describe the SAME skipped slot.
-      // The substantive planner row renders (via slotResolutions/covered);
-      // a template row it covers is the duplicate and drops. The inverse —
-      // a template row whose planner twin is missing — keeps rendering.
-      if (
-        as.origin !== undefined &&
-        as.origin.startsWith('slot:') &&
-        originSlots(as.origin).every((s) => covered.has(s))
-      )
-        continue
+      // W7 (RA-11 family): the planner's own row and the platform's
+      // `slot:<slot>` template row describe the SAME skipped slot — ONE
+      // assumption entry per slot (review M5). The planner's twin is matched
+      // two ways: by tag (`assumption:`/`interview:` origins, via `covered`)
+      // or — because the planner writes its origin as free prose (witnessed:
+      // "You skipped the question about examples to follow, so I am going
+      // with the suggested default.") — by that prose naming the slot's own
+      // plain name. Either match makes the template row the duplicate, and
+      // it drops; matched by neither, it renders (nothing hidden on a
+      // guess), but transformed: plain name, the assumed VALUE as the value,
+      // the narration as provenance — never the sentence standing as the row.
+      if (as.origin !== undefined && as.origin.startsWith('slot:')) {
+        const slots = originSlots(as.origin)
+        const twin = (slot: string) => {
+          // Whole-word match, not substring: a one-word plain name ("tone")
+          // inside unrelated prose must not count as the planner naming THIS
+          // slot — a dropped row on a false match is a hidden served fact.
+          const name = plainName(slot).toLowerCase()
+          const word = new RegExp(`(^|\\W)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\W|$)`)
+          return assumptions.some(
+            (other) =>
+              other !== as &&
+              other.origin !== undefined &&
+              !other.origin.startsWith('slot:') &&
+              word.test(other.origin.toLowerCase()),
+          )
+        }
+        if (slots.every((s) => covered.has(s) || twin(s))) continue
+        const narration = skipNarration(assumptionRemainder(nameFromText, as.text))
+        if (narration !== null && narration.value !== '' && slots.length === 1) {
+          shown.push({ ...as, display: { name: plainName(slots[0]), value: narration.value, why: narration.why } })
+          continue
+        }
+      }
     }
     shown.push(as)
   }
@@ -3817,9 +3989,21 @@ function AssumptionList({
       {shown.map((as) => (
         <li key={as.text}>
           <Contestable target={`assumption:${as.text}`} label={as.text} contest={ctl}>
-            {as.text}
-            {as.origin !== undefined && as.origin !== '' && (
-              <span className="assume-origin"> · {originWords(as.origin)}</span>
+            {as.display !== undefined ? (
+              <>
+                {as.display.name} — {as.display.value}
+                {/* display.why IS this row's origin story — appending
+                    originWords beside it would say "you skipped this"
+                    twice on one line. */}
+                <span className="assume-origin"> · {as.display.why}</span>
+              </>
+            ) : (
+              <>
+                {as.text}
+                {as.origin !== undefined && as.origin !== '' && (
+                  <span className="assume-origin"> · {originWords(as.origin, names)}</span>
+                )}
+              </>
             )}
           </Contestable>
         </li>
@@ -3837,18 +4021,22 @@ function AssumptionList({
 }
 
 /** The S06.6 assumption origins, in the reader's words — raw slot ids and
- *  origin tags never surface (blocker #15; jargon sweep #17). */
-export function originWords(origin: string): string {
-  if (origin.startsWith('slot:')) return `assumed because you skipped "${humanSlot(origin.slice(5))}"`
+ *  origin tags never surface (blocker #15; jargon sweep #17). With `names`
+ *  (slot_id → the question's plain name, from the card's own understood
+ *  items) a slot reference reads as the question the person saw — "Examples
+ *  to follow", never the token "references" (review M5). */
+export function originWords(origin: string, names?: Map<string, string>): string {
+  const said = (slot: string) => names?.get(slot) ?? humanSlot(slot)
+  if (origin.startsWith('slot:')) return `assumed because you skipped "${said(origin.slice(5))}"`
   if (origin === 'force_proceed') return 'assumed because you chose to proceed'
   if (origin === 'planner') return 'the planner assumed it'
   if (origin === 'band') return 'assumed — the ask was small enough to run without an interview'
   if (origin.startsWith('answered:'))
-    return `follows from what you answered (${originSlots(origin).map(humanSlot).join(', ')})`
+    return `follows from what you answered (${originSlots(origin).map(said).join(', ')})`
   if (origin.startsWith('assumption:'))
-    return `its stated call on ${originSlots(origin).map(humanSlot).join(', ')}`
+    return `its stated call on ${originSlots(origin).map(said).join(', ')}`
   if (origin.startsWith('interview:'))
-    return `its stated call on ${originSlots(origin).map(humanSlot).join(', ')}`
+    return `its stated call on ${originSlots(origin).map(said).join(', ')}`
   if (origin.startsWith('research:')) return 'from its own research notes'
   const marker = /^marker-(\d+) answered$/.exec(origin)
   if (marker !== null) return `settled by your answer to open question ${marker[1]}`
@@ -4011,7 +4199,23 @@ function Cancelled({ view }: { view: IntakeTaskView }) {
  *  and it SAYS what the machine is doing meanwhile, with its own clock
  *  (never-stall-silently; the first phrased card takes about a minute on the
  *  local models). */
-function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting: boolean; answered: boolean }) {
+function NoCardYet({
+  view,
+  waiting,
+  live = true,
+  answered,
+  lastSent,
+}: {
+  view: IntakeTaskView
+  waiting: boolean
+  /** Whether the caller's live read is actually caught up (useLive.stale
+   *  inverted). "listening" was claimed unconditionally before (review L1),
+   *  including through a wedge where a served card never painted. */
+  live?: boolean
+  answered: boolean
+  /** What this tab last sent — names the actual state (review L2). */
+  lastSent?: SentKind
+}) {
   const seconds = useElapsedSeconds(view.tier !== 'trivial')
   // The one served fact that changes this face's story: the task's own run
   // states. A CRASHED intake run is not a dead journey — the S02.5 recovery
@@ -4049,7 +4253,13 @@ function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting:
           : crashed
             ? 'The working session broke — it heals itself'
             : working
-              ? 'Answers recorded — it is working'
+              ? lastSent === 'contest'
+                ? 'Changes recorded — it is redrafting the plan'
+                : lastSent === 'force-proceed'
+                  ? 'Understood — it goes straight to the plan'
+                  : lastSent === 'reinterview'
+                    ? 'Plan sent back — it returns to its questions'
+                    : 'Answers recorded — it is working'
               : 'The task is born — it is reading your goal'}
       </h3>
       <p className="landed-sub">
@@ -4064,14 +4274,38 @@ function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting:
             too.
           </>
         ) : working ? (
-          // TODAY'S TRUTH (PH-1): no live "phrasing" step exists to claim —
-          // questions arrive in standard wording and admit it on the card.
-          <>
-            It took what you said and moved: it is choosing the next questions, or — once it knows
-            enough — drafting the full plan. A question round takes about a minute on the local models; the plan is
-            drafted in one piece and can take a few minutes. It appears RIGHT HERE the moment it exists, and lands in
-            your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
-          </>
+          // The wait names the actual state where this tab knows it (review
+          // L2): a contest is a redraft, a force-proceed is a straight draft
+          // on out-loud defaults — not "choosing the next questions".
+          lastSent === 'contest' ? (
+            <>
+              It took your changes and is redrafting the plan — one redraft with all of it, and the fresh card
+              opens with exactly what changed. A redraft takes a few minutes. It appears RIGHT HERE the moment it
+              exists, and lands in your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
+            </>
+          ) : lastSent === 'force-proceed' ? (
+            <>
+              You told it to stop asking: it is drafting the full plan now, settling what was left unanswered with
+              out-loud assumptions — every one will be listed on the plan card. The draft takes a few minutes. It
+              appears RIGHT HERE the moment it exists, and lands in your <Link to={hrefFor('inbox')}>Inbox</Link>{' '}
+              too. You can leave; nothing is lost.
+            </>
+          ) : lastSent === 'reinterview' ? (
+            <>
+              You sent the plan back to its questions: it is re-planning what to ask you. The next round takes
+              about a minute on the local models, appears RIGHT HERE the moment it exists, and lands in your{' '}
+              <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
+            </>
+          ) : (
+            // TODAY'S TRUTH (PH-1): no live "phrasing" step exists to claim —
+            // questions arrive in standard wording and admit it on the card.
+            <>
+              It took what you said and moved: it is choosing the next questions, or — once it knows
+              enough — drafting the full plan. A question round takes about a minute on the local models; the plan
+              is drafted in one piece and can take a few minutes. It appears RIGHT HERE the moment it exists, and
+              lands in your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
+            </>
+          )
         ) : (
           <>
             It is working out what it must ask you — sizing the goal and picking the questions that matter. The
@@ -4081,8 +4315,13 @@ function NoCardYet({ view, waiting, answered }: { view: IntakeTaskView; waiting:
         )}
       </p>
       {view.tier !== 'trivial' && (
+        // "listening" is claimed only while the live read is actually caught
+        // up (review L1: the old line said it unconditionally, including
+        // through a wedge where a served card never painted). The count is
+        // this page's own wait, derived at render — see useElapsedSeconds.
         <p className="composing-clock mono" data-birth-clock data-run-crashed={crashed ? 'true' : undefined}>
-          {crashed ? 'healing machine-side' : waiting ? 'listening' : 'catching up'} · {elapsedWords(seconds)}
+          {crashed ? 'healing machine-side' : waiting && live ? 'listening' : 'catching up'} ·{' '}
+          {elapsedWords(seconds)} on this page
         </p>
       )}
       <div className="door-acts">

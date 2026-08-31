@@ -326,7 +326,9 @@ describe('the plan card verbs (design §2.E/§2.F)', () => {
     expect(text).toContain('Catalog')
     expect(block.querySelector('[data-change-kind="removed"]')).not.toBeNull()
     // The framing: the comparison is the page's, the cards the platform's.
-    expect(text).toContain('the comparison this page')
+    // (Reworded in the GF9 drain — review L3 read the old sentence as
+    // garbled; the framing CLAIM is what this pin protects.)
+    expect(text).toContain('the comparison between them is this page')
     m.unmount()
   })
 
@@ -422,6 +424,123 @@ describe('the plan card verbs (design §2.E/§2.F)', () => {
     const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
     click(m.container.querySelector('[data-plan-act="reinterview"]'))
     expect(sent).toEqual([{ action: 'reinterview' }])
+    m.unmount()
+  })
+})
+
+describe('the GF9 drain pins (review M4/M5/L11)', () => {
+  const skipSentence =
+    'Examples to follow: you skipped this one, so I am going with what was suggested on the card: match the shop tone'
+
+  test('an option-backed answer SHOWS the label the person clicked; its editor seeds the machine value (M4)', () => {
+    const corrected: Record<string, string> = {}
+    const m = mount(
+      <UnderstoodPanel
+        heading="What it understood so far"
+        understood={{
+          items: [{ slot_id: 'tone_voice', name: 'Tone and voice', how: 'answered', value: 'warm', label: 'Warm and personal' }],
+        }}
+        correct={{
+          corrected,
+          onCorrect: (slot, v) => {
+            corrected[slot] = v
+          },
+          onRevert: () => undefined,
+        }}
+      />,
+    )
+    // The row reads as the option the person clicked, never the token.
+    expect(m.container.querySelector('.understood-value')?.textContent).toBe('Warm and personal')
+    // The editor seeds the MACHINE value — the label is display-only and
+    // must never ride back as the answer.
+    click(m.container.querySelector('[data-understood-fix="tone_voice"]'))
+    const input = m.container.querySelector('[data-understood-editor="tone_voice"] input') as HTMLInputElement
+    expect(input.value).toBe('warm')
+    m.unmount()
+  })
+
+  test('a skipped slot’s row shows the assumed VALUE; the narration is provenance and never seeds the editor (M5)', () => {
+    const corrected: Record<string, string> = {}
+    const m = mount(
+      <UnderstoodPanel
+        heading="What it understood so far"
+        understood={{
+          items: [{ slot_id: 'references', name: 'Examples to follow', how: 'assumption', assumption: skipSentence }],
+        }}
+        correct={{
+          corrected,
+          onCorrect: (slot, v) => {
+            corrected[slot] = v
+          },
+          onRevert: () => undefined,
+        }}
+      />,
+    )
+    expect(m.container.querySelector('.understood-value')?.textContent).toBe('match the shop tone')
+    expect(m.container.querySelector('.understood-assume-why')?.textContent).toContain('you skipped this one')
+    click(m.container.querySelector('[data-understood-fix="references"]'))
+    const input = m.container.querySelector('[data-understood-editor="references"] input') as HTMLInputElement
+    // One edit-slip from submitting boilerplate is exactly the M5 hazard:
+    // the seed is the value alone, never the sentence.
+    expect(input.value).toBe('match the shop tone')
+    m.unmount()
+  })
+
+  function planWith(assumptions: { text: string; origin?: string }[]): { view: IntakeTaskView; card: IntakeCard } {
+    const card: IntakeCard = {
+      kind: 'approval',
+      task_id: 't-1',
+      approval: {
+        layer1: {
+          restatement: 'A short note.',
+          understood: {
+            items: [{ slot_id: 'references', name: 'Examples to follow', how: 'assumption', assumption: skipSentence }],
+          },
+          assumptions,
+        },
+        actions: ['approve'],
+      },
+    }
+    return { view: { task_id: 't-1', title: 'A note', kanban_status: 'intake', owner: 'op' }, card }
+  }
+
+  test('the skipped question’s assumption ships ONCE: the platform’s template row drops when the planner’s prose twin names the slot (M5/W7)', () => {
+    const { view, card } = planWith([
+      {
+        text: 'The copy follows the shop tone of voice.',
+        origin: 'You skipped the question about examples to follow, so I am going with the suggested default.',
+      },
+      { text: skipSentence, origin: 'slot:references' },
+    ])
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const sec = m.container.querySelector('[data-plan="assumptions"]')!
+    expect(sec.textContent).toContain('The copy follows the shop tone of voice.')
+    // The template twin is the duplicate and drops — its sentence appears
+    // nowhere in the assumption list.
+    expect(sec.textContent).not.toContain('so I am going with what was suggested')
+    m.unmount()
+  })
+
+  test('a template row with NO planner twin still renders — transformed: plain name, the value, the narration as provenance, no raw token (M5)', () => {
+    const { view, card } = planWith([{ text: skipSentence, origin: 'slot:references' }])
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const sec = m.container.querySelector('[data-plan="assumptions"]')!
+    const text = sec.textContent ?? ''
+    expect(text).toContain('Examples to follow — match the shop tone')
+    expect(text).toContain('you skipped this one, so it went with what was suggested on the card')
+    // The raw slot token never surfaces; the question’s plain name stands.
+    expect(text).not.toContain('"references"')
+    expect(text).not.toContain('so I am going with what was suggested')
+    m.unmount()
+  })
+
+  test('while the PIN step-up is armed the verb list folds to one pointer (L11)', () => {
+    const { view, card } = planWith([])
+    const m = mount(<PlanCard view={view} card={card} busy={false} pinArmed onAnswer={onAnswer} />)
+    expect(m.container.querySelector('[data-plan-verbs]'), 'a second live verb set beside the armed panel').toBeNull()
+    const note = m.container.querySelector('[data-plan="armed-note"]')
+    expect(note?.textContent).toContain('armed just below')
+    expect(note?.textContent).toContain('nothing has happened yet')
     m.unmount()
   })
 })

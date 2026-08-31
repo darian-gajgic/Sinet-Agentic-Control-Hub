@@ -1695,6 +1695,13 @@ export type IntakeUnderstoodItem = {
   name: string
   how: string
   value?: string
+  /** What the requester actually CLICKED: the plain wording of the option
+   *  whose machine value this row carries (P3-GF13 R9; cards.go UnderstoodItem
+   *  .Label). Rides ALONGSIDE `value` and never replaces it — `value` stays
+   *  the round-trip key the answer fold matches, and the label is only ever
+   *  DISPLAYED. Empty is honest absence: an own-words answer (the value IS
+   *  the words) or a carried-over slot with no options here to match. */
+  label?: string
   assumption?: string
 }
 

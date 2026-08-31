@@ -128,6 +128,55 @@ test('inlineCss with a NAMED sheet replaces only the link that references it', (
   expect(out).toContain('q{r:s}')
 })
 
+// ── the pipe-table pass (review M9: the flagship deliverable WAS a table) ──
+
+const priceTable = [
+  '# Candles',
+  '',
+  '| Candle | Description | Price |',
+  '| --- | :---: | ---: |',
+  '| Winter Pine | fresh forest | 8 € |',
+  '| Amber Glow | warm evening | 11 € |',
+].join('\n')
+
+test('a pipe table renders as a real table, alignment from the delimiter row alone', () => {
+  const html = markdownToHtml(priceTable)
+  expect(html).toContain('<table>')
+  expect(html).toContain('<th>Candle</th>')
+  expect(html).toContain('<th style="text-align:center">Description</th>')
+  expect(html).toContain('<th style="text-align:right">Price</th>')
+  expect(html).toContain('<td>Winter Pine</td>')
+  expect(html).toContain('<td style="text-align:right">11 €</td>')
+  // No raw pipe syntax survives into the rendered document…
+  expect(html).not.toContain('| Candle |')
+  // …and the wide-table wrapper scrolls inside itself rather than widening a phone.
+  expect(html).toContain('<div class="tablewrap">')
+})
+
+test('table cells stay escape-first and still carry inline formatting', () => {
+  const html = markdownToHtml('| a | b |\n| --- | --- |\n| <script>x</script> | **bold** [ok](https://e.com) |')
+  expect(html).toContain('&lt;script&gt;')
+  expect(html).not.toContain('<script>')
+  expect(html).toContain('<strong>bold</strong>')
+  expect(html).toContain('href="https://e.com"')
+})
+
+test('what is not a table stays the escaped text it is', () => {
+  // A delimiter row whose cell count disagrees with the header is NOT a
+  // table — the strict recognition fails to plain prose, never to guesswork.
+  const html = markdownToHtml('| a | b |\n| --- |\n| c | d |')
+  expect(html).not.toContain('<table>')
+  expect(html).toContain('| a | b |')
+  // A lone pipe in prose is prose.
+  expect(markdownToHtml('either | or')).not.toContain('<table>')
+})
+
+test('ragged body rows keep every served cell: short rows pad, long rows keep their extras', () => {
+  const html = markdownToHtml('| a | b |\n| --- | --- |\n| only |\n| x | y | extra |')
+  expect(html).toContain('<td>only</td><td></td>')
+  expect(html).toContain('<td>extra</td>')
+})
+
 test('escapeHtml makes the four live characters inert', () => {
   expect(escapeHtml('<a href="x">&</a>')).toBe('&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;')
 })
