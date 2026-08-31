@@ -283,7 +283,7 @@ func stakesBlock(st *State) *Stakes {
 // canLowerTier reports whether Pipeline.LowerTier would accept a lowering
 // right now. It reads the same three walls the verb enforces — the floor, the
 // rule-decided band, and the pre-approval phase — so the card offers exactly
-// what the answer path accepts (§43: one rule, two readers).
+// what the answer path accepts (§71: one rule, two readers).
 func canLowerTier(st *State) bool {
 	if st.Phase == PhaseApproved || st.Phase == PhaseCancelled {
 		return false

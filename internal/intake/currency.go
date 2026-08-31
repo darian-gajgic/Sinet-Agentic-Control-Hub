@@ -39,8 +39,8 @@ const moneyRuleID = "P47-1"
 // — a currency answered, assumed, or simply written in the request stays
 // settled, permanently (CONVENTIONS §60/GF12: settled facts stay settled).
 var currencyTokens = regexp.MustCompile(`(?i)[$€£¥₹]|\b(?:` +
-	`eur|usd|gbp|chf|jpy|cad|aud|sek|nok|dkk|pln|` +
-	`euros?|dollars?|pounds?|sterling|francs?|yen|rupees?|kronor|krona|kroner|zloty` +
+	`eur|usd|gbp|chf|jpy|cad|aud|sek|nok|dkk|pln|cny|rmb|` +
+	`euros?|dollars?|pounds?|sterling|francs?|yen|yuan|rupees?|kronor|krona|kroner|krone|zloty` +
 	`)\b`)
 
 // bareNumber is a standalone quantity: a digit run that no currency token is

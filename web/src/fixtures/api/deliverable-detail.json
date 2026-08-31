@@ -75,7 +75,7 @@
       "method": "POST",
       "route": "/api/deliverables/d-notes/preview/compare",
       "available": true,
-      "reason": "a preview is built from a saved version of the work, and every kind of work gets a straight answer here — \"there is no preview for this\" is an answer, not a fault. With nothing accepted yet to compare against, this shows the one version there is rather than a pair"
+      "reason": "a preview is built from a saved version of the work, and every kind of work gets a straight answer here — \"there is no preview for this\" is an answer, not a fault. The version you accepted is shown beside this one, so you can see what changed"
     }
   ],
   "cursor": 89

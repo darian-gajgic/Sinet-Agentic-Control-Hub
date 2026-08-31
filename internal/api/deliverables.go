@@ -365,11 +365,25 @@ func (s *Server) doorsFor(ctx context.Context, d review.Deliverable, revs []revi
 	doors = append(doors,
 		Door{Verb: doorPreview, Method: http.MethodPost, Route: base + "/preview", Available: previewOK, Reason: previewWhy},
 		Door{Verb: doorPreviewCompare, Method: http.MethodPost, Route: base + "/preview/compare", Available: previewOK,
-			// S13.8/S1.9: with nothing accepted to compare against, the pair
-			// answers with the single instance it does have.
-			Reason: previewWhy + ". With nothing accepted yet to compare against, this shows the one version there is rather than a pair"},
+			Reason: previewWhy + ". " + compareWhy(d)},
 	)
 	return doors
+}
+
+// compareWhy says what the compare door will actually show, which depends on
+// whether this deliverable HAS an accepted version to sit beside.
+//
+// The condition is the mechanism's own: `LaunchComparison` pairs the candidate
+// against `AcceptedRevision`, which answers only for an accepted deliverable
+// and otherwise returns the honest single-instance state. Keying the sentence
+// on the same state is what stops the door telling a person "nothing accepted
+// yet" about work they accepted an hour ago (GF9 review L10) — a door may
+// summarize its authority, never contradict it.
+func compareWhy(d review.Deliverable) string {
+	if d.State == review.StateAccepted {
+		return "The version you accepted is shown beside this one, so you can see what changed"
+	}
+	return "With nothing accepted yet to compare against, this shows the one version there is rather than a pair"
 }
 
 func followUpReason(ok bool) string {

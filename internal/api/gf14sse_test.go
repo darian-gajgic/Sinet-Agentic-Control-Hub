@@ -6,9 +6,12 @@ package api_test
 // The wedge this pins down (GF9 review M1): a requester sat on a page that said
 // "listening" for two minutes while the card they were waiting for had already
 // been committed, then reloaded — and the reload killed the drive (R1). The
-// gate-open commit writes exactly two event rows in ONE transaction (the
-// pipeline's `intake.state` and the run's `run.state_changed` park), so this
-// test drives that commit shape against a live subscriber and reads the wire.
+// gate-open commit writes its rows in ONE transaction (the pipeline's
+// `intake.state` and the run's `run.state_changed` park), so this test drives
+// the REAL pipeline against a live subscriber and reads the wire. Driving it
+// rather than crafting the appends is deliberate (drain r1 F1): the rows are
+// read back from the log, so a change to `issueCard`'s commit shape fails this
+// test loudly instead of leaving it passing about a shape nothing writes.
 //
 // Green is the result it is meant to have: the backend delivered, every frame
 // carrying `id:` = its event_seq, and M1's residue is the client's. The frames'
@@ -17,38 +20,77 @@ package api_test
 import (
 	"bufio"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/auth"
-	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/eventlog"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
-// commitGateOpen writes the two rows an intake gate-open commits, in one
-// transaction, exactly as internal/intake's issueCard does.
-func commitGateOpen(t *testing.T, b *backend, owner, runID string) (stateSeq, parkSeq int64) {
+// gateOpen drives a REAL intake gate-open on this world and returns the rows it
+// actually committed.
+//
+// The pipeline is the one from internal/intake — no planner and no classifier
+// are wired, so the drive reaches the pre-round family question and parks
+// there, which is a gate-open with no paid seam in it. Reading the rows back
+// from the log rather than crafting them is the point (drain r1 F1): a hand-
+// written pair of appends would keep passing after `issueCard`'s commit shape
+// moved, and would then be proving something about the test.
+func gateOpen(t *testing.T, b *backend, owner, taskID string) (runID string, stateSeq, parkSeq int64) {
 	t.Helper()
 	ctx := context.Background()
-	if err := b.db.WriteTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		stateSeq, err = b.log.AppendTx(ctx, tx, eventlog.Append{
-			RunID: runID, Generation: 0, UserID: owner, Type: "intake.state", SchemaVersion: 1,
-			Payload: json.RawMessage(`{"phase":"interview","open_ask_kind":"interview"}`),
-		})
-		if err != nil {
-			return err
-		}
-		parkSeq, err = b.log.AppendTx(ctx, tx, eventlog.Append{
-			RunID: runID, Generation: 0, UserID: owner, Type: "run.state_changed", SchemaVersion: 1,
-			Payload: json.RawMessage(`{"from":"running","to":"parked"}`),
-		})
-		return err
-	}); err != nil {
-		t.Fatalf("gate-open commit: %v", err)
+	runs := run.NewStore(b.db, b.log)
+	pipe := &intake.Pipeline{
+		DB: b.db, Log: b.log, Runs: runs, Ledger: ledger.NewStore(b.db, b.log),
+		Settings: b.reg, ArtifactRoot: filepath.Join(t.TempDir(), "artifacts"),
 	}
-	return stateSeq, parkSeq
+	st, err := pipe.Start(ctx, intake.Request{TaskID: taskID, UserID: owner,
+		Title: "GF14 wire proof", Text: "A one-page price list for my candle shop."})
+	if err != nil {
+		t.Fatalf("intake Start: %v", err)
+	}
+	// Admission is the scheduler's; the FSM edges are walked directly here, as
+	// every dev-mode intake harness does.
+	for _, s := range []run.State{run.StateQueued, run.StateClaimed, run.StateRunning} {
+		if _, err := runs.Transition(ctx, st.RunID, s, run.TransitionOptions{
+			Reason: "test admission", Actor: run.ActorPlatform}); err != nil {
+			t.Fatalf("admit %s: %v", s, err)
+		}
+	}
+	if st, err = pipe.Advance(ctx, taskID); err != nil {
+		t.Fatalf("intake Advance: %v", err)
+	}
+	if st.OpenAskID == "" {
+		t.Fatalf("the drive opened no gate (card %q) — this test needs the gate-open commit", st.OpenAskKind)
+	}
+
+	// The two rows the gate-open committed, read back from the log: the last
+	// state event of the run, and the park that put it behind the gate.
+	seqOf := func(typ, jsonPath, want string) int64 {
+		t.Helper()
+		var seq int64
+		q := `SELECT event_seq FROM run_events WHERE run_id = ? AND type = ?`
+		args := []any{st.RunID, typ}
+		if jsonPath != "" {
+			q += ` AND json_extract(payload, ?) = ?`
+			args = append(args, jsonPath, want)
+		}
+		q += ` ORDER BY event_seq DESC LIMIT 1`
+		if err := b.db.QueryRowContext(ctx, q, args...).Scan(&seq); err != nil {
+			t.Fatalf("read the %s row the gate-open committed: %v", typ, err)
+		}
+		return seq
+	}
+	stateSeq = seqOf(intake.EventState, "", "")
+	parkSeq = seqOf(run.EventState, "$.to", string(run.StateParked))
+	if stateSeq == 0 || parkSeq == 0 {
+		t.Fatal("the gate-open committed neither of the rows this test reads")
+	}
+	return st.RunID, stateSeq, parkSeq
 }
 
 // awaitFrames reads until every wanted event_seq has arrived, failing on the
@@ -86,14 +128,12 @@ func awaitFrames(t *testing.T, r *bufio.Reader, want []int64) map[int64][]string
 func TestGF14GateOpenReachesAConnectedSubscriber(t *testing.T) {
 	b := newBackend(t)
 	seedUser(t, b, "op", auth.RoleOperator)
-	seedTask(t, b, "t-gf14-sse", "op", "GF14 wire proof", "doing")
-	seedRun(t, b, "t-gf14-sse.intake", "op", "t-gf14-sse", "running", "anthropic")
 	_, ts := newTestServer(t, serverOpts{b: b, auth: fixedIdentity{id: "op"}})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events?after_seq=0", nil)
 	defer done()
 
-	stateSeq, parkSeq := commitGateOpen(t, b, "op", "t-gf14-sse.intake")
+	_, stateSeq, parkSeq := gateOpen(t, b, "op", "t-gf14-sse")
 	tags := awaitFrames(t, r, []int64{stateSeq, parkSeq})
 
 	for seq, want := range map[int64]string{stateSeq: "run", parkSeq: "board"} {
@@ -111,8 +151,6 @@ func TestGF14GateOpenReachesAConnectedSubscriber(t *testing.T) {
 func TestGF14GateOpenReachesTheSubscribedSurface(t *testing.T) {
 	b := newBackend(t)
 	seedUser(t, b, "op", auth.RoleOperator)
-	seedTask(t, b, "t-gf14-sse2", "op", "GF14 wire proof", "doing")
-	seedRun(t, b, "t-gf14-sse2.intake", "op", "t-gf14-sse2", "running", "anthropic")
 	_, ts := newTestServer(t, serverOpts{b: b, auth: fixedIdentity{id: "op"}})
 
 	r, done := stream(t, testCtx(t), ts.URL+"/events?topics=board,inbox", nil)
@@ -120,7 +158,7 @@ func TestGF14GateOpenReachesTheSubscribedSurface(t *testing.T) {
 	readSnapshot(t, r) // board
 	readSnapshot(t, r) // inbox
 
-	stateSeq, parkSeq := commitGateOpen(t, b, "op", "t-gf14-sse2.intake")
+	_, stateSeq, parkSeq := gateOpen(t, b, "op", "t-gf14-sse2")
 	tags := awaitFrames(t, r, []int64{stateSeq, parkSeq})
 
 	for _, seq := range []int64{stateSeq, parkSeq} {

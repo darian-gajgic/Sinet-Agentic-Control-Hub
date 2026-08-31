@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -122,6 +123,13 @@ func TestWatchlistRevalidateHookIsNilWithoutARunbook(t *testing.T) {
 // watchlist's liveness probe, wired into the watchdog's previously-nil organ
 // seam, turns an absent changedetection.io into a
 // `watchdog.organ_absence:watchlist` degraded digest flag.
+//
+// AMENDED 2026-08-31 (P3-GF14 drain r1 F9, GF9 review L8): the WHY still has to
+// be there, but not on the CARD. The flag is read on the household inbox beside
+// a person's own work, so it speaks plain words; the operator-actionable half —
+// the probe's note, which names the environment variable — goes to the ops log,
+// where the person who can act on it is already looking. This test now pins
+// BOTH halves rather than the one place they used to share.
 func TestAbsentOrganRaisesTheOrganAbsenceFlag(t *testing.T) {
 	ctx := context.Background()
 	db, log, reg := watchlistTestDeps(t)
@@ -131,9 +139,10 @@ func TestAbsentOrganRaisesTheOrganAbsenceFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var opsLog bytes.Buffer
 	wd := watchdog.New(watchdog.Deps{
 		DB: db, Log: log, Runs: run.NewStore(db, log), Settings: reg,
-		Organs: watchlistOrgans(wl), Logger: testLogger(),
+		Organs: watchlistOrgans(wl), Logger: slog.New(slog.NewTextHandler(&opsLog, nil)),
 	})
 	if err := wd.Sweep(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -166,12 +175,18 @@ func TestAbsentOrganRaisesTheOrganAbsenceFlag(t *testing.T) {
 		if p.Severity != watchdog.SeverityDailyDigest {
 			t.Errorf("an absent organ is DEGRADED, not an emergency: severity = %q, want %q", p.Severity, watchdog.SeverityDailyDigest)
 		}
-		if !strings.Contains(p.Detail, watchlist.CDIOURLEnv) {
-			t.Errorf("the flag does not say WHY the organ is absent: %q", p.Detail)
+		if strings.Contains(p.Detail, watchlist.CDIOURLEnv) {
+			t.Errorf("the household card carries an ops detail that belongs in the log: %q", p.Detail)
+		}
+		if !strings.Contains(p.Detail, "is not running") {
+			t.Errorf("the card must still say what happened, in plain words: %q", p.Detail)
 		}
 	}
 	if !found {
 		t.Fatal("no watchdog.organ_absence:watchlist flag — the organ seam was nil until this packet and must now fire")
+	}
+	if !strings.Contains(opsLog.String(), watchlist.CDIOURLEnv) {
+		t.Errorf("the WHY reached neither the card nor the ops log — an operator cannot act on this: %q", opsLog.String())
 	}
 }
 

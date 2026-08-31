@@ -2066,7 +2066,7 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 	}
 	// The S06.9 action vocabulary is unchanged. The lowering door is OFFERED on
 	// the stakes block instead — `Stakes.CanLower`, computed from the very rule
-	// Pipeline.LowerTier enforces (§43: one rule, two readers) — because it is
+	// Pipeline.LowerTier enforces (§71: one rule, two readers) — because it is
 	// a statement about the stakes and belongs where the stakes are served,
 	// beside the tier it would move and the reason it stands where it does.
 	actions := []string{ActionApprove, ActionRePlan, ActionReInterview, ActionCancel}

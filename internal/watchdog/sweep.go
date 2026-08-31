@@ -244,14 +244,36 @@ func (w *Watchdog) checkOrgans(ctx context.Context) error {
 		if s.Up {
 			continue
 		}
+		// The CARD is read on the household inbox beside a person's own work,
+		// so it speaks plain words (P3-GF13; no keep row covers this string).
+		// The operator-actionable half — which organ, and the probe's own note,
+		// which names environment variables and endpoints — goes to the ops log,
+		// where the person who can act on it is already looking.
+		w.logger.Warn("watchdog: adopted organ is down (degraded mode)",
+			"organ", s.Organ, "note", s.Note)
 		if err := w.flagPlatformClass(ctx, trigger{
-			Rule:   RuleOrganAbsence,
-			Detail: fmt.Sprintf("adopted organ %q is down (degraded mode): %s", s.Organ, s.Note),
+			Rule: RuleOrganAbsence,
+			Detail: plainOrganName(s.Organ) + " is not running just now, so the platform is carrying on without it — " +
+				"nothing else stops, and anything it would have done waits until it is back. " +
+				"What it needs in order to start is in the platform log.",
 		}, RuleOrganAbsence+":"+s.Organ); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// plainOrganName names an adopted organ the way the person reading the card
+// would name it. The organ ID stays the machine value — it keys the dedup class
+// and the log line — and an organ with no plain name yet falls through as
+// itself: a token beats a blank (the plainCardKind precedent).
+func plainOrganName(organ string) string {
+	switch organ {
+	case "watchlist":
+		return "The helper that watches web pages for changes"
+	default:
+		return "One of the platform's background helpers (" + organ + ")"
+	}
 }
 
 // flagPlatformClass emits a platform-scope run-less flag with an explicit dedup
