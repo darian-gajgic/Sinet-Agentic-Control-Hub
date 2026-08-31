@@ -367,6 +367,13 @@ func (p *Pipeline) applyFamilyAnswer(ctx context.Context, st *State, ans Answer)
 		"family question (S06.5; 1.7 ask-don't-assume — nothing else resolved it)", 0); err != nil {
 		return err
 	}
+	// The answer may also have removed the reason the stakes are standing at
+	// the fail-closed high: the classifier abstained because it could not read
+	// the request, and the requester has just supplied the fact it was missing
+	// (P3-GF14 R4.1). One shot — this card is answered at most once per task.
+	if err := p.settleAbstainedTier(ctx, st); err != nil {
+		return err
+	}
 	return p.recordTaxonomyFallback(ctx, st, fallback)
 }
 
@@ -548,6 +555,8 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 	}
 
 	switch ans.Action {
+	case ActionLowerStakes:
+		return p.lowerStakesAtCard(ctx, st, card, ans)
 	case ActionCompose:
 		// The no-fit compose verb (Spec S08.6 compose-when-earned): valid
 		// only while the card offers it. The card stays OPEN — the
@@ -630,6 +639,34 @@ func (p *Pipeline) applyApprovalAnswer(ctx context.Context, st *State, card *Car
 		return st, nil
 	}
 	return p.advanceLoaded(ctx, st)
+}
+
+// lowerStakesAtCard applies S06.4's one downward move from the approval card
+// (P3-GF14 R4.5). The decision, its walls and its ledger record are
+// Pipeline.LowerTier's — this leg adds only what riding a CARD means: the card
+// stays open (the approval decision is still owed) and its snapshot re-serves
+// at the settled tier, so every later answer on this ask — the step-up demand
+// included — reads the tier the task actually has rather than the one it had
+// when the card was first written.
+func (p *Pipeline) lowerStakesAtCard(ctx context.Context, st *State, card *Card, ans Answer) (*State, error) {
+	if ans.Tier == "" {
+		return nil, fmt.Errorf("%w: lowering the stakes needs the tier to move to", ErrBadAnswer)
+	}
+	lowered, err := p.LowerTier(ctx, st.Owner, st.TaskID, ans.Tier)
+	if err != nil {
+		return nil, err
+	}
+	floor, err := p.clearanceFloor(lowered.Tier)
+	if err != nil {
+		return nil, err
+	}
+	card.Tier, card.ClearanceFloor, card.Stakes = lowered.Tier, floor, stakesBlock(lowered)
+	if err := p.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		return p.updateAskSnapshotTx(ctx, tx, lowered.OpenAskID, card)
+	}); err != nil {
+		return nil, err
+	}
+	return lowered, nil
 }
 
 // replanContest folds the S06.9 structured Re-plan entry into the contested
@@ -1041,7 +1078,9 @@ func (p *Pipeline) LowerTier(ctx context.Context, actor, taskID string, to Tier)
 		// The band is rule-decided, never re-entered by hand (S06.4).
 		return nil, fmt.Errorf("%w: the zero-interaction band is rule-decided (S06.4)", ErrBadAnswer)
 	}
-	st.Tier = to
+	// The person is now the standing tier's author, which is what the card says
+	// about it from here on (P3-GF14 R4.4).
+	st.Tier, st.TierSource = to, TierSourceRequester
 	if _, err := p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorHuman, st.Owner, string(st.Phase),
 		"requester lowered the stakes tier to "+string(to), "explicit requester action (S06.4)", 0); err != nil {
 		return nil, err

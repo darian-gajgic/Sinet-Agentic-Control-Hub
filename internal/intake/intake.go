@@ -48,6 +48,27 @@ var tierRank = map[Tier]int{TierTrivial: 0, TierLow: 1, TierStandard: 2, TierHig
 // ValidTier reports whether t is one of the four S06.4 tiers.
 func ValidTier(t Tier) bool { _, ok := tierRank[t]; return ok }
 
+// TierSource records WHAT set a task's standing stakes tier, so one card can
+// never serve two truths about it (P3-GF14 R4.4). It is the FamilySource
+// pattern: the tier alone cannot say whether it is a judgement or a posture
+// held while the platform waits to learn more, and only the fail-closed
+// posture may settle when its cause is removed.
+const (
+	// TierSourceFailClosed is the S06.2 posture held when the platform could
+	// not read the request: unknown is handled as high until told otherwise.
+	TierSourceFailClosed = "fail-closed"
+	// TierSourceClassifier is the platform's own reading of the task — the
+	// Stage-0 classification, and the Stage-3 TIER-UP that raises over it
+	// (S06.2, S06.8). Both are the platform judging; neither is the person.
+	TierSourceClassifier = "classifier"
+	// TierSourceRequester is the S06.4 explicit requester action: the one
+	// downward move, taken by the person on the card.
+	TierSourceRequester = "requester"
+	// TierSourceFloor is a deterministic floor holding the tier where it is —
+	// it overrides everything upward and refuses every lowering below it.
+	TierSourceFloor = "floor"
+)
+
 // maxTier returns the higher-stakes of a and b (monotone-upward merges).
 func maxTier(a, b Tier) Tier {
 	if tierRank[b] > tierRank[a] {
@@ -261,6 +282,14 @@ type TriageInput struct {
 
 	Request  Request
 	Registry *RegistrySlice
+	// Family is the SETTLED task family when one is already known — the
+	// requester's own answer to the family question (P3-GF14 R4.1). It is empty
+	// on the first classification, where family is one of the things being
+	// asked. It exists so the one re-classification the pipeline runs — after a
+	// classifier abstain, once the requester has supplied the fact whose absence
+	// caused it — asks about the task the platform now knows about. The seam
+	// carries it into the duty's own words; the duty schema is unchanged.
+	Family Family
 }
 
 // Classifier is the S06.10 "local duty aliases" seam for family, stakes,

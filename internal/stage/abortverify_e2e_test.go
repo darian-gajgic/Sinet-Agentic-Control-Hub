@@ -16,6 +16,7 @@ package stage_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,19 +46,38 @@ import (
 // it cancels the REQUEST's own context and fails, which is the browser-abort
 // shape one layer down from the intake beats.
 type abortRevise struct {
-	mu           sync.Mutex
-	armed        bool
-	cancel       context.CancelFunc
-	artifactRoot string
+	mu     sync.Mutex
+	armed  bool
+	cancel context.CancelFunc
+	// surviveCancel makes the armed call cancel the caller and then rework
+	// NORMALLY — the P3-GF14 R1 staging, where the request dies mid-drain and
+	// the drain must still run to its own end and land its verdict. Zero value
+	// keeps this file's original behavior (cancel, then fail).
+	surviveCancel bool
+	artifactRoot  string
 }
 
 func (a *abortRevise) revise(ctx context.Context, pkg verify.RetryPackage) (verify.Deliverable, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.armed {
+	if a.armed && !a.surviveCancel {
 		a.armed = false
 		a.cancel()
-		return verify.Deliverable{}, fmt.Errorf("rework session: %w", ctx.Err())
+		// AMENDED 2026-08-31 (P3-GF14 R1, the §56 second-bullet reversal): the
+		// resumed drain no longer rides the caller's context, so the seam sees
+		// a LIVE one and cannot report the caller's cancellation as its own
+		// cause. The staging is unchanged — the request really does die
+		// mid-rework — and so is what this test pins: a resumed drain that
+		// fails for a real cause leaves a corpse with the answered card closed
+		// behind it.
+		if err := ctx.Err(); err != nil {
+			return verify.Deliverable{}, fmt.Errorf("rework session: %w", err)
+		}
+		return verify.Deliverable{}, errors.New("rework session died mid-drive")
+	}
+	if a.armed {
+		a.armed = false
+		a.cancel() // the page went away; the paid rework carries on
 	}
 	d := pkg.Deliverable
 	d.PrevContent = d.Content
@@ -166,8 +186,8 @@ func TestVerifyAbortParity(t *testing.T) {
 	if ctx.Err() == nil {
 		t.Fatal("the request context is still live — this test is not pinning the abort shape")
 	}
-	if !strings.Contains(err.Error(), "context canceled") {
-		t.Fatalf("resumed-verify error = %v, want the aborted rework named", err)
+	if !strings.Contains(err.Error(), "rework session died mid-drive") {
+		t.Fatalf("resumed-verify error = %v, want the failed rework named", err)
 	}
 
 	if got := h.runState(t, verifyRunID); got != string(run.StateCrashed) {

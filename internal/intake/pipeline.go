@@ -215,6 +215,7 @@ func (p *Pipeline) Start(ctx context.Context, req Request) (*State, error) {
 		Req:        req,
 		NeedsDraft: true,
 		Tier:       TierHigh, // fail-closed baseline until classified (S06.2)
+		TierSource: TierSourceFailClosed,
 		Family:     FamilyGeneric,
 		// Nothing has resolved the family yet. This baseline is what the family
 		// question exists to replace on a non-band task (P3-RW-11 R5): "generic,
@@ -359,6 +360,7 @@ func (p *Pipeline) classifyStep(ctx context.Context, st *State) error {
 	if p.Classifier != nil {
 		prop, err := p.Classifier.Classify(ctx, TriageInput{
 			RunID: st.RunID, Request: st.Req, Registry: st.Registry,
+			Family: settledFamily(st),
 		})
 		if err == nil {
 			classified = true
@@ -378,7 +380,7 @@ func (p *Pipeline) classifyStep(ctx context.Context, st *State) error {
 				st.Family, st.FamilySource = prop.Family, FamilySourceClassifier
 			}
 			if ValidTier(prop.Tier) {
-				st.Tier = prop.Tier
+				st.Tier, st.TierSource = prop.Tier, TierSourceClassifier
 			}
 			st.Guess = prop.Est
 			st.addHits(prop.DataHits) // add-only
@@ -399,8 +401,11 @@ func (p *Pipeline) classifyStep(ctx context.Context, st *State) error {
 	}
 	if !classified {
 		// nil seam, seam error, abstain, invalid label: high stakes, family left
-		// unresolved for the S06.5 question (S06.2).
-		st.Tier = TierHigh
+		// unresolved for the S06.5 question (S06.2). The POSTURE is recorded as
+		// such: high because the platform could not read the request, not
+		// because it judged the task risky — which is what lets it settle once
+		// the requester supplies the fact whose absence caused the abstain.
+		st.Tier, st.TierSource = TierHigh, TierSourceFailClosed
 	}
 
 	// The family may have moved (generic → software), so the question set is
@@ -437,6 +442,63 @@ func (p *Pipeline) classifyStep(ctx context.Context, st *State) error {
 		return err
 	}
 	return p.recordTaxonomyFallback(ctx, st, fallback)
+}
+
+// settledFamily is the family the platform can stand behind when it asks the
+// classification duty to read a task: a registered project's standing
+// declaration, or the requester's own answer. A classifier's own earlier guess
+// is never fed back to it, and an unresolved family is precisely what the duty
+// is being asked about (precedence registry > classifier > requester-asked,
+// P3-RW-11 OQ3).
+func settledFamily(st *State) Family {
+	switch st.FamilySource {
+	case FamilySourceRegistry, FamilySourceRequester:
+		return st.Family
+	default:
+		return ""
+	}
+}
+
+// settleAbstainedTier completes Stage 0 when the requester's family answer
+// removes the cause of a classifier abstain (Spec S06.2; P3-GF14 R4.1).
+//
+// The fail-closed HIGH is a POSTURE held while classification is unavailable —
+// S06.2's own word is that the task is TREATED as high-stakes — not a
+// classification. Completing the classification once its cause is gone is
+// therefore Stage 0 finishing, not one of S06.4's automatic adjustments (which
+// govern a tier that WAS classified): the proposal ASSIGNS the tier exactly as
+// the first classification does. Floors still clamp upward regardless, the
+// zero-interaction band is never re-entered, and one shot is structural — the
+// family card is issued only while nothing has resolved the family, so it is
+// answered at most once per task.
+//
+// A classifier that still abstains leaves the HIGH standing, and the card says
+// why it is high (the stakes block's fail-closed origin).
+func (p *Pipeline) settleAbstainedTier(ctx context.Context, st *State) error {
+	if st.TierSource != TierSourceFailClosed || p.Classifier == nil {
+		return nil
+	}
+	prop, err := p.Classifier.Classify(ctx, TriageInput{
+		RunID: st.RunID, Request: st.Req, Registry: st.Registry, Family: st.Family,
+	})
+	if err != nil || !ValidTier(prop.Tier) {
+		return nil
+	}
+	st.Tier, st.TierSource = prop.Tier, TierSourceClassifier
+	st.Guess = prop.Est
+	st.addHits(prop.DataHits)              // add-only (S06.2/S06.3)
+	st.addFloors(validFloors(prop.Floors)) // overrides upward, and then owns the tier
+	if prop.Tier == TierTrivial {
+		// Trivial IS the band, and the band is decided once at the first pass
+		// and never re-entered (S06.4): a trivial proposal arriving here lands
+		// at low, the same landing pipeline.go's first classification gives it.
+		st.Tier = maxTier(TierLow, st.FloorTier)
+	}
+	_, err = p.Ledger.RecordDecision(ctx, st.RunID, ledger.AuthorPlatform, run.ActorPlatform, "triage",
+		"how careful to be with this task settled as "+plainTier(st.Tier)+
+			" once you said what kind of task it is — until then the platform could not read the request and was treating it as high-stakes",
+		"Stage-0 classification completed after the family answer removed the abstain's cause (S06.2)", 0)
+	return err
 }
 
 // applyFamilyTaxonomy keys the state to its family's question set, re-applies
@@ -692,6 +754,23 @@ func (p *Pipeline) lineageReaches(ctx context.Context, from run.Run, target stri
 }
 
 func (p *Pipeline) advanceLoaded(ctx context.Context, st *State) (*State, error) {
+	// THE DRIVE'S LIFETIME IS THE RUN'S, NOT THE REQUEST'S (P3-GF14 R1). Once a
+	// beat has resumed the run, the drive runs to its own end — the next gate,
+	// or a terminal phase — whatever became of the viewer's connection. A page
+	// reload used to cancel the request context mid-draft, which killed the
+	// beat, crashed the run for the recovery ladder and re-paid the whole plan
+	// ceremony on the fork: a ~12-minute re-billed heal for the exact act the
+	// card invites ("you can leave; nothing is lost"). The caller's death may
+	// cost the RESPONSE, never the WORK.
+	//
+	// The detach lives HERE, at the one seam every drive passes through (the
+	// §56 in-seam doctrine: `crash` detaches inside so no call site can forget),
+	// and it changes nothing before the resume commit — a caller that dies while
+	// its answer is still being written still fails that write, and the standing
+	// card is still the remedy. Values are kept; only cancellation is dropped.
+	// Runaway containment stays where it is ratified: the lease keeper beating
+	// under the drive (§54), the recovery ladder, and the watchdog.
+	ctx = context.WithoutCancel(ctx)
 	if st.Phase == PhaseApproved || st.Phase == PhaseCancelled {
 		return st, nil
 	}
@@ -1293,7 +1372,13 @@ func (p *Pipeline) phaseSpine(ctx context.Context, st *State, pair *Pair) (bool,
 			if len(qs) == maxQuestionsPerCard {
 				break
 			}
-			qs = append(qs, Question{ID: fmt.Sprintf("marker-%d", i+1), Text: m})
+			// A marker the PLATFORM authored carries its own finite choice set
+			// and its own reason line; a planner's marker carries neither
+			// (P3-GF14 R3). Free text stays available on every question.
+			qs = append(qs, Question{
+				ID: fmt.Sprintf("marker-%d", i+1), Text: m,
+				Options: markerOptions(m), Why: markerWhy(m),
+			})
 		}
 		// A Stage-1 ask is a Stage-1 ask: the clarification card carries the
 		// same understanding block (P3-RW-12 OQ5). It is NOT phrased — these
@@ -1409,7 +1494,10 @@ func (p *Pipeline) phaseCritique(ctx context.Context, st *State, pair *Pair) (bo
 	case VerdictTierUp:
 		raised := ValidTier(v.ProposedTier) && tierRank[v.ProposedTier] > tierRank[st.Tier]
 		if raised {
-			st.Tier = maxTier(st.Tier, v.ProposedTier)
+			// The platform's own reading of the plan raised the tier, so the
+			// platform owns the standing tier from here (P3-GF14 R4.4); a floor
+			// re-check later takes it back if one trips.
+			st.Tier, st.TierSource = maxTier(st.Tier, v.ProposedTier), TierSourceClassifier
 			st.exitBand("TIER-UP (S06.8)")
 			st.CritiqueDone = false
 			st.OpenFindings = nil
@@ -1568,7 +1656,21 @@ func (p *Pipeline) acceptEmission(ctx context.Context, st *State, prior *Pair, n
 	// ran out. Neither arm is model-output repair: this function already
 	// normalizes the SPEC's platform-guaranteed content above, and a marker is
 	// not dropped here, it is RESOLVED — with the resolution visible.
+	// The unstated-unit backstop (P3-GF14 R3), raised BEFORE the marker arms
+	// run, so it is bound by exactly the same contract as a planner's own
+	// marker: asked once, settled from the record if it was already answered,
+	// and converted to a listed assumption when the rounds run out.
+	raisedCurrency := p.currencyGapStands(st, next) && !hasClarification(next.Spec.Clarifications, currencyMarker)
+	if raisedCurrency {
+		next.Spec.Clarifications = append(next.Spec.Clarifications, currencyMarker)
+	}
 	disclosures := settleMarkers(st, next)
+	if raisedCurrency && st.settledMarker(currencyMarker) == nil {
+		disclosures = append(disclosures, markerDisclosure{
+			line: "the plan showed prices as bare numbers with no currency named anywhere, so the platform raised it as an open point",
+			why:  "S06.5 ask-don't-assume — an unstated unit on priced criteria would change what the result must be; S06.6's marker contract carries it (P3-GF14 R3)",
+		})
+	}
 
 	// Version assignment: plan bumps on every emission; spec bumps only on
 	// content change.
@@ -1858,6 +1960,15 @@ func (p *Pipeline) issueCard(ctx context.Context, st *State, card *Card) error {
 	card.Clearance = st.Clearance
 	card.ClearanceFloor = floor
 	card.Tier = st.Tier
+	switch card.Kind {
+	case CardInterview, CardClarification, CardApproval:
+		// The whole stakes truth travels with the cards a person decides at,
+		// from the same single site (P3-GF14 R4.3): the tier, what set it, why
+		// in plain words, any pending downward proposal, and whether the
+		// requester's one downward move is legal. A surface reading this can
+		// never disagree with the platform about the stakes.
+		card.Stakes = stakesBlock(st)
+	}
 	if card.Kind != CardFamily {
 		// The family guess travels on every card that HAS one, from the single
 		// site that issues them all (P3-GF7 R9): a surface can say "I am
@@ -1953,6 +2064,11 @@ func (p *Pipeline) buildApprovalCard(ctx context.Context, st *State, pair *Pair)
 		Estimate: pair.Plan.Est, SpecRef: st.SpecRef, PlanRef: st.PlanRef,
 		Constraints: pair.Spec.Constraints, Supplied: pair.Spec.Supplied,
 	}
+	// The S06.9 action vocabulary is unchanged. The lowering door is OFFERED on
+	// the stakes block instead — `Stakes.CanLower`, computed from the very rule
+	// Pipeline.LowerTier enforces (§43: one rule, two readers) — because it is
+	// a statement about the stakes and belongs where the stakes are served,
+	// beside the tier it would move and the reason it stands where it does.
 	actions := []string{ActionApprove, ActionRePlan, ActionReInterview, ActionCancel}
 	if st.Routing != nil && st.Routing.ComposeEarned && st.Compose == nil {
 		// The no-fit stage-2 compose offer is an ANSWERABLE verb exactly

@@ -228,10 +228,14 @@ func (rc *Receipts) dominantCurrency(items []LineItem) Currency {
 // renders UNPRICED — the label is present verbatim regardless (§13).
 func directUse(cons RunConsumption) DirectUseEstimate {
 	est := DirectUseEstimate{
-		Label:             DirectUseLabel,
-		FormulaRef:        DirectUseFormulaRef,
-		Currency:          CurrencyAPIEquiv,
-		MeasuredStageSeam: "aggregate switches to the measured-median stage per " + DirectUseFormulaRef + " once the benchmark machinery (S14, B5) has enough pairs; threshold registered there, not restated",
+		Label:      DirectUseLabel,
+		FormulaRef: DirectUseFormulaRef,
+		Currency:   CurrencyAPIEquiv,
+		// The requester-facing sentences are written for the person reading the
+		// receipt: no file paths, no section ids, and no restatement of the
+		// registered threshold (it is cited by FormulaRef and lives in
+		// Spec/benchmark-preregistration-v1.md §13 alone).
+		MeasuredStageSeam: "This figure comes from a rule of thumb rather than a measurement. Once the platform has run enough of its own side-by-side comparisons, it switches to a figure measured from those runs instead.",
 	}
 	var priced float64
 	var pricedCalls, unpricedCalls int64
@@ -248,7 +252,7 @@ func directUse(cons RunConsumption) DirectUseEstimate {
 	}
 	if unpricedCalls > 0 || pricedCalls == 0 {
 		est.Unpriced = true
-		est.Reason = "no price table loaded at v0 (UNPRICED, never a silent $0 — S10.1)"
+		est.Reason = "No price list is loaded on this platform yet, so there is no money figure to show. What the work used is still counted — the platform leaves the cost blank rather than quietly showing nothing owed."
 		return est
 	}
 	est.HeuristicUSD = priced

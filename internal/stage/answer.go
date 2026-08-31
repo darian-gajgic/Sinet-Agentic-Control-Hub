@@ -94,6 +94,10 @@ func (s *Skeleton) answerInfraRetry(ctx context.Context, actor, askID string, ca
 	if err != nil {
 		return err
 	}
+	// Past the resume commit the drain belongs to the RUN, not to the request
+	// that answered (P3-GF14 R1): the caller's death may cost the response,
+	// never the work it already resumed.
+	ctx = context.WithoutCancel(ctx)
 	r, err := s.cfg.Runs.Get(ctx, card.RunID)
 	if err != nil {
 		return err
@@ -228,6 +232,10 @@ func (s *Skeleton) answerRevise(ctx context.Context, actor, askID string, card v
 	if err != nil {
 		return err
 	}
+	// Past the resume commit the drain belongs to the RUN, not to the request
+	// that answered (P3-GF14 R1): a page that navigates away mid-rework must
+	// not cost the requester the paid round it just bought.
+	ctx = context.WithoutCancel(ctx)
 	// The resumed drain runs inline in this request, so the stage layer HOLDS
 	// the run's lease across it (Spec S02.2 at ⚙ recovery.heartbeat; P3-RW-5
 	// R3). Taken after the resume transaction, so it beats at the bumped

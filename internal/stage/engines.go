@@ -420,6 +420,12 @@ NEEDS-CLARIFICATION entry that re-asks, re-confirms, or restates a settled fact.
 Clarifications are only for new consequential ambiguities that nothing in your
 input resolves, and each one is a QUESTION — never a disclosure, a summary, or a
 confirmation of something you were already told.
+Name the unit, or ask for it [P3-GF14]: a quantity that reaches the deliverable
+with its unit unstated anywhere — the currency on a price is the everyday case —
+is a consequential ambiguity, because the result changes depending on the
+answer. Raise it as a NEEDS-CLARIFICATION question, or carry it as an assumption
+that NAMES the unit you assumed. Never emit the bare numbers with the unit
+silently unstated.
 Plain words for the person, always [P3-GF13]: every sentence a requester reads —
 the restatement, each criterion, the assumptions, the clarifications and any
 NEEDS-CLARIFICATION marker — is written in ordinary language. Never quote an
@@ -662,7 +668,12 @@ const verdictSchema = `Output EXACTLY one JSON object:
 {"kind":"pass"|"revise"|"spec_doubt"|"tier_up",
  "findings":[string...],   // numbered blocker findings (revise)
  "doubt":string,           // plain-language why (spec_doubt)
- "proposed_tier":"low"|"standard"|"high"}  // (tier_up)`
+ "proposed_tier":"low"|"standard"|"high"}  // (tier_up, or any kind for a tier opinion)
+A tier opinion rides proposed_tier ALONE, on whatever kind you return — never as
+a finding. The stakes tier is the platform's, and lowering it is a decision only
+the requester may take: a finding saying the tier is too high would be handed to
+the planner to "resolve", and a plan cannot rewrite the platform's own stakes.
+Judge the plan; propose the tier.`
 
 func (c *EngineCritic) Critique(ctx context.Context, pair intake.Pair) (intake.Verdict, error) {
 	return c.session(ctx, pair, nil)

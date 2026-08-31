@@ -147,7 +147,7 @@ func (c *localClassifier) Classify(ctx context.Context, in intake.TriageInput) (
 	req := local.DutyRequest{
 		Alias:          local.AliasIntakeTriage,
 		System:         "You are a task triage classifier for a personal automation platform. Output ONLY the JSON matching the schema — put your brief reasoning in the leading \"reason\" field, then the labels (free-text-then-constrained). Set abstain=true if you cannot classify confidently — never guess a label.",
-		User:           triagePrompt(in.Request, in.Registry, schema),
+		User:           triagePrompt(in.Request, in.Registry, in.Family, schema),
 		Schema:         schema,
 		Name:           "intake-triage",
 		MaxTokens:      triageMaxTokens,
@@ -170,11 +170,19 @@ func (c *localClassifier) Classify(ctx context.Context, in intake.TriageInput) (
 	return parseTriage(res.Content)
 }
 
-func triagePrompt(req intake.Request, reg *intake.RegistrySlice, schema json.RawMessage) string {
+func triagePrompt(req intake.Request, reg *intake.RegistrySlice, family intake.Family, schema json.RawMessage) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Request title: %s\n\nRequest text:\n%s\n", req.Title, req.Text)
 	if reg != nil && reg.Project != "" {
 		fmt.Fprintf(&b, "\nMatched project: %s (conventions/commands are known to the platform).\n", reg.Project)
+	}
+	if family != "" {
+		// The family is SETTLED — a registered project's declaration or the
+		// requester's own answer — so it is given as a fact, not asked about
+		// (P3-GF14 R4.1). The output schema is unchanged: the duty still
+		// answers family, and the pipeline's own precedence rule decides what
+		// to do with that answer.
+		fmt.Fprintf(&b, "\nSettled task family (the requester or the project said so): %s.\n", family)
 	}
 	fmt.Fprintf(&b, "\nClassify family, stakes, size, and whether the task rests on a live fact (data_bearing). Respond with JSON matching this schema:\n%s\n", schema)
 	return b.String()

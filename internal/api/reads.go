@@ -14,6 +14,7 @@ import (
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/redact"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/run"
 )
 
 // reads.go is the S15.2 REST read side: the `runs` and `tasks` resource
@@ -980,7 +981,7 @@ func (s *Server) fillTaskArtifacts(ctx context.Context, taskID string, detail *T
 // liveness risk whatever the expected shape, and expectation is not a bound.
 func (p *projector) taskRuns(ctx context.Context, taskID string) ([]TaskRunView, error) {
 	rows, err := p.db.QueryContext(ctx,
-		`SELECT r.run_id, r.state, r.created_ts, rc.usage_json
+		`SELECT r.run_id, r.state, r.created_ts, r.parent_run_id, rc.usage_json
 		   FROM runs r LEFT JOIN receipts rc ON rc.run_id = r.run_id
 		  WHERE r.task_id = ? ORDER BY r.created_ts, r.run_id LIMIT ?`, taskID, readPageDefault)
 	if err != nil {
@@ -988,23 +989,62 @@ func (p *projector) taskRuns(ctx context.Context, taskID string) ([]TaskRunView,
 	}
 	defer rows.Close()
 	out := []TaskRunView{}
+	absent := []int{}
+	successor := map[string]string{}
 	for rows.Next() {
 		var v TaskRunView
 		var created string
-		var usage sql.NullString
-		if err := rows.Scan(&v.RunID, &v.State, &created, &usage); err != nil {
+		var parent, usage sql.NullString
+		if err := rows.Scan(&v.RunID, &v.State, &created, &parent, &usage); err != nil {
 			return nil, fmt.Errorf("projection: task run scan: %w", err)
 		}
 		v.CreatedTS = parseTS(created)
 		if usage.Valid && usage.String != "" {
 			v.Receipt = json.RawMessage(usage.String)
 		} else {
-			// S10.1: a receipt materializes at the run's terminal transition.
-			v.ReceiptAbsent = "no receipt yet — one is written when the work finishes"
+			absent = append(absent, len(out))
+		}
+		if parent.Valid && parent.String != "" {
+			successor[parent.String] = v.RunID
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The absence is rendered with ITS OWN reason: the reason a run carries no
+	// receipt depends on how that run ended, and the future-tense line is true
+	// only while the run is still going (S10.1 materializes a receipt at the
+	// terminal transition; CONVENTIONS §55: a crashed leg materializes none and
+	// its successor carries its own).
+	for _, i := range absent {
+		out[i].ReceiptAbsent = receiptAbsence(run.State(out[i].State), successor[out[i].RunID])
+	}
+	return out, nil
+}
+
+// receiptAbsence says why a run carries no receipt, in the words of that run's
+// own ending. A terminal run never promises a receipt that will not come.
+// A crashed run is NOT run.IsTerminal (recovery supersedes it), but it has
+// ENDED — nothing more will be billed to it and nothing more will be written
+// for it — so the ended set is enumerated here rather than borrowed.
+func receiptAbsence(state run.State, successor string) string {
+	switch state {
+	case run.StateCrashed:
+		if successor != "" {
+			return "this attempt broke partway, so no receipt was written for it — the platform carried the work on in a fresh run (" + successor +
+				"), and that run carries the receipt. What this attempt used is still in the task's own record."
+		}
+		return "this attempt broke partway, so no receipt was written for it. What it used is still in the task's own record; if the work is picked up again, the attempt that finishes carries the receipt."
+	case run.StateTombstoned:
+		return "this attempt was stopped for good after repeated failures, so no receipt was written for it. What it used is still in the task's own record."
+	case run.StateDiedAtGate:
+		return "this attempt ran out of its budget while it was waiting to be picked up again, so it never finished and no receipt was written for it. What it used is still in the task's own record."
+	case run.StateCompleted, run.StateFinalized:
+		return "this run has ended and no receipt was written for it. What it used is still in the task's own record."
+	default:
+		return "no receipt yet — one is written when the work finishes"
+	}
 }
 
 // stageProgress derives the per-stage story from the log across the task's

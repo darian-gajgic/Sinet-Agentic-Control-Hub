@@ -133,8 +133,14 @@ type State struct {
 	// FamilySource names what resolved Family (P3-RW-11 R5) — additive, so a
 	// state event written before this packet reads back "" and is left exactly
 	// as it was. It is an event payload, so it needs no migration.
-	FamilySource string         `json:"family_source,omitempty"`
-	Tier         Tier           `json:"tier"`
+	FamilySource string `json:"family_source,omitempty"`
+	Tier         Tier   `json:"tier"`
+	// TierSource names what set Tier (P3-GF14 R4.4) — the FamilySource pattern,
+	// additive, so a state event written before this packet reads back "" and
+	// behaves exactly as it did. It gates the one abstain-settle and feeds the
+	// card's stakes block, so a chip and a plan can never disagree about the
+	// stakes again.
+	TierSource   string         `json:"tier_source,omitempty"`
 	FloorTier    Tier           `json:"floor_tier,omitempty"` // deterministic floor ("" = none)
 	FloorReasons []FloorReason  `json:"floor_reasons,omitempty"`
 	Guess        Estimate       `json:"guess"`
@@ -345,7 +351,10 @@ func (s *State) addFloors(reasons []FloorReason) {
 	}
 	s.FloorReasons = append(s.FloorReasons, reasons...)
 	s.FloorTier = TierHigh
-	s.Tier = maxTier(s.Tier, TierHigh)
+	// The floor is what HOLDS the tier here: it overrides everything upward and
+	// refuses every lowering below it, so it owns the standing tier's
+	// provenance whatever set the tier before (P3-GF14 R4.4).
+	s.Tier, s.TierSource = maxTier(s.Tier, TierHigh), TierSourceFloor
 }
 
 // exitBand ejects the task from the zero-interaction band — one-way for

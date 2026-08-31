@@ -492,6 +492,12 @@ func (s *Skeleton) dispatchIntake(ctx context.Context, r run.Run) error {
 // its ceremony run FIRST — it runs while the card stays open (Spec S08.6:
 // composition never rides approval), and the ensure is idempotent.
 func (s *Skeleton) afterIntake(ctx context.Context, st *intake.State) error {
+	// The continuation is part of the drive the answer resumed, so it owes the
+	// drive's own lifetime (P3-GF14 R1): a caller that navigated away must not
+	// leave an approved plan with its intake run still `running` and its
+	// execution never launched. Detached INSIDE the seam, so the dispatch leg
+	// and both answer sites are covered in one move (the §56 doctrine).
+	ctx = context.WithoutCancel(ctx)
 	if st.Compose != nil {
 		if err := s.ensureComposeRun(ctx, st); err != nil {
 			return err

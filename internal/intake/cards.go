@@ -228,6 +228,16 @@ type Card struct {
 	Family       Family `json:"family,omitempty"`
 	FamilySource string `json:"family_source,omitempty"`
 
+	// Stakes is the platform-authored stakes block (P3-GF14 R4.3) on the cards
+	// a person decides at: what the tier is, WHO set it, why in plain words,
+	// any pending downward proposal, and whether the requester's one downward
+	// move is legal right now. It rides beside Tier rather than replacing it —
+	// an old reader keeps reading Tier — and it exists because one card served
+	// two stakes truths: the chip said high while the plan's own prose said the
+	// task was being treated as light, because a critique's tier objection had
+	// been handed to the planner to "resolve" in words.
+	Stakes *Stakes `json:"stakes,omitempty"`
+
 	Questions []Question    `json:"questions,omitempty"` // interview / clarification / escalation
 	Decision  *DecisionBody `json:"decision,omitempty"`  // coverage / research / spec_doubt
 	Approval  *ApprovalBody `json:"approval,omitempty"`
@@ -239,6 +249,140 @@ type Card struct {
 	// nothing-is-known question have nothing to summarize. Nil before the
 	// first slot resolves and before any phrase seam answers.
 	Understood *UnderstoodBlock `json:"understood,omitempty"`
+}
+
+// Stakes is one card's whole stakes truth, composed by platform code from the
+// state's own record — never by a model (P3-GF14 R4.3).
+type Stakes struct {
+	Tier Tier `json:"tier"`
+	// Origin is what set the standing tier: TierSourceFailClosed,
+	// TierSourceClassifier, TierSourceRequester or TierSourceFloor. Empty on a
+	// task whose state predates the record — an honest absence, never a guess.
+	Origin      string `json:"origin,omitempty"`
+	PlainReason string `json:"plain_reason"`
+	// ProposedLower is a critique's pending opinion that the tier is too high.
+	// It is a proposal TO THE REQUESTER and moves nothing by itself: no
+	// downward verdict exists (Spec S06.4/S06.8), and the planner never sees it.
+	ProposedLower Tier `json:"proposed_lower,omitempty"`
+	// CanLower reports whether the S06.4 explicit requester action is legal
+	// right now: above the floor, not into the rule-decided band, pre-approval.
+	CanLower bool `json:"can_lower"`
+}
+
+// stakesBlock composes the card's stakes truth from the state (P3-GF14 R4.3).
+func stakesBlock(st *State) *Stakes {
+	return &Stakes{
+		Tier:          st.Tier,
+		Origin:        st.TierSource,
+		PlainReason:   stakesReason(st),
+		ProposedLower: pendingLowerProposal(st),
+		CanLower:      canLowerTier(st),
+	}
+}
+
+// canLowerTier reports whether Pipeline.LowerTier would accept a lowering
+// right now. It reads the same three walls the verb enforces — the floor, the
+// rule-decided band, and the pre-approval phase — so the card offers exactly
+// what the answer path accepts (§43: one rule, two readers).
+func canLowerTier(st *State) bool {
+	if st.Phase == PhaseApproved || st.Phase == PhaseCancelled {
+		return false
+	}
+	lowest := TierLow // the band is never re-entered by hand (S06.4)
+	if st.FloorTier != "" {
+		lowest = maxTier(lowest, st.FloorTier)
+	}
+	return tierRank[st.Tier] > tierRank[lowest]
+}
+
+// pendingLowerProposal returns the most recent critique proposal that ranks
+// BELOW the standing tier, or "" when none stands. It is read from the
+// recorded verdicts, which is where a tier opinion belongs (Spec S06.8).
+func pendingLowerProposal(st *State) Tier {
+	for i := len(st.Verdicts) - 1; i >= 0; i-- {
+		if p := st.Verdicts[i].Proposed; ValidTier(p) && tierRank[p] < tierRank[st.Tier] {
+			return p
+		}
+	}
+	return ""
+}
+
+// stakesReason says, in the words of the person reading the card, why the
+// platform is being as careful as it is (CONVENTIONS §59).
+func stakesReason(st *State) string {
+	switch st.TierSource {
+	case TierSourceFailClosed:
+		return "I could not read this request well enough to judge how careful to be, so I am treating it as high-stakes until you tell me otherwise."
+	case TierSourceFloor:
+		return "This task " + plainFloorClauses(st.FloorReasons) + ", so it counts as high-stakes and cannot be set lower."
+	case TierSourceRequester:
+		return "You chose this yourself: I am treating the task as " + plainTier(st.Tier) + "."
+	case TierSourceClassifier:
+		return "Reading the request, I am treating this as " + plainTier(st.Tier) + "."
+	default:
+		return "I am treating this as " + plainTier(st.Tier) + "."
+	}
+}
+
+// plainTier names a stakes tier the way the person answering the card would
+// name it. The tier TOKEN stays the machine value every surface switches on;
+// only the prose goes through here (the plainCardKind precedent).
+func plainTier(t Tier) string {
+	switch t {
+	case TierTrivial:
+		return "a small routine job"
+	case TierLow:
+		return "low-stakes work"
+	case TierStandard:
+		return "ordinary-stakes work"
+	case TierHigh:
+		return "high-stakes work"
+	default:
+		return string(t)
+	}
+}
+
+// plainFloorClass names one deterministic floor class in plain words; an
+// unknown class returns "" and is left out rather than printed as a token.
+func plainFloorClass(class string) string {
+	switch class {
+	case FloorOutwardEffect:
+		return "sends something out beyond this machine"
+	case FloorNewSpend:
+		return "spends money"
+	case FloorCredentialTouch:
+		return "uses a saved login"
+	case FloorSharedAssetWrite:
+		return "changes something other people share"
+	case FloorRegulatedDomain:
+		return "touches an area with rules of its own"
+	default:
+		return ""
+	}
+}
+
+// plainFloorClauses joins the distinct tripped floor classes into one readable
+// clause. Nothing nameable leaves the general sentence, which is still true.
+func plainFloorClauses(reasons []FloorReason) string {
+	seen := make(map[string]bool, len(reasons))
+	parts := make([]string, 0, len(reasons))
+	for _, r := range reasons {
+		if seen[r.Class] {
+			continue
+		}
+		seen[r.Class] = true
+		if plain := plainFloorClass(r.Class); plain != "" {
+			parts = append(parts, plain)
+		}
+	}
+	switch len(parts) {
+	case 0:
+		return "has something in it that always counts as high stakes"
+	case 1:
+		return parts[0]
+	default:
+		return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
 }
 
 // DecisionBody carries a decision card: what happened, the enumerated
@@ -327,6 +471,14 @@ const (
 	// billed run while the approval stays open — composition never rides
 	// approval, and never the zero-interaction band.
 	ActionCompose = "compose"
+	// ActionLowerStakes is S06.4's one downward move made reachable: an
+	// EXPLICIT requester action, carrying the tier to move to, routed to
+	// Pipeline.LowerTier and refused by that verb's own rules (never below a
+	// floor, never into the rule-decided band, never after approval). It does
+	// NOT close the card — the requester still owes the approval decision, and
+	// the card re-serves at the settled tier so every later answer, its
+	// step-up included, follows the tier the card now carries.
+	ActionLowerStakes = "lower_stakes"
 )
 
 // DeltaKind is the S06.9 delta vocabulary (OpenSpec pattern).
@@ -457,6 +609,9 @@ type Answer struct {
 	// Route is the S08.8 re-route/pin entry, applied with Approve (the
 	// pre-execution override surface; recorded with its actor).
 	Route *RouteOverride `json:"route,omitempty"`
+	// Tier is the target of ActionLowerStakes — the tier the requester is
+	// moving the task DOWN to (Spec S06.4). Read on that action alone.
+	Tier Tier `json:"tier,omitempty"`
 
 	// Note is the person's own words, the same channel the verify/ladder cards
 	// carry (P3-RW-19 R6). One Answer type serves every intake card, so the

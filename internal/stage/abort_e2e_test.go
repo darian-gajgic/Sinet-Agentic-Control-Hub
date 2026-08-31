@@ -17,6 +17,13 @@ package stage_test
 // P3-RW-9 established the posture; this battery pins that the posture is
 // CONTEXT-INDEPENDENT: the record of the ending outlives the request.
 //
+// AMENDED 2026-08-31 (P3-GF14 R1): §56's second bullet — "the drive itself
+// stays attached, and abort-mid-drive is a CRASH" — is REVERSED, so the drive
+// no longer dies with its caller and the caller's cancellation is no longer a
+// cause the crash can name. Every other assertion in this file stands
+// unchanged, and the corpse-and-heal posture it exists for is untouched: what
+// moved is one cause STRING per test, at `callerDied`'s note below.
+//
 // Zero paid calls: the planning seam is the fork harness's recorder.
 
 import (
@@ -64,10 +71,23 @@ func (p *abortPlanner) Revise(_ context.Context, in intake.ReviseInput) (intake.
 	return in.Pair, nil
 }
 
-// callerDied is the armed failure of the diagnosed shape: the seam reports its
-// caller's own context error.
+// callerDied is the armed failure of the diagnosed shape: a seam that fails
+// while its caller's request is already dead.
+//
+// DATED NOTE 2026-08-31 (P3-GF14 R1, the §56 second-bullet reversal): the drive
+// no longer rides the caller's context, so a seam reached after the abort sees
+// a LIVE context and cannot report the caller's cancellation as its own cause.
+// What these tests stage is unchanged — the request really does die mid-drive —
+// and what they pin is unchanged: a drive that fails for a REAL cause past the
+// resume commit still leaves a classifiable corpse for the ladder. Only the
+// cause SENTENCE moved, because the caller's death is no longer a cause of
+// drive death. That the abort alone no longer kills the drive is pinned by
+// TestGF14AnswerDriveOutlivesItsCaller and its stage-level companions.
 func callerDied(ctx context.Context) error {
-	return fmt.Errorf("planner session: %w", ctx.Err())
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("planner session: %w", err)
+	}
+	return errors.New("planner session died mid-drive")
 }
 
 // armAbort points the pipeline's planning seam at an abort planner that cancels
@@ -124,7 +144,7 @@ func TestAnswerAbortMidDriveStillLeavesCorpse(t *testing.T) {
 			se.Status, se.Code, strandCodeRecovering)
 	}
 
-	assertCorpse(t, h, intakeRun, "context canceled")
+	assertCorpse(t, h, intakeRun, "planner session died mid-drive")
 	if got := h.openAskID(taskID); got != "" {
 		t.Fatalf("ask %q is still open — the answered card must stay closed", got)
 	}
@@ -182,7 +202,7 @@ func TestAdvanceAbortMidDriveStillLeavesCorpse(t *testing.T) {
 	if se.Status != http.StatusInternalServerError || se.Code != strandCodeRecovering {
 		t.Fatalf("advance error = %d/%s, want 500/%s", se.Status, se.Code, strandCodeRecovering)
 	}
-	assertCorpse(t, h, intakeRun, "context canceled")
+	assertCorpse(t, h, intakeRun, "planner session died mid-drive")
 
 	forkID := h.forkOf(intakeRun)
 	if n := h.tick(bg); n != 1 {

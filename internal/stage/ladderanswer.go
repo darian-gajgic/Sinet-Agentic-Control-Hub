@@ -138,6 +138,11 @@ func (s *Skeleton) ladderRetry(ctx context.Context, actor, askID string, card re
 	if err != nil {
 		return err
 	}
+	// The successor is committed; admitting it is the rest of the same act
+	// (P3-GF14 R1). A caller that dies here would leave the granted attempt in
+	// the runs table with no queue row — a run nobody drives, bought by an
+	// answer that already committed.
+	ctx = context.WithoutCancel(ctx)
 	if err := s.sched.Enqueue(ctx, successorID, scheduler.ClassInteractive); err != nil {
 		return fmt.Errorf("stage: admit the retried run %q: %w", successorID, err)
 	}
