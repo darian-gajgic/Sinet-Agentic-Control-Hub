@@ -130,6 +130,12 @@ lane and substrate metadata · `memory/*taxonomy*` + `memory/seeds.go` +
 provenance strings, which the brief names keepable) · `history/catalog.go`,
 `history/layer0.go` (SQL and column contracts) · `retention/*`.
 
+## E-2. Machine provenance on a served RECORD — added 2026-08-31 (P3-GF14 R5.3)
+
+| String | Site | Reason |
+|---|---|---|
+| `Spec/benchmark-preregistration-v1.md §13` | `metering/receipt.go:22` (`DirectUseFormulaRef`, served as `formula_ref`) | The registered-formula POINTER, a machine member of the receipt: the done-directly figure is computed against a frozen registration whose numbers are cited and never restated, and this is the citation. It is provenance the platform owes its own record, not a sentence addressed to anybody — the E-family reading, on a member that happens to ride a requester-facing response. **The drawer must not render it inside its prose line** (FRONTEND.md-lane seam, noted at GF14). Its two PROSE neighbours went plain words in the same packet: `DirectUseEstimate.Reason` and `.MeasuredStageSeam` (:251, :234) had slipped the census through deferred item 3's bare-token class and carried `S10.1`, `Spec/…§13`, `S14` and `B5` to a requester verbatim. `DirectUseEstimate.Label` stays byte-exact for the other reason — it is RATIFIED text (Spec S15.5 / G2 D2.8), frozen like family B.
+
 ## F. Engine PROMPTS — model-facing, not requester-facing
 
 `stage/engines.go:383/:439/:454/:682/:746/:757/:808`, `stage/compose.go:66/:120`,
