@@ -641,6 +641,18 @@ const acceptPushFailedMsg = "the commit could not be pushed to this project's re
 	"the accept can be made again once the remote is reachable. Nothing was left half-applied — the accept's effect is recorded as failed and no " +
 	"branch moved. The underlying cause is in the platform's ops log."
 
+// acceptBrokerDownMsg is the served answer when the platform's credential
+// helper is not running on this machine. It is true at all three of the
+// accept's broker touches (reading the signing posture, signing the commit,
+// pushing), because all three mean the same thing to the person: the helper is
+// down, so the act did not happen. It names the helper by what it does for
+// them, says what state their work is in, and says what makes the accept
+// possible again — and it carries no socket path, no dial verb and no internal
+// chain, because those are ops facts a requester can neither read nor act on.
+const acceptBrokerDownMsg = "the platform's credential helper — the part that signs commits and pushes in your name — is not running on this machine, so the work is " +
+	"not accepted: the deliverable is still in review, no commit was made and no branch moved, and the accept's effect is recorded as failed. The accept can be made " +
+	"again once the helper is running; starting it is the machine owner's act, not yours. The underlying cause is in the platform's ops log."
+
 // acceptErr maps the accept orchestration's own refusals ON THE ERROR'S TYPE
 // (CONVENTIONS §38), then falls through to the review store's mapping for
 // everything the accept passes up unchanged.
@@ -652,6 +664,17 @@ const acceptPushFailedMsg = "the commit could not be pushed to this project's re
 // remote is an upstream failure, which is what 502 says, and the deliverable is
 // honestly still in review afterwards.
 func (s *Server) acceptErr(err error) error {
+	// THE BROKER-DOWN ARM IS CHECKED FIRST, and the order is load-bearing: a
+	// push that failed because the broker was never reachable wraps BOTH
+	// sentinels, and it belongs to this class rather than the remote's — 502
+	// push_failed blames a project's remote for a helper that is down on this
+	// machine. 503 is the honest status: a named platform component is not
+	// running, which is neither an unexpected fault (500) nor an upstream
+	// failure (502) (S01.3, CONVENTIONS §56).
+	if errors.Is(err, accept.ErrBrokerUnavailable) {
+		s.logger.Error("accept: the credential broker is unreachable", "err", err)
+		return &SurfaceError{Status: http.StatusServiceUnavailable, Code: "broker_unreachable", Msg: acceptBrokerDownMsg}
+	}
 	if errors.Is(err, accept.ErrPushFailed) {
 		s.logger.Error("accept: the broker could not perform the push", "err", err)
 		return &SurfaceError{Status: http.StatusBadGateway, Code: "push_failed", Msg: acceptPushFailedMsg}

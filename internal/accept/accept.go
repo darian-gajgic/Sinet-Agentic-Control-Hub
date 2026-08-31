@@ -74,6 +74,14 @@ const (
 // human makes rather than a failure anybody has to be told about.
 var ErrPushFailed = errors.New("accept: the broker could not perform the push")
 
+// ErrBrokerUnavailable re-exports the broker client's transport sentinel at this
+// package's seam so the answer layer classifies a broker-down accept with
+// errors.Is WITHOUT importing internal/broker (CONVENTIONS §24 import wall).
+// Every broker touch of the accept — the signing posture, the commit signature
+// and the CAS push — reaches the surface through here, and all three mean the
+// same thing to the person: the helper is not running (P3-GF15 R2).
+var ErrBrokerUnavailable = broker.ErrUnavailable
+
 // landingLocal is the additive member the succeeded accept effect's result
 // carries when the landing was local (P3-GF11 R2/OQ1). The PUSH arm's result
 // stays byte-identical to the landed one — the commit and nothing else — so
@@ -493,6 +501,12 @@ func (a *Accepter) executeAccept(ctx context.Context, s executeSpec) (Outcome, e
 	}
 	sign, err := a.signerFor(ctx, s.acceptingUser)
 	if err != nil {
+		// Every error on this limb aborts the act before anything is written,
+		// so the effect is FAILED here exactly as its collision/squash/push
+		// siblings are (S02.7): an `executing` row left behind is an in-doubt
+		// claim the boot reconcile would re-drive behind the back of a
+		// requester who was told nothing happened.
+		a.failEffect(ctx, s.effectID, "signing posture unresolved")
 		return Outcome{}, err
 	}
 	commit, err := a.cfg.Project.SquashAccept(ctx, s.projectID, project.SquashInput{

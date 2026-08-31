@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,17 @@ import (
 // at spawn (S01.6) — never to the event log or platform.db (D2/S11.5). Owner
 // secrets are never resolved here at all; they are used via Sign (result-only).
 
+// ErrUnavailable marks a TRANSPORT failure against the broker — no daemon
+// listening on the socket, or the connection dying mid-conversation — so a
+// caller can answer "the helper is not running" on the error's TYPE rather than
+// by matching its text (CONVENTIONS §38). A broker REFUSAL is deliberately not
+// marked: a guardrail that held is a different fact from an outage, and the
+// client already keeps that distinction (send vs roundTrip).
+//
+// The cause it wraps carries the socket path and errno for the ops log; the
+// requester surface serves neither (P3-GF15 R1).
+var ErrUnavailable = errors.New("broker: unavailable")
+
 // Client is a broker connection. Safe for sequential use; one op at a time.
 type Client struct {
 	mu   sync.Mutex
@@ -27,7 +39,7 @@ type Client struct {
 func Dial(socket string) (*Client, error) {
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
-		return nil, fmt.Errorf("broker: dial %s: %w", socket, err)
+		return nil, fmt.Errorf("%w: dial %s: %w", ErrUnavailable, socket, err)
 	}
 	return &Client{conn: conn, r: bufio.NewReader(conn)}, nil
 }
@@ -53,11 +65,11 @@ func (c *Client) send(req Request) (Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := writeJSON(c.conn, req); err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	var resp Response
 	if err := readJSONReader(c.r, &resp); err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return resp, nil
 }
