@@ -1096,11 +1096,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	// After the ladder returns in-doubt class-A effects to `approved`, re-drive
 	// any in-doubt ACCEPT effects: reconcile leads to the push being re-driven
-	// against the SAME pinned expect-sha (S13.6 R8 / F4). Non-fatal — a
-	// transient broker outage retries next boot.
+	// against the SAME pinned expect-sha (S13.6 R8 / F4). Non-fatal to the
+	// boot, and no longer self-healing on every limb: a broker that is down
+	// when the signing posture is read FAILS that effect terminally (P3-GF15
+	// R3), so the warning below is the record of it, not a next-boot promise.
 	if acceptSurf != nil {
 		if n, err := acceptSurf.Accepter.ReDriveApproved(ctx); err != nil {
-			logger.Warn("accept: re-drive of in-doubt accepts failed (retries next boot)", "err", err)
+			logger.Warn("accept: re-drive of in-doubt accepts failed (a failed effect is terminal, not retried)", "err", err)
 		} else if n > 0 {
 			logger.Info("accept: re-drove in-doubt accept effects after recovery (Spec S13.6 R8)", "count", n)
 		}

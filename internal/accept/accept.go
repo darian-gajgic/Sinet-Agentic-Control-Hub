@@ -449,7 +449,10 @@ func (a *Accepter) ReDrive(ctx context.Context, effectID string) (Outcome, error
 // after the recovery ladder's reconcile, this leads reconcile to the push being
 // re-driven with the pinned expect-sha. Non-accept class-A effects are skipped
 // (their own executors re-drive them). Returns the number re-driven; a
-// per-effect error aborts so the caller can log and retry next boot.
+// per-effect error aborts so the caller can log — but not every abort comes
+// back: a limb that FAILS the effect (an unresolved signing posture, a squash,
+// a push) is terminal, and a `failed` row is not one a later boot re-drives.
+// Only an abort that left the row in-doubt reaches the next boot's reconcile.
 func (a *Accepter) ReDriveApproved(ctx context.Context) (int, error) {
 	approved, err := a.cfg.Journal.InState(ctx, gates.EffectApproved)
 	if err != nil {

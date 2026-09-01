@@ -92,12 +92,14 @@ func gf15AssertPlainRefusal(t *testing.T, code int, out string) {
 	if refusal.Error != "broker_unreachable" {
 		t.Errorf("the refusal's code must name THIS class — broker_unreachable, distinct from push_failed (the remote) and internal (a genuine fault) — got %q", refusal.Error)
 	}
+	// Both sweeps read the LOWERED body: a capitalized "Dial" or "Unix" is the
+	// same raw internal on the requester's screen (drain r1 F3).
+	low := strings.ToLower(out)
 	for _, raw := range gf15BannedOnTheWire {
-		if strings.Contains(out, raw) {
+		if strings.Contains(low, raw) {
 			t.Errorf("raw internals reached the requester surface (§38): the body contains %q: %s", raw, out)
 		}
 	}
-	low := strings.ToLower(out)
 	for _, want := range gf15WantedWords {
 		if !strings.Contains(low, want) {
 			t.Errorf("the refusal must say what it means in the requester's words — missing %q: %s", want, out)
