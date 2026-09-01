@@ -1820,6 +1820,30 @@ export type IntakeDelta = {
 }
 
 /** One intake ask snapshot. Exactly one body field is set, per `kind`. */
+/**
+ * One card's whole stakes truth (P3-GF14 R4.3; intake/cards.go `Stakes`),
+ * composed by platform code from the state's own record — never by a model.
+ * It rides beside `tier` on the cards a person decides at, and it exists
+ * because one card once served two stakes truths (review M11): the chip said
+ * high while the plan's own prose called the task light.
+ */
+export type IntakeStakes = {
+  tier: string
+  /** What set the standing tier: `fail-closed` · `classifier` · `requester` ·
+   *  `floor` (intake TierSource vocabulary). Empty on a task whose state
+   *  predates the record — an honest absence, never a guess. */
+  origin?: string
+  /** Why the platform is being as careful as it is, in the reader's words. */
+  plain_reason: string
+  /** A critique's pending opinion that the tier is too high. A proposal TO
+   *  THE REQUESTER that moves nothing by itself — no downward verdict exists
+   *  (S06.4/S06.8), and the planner never sees it. */
+  proposed_lower?: string
+  /** Whether the S06.4 explicit requester action (`lower_stakes`) is legal
+   *  right now: above the floor, not into the rule-decided band, pre-approval. */
+  can_lower: boolean
+}
+
 export type IntakeCard = {
   kind: string
   task_id?: string
@@ -1834,6 +1858,10 @@ export type IntakeCard = {
    *  it. Absent on cards issued before the field existed. */
   clearance_floor?: number
   tier?: string
+  /** The platform-authored stakes block (P3-GF14 R4.3): tier, who set it, the
+   *  plain-words why, any pending downward proposal, and whether the one
+   *  downward move is legal now. Absent on snapshots written before it. */
+  stakes?: IntakeStakes
   /** The task's family and what resolved it (P3-GF7 R9), carried on every
    *  issued card as passive data: a silent family guess is what sends a whole
    *  interview down the wrong template, so the guess is shown and cheaply
@@ -1909,6 +1937,14 @@ export type IntakeAnswerBody = {
   criteria?: string[]
   facts?: { rule_id: string; fact: string }[]
   action?: string
+  /** The target of `{action:"lower_stakes"}` — the tier the requester moves
+   *  the task DOWN to (S06.4's one downward move, P3-GF14 R4.5). Read on that
+   *  action alone; the verb's own walls refuse it (never below a floor, never
+   *  into the rule-decided band, never after approval) and the card re-serves
+   *  at the settled tier without closing — the approval decision is still
+   *  owed. At high tier the ordinary PIN step-up governs this answer like any
+   *  other. */
+  tier?: string
   /** The legacy single contest (kept byte-compatible server-side). New sends
    *  use `contests` — one send may name any number of targets. */
   contest?: { target: string; note?: string }

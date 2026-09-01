@@ -3933,7 +3933,11 @@ input[type='radio'] {
 }
 
 .journey-title {
-  min-width: 0;
+  /* A floor, not 0: the stakes side grew a served why-sentence (P3-GF14
+     R4.3), and with min-width 0 the title column was crushed to slivers
+     beside it — the head already wraps, so the long side drops below the
+     title instead. */
+  min-width: min(240px, 100%);
   flex: 1;
 }
 
@@ -4873,6 +4877,62 @@ input[type='radio'] {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-grad);
+}
+
+/* ── one stakes truth on the plan card (P3-GF14 R4; exit walk F7) ── */
+
+.plan-stakes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-stakes-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.plan-stakes-proposal {
+  padding: 8px 12px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: var(--radius-sm);
+  background: rgba(96, 165, 250, 0.06);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+/* The one downward door: a quiet act, styled like the lane pin's opener —
+   present where it is legal, never shouting beside the approve verb. */
+.plan-stakes-lower {
+  align-self: flex-start;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 11px;
+  background: none;
+  font-size: 11.5px;
+  color: var(--accent-2);
+  cursor: pointer;
+}
+
+.plan-stakes-lower:hover {
+  color: var(--fg);
+  border-color: var(--accent-2);
+}
+
+.plan-stakes-door {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
 }
 
 .plan-h {

@@ -599,7 +599,7 @@ export function Board({ me, stream }: { me: string; stream?: EventStream }) {
                   <div className="col-group" key={group.project}>
                     {group.project !== '' && <p className="col-proj">{group.project}</p>}
                     {group.tasks.map((t) => (
-                      <BoardCard key={t.task_id} task={t} showProject={scope === ''} />
+                      <BoardCard key={t.task_id} task={t} showProject={scope === ''} stream={stream} />
                     ))}
                   </div>
                 ))}
@@ -641,7 +641,15 @@ function railTone(t: TaskListItem): string {
  * own card via the route table; the expand control is its own button, so the
  * two gestures cannot collide.
  */
-export function BoardCard({ task, showProject }: { task: TaskListItem; showProject: boolean }) {
+export function BoardCard({
+  task,
+  showProject,
+  stream,
+}: {
+  task: TaskListItem
+  showProject: boolean
+  stream?: EventStream
+}) {
   const [open, setOpen] = useState(false)
   const run = task.latest_run
   const cancelled = task.kanban_status === cancelledStatus
@@ -736,7 +744,7 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
         )}
         <span>{open ? 'hide' : 'plan'}</span>
       </button>
-      {open && <SubItems taskID={task.task_id} cancelled={cancelled} />}
+      {open && <SubItems taskID={task.task_id} cancelled={cancelled} stream={stream} />}
     </article>
   )
 }
@@ -748,11 +756,16 @@ export function BoardCard({ task, showProject }: { task: TaskListItem; showProje
  * so none is drawn — the steps are the plan, the stage records are the
  * progress. For a cancelled card the recorded human decisions say WHY.
  */
-function SubItems({ taskID, cancelled }: { taskID: string; cancelled: boolean }) {
+function SubItems({ taskID, cancelled, stream }: { taskID: string; cancelled: boolean; stream?: EventStream }) {
+  // `stream` rides down from Board so the expansion's live read shares the
+  // page's one connection — and so tests inject their scripted stream instead
+  // of this component silently opening a real EventSource of its own (the
+  // one-per-tab invariant, and the E8 pin's death point).
   const { data, error } = useLive<TaskDetail>({
     key: `/api/tasks/${taskID}#card`,
     read: () => api.task(taskID),
     types: boardEventTypes,
+    stream,
   })
 
   if (error !== '' && data === null) {
@@ -769,16 +782,32 @@ function SubItems({ taskID, cancelled }: { taskID: string; cancelled: boolean })
       {cancelled && (
         <div className="sub-block">
           <p className="sub-head">Why it is cancelled</p>
-          {decisions.length === 0 ? (
-            <p className="sub-note">No decision row was recorded — open the card for the trail.</p>
-          ) : (
-            decisions.slice(-2).map((d) => (
+          {(() => {
+            // The cancel row, in the same words the task card uses (exit walk
+            // E8's trip, shortened by one navigation): the person's OWN why
+            // where one was given, its honest absence otherwise — never the
+            // record's mechanical sentence standing where a motive should be
+            // (`reason` carries the rule citation; TaskDetail's ruling).
+            const cancel = [...decisions].reverse().find((d) => d.decision === 'cancel')
+            if (cancel !== undefined) {
+              const why = cancel.human_reason ?? ''
+              return (
+                <p className="sub-note" data-cancel-why={why !== '' ? 'given' : 'absent'}>
+                  <Owner id={cancel.actor} /> cancelled this work
+                  {why !== '' ? <> — &ldquo;{why}&rdquo;</> : <> — no reason was given</>}
+                </p>
+              )
+            }
+            if (decisions.length === 0) {
+              return <p className="sub-note">No decision row was recorded — open the card for the trail.</p>
+            }
+            return decisions.slice(-2).map((d) => (
               <p className="sub-note" key={d.seq}>
                 <Owner id={d.actor} /> — {d.decision}
                 {d.reason !== undefined && d.reason !== '' && <> · {d.reason}</>}
               </p>
             ))
-          )}
+          })()}
         </div>
       )}
       <div className="sub-block">

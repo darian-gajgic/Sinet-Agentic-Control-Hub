@@ -152,6 +152,33 @@ test('frames route by the topics field, not by the connection filter', () => {
   expect(inbox.map((e) => e.seq)).toEqual([2])
 })
 
+test('the GF14 routing fact: a gate-open frame rides board+run and NEVER inbox — the views\' types-only wiring hears it; a pane pinned to the inbox topic would not', () => {
+  // P3-GF14 R2 / drain r1 F1 declared it on the record: intake.state (the
+  // frame that announces a fresh card) routes topics [board, run] — never
+  // inbox. Every view in this tree subscribes with TYPES on the unfiltered
+  // relay and no topic filter (live.ts, B6-5 OQ1(b) ratified), which is
+  // exactly why the card wakes arrive. This pin makes the trap explicit: a
+  // future pane that "helpfully" filtered itself to the inbox topic would go
+  // deaf to the very frames the inbox card set exists for.
+  const { stream } = newStream()
+  const typesOnly: WireEvent[] = []
+  const inboxPinned: WireEvent[] = []
+  stream.subscribe({ types: ['intake.state'], onEvent: (e) => typesOnly.push(e), onResnapshot: (_r, done) => done() })
+  stream.subscribe({
+    topics: ['inbox'],
+    types: ['intake.state'],
+    onEvent: (e) => inboxPinned.push(e),
+    onResnapshot: (_r, done) => done(),
+  })
+  const src = FakeSource.last()
+  src.open()
+
+  src.send('intake.state', event(1, 'intake.state', ['board', 'run']))
+
+  expect(typesOnly.map((e) => e.seq), 'the types-only subscriber missed the gate-open frame').toEqual([1])
+  expect(inboxPinned, 'an inbox-topic-pinned pane received a frame the wire never tags inbox').toEqual([])
+})
+
 test('a subscriber receives only the event types it declared', () => {
   const { stream } = newStream()
   const seen: string[] = []

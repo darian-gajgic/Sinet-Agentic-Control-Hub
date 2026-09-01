@@ -14,10 +14,12 @@ import {
   ClearanceMeter,
   InterviewForm,
   PlanCard,
+  QuestionForm,
   ReviewForm,
   UnderstoodPanel,
   deltaOriginWords,
   humanValue,
+  stakesWords,
 } from './Intake'
 import type { IntakeAnswerBody, IntakeCard, IntakeTaskView } from './api'
 import { mount } from './testing'
@@ -545,6 +547,282 @@ describe('the GF9 drain pins (review M4/M5/L11)', () => {
   })
 })
 
+describe('one stakes truth on the plan card (P3-GF14 R4; exit walk F7/E4)', () => {
+  function stakesCard(stakes: NonNullable<IntakeCard['stakes']>): { view: IntakeTaskView; card: IntakeCard } {
+    const card: IntakeCard = {
+      kind: 'approval',
+      task_id: 't-1',
+      tier: stakes.tier,
+      stakes,
+      approval: {
+        layer1: { restatement: 'A short note.', assumptions: [] },
+        actions: ['approve', 'replan', 'reinterview', 'cancel'],
+      },
+    }
+    return { view: { task_id: 't-1', title: 'A note', kanban_status: 'intake', owner: 'op' }, card }
+  }
+
+  test('the chip carries its why in the platform\'s OWN words — the served plain_reason, never a guess', () => {
+    const { view, card } = stakesCard({
+      tier: 'high',
+      origin: 'fail-closed',
+      plain_reason:
+        'I could not read this request well enough to judge how careful to be, so I am treating it as high-stakes until you tell me otherwise.',
+      can_lower: true,
+    })
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const strip = m.container.querySelector('[data-plan="stakes"]')!
+    expect(strip, 'no stakes strip on a card that serves the block').not.toBeNull()
+    expect(strip.textContent).toContain('I could not read this request well enough')
+    expect(strip.querySelector('[data-stakes-why]')?.getAttribute('data-stakes-origin')).toBe('fail-closed')
+    // High tier keeps its consequence beside the why.
+    expect(strip.textContent).toContain('Approving asks for your PIN')
+    m.unmount()
+  })
+
+  test('the one downward move: the door renders only where can_lower says it is legal, never offers trivial, and sends {action:"lower_stakes", tier}', () => {
+    const { view, card } = stakesCard({
+      tier: 'high',
+      origin: 'classifier',
+      plain_reason: 'Reading the request, I am treating this as high-stakes work.',
+      can_lower: true,
+    })
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    click(m.container.querySelector('[data-stakes-lower-open]'))
+    const door = m.container.querySelector('[data-stakes-lower-door]')!
+    expect(door).not.toBeNull()
+    // Strictly-below targets only — and the zero-interaction band is never
+    // re-entered by hand (S06.4).
+    expect(door.querySelector('[data-stakes-target="standard"]')).not.toBeNull()
+    expect(door.querySelector('[data-stakes-target="low"]')).not.toBeNull()
+    expect(door.querySelector('[data-stakes-target="trivial"]')).toBeNull()
+    expect(door.querySelector('[data-stakes-target="high"]')).toBeNull()
+    // The send is disabled with its printed reason until a target is picked.
+    const send = door.querySelector('[data-stakes-lower-send]') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(door.textContent).toContain('pick the level to move to')
+    click(door.querySelector('[data-stakes-target="low"]'))
+    click(send)
+    expect(sent).toEqual([{ action: 'lower_stakes', tier: 'low' }])
+    m.unmount()
+  })
+
+  test('where the move is illegal the door does not render — a control either works or is not rendered', () => {
+    const { view, card } = stakesCard({
+      tier: 'low',
+      origin: 'classifier',
+      plain_reason: 'Reading the request, I am treating this as low-stakes work.',
+      can_lower: false,
+    })
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    expect(m.container.querySelector('[data-plan="stakes"]')).not.toBeNull()
+    expect(m.container.querySelector('[data-stakes-lower-open]')).toBeNull()
+    expect(m.container.querySelector('[data-stakes-lower-door]')).toBeNull()
+    m.unmount()
+  })
+
+  test('a critique\'s pending downward proposal is VISIBLE and framed as the person\'s to take — and pre-picks the door', () => {
+    const { view, card } = stakesCard({
+      tier: 'high',
+      origin: 'classifier',
+      plain_reason: 'Reading the request, I am treating this as high-stakes work.',
+      proposed_lower: 'low',
+      can_lower: true,
+    })
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const prop = m.container.querySelector('[data-stakes-proposal="low"]')!
+    expect(prop, 'the pending proposal never rendered').not.toBeNull()
+    expect(prop.textContent).toContain('nothing moves on its own')
+    click(m.container.querySelector('[data-stakes-lower-open]'))
+    // The proposal is the natural pick, one confirm away — still explicit.
+    const picked = m.container.querySelector('[data-stakes-target="low"]')
+    expect(picked?.getAttribute('data-active')).toBe('true')
+    m.unmount()
+  })
+
+  test('a card without the served block renders no strip — nothing is invented for an old snapshot', () => {
+    const card: IntakeCard = {
+      kind: 'approval',
+      task_id: 't-1',
+      approval: { layer1: { restatement: 'A note.', assumptions: [] }, actions: ['approve'] },
+    }
+    const m = mount(
+      <PlanCard
+        view={{ task_id: 't-1', title: 'A note', kanban_status: 'intake', owner: 'op' }}
+        card={card}
+        busy={false}
+        onAnswer={onAnswer}
+      />,
+    )
+    expect(m.container.querySelector('[data-plan="stakes"]')).toBeNull()
+    m.unmount()
+  })
+
+  test('stakesWords speaks the four SERVED tiers — "medium" was this file\'s own invention and is dead', () => {
+    expect(stakesWords('standard')).toContain('Ordinary stakes')
+    expect(stakesWords('trivial')).toContain('routine')
+    expect(stakesWords('high')).toContain('PIN')
+    // An unknown value gets the general words only — no guessed severity.
+    expect(stakesWords('someday-new')).not.toContain('PIN')
+  })
+})
+
+describe('the exit-walk F1 dedup: the planner twin\'s THIRD origin spelling', () => {
+  // The walk's literal rows (evidence: ~/.sinet-exitwalk platform.db, ask
+  // intake:t-a35324ab53bf24dd:4): the planner's substantive row wears a PROSE
+  // origin naming no slot at all, and names the skipped question in its TEXT.
+  const twinText =
+    "The list's job is to let people walking past the stand quickly see each soap's name and price so they can decide what to buy. You skipped what it should achieve, so I picked this; tell me if it's wrong."
+  const template =
+    'What it should achieve: you skipped this one, so I will pick something sensible and show you what I picked on the plan.'
+
+  function walkCard(): { view: IntakeTaskView; card: IntakeCard } {
+    const card: IntakeCard = {
+      kind: 'approval',
+      task_id: 't-1',
+      approval: {
+        layer1: {
+          restatement: 'A one-page price list.',
+          understood: {
+            items: [
+              { slot_id: 'purpose_action', name: 'What it should achieve', how: 'assumption', assumption: template },
+            ],
+          },
+          assumptions: [
+            { text: twinText, origin: 'assumed during intake, not stated by you' },
+            { text: template, origin: 'slot:purpose_action' },
+          ],
+        },
+        actions: ['approve'],
+      },
+    }
+    return { view: { task_id: 't-1', title: 'Soap prices', kanban_status: 'intake', owner: 'op' }, card }
+  }
+
+  test('the assumptions block says the skipped fact ONCE: the stale template row drops beside the row carrying the picked value', () => {
+    const { view, card } = walkCard()
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const sec = m.container.querySelector('[data-plan="assumptions"]')!
+    expect(sec.textContent).toContain("The list's job is to let people walking past")
+    // The future-tense placeholder beside an already-picked value is the walk
+    // F1 confusion — it must not render.
+    expect(sec.textContent).not.toContain('so I will pick something sensible')
+    m.unmount()
+  })
+
+  test('POINT BY POINT shows the picked value for the skipped slot, not a dash and not the placeholder', () => {
+    const { view, card } = walkCard()
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const row = m.container.querySelector('[data-plan="understood"] li[data-slot="purpose_action"]')!
+    expect(row, 'the skipped slot left the recap').not.toBeNull()
+    expect(row.querySelector('.understood-value')?.textContent).toContain("The list's job is to let people")
+    expect(row.textContent).not.toContain('so I will pick something sensible')
+    m.unmount()
+  })
+
+  test('the FOURTH spelling (live, ~/.sinet-fefollow2 ask :8): a hyphenated slot name in the twin text still pairs — same words, same order', () => {
+    const { view, card } = walkCard()
+    card.approval!.layer1.understood = {
+      items: [{ slot_id: 'ref_examples', name: 'Examples to follow', how: 'assumption', assumption: 'skipped' }],
+    }
+    card.approval!.layer1.assumptions = [
+      {
+        text: "With nothing to match against, I'll follow the look of a clean, simple market price card. You skipped the examples-to-follow question, so I picked this.",
+        origin: 'assumed during intake, not stated by you',
+      },
+      { text: 'Examples to follow: you skipped this one, so I will pick something sensible.', origin: 'slot:ref_examples' },
+    ]
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const sec = m.container.querySelector('[data-plan="assumptions"]')!
+    expect(sec.textContent).toContain('clean, simple market price card')
+    expect(sec.textContent, 'the template row survived beside a hyphen-spelled twin').not.toContain(
+      'so I will pick something sensible',
+    )
+    m.unmount()
+  })
+
+  test('a SYNONYM never pairs: "the audience question" is not "Who it\'s for", and equating them would hide a served row on a guess', () => {
+    // The same live card's other half: the planner named the skipped slot by
+    // meaning, not by its words. The client refuses to guess synonyms — both
+    // rows render, honestly — and the durable fix is wire-side (the planner
+    // row carrying its own `assumption:<slot>` tag), reported, not papered.
+    const { view, card } = walkCard()
+    card.approval!.layer1.understood = {
+      items: [{ slot_id: 'audience', name: "Who it's for", how: 'assumption', assumption: 'skipped' }],
+    }
+    card.approval!.layer1.assumptions = [
+      {
+        text: 'This is for customers and passers-by at your market stand. You skipped the audience question, so I picked this.',
+        origin: 'assumed during intake, not stated by you',
+      },
+      { text: "Who it's for: you skipped this one, so I will pick something sensible.", origin: 'slot:audience' },
+    ]
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const sec = m.container.querySelector('[data-plan="assumptions"]')!
+    expect(sec.textContent).toContain('customers and passers-by')
+    expect(sec.textContent, 'a synonym was equated to the slot name — a guessed dedup').toContain(
+      'so I will pick something sensible',
+    )
+    m.unmount()
+  })
+
+  test('a passing mention does NOT pair: without the skip narration the template row still renders (nothing hidden on a guess)', () => {
+    const { view, card } = walkCard()
+    card.approval!.layer1.assumptions = [
+      // Names the slot's words but narrates no skip — not a twin.
+      { text: 'What it should achieve is stated in the title.', origin: 'planner' },
+      { text: template, origin: 'slot:purpose_action' },
+    ]
+    const m = mount(<PlanCard view={view} card={card} busy={false} onAnswer={onAnswer} />)
+    const sec = m.container.querySelector('[data-plan="assumptions"]')!
+    expect(sec.textContent).toContain('so I will pick something sensible')
+    m.unmount()
+  })
+})
+
+describe('the clarification card renders served options as chips (exit walk E1\'s FE half)', () => {
+  test('a marker-born question WITH a finite choice set gets the interview idiom: chips, effect lines, and the option value on the wire', () => {
+    // The platform-authored currency marker serves 5 options (backend T2);
+    // the walk's card carried NONE because the PLANNER authored its own
+    // marker text — a wire seam, reported. This pins the FE half: options
+    // that ARE served render as chips on the clarification form.
+    const card: IntakeCard = {
+      kind: 'clarification',
+      task_id: 't-1',
+      questions: [
+        {
+          id: 'marker-1',
+          text: 'Which currency are these prices in?',
+          why: 'The plan shows prices as plain numbers and nothing says what money they are in, so the list could come out in the wrong one.',
+          options: [
+            { label: 'Euros (€)', value: 'euros (€)' },
+            { label: 'US dollars ($)', value: 'US dollars ($)' },
+            {
+              label: 'Leave the numbers as they are',
+              value: 'show the numbers exactly as supplied, with no currency on them',
+              effect: 'The prices appear as plain numbers, with nothing saying what money they are in.',
+            },
+          ],
+        },
+      ],
+    }
+    const m = mount(<QuestionForm card={card} busy={false} onAnswer={onAnswer} />)
+    const editor = m.container.querySelector('[data-question="marker-1"]')!
+    const chips = editor.querySelectorAll('.q-option')
+    expect(chips.length, 'served options did not render as chips').toBe(3)
+    expect(editor.textContent).toContain('so the list could come out in the wrong one')
+    expect(editor.textContent).toContain('The prices appear as plain numbers')
+    // One click + save answers in the card's own vocabulary.
+    click(chips[2])
+    click(editor.querySelector('[data-q-save]'))
+    click(m.container.querySelector('[data-interview="send"]'))
+    expect(sent).toEqual([
+      { answers: [{ id: 'marker-1', value: 'show the numbers exactly as supplied, with no currency on them' }] },
+    ])
+    m.unmount()
+  })
+})
+
 describe('the meter and the plain words', () => {
   test('the clearance meter explains itself with the SERVED floor', () => {
     const m = mount(<ClearanceMeter value={12.1212} floor={75} />)
@@ -552,7 +830,9 @@ describe('the meter and the plain words', () => {
     expect(el?.getAttribute('data-clearance')).toBe('12.1212')
     expect(el?.getAttribute('data-clearance-floor')).toBe('75')
     expect(el?.textContent).toContain('12')
-    expect(el?.textContent).toContain('of the 75 needed')
+    // "points", because "0 of the 60 needed" read at first sight as sixty
+    // QUESTIONS (exit-walk nit); it is a score threshold.
+    expect(el?.textContent).toContain('of the 75 points needed')
     expect(el?.getAttribute('title')).toContain('questions stop once it reaches 75')
     expect(m.container.querySelector('.clearance-stop')).not.toBeNull()
     m.unmount()

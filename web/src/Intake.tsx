@@ -11,6 +11,7 @@ import {
   type IntakeHelp,
   type IntakePlanStep,
   type IntakeQuestion,
+  type IntakeStakes,
   type IntakeTaskView,
   type IntakeUnderstood,
   type PinnableLane,
@@ -631,8 +632,12 @@ const kindLine: Record<string, string> = {
 /** What the last thing this tab SENT was — the waiting face names the actual
  *  state with it (review L2: after a contest the panel still claimed the
  *  machine was "choosing the next questions"). Tab-local on purpose: a cold
- *  resume honestly does not know, and the generic copy is the honest fallback. */
-export type SentKind = 'answers' | 'contest' | 'force-proceed' | 'reinterview'
+ *  resume honestly does not know, and the generic copy is the honest fallback.
+ *  `redraft` is the answers-shaped send whose declared consequence IS a
+ *  redraft — a clarification card's open points, or the review card's "Save
+ *  N changes: redraft the plan" (exit walk F5: that path's wait face never
+ *  said redrafting; only the contest's did). */
+export type SentKind = 'answers' | 'contest' | 'force-proceed' | 'reinterview' | 'redraft'
 
 function Journey({
   view,
@@ -872,7 +877,13 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
         <h2 className="m-0">{view.title !== '' ? view.title : 'Untitled goal'}</h2>
         <p className="journey-under mono">
           {view.task_id} · <Owner id={view.owner} />
-          {view.family !== undefined && view.family !== '' && <> · {view.family}</>}
+          {/* The family in the same plain words the cards use ("write or
+              create content"), never the raw token beside them (exit walk
+              nit: `generic` and "I'm treating this as…" were two
+              vocabularies for one slot). Unknown values render as served. */}
+          {view.family !== undefined && view.family !== '' && (
+            <> · {(familyChoiceLabels[view.family] ?? view.family).toLowerCase()}</>
+          )}
         </p>
       </div>
       <div className="journey-side">
@@ -892,11 +903,17 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
           // has actually considered the goal (its first card).
           (() => {
             const fromCard = view.open_card?.tier !== undefined && view.open_card.tier !== ''
+            // The served stakes truth (P3-GF14 R4.3): the card's own why in
+            // plain words, who set the level, and any pending downward
+            // proposal. Exit walk F7: the chip stood alone with no why in
+            // words and none on hover — the why only ever appeared here on
+            // the intake header, and only for high.
+            const stakes = view.open_card?.stakes
             return (
-              <span className="journey-tier" title={stakesWords(tier)}>
+              <span className="journey-tier" title={stakes !== undefined ? `${stakesWords(tier)} ${stakes.plain_reason}` : stakesWords(tier)}>
                 {/* The guess wears the calm tone whatever its level says — a
                     red first-paint IS the cried wolf. */}
-                <Chip tone={!fromCard ? 'blue' : tier === 'high' ? 'red' : tier === 'medium' ? 'orange' : 'blue'}>
+                <Chip tone={!fromCard ? 'blue' : tier === 'high' ? 'red' : tier === 'standard' ? 'orange' : 'blue'}>
                   stakes: {tier}
                 </Chip>
                 {!fromCard && (
@@ -907,9 +924,18 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
                 )}
                 {/* GF1-W3: the chip keeps the served tier truth; the consequence
                     stands BESIDE it in calm words instead of shouting inside the
-                    red — "EXTRA CARE, PIN TO APPROVE" terrified a birthday-dinner
-                    project. High stakes mean more care, and that is good news. */}
-                {fromCard && tier === 'high' && (
+                    red. With a served stakes block the why is the PLATFORM'S own
+                    sentence; without one (an older snapshot) the high tier keeps
+                    the landed consequence line — nothing is invented for the
+                    other tiers. */}
+                {fromCard && stakes !== undefined && (
+                  <span className="muted text-xs" data-stakes-why data-stakes-origin={stakes.origin ?? undefined}>
+                    {' '}
+                    {stakes.plain_reason}
+                    {tier === 'high' && ' Approving the plan asks for your PIN.'}
+                  </span>
+                )}
+                {fromCard && stakes === undefined && tier === 'high' && (
                   <span className="muted text-xs" data-stakes-why>
                     {' '}
                     handled with extra care — approving the plan asks for your PIN
@@ -918,7 +944,25 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
                 {fromCard && moved !== '' && moved !== tier && (
                   <span className="muted text-xs" data-stakes-moved={moved}>
                     {' '}
-                    was {moved} — the platform refined its reading of the goal as it learned more
+                    {/* WHO moved it picks the sentence: a requester-set tier
+                        is the person's own act (S06.4's one downward move),
+                        and crediting it to "the platform refining its
+                        reading" would misattribute the one move only a
+                        person can make. */}
+                    was {moved} —{' '}
+                    {stakes?.origin === 'requester'
+                      ? 'you set it yourself'
+                      : 'the platform refined its reading of the goal as it learned more'}
+                  </span>
+                )}
+                {stakes?.proposed_lower !== undefined && stakes.proposed_lower !== '' && (
+                  // A critique's pending downward opinion is a proposal TO THE
+                  // PERSON and moves nothing by itself (S06.4/S06.8) — shown,
+                  // with where the one downward move lives.
+                  <span className="muted text-xs" data-stakes-proposal={stakes.proposed_lower}>
+                    {' '}
+                    · a fresh look at the plan reads this as {stakes.proposed_lower}-stakes work — nothing moves
+                    unless you lower it on the plan card
                   </span>
                 )}
               </span>
@@ -940,14 +984,17 @@ function JourneyHead({ view }: { view: IntakeTaskView }) {
 }
 
 /** The stakes chip's plain-words why (W1-4): what the level MEANS, said where
- *  the chip is. The platform sets the level from the goal; an unknown served
- *  value gets the general words only. */
-function stakesWords(tier: string): string {
-  const what = 'Stakes — how much care this goal gets before anything runs. The platform set this from your description.'
+ *  the chip is. The vocabulary is the four served S06.4 tiers — trivial ·
+ *  low · standard · high ("medium" was this file's own invention and never
+ *  arrived on the wire; exit-walk round) — and an unknown served value gets
+ *  the general words only. */
+export function stakesWords(tier: string): string {
+  const what = 'Stakes — how much care this goal gets before anything runs.'
   if (tier === 'high')
-    return `${what} High stakes bring stricter questions, and approving the plan asks for your PIN. The plan card states what made it high.`
-  if (tier === 'medium') return `${what} Medium stakes bring the standard questions and a plain approval.`
-  if (tier === 'low') return `${what} Low stakes keep the ceremony light — trivial read-only work can skip it entirely.`
+    return `${what} High stakes bring stricter questions, and approving the plan asks for your PIN.`
+  if (tier === 'standard') return `${what} Ordinary stakes bring the standard questions and a plain approval.`
+  if (tier === 'low') return `${what} Low stakes keep the ceremony light.`
+  if (tier === 'trivial') return `${what} A small routine job — trivial read-only work can skip the ceremony entirely.`
   return what
 }
 
@@ -984,8 +1031,14 @@ export function ClearanceMeter({ value, floor }: { value: number; floor?: number
         {String(shown)}
         <span className="clearance-unit">
           {/* W9: past the floor, "85 of the 60 needed" reads as a broken
-              fraction — the words flip to say what is actually true. */}
-          {stopAt === undefined ? '/100 settled' : shown >= stopAt ? ` settled — past the ${String(stopAt)} needed` : ` of the ${String(stopAt)} needed`}
+              fraction — the words flip to say what is actually true. "points"
+              because "0 of the 60 needed" read at first sight as sixty
+              QUESTIONS (exit walk nit); it is a score threshold. */}
+          {stopAt === undefined
+            ? '/100 settled'
+            : shown >= stopAt
+              ? ` settled — past the ${String(stopAt)} points needed`
+              : ` of the ${String(stopAt)} points needed`}
         </span>
       </b>
     </div>
@@ -1254,13 +1307,40 @@ export function humanValue(v: string): string {
   return /^[a-z0-9]+(?:[_-][a-z0-9]+)+$/.test(v) ? v.replace(/[_-]+/g, ' ') : v
 }
 
+/** Whole-word test: does this prose name the slot's own plain question name?
+ *  Not substring — a one-word name inside unrelated prose must not count (the
+ *  M5 dedup's own standard: a row dropped on a false match is a hidden served
+ *  fact). Word separators are normalized the way humanValue reads machine
+ *  names: "examples-to-follow" (a live planner spelling, world
+ *  ~/.sinet-fefollow2 ask :8) IS "Examples to follow" — same words, same
+ *  order. A synonym ("the audience question" for "Who it's for") still never
+ *  matches: equating meanings would be a guess, and that half belongs to the
+ *  wire (the planner row's own `assumption:<slot>` tag). */
+function namesSlotInProse(name: string, prose: string): boolean {
+  const words = name.trim().toLowerCase().split(/[\s_-]+/).filter((w) => w !== '')
+  if (words.length === 0) return false
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const word = new RegExp(`(^|\\W)${escaped.join('[\\s_-]+')}(\\W|$)`)
+  return word.test(prose.toLowerCase())
+}
+
 /**
  * The plan card's substantive assumed values, keyed by the slot each covers:
  * parsed from the planner's own assumption rows whose origin is
  * `assumption:<slot,…>`. This is the resolution the wire carries — the actual
  * "sensible default", stated by the planner.
+ *
+ * With `names` (slot_id → the question's plain name, off the card's own
+ * understood items) a THIRD planner spelling also resolves (exit walk F1):
+ * a row whose origin is free prose naming no slot at all ("assumed during
+ * intake, not stated by you") but whose TEXT narrates the skip and names the
+ * question ("…You skipped what it should achieve, so I picked this…"). The
+ * skip-narration requirement keeps a passing mention from claiming a slot.
  */
-function slotResolutions(assumptions: { text: string; origin?: string }[]): Map<string, string> {
+function slotResolutions(
+  assumptions: { text: string; origin?: string }[],
+  names?: Map<string, string>,
+): Map<string, string> {
   const out = new Map<string, string>()
   for (const a of assumptions) {
     // `assumption:<slots>` is the platform's tag for the planner's stated
@@ -1270,6 +1350,16 @@ function slotResolutions(assumptions: { text: string; origin?: string }[]): Map<
     if (a.origin === undefined || !(a.origin.startsWith('assumption:') || a.origin.startsWith('interview:'))) continue
     for (const slot of originSlots(a.origin)) {
       if (!out.has(slot)) out.set(slot, a.text)
+    }
+  }
+  if (names !== undefined) {
+    for (const a of assumptions) {
+      const origin = a.origin ?? ''
+      if (origin.startsWith('assumption:') || origin.startsWith('interview:') || origin.startsWith('slot:')) continue
+      if (!/\bskip/i.test(a.text) && !/\bskip/i.test(origin)) continue
+      for (const [slot, name] of names) {
+        if (!out.has(slot) && namesSlotInProse(name, a.text)) out.set(slot, a.text)
+      }
     }
   }
   return out
@@ -1407,14 +1497,18 @@ export function UnderstoodPanel({
       names: [isCarriedOver(it) ? humanSlot(it.name) : it.name],
       slots: [it.slot_id],
       value:
+        // The empty-value face is WORDS, not a bare dash: the row's name
+        // already ends in a dash (CSS), so a '—' value rendered "What it
+        // should achieve — —" (exit walk nit). The narration's why-line
+        // below carries the story; this just refuses to be a glyph.
         narration !== null
           ? narration.value !== ''
             ? narration.value
-            : (resolutions?.get(it.slot_id) ?? '—')
+            : (resolutions?.get(it.slot_id) ?? 'not picked yet')
           : label !== ''
             ? label
             : remainder === ''
-              ? '—'
+              ? 'nothing recorded'
               : humanValue(remainder),
       // The machine value stays the editor's seed even where the label shows:
       // the label is display-only and must never ride back as the answer.
@@ -1610,7 +1704,7 @@ function useElapsedSeconds(active: boolean): number {
  * about leaving: the card lands in the Inbox and the page resumes on its own.
  * No spinner stands alone, nothing pretends to know a percentage.
  */
-function ComposingFace({ mode }: { mode: 'answer' | 'approve' }) {
+function ComposingFace({ mode }: { mode: 'answer' | 'approve' | 'redraft' }) {
   const seconds = useElapsedSeconds(true)
   const long = seconds >= 90
   return (
@@ -1620,19 +1714,29 @@ function ComposingFace({ mode }: { mode: 'answer' | 'approve' }) {
       </span>
       <div className="composing-body">
         <p className="composing-head">
-          {mode === 'approve' ? 'Approved — it is starting the work' : 'Answers recorded — it is working on what comes next'}
+          {mode === 'approve'
+            ? 'Approved — it is starting the work'
+            : mode === 'redraft'
+              ? 'Recorded — it is redrafting the plan'
+              : 'Answers recorded — it is working on what comes next'}
         </p>
         <p className="composing-sub">
           {mode === 'approve'
             ? 'The approval is being recorded and the work handed to its worker. This usually takes a few seconds.'
-            : // TODAY'S TRUTH (PH-1, 2026-08-17): the phrase seat has never
-              // answered live — questions arrive in standard wording and the
-              // page admits it per round — so this face does not claim a
-              // "phrasing" step it cannot show. The choosing is real.
-              'It is choosing the next questions, or drafting the plan. A question round takes about a minute on the local models; the full plan is drafted in one piece and can take a few minutes.'}
+            : mode === 'redraft'
+              ? // The send that got here PROMISED a redraft (a clarification
+                // card's open points, the review card's save, a contest) — so
+                // the wait says redrafting, not "choosing the next questions"
+                // (exit walk F5). The plan is drafted in one piece.
+                'The plan is being redrafted in one piece with what you just settled — that takes a few minutes. The fresh card opens with what changed.'
+              : // TODAY'S TRUTH (PH-1, 2026-08-17): the phrase seat has never
+                // answered live — questions arrive in standard wording and the
+                // page admits it per round — so this face does not claim a
+                // "phrasing" step it cannot show. The choosing is real.
+                'It is choosing the next questions, or drafting the plan. A question round takes about a minute on the local models; the full plan is drafted in one piece and can take a few minutes.'}
         </p>
         <p className="composing-clock mono">working · {elapsedWords(seconds)}</p>
-        {mode === 'answer' && long && (
+        {(mode === 'answer' || mode === 'redraft') && long && (
           <p className="composing-sub">
             Still at it — a full plan draft is the long step, and it arrives whole. You can leave: the card lands in
             your <Link to={hrefFor('inbox')}>Inbox</Link> and this page resumes by itself when you come back.
@@ -1693,6 +1797,20 @@ function CardPanel({
     stepupRef.current?.querySelector('input')?.focus()
   }, [needPin])
 
+  // Whether an answers-shaped send from THIS card redrafts the plan (exit
+  // walk F5): a clarification card's open points hold a drafted plan, and the
+  // review card's save says "redraft the plan" on its own button — so their
+  // wait faces must say redrafting, exactly as the contest's already does.
+  const redraftCard =
+    card.kind === 'clarification' ||
+    (card.kind === 'interview' && (card.questions ?? []).some((q) => q.resolution !== undefined))
+  // What the in-flight send IS, so the composing face can tell ITS truth per
+  // verb: an approve is the only send that may say "Approved"; a contest is a
+  // redraft; a cancel or a stakes-lowering is a short request whose button
+  // already says what it does (no face swap — swapping to "Approved — it is
+  // starting the work" on a cancel would be a lie this file introduced).
+  const sentActionRef = useRef<string | undefined>(undefined)
+
   // ONE answer path for every card kind: send, fold the returned view in, and
   // render any refusal in the server's own words. `pin_required` arms the
   // step-up panel instead of failing — the S01.9 step-up rides the same request.
@@ -1700,6 +1818,7 @@ function CardPanel({
     if (busy) return
     setBusy(true)
     setRefusal('')
+    sentActionRef.current = body.action
     // What KIND of send this is (review L2) — read off the body, so the wait
     // face that replaces this card can name the actual state.
     onSent?.(
@@ -1709,7 +1828,9 @@ function CardPanel({
           ? 'reinterview'
           : body.force_proceed === true
             ? 'force-proceed'
-            : 'answers',
+            : redraftCard && body.answers !== undefined
+              ? 'redraft'
+              : 'answers',
     )
     api.answerAsk(askID, { answer: body, ...(pin !== '' ? { pin } : {}) }).then(
       (v) => {
@@ -1773,8 +1894,22 @@ function CardPanel({
   // While the answer request is in flight the FORM is done saying anything —
   // the wait is the story now (a phrased round takes ~a minute, a plan draft
   // minutes, and both ride this very request), so the composing face replaces
-  // the dead controls instead of dimming them.
-  const composing = busy && (kind === 'approval' || kind === 'approval.delta' ? 'approve' : 'answer')
+  // the dead controls instead of dimming them. The face is picked by the VERB
+  // that is actually in flight: only an approve says "Approved", a contest
+  // and a redrafting answers-send say redrafting, and the short requests
+  // (cancel, lower_stakes) keep their own busy button instead of a face that
+  // would claim something else is happening.
+  const composing: 'approve' | 'redraft' | 'answer' | false = !busy
+    ? false
+    : kind === 'approval' || kind === 'approval.delta'
+      ? sentActionRef.current === 'approve'
+        ? 'approve'
+        : sentActionRef.current === 'replan'
+          ? 'redraft'
+          : false
+      : redraftCard
+        ? 'redraft'
+        : 'answer'
   return (
     <div className="door-card" data-card-kind={kind}>
       {reissued === true && (
@@ -2715,7 +2850,7 @@ function ReviewRow({ q, change, onOpen }: { q: IntakeQuestion; change?: Given; o
  * keep holding it, and the send button says which. Clarification cards are
  * never phrased BY DESIGN, so no stock marker rides here (#6).
  */
-function QuestionForm({
+export function QuestionForm({
   card,
   busy,
   onAnswer,
@@ -3107,6 +3242,10 @@ const planActionLabels: Record<string, string> = {
   reinterview: 'Change my answers…',
   cancel: 'Cancel the task',
   compose: 'Compose a specialist for this…',
+  // S06.4's one downward move (P3-GF14 R4.5) — named here so the armed PIN
+  // step-up can say what it holds; the door itself lives on the stakes strip,
+  // because this answer does not close the card.
+  lower_stakes: 'Lower the stakes',
 }
 
 const planActionWhy: Record<string, string> = {
@@ -3114,6 +3253,140 @@ const planActionWhy: Record<string, string> = {
   replan: 'tap what is wrong, as many things as you like, and say it in your words. It redrafts once and shows exactly what changed.',
   reinterview: 'reopens every question with your current answers filled in. Change what you want; the rest stays.',
   cancel: 'stops here. Nothing runs, nothing is spent, the task keeps its record.',
+}
+
+/** The four S06.4 stakes tiers in rank order — used ONLY to offer lowering
+ *  targets strictly below the standing tier. `trivial` is never offered: the
+ *  zero-interaction band is never re-entered by hand (S06.4), and the
+ *  server's own walls refuse anything illegal anyway (§71: one rule, two
+ *  readers — the card's `can_lower` and the verb read the same walls). */
+const stakesTierRank: Record<string, number> = { trivial: 0, low: 1, standard: 2, high: 3 }
+
+function lowerTargets(current: string): string[] {
+  const rank = stakesTierRank[current] ?? -1
+  return ['standard', 'low'].filter((t) => stakesTierRank[t] < rank)
+}
+
+/** A lowering target in the reader's words; the machine token stays visible
+ *  because it is what every chip on this journey shows. */
+const lowerTargetWords: Record<string, string> = {
+  standard: 'Ordinary care (standard)',
+  low: 'Light ceremony (low)',
+}
+
+/**
+ * The plan card's stakes strip (P3-GF14 R4; exit walk F7): ONE stakes truth
+ * where the person decides — the served tier with its plain-words why, any
+ * pending downward proposal from the plan's own critique (a proposal TO the
+ * requester; it moves nothing by itself, S06.4/S06.8), and — exactly where
+ * `can_lower` says the move is legal — the one downward door. The verb is
+ * `lower_stakes` with the target tier, riding the ordinary card answer: the
+ * card stays open (the approval decision is still owed) and re-serves at the
+ * settled tier, so the PIN step-up follows the tier the task actually has.
+ */
+function PlanStakes({
+  stakes,
+  busy,
+  onAnswer,
+}: {
+  stakes: IntakeStakes
+  busy: boolean
+  onAnswer: (b: IntakeAnswerBody) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pick, setPick] = useState('')
+  const targets = stakes.can_lower ? lowerTargets(stakes.tier) : []
+  const proposal = stakes.proposed_lower ?? ''
+  return (
+    <section className="plan-sec plan-stakes" data-plan="stakes" data-stakes-tier={stakes.tier}>
+      <p className="m-0 plan-stakes-line">
+        <Chip tone={stakes.tier === 'high' ? 'red' : stakes.tier === 'standard' ? 'orange' : 'blue'}>
+          stakes: {stakes.tier}
+        </Chip>{' '}
+        <span data-stakes-why data-stakes-origin={stakes.origin ?? undefined}>{stakes.plain_reason}</span>
+        {stakes.tier === 'high' && <span className="muted"> Approving asks for your PIN in the same breath.</span>}
+      </p>
+      {proposal !== '' && (
+        <p className="plan-stakes-proposal m-0" data-stakes-proposal={proposal}>
+          A fresh set of eyes on the drafted plan reads this as {proposal}-stakes work. That is a proposal to you,
+          not a change — nothing moves on its own, and the level above stands until you lower it here.
+        </p>
+      )}
+      {targets.length > 0 &&
+        (!open ? (
+          <button
+            type="button"
+            className="plan-stakes-lower"
+            data-stakes-lower-open
+            disabled={busy}
+            onClick={() => {
+              setOpen(true)
+              if (proposal !== '' && stakesTierRank[proposal] < (stakesTierRank[stakes.tier] ?? -1)) setPick(proposal)
+            }}
+          >
+            Treat this as lower-stakes work…
+          </button>
+        ) : (
+          <div className="plan-stakes-door" data-stakes-lower-door>
+            <p className="m-0 text-sm">
+              Lowering the stakes is yours alone to do, and it takes effect right away: this card stays open at the
+              new level and the ceremony follows it. It never goes below what the platform&apos;s own rules hold it
+              at — a move they refuse comes back with its reason, and nothing changes.
+            </p>
+            <div className="q-options" role="group" aria-label="treat this task as">
+              {targets.map((t) => {
+                const active = pick === t
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    className="q-option"
+                    data-stakes-target={t}
+                    data-active={active ? 'true' : undefined}
+                    aria-pressed={active}
+                    onClick={() => {
+                      setPick((p) => (p === t ? '' : t))
+                    }}
+                  >
+                    {active && <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
+                    {lowerTargetWords[t] ?? t}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="door-acts">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={pick === '' || busy}
+                aria-busy={busy}
+                data-stakes-lower-send
+                onClick={() => {
+                  onAnswer({ action: 'lower_stakes', tier: pick })
+                }}
+              >
+                {busy ? 'Lowering…' : pick === '' ? 'Lower the stakes' : `Lower the stakes: treat as ${pick}`}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                data-stakes-lower-back
+                onClick={() => {
+                  setOpen(false)
+                  setPick('')
+                }}
+              >
+                Keep it as it is
+              </Button>
+              {pick === '' && !busy && (
+                <span className="door-why">pick the level to move to — on high-stakes work your PIN confirms it</span>
+              )}
+            </div>
+          </div>
+        ))}
+    </section>
+  )
 }
 
 /** One armed contest: the card's own target key, the words the person tapped,
@@ -3436,6 +3709,12 @@ export function PlanCard({
           rewritten plan. */}
       {prevApproval !== undefined && <PlanChanged previous={prevApproval} current={a} />}
 
+      {/* One stakes truth on the card the person decides at (P3-GF14 R4;
+          exit walk F7): the why in plain words, a critique's pending downward
+          proposal, and the one downward door where it is legal. Absent on
+          snapshots written before the block existed — nothing is invented. */}
+      {card.stakes !== undefined && <PlanStakes stakes={card.stakes} busy={busy} onAnswer={onAnswer} />}
+
       <section className="plan-sec" data-plan="understood">
         <h3 className="plan-h">What I understood</h3>
         <Contestable target="restatement" label="what I understood" contest={contest}>
@@ -3452,7 +3731,7 @@ export function PlanCard({
         <UnderstoodPanel
           understood={l1.understood}
           heading="Point by point — what was settled, and how"
-          resolutions={slotResolutions(l1.assumptions ?? [])}
+          resolutions={slotResolutions(l1.assumptions ?? [], slotNames)}
         />
       </section>
 
@@ -3893,7 +4172,11 @@ export function PlanCard({
           </div>
         </div>
       )}
-      {view.tier === 'high' && !contesting && !cancelling && (
+      {/* The card's OWN tier picks this line (one stakes truth per card,
+          P3-GF14 R4): a lowering re-serves the card at the settled tier, and
+          a footnote still keyed on the view's stale figure would demand a PIN
+          the platform no longer asks for. */}
+      {(card.stakes?.tier ?? card.tier ?? view.tier) === 'high' && !contesting && !cancelling && (
         <p className="muted mt-1 text-xs">High stakes: approving asks for your PIN in the same breath.</p>
       )}
     </div>
@@ -3927,7 +4210,10 @@ function AssumptionList({
 }) {
   const ctl = contest ?? null
   if (assumptions.length === 0) return <p className="muted m-0">None. Everything it needed, you answered.</p>
-  const covered = new Set(slotResolutions(assumptions).keys())
+  // `names` rides into the resolution pass too, so a planner twin whose
+  // ORIGIN names no slot but whose TEXT narrates the skip (exit walk F1's
+  // third spelling) still covers its slot — and its template row drops below.
+  const covered = new Set(slotResolutions(assumptions, names).keys())
   const plainName = (slot: string) => names?.get(slot) ?? humanSlot(slot)
   type Shown = (typeof assumptions)[number] & { display?: { name: string; value: string; why: string } }
   const shown: Shown[] = []
@@ -3964,14 +4250,18 @@ function AssumptionList({
           // Whole-word match, not substring: a one-word plain name ("tone")
           // inside unrelated prose must not count as the planner naming THIS
           // slot — a dropped row on a false match is a hidden served fact.
-          const name = plainName(slot).toLowerCase()
-          const word = new RegExp(`(^|\\W)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\W|$)`)
+          // The planner's twin names the slot in its ORIGIN prose (the drain
+          // round's witnessed spelling) or — third spelling, exit walk F1 —
+          // in its TEXT, where the skip-narration requirement keeps a
+          // passing mention from counting.
+          const name = plainName(slot)
           return assumptions.some(
             (other) =>
               other !== as &&
               other.origin !== undefined &&
               !other.origin.startsWith('slot:') &&
-              word.test(other.origin.toLowerCase()),
+              (namesSlotInProse(name, other.origin) ||
+                (/\bskip/i.test(other.text) && namesSlotInProse(name, other.text))),
           )
         }
         if (slots.every((s) => covered.has(s) || twin(s))) continue
@@ -4255,11 +4545,13 @@ function NoCardYet({
             : working
               ? lastSent === 'contest'
                 ? 'Changes recorded — it is redrafting the plan'
-                : lastSent === 'force-proceed'
-                  ? 'Understood — it goes straight to the plan'
-                  : lastSent === 'reinterview'
-                    ? 'Plan sent back — it returns to its questions'
-                    : 'Answers recorded — it is working'
+                : lastSent === 'redraft'
+                  ? 'Answers recorded — it is redrafting the plan'
+                  : lastSent === 'force-proceed'
+                    ? 'Understood — it goes straight to the plan'
+                    : lastSent === 'reinterview'
+                      ? 'Plan sent back — it returns to its questions'
+                      : 'Answers recorded — it is working'
               : 'The task is born — it is reading your goal'}
       </h3>
       <p className="landed-sub">
@@ -4282,6 +4574,16 @@ function NoCardYet({
               It took your changes and is redrafting the plan — one redraft with all of it, and the fresh card
               opens with exactly what changed. A redraft takes a few minutes. It appears RIGHT HERE the moment it
               exists, and lands in your <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
+            </>
+          ) : lastSent === 'redraft' ? (
+            // The send that got here PROMISED a redraft — the clarification
+            // card's open points, or "Save N changes: redraft the plan" — so
+            // this face says redrafting, never "choosing the next questions"
+            // (exit walk F5: only the contest path had its own words).
+            <>
+              It took what you settled and is redrafting the plan — one piece, a few minutes — and the fresh card
+              shows what changed. It appears RIGHT HERE the moment it exists, and lands in your{' '}
+              <Link to={hrefFor('inbox')}>Inbox</Link> too. You can leave; nothing is lost.
             </>
           ) : lastSent === 'force-proceed' ? (
             <>

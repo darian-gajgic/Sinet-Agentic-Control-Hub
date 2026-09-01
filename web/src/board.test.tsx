@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { applyDrag, hintPostsFor, matchesFilter, ownQueueDroppableId, ownQueued, spacedRank } from './Board'
 import type { TaskListItem } from './api'
-import { FakeSource, oversightRoutes, scriptedFetch, signedIn } from './doubles'
+import { FakeSource, fixtures, oversightRoutes, scriptedFetch, signedIn } from './doubles'
 import { EventStream } from './events'
 import { beyondFold, columnsFor } from './kanban'
 import { flush, mount } from './testing'
@@ -174,6 +174,52 @@ test('a cancelled task renders IN Backlog wearing the cancelled sign (D-B)', asy
   // question, because it is not one.
   expect(card.textContent).toContain('cancelled — the task says why')
   expect(card.textContent, 'the stale pre-RW-19 chip wording is back').not.toContain('open for why')
+  view.unmount()
+})
+
+test('the cancelled card\'s expansion says the why in the person\'s OWN words — never the record\'s rule citation (exit walk E8)', async () => {
+  // The board LIST read carries no cancel reason (a reported wire seam), so
+  // the chip stays a pointer — but the one-click expansion reads the task's
+  // own detail, and there the why must wear the TaskDetail treatment: the
+  // human_reason where one was given, its honest absence otherwise, and the
+  // mechanical `reason` sentence never standing where a motive should be.
+  const tasks = { tasks: fixtureTasks(), cursor: 89, truncated: false }
+  tasks.tasks = tasks.tasks.map((t) => (t.task_id === 't-triage' ? { ...t, kanban_status: 'cancelled' } : t))
+  const detail = fixtures.taskDetailDraft() as Record<string, unknown>
+  detail.kanban_status = 'cancelled'
+  detail.decisions = [
+    {
+      seq: 9,
+      type: 'decision.recorded',
+      ts: '2026-08-30T10:00:00Z',
+      actor: 'darian',
+      card_id: 'cancel:t-triage',
+      card_type: 'cancel',
+      decision: 'cancel',
+      reason: 'cancelled under S02.3 rule 4.5 (requester act; ladder invoked)',
+      human_reason: 'Changed my mind, I will write the note myself.',
+    },
+  ]
+  const { view } = await board({
+    ...oversightRoutes(),
+    'GET /api/tasks': { body: tasks },
+    'GET /api/tasks/t-triage': { body: detail },
+  })
+  const backlog = view.container.querySelector('.kanban-col[data-status="intake"]')!
+  const card = [...backlog.querySelectorAll('.task-card')].find((c) =>
+    c.textContent?.includes('Triage the inbox backlog'),
+  )!
+  act(() => {
+    ;(card.querySelector('.task-expand') as HTMLElement).click()
+  })
+  await flush()
+  const sub = card.querySelector('.task-sub')!
+  expect(sub, 'the expansion never rendered').not.toBeNull()
+  expect(sub.textContent).toContain('Why it is cancelled')
+  expect(sub.querySelector('[data-cancel-why="given"]')?.textContent).toContain(
+    'Changed my mind, I will write the note myself.',
+  )
+  expect(sub.textContent, 'the mechanical rule citation stood where the motive should be').not.toContain('S02.3')
   view.unmount()
 })
 

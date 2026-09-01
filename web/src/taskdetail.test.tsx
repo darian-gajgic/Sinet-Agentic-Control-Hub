@@ -2,7 +2,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import App from './App'
-import { ReceiptView, eventTypeWords, fmtDuration } from './TaskDetail'
+import { ReceiptView, approximationWords, currencyWords, eventTypeWords, fmtDuration } from './TaskDetail'
 import type { Receipt, RunDetail, TaskDetail as Detail } from './api'
 import { FakeSource, fixtures, oversightRoutes, type Scripted, scriptedFetch } from './doubles'
 import { intakeResumeHref } from './Inbox'
@@ -294,6 +294,79 @@ test('a run with no receipt renders the served reason', async () => {
   detail.runs = [{ run_id: 'r-new', state: 'queued', created_ts: '2026-07-20T09:10:00Z', receipt_absent: 'no receipt yet' }]
   const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
   expect(view.container.textContent).toContain('no receipt yet')
+})
+
+test('a TERMINAL run renders the served state-aware absence — the demo-seed guess is dead (P3-GF14 R6; review M10)', async () => {
+  // The wire now speaks to the run's own ending (api/reads.go
+  // receiptAbsence), naming a crashed run's successor. The client-side
+  // terminal guess that stood here ("a demo-seeded task can be minted
+  // finished without one") misattributed on a REAL crashed run — exactly the
+  // sentence this pin forbids.
+  const detail = fixtures.taskDetail() as unknown as Detail
+  detail.runs = [
+    {
+      run_id: 'r-broke',
+      state: 'crashed',
+      created_ts: '2026-07-20T09:10:00Z',
+      receipt_absent:
+        'this attempt broke partway, so no receipt was written for it — the platform carried the work on in a fresh run (r-broke.g2), and that run carries the receipt. What this attempt used is still in the task\'s own record.',
+    },
+  ]
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('carried the work on in a fresh run (r-broke.g2)')
+  expect(text, 'the hardcoded demo-seed guess survived on a receipts absence').not.toContain('demo-seeded')
+})
+
+test('a terminal run whose snapshot predates the member gets honest fallback words, not a promise and not a guess', async () => {
+  const detail = fixtures.taskDetail() as unknown as Detail
+  detail.runs = [{ run_id: 'r-old', state: 'completed', created_ts: '2026-07-20T09:10:00Z' }]
+  const { view } = await task('t-ship', { ...detailRoutes(), 'GET /api/tasks/t-ship': { body: detail } })
+  const text = view.container.textContent ?? ''
+  expect(text).toContain('no receipt is recorded for this run')
+  expect(text).not.toContain('demo-seeded')
+})
+
+test('the receipt summary speaks plain words for the machine members; the exact values stay on data attributes (exit walk F6)', () => {
+  const receipt = fixtures.receipt() as unknown as Receipt
+  const view = mount(<ReceiptView receipt={receipt} />)
+  const text = view.container.textContent ?? ''
+  // The engineer dialect is gone from the prose…
+  expect(text).not.toContain('currency api-equivalent')
+  expect(text).not.toContain('worst approximation tier')
+  // …the plain words stand in its place…
+  expect(text).toContain(currencyWords(receipt.currency))
+  expect(text).toContain(approximationWords(receipt.worst_tier))
+  // …and the served values are still on the record, humanized, never hidden.
+  const p = view.container.querySelector('[data-receipt-currency]')!
+  expect(p.getAttribute('data-receipt-currency')).toBe(receipt.currency)
+  expect(p.getAttribute('data-worst-tier')).toBe(String(receipt.worst_tier))
+  view.unmount()
+})
+
+test('the registered formula ref leaves the prose line — machine provenance rides the data attribute and the label\'s hover (exit walk F6)', () => {
+  const receipt = fixtures.receipt() as unknown as Receipt
+  const ref = receipt.direct_use.formula_ref
+  expect(ref, 'the fixture lost its formula ref').not.toBe('')
+  const view = mount(<ReceiptView receipt={receipt} />)
+  const text = view.container.textContent ?? ''
+  // A repository path with a section sign is not a sentence for a household
+  // reader on a money surface.
+  expect(text).not.toContain(ref)
+  const p = view.container.querySelector('.direct-use')!
+  expect(p.getAttribute('data-formula-ref')).toBe(ref)
+  // The registered LABEL stays verbatim (its GF13 keep row).
+  expect(text).toContain(receipt.direct_use.label)
+  view.unmount()
+})
+
+test('the machine-member word maps: known values speak, unknown values render as themselves (§42)', () => {
+  expect(currencyWords('api-equivalent')).toContain('not a bill')
+  expect(currencyWords('real')).toContain('billed money')
+  expect(currencyWords('space-credits')).toBe('currency space-credits')
+  expect(approximationWords(1)).toContain("provider's own per-call numbers")
+  expect(approximationWords(5)).toContain('never a silent zero')
+  expect(approximationWords(9)).toBe('approximation tier 9')
 })
 
 // ── live activity (R11; drain r1 D4) ──────────────────────────────────────

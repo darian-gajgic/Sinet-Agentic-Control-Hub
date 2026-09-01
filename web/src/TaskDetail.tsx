@@ -258,6 +258,38 @@ const purposeWords: Record<string, string> = {
   execution: 'doing the work',
 }
 
+/** The S10.10 receipt `currency` member in the reader's words (exit walk F6:
+ *  "currency api-equivalent" is engineer dialect on a money surface).
+ *  `api-equivalent` is D5's flat-rate posture — figures are what the calls
+ *  would have cost at list prices, not a bill. An unknown served value
+ *  renders under its own name (§42). */
+export function currencyWords(currency: string): string {
+  if (currency === 'api-equivalent') return 'dollar figures are list-price equivalents, not a bill'
+  if (currency === 'real') return 'dollar figures are real billed money'
+  return `currency ${currency}`
+}
+
+/** The S10.1 honest-approximation rank (1 best … 5 unknown) in the reader's
+ *  words: HOW the usage behind this receipt was counted. The served number
+ *  stays on the paragraph's data attribute; an unknown rank prints itself
+ *  (§42). */
+export function approximationWords(tier: number): string {
+  switch (tier) {
+    case 1:
+      return "usage counted from the provider's own per-call numbers"
+    case 2:
+      return "usage counted from the engine's own aggregate counters"
+    case 3:
+      return "usage derived from the plan's own units"
+    case 4:
+      return 'usage estimated by tokenizer before the run'
+    case 5:
+      return 'usage could not be counted — listed UNPRICED, never a silent zero'
+    default:
+      return `approximation tier ${String(tier)}`
+  }
+}
+
 /** fmtDuration: seconds → human words. Raw seconds never render (C2-13). */
 export function fmtDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds))
@@ -780,8 +812,14 @@ export function LiveActivity({ run, stream }: { run: TaskRunView | null; stream?
             </p>
           )}
           <ul className="counters m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-muted-foreground">
-            <li>{String(card.counters.steps)} steps</li>
-            <li>{String(card.counters.tokens)} tokens</li>
+            {/* Counted words agree with their count — "1 steps" (exit walk
+                nit) is the kind of seam a requester notices. */}
+            <li>
+              {String(card.counters.steps)} step{card.counters.steps === 1 ? '' : 's'}
+            </li>
+            <li>
+              {String(card.counters.tokens)} token{card.counters.tokens === 1 ? '' : 's'}
+            </li>
             {/* Human-readable, never raw seconds (C2-13: "1500991 s elapsed"
                 is the banned class). The counter stays monotonic fact — AND IT
                 STOPS AT THE TERMINAL (return-visit item 7): the served
@@ -1236,11 +1274,14 @@ function DeliverablesBlock({ taskID, ended, stream }: { taskID: string; ended?: 
       {data && data.length === 0 ? (
         ended === true ? (
           // W2-2: on an ENDED task, "no deliverables YET" promised something
-          // still coming. The ended state picks the honest tense — and names
-          // the one legitimate way a finished task has nothing to show.
+          // still coming. The ended state picks the honest tense. The
+          // demo-seed clause that stood here guessed a CAUSE this page cannot
+          // know (the M10 class: the same guess misattributed on a real
+          // crashed run) — the honest words claim only what is served, and
+          // point at the records that do say how it ended.
           <EmptyState
             what="This task is finished, and no deliverable is recorded for it."
-            why="A real run attaches what it produced, and it would be listed here with a door into review. A demo-seeded task can be minted finished with nothing attached — that is the seed's shortcut, not lost work."
+            why="A run that produces work attaches it, and it would be listed here with a door into review. Nothing is attached on this one — the stage rail and receipts above say how its runs ended."
           />
         ) : (
         <EmptyState
@@ -1324,16 +1365,17 @@ function ReceiptsBlock({ runs, stale, reload }: { runs: TaskRunView[]; stale: bo
                 <CancelRun run={r} reload={reload} />
                 {r.receipt ? (
                   <ReceiptView receipt={r.receipt} modeNoteRepeated={repeated} directUseRepeated={directRepeated} />
-                ) : terminalStates.includes(r.state) ? (
-                  // W2-2 (the walk's worst trust hit): the served absence line
-                  // says receipts arrive "at the run's terminal transition" —
-                  // read on a run that IS terminal, it promised a receipt that
-                  // will never come. The run's own served state picks honest
-                  // words instead; the wire's line stays for live runs, where
-                  // it is true.
-                  <Absent reason="this run ended without a recorded receipt — nothing was itemized for it. A real run leaves its receipt when it ends; a demo-seeded task can be minted finished without one" />
                 ) : (
-                  <Absent reason={r.receipt_absent ?? 'no receipt'} />
+                  // The SERVED absence reason (P3-GF14 R6): the wire now
+                  // speaks to the run's own ending, state by state — a
+                  // terminal run is never promised a receipt that will not
+                  // come, and a crashed leg names the successor carrying the
+                  // work. The client-side terminal guess that stood here
+                  // ("a demo-seeded task can be minted finished without
+                  // one") misattributed on a REAL crashed run (review M10)
+                  // and is deleted; the fallback covers only a snapshot
+                  // written before the member existed.
+                  <Absent reason={r.receipt_absent ?? 'no receipt is recorded for this run'} />
                 )}
               </div>
             )
@@ -1409,13 +1451,22 @@ export function ReceiptView({
         </table>
       </div>
       )}
-      <p>
-        Total priced <Money usd={receipt.total_priced_usd} /> over {String(receipt.total_calls)} calls
+      <p data-receipt-currency={receipt.currency} data-worst-tier={String(receipt.worst_tier)}>
+        Total priced <Money usd={receipt.total_priced_usd} /> over {String(receipt.total_calls)} call
+        {receipt.total_calls === 1 ? '' : 's'}
         {receipt.total_unpriced_calls > 0 && (
-          <span className="warn-flag"> · {String(receipt.total_unpriced_calls)} call(s) UNPRICED</span>
+          <span className="warn-flag">
+            {' '}
+            · {String(receipt.total_unpriced_calls)} call{receipt.total_unpriced_calls === 1 ? '' : 's'} UNPRICED
+          </span>
         )}{' '}
         <span className="muted">
-          · currency {receipt.currency} · worst approximation tier {String(receipt.worst_tier)}
+          {/* The machine members in the reader's words (exit walk F6:
+              "currency api-equivalent · worst approximation tier 1" is
+              engineer dialect on a money surface). The exact served values
+              stay on this paragraph's data attributes — humanized, never
+              hidden (§42: an unknown value renders as itself). */}
+          · {currencyWords(receipt.currency)} · {approximationWords(receipt.worst_tier)}
         </span>
       </p>
 
@@ -1467,8 +1518,16 @@ export function ReceiptView({
         // The same registered pricing note, word for word, on every run of a
         // task read as a stuck footnote (review #17) — the first receipt
         // carries it whole; repeats point up.
-        <p className="direct-use" data-direct-use-label={direct.label} data-direct-use="repeated">
-          <span className="direct-use-label text-foreground">{direct.label}</span>:{' '}
+        <p
+          className="direct-use"
+          data-direct-use-label={direct.label}
+          data-direct-use="repeated"
+          data-formula-ref={direct.formula_ref}
+        >
+          <span className="direct-use-label text-foreground" title={`the registered formula: ${direct.formula_ref}`}>
+            {direct.label}
+          </span>
+          :{' '}
           <span className="muted">same pricing note as the receipt above</span>
           {!direct.unpriced && (
             <>
@@ -1478,14 +1537,23 @@ export function ReceiptView({
           )}
         </p>
       ) : (
-      <p className="direct-use" data-direct-use-label={direct.label}>
-        <span className="direct-use-label text-foreground">{direct.label}</span>:{' '}
+      <p className="direct-use" data-direct-use-label={direct.label} data-formula-ref={direct.formula_ref}>
+        {/* The registered LABEL stays verbatim (its GF13 keep row). The
+            formula REF is machine provenance — a repository path with a
+            section sign, meaningless and slightly alarming to a household
+            reader on a money surface (exit walk F6) — so it moves off the
+            prose line onto this paragraph's data attribute and the label's
+            hover, where the record stays findable without standing in a
+            sentence. */}
+        <span className="direct-use-label text-foreground" title={`the registered formula: ${direct.formula_ref}`}>
+          {direct.label}
+        </span>
+        :{' '}
         {direct.unpriced ? (
           <Absent reason={direct.reason ?? 'unpriced — no dollar figure can be honest here'} />
         ) : (
           <Money usd={direct.heuristic_usd} />
         )}
-        <span className="muted"> · {direct.formula_ref}</span>
         {direct.measured_stage_seam && <span className="muted"> · {direct.measured_stage_seam}</span>}
       </p>
       )}
