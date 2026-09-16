@@ -1,6 +1,6 @@
 # Interview-rework sitting — gate record (opened 2026-09-16, re-presented 2026-09-17)
 
-**Status: OPEN — answers pending.** Operator free-text answers are authoritative (standing convention); the coordinator records them under §Answers + in `P3/STATE.md`, executes, and closes. The sitting of 2026-09-16 was interrupted by a host reboot after the six standing items were presented in chat and before any answer landed; this file is the durable re-presentation plus the sitting's own findings, triaged.
+**Status: PARTIALLY ANSWERED 2026-09-17 (A1/A2/A5/B7/B8/B10/B11 closed; A3/A4/A6/B9 open pending the coordinator's explanations — see §Answers).** Operator free-text answers are authoritative (standing convention); the coordinator records them under §Answers + in `P3/STATE.md`, executes, and closes. The sitting of 2026-09-16 was interrupted by a host reboot after the six standing items were presented in chat and before any answer landed; this file is the durable re-presentation plus the sitting's own findings, triaged.
 
 **What the operator sees when reading this:** Part A = six decisions that were already due at the planning-rework exit gate. Part B = five new decisions produced by the sitting's webshop probe. Part C = every finding from the sitting mapped to a packet (nothing is dropped). Part D = the order the coordinator recommends, and which packets need no answer to start.
 
@@ -149,6 +149,22 @@ Which browser produced the original dead-click experience on the webshop — **B
 5. **P3-TQ-4** — the verification rung (after A16).
 6. **P3-SIT-3** — the preview substrate (after B9 = a; host session scheduled with the operator).
 
-## Answers
+## Answers (operator, chat, 2026-09-17 — verbatim, authoritative)
 
-_(pending — recorded here verbatim when they land)_
+> "1. Ok for now, will need some refinement later. 2. ok do it. 3. & 4. what you mean by that, what effect does it has? 5. ok. 6. More details please. 7. First Kimi K3 CLI. 8. ok. 9. more details please. 10. ok, I do it later. 11. I used firefox."
+
+| Item | Answer | Coordinator reading + execution |
+|---|---|---|
+| A1 taxonomy v4 | ok for now, refinement later | **RATIFIED** as shipped; "refinement later" → deferred ledger (a v4.x revision when the operator names what to refine). Provenance comment flips from PENDING to ratified 2026-09-17 in the v4.1 packet. |
+| A2 quality_bar | ok do it | **(a) RATIFIED**: weight 8 → 12 as a v4.1 supersession (packet `v4.1`, no ⚙, no amendment). |
+| A3 A14 veto | question asked | **OPEN** — explanation owed (what a veto window is; A14's effect). A14 stays applied meanwhile (it was the operator's own order). |
+| A4 A15 veto | question asked | **OPEN** — explanation owed; A15 stays applied meanwhile. |
+| A5 decision.emission | ok | **RATIFIED**: the card kind + `emissionRetryLimit = 2` + `clarificationRoundLimit = 2`; `approachMaxRunes` stays 1200; both constants on the settings-tab clamped-⚙ ledger. |
+| A6 readings | more details | **OPEN** — each reading explained in plain words, owed. |
+| B7 model directive | First Kimi K3 CLI | **RATIFIED with the sub-choice**: execution first choice = K3 on `kimi-cli`, then K3 on `kimi`, then Opus 5 on `anthropic`; planning + judge = Opus 5; interim self-family-judging flag on receipts until a Kimi key is placed; P-T06-5 golden-set re-run on Opus 5 (rubric v3) before unsupervised judging resumes; E3 rider on the new executor seat; ids live-verified. Packet **P3-TQ-5**. |
+| B8 amendment A16 | ok | **APPROVED + APPLIED 2026-09-17**: changelog row A16 in `S00`, marker sites annotated (S07.3 code-ladder paragraph, S07.8 bootstrap bullet, S13.7 re-scan line), assembled spec regenerated and verified byte-exact against the drafts; no ⚙ moved → no S18 sweep (118/33). Opens **P3-TQ-4**. |
+| B9 preview substrate | more details | **OPEN** — explanation owed (what promoting it means on the host, what the operator gets, cost). P3-SIT-3 waits. |
+| B10 webshop task | ok, later | Operator will deny-with-reason through the platform at a later sitting; world `~/.sinet-rework-sitting` stays as is (never reseed). |
+| B11 browser | Firefox | **RECORDED**: the original dead-click experience was in Firefox, not Chromium. TQ-F7's host half widens: the Chrome frame-starvation repro stands on its own, and whether Firefox froze the same way is untested — the host investigation must measure Firefox first (memory `chromium-frame-starvation` updated). Not a Sinet packet. |
+
+Order confirmed as Part D: the LN key ceremony remains the operator's next hands-on act (not scheduled by the operator yet); P3-TQ-5 starts now; the gate-independent TQ-1/2/3 + SIT-1 follow; v4.1 rides beside them; TQ-4 after TQ-5; SIT-2 after SIT-1; SIT-3 after B9.
