@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -375,6 +376,23 @@ func (s *Store) SnapshotAndBase(ctx context.Context, projectID, pipelineID strin
 		return "", "", err
 	}
 	return snapshot, base, nil
+}
+
+// RestoreSnapshot restores a run worktree to the TREE of a platform snapshot
+// commit, forward: the index and working tree are made identical to that
+// commit's tree (tracked files restored, files it does not hold removed,
+// untracked non-ignored residue cleaned, ignored junk left alone — it was never
+// in any snapshot), and the result is committed as a new platform snapshot on
+// the run branch so the branch only ever fast-forwards (Spec S13.5) and every
+// earlier snapshot — including the discarded partial work — stays reachable as
+// an ancestor. It returns the resulting HEAD; when HEAD's tree already equals
+// the target's and the tree is clean it returns HEAD unchanged (never an
+// --allow-empty commit). It is the fork-from-last-checkpoint worktree verb
+// (Spec S02.5 step 2, S02.4 (d)).
+//
+// Inert at P3-TQ-2 grounding: the behaviour lands with that packet.
+func (s *Store) RestoreSnapshot(ctx context.Context, worktree, snapshotSHA string) (string, error) {
+	return "", errors.New("project: RestoreSnapshot not implemented (P3-TQ-2)")
 }
 
 // ExistingWorkspace returns a pipeline's attempt-1 run-branch worktree PATH

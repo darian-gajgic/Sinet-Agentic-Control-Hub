@@ -379,6 +379,15 @@ type Config struct {
 	CreateRevisionRef  func(ctx context.Context, runID, ref, snapshotSHA string) error
 	BaseContent        review.BaseContentSource
 	WorkspaceCwd       func(ctx context.Context, runID string) (path string, ok bool, err error)
+	// RestoreWorkspace is the fork-from-last-checkpoint worktree seam (Spec
+	// S02.5 step 2, S02.4 (d), S13.5): before a recovery successor drives its
+	// first plan step, the run's task worktree is restored to the tree of the
+	// named platform snapshot commit — forward, as a new snapshot commit on the
+	// run branch, never a rewind (S13.5: the branch only fast-forwards). It
+	// returns the resulting HEAD, or "" for a run with no worktree yet (nothing
+	// to restore; the first session materializes one at the base). Inert type
+	// surface at P3-TQ-2 grounding; wired and consumed by that packet.
+	RestoreWorkspace func(ctx context.Context, runID, snapshotSHA string) (string, error)
 
 	// The S13.7 onboarding-as-task seams (R5/F1), wired over internal/project.
 	// OnboardStart runs register → clone → scan → draft, returning the drafted
