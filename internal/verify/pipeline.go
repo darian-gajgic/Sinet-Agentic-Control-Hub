@@ -97,6 +97,12 @@ type Verifier struct {
 	// handoff, findings-as-comments, guidance ingress, and THE S13.4
 	// drain. Nil = the pre-S13 in-memory channel (see ReviewSink).
 	Review ReviewSink
+	// Change is the S13 tree seam of the judge's input slice (Spec S07.5;
+	// judgeslice.go): the reviewable change of a repo-backed revision from
+	// the platform-owned store at the pinned refs. Nil = today's slice (the
+	// artifact-of-record text). Inert at P3-TQ-8 grounding; wired and
+	// consumed by that packet.
+	Change ChangeSource
 
 	// PreGates overrides the V0 gate set (nil = DefaultPreGates) — the
 	// extension point per-deployment shape checks ride.

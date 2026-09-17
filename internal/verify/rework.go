@@ -113,6 +113,11 @@ type RoundRecord struct {
 	Findings        []Finding `json:"findings,omitempty"`
 	SuppressedNotes int       `json:"suppressed_notes,omitempty"`
 
+	// JudgeSaw records what the judge's artifact slice held this round
+	// (Spec S07.11: a verdict is read against its evidence; judgeslice.go).
+	// Inert at P3-TQ-8 grounding; filled by that packet.
+	JudgeSaw *JudgeSaw `json:"judge_saw,omitempty"`
+
 	ContentSHA string `json:"content_sha256"`
 	// EventSeq is the verify.round event row of this record.
 	EventSeq int64 `json:"event_seq,omitempty"`

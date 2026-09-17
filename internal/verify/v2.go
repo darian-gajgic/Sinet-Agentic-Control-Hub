@@ -110,9 +110,19 @@ type JudgeInput struct {
 	BriefText string
 	// ACs is the frozen numbered criterion set from the ledger's pinned §1.
 	ACs []ledger.AcceptanceCriterion
-	// Artifact and Diff are the deliverable revision under judgment.
+	// Artifact and Diff are the deliverable revision under judgment — the
+	// quotable slice. For a repo-backed revision (judgeslice.go) Artifact is
+	// the change inventory plus the full content of modified files and Diff
+	// the per-file unified diffs; for a content-pinned one Artifact is the
+	// artifact-of-record text, byte-identical to before.
 	Artifact string
 	Diff     string
+	// Report is the executor's own step report on a repo-backed revision —
+	// what the executor SAYS it did, shown to the judge as labelled claims
+	// (verify/executor-report) and never part of the quotable artifact
+	// (Spec S07.9 P-T06-3). Empty on a content-pinned revision, whose
+	// artifact-of-record IS the content. Inert at P3-TQ-8 grounding.
+	Report string
 	// RubricID/RubricVersion pin the rubric bundle this pass judges under
 	// (Spec S07.10: immutable versioned bundles).
 	RubricID      string
