@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
@@ -299,9 +300,64 @@ func ValidateAxis1(res Axis1Result, acs []ledger.AcceptanceCriterion, v1 map[str
 // step contracts: a judge axis-1 PASS on a criterion whose covering step
 // (Spec S06.6 coverage map) carries a V1 contract FAIL is a CHECK-INTEGRITY
 // finding, never an override — the mechanical fact stands (P3-TQ-6).
-// Inert at grounding: returns the verdicts unchanged and no findings.
+//
+// The judge's verdict is MARKED and otherwise kept: unlike an AC executed at
+// V1, a step contract carries no AC-level mechanical fact to substitute for
+// it. The contract's own AC-BLOCKER is what drives the rework round; this
+// finding's sink is the CHECK-INTEGRITY card, never the REVISE drain
+// (CONVENTIONS §15). Without a coverage map nothing can be said about which
+// criterion a step owns, so nothing is said — a criterion is never defaulted.
+//
+// The anchor (step + criterion) is round-stable, so the raiser cards the
+// disagreement once per drain (Spec S07.6 finding key). Pure: no I/O, no
+// settings, and the caller's verdict slice is never mutated.
 func ContractDisagreements(verdicts []ACVerdict, contracts []StepContract, coverage map[string][]string) ([]ACVerdict, []Finding) {
-	return verdicts, nil
+	out := append([]ACVerdict(nil), verdicts...)
+	byStep := make(map[string]StepContract, len(contracts))
+	for _, sc := range contracts {
+		byStep[sc.StepID] = sc
+	}
+	var (
+		findings []Finding
+		seen     = map[string]bool{}
+	)
+	for i, v := range out {
+		if v.Unknown || !v.Pass || v.FromV1 {
+			continue
+		}
+		for _, stepID := range coverage[v.Key] {
+			sc, ok := byStep[stepID]
+			if !ok || sc.State != ContractFail {
+				continue
+			}
+			anchor := "step:" + stepID + "/" + v.Key
+			if seen[anchor] {
+				continue
+			}
+			seen[anchor] = true
+			out[i].Disagreement = true
+			findings = append(findings, Finding{
+				Severity:  SeverityBlocker,
+				Category:  CatCheckIntegrity,
+				Criterion: string(CatCheckIntegrity),
+				Anchor:    anchor,
+				Text: fmt.Sprintf("The automated check found step %s's promise unmet, but the review marked criterion %s as met. %s The checks and the review disagree, so a person has to look.",
+					stepID, criterionNumber(v.Key), sc.Detail),
+			})
+		}
+	}
+	return out, findings
+}
+
+// criterionNumber renders a frozen criterion key the way the requester reads
+// it on their own specification — "AC-3" is criterion 3. A key in any other
+// shape (which intake cannot produce) is printed as it stands rather than
+// guessed at.
+func criterionNumber(key string) string {
+	if n, ok := acNumber(key); ok {
+		return strconv.Itoa(n)
+	}
+	return key
 }
 
 // UnknownEscapes synthesizes the round's Unknown-escape findings (Spec
