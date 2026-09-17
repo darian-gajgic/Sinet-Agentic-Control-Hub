@@ -51,7 +51,7 @@ Spec/  Research/  Docs/   read-only for build sessions
 
 ## 5. Commit & process conventions (P3)
 
-- **Subject:** `P3-<phase>-<n>: <summary> (<spec sections>)` — e.g. `P3-B0-1: repo scaffold + adoption rail + CONVENTIONS (S01, S16, S19.5)`. Body optional; trailer on every packet commit: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
+- **Subject:** `P3-<phase>-<n>: <summary> (<spec sections>)` — e.g. `P3-B0-1: repo scaffold + adoption rail + CONVENTIONS (S01, S16, S19.5)`. Body optional; trailer on every packet commit names the AUTHORING model as the harness reports it (`Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` for a coordinator/Fable commit, `Claude Opus 5 …` for an opus executor's — the trailer tracks who wrote it, never a fixed literal; wording updated 2026-09-17 after the TQ-1 evaluator found the old literal stale against main's history).
 - Stage files explicitly — never `git add -A`. Packet sessions never push (the coordinator pushes after validation), never force-push, never edit `Docs/`, `Spec/`, `Research/`, or `P3/STATE.md`, and never read or stage `*-api-key.txt`.
 - **CI:** `.github/workflows/ci.yml` runs gofmt, vet, build, test, lock-gate on push to `main` and on PRs. The tag-triggered release pipeline (artifact + `SHA256SUMS` + signed tag, S01.11) is a later packet.
 
