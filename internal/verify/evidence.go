@@ -21,7 +21,12 @@ package verify
 // P3-TQ-4a ships this file as the schema plus the honest absence; P3-TQ-4b
 // plugs the driver in behind WalkDriver once the gate ratifies a browser.
 
-import "github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
+)
 
 // Provenance names where a resolved check pack's commands came from. The empty
 // provenance is the ordinary one: the owner captured these commands by hand
@@ -141,11 +146,57 @@ type WalkOutcome struct {
 // which is exactly why WalkStep.Composable exists and why an uncomposable step
 // records UNVERIFIABLE-HERE rather than a verdict [A16].
 func WalkPlanFor(spec intake.Spec) []ACWalk {
-	// P3-TQ-4a: the schema above is the deliverable; this decomposition is the
-	// packet's work. Returning nothing here is what makes the acceptance tests
-	// red.
-	_ = spec
-	return nil
+	plan := make([]ACWalk, 0, len(spec.ACs))
+	for _, ac := range spec.ACs {
+		w := ACWalk{ACKey: fmt.Sprintf("AC-%d", ac.N)}
+		given, when, then, split := splitGivenWhenThen(ac.Structured)
+		switch {
+		case ac.StructuredKind != "gwt":
+			w.Reason = "this criterion is written as a plain sentence with no given/when/then line, so the walk does not cover it — a person's reading of it decides it instead"
+		case !split:
+			w.Reason = "this criterion's given/when/then line does not read as three separate clauses, so the walk could not tell where to start, what to do and what to check"
+		default:
+			w.Walkable = true
+			// Composable is FALSE on every step here, and that is the honest
+			// value rather than a placeholder: composing a clause into a move
+			// the platform can execute means reading the served page, and no
+			// browser is adopted to serve or read one (Spec S16.4; TQ-4b).
+			// Target and Expect stay empty with it — an uncomposable step
+			// names no state it could not have read.
+			w.Steps = []WalkStep{
+				{Kind: WalkNavigate, Clause: given},
+				{Kind: WalkAct, Clause: when},
+				{Kind: WalkAssert, Clause: then},
+			}
+			w.Reason = WalkUnavailableReason
+		}
+		plan = append(plan, w)
+	}
+	return plan
+}
+
+// splitGivenWhenThen reads the three spans of a "Given X, when Y, then Z" line.
+// This is the deterministic half of the walk: the clauses are where the line
+// says they are, and reading them out is arithmetic. Matching is
+// case-insensitive on the three keywords and on nothing else, so the clauses
+// come back VERBATIM — the recorded outcome has to be readable against the
+// frozen line it walked.
+func splitGivenWhenThen(line string) (given, when, then string, ok bool) {
+	lower := strings.ToLower(line)
+	g := strings.Index(lower, "given ")
+	w := strings.Index(lower, " when ")
+	t := strings.Index(lower, " then ")
+	if g < 0 || w <= g || t <= w {
+		return "", "", "", false
+	}
+	clause := func(s string) string { return strings.Trim(strings.TrimSpace(s), " ,.") }
+	given = clause(line[g+len("given ") : w])
+	when = clause(line[w+len(" when ") : t])
+	then = clause(line[t+len(" then "):])
+	if given == "" || when == "" || then == "" {
+		return "", "", "", false
+	}
+	return given, when, then, true
 }
 
 // WalkDriver executes a composed walk against the deliverable served by its

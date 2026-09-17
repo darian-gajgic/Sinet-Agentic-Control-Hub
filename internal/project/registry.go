@@ -126,9 +126,11 @@ func (s *Store) captureAt(ctx context.Context, projectID string, version int) (C
 		return Capture{}, fmt.Errorf("project: read capture: %w", err)
 	}
 	c.Conventions = unmarshalStrings(conventions)
-	if err := json.Unmarshal([]byte(commands), &c.Commands); err != nil {
+	var stored storedCommands
+	if err := json.Unmarshal([]byte(commands), &stored); err != nil {
 		return Capture{}, fmt.Errorf("project: decode commands: %w", err)
 	}
+	c.Commands, c.Detected = stored.Commands, stored.Detected
 	if err := json.Unmarshal([]byte(zones), &c.DangerZones); err != nil {
 		return Capture{}, fmt.Errorf("project: decode danger zones: %w", err)
 	}
@@ -224,6 +226,10 @@ type CaptureInput struct {
 	// scan's draft on a row that otherwise looks identical; nothing branches
 	// on it.
 	Origin string
+	// Detected is the platform's own detected command set [A16, 2026-09-17].
+	// Nil on every caller that predates it, which is what keeps their stored
+	// bytes unchanged: the member is omitempty inside the commands column.
+	Detected *Commands
 }
 
 // OriginEdit marks a capture an owner typed rather than one a scan derived
@@ -244,7 +250,7 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 		return Capture{}, err
 	}
 	conventions := marshalStrings(in.Conventions)
-	commands, err := json.Marshal(in.Commands)
+	commands, err := json.Marshal(storedCommands{Commands: in.Commands, Detected: in.Detected})
 	if err != nil {
 		return Capture{}, fmt.Errorf("project: marshal commands: %w", err)
 	}
@@ -321,8 +327,8 @@ func (s *Store) Capture(ctx context.Context, in CaptureInput) (Capture, error) {
 const commandMaxRunes = 500
 
 // commandSlots names each command slot with its accessor, so validation and
-// carry-forward run over ALL FIVE rather than over whichever ones somebody
-// remembered (Spec S13.7: build/test/lint/run/preview).
+// carry-forward run over ALL of them rather than over whichever ones somebody
+// remembered (Spec S13.7: build/test/lint/run/preview, plus dev [A16]).
 var commandSlots = []struct {
 	name string
 	get  func(Commands) string
@@ -332,6 +338,7 @@ var commandSlots = []struct {
 	{"test", func(c Commands) string { return c.Test }, func(c *Commands, v string) { c.Test = v }},
 	{"lint", func(c Commands) string { return c.Lint }, func(c *Commands, v string) { c.Lint = v }},
 	{"run", func(c Commands) string { return c.Run }, func(c *Commands, v string) { c.Run = v }},
+	{"dev", func(c Commands) string { return c.Dev }, func(c *Commands, v string) { c.Dev = v }},
 	{"preview", func(c Commands) string { return c.Preview }, func(c *Commands, v string) { c.Preview = v }},
 }
 
@@ -429,7 +436,12 @@ func (s *Store) EditCommands(ctx context.Context, projectID, by string, cmds Com
 		DangerZones: e.Capture.DangerZones,
 		ScanHash:    e.Capture.ScanHash,
 		Family:      e.Capture.Family,
-		Origin:      OriginEdit,
+		// The detected set is a non-`commands` member and rides the same
+		// carry-forward rule [A16]: an owner typing one command has not asked
+		// the platform to forget what it noticed, and dropping it would
+		// silently re-empty the ladder on the next bootstrap round.
+		Detected: e.Capture.Detected,
+		Origin:   OriginEdit,
 	})
 	if err != nil {
 		return Capture{}, false, err

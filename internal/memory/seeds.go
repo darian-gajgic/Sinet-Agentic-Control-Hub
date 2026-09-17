@@ -203,7 +203,14 @@ func (g *Gate) EnsureComposerPlaybook(ctx context.Context) (created bool, err er
 	}
 	d := Draft{
 		Scope: ScopeHouse, Kind: KindPlaybook, Title: worker.ComposerPlaybookTitle,
-		Content:  worker.ComposerPlaybookSeed(),
+		// The B3-RATIFIED content, frozen (tq4playbook_seed1.go) — never
+		// whatever worker.ComposerPlaybookSeed() returns today. This used to
+		// read the live seed, which made the governed entry a pointer at the
+		// current code; P3-TQ-4a revises the playbook, so the pointer would
+		// now write seed-2 content under a B3 record that never read it. The
+		// seed-2 content enters as its own supersession instead
+		// (tq4governance.go) — CONVENTIONS §57.
+		Content:  tq4PlaybookSeed1(),
 		TopicKey: worker.ComposerPlaybookTopicKey,
 		// Machinery consumer: the S08.6 composer reads it by topic key; it
 		// never injects into stage briefs.

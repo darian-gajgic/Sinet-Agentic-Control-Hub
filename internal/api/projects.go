@@ -181,10 +181,15 @@ type ProjectEntry struct {
 // ProjectCommands is the captured build/test/lint/run/preview command set
 // (S13.7). The preview slot's consumer is S13.8's; here it is data.
 type ProjectCommands struct {
-	Build   string `json:"build,omitempty"`
-	Test    string `json:"test,omitempty"`
-	Lint    string `json:"lint,omitempty"`
-	Run     string `json:"run,omitempty"`
+	Build string `json:"build,omitempty"`
+	Test  string `json:"test,omitempty"`
+	Lint  string `json:"lint,omitempty"`
+	Run   string `json:"run,omitempty"`
+	// Dev serves the project from SOURCE, which is what the S07.3 acceptance
+	// walk drives [A16, 2026-09-17] — distinct from Preview, which serves a
+	// built artifact. Adding it here is what makes the write door accept the
+	// slot: commandSlotNames derives the wire vocabulary from these tags.
+	Dev     string `json:"dev,omitempty"`
 	Preview string `json:"preview,omitempty"`
 }
 
@@ -207,9 +212,26 @@ type ProjectCapture struct {
 	Conventions []string            `json:"conventions"`
 	Commands    ProjectCommands     `json:"commands"`
 	DangerZones []ProjectDangerZone `json:"danger_zones"`
-	ScanHash    string              `json:"scan_hash,omitempty"`
-	CapturedBy  string              `json:"captured_by,omitempty"`
-	CapturedTS  string              `json:"captured_ts,omitempty"`
+	// Detected is the command set the PLATFORM read out of a produced tree at
+	// a bootstrap-posture round [A16, 2026-09-17], absent when no scan has
+	// ever proposed one. It is served because the platform runs these commands
+	// against the member's own work, and hiding what is already being acted on
+	// in front of them would be theater — the same rule the whole capture is
+	// served under. It is READ-ONLY here: the Commands door writes `commands`
+	// alone, because the owner's answer to a detected command is to type the
+	// one they want, which outranks it per slot.
+	Detected   *ProjectCommands `json:"detected,omitempty"`
+	ScanHash   string           `json:"scan_hash,omitempty"`
+	CapturedBy string           `json:"captured_by,omitempty"`
+	CapturedTS string           `json:"captured_ts,omitempty"`
+}
+
+// capturedCommands is the stored `commands` JSON column's shape: the owner's
+// set, with the platform's detected set beside it since A16. It mirrors
+// project.storedCommands, which writes the column.
+type capturedCommands struct {
+	ProjectCommands
+	Detected *ProjectCommands `json:"detected,omitempty"`
 }
 
 // ProjectCaptureSummary is what a LIST row carries of the capture (brief OQ1):
@@ -430,8 +452,11 @@ func (s *Server) visibleProjectRows(ctx context.Context, viewer, projectID strin
 			row.capture.Conventions = []string{}
 		}
 		if r.commands != "" {
-			if err := json.Unmarshal([]byte(r.commands), &row.capture.Commands); err != nil {
+			var stored capturedCommands
+			if err := json.Unmarshal([]byte(r.commands), &stored); err != nil {
 				s.logger.Error("projects: captured commands do not decode", "project", r.e.ProjectID, "err", err)
+			} else {
+				row.capture.Commands, row.capture.Detected = stored.ProjectCommands, stored.Detected
 			}
 		}
 		row.capture.DangerZones = []ProjectDangerZone{}

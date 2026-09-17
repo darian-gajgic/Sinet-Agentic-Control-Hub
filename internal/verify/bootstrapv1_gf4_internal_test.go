@@ -10,6 +10,7 @@ package verify
 // arbitrary ids and "Done when" texts, over several seeds.
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -41,7 +42,8 @@ func TestGF4PropBootstrapV1IsUniversallyUnverifiable(t *testing.T) {
 		r := rand.New(rand.NewSource(seed))
 		for n := 0; n <= 12; n++ {
 			steps := genSteps(r, n)
-			res := bootstrapV1(BootstrapPack(DomainSoftware, 1), steps, nil, t.TempDir())
+			res := bootstrapV1(context.Background(), BootstrapPack(DomainSoftware, 1), nil,
+				CheckRequest{Workspace: t.TempDir()}, steps, nil)
 
 			if len(res.Checks) == 0 {
 				t.Fatalf("seed %d n=%d: no rung recorded at all — a silent skip", seed, n)
@@ -89,7 +91,8 @@ func TestGF4PropBootstrapMintsOnlyNotes(t *testing.T) {
 	for seed := int64(1); seed <= 8; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		for n := 0; n <= 12; n++ {
-			res := bootstrapV1(BootstrapPack(DomainSoftware, 1), genSteps(r, n), nil, t.TempDir())
+			res := bootstrapV1(context.Background(), BootstrapPack(DomainSoftware, 1), nil,
+				CheckRequest{Workspace: t.TempDir()}, genSteps(r, n), nil)
 			notes := 0
 			for _, f := range res.Findings {
 				if f.Severity == SeverityBlocker {

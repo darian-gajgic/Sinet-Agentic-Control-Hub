@@ -206,7 +206,7 @@ var _ api.ProjectCommandsSurface = commandsDoor{}
 // whether one was actually minted (an identical resubmission mints nothing).
 func (d commandsDoor) SetCommands(ctx context.Context, caller, projectID string, c api.ProjectCommands) (bool, error) {
 	_, minted, err := d.proj.EditCommands(ctx, projectID, caller, project.Commands{
-		Build: c.Build, Test: c.Test, Lint: c.Lint, Run: c.Run, Preview: c.Preview,
+		Build: c.Build, Test: c.Test, Lint: c.Lint, Run: c.Run, Dev: c.Dev, Preview: c.Preview,
 	})
 	if err != nil {
 		return false, commandsRefusal(err)
@@ -329,7 +329,46 @@ func (s *projectSeams) CheckPackFor(ctx context.Context, domain, taskID string) 
 	if err != nil {
 		return nil, err // a registry read failure is mechanical, never a card
 	}
-	return packFromCapture(domain, e)
+	return packFromCapture(domain, s.rescanDetected(ctx, e, taskID))
+}
+
+// rescanDetected is the A16 re-scan at the execute→verify boundary: a project
+// with no hand-captured rung has its own produced tree read for the commands
+// the work itself declared, and the entry comes back carrying them (Spec
+// S13.7 [A16, 2026-09-17]).
+//
+// It runs ONLY on the bootstrap path, because that is the only place a
+// detected command is ever consulted — a project whose owner captured commands
+// resolves from those and nothing here changes it. The subject is the task's
+// EXISTING worktree, resolved without creating one: the verification
+// workspace is materialized later in the round, and the pack must be resolved
+// before it exists.
+//
+// A failure here is never a verification failure. Spec S07.8's whole point is
+// that a bootstrap round runs and says what it could not check; degrading to
+// the placeholder rungs is exactly that landing, so the reason is logged and
+// the unchanged entry is returned.
+func (s *projectSeams) rescanDetected(ctx context.Context, e project.Entry, taskID string) project.Entry {
+	if len(packChecks(e.Capture.Commands)) > 0 {
+		return e
+	}
+	tree, ok, err := s.proj.ExistingWorkspace(ctx, e.ProjectID, taskID)
+	if err != nil || !ok {
+		if err != nil {
+			log.Printf("shell: resolve produced tree for project %s task %s: %v", e.ProjectID, taskID, err)
+		}
+		return e
+	}
+	c, minted, err := s.proj.RescanDetected(ctx, e.ProjectID, e.Owner, tree)
+	if err != nil {
+		log.Printf("shell: re-scan produced tree %s for project %s: %v", tree, e.ProjectID, err)
+		return e
+	}
+	if minted {
+		e.CaptureVersion = c.Version
+	}
+	e.Capture = c
+	return e
 }
 
 // VerificationWorkspace materializes the revision under review for the V1
@@ -477,7 +516,29 @@ func packFromCapture(domain string, e project.Entry) (*verify.CheckPack, error) 
 		//
 		// The capture date is deliberately not required here: it stamps a
 		// suite's freshness (rule 7) and there is no suite to stamp.
-		return verify.BootstrapPack(domain, e.Capture.Version), nil
+		pack := verify.BootstrapPack(domain, e.Capture.Version)
+		// A16: the posture is no longer execution-less. Commands the platform
+		// DETECTED in the produced tree ride the bootstrap pack as evidence
+		// rungs — ids prefixed so the record says what kind of rung it is.
+		// GRADUATION IS DECIDED FROM Capture.Commands ALONE, one branch up:
+		// detected commands never move the posture, so a detected pack is
+		// still a bootstrap pack in every way that decides anything.
+		if e.Capture.Detected != nil {
+			if detected := packChecks(*e.Capture.Detected); len(detected) > 0 {
+				for i := range detected {
+					detected[i].ID = "detected:" + detected[i].ID
+				}
+				pack.Checks = detected
+				pack.Provenance = verify.ProvenanceDetected
+				// Rule 7: a suite is exactly as fresh as the scan it came
+				// from. An unreadable capture date leaves the stamp zero,
+				// which is honest — a bootstrap pack is never Validate()d.
+				if capturedAt, err := time.Parse(time.RFC3339Nano, e.Capture.CapturedTS); err == nil {
+					pack.VerifiedOn = capturedAt
+				}
+			}
+		}
+		return pack, nil
 	}
 	capturedAt, err := time.Parse(time.RFC3339Nano, e.Capture.CapturedTS)
 	if err != nil {
