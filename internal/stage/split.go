@@ -112,10 +112,11 @@ func executeInstructions(taskID string, step intake.Step, stageName string, sub 
 		}
 		return stageMarker(markerExecute) + fmt.Sprintf(
 			"You are resuming plan step %s of task %s after an earlier attempt was interrupted: %s.\n"+
-				"The interrupted attempt at THIS step was discarded, so start it from the state your working directory is in now: %s\n"+
+				"This step is: %s\n"+
+				"The interrupted attempt at THIS step was discarded, so start the step from the state your working directory is in now.\n"+
 				"Done when: %s\n"+
 				"Work in your working directory. When the step is complete, output the step's "+
-				"complete deliverable content as your final message — full content, no commentary wrapper.\n",
+				"complete deliverable content as your final message. Give the full content, with no commentary wrapper.\n",
 			step.ID, taskID, finished, step.Title, step.DoneWhen)
 	}
 	if sub <= 1 {

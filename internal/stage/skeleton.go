@@ -730,7 +730,22 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	// step 2, S02.4 (d)). A failure here is loud: a successor re-driving a dirty
 	// tree is the defect this packet exists to close, so it becomes a corpse
 	// rather than a silent re-drive.
-	if r.ParentRunID != "" && resume.Snapshot != "" && s.cfg.RestoreWorkspace != nil {
+	//
+	// "Needs a restore" is exactly `resume.Snapshot != ""`: a step counted
+	// complete is one that carries its close snapshot, so a non-zero resume
+	// index always brings a tree with it, and a zero index brings the attempt
+	// base when the task is repo-backed at all.
+	if r.ParentRunID != "" && resume.Snapshot != "" {
+		if s.cfg.RestoreWorkspace == nil {
+			// A process wired without the restore seam cannot resume a
+			// repo-backed lineage. Carrying on regardless would re-drive
+			// whatever the dead run left on disk, which is the defect this
+			// packet exists to close, so the boundary says so instead of
+			// quietly doing the wrong thing.
+			cause := fmt.Sprintf("no workspace restore is wired in this process, so the working copy cannot be put back on snapshot %s before this run carries on", resume.Snapshot)
+			s.crash(ctx, r.ID, "restore workspace: "+cause)
+			return fmt.Errorf("stage: restore workspace for %s: %s", r.ID, cause)
+		}
 		head, err := s.cfg.RestoreWorkspace(ctx, r.ID, resume.Snapshot)
 		if err != nil {
 			s.crash(ctx, r.ID, "restore workspace: "+err.Error())
