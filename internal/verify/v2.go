@@ -121,7 +121,7 @@ type JudgeInput struct {
 	// what the executor SAYS it did, shown to the judge as labelled claims
 	// (verify/executor-report) and never part of the quotable artifact
 	// (Spec S07.9 P-T06-3). Empty on a content-pinned revision, whose
-	// artifact-of-record IS the content. Inert at P3-TQ-8 grounding.
+	// artifact-of-record IS the content.
 	Report string
 	// RubricID/RubricVersion pin the rubric bundle this pass judges under
 	// (Spec S07.10: immutable versioned bundles).
@@ -148,11 +148,15 @@ type Judge interface {
 // Judge-input item identities on the assembly manifest (Spec S05.4 entry
 // schema; stage-precedence Extra items).
 const (
-	itemArtifact      = "verify/artifact"
-	itemDiff          = "verify/diff"
-	itemRubric        = "verify/rubric"
-	itemV1Outcomes    = "verify/v1-outcomes"
-	itemPriorFindings = "verify/prior-findings"
+	itemArtifact = "verify/artifact"
+	itemDiff     = "verify/diff"
+	// itemExecutorReport carries the executor's own account of its work on a
+	// repo-backed revision: the judge reads it as CLAIMS and can never quote
+	// it as evidence (Spec S07.9 P-T06-3; CONVENTIONS §74, §78).
+	itemExecutorReport = "verify/executor-report"
+	itemRubric         = "verify/rubric"
+	itemV1Outcomes     = "verify/v1-outcomes"
+	itemPriorFindings  = "verify/prior-findings"
 
 	selectorVerify = "verification input slice (S07.5) — artifact+diff+rubric+V1+prior findings; never the execution transcript"
 )
@@ -162,18 +166,27 @@ const (
 // judge session (Spec S05.4). The ledger store enforces the clean-mode
 // firewall (user overlay dropped, learned excluded, objective_ac only);
 // this function contributes the S07-owned Extra items.
-func BuildJudgeInput(ctx context.Context, store *ledger.Store, d Deliverable, rubric *RubricBundle, v1 *V1Result, prior []Finding, round int) (JudgeInput, error) {
+//
+// slice is what the drain resolved the revision to (judgeslice.go): the
+// tree's change for a repo-backed revision, the artifact of record for a
+// content-pinned one. The executor's report gets its own item ONLY when
+// there is one to show, so a content-pinned assembly is byte-unchanged.
+func BuildJudgeInput(ctx context.Context, store *ledger.Store, d Deliverable, slice JudgeSlice, rubric *RubricBundle, v1 *V1Result, prior []Finding, round int) (JudgeInput, error) {
 	if store == nil {
 		return JudgeInput{}, fmt.Errorf("%w: V2 without the ledger store (clean-context assembly, Spec S05.4)", ErrSeamMissing)
 	}
 	if rubric == nil {
 		return JudgeInput{}, fmt.Errorf("%w: V2 without a rubric bundle (Spec S07.10)", ErrSeamMissing)
 	}
+	rev := fmt.Sprintf("rev%d", d.Revision)
 	extra := []ledger.Item{
-		extraItem(itemArtifact, d.Content, fmt.Sprintf("rev%d", d.Revision)),
-		extraItem(itemDiff, d.Diff, fmt.Sprintf("rev%d", d.Revision)),
-		extraItem(itemRubric, rubricSlice(rubric), fmt.Sprintf("v%d", rubric.Version)),
+		extraItem(itemArtifact, slice.Artifact, rev),
+		extraItem(itemDiff, slice.Diff, rev),
 	}
+	if slice.Report != "" {
+		extra = append(extra, extraItem(itemExecutorReport, executorClaims(slice.Report), rev))
+	}
+	extra = append(extra, extraItem(itemRubric, rubricSlice(rubric), fmt.Sprintf("v%d", rubric.Version)))
 	if v1 != nil {
 		raw, err := json.Marshal(v1)
 		if err != nil {
@@ -205,8 +218,9 @@ func BuildJudgeInput(ctx context.Context, store *ledger.Store, d Deliverable, ru
 		Brief:         brief,
 		BriefText:     ledger.BriefText(brief),
 		ACs:           doc.ObjectiveAC.AcceptanceCriteria,
-		Artifact:      d.Content,
-		Diff:          d.Diff,
+		Artifact:      slice.Artifact,
+		Diff:          slice.Diff,
+		Report:        slice.Report,
 		RubricID:      rubric.ID,
 		RubricVersion: rubric.Version,
 		V1:            v1,
@@ -235,6 +249,16 @@ func extraItem(id, content, version string) ledger.Item {
 		SelectorRule: selectorVerify,
 		Precedence:   ledger.PrecedenceStage,
 	}
+}
+
+// executorClaims labels the executor's step report for the judge. The report
+// rides the slice so the judge can read what was CLAIMED — and the label says,
+// in the judge's own plain words, that a claim is not the work and never
+// evidence (Spec S07.9 P-T06-3).
+func executorClaims(report string) string {
+	return "What the executor says it did, in its own words. This is a claim about the work, not the work itself: " +
+		"nothing here is evidence, and the quote behind a passing criterion must come from the " +
+		itemArtifact + " or " + itemDiff + " item above.\n\n" + report
 }
 
 // rubricSlice renders the judge-facing rubric slice.

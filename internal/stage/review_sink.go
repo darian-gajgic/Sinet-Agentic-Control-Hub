@@ -283,3 +283,90 @@ func drainedAnchor(b review.Drained) string {
 		return fmt.Sprintf("orphan (rev %d)", c.RevisionN)
 	}
 }
+
+// RevisionChange serves the judge's input slice for a repo-backed revision
+// (Spec S07.5 "the artifact + its diff against the previous revision [S13]"):
+// the whole change inventory, each text file's unified diff, and the full
+// new-side content of the files changed in place — read from the
+// platform-owned project store at the PINNED refs through review's read-only
+// tree verbs (Spec S13.1/S13.2; CONVENTIONS §78), never from the sandbox and
+// never from the stripped verification workspace (Spec S07.3 rule 1).
+//
+// The pins come from the review store's OWN revision rows, which is why only
+// the revision NUMBER is taken from the deliverable: the revise path copies a
+// stale snapshot sha onto rework revisions, and a judge slice built on it
+// would compare the wrong two trees. Revision 1 compares against the recorded
+// pre-task base (old side 0, Spec S13.1).
+//
+// A revision that pins no snapshot — the content-pin lane — answers an
+// AbsentReason in review's own sentence; that is an answer, not a failure.
+// A pin the store no longer holds is review.ErrContentDrift and fails the
+// round, because serving the executor's report instead would answer a
+// different question than the one the judge was asked (§78 F1).
+func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, bodyBudget int) (verify.RevisionChange, error) {
+	id := TaskDeliverableID(d.TaskID)
+	ch, err := rs.store().Change(ctx, id, d.Revision-1, d.Revision)
+	if err != nil {
+		return verify.RevisionChange{}, fmt.Errorf("stage: the change of %s version %d: %w", id, d.Revision, err)
+	}
+	out := verify.RevisionChange{
+		OldN: ch.OldN, NewN: ch.NewN, OldPin: ch.OldPin, NewPin: ch.NewPin,
+		OldIsBase: ch.OldIsBase, AbsentReason: ch.AbsentReason,
+	}
+	if ch.AbsentReason != "" {
+		return out, nil
+	}
+	// The inventory is always whole — it is what makes a change reviewable —
+	// and only the BODIES are bounded (Spec S05.3 stage fit).
+	out.Files = make([]verify.ChangedFile, 0, len(ch.Files))
+	for _, f := range ch.Files {
+		out.Files = append(out.Files, verify.ChangedFile{
+			Path: f.Path, OldPath: f.OldPath, Kind: f.Kind,
+			OldSize: f.OldSize, NewSize: f.NewSize, Binary: f.Binary,
+			Additions: f.Additions, Deletions: f.Deletions,
+		})
+	}
+	read := 0
+	// Diffs first: they are what a judge reads to see WHAT changed, so they
+	// get the budget before any whole file does.
+	for i := range out.Files {
+		row := &out.Files[i]
+		if row.Binary {
+			continue
+		}
+		if read >= bodyBudget {
+			row.BodySkipped = true
+			continue
+		}
+		cmp, err := rs.store().CompareFile(ctx, id, ch.OldN, ch.NewN, row.Path)
+		if err != nil {
+			return verify.RevisionChange{}, fmt.Errorf("stage: the changes to %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		row.Diff, row.DiffTruncated, row.DiffReason = cmp.Unified, cmp.Truncated, cmp.TruncationReason
+		read += len(cmp.Unified)
+	}
+	// Then the new-side content of the files changed in place: the diff shows
+	// hunks, and a judge that may only quote hunks cannot say what the file
+	// around them now does. An added file's diff IS its content, so it is
+	// never read twice; a deleted file has no new side; a binary has no text.
+	for i := range out.Files {
+		row := &out.Files[i]
+		if row.Binary || row.BodySkipped {
+			continue
+		}
+		if row.Kind != verify.KindModified && row.Kind != verify.KindRenamed {
+			continue
+		}
+		if read >= bodyBudget {
+			row.BodySkipped = true
+			continue
+		}
+		fc, err := rs.store().RevisionFile(ctx, id, ch.NewN, row.Path)
+		if err != nil {
+			return verify.RevisionChange{}, fmt.Errorf("stage: %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		row.Content, row.ContentTruncated, row.ContentReason = fc.Content, fc.Truncated, fc.TruncationReason
+		read += len(fc.Content)
+	}
+	return out, nil
+}

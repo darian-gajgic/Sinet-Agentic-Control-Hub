@@ -1110,9 +1110,16 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 	if revise == nil {
 		revise = s.engineRevise
 	}
-	var sink verify.ReviewSink
+	// One adapter, two seams: the review sink owns the task → deliverable
+	// identity mapping, so the judge's tree slice is read through the same
+	// handle that mints the revisions it reads (P3-TQ-8; Spec S07.5).
+	var (
+		sink   verify.ReviewSink
+		change verify.ChangeSource
+	)
 	if s.cfg.Review != nil {
-		sink = reviewSink{s: s}
+		rs := reviewSink{s: s}
+		sink, change = rs, rs
 	}
 	return &verify.Verifier{
 		DB:       s.cfg.DB,
@@ -1130,6 +1137,9 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 		},
 		Runner: s.cfg.CheckRunner,
 		Review: sink,
+		// The S07.5 input slice of a repo-backed revision: the tree's change
+		// at the pinned refs, read from the platform store (Spec S13.1/S13.2).
+		Change: change,
 		// The S13 verification-workspace seam (Spec S07.3 rule 1): V1 checks
 		// run against the revision's stripped content, not the execute leg's
 		// scratch cwd, whenever the task is project-backed (P3-RW-14 R6).

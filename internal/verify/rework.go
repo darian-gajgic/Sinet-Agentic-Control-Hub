@@ -115,7 +115,7 @@ type RoundRecord struct {
 
 	// JudgeSaw records what the judge's artifact slice held this round
 	// (Spec S07.11: a verdict is read against its evidence; judgeslice.go).
-	// Inert at P3-TQ-8 grounding; filled by that packet.
+	// Set on every judged round, tree lane and content lane alike.
 	JudgeSaw *JudgeSaw `json:"judge_saw,omitempty"`
 
 	ContentSHA string `json:"content_sha256"`

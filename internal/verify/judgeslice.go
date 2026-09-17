@@ -1,6 +1,10 @@
 package verify
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
 // The judge's input slice for a REPO-BACKED deliverable (Spec S07.5: "the
 // artifact + its diff against the previous revision [S13] ... never the
@@ -12,11 +16,6 @@ import "context"
 // platform-owned store at the pinned refs through the seam below. The step
 // report the executor wrote is what the executor SAYS it did: it rides the
 // slice as a labelled claims item and is never the artifact.
-//
-// INERT TYPE SURFACE at P3-TQ-8 grounding (CONVENTIONS §3 Amendment-A
-// carve-out): the types and the seam exist so the committed acceptance tests
-// compile; nothing here is consumed yet. The executor packet wires and fills
-// them.
 
 // ChangeSource is the S13 tree seam of the judge's input slice: the
 // reviewable change of one minted revision, from the platform-owned project
@@ -156,12 +155,244 @@ type JudgeSaw struct {
 	Truncated bool `json:"truncated"`
 }
 
+// Kinds of judge slice, as JudgeSaw.Kind records them.
+const (
+	sawTree    = "tree"
+	sawContent = "content"
+)
+
+// JudgeSlice is what one judged round puts in front of the judge: the
+// quotable artifact, its diff, and — on a repo-backed revision — the
+// executor's report as labelled claims. The drain builds it once per round
+// (pipeline.go) and BuildJudgeInput turns it into the S07.5 Extra items.
+type JudgeSlice struct {
+	Artifact string
+	Diff     string
+	// Report is the executor's step report, shown as claims and never
+	// quotable. Empty on a content-pinned revision, whose artifact of record
+	// IS the content.
+	Report string
+	// Saw is what the slice holds, for the round record (Spec S07.11).
+	Saw JudgeSaw
+}
+
+// Quotable is the text an axis-1 evidence quote must be an exact substring of
+// (Spec S07.5 "mandatory extractive evidence quote"): the artifact item, plus
+// the diff item when there is one. The executor's report is outside it by
+// construction — a judge that can only repeat what the executor claimed has
+// checked nothing (Spec S07.9 P-T06-3).
+func (in JudgeInput) Quotable() string {
+	if in.Diff == "" {
+		return in.Artifact
+	}
+	return in.Artifact + "\n" + in.Diff
+}
+
 // RenderChangeSlice renders a RevisionChange into the two judge items — the
-// quotable ARTIFACT (inventory, the full content of modified files, the
-// honest omitted lists) and the DIFF (the shown per-file unified diffs in path
-// order) — under JudgeArtifactBytesCap, and reports what it showed. Pure.
+// quotable ARTIFACT (the whole inventory, the full content of the modified
+// files that fit, and the honest omitted lists) and the DIFF (the shown
+// per-file unified diffs in path order, concatenated: their own headers name
+// the files) — under JudgeArtifactBytesCap, and reports what it showed. Pure.
 //
-// INERT at grounding: returns zero values. The executor packet fills it.
-func RenderChangeSlice(rc RevisionChange) (artifact, diff string, saw JudgeSaw) {
-	return "", "", JudgeSaw{}
+// The bound falls on a FILE boundary, twice: the diffs are shown in path
+// order until one does not fit and everything from there on is omitted (a
+// contiguous prefix, so "the first N of M" is literally true), then the
+// contents are shown under what is left. Part of a file's diff would describe
+// a change the change does not make, which is worse than naming the file and
+// showing nothing (the review.changeDiff reason, CONVENTIONS §78).
+func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
+	saw := JudgeSaw{
+		Kind:      sawTree,
+		OldN:      rc.OldN,
+		NewN:      rc.NewN,
+		OldPin:    rc.OldPin,
+		NewPin:    rc.NewPin,
+		OldIsBase: rc.OldIsBase,
+		Files:     len(rc.Files),
+	}
+	var diff strings.Builder
+	cut := false
+	for _, row := range rc.Files {
+		// A binary file is an inventory row and nothing else: its bytes never
+		// reach the judge (Spec S13.2, G2 Def.14).
+		if row.Binary {
+			continue
+		}
+		if row.Diff == "" {
+			// No diff text was read for this row because the seam's body
+			// budget was already spent: the file is named among the omitted
+			// rather than passing as a file with no changes.
+			if row.BodySkipped {
+				cut = true
+				saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
+			}
+			continue
+		}
+		if cut || saw.DiffBytes+len(row.Diff) > JudgeArtifactBytesCap {
+			cut = true
+			saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
+			continue
+		}
+		diff.WriteString(row.Diff)
+		saw.DiffBytes += len(row.Diff)
+		saw.DiffsShown++
+	}
+	// The contents come out of what the diffs left, in the same order under
+	// the same rule. A modified file's content is what lets the judge quote
+	// outside the hunks, so it is carried — and it is the first thing the
+	// bound drops.
+	contents := make([]ChangedFile, 0, len(rc.Files))
+	cut = false
+	for _, row := range rc.Files {
+		if row.Content == "" {
+			if row.BodySkipped && (row.Kind == KindModified || row.Kind == KindRenamed) {
+				saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
+			}
+			continue
+		}
+		if cut || saw.DiffBytes+saw.ContentBytes+len(row.Content) > JudgeArtifactBytesCap {
+			cut = true
+			saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
+			continue
+		}
+		contents = append(contents, row)
+		saw.ContentBytes += len(row.Content)
+		saw.ContentShown++
+	}
+	saw.Truncated = len(saw.DiffsOmitted)+len(saw.ContentOmitted) > 0
+	artifact := renderChangeArtifact(rc, saw, contents)
+	saw.ArtifactBytes = len(artifact)
+	return artifact, diff.String(), saw
+}
+
+// renderChangeArtifact writes the quotable artifact item: what this is, the
+// whole inventory, then — in plain words — how much of the change the judge
+// is being shown, which files were left out, and the contents that fit
+// (CONVENTIONS §38: the bound is said, never silent).
+func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFile) string {
+	var sb strings.Builder
+	sb.WriteString("The work under judgment is the change this version makes to the project's files, read from the platform's own copy of the project at the recorded commits.\n\n")
+	fmt.Fprintf(&sb, "Version %d (commit %s) compared with %s.\n\n", rc.NewN, rc.NewPin, oldSideOf(rc))
+	if len(rc.Files) == 0 {
+		sb.WriteString("No file differs between the two: this version changes nothing in the project.\n")
+		return sb.String()
+	}
+	fmt.Fprintf(&sb, "%d %s changed. Every one of them is listed here; this list is never shortened.\n\n",
+		len(rc.Files), filesWord(len(rc.Files)))
+	for _, row := range rc.Files {
+		writeInventoryRow(&sb, row)
+	}
+
+	diffable := saw.DiffsShown + len(saw.DiffsOmitted)
+	sb.WriteByte('\n')
+	switch {
+	case diffable == 0:
+		sb.WriteString("No file in this change has text to compare, so the verify/diff item is empty.\n")
+	case len(saw.DiffsOmitted) == 0:
+		fmt.Fprintf(&sb, "The file-by-file changes are in the verify/diff item: all %d %s with text are there in full, in the order listed above.\n",
+			diffable, filesWord(diffable))
+	default:
+		fmt.Fprintf(&sb, "The file-by-file changes are in the verify/diff item: the first %d of %d %s with text are there in full, in the order listed above.\n",
+			saw.DiffsShown, diffable, filesWord(diffable))
+		fmt.Fprintf(&sb, "The rest did not fit the %d KB of file text this judge reads under. A file is shown whole or not at all: part of a file's changes would describe a change this version does not make.\n",
+			JudgeArtifactBytesCap>>10)
+		fmt.Fprintf(&sb, "Changes NOT shown, by file: %s\n", strings.Join(saw.DiffsOmitted, ", "))
+	}
+
+	shownContent := saw.ContentShown + len(saw.ContentOmitted)
+	if shownContent == 0 {
+		return sb.String()
+	}
+	sb.WriteByte('\n')
+	if len(saw.ContentOmitted) == 0 {
+		fmt.Fprintf(&sb, "The whole new content of every file changed in place follows (%d of %d).\n", saw.ContentShown, shownContent)
+	} else {
+		fmt.Fprintf(&sb, "The whole new content of %d of the %d files changed in place follows; the rest did not fit the same bound.\n",
+			saw.ContentShown, shownContent)
+		fmt.Fprintf(&sb, "Content NOT shown, by file: %s\n", strings.Join(saw.ContentOmitted, ", "))
+	}
+	for _, row := range contents {
+		fmt.Fprintf(&sb, "\n----- %s, the whole file at version %d -----\n", row.Path, rc.NewN)
+		sb.WriteString(row.Content)
+		if !strings.HasSuffix(row.Content, "\n") {
+			sb.WriteByte('\n')
+		}
+		fmt.Fprintf(&sb, "----- end %s -----\n", row.Path)
+	}
+	return sb.String()
+}
+
+// writeInventoryRow writes one inventory line: what happened to the file, its
+// sizes, and — when review's own per-file caps cut a body it did serve — the
+// reason it gives for that cut.
+func writeInventoryRow(sb *strings.Builder, f ChangedFile) {
+	fmt.Fprintf(sb, "  %-9s %s", f.Kind, f.Path)
+	if f.OldPath != "" {
+		fmt.Fprintf(sb, " (it was %s)", f.OldPath)
+	}
+	switch {
+	case f.Binary:
+		sb.WriteString(" — a binary file: it gets this row and nothing more, and its bytes are never shown")
+	case f.Kind == KindAdded:
+		fmt.Fprintf(sb, " — new, %d bytes, %d %s added", f.NewSize, f.Additions, linesWord(f.Additions))
+	case f.Kind == KindDeleted:
+		fmt.Fprintf(sb, " — removed, it was %d bytes, %d %s deleted", f.OldSize, f.Deletions, linesWord(f.Deletions))
+	default:
+		fmt.Fprintf(sb, " — was %d bytes, now %d bytes; %d %s added, %d %s deleted",
+			f.OldSize, f.NewSize, f.Additions, linesWord(f.Additions), f.Deletions, linesWord(f.Deletions))
+	}
+	sb.WriteByte('\n')
+	if f.DiffTruncated && f.DiffReason != "" {
+		fmt.Fprintf(sb, "            its changes are shown only in part: %s\n", f.DiffReason)
+	}
+	if f.ContentTruncated && f.ContentReason != "" {
+		fmt.Fprintf(sb, "            its content is shown only in part: %s\n", f.ContentReason)
+	}
+}
+
+func oldSideOf(rc RevisionChange) string {
+	if rc.OldIsBase {
+		return fmt.Sprintf("the state the project was in before this task started (commit %s)", rc.OldPin)
+	}
+	return fmt.Sprintf("version %d (commit %s)", rc.OldN, rc.OldPin)
+}
+
+func filesWord(n int) string {
+	if n == 1 {
+		return "file"
+	}
+	return "files"
+}
+
+func linesWord(n int) string {
+	if n == 1 {
+		return "line"
+	}
+	return "lines"
+}
+
+// changeSlice is the judge slice of a repo-backed revision: the rendered
+// change is the artifact, and the executor's report rides beside it as claims
+// (Spec S07.5; S07.9 P-T06-3).
+func changeSlice(rc RevisionChange, report string) JudgeSlice {
+	artifact, diff, saw := RenderChangeSlice(rc)
+	saw.ReportBytes = len(report)
+	return JudgeSlice{Artifact: artifact, Diff: diff, Report: report, Saw: saw}
+}
+
+// contentSlice is the judge slice of a content-pinned revision — the
+// artifact of record as its own quotable text, byte for byte what the judge
+// has always received. absentReason carries the seam's own sentence for why
+// there is no tree slice, which is an ANSWER and is recorded (CONVENTIONS
+// §78); it is empty when no seam was asked at all.
+func contentSlice(d Deliverable, absentReason string) JudgeSlice {
+	return JudgeSlice{
+		Artifact: d.Content,
+		Diff:     d.Diff,
+		Saw: JudgeSaw{
+			Kind:          sawContent,
+			AbsentReason:  absentReason,
+			ArtifactBytes: len(d.Content),
+		},
+	}
 }
