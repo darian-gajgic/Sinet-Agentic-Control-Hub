@@ -1,8 +1,10 @@
 package review
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"fmt"
+	"strings"
 )
 
 // A repo-backed revision IS the tree at its snapshot pin (Spec S13.1: repo-backed
@@ -12,10 +14,12 @@ import (
 // is the tree half of the S13.1/S13.2 data layer: the seam the platform store is
 // reached through, the served shapes, the bounds, and the verbs.
 //
-// P3-SIT-1 GROUNDING — INERT TYPE SURFACE (CONVENTIONS §3, amendment-A carve-out):
-// the types, the seam and the verb signatures exist so the committed acceptance
-// tests compile and FAIL on behaviour; every verb below answers
-// errTreeNotBuilt until the packet's implementation commit replaces it.
+// THE LANE IS CHOSEN BY THE PIN, NEVER BY THE TYPE. A revision with a snapshot
+// sha is repo-backed whatever word its deliverable row carries, which is what
+// lets rows minted before the type was right serve their trees with no data
+// migration (Spec S13.1 makes a minted revision immutable, and migration 0007
+// makes the row's type immutable); a revision with no snapshot sha keeps the
+// content-pinned behaviour byte for byte.
 
 // TreeSource is the composition-root seam to the platform-owned project store
 // (the BaseContentSource precedent, R25): review never imports internal/project;
@@ -134,14 +138,231 @@ const (
 	TreeFileBytesCap     = 1 << 20
 )
 
-var errTreeNotBuilt = errors.New("review: tree reads are P3-SIT-1's implementation (inert grounding surface)")
+// binarySniffBytes is git's own window for deciding a blob is binary: a NUL in
+// the first 8000 bytes. The same rule is applied here so the file read and the
+// inventory row agree about which files have no text to show.
+const binarySniffBytes = 8000
 
 // Change computes the change inventory between two revisions of a repo-backed
 // deliverable — oldN 0 is the pre-task base (Spec S13.1) — without reading any
 // file body. A revision with no snapshot pin, or a nil TreeSource, answers a
 // Change carrying AbsentReason.
 func (s *Store) Change(ctx context.Context, deliverableID string, oldN, newN int) (Change, error) {
-	return Change{}, errTreeNotBuilt
+	if newN < 1 || oldN < 0 || oldN == newN {
+		return Change{}, fmt.Errorf("%w: comparing needs two different versions (old %d, new %d)", ErrBadInput, oldN, newN)
+	}
+	if _, err := s.Deliverable(ctx, deliverableID); err != nil {
+		return Change{}, err
+	}
+	newRev, err := s.RevisionAt(ctx, deliverableID, newN)
+	if err != nil {
+		return Change{}, err
+	}
+	ch := Change{DeliverableID: deliverableID, OldN: oldN, NewN: newN, Files: []ChangedFile{}}
+	if newRev.SnapshotSHA == "" {
+		ch.AbsentReason = fmt.Sprintf("version %d is not stored as a snapshot of the project's files, so there is no file-by-file list for it", newN)
+		return ch, nil
+	}
+	ch.NewPin = newRev.SnapshotSHA
+	if s.Tree == nil {
+		ch.AbsentReason = "the project's file store is not available in this process, so the files in this version cannot be listed"
+		return ch, nil
+	}
+	if oldN == 0 {
+		base, ok, err := s.Tree.TreeBase(ctx, deliverableID)
+		if err != nil {
+			return Change{}, err
+		}
+		if !ok || base == "" {
+			ch.AbsentReason = "no record of how the project stood before this task started, so there is nothing to compare this version against"
+			return ch, nil
+		}
+		ch.OldPin, ch.OldIsBase = base, true
+	} else {
+		oldRev, err := s.RevisionAt(ctx, deliverableID, oldN)
+		if err != nil {
+			return Change{}, err
+		}
+		if oldRev.SnapshotSHA == "" {
+			ch.AbsentReason = fmt.Sprintf("version %d is not stored as a snapshot of the project's files, so the two versions cannot be compared file by file", oldN)
+			return ch, nil
+		}
+		ch.OldPin = oldRev.SnapshotSHA
+	}
+	files, err := s.Tree.TreeChanges(ctx, deliverableID, ch.OldPin, ch.NewPin)
+	if err != nil {
+		return Change{}, err
+	}
+	if files != nil {
+		ch.Files = files
+	}
+	return ch, nil
+}
+
+// treeCompare serves the tree lane of Compare: the inventory plus the per-file
+// unified diffs of everything in it, in path order. onlyPath narrows both to one
+// file (R4) — the same read at a second grain, never a second computation.
+func (s *Store) treeCompare(ctx context.Context, d Deliverable, oldN, newN int, onlyPath string) (Comparison, error) {
+	out := Comparison{DeliverableID: d.ID, Type: d.Type, OldN: oldN, NewN: newN, Surface: SurfaceLineDiff}
+	ch, err := s.Change(ctx, d.ID, oldN, newN)
+	if err != nil {
+		return Comparison{}, err
+	}
+	if ch.AbsentReason != "" {
+		// An absence is an ANSWER: the surface says why there is no file list
+		// rather than failing the read (§38).
+		out.Change = &ch
+		return out, nil
+	}
+	if onlyPath != "" {
+		row, ok := rowFor(ch.Files, onlyPath)
+		if !ok {
+			return Comparison{}, fmt.Errorf("%w: %s did not change between versions %d and %d", ErrNotFound, onlyPath, oldN, newN)
+		}
+		ch.Files = []ChangedFile{row}
+		out.Change = &ch
+		out.Unified, out.Truncated, out.TruncationReason, err = s.fileDiff(ctx, d.ID, ch, row)
+		return out, err
+	}
+	out.Change = &ch
+	out.Unified, out.Truncated, out.TruncationReason, err = s.changeDiff(ctx, d.ID, ch)
+	return out, err
+}
+
+func rowFor(files []ChangedFile, path string) (ChangedFile, bool) {
+	for _, f := range files {
+		if f.Path == path {
+			return f, true
+		}
+	}
+	return ChangedFile{}, false
+}
+
+// changeDiff renders the whole change's unified text, bounded by
+// TreeDiffBytesCap and cut at a FILE boundary.
+//
+// The cut is per-file rather than mid-text because the result has to stay a
+// unified diff the S15.8 widget can parse: half a file's hunks is a body whose
+// headers promise content that is not there. A file whose own bytes exceed the
+// whole-change budget cannot be shown here honestly either — a diff computed
+// from a partly-read blob would report changes that are an artefact of where
+// the read stopped — so it and everything after it are omitted, and the reason
+// says how much of the change the text holds.
+func (s *Store) changeDiff(ctx context.Context, deliverableID string, ch Change) (string, bool, string, error) {
+	var (
+		sb       strings.Builder
+		shown    int
+		diffable int
+	)
+	for _, row := range ch.Files {
+		if !row.Binary {
+			diffable++
+		}
+	}
+	for _, row := range ch.Files {
+		if row.Binary {
+			continue
+		}
+		oldText, oldWhole, err := s.side(ctx, deliverableID, ch.OldPin, oldPathOf(row), row.Kind != KindAdded, TreeDiffBytesCap)
+		if err != nil {
+			return "", false, "", err
+		}
+		newText, newWhole, err := s.side(ctx, deliverableID, ch.NewPin, row.Path, row.Kind != KindDeleted, TreeDiffBytesCap)
+		if err != nil {
+			return "", false, "", err
+		}
+		if !oldWhole || !newWhole {
+			return sb.String(), true, partialChangeReason(shown, diffable), nil
+		}
+		u, err := gitDiff(row.Path, oldText, newText)
+		if err != nil {
+			return "", false, "", err
+		}
+		if sb.Len()+len(u) > TreeDiffBytesCap {
+			return sb.String(), true, partialChangeReason(shown, diffable), nil
+		}
+		sb.WriteString(u)
+		shown++
+	}
+	return sb.String(), false, "", nil
+}
+
+func partialChangeReason(shown, total int) string {
+	if shown == 0 {
+		return fmt.Sprintf("none of the %d changed files fit in one view — open each one on its own to read its changes", total)
+	}
+	return fmt.Sprintf("this change is too large to show at once: the text below covers the first %d of %d changed files — open the rest one at a time",
+		shown, total)
+}
+
+// fileDiff renders ONE file's unified diff, bounded by TreeFileDiffBytesCap.
+func (s *Store) fileDiff(ctx context.Context, deliverableID string, ch Change, row ChangedFile) (string, bool, string, error) {
+	if row.Binary {
+		return "", false, "", nil
+	}
+	oldText, oldWhole, err := s.side(ctx, deliverableID, ch.OldPin, oldPathOf(row), row.Kind != KindAdded, TreeFileDiffBytesCap)
+	if err != nil {
+		return "", false, "", err
+	}
+	newText, newWhole, err := s.side(ctx, deliverableID, ch.NewPin, row.Path, row.Kind != KindDeleted, TreeFileDiffBytesCap)
+	if err != nil {
+		return "", false, "", err
+	}
+	// A side read short stops at the end of a line, so the diff below is over
+	// whole lines and ends cleanly rather than with a spurious no-newline mark.
+	partial := !oldWhole || !newWhole
+	if partial {
+		oldText, newText = trimToLine(oldText), trimToLine(newText)
+	}
+	text, err := gitDiff(row.Path, oldText, newText)
+	if err != nil {
+		return "", false, "", err
+	}
+	full := len(text)
+	if full > TreeFileDiffBytesCap {
+		text = cutDiff(text, TreeFileDiffBytesCap)
+	}
+	switch {
+	case partial:
+		return text, true, fmt.Sprintf("%s is %s, which is more than can be compared in one view — the changes below cover only the start of it",
+			row.Path, byteSize(largerOf(row.OldSize, row.NewSize))), nil
+	case full > len(text):
+		return text, true, fmt.Sprintf("the changes to %s run to %s; the text below stops after %s, at the end of a line",
+			row.Path, byteSize(int64(full)), byteSize(int64(len(text)))), nil
+	}
+	return text, false, "", nil
+}
+
+// side reads one end of a file's diff. present=false is the added/deleted end
+// (the empty side); a path the tree does not hold reads empty too. The returned
+// flag is false when the blob is LARGER than the limit, which means the text is
+// a prefix and no honest diff can be computed from it.
+func (s *Store) side(ctx context.Context, deliverableID, pin, path string, present bool, limit int64) (string, bool, error) {
+	if !present || pin == "" || path == "" {
+		return "", true, nil
+	}
+	data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, pin, path, limit)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return "", true, nil
+	}
+	return string(data), size <= limit, nil
+}
+
+func oldPathOf(row ChangedFile) string {
+	if row.Kind == KindRenamed && row.OldPath != "" {
+		return row.OldPath
+	}
+	return row.Path
+}
+
+func largerOf(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // CompareFile is Compare restricted to one changed file of a repo-backed
@@ -149,12 +370,263 @@ func (s *Store) Change(ctx context.Context, deliverableID string, oldN, newN int
 // diff, bounded by TreeFileDiffBytesCap. A path the change does not cover is
 // ErrNotFound.
 func (s *Store) CompareFile(ctx context.Context, deliverableID string, oldN, newN int, path string) (Comparison, error) {
-	return Comparison{}, errTreeNotBuilt
+	if path == "" {
+		return Comparison{}, fmt.Errorf("%w: narrowing a comparison needs a file path", ErrBadInput)
+	}
+	d, err := s.Deliverable(ctx, deliverableID)
+	if err != nil {
+		return Comparison{}, err
+	}
+	newRev, err := s.RevisionAt(ctx, deliverableID, newN)
+	if err != nil {
+		return Comparison{}, err
+	}
+	if newRev.SnapshotSHA == "" || s.Tree == nil {
+		return Comparison{}, fmt.Errorf("%w: this version is not stored as a snapshot of the project's files, so a comparison cannot be narrowed to one file", ErrBadInput)
+	}
+	return s.treeCompare(ctx, d, oldN, newN, path)
 }
 
 // RevisionFile serves one file of one revision (see FileContent): the tree
 // file at the pin first, else the revision's content object of that name. An
 // unknown path is ErrNotFound.
 func (s *Store) RevisionFile(ctx context.Context, deliverableID string, n int, path string) (FileContent, error) {
-	return FileContent{}, errTreeNotBuilt
+	if path == "" {
+		return FileContent{}, fmt.Errorf("%w: reading a file needs a path", ErrBadInput)
+	}
+	rev, err := s.RevisionAt(ctx, deliverableID, n)
+	if err != nil {
+		return FileContent{}, err
+	}
+	out := FileContent{DeliverableID: deliverableID, RevisionN: n, Path: path, Pin: rev.ContentSHA256}
+	if rev.SnapshotSHA != "" {
+		out.Pin = rev.SnapshotSHA
+	}
+	if rev.SnapshotSHA != "" && s.Tree != nil {
+		data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, rev.SnapshotSHA, path, TreeFileBytesCap)
+		if err != nil {
+			return FileContent{}, err
+		}
+		if ok {
+			out.Size = size
+			if isBinaryContent(data) {
+				// A binary's bytes are never served inline; the objects route
+				// is the one bytes channel (Spec S13.2, G2 Def.14).
+				out.Binary = true
+				return out, nil
+			}
+			out.Content = string(data)
+			if size > TreeFileBytesCap {
+				// The read already stopped at the cap; the cut here is to the
+				// last whole LINE of what came back, not to the cap again.
+				out.Content = trimToLine(out.Content)
+				out.Truncated = true
+				out.TruncationReason = fmt.Sprintf("%s is %s; the text below stops after %s, at the end of a line",
+					path, byteSize(size), byteSize(int64(len(out.Content))))
+			}
+			return out, nil
+		}
+	}
+	// No tree file of that name: the revision's own content objects — the
+	// companion report on a repo-backed revision, and the whole deliverable on
+	// a content-pinned one. Read hash-verified through the object dir.
+	files, err := s.RevisionFiles(ctx, deliverableID, n)
+	if err != nil {
+		return FileContent{}, err
+	}
+	content, ok := files[path]
+	if !ok {
+		return FileContent{}, fmt.Errorf("%w: %s holds no file %q at version %d", ErrNotFound, deliverableID, path, n)
+	}
+	out.Size = int64(len(content))
+	if isBinaryContent([]byte(content)) {
+		out.Binary = true
+		return out, nil
+	}
+	out.Content = content
+	if out.Size > TreeFileBytesCap {
+		out.Content = cutAtLine(content, TreeFileBytesCap)
+		out.Truncated = true
+		out.TruncationReason = fmt.Sprintf("%s is %s; the text below stops after %s, at the end of a line",
+			path, byteSize(out.Size), byteSize(int64(len(out.Content))))
+	}
+	return out, nil
+}
+
+// anchorFiles is the file map the S13.3 anchor model reads for one revision.
+//
+// For a repo-backed revision the anchored paths are TREE paths (Spec S13.3:
+// file_path is the repo-relative path, line_no the line of that file at the
+// revision), so they are read from the tree at the pin — but only the paths the
+// anchors actually name, so the cost is the number of anchors rather than the
+// size of the tree. The revision's own content objects stay in the map beneath
+// them, which is what keeps a comment on the companion report anchoring; the
+// tree wins a collision, because on a repo-backed revision the tree IS the
+// deliverable. A content-pinned revision's map is exactly RevisionFiles, as
+// before.
+func (s *Store) anchorFiles(ctx context.Context, deliverableID string, n int, paths []string) (map[string]string, error) {
+	files, err := s.RevisionFiles(ctx, deliverableID, n)
+	if err != nil {
+		return nil, err
+	}
+	if s.Tree == nil || len(paths) == 0 {
+		return files, nil
+	}
+	rev, err := s.RevisionAt(ctx, deliverableID, n)
+	if err != nil {
+		return nil, err
+	}
+	if rev.SnapshotSHA == "" {
+		return files, nil
+	}
+	seen := map[string]bool{}
+	for _, p := range paths {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, rev.SnapshotSHA, p, TreeFileBytesCap)
+		if err != nil {
+			return nil, err
+		}
+		// A path that is absent, binary or past the read cap simply is not in
+		// the map, and the ladder degrades it the way it degrades any anchor
+		// whose file it cannot see — to a file-level placement or an orphan,
+		// quote kept (Spec S13.3 steps 4-5). A partial body is never offered,
+		// because anchoring against one would place comments by line numbers
+		// that only exist in the prefix.
+		if !ok || size > TreeFileBytesCap || isBinaryContent(data) {
+			continue
+		}
+		files[p] = string(data)
+	}
+	return files, nil
+}
+
+// anchoredPaths is the set of file paths a batch of comments names — the bound
+// on what anchorFiles reads.
+func anchoredPaths(comments []Comment) []string {
+	var out []string
+	for _, c := range comments {
+		if c.Anchor.FilePath != "" {
+			out = append(out, c.Anchor.FilePath)
+		}
+	}
+	return out
+}
+
+// findingAnchorPaths is the same bound for findings, whose anchors arrive as the
+// opaque "path:line" strings S07.5 emits. It reads the SAME shape
+// ParseFindingAnchor does — the path before a trailing line number — without
+// deciding anything: a candidate that names no file of the revision simply
+// finds nothing in the map, and the finding records file-level as it always
+// did.
+func findingAnchorPaths(findings []FindingInput) []string {
+	var out []string
+	for _, f := range findings {
+		if path, ok := anchorPathCandidate(f.RawAnchor); ok {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+func anchorPathCandidate(raw string) (string, bool) {
+	i := strings.LastIndexByte(raw, ':')
+	if i <= 0 || i == len(raw)-1 {
+		return "", false
+	}
+	for _, c := range raw[i+1:] {
+		if c < '0' || c > '9' {
+			return "", false
+		}
+	}
+	return raw[:i], true
+}
+
+// isBinaryContent applies git's own heuristic: a NUL byte inside the first
+// 8000 bytes means there is no text to show.
+func isBinaryContent(data []byte) bool {
+	if len(data) > binarySniffBytes {
+		data = data[:binarySniffBytes]
+	}
+	return bytes.IndexByte(data, 0) >= 0
+}
+
+// cutAtLine truncates to at most limit bytes, ending at a line boundary when
+// there is one — so a served prefix is a set of whole lines and its last line
+// is not half a statement.
+func cutAtLine(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	if i := strings.LastIndexByte(s[:limit], '\n'); i >= 0 {
+		return s[:i+1]
+	}
+	return s[:limit]
+}
+
+// trimToLine drops a trailing partial line from a prefix that was already cut
+// by a bounded READ. It is not cutAtLine's job: that one asks "what fits under
+// this many bytes", and the answer here is "all of this except the half line
+// the reader stopped in the middle of".
+func trimToLine(s string) string {
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return s[:i+1]
+	}
+	return s
+}
+
+// cutDiff truncates a unified diff to at most limit bytes, preferring the last
+// HUNK boundary that fits so the served text is whole hunks. The first hunk is
+// never cut away — a diff body with headers and no hunk at all says less than a
+// partial hunk does — so a single oversized hunk falls back to a line boundary.
+func cutDiff(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	first := hunkStart(text, 0)
+	if first >= 0 && first < limit {
+		best := -1
+		for at := hunkStart(text, first+1); at >= 0 && at <= limit; at = hunkStart(text, at+1) {
+			best = at
+		}
+		if best > 0 {
+			return text[:best]
+		}
+	}
+	return cutAtLine(text, limit)
+}
+
+// hunkStart is the index of the first hunk header at or after from — a line
+// beginning "@@ ".
+func hunkStart(text string, from int) int {
+	if from < 0 || from > len(text) {
+		return -1
+	}
+	for at := from; at < len(text); {
+		i := strings.Index(text[at:], "@@ ")
+		if i < 0 {
+			return -1
+		}
+		abs := at + i
+		if abs == 0 || text[abs-1] == '\n' {
+			return abs
+		}
+		at = abs + 1
+	}
+	return -1
+}
+
+// byteSize renders a size the way a person reads one. Requester-facing prose
+// carries no byte counts in the raw (§38).
+func byteSize(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
 }

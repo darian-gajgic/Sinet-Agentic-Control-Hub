@@ -1,0 +1,27 @@
+{
+  "deliverable_id": "d-site",
+  "type": "code",
+  "old_n": 1,
+  "new_n": 2,
+  "surface": "line-diff",
+  "unified": "diff --git a/site/release.tsx b/site/release.tsx\nindex 947bc73..a144823 100644\n--- a/site/release.tsx\n+++ b/site/release.tsx\n@@ -1,4 +1,5 @@\n import { mount } from './mount'\n+import { theme } from './theme'\n \n export function ReleasePage() {\n   const notes = loadNotes()\n@@ -11,7 +12,8 @@ export function loadNotes() {\n }\n \n export function render(notes) {\n+  theme.apply()\n   return mount(notes)\n }\n \n-export const version = 1\n+export const version = 2\n",
+  "change": {
+    "deliverable_id": "d-site",
+    "old_n": 1,
+    "new_n": 2,
+    "old_pin": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+    "new_pin": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
+    "old_is_base": false,
+    "files": [
+      {
+        "path": "site/release.tsx",
+        "kind": "modified",
+        "old_size": 312,
+        "new_size": 360,
+        "binary": false,
+        "additions": 3,
+        "deletions": 1
+      }
+    ]
+  }
+}

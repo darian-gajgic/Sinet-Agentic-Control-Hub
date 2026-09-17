@@ -126,6 +126,23 @@ func (s *Store) Compare(ctx context.Context, deliverableID string, oldN, newN in
 	}
 	out := Comparison{DeliverableID: deliverableID, Type: d.Type, OldN: oldN, NewN: newN}
 
+	// THE TREE LANE IS CHOSEN BY THE PIN, NEVER BY THE TYPE (tree.go). A
+	// revision carrying a snapshot commit IS the tree at that commit (Spec
+	// S13.1), so the reviewable change is the files that moved between the two
+	// pins and the round report is a companion beside them. A content-pinned
+	// revision never reaches here, which is what keeps every other lane's
+	// comparison byte-identical.
+	if newRev.SnapshotSHA != "" {
+		if s.Tree != nil {
+			return s.treeCompare(ctx, d, oldN, newN, "")
+		}
+		// The work IS in a repository and this process cannot read it. The
+		// companion comparison below is still served — it is the honest lesser
+		// answer — but it says what it is rather than posing as the change
+		// (Spec S13.2's labeled-fallback posture).
+		out.Label = "the project's file store is not available in this process, so this shows the round's written report rather than the files that changed"
+	}
+
 	switch {
 	case isLineDiffType(d.Type) && newRev.PinKind == "content":
 		out.Surface = SurfaceLineDiff

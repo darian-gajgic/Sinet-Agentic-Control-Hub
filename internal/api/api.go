@@ -702,6 +702,7 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api/deliverables", s.handleDeliverableList)
 	protected("GET /api/deliverables/{deliverable}", s.handleDeliverableDetail)
 	protected("GET /api/deliverables/{deliverable}/compare", s.handleDeliverableCompare)
+	protected("GET /api/deliverables/{deliverable}/files", s.handleDeliverableFile)
 	protected("GET /api/deliverables/{deliverable}/comments", s.handleCommentList)
 	protected("POST /api/deliverables/{deliverable}/comments", s.handleCommentCreate)
 	// The object BYTES behind an ObjectRef (B6-8 OQ2b): the S13.2 image trio and

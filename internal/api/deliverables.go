@@ -233,7 +233,17 @@ type DeliverableDetail struct {
 	// apart from a posture it has never heard of, and absence is the answer
 	// (the GF4 drain-F3c lesson).
 	Verification *RevisionVerification `json:"verification,omitempty"`
-	Cursor       int64                 `json:"cursor"`
+	// Change is the CURRENT revision's default reviewable change — the file
+	// inventory between it and the version before it (the pre-task base for
+	// revision 1), so a surface can say what this work consists of without a
+	// second read (Spec S13.1 "everything arrives as a reviewable change";
+	// S15.3 splits the inventory from the bodies, which are one read away).
+	//
+	// A pointer, and ABSENT for a deliverable that is not stored as a project
+	// snapshot: there is no file list for a single written answer, and a
+	// zero-valued one would claim an empty change rather than no change.
+	Change *review.Change `json:"change,omitempty"`
+	Cursor int64          `json:"cursor"`
 }
 
 // RevisionVerification is the machine-readable half of what a round's verdict
@@ -287,8 +297,34 @@ func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request)
 		Lineage:      lineage,
 		Doors:        s.doorsFor(r.Context(), d, revs),
 		Verification: s.revisionVerification(r.Context(), currentRevision(revs, d.CurrentRevision)),
+		Change:       s.deliverableChange(r.Context(), d, revs),
 		Cursor:       cursor,
 	})
+}
+
+// deliverableChange is the current revision's default change inventory, or nil
+// when this deliverable is not stored as a project snapshot.
+//
+// A read failure does NOT fail the detail: the inventory is one member of a
+// resource read, and refusing the whole deliverable because the project store
+// could not answer would hide the deliverable to report a problem with a part
+// of it. The absence is served with its reason and the cause goes to the ops
+// log — the `revisionVerification` posture (§38: absences are rendered).
+func (s *Server) deliverableChange(ctx context.Context, d review.Deliverable, revs []review.Revision) *review.Change {
+	rev := currentRevision(revs, d.CurrentRevision)
+	if rev.N < 1 || rev.SnapshotSHA == "" {
+		return nil
+	}
+	ch, err := s.review.Change(ctx, d.ID, rev.N-1, rev.N)
+	if err != nil {
+		s.logger.Warn("deliverables: read the change inventory", "deliverable", d.ID, "revision", rev.N, "err", err)
+		return &review.Change{
+			DeliverableID: d.ID, OldN: rev.N - 1, NewN: rev.N, NewPin: rev.SnapshotSHA,
+			OldIsBase: rev.N == 1, Files: []review.ChangedFile{},
+			AbsentReason: "the files in this version could not be read just now",
+		}
+	}
+	return &ch
 }
 
 // revisionVerification reads the posture off the revision's OWN verdict row.
@@ -600,12 +636,101 @@ func (s *Server) handleDeliverableCompare(w http.ResponseWriter, r *http.Request
 			"comparing needs two different versions (old %d, new %d); old=0 means how things stood before the task started", oldN, newN)))
 		return
 	}
-	cmp, err := s.review.Compare(r.Context(), d.ID, oldN, newN)
+	// `?path=` narrows the SAME comparison to one file (Spec S15.3: the
+	// inventory rides the read, the bodies are one read away). It is a
+	// parameter rather than a second endpoint for the reason the revision pair
+	// is: one act, one door.
+	path, err := treePathParam(r, false)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	var cmp review.Comparison
+	if path != "" {
+		cmp, err = s.review.CompareFile(r.Context(), d.ID, oldN, newN, path)
+	} else {
+		cmp, err = s.review.Compare(r.Context(), d.ID, oldN, newN)
+	}
 	if err != nil {
 		s.writeSurface(w, nil, s.reviewErr(err))
 		return
 	}
 	s.writeReadJSON(w, cmp)
+}
+
+// ── GET /api/deliverables/{deliverable}/files ───────────────────────────────
+
+// handleDeliverableFile serves ONE file of one revision as JSON text — the code
+// view of a repo-backed deliverable (Spec S15.8; S13.2's code/text row), and the
+// companion report or a content-pinned deliverable's own object by the same
+// read.
+//
+// Escape-first, like every other content read here: the body is a JSON string,
+// and the objects route stays the one channel that serves raw bytes (Spec
+// S13.3's escape-first contract; the enforcement is S15's).
+func (s *Server) handleDeliverableFile(w http.ResponseWriter, r *http.Request) {
+	if !s.reviewReady(w) {
+		return
+	}
+	d, ok := s.deliverableScope(w, r)
+	if !ok {
+		return
+	}
+	if d.CurrentRevision < 1 {
+		s.writeSurface(w, nil, badRequest("no version of this work has been produced yet, so there are no files to read"))
+		return
+	}
+	n, err := revisionParam(r, "revision", d.CurrentRevision)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	if n < 1 {
+		s.writeSurface(w, nil, badRequest("reading a file needs a numbered version (1 is the first); 0 means the state before the task and holds no version of this work"))
+		return
+	}
+	path, err := treePathParam(r, true)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	fc, err := s.review.RevisionFile(r.Context(), d.ID, n, path)
+	if err != nil {
+		s.writeSurface(w, nil, s.reviewErr(err))
+		return
+	}
+	s.writeReadJSON(w, fc)
+}
+
+// treePathParam reads and validates the `path` query parameter at the transport
+// boundary (§30: anything a caller can fix answers 4xx).
+//
+// A deliverable's file path is repo-relative and names a file in a tree the
+// platform pinned — it is never resolved against a filesystem here, so this is
+// a shape check on an identity, not a traversal guard: a leading separator or a
+// `..` segment would make the served answer claim a path the deliverable does
+// not own, and the control characters would let a path forge a line in the
+// unified diff's own headers.
+func treePathParam(r *http.Request, required bool) (string, error) {
+	raw := r.URL.Query().Get("path")
+	if raw == "" {
+		if required {
+			return "", badRequest(`missing "path": reading a file needs the file's path inside the project, like "src/app.go"`)
+		}
+		return "", nil
+	}
+	if strings.ContainsAny(raw, "\x00\r\n") {
+		return "", badRequest("that file path contains characters a path cannot hold")
+	}
+	if strings.HasPrefix(raw, "/") {
+		return "", badRequest(fmt.Sprintf("%q is an absolute path: a file is named relative to the project, like \"src/app.go\"", raw))
+	}
+	for _, seg := range strings.Split(raw, "/") {
+		if seg == ".." {
+			return "", badRequest(fmt.Sprintf("%q steps outside the project: a file is named relative to the project, like \"src/app.go\"", raw))
+		}
+	}
+	return raw, nil
 }
 
 // revisionParam parses a revision query bound, defaulting when absent.

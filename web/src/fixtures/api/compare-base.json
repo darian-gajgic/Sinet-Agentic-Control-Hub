@@ -4,5 +4,31 @@
   "old_n": 0,
   "new_n": 2,
   "surface": "line-diff",
-  "unified": "diff --git a/site/README.md b/site/README.md\nindex e69de29..1888fdf 100644\n--- a/site/README.md\n+++ b/site/README.md\n@@ -0,0 +1,3 @@\n+# Release page\n+\n+Rendered from the changelog.\ndiff --git a/site/release.tsx b/site/release.tsx\nindex e69de29..a144823 100644\n--- a/site/release.tsx\n+++ b/site/release.tsx\n@@ -0,0 +1,19 @@\n+import { mount } from './mount'\n+import { theme } from './theme'\n+\n+export function ReleasePage() {\n+  const notes = loadNotes()\n+  if (!notes) throw new Error('no notes to render')\n+  return render(notes)\n+}\n+\n+export function loadNotes() {\n+  return fetchChangelog()\n+}\n+\n+export function render(notes) {\n+  theme.apply()\n+  return mount(notes)\n+}\n+\n+export const version = 2\n"
+  "unified": "diff --git a/site/legacy.tsx b/site/legacy.tsx\nindex 6bbffa9..e69de29 100644\n--- a/site/legacy.tsx\n+++ b/site/legacy.tsx\n@@ -1,2 +0,0 @@\n-// superseded by release.tsx\n-export const legacy = true\ndiff --git a/site/release.tsx b/site/release.tsx\nindex e69de29..a144823 100644\n--- a/site/release.tsx\n+++ b/site/release.tsx\n@@ -0,0 +1,19 @@\n+import { mount } from './mount'\n+import { theme } from './theme'\n+\n+export function ReleasePage() {\n+  const notes = loadNotes()\n+  if (!notes) throw new Error('no notes to render')\n+  return render(notes)\n+}\n+\n+export function loadNotes() {\n+  return fetchChangelog()\n+}\n+\n+export function render(notes) {\n+  theme.apply()\n+  return mount(notes)\n+}\n+\n+export const version = 2\n",
+  "change": {
+    "deliverable_id": "d-site",
+    "old_n": 0,
+    "new_n": 2,
+    "old_pin": "0b1c2d3e4f5061728394a5b6c7d8e9f00b1c2d3e",
+    "new_pin": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
+    "old_is_base": true,
+    "files": [
+      {
+        "path": "site/legacy.tsx",
+        "kind": "deleted",
+        "old_size": 56,
+        "new_size": 0,
+        "binary": false,
+        "deletions": 2
+      },
+      {
+        "path": "site/release.tsx",
+        "kind": "added",
+        "old_size": 0,
+        "new_size": 360,
+        "binary": false,
+        "additions": 19
+      }
+    ]
+  }
 }
