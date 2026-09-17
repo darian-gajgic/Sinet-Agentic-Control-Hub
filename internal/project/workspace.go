@@ -139,6 +139,19 @@ func (s *Store) FreshAttempt(ctx context.Context, projectID, pipelineID string, 
 	return s.ensureWorkspaceAttempt(ctx, projectID, pipelineID, attempt)
 }
 
+// snapshotAddAttempts bounds the snapshot's staging attempts. A checkpoint
+// snapshot runs while the engine is live (Spec S02.4d: per paid call), and an
+// engine writes files atomically — a temp beside the target, then a rename —
+// so an UNTRACKED path can vanish between `git add -A`'s directory walk and
+// its lstat of that path, which git treats as fatal (exit 128). One retry
+// clears any single vanish, since the path is gone by the next walk; the third
+// attempt covers a second independent vanish during a multi-file write burst;
+// the bound exists so a pathologically churning tree fails LOUD instead of
+// looping. Structural, not a ⚙ setting — S13.5/S02.4 ratify no key (the
+// CONVENTIONS §7 sseBatchSize precedent, the §23 posture for snapshot
+// mechanics).
+const snapshotAddAttempts = 3
+
 // Snapshot takes a platform-owned, TREE-LEVEL snapshot commit of a worktree —
 // capturing bash side effects (modified AND untracked files, and deletions),
 // junk-excluded via the platform ignore rules, authored as the platform with
@@ -147,13 +160,35 @@ func (s *Store) FreshAttempt(ctx context.Context, projectID, pipelineID string, 
 // branch that is checked out; the tree matches the new HEAD). When the tree is
 // unchanged since the last snapshot it returns the existing tip — never an
 // --allow-empty commit (Spec S13.5; still-valid D7 material). "" is returned
-// only for a genuinely empty worktree with no HEAD.
+// only for a genuinely empty worktree with no HEAD. Staging is retried — the
+// identical command, up to snapshotAddAttempts times — when git dies on a path
+// that vanished under it.
 func (s *Store) Snapshot(ctx context.Context, worktree string) (string, error) {
 	id := platformIdentity
 	// Stage every worktree change (tree-level), applying the platform excludes
-	// so junk never enters a snapshot (structural code data, Spec S13.5).
-	if _, err := s.git(ctx, worktree, id, "-c", "core.excludesFile="+s.excludes, "add", "-A"); err != nil {
-		return "", err
+	// so junk never enters a snapshot (structural code data, Spec S13.5). Each
+	// attempt is the SAME command on the tree as it is at that instant, so a
+	// retry can never alter what is captured; only git's die code (128) is the
+	// transient class, and a spawn failure is loud immediately.
+	var addErr error
+	attempts := 0
+	for attempts < snapshotAddAttempts {
+		attempts++
+		code, _, stderr, err := s.gitRaw(ctx, worktree, id, "-c", "core.excludesFile="+s.excludes, "add", "-A")
+		if err != nil {
+			return "", err
+		}
+		if code == 0 {
+			addErr = nil
+			break
+		}
+		addErr = fmt.Errorf("project: git add -A (exit %d): %s", code, strings.TrimSpace(stderr))
+		if code != 128 {
+			break
+		}
+	}
+	if addErr != nil {
+		return "", fmt.Errorf("project: snapshot staging failed after %d of %d attempts: %w", attempts, snapshotAddAttempts, addErr)
 	}
 	// No-change → the prior snapshot (git diff --cached --quiet: exit 0 = the
 	// staged tree equals HEAD, exit 1 = differs).
