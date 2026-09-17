@@ -929,10 +929,14 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 
 	// seatDuty is the duty whose seat selection ACTUALLY resolved, which is not
 	// always the duty the template asked for: an unknown duty degrades onto the
-	// execution seat below. `duty` itself is deliberately NOT reassigned —
-	// chooseFlatLane and the reason both read it, and moving it would change
-	// the unpinned path — so the effective value is tracked separately and only
-	// the lane pin reads it (P3-LN-9 r1 F1/F2).
+	// execution seat below. `duty` itself is deliberately NOT reassigned — the
+	// requester-facing reason reads it, and the sentence must keep naming the
+	// work the person asked about, not the seat it degraded onto — so the
+	// effective value is tracked separately and read by the lane pin
+	// (P3-LN-9 r1 F1/F2) and by the flat-lane choice (P3-TQ-5 drain r1 F4: a
+	// degraded duty rides the EXECUTION seat, so it must ride that seat's
+	// alternates and lane order too — resolving it under its own unknown name
+	// found neither, and silently stranded a commissioned lane).
 	seat, ok := r.DutyMap[duty]
 	seatDuty := duty
 	if !ok {
@@ -985,7 +989,7 @@ func (r *Router) resolveSeat(ctx context.Context, q RouteQuery, p ExecutionProfi
 	// be honoring the pin.
 	laneNote := ""
 	if p.ModelPin == "" && !lanePinned {
-		seat, laneNote = r.chooseFlatLane(ctx, q.Requester, duty, seat)
+		seat, laneNote = r.chooseFlatLane(ctx, q.Requester, seatDuty, seat)
 	}
 
 	if !r.Coverage.laneCovered(seat.Lane) {
