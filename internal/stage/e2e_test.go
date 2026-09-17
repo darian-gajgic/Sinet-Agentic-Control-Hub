@@ -87,6 +87,16 @@ func stageFakeMain() int {
 		payload = fakeAxis2JSON()
 	case marker("execute"):
 		sid = "0000f00d-0000-4000-8000-000000000003"
+		// A faithful executor of this fixture's own plan: step S-1 declares
+		// write_set ["note.md"], and the session's cwd is the run cwd the
+		// drain later verifies against. A step's "Done when" contract is
+		// decided from the files the work produced (Spec S07.3; Spec S07.8
+		// [A16]), so a fixture that promises a file and writes none is the
+		// defect the check is meant to catch, not a false positive.
+		if err := os.WriteFile("note.md", []byte(fakeDeliverable), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "fake execute session: write note.md: %v\n", err)
+			return 1
+		}
 		if os.Getenv("SINET_STAGE_FAKE_OVERFLOW") == "1" && !strings.Contains(prompt, "after a stage split") {
 			// The stage-split leg (split e2e): a first execute session whose
 			// second paid call crosses the overflow threshold, then keeps

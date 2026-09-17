@@ -133,6 +133,10 @@ type VerifyInput struct {
 	// Steps are the approved PLAN steps (per-step Done-when contracts,
 	// Spec S07.3).
 	Steps []intake.Step
+	// Coverage is the approved PLAN's AC coverage map (AC key → owning step
+	// ids, Spec S06.6): the frozen criterion a step's contract FAIL cites
+	// (Spec S07.5 blocker rule; P3-TQ-3).
+	Coverage map[string][]string
 	// ResearchNodes are the PLAN's declared research nodes (1.9).
 	ResearchNodes []intake.ResearchNode
 	// Tier is the stakes tier (axis-2 gating outside launch domains, Spec
@@ -461,10 +465,20 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 		switch {
 		case posture == PostureBootstrap:
 			// The ladder has nothing it could run, so V1 still RUNS and says
-			// so: every rung and every step contract records UNVERIFIABLE-HERE
-			// (Spec S07.8 [A14]). No workspace is materialized — there is
-			// nothing to materialize it for.
-			res := bootstrapV1(pack, in.Steps)
+			// so: every rung records UNVERIFIABLE-HERE (Spec S07.8 [A14]).
+			// The step contracts are another matter — the files the work
+			// produced are there to be read, and every contract they can
+			// decide is decided from them rather than from the executor's
+			// report (Spec S07.8 [A16]). The workspace resolves exactly as
+			// the pack branch's does: one behavior, no special case.
+			ws, cleanup, err := v.workspace(ctx, d, in.Workspace)
+			if err != nil {
+				return Outcome{}, err
+			}
+			res := bootstrapV1(pack, in.Steps, in.Coverage, ws)
+			if cleanup != nil {
+				cleanup()
+			}
 			v1res = &res
 			record.V1 = v1res
 			if _, err := rec.RecordV1(ctx, d.RunID, res); err != nil {

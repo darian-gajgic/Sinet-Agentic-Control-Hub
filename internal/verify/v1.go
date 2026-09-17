@@ -255,6 +255,11 @@ type StepContract struct {
 	AttributedTo string        `json:"attributed_to,omitempty"` // first upstream failure
 	Category     Category      `json:"category,omitempty"`
 	Route        Sink          `json:"route,omitempty"`
+	// Detail is the plain-words reason behind the state — what the tree
+	// showed, or why the contract could not be decided here (Spec S07.8
+	// [A16, 2026-09-17]; P3-TQ-3). Additive: rows without it decode
+	// unchanged.
+	Detail string `json:"detail,omitempty"`
 }
 
 // V1Result is the V1 layer outcome.
