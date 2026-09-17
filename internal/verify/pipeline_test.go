@@ -58,7 +58,7 @@ func TestShipPathRecordsAndVerifies(t *testing.T) {
 	}
 	golden := p["golden_set"].(map[string]any)
 	if golden["measured"] != true {
-		t.Fatal("golden-set rates must be measured (rubric v2 — the B4-7 rider-1 P-T06-5 run on opus-4-8)")
+		t.Fatal("golden-set rates must be measured (rubric v3 — the P3-TQ-5 rider-1 P-T06-5 run on claude-opus-5)")
 	}
 	if p["content_sha256"] == "" {
 		t.Fatal("verdict row without the revision content hash")

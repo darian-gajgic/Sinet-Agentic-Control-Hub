@@ -63,7 +63,7 @@ func newSplitHarness(t *testing.T) *harness {
 	// context overflow (the tiny window), not a judge change, and P-T06-5 blocks
 	// unsupervised judging under a seat the rubric was never measured on
 	// (Spec S14.8 ¶3).
-	ceremony := worker.Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: 500}
+	ceremony := worker.Seat{Model: "claude-opus-5", Lane: "anthropic", WindowTokens: 500}
 	sk, err := stage.New(stage.Config{
 		DB: db, Log: log, Runs: runs, Checkpoints: cps, Ledger: led, Settings: reg,
 		DutyMap: worker.DutyMap{

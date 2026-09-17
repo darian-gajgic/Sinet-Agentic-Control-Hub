@@ -88,7 +88,7 @@ func TestSeedFloorsAreMeasurementDerivedAndGatePending(t *testing.T) {
 	if fl.Ratified {
 		t.Error("seed floors must enter gate-PENDING (operator ratification is a B5-gate item)")
 	}
-	if !strings.Contains(fl.Basis, "2026-07-22") || !strings.Contains(fl.Basis, "Wilson") {
+	if !strings.Contains(fl.Basis, "2026-09-17") || !strings.Contains(fl.Basis, "Wilson") {
 		t.Errorf("floor basis does not name its measurement: %q", fl.Basis)
 	}
 	if err := f.store.Ratify(ctx, r.ID, r.Version); err != nil {

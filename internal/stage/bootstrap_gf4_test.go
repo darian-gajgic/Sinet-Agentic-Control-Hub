@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -215,8 +216,16 @@ func TestGF4RetryOnPreGF4CardLandsInBootstrap(t *testing.T) {
 }
 
 // TestGF4NonBootstrapReceiptIsUnchanged [R7]: a run whose drain never touched
-// the posture serves the receipt row byte for byte as it was materialized —
-// the posture member is composed in, never a rewrite of everyone's receipt.
+// the posture serves the materialized receipt row unchanged — the POSTURE
+// member is composed in, never a rewrite of everyone's receipt.
+//
+// NARROWED at P3-TQ-5 (coordinator-sanctioned): the comparison now allows the
+// additive `judge` member, which S07.5 / G1 Def.1 puts on every receipt whose
+// run reached a verdict, and which this run does reach. The intent above is
+// unchanged and is what the two assertions below state directly — the posture
+// sentence is absent, and nothing ELSE about the stored row moved. A raw
+// byte-identity check would have forbidden every future additive member, which
+// is a stronger claim than this test was written to make.
 func TestGF4NonBootstrapReceiptIsUnchanged(t *testing.T) {
 	ctx := context.Background()
 	h := outageHarness(t, bootstrapJudge{}, nil)
@@ -235,8 +244,21 @@ func TestGF4NonBootstrapReceiptIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Receipt: %v", err)
 	}
-	if string(served) != stored {
-		t.Fatalf("served receipt differs from the materialized row:\n served = %s\n stored = %s", served, stored)
+	// Everything the materialized row holds is served unchanged; the only
+	// member the serving side is allowed to add here is the judge line.
+	var servedMap, storedMap map[string]any
+	if err := json.Unmarshal(served, &servedMap); err != nil {
+		t.Fatalf("decode the served receipt: %v", err)
+	}
+	if err := json.Unmarshal([]byte(stored), &storedMap); err != nil {
+		t.Fatalf("decode the materialized receipt: %v", err)
+	}
+	if _, ok := servedMap["judge"]; !ok {
+		t.Errorf("the served receipt carries no judge line although the run reached a verdict: %s", served)
+	}
+	delete(servedMap, "judge")
+	if !reflect.DeepEqual(servedMap, storedMap) {
+		t.Fatalf("the served receipt rewrote the materialized row:\n served = %v\n stored = %v", servedMap, storedMap)
 	}
 	if strings.Contains(string(served), "restores the full ladder") {
 		t.Fatalf("a full-posture run's receipt carries the bootstrap statement: %s", served)

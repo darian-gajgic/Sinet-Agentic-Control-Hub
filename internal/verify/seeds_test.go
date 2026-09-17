@@ -20,16 +20,17 @@ func TestSeedRubricValid(t *testing.T) {
 	if err := r.Validate(); err != nil {
 		t.Fatalf("seed rubric invalid: %v", err)
 	}
-	// v2 (B4-7 rider 1): the golden-set rates are measured on the ratified
-	// opus-4-8 judge (P-T06-5); content flagged for gate ratification (D1).
-	if r.Domain != verify.DomainSoftware || r.Version != 2 {
+	// v3 (P3-TQ-5 rider 1): the judge seat moved to claude-opus-5, which is a
+	// version bump under P-T06-5, so the golden-set rates are re-measured on
+	// that seat (2026-09-17); content unchanged from v2.
+	if r.Domain != verify.DomainSoftware || r.Version != 3 {
 		t.Fatalf("rubric identity: %+v", r)
 	}
 	if !r.GoldenSet.Measured || r.GoldenSet.TPR == nil || r.GoldenSet.TNR == nil {
-		t.Fatal("v2 rubric must carry measured golden-set rates (rider 1 P-T06-5 run)")
+		t.Fatal("v3 rubric must carry measured golden-set rates (rider 1 P-T06-5 run)")
 	}
-	if !strings.Contains(r.JudgePin, "opus-4-8") {
-		t.Fatalf("judge pin must name the ratified opus-4-8 judge seat: %q", r.JudgePin)
+	if !strings.Contains(r.JudgePin, "claude-opus-5") {
+		t.Fatalf("judge pin must name the ratified claude-opus-5 judge seat: %q", r.JudgePin)
 	}
 	if !strings.Contains(r.LengthBiasNote, "MEASURED") {
 		t.Fatalf("length-bias note must be measured (P-T06-3): %q", r.LengthBiasNote)

@@ -17,30 +17,36 @@ import (
 // owns the store and the per-suite green/red check.
 
 // Seed floor values (OQ5(a), coordinator-dispositioned): the floor IS the
-// MEASURED Wilson 95% lower bound of the B4-7 rider-1 golden-set run — a floor
-// is measurement-derived, never invented, and the point estimate would be
-// brittle at n=20 (a single miss would red the rubric).
+// MEASURED Wilson 95% lower bound of the rider-1 golden-set run — a floor is
+// measurement-derived, never invented, and the point estimate would be brittle
+// at n=20 (a single miss would red the rubric).
+//
+// RE-MEASURED 2026-09-17 on claude-opus-5 (P3-TQ-5 rider 1), because a floor
+// tracks the (asset, VERSION) it was measured against (Spec S14.8 ¶2/¶5) and
+// the judge-seat change bumped rubric-software to v3. The numbers below are
+// that run's own; they happen to reproduce the previous seat's exactly, which
+// is a result and not a carry-over.
 //
 // These are named code constants, not ⚙ values: S18 ratifies no key for them
 // (the §7 sseBatchSize / §9 auth-constant precedent, under the standing
-// settings-tab directive). Operator RATIFICATION of the seeded floors is
-// flagged to the B5 gate; until then the registered rows carry ratified=0.
+// settings-tab directive). Operator RATIFICATION of the seeded floors stays
+// flagged to the gate; until then the registered rows carry ratified=0.
 const (
-	// rubricSoftwareCatchFloor: TPR 20/20 = 1.000 measured on claude-opus-4-8,
+	// rubricSoftwareCatchFloor: TPR 20/20 = 1.000 measured on claude-opus-5,
 	// Wilson 95% interval [0.84, 1.00] → floor 0.84.
 	rubricSoftwareCatchFloor = 0.84
 	// rubricSoftwareTNR: TNR 3/6 = 0.500, Wilson 95% [0.19, 0.81] → carried
 	// REPORT-ONLY at 0.19. A TNR floor would flag the judge for being
 	// CONSERVATIVE — the over-strict direction the B4 gate accepted as safe for
-	// a quality gate (D4, 2026-07-23).
+	// a quality gate (D4, 2026-07-23), and the direction this judge reproduced.
 	rubricSoftwareTNR = 0.19
 )
 
 // floorBasis is the provenance every seeded floor carries.
-const floorBasis = "measured 2026-07-22 on claude-opus-4-8 (B4-7 rider 1, P-T06-5; " +
-	"P3/measurements/2026-07-22-rider1-golden-set-opus.md): planted-defect catch 20/20 = 1.000, " +
+const floorBasis = "measured 2026-09-17 on claude-opus-5 (P3-TQ-5 rider 1, P-T06-5; " +
+	"P3/measurements/2026-09-17-rider1-golden-set-opus5.md): planted-defect catch 20/20 = 1.000, " +
 	"Wilson 95% [0.84, 1.00] → floor = the lower bound 0.84. Clean controls 3/6 = 0.500, " +
-	"Wilson 95% [0.19, 0.81] → carried report-only. Operator ratification pending at the B5 gate."
+	"Wilson 95% [0.19, 0.81] → carried report-only. Operator ratification pending at the gate."
 
 // Floor is one registered per-version floor.
 type Floor struct {

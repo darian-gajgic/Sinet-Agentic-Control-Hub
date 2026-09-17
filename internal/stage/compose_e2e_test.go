@@ -208,7 +208,7 @@ func TestNoFitComposeVerbE2E(t *testing.T) {
 		t.Fatalf("VersionByID: %v", err)
 	}
 	if ver.AuthorKind != "composer" || ver.Origin != worker.OriginComposed ||
-		ver.Composer != "claude-opus-4-8" || !strings.Contains(ver.PlaybookVer, "seed-composer-playbook@v1") {
+		ver.Composer != "claude-opus-5" || !strings.Contains(ver.PlaybookVer, "seed-composer-playbook@v1") {
 		t.Fatalf("composer provenance = %+v", ver)
 	}
 	if !strings.HasPrefix(ver.EvidenceRef, "gap:") || ver.OriginRef != taskB {

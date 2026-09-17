@@ -44,8 +44,23 @@ Subscription `claude` login (setup-token): **$0 cash**; the API-equivalent is re
 
 `verify.SeedSoftwareRubric()` → **v3** (`JudgePin` naming `claude-opus-5`, `GoldenSet{TPR, TNR, Measured: true, MeasuredOn}`, `LengthBiasNote` measured on `claude-opus-5`, the four axis-2 items VERBATIM from v2); `internal/evals/floors.go` → the v3 floor row with its basis naming `claude-opus-5`, this file and "Wilson", `Ratified: false`; the `internal/evals/evals_test.go` probe literals only if the Wilson bound moved off `0.84`. Optionally the S14.8 record `evals.JudgeRemeasurement(...)`. The v2 floor row already registered in live databases is untouched (`EnsureFloorsRegistered` is insert-once).
 
-## Observation — PENDING
+## Observation — EXECUTED 2026-09-17 (coordinator; installed `claude` 2.1.274, reported per CONVENTIONS §10, never retargeted)
 
-Not executed. The coordinator runs the command above and records here: per-case results, TPR/TNR with Wilson 95% intervals, the point-biserial length bias, cumulative API-equivalent spend against the projection and the stop line, and the installed `claude` version (reported, never retargeted).
+Raw log: `P3/measurements/2026-09-17-rider1-golden-set-opus5.log` (26 per-case lines). Full set, no partial, wall 414.8 s. Harness line: `RIDER1_RESULT judge=claude-opus-5 cases=26 TPR=1.000[0.84,1.00] (20/20) TNR=0.500[0.19,0.81] (3/6) length_bias_r=-0.167 total_cost=$2.3714 stop=$5.00`.
 
-## Verdict — PENDING
+- **TPR = 1.000, Wilson 95% [0.84, 1.00] (20/20)** — every planted defect flagged, across all six classes: AC-BLOCKER (g-07…g-12), SANITY-BLOCKER (g-13…g-18), CHECK-INTEGRITY (g-19, g-20), RESEARCH-NOT-RUN (g-21, g-22), REOPEN-SPEC (g-23, g-24), V0-MALFORMED (g-25, g-26).
+- **TNR = 0.500, Wilson 95% [0.19, 0.81] (3/6)** — clean controls g-01, g-02, g-04 passed; **g-03, g-05, g-06 over-flagged, by axis 2 alone in all three cases** (`a1=false a2=true`). The same over-strictness, in the same direction, as the 2026-07-22 run on the previous judge seat.
+- **Length bias (P-T06-3): point-biserial r = −0.167** — WEAK and slightly negative (longer artifacts are not more flagged), **identical to the 2026-07-22 value**.
+- **Statistical correction (S07.11):** TPR/TNR are computed against the ground-truth human labels, never the judge's self-report; Wilson 95% intervals shown.
+- **Spend = $2.3714 API-equivalent** (per-case $0.080–$0.106) vs the $2.10 projection and the **$5.00 STOP LINE — never approached**. $0 cash (subscription lane).
+
+**Pre-registered readings, applied as written:**
+
+- Catch floor = the TPR Wilson lower bound at n = 20 = **0.84**. It lands exactly on the registered v2 floor, so the `internal/evals/evals_test.go` `0.84` literal and its `0.90`/`0.70` probes **do not move**.
+- TNR lower bound **0.19**, carried **report-only**.
+- **|r| ≥ 0.10 → a FINDING for the gate, not a rider failure.** r = −0.167 clears that bar, so it is recorded as a finding: it is the same value the B4 gate already accepted as weak and in the safe direction, reproduced on a different judge seat, which is evidence the measurement is stable rather than evidence of a new problem.
+
+## Verdict — PASS
+
+Full 26-case run, under the stop line, on the pinned seat. The claude-opus-5 judge has **perfect recall on planted defects and is over-strict on clean controls** — conservative, which is the safe direction for a quality gate and inflates rework rather than letting defects through. The gate that P-T06-5 requires is cleared, so unsupervised judging resumes under **rubric-software v3** (`JudgePin` = claude-opus-5, `GoldenSet{Measured: true, MeasuredOn: 2026-09-17}`) and the seeded floor is re-keyed to v3 with this run as its basis. Operator ratification of the v3 numbers is flagged to the packet's gate; the registered floor row ships `ratified=false`.
+

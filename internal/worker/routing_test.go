@@ -59,7 +59,7 @@ func TestRouteSelectsActiveWorkerDeterministically(t *testing.T) {
 	// Step 3: the duty map resolves the execution seat under flat-rate
 	// coverage; the seat row carries the window record (the retired B2-4
 	// constant's home).
-	if d1.Model != "claude-sonnet-5" || d1.Lane != "anthropic" || d1.WindowTokens != worker.DefaultWindowTokens {
+	if d1.Model != "claude-opus-5" || d1.Lane != "anthropic" || d1.WindowTokens != worker.DefaultWindowTokens {
 		t.Fatalf("seat = %s/%s/%d", d1.Model, d1.Lane, d1.WindowTokens)
 	}
 	if d1.Effort != "standard" {
@@ -329,7 +329,7 @@ func TestRouteMechanicalHelperDegradesLocalAbsence(t *testing.T) {
 	if !strings.Contains(d.PlainReason, "free models on this machine") || !strings.Contains(d.PlainReason, "none are set up here") {
 		t.Fatalf("local-tier absence not recorded: %q", d.PlainReason)
 	}
-	if d.Model != "claude-sonnet-5" {
+	if d.Model != "claude-opus-5" {
 		t.Fatalf("degraded mechanical duty must ride the paid execution seat, got %q", d.Model)
 	}
 	found := false
@@ -384,13 +384,14 @@ func TestTighterClass(t *testing.T) {
 
 func TestDefaultDutyMapShape(t *testing.T) {
 	m := worker.DefaultDutyMap()
-	// Seat mix ratified at the B3 gate 2026-07-22 (operator D3): the
-	// advisor split — opus plans, sonnet executes, cross-model opus judge
-	// (P3/gates/B3-report.md §7).
+	// Seat mix ratified by the operator 2026-09-17 (P3/gates/rework-sitting-gate.md
+	// item B7 + §Answers), which supersedes the B3 gate's advisor split: one
+	// model on every seat the map carries. Execution's row is the seat of LAST
+	// RESORT — the configured lane order prefers the Kimi lanes ahead of it.
 	want := map[string]string{
-		worker.DutyExecution: "claude-sonnet-5",
-		worker.DutyPlanning:  "claude-opus-4-8",
-		worker.DutyJudge:     "claude-opus-4-8",
+		worker.DutyExecution: "claude-opus-5",
+		worker.DutyPlanning:  "claude-opus-5",
+		worker.DutyJudge:     "claude-opus-5",
 	}
 	for duty, model := range want {
 		seat, ok := m[duty]

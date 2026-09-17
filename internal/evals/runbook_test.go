@@ -112,7 +112,7 @@ func TestRunbookStampsGreenAndKeepsRedFlagged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base.TPR != 1.0 || base.TNR != 0.5 || base.MeasuredOn != "2026-07-22" {
+	if base.TPR != 1.0 || base.TNR != 0.5 || base.MeasuredOn != "2026-09-17" {
 		t.Fatalf("baseline = %+v, want the rider-1 measurement", base)
 	}
 
@@ -146,7 +146,7 @@ func TestRunbookStampsGreenAndKeepsRedFlagged(t *testing.T) {
 	if !strings.Contains(st.Suites, "golden-software") {
 		t.Errorf("stamp does not name the suites that ran: %q", st.Suites)
 	}
-	if !strings.Contains(st.Baseline, "2026-07-22") {
+	if !strings.Contains(st.Baseline, "2026-09-17") {
 		t.Errorf("stamp does not name the pinned baseline: %q", st.Baseline)
 	}
 	if f.sweepRow(t).LastResult != conformance.ResultGreen {

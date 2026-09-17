@@ -16,12 +16,12 @@ func TestUnsupervisedJudgingGateBlocksAJudgeChange(t *testing.T) {
 	r := verify.SeedSoftwareRubric()
 
 	// The shipped bundle was measured on the ratified seat: judging proceeds.
-	if err := verify.UnsupervisedJudgingGate(r, "claude-opus-4-8"); err != nil {
+	if err := verify.UnsupervisedJudgingGate(r, "claude-opus-5"); err != nil {
 		t.Fatalf("the measured rubric must judge under its own pinned seat: %v", err)
 	}
 
 	// A judge change blocks — this is the whole point of the pin.
-	for _, seat := range []string{"claude-sonnet-5", "claude-haiku-4-5", "gpt-6"} {
+	for _, seat := range []string{"claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5", "gpt-6"} {
 		if err := verify.UnsupervisedJudgingGate(r, seat); !errors.Is(err, verify.ErrJudgeUnvalidated) {
 			t.Errorf("seat %q must block unsupervised judging, got %v", seat, err)
 		}
@@ -38,13 +38,13 @@ func TestUnsupervisedJudgingGateBlocksAJudgeChange(t *testing.T) {
 	// says so honestly rather than being trusted.
 	unmeasured := *r
 	unmeasured.GoldenSet = verify.GoldenSetRates{Measured: false}
-	if err := verify.UnsupervisedJudgingGate(&unmeasured, "claude-opus-4-8"); !errors.Is(err, verify.ErrJudgeUnvalidated) {
+	if err := verify.UnsupervisedJudgingGate(&unmeasured, "claude-opus-5"); !errors.Is(err, verify.ErrJudgeUnvalidated) {
 		t.Errorf("unmeasured golden-set rates must block: %v", err)
 	}
 	// A "measured" claim without a date is not a measurement either.
 	undated := *r
 	undated.GoldenSet.MeasuredOn = ""
-	if err := verify.UnsupervisedJudgingGate(&undated, "claude-opus-4-8"); !errors.Is(err, verify.ErrJudgeUnvalidated) {
+	if err := verify.UnsupervisedJudgingGate(&undated, "claude-opus-5"); !errors.Is(err, verify.ErrJudgeUnvalidated) {
 		t.Errorf("an undated measurement must block: %v", err)
 	}
 

@@ -109,18 +109,26 @@ func (r *RubricBundle) Validate() error {
 	return nil
 }
 
-// SeedSoftwareRubric returns the v1 software rubric bundle (TBD-P3 seed,
-// Spec S07.10 "seed rubric drafting session per launch domain" — drafted at
-// implementation time, ratification queued for the B2 gate).
+// SeedSoftwareRubric returns the software rubric bundle (Spec S07.10 "seed
+// rubric drafting session per launch domain"; immutable versioned bundles,
+// each pinning its judge model).
+//
+// v3, 2026-09-17: the judge seat moved to claude-opus-5 (gate record
+// P3/gates/rework-sitting-gate.md item B7 + §Answers), which IS a version bump
+// under S07.9 P-T06-5 — so the 26-case golden set was re-run on the new seat
+// and the rates below are that run's, never the previous judge's carried
+// forward. The rubric CONTENT is byte-for-byte v2's: only the pin and its
+// measurement moved.
 func SeedSoftwareRubric() *RubricBundle {
-	tpr, tnr := 1.0, 0.5 // measured on opus-4-8, 2026-07-22 (rider 1, P-T06-5)
+	tpr, tnr := 1.0, 0.5 // measured on claude-opus-5, 2026-09-17 (rider 1, P-T06-5)
 	return &RubricBundle{
 		ID:         "rubric-software",
 		Domain:     DomainSoftware,
-		Version:    2, // v2 bump (B4-7 rider 1): golden-set rates measured on the ratified opus-4-8 judge; RATIFIED at the B4 gate 2026-07-23 (D4) — the over-strict TNR 0.50 is on record, safe-direction for a quality gate; a byte-identical-schema re-run stays at operator discretion
-		VerifiedOn: "2026-07-22",
-		JudgePin: "claude-opus-4-8 (the D3-ratified judge seat, applied e06f0a4). The P-T06-5 golden-set re-run ran on it " +
-			"2026-07-22 (rider 1) before unsupervised judging resumes; any future judge change re-gates on a fresh re-run.",
+		Version:    3, // v3 bump (P3-TQ-5 rider 1): golden-set rates re-measured on the claude-opus-5 judge seat. The over-strict TNR 0.50 reproduced exactly — the same three simple-but-correct controls, flagged by axis 2 alone — which is the conservative direction a quality gate wants and the B4 gate already accepted on record (D4, 2026-07-23). Operator ratification of the v3 numbers is flagged to the packet's gate; a byte-identical-schema re-run stays at operator discretion.
+		VerifiedOn: "2026-09-17",
+		JudgePin: "claude-opus-5 (the judge seat ratified 2026-09-17, P3/gates/rework-sitting-gate.md item B7 + §Answers). " +
+			"The P-T06-5 golden-set re-run ran on it 2026-09-17 before unsupervised judging resumed " +
+			"(P3/measurements/2026-09-17-rider1-golden-set-opus5.md, rider 1); any future judge change re-gates on a fresh re-run.",
 		Axis1Protocol: "One BINARY verdict per numbered frozen AC, binding to the structured sub-line where one exists " +
 			"(G1 P10); a mandatory extractive evidence quote from the artifact for every PASS; an Unknown escape. " +
 			"Sub-lines executed at V1 are consumed as evidence, never re-decided (Spec S07.5).",
@@ -151,10 +159,10 @@ func SeedSoftwareRubric() *RubricBundle {
 			},
 		},
 		ExtractiveGrounding: true,
-		LengthBiasNote: "MEASURED on opus-4-8 2026-07-22 (rider 1, P-T06-3): point-biserial r = -0.167 of artifact length vs the " +
-			"judge's flag decision over the 26-case golden set — WEAK, slightly negative (nowhere near the 0.10–0.76 style-bias " +
-			"warning). Re-measure on every judge change.",
-		GoldenSet: GoldenSetRates{TPR: &tpr, TNR: &tnr, Measured: true, MeasuredOn: "2026-07-22"},
+		LengthBiasNote: "MEASURED on claude-opus-5 2026-09-17 (rider 1, P-T06-3): point-biserial r = -0.167 of artifact length " +
+			"vs the judge's flag decision over the 26-case golden set — WEAK, slightly negative (nowhere near the 0.10–0.76 " +
+			"style-bias warning), and the same value the previous judge seat produced. Re-measure on every judge change.",
+		GoldenSet: GoldenSetRates{TPR: &tpr, TNR: &tnr, Measured: true, MeasuredOn: "2026-09-17"},
 	}
 }
 

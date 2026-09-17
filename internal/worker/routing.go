@@ -131,43 +131,59 @@ type DutyMap map[string]Seat
 // number the S05.3 stage-fit machinery measures against (fit target and
 // overflow threshold are fractions of it). 200k is the verified-safe floor
 // across every seated model on this lane (haiku's hard window; the B2-4
-// stage constant, retired here into seat-row data). The 1M-class models
-// (opus-4-8, sonnet-5 — API-documented windows, live-verified 2026-07-22)
-// deliberately keep the floor: UNDERSTATING a window only splits stages
+// stage constant, retired here into seat-row data). The 1M-class seat
+// (claude-opus-5 — a 1M-token context window, live-verified 2026-09-17)
+// deliberately keeps the floor: UNDERSTATING a window only splits stages
 // earlier (safe, and aligned with fresh-context-per-stage), while
 // overstating one would disarm overflow protection entirely. Per-seat
 // uplift is an S14 recalibration with a CLI-lane-measured window (B5).
 const DefaultWindowTokens = 200_000
 
 // DefaultDutyMap is the v0 recommended platform-wide duty map (S06.10
-// "uniform recommended default"), seat mix RATIFIED at the B3 gate
-// 2026-07-22 (operator D3; record + research grounding in
-// P3/gates/B3-report.md §7): the advisor split. Planning rides
-// claude-opus-4-8 — S06.10's "paid frontier-class" bar for
-// interview/critique and S08.6's frontier-class composer ceremony.
-// Execution rides claude-sonnet-5 — the ratified advisor-pattern default
-// executor under an opus-class planner (also the subscription's separate
-// sonnet weekly pool; a ratification fact, not runtime pricing). The V2
-// judge rides claude-opus-4-8 — paid frontier-class per the S07.5 class
-// bar, capability ≥ the executor, and deliberately a DIFFERENT model than
-// the executor whose output it judges (cross-model judging; same-model
-// judges prefer their own output). P-T06-5: the judge retarget IS a
-// version bump — the golden-set re-run on the opus-4-8 judge is
-// pre-registered at the B4 judge-calibration measurement row (B2-3
-// deferral record); verdicts before that run are bring-up-grade. Gate
-// rider: the serialize-by-deny E3 leg re-runs on this executor seat in
-// the B4 battery (the B3-3 measurement ran on the superseded haiku
-// default). The utility seat is deliberately ABSENT: S06.10 pins it to
-// the local tier (S12, B4) — an absent duty degrades with a recorded
-// reason, never fakes a local model onto a paid lane. No S18 key covers
-// the map (the §7/§9/§11 constant precedent; the standing settings-tab
-// directive applies). D5 unchanged: all seats subscription-covered,
-// metered list EMPTY, selection never prices.
+// "uniform recommended default"). Every seat it carries rides
+// claude-opus-5 on the anthropic lane — RATIFIED by the operator
+// 2026-09-17 (record: P3/gates/rework-sitting-gate.md item B7 +
+// §Answers), which SUPERSEDES the B3 gate's advisor split (D3,
+// P3/gates/B3-report.md §7) and retires both models that split seated.
+// The model id was live-verified 2026-09-17 against the provider's model
+// overview.
+//
+// Readings, section-cited:
+//
+//   - Execution's row is the seat of LAST RESORT, not the first choice.
+//     The configured order is DefaultLaneOrder's — the Kimi Code CLI lane,
+//     then the Kimi lane, then this one — and a preferred lane nothing is
+//     commissioned on is SKIPPED with its name said out loud, never
+//     parked as a subscription gap. Planning and judging have no other
+//     seat (AlternateSeatsFor stays EXECUTION ONLY).
+//   - The judge is deliberately the SAME model as the interim executor,
+//     which inverts the B3 reading that a judge must differ from the
+//     executor it judges. That is a cost the ruling accepts and the
+//     platform DISCLOSES: the S07.5 self-family flag is computed per task
+//     and rides every verdict row and every receipt [G1 Def.1]. Once a
+//     Kimi credential is placed, K3 executes and this seat judges it, and
+//     the flag goes false on its own.
+//   - Judge capability ≥ executor ACROSS VENDORS (claude-opus-5 judging
+//     K3) is a JUDGMENT CALL recorded at that gate, never a measured
+//     claim: nobody has measured the two against each other.
+//   - P-T06-5 is satisfied, not deferred: the judge seat moved, so the
+//     golden set was re-run on it (rider 1, 2026-09-17,
+//     P3/measurements/2026-09-17-rider1-golden-set-opus5.md) and
+//     rubric-software v3 carries those rates. The seat and the rubric
+//     that pins it land together — a tree with one without the other
+//     parks every verification on the S07.7 card.
+//   - The utility seat is deliberately ABSENT: S06.10 pins it to the
+//     local tier (S12) — an absent duty degrades with a recorded reason,
+//     never fakes a local model onto a paid lane.
+//   - No S18 key covers the map (the §7/§9/§11 constant precedent; the
+//     standing settings-tab directive is the resolution path). D5
+//     unchanged: all seats subscription-covered, metered list EMPTY,
+//     selection never prices.
 func DefaultDutyMap() DutyMap {
 	return DutyMap{
-		DutyExecution: Seat{Model: "claude-sonnet-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
-		DutyPlanning:  Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
-		DutyJudge:     Seat{Model: "claude-opus-4-8", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyExecution: Seat{Model: "claude-opus-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyPlanning:  Seat{Model: "claude-opus-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
+		DutyJudge:     Seat{Model: "claude-opus-5", Lane: "anthropic", WindowTokens: DefaultWindowTokens},
 	}
 }
 
