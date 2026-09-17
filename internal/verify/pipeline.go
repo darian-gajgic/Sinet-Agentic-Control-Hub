@@ -491,7 +491,7 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			}
 			res, err := RunV1(ctx, pack, v.Runner,
 				CheckRequest{RunID: d.RunID, Workspace: ws, EvidenceDir: in.EvidenceDir},
-				in.Steps, v.now(), v.Settings)
+				in.Steps, in.Coverage, v.now(), v.Settings)
 			if cleanup != nil {
 				cleanup()
 			}

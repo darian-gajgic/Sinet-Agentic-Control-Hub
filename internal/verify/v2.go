@@ -295,6 +295,15 @@ func ValidateAxis1(res Axis1Result, acs []ledger.AcceptanceCriterion, v1 map[str
 	return out, integrity
 }
 
+// ContractDisagreements applies the S07.5 disagreement sentence to the PLAN
+// step contracts: a judge axis-1 PASS on a criterion whose covering step
+// (Spec S06.6 coverage map) carries a V1 contract FAIL is a CHECK-INTEGRITY
+// finding, never an override — the mechanical fact stands (P3-TQ-6).
+// Inert at grounding: returns the verdicts unchanged and no findings.
+func ContractDisagreements(verdicts []ACVerdict, contracts []StepContract, coverage map[string][]string) ([]ACVerdict, []Finding) {
+	return verdicts, nil
+}
+
 // UnknownEscapes synthesizes the round's Unknown-escape findings (Spec
 // S07.5): every criterion whose validated verdict is Unknown becomes a
 // blocker-class AC-BLOCKER finding citing that criterion. An undecided

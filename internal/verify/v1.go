@@ -401,8 +401,10 @@ func (r *SandboxCheckRunner) RunCheck(ctx context.Context, req CheckRequest) (Ch
 // workspace: quarantined checks are skipped (rule 6), the first failing
 // stage stops later stages (their checks and contracts become
 // UNVERIFIABLE-HERE with first-upstream-failure attribution), and every
-// verdict derivation happens here, platform-side (rule 3).
-func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, steps []intake.Step, now time.Time, settings Settings) (V1Result, error) {
+// verdict derivation happens here, platform-side (rule 3). coverage is the
+// approved PLAN's AC coverage map (Spec S06.6): the frozen criterion a step's
+// contract FAIL cites (Spec S07.5 blocker rule; P3-TQ-6).
+func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, steps []intake.Step, coverage map[string][]string, now time.Time, settings Settings) (V1Result, error) {
 	if err := pack.Validate(); err != nil {
 		// An invalid pack is a SCREEN THAT CANNOT RUN, wherever it is caught:
 		// re-running it produces the identical refusal, so the ladder could only
