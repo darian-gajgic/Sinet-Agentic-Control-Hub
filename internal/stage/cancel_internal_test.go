@@ -603,7 +603,9 @@ func TestCancelIsReachableFromTheHTTPVerbsOnly(t *testing.T) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "dist":
+			case ".git", ".claude", "node_modules", "dist":
+				// .claude holds skills and agent worktrees (mirrors of this
+				// tree), never production sources.
 				return filepath.SkipDir
 			}
 			return nil
