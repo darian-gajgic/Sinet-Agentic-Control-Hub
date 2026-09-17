@@ -27,7 +27,9 @@ import (
 // proposes and executes the split; a successor sub-stage carries the prior
 // count, so its own crossing emits the re-plan proposal and never splits
 // again — the loop is structurally bounded at one split per planned stage.
-func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRouting, step intake.Step) (SessionResult, error) {
+// resume is non-nil only for the first step a recovery successor drives, and
+// carries what that step's session is told about the attempt it follows.
+func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRouting, step intake.Step, resume *resumePoint) (SessionResult, error) {
 	prior := 0
 	for sub := 1; ; sub++ {
 		stageName := ledger.SubStageName(step.ID, sub)
@@ -36,7 +38,7 @@ func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRou
 			Stage:          stageName,
 			Assemble:       true,
 			Sources:        ledger.Sources{Plan: &intake.PlanSource{P: s.pipe}, Knowledge: s.cfg.Knowledge},
-			Instructions:   executeInstructions(r.TaskID, step, stageName, sub),
+			Instructions:   executeInstructions(r.TaskID, step, stageName, sub, resume),
 			Kind:           markerExecute,
 			Class:          step.Class,
 			Tools:          execTools,
@@ -91,7 +93,32 @@ func (s *Skeleton) runPlannedStage(ctx context.Context, r run.Run, er executeRou
 // sub-stage (sub ≥ 2) gets the continuation frame — its brief already
 // carries the consolidated ledger state, and the per-run workspace persists
 // across the split.
-func executeInstructions(taskID string, step intake.Step, stageName string, sub int) string {
+//
+// The first step a recovery successor drives gets a THIRD frame (Spec S02.5
+// step 2 through S05.4's stage-brief content), on the sub-stage continuation's
+// precedent: the session is told where the interrupted attempt got to, that the
+// finished steps' results are in its working directory, and that its own step
+// starts from that state rather than from whatever the interrupted attempt left
+// half-written. The split frame keeps precedence for sub ≥ 2 — by then the run
+// is continuing its OWN session, not the dead one's.
+func executeInstructions(taskID string, step intake.Step, stageName string, sub int, resume *resumePoint) string {
+	if sub <= 1 && resume != nil {
+		finished := "that attempt finished no step of the plan, so this step starts from the beginning"
+		if n := len(resume.Completed); n == 1 {
+			finished = fmt.Sprintf("step %s was finished by that attempt and its results are in your working directory (recorded as done above)", resume.Completed[0])
+		} else if n > 1 {
+			finished = fmt.Sprintf("steps %s to %s were finished by that attempt and their results are in your working directory (recorded as done above)",
+				resume.Completed[0], resume.Completed[n-1])
+		}
+		return stageMarker(markerExecute) + fmt.Sprintf(
+			"You are resuming plan step %s of task %s after an earlier attempt was interrupted: %s.\n"+
+				"This step is: %s\n"+
+				"The interrupted attempt at THIS step was discarded, so start the step from the state your working directory is in now.\n"+
+				"Done when: %s\n"+
+				"Work in your working directory. When the step is complete, output the step's "+
+				"complete deliverable content as your final message. Give the full content, with no commentary wrapper.\n",
+			step.ID, taskID, finished, step.Title, step.DoneWhen)
+	}
 	if sub <= 1 {
 		return stageMarker(markerExecute) + fmt.Sprintf(
 			"You are executing plan step %s of task %s: %s\n"+

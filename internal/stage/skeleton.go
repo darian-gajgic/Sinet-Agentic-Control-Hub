@@ -433,6 +433,18 @@ func (s *Skeleton) Dispatch(ctx context.Context, r run.Run) error {
 // spawn-failure precedent: a dispatch leg that cannot proceed leaves a
 // classifiable corpse for the recovery ladder, never a silent zombie.
 func (s *Skeleton) crash(ctx context.Context, runID, cause string) {
+	s.crashWith(ctx, runID, "stage dispatch failed", reasonDetail(cause))
+}
+
+// crashWith files the same corpse as crash with the ending NARRATED: an
+// explicit requester-facing reason and the structured detail beside it. The
+// step-error site knows things the generic pair cannot say — which step died,
+// whether the WORK or the PLATFORM failed, and a sentence a person can read
+// (Spec S14.2 family 1: every transition carries its cause).
+//
+// It is the single implementation both forms share, so the §56 posture below
+// cannot be held on one path and lost on the other.
+func (s *Skeleton) crashWith(ctx context.Context, runID, reason string, detail json.RawMessage) {
 	// THE RECORD OF THE ENDING OUTLIVES THE REQUEST (P3-RW-10 R2). The corpse is
 	// what makes the strand healable, and the commonest reason a leg dies is that
 	// its caller did — a requester's page navigating away mid-answer kills the
@@ -450,12 +462,12 @@ func (s *Skeleton) crash(ctx context.Context, runID, cause string) {
 	if cur, err := s.cfg.Runs.Get(ctx, runID); err == nil &&
 		s.cancels.consumeCancel(runID, cur.Generation) {
 		s.logger().Info("stage: dispatch leg unwound by a human cancel; no crash corpse",
-			"run", runID, "generation", cur.Generation, "cause", cause)
+			"run", runID, "generation", cur.Generation, "reason", reason, "detail", string(detail))
 		return
 	}
 	if _, err := s.cfg.Runs.Transition(ctx, runID, run.StateCrashed, run.TransitionOptions{
-		Reason: "stage dispatch failed", Actor: run.ActorPlatform,
-		Detail: reasonDetail(cause),
+		Reason: reason, Actor: run.ActorPlatform,
+		Detail: detail,
 	}); err != nil {
 		s.logger().Error("stage: crash transition", "run", runID, "err", err)
 	}
@@ -655,16 +667,31 @@ var execTools = []string{"Read", "Write", "Edit"}
 const execPermissionMode = "acceptEdits"
 
 func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
-	if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateRunning, run.TransitionOptions{
-		Reason: "execute stage sessions (S05.3)", Actor: run.ActorPlatform,
-	}); err != nil {
-		return err
-	}
+	// The approved plan is read BEFORE the run goes running, because for a
+	// recovery successor the plan's step order is what the resume point is
+	// derived against (forkresume.go) and that derivation is what the
+	// claimed→running transition explains. D10: nothing executes without an
+	// approved plan.
 	pair, _, err := s.pipe.ApprovedPair(ctx, r.TaskID)
 	if err != nil {
-		// D10: nothing executes without an approved plan.
 		s.crash(ctx, r.ID, "no approved plan: "+err.Error())
 		return fmt.Errorf("stage: execute without approved plan: %w", err)
+	}
+	// A fresh attempt starts at the first step; a recovery successor starts
+	// where its lineage stopped (Spec S02.5 step 2).
+	resume := resumePoint{Step: pair.Plan.Steps[0].ID}
+	reason, detail := "execute stage sessions (S05.3)", json.RawMessage(nil)
+	if r.ParentRunID != "" {
+		if resume, err = s.resumeFrom(ctx, r, pair.Plan.Steps); err != nil {
+			s.crash(ctx, r.ID, "resume point: "+err.Error())
+			return err
+		}
+		reason, detail = resume.reason(), resume.detail()
+	}
+	if _, err := s.cfg.Runs.Transition(ctx, r.ID, run.StateRunning, run.TransitionOptions{
+		Reason: reason, Actor: run.ActorPlatform, Detail: detail,
+	}); err != nil {
+		return err
 	}
 
 	// S08.8: the dispatch consumes the recorded selection (approval-card
@@ -696,6 +723,44 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 		return err
 	}
 
+	// The worktree a successor inherits is whatever the dead run left on disk:
+	// its partial step, and its untracked residue. It is put back on the resume
+	// point's tree ONCE, before the seed and before the first session, so
+	// nothing downstream ever reads or writes the interrupted state (Spec S02.5
+	// step 2, S02.4 (d)). A failure here is loud: a successor re-driving a dirty
+	// tree is the defect this packet exists to close, so it becomes a corpse
+	// rather than a silent re-drive.
+	//
+	// "Needs a restore" is exactly `resume.Snapshot != ""`: a step counted
+	// complete is one that carries its close snapshot, so a non-zero resume
+	// index always brings a tree with it, and a zero index brings the attempt
+	// base when the task is repo-backed at all.
+	if r.ParentRunID != "" && resume.Snapshot != "" {
+		if s.cfg.RestoreWorkspace == nil {
+			// A process wired without the restore seam cannot resume a
+			// repo-backed lineage. Carrying on regardless would re-drive
+			// whatever the dead run left on disk, which is the defect this
+			// packet exists to close, so the boundary says so instead of
+			// quietly doing the wrong thing.
+			cause := fmt.Sprintf("no workspace restore is wired in this process, so the working copy cannot be put back on snapshot %s before this run carries on", resume.Snapshot)
+			s.crash(ctx, r.ID, "restore workspace: "+cause)
+			return fmt.Errorf("stage: restore workspace for %s: %s", r.ID, cause)
+		}
+		head, err := s.cfg.RestoreWorkspace(ctx, r.ID, resume.Snapshot)
+		if err != nil {
+			s.crash(ctx, r.ID, "restore workspace: "+err.Error())
+			return fmt.Errorf("stage: restore workspace for %s: %w", r.ID, err)
+		}
+		if head == "" && resume.Index > 0 {
+			// A recorded step-close snapshot implies the worktree it was taken
+			// in. Finding none means the record and the disk disagree, and
+			// guessing which is right is not this layer's call.
+			cause := fmt.Sprintf("step %s is recorded complete on snapshot %s but the task has no worktree to restore", resume.Completed[resume.Index-1], resume.Snapshot)
+			s.crash(ctx, r.ID, "restore workspace: "+cause)
+			return fmt.Errorf("stage: restore workspace for %s: %s", r.ID, cause)
+		}
+	}
+
 	// Ledger work items for the plan steps (Spec S05.1 §4): the platform
 	// records the stage sessions' claims — the session-verb TOOL channel
 	// (engine-called verbs) is S04 orchestration machinery (B3).
@@ -703,12 +768,21 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	verbs := s.cfg.Ledger.SessionVerbs(r.ID, "execute", gen)
 	items := make([]ledger.WorkItem, 0, len(pair.Plan.Steps))
 	acRefs := coverageByStep(&pair.Plan)
-	for _, step := range pair.Plan.Steps {
+	for i, step := range pair.Plan.Steps {
+		if i < resume.Index {
+			// What the lineage finished is NOT re-opened. Status only: an empty
+			// summary, AC list and evidence ref leave the recorded ones exactly
+			// as they are, so the successor's first write preserves its parent's
+			// progress instead of erasing it. A fresh attempt has no finished
+			// steps and seeds every item pending, as before.
+			items = append(items, ledger.WorkItem{ID: step.ID, Status: ledger.StatusDoneUnverified})
+			continue
+		}
 		items = append(items, ledger.WorkItem{
 			ID: step.ID, Summary: step.Title, ACRefs: acRefs[step.ID], Status: ledger.StatusPending,
 		})
 	}
-	first := pair.Plan.Steps[0].ID
+	first := resume.Step
 	if _, err := verbs.State(ctx, ledger.StateUpdate{Upserts: items, Current: &first}); err != nil {
 		s.crash(ctx, r.ID, "seed work items: "+err.Error())
 		return err
@@ -720,8 +794,13 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	// the planned stage in successor sub-stage sessions (split.go); the
 	// overflow count is scoped PER PLANNED STAGE per S05.3 ("a second
 	// overflow within one planned stage escalates to a re-plan proposal").
-	deliverable := ""
-	for i, step := range pair.Plan.Steps {
+	// The steps this run drives: from the resume point to the end of the plan.
+	// A successor that forked after the LAST step's close drives none of them
+	// and goes straight to the leg close — the deliverable was already filed
+	// below, before that step was ever recorded done.
+	last := len(pair.Plan.Steps) - 1
+	for i := resume.Index; i <= last; i++ {
+		step := pair.Plan.Steps[i]
 		// The S10.4 pause-my-automation boundary (pause.go): between stage
 		// sessions, never inside one. A parked leg returns cleanly with
 		// everything it has already done recorded — nothing is killed, nothing
@@ -729,40 +808,53 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 		if s.pauseParkPoint(ctx, r, step.ID) {
 			return nil
 		}
-		res, err := s.runPlannedStage(ctx, r, er, step)
+		// Only the FIRST step a successor drives gets the resume frame: the
+		// ones after it are ordinary steps of this run's own execution (R7).
+		var frame *resumePoint
+		if i == resume.Index && r.ParentRunID != "" {
+			frame = &resume
+		}
+		res, err := s.runPlannedStage(ctx, r, er, step, frame)
 		if errors.Is(err, errPausedPark) {
 			// The owner paused mid-stage and a SPLIT successor boundary caught
 			// it. The run is parked; the leg returns cleanly (pause.go).
 			return nil
 		}
 		if err != nil {
-			s.crash(ctx, r.ID, fmt.Sprintf("step %s session: %v", step.ID, err))
+			failed := failedClass(err)
+			plain := stepCrashPlain(step.ID, failed)
+			s.crashWith(ctx, r.ID, plain, stepCrashDetail(boundDetail(err.Error()), step.ID, failed, plain))
 			return fmt.Errorf("stage: execute step %s: %w", step.ID, err)
 		}
-		deliverable = res.Text
+
+		// Deliverable of record: the final step session's result text, durably
+		// filed and ledger-registered BEFORE that step is recorded done, so
+		// "the last step is complete" in the record always implies the
+		// deliverable exists. Revision/diff/comment mechanics are Spec S13's
+		// (B4) — this is the walking-skeleton deliverable capture.
+		if i == last {
+			path, sha, err := s.writeDeliverable(r.TaskID, 1, res.Text)
+			if err != nil {
+				s.crash(ctx, r.ID, "write deliverable: "+err.Error())
+				return err
+			}
+			if _, err := verbs.Artifact(ctx, path, "deliverable", "execution deliverable rev1 (B2-4 capture; S13 owns revisions)", sha); err != nil {
+				s.crash(ctx, r.ID, "register deliverable: "+err.Error())
+				return err
+			}
+		}
+
 		next := ""
-		if i+1 < len(pair.Plan.Steps) {
+		if i < last {
 			next = pair.Plan.Steps[i+1].ID
 		}
-		done := ledger.WorkItem{ID: step.ID, Status: ledger.StatusDoneUnverified}
+		done := ledger.WorkItem{ID: step.ID, Status: ledger.StatusDoneUnverified, EvidenceRef: s.stepCloseSnapshot(ctx, r, step.ID)}
 		if _, err := verbs.State(ctx, ledger.StateUpdate{Upserts: []ledger.WorkItem{done}, Current: &next}); err != nil {
 			s.crash(ctx, r.ID, "record step completion: "+err.Error())
 			return err
 		}
 	}
 
-	// Deliverable of record: the final step session's result text, durably
-	// filed and ledger-registered. Revision/diff/comment mechanics are
-	// Spec S13's (B4) — this is the walking-skeleton deliverable capture.
-	path, sha, err := s.writeDeliverable(r.TaskID, 1, deliverable)
-	if err != nil {
-		s.crash(ctx, r.ID, "write deliverable: "+err.Error())
-		return err
-	}
-	if _, err := verbs.Artifact(ctx, path, "deliverable", "execution deliverable rev1 (B2-4 capture; S13 owns revisions)", sha); err != nil {
-		s.crash(ctx, r.ID, "register deliverable: "+err.Error())
-		return err
-	}
 	// Stage close (Spec S05.1): every assigned item accounted for, verify
 	// handed forward.
 	empty := ""
@@ -800,6 +892,30 @@ func (s *Skeleton) dispatchExecute(ctx context.Context, r run.Run) error {
 	}
 	s.setKanban(ctx, r.TaskID, "verifying")
 	return s.launchRole(ctx, r.TaskID, r.UserID, roleVerify)
+}
+
+// stepCloseSnapshot takes a plan step's close snapshot and returns the commit
+// to record as that step's evidence (Spec S13.5: snapshot commits at stage
+// boundaries; Spec S05.1 §4: a work item's evidence_ref). It is what a later
+// recovery successor restores the worktree to, so a step without one is a step
+// no fork can resume past.
+//
+// A workspace-less run has no snapshot to take and answers "" — the honest
+// content-pin lane. A snapshot that FAILS is a Warn and an absence too, the
+// leg-close precedent: the step was done, and the platform's own bookkeeping
+// failing does not undo it. The cost is bounded and visible — a fork resumes
+// from the step before instead.
+func (s *Skeleton) stepCloseSnapshot(ctx context.Context, r run.Run, stepID string) string {
+	if s.cfg.Snapshot == nil {
+		return ""
+	}
+	sha, err := s.cfg.Snapshot(ctx, r.ID)
+	if err != nil {
+		s.logger().Warn("stage: execute step-close snapshot failed",
+			"run", r.ID, "step", stepID, "err", err)
+		return ""
+	}
+	return sha
 }
 
 // coverageByStep inverts the plan's AC coverage map: step id → AC numbers.
