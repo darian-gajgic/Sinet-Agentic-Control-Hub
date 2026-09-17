@@ -291,13 +291,18 @@ func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request)
 		s.writeSurface(w, nil, err)
 		return
 	}
+	change, err := s.deliverableChange(r.Context(), d, revs)
+	if err != nil {
+		s.writeSurface(w, nil, s.reviewErr(err))
+		return
+	}
 	s.writeReadJSON(w, DeliverableDetail{
 		Deliverable:  d,
 		Revisions:    revs,
 		Lineage:      lineage,
 		Doors:        s.doorsFor(r.Context(), d, revs),
 		Verification: s.revisionVerification(r.Context(), currentRevision(revs, d.CurrentRevision)),
-		Change:       s.deliverableChange(r.Context(), d, revs),
+		Change:       change,
 		Cursor:       cursor,
 	})
 }
@@ -305,26 +310,33 @@ func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request)
 // deliverableChange is the current revision's default change inventory, or nil
 // when this deliverable is not stored as a project snapshot.
 //
-// A read failure does NOT fail the detail: the inventory is one member of a
-// resource read, and refusing the whole deliverable because the project store
-// could not answer would hide the deliverable to report a problem with a part
-// of it. The absence is served with its reason and the cause goes to the ops
-// log — the `revisionVerification` posture (§38: absences are rendered).
-func (s *Server) deliverableChange(ctx context.Context, d review.Deliverable, revs []review.Revision) *review.Change {
+// AN ABSENCE IS RENDERED; A LOST PIN IS NOT AN ABSENCE. An ordinary read failure
+// does not fail the detail — the inventory is one member of a resource read, and
+// refusing the whole deliverable because a part of it could not be assembled
+// would hide the subject to report a problem with it (§38, the
+// `revisionVerification` posture). But a revision whose snapshot commit the
+// project store no longer holds is a platform integrity failure, and saying
+// "could not be read just now" about permanently lost work would be the
+// comfortable lie the drift error exists to prevent: that one propagates and the
+// read answers 500 content_drift.
+func (s *Server) deliverableChange(ctx context.Context, d review.Deliverable, revs []review.Revision) (*review.Change, error) {
 	rev := currentRevision(revs, d.CurrentRevision)
 	if rev.N < 1 || rev.SnapshotSHA == "" {
-		return nil
+		return nil, nil
 	}
 	ch, err := s.review.Change(ctx, d.ID, rev.N-1, rev.N)
+	if errors.Is(err, review.ErrContentDrift) {
+		return nil, err
+	}
 	if err != nil {
 		s.logger.Warn("deliverables: read the change inventory", "deliverable", d.ID, "revision", rev.N, "err", err)
 		return &review.Change{
 			DeliverableID: d.ID, OldN: rev.N - 1, NewN: rev.N, NewPin: rev.SnapshotSHA,
 			OldIsBase: rev.N == 1, Files: []review.ChangedFile{},
 			AbsentReason: "the files in this version could not be read just now",
-		}
+		}, nil
 	}
-	return &ch
+	return &ch, nil
 }
 
 // revisionVerification reads the posture off the revision's OWN verdict row.
@@ -719,18 +731,42 @@ func treePathParam(r *http.Request, required bool) (string, error) {
 		}
 		return "", nil
 	}
-	if strings.ContainsAny(raw, "\x00\r\n") {
-		return "", badRequest("that file path contains characters a path cannot hold")
+	if err := checkTreePath(raw); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+// anchorPath is an anchor's claimed file path, or "" when there is no anchor.
+func anchorPath(a *review.AnchorRecord) string {
+	if a == nil {
+		return ""
+	}
+	return a.FilePath
+}
+
+// checkTreePath is THE boundary rule for a project-relative file path, shared by
+// every ingress that can carry one — the files read, the compare's `?path=`, and
+// a comment's anchor. One rule in one place, because a path validated on one
+// route and not on another is the same hole with a different name.
+func checkTreePath(raw string) error {
+	if raw != strings.TrimSpace(raw) {
+		return badRequest(fmt.Sprintf("%q begins or ends with a space: name the file exactly as it is in the project", raw))
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return badRequest("that file path contains characters a path cannot hold")
+		}
 	}
 	if strings.HasPrefix(raw, "/") {
-		return "", badRequest(fmt.Sprintf("%q is an absolute path: a file is named relative to the project, like \"src/app.go\"", raw))
+		return badRequest(fmt.Sprintf("%q is an absolute path: a file is named relative to the project, like \"src/app.go\"", raw))
 	}
 	for _, seg := range strings.Split(raw, "/") {
 		if seg == ".." {
-			return "", badRequest(fmt.Sprintf("%q steps outside the project: a file is named relative to the project, like \"src/app.go\"", raw))
+			return badRequest(fmt.Sprintf("%q steps outside the project: a file is named relative to the project, like \"src/app.go\"", raw))
 		}
 	}
-	return raw, nil
+	return nil
 }
 
 // revisionParam parses a revision query bound, defaulting when absent.
@@ -863,6 +899,20 @@ func (s *Server) handleCommentCreate(w http.ResponseWriter, r *http.Request) {
 			"unknown anchor side %q: an anchor is on the %q or the %q side of the diff (FC-v1 §2)",
 			body.Anchor.Side, review.SideOld, review.SideNew)))
 		return
+	}
+	// An anchor's file_path is a FILE PATH INSIDE THE PROJECT, and on a
+	// repo-backed revision it is handed to git to read that file — so it is
+	// validated by the same boundary rule the files read uses, and for the same
+	// reason: only the caller can fix it, and an unchecked one reached exec.
+	// file_level is the same field at a coarser grain, so it takes the same rule.
+	for _, p := range []string{anchorPath(body.Anchor), body.FileLevel} {
+		if p == "" {
+			continue
+		}
+		if err := checkTreePath(p); err != nil {
+			s.writeSurface(w, nil, err)
+			return
+		}
 	}
 	// The comment is attributed to the AUTHENTICATED identity (15.6): whoever
 	// says it owns having said it. RunID stays empty, which is what makes the

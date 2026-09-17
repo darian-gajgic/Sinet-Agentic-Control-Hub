@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -50,6 +51,36 @@ const (
 	kindRenamed  = "renamed"
 )
 
+// ErrPinMissing reports that a PINNED COMMIT is not in the store — the platform
+// recorded a revision against an object the store no longer holds.
+//
+// It is deliberately distinct from "that path is not in this tree", which is an
+// ordinary absence (ok=false): one says a copy of the work is gone and is a
+// platform integrity failure, the other says a file was never there and is an
+// ordinary answer. Collapsing the two is how a lost pin came back as a 404 over
+// the round report instead of the drift error it is.
+var ErrPinMissing = errors.New("project: the store holds no such commit")
+
+// pinMissing carries which pin was lost, and answers TreePinMissing so consumers
+// that cannot import this package can still recognise the condition.
+// internal/review is walled off from internal/project (CONVENTIONS §23), so a
+// shared sentinel is unreachable between them and a METHOD is the seam — the
+// net.Error.Timeout() shape.
+type pinMissing struct {
+	projectID string
+	sha       string
+}
+
+func (e *pinMissing) Error() string {
+	return fmt.Sprintf("project: %s holds no commit %s", e.projectID, e.sha)
+}
+
+func (e *pinMissing) Is(target error) bool { return target == ErrPinMissing }
+
+// TreePinMissing marks this as a lost pin for a consumer outside this package's
+// import reach.
+func (e *pinMissing) TreePinMissing() bool { return true }
+
 // BaseSHA reads a pipeline's recorded attempt-1 base commit
 // (refs/sinet/base/<pipeline>, Spec S13.5) — revision 1's old side (Spec
 // S13.1). "" when none is recorded; never a guess.
@@ -83,7 +114,7 @@ func (s *Store) TreeChanges(ctx context.Context, projectID, oldSHA, newSHA strin
 			return nil, fmt.Errorf("project: tree changes need two commits (got %q → %q)", oldSHA, newSHA)
 		}
 		if !s.objectExists(ctx, e.StorePath, sha) {
-			return nil, fmt.Errorf("project: %s holds no commit %s", projectID, sha)
+			return nil, &pinMissing{projectID: projectID, sha: sha}
 		}
 	}
 	rows, err := s.rawChanges(ctx, e.StorePath, oldSHA, newSHA)
@@ -240,7 +271,11 @@ func (s *Store) blobSizes(ctx context.Context, store, sha string, paths []string
 	if len(paths) == 0 {
 		return sizes, nil
 	}
-	args := append([]string{"ls-tree", "-r", "-l", "-z", sha, "--"}, paths...)
+	// --literal-pathspecs is a GIT-LEVEL option (ls-tree rejects it as its own),
+	// and it is load-bearing rather than defensive: without it a file literally
+	// named ":x" is read as pathspec MAGIC, matches nothing, and that row comes
+	// back with no size at all.
+	args := append([]string{"--literal-pathspecs", "ls-tree", "-r", "-l", "-z", sha, "--"}, paths...)
 	out, err := s.plumb(ctx, store, args...)
 	if err != nil {
 		return nil, err
@@ -280,15 +315,37 @@ func (s *Store) TreeBlob(ctx context.Context, projectID, treeish, path string, l
 	if err != nil {
 		return nil, 0, false, err
 	}
-	spec := treeish + ":" + path
-	code, out, _, err := s.gitRaw(ctx, e.StorePath, identity{}, "cat-file", "-s", spec)
+	spec := treeish + ":" + cleanTreePath(path)
+	// The TYPE first, for two reasons that both used to reach the wire. A
+	// missing path and a missing COMMIT both exit non-zero here, and only the
+	// second is a lost pin — so a failure asks the store whether it still holds
+	// the commit rather than guessing. And a DIRECTORY resolves perfectly well
+	// as an object: `cat-file -s` answers a tree's size and `cat-file blob` then
+	// fails on it, which is how a request for a folder came back as git's own
+	// "bad file" text at 500 instead of "that is not a file".
+	code, kind, stderr, err := s.gitRaw(ctx, e.StorePath, identity{}, "cat-file", "-t", spec)
 	if err != nil {
 		return nil, 0, false, err
 	}
 	if code != 0 {
-		// Not in that tree (or not a blob): an absence, not a failure — the
+		if !s.objectExists(ctx, e.StorePath, treeish) {
+			return nil, 0, false, &pinMissing{projectID: projectID, sha: treeish}
+		}
+		// The commit is here and the path is not: an ordinary absence, and the
 		// caller's ladder decides what to do about it.
 		return nil, 0, false, nil
+	}
+	if strings.TrimSpace(kind) != "blob" {
+		// A tree or a submodule is not a file. An absence, so the read falls to
+		// its own next step and an anchor degrades down the S13.3 ladder.
+		return nil, 0, false, nil
+	}
+	code, out, stderr, err := s.gitRaw(ctx, e.StorePath, identity{}, "cat-file", "-s", spec)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if code != 0 {
+		return nil, 0, false, fmt.Errorf("project: cat-file -s %s (exit %d): %s", spec, code, strings.TrimSpace(stderr))
 	}
 	size, err = strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	if err != nil {
@@ -353,9 +410,29 @@ func (s *Store) plumb(ctx context.Context, store string, args ...string) (string
 		return "", err
 	}
 	if code != 0 {
-		return "", fmt.Errorf("project: git %s (exit %d): %s", args[0], code, strings.TrimSpace(stderr))
+		return "", fmt.Errorf("project: git %s (exit %d): %s", subcommandOf(args), code, strings.TrimSpace(stderr))
 	}
 	return out, nil
+}
+
+// subcommandOf names the git subcommand for an error message, skipping any
+// git-level options that precede it.
+func subcommandOf(args []string) string {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return "plumbing"
+}
+
+// cleanTreePath drops a leading "./" so a path used as an object spec names the
+// same entry the tree lists it under.
+func cleanTreePath(p string) string {
+	for strings.HasPrefix(p, "./") {
+		p = p[2:]
+	}
+	return p
 }
 
 // nulFields splits NUL-separated plumbing output, dropping the trailing empty

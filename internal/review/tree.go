@@ -3,6 +3,7 @@ package review
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -143,6 +144,57 @@ const (
 // inventory row agree about which files have no text to show.
 const binarySniffBytes = 8000
 
+// treePinMissing is how a TreeSource reports that a PINNED COMMIT is gone from
+// the project store. It is a structural contract rather than a shared sentinel
+// because review cannot import the package that raises it (CONVENTIONS §23),
+// and it has to be recognisable: a lost pin is the one tree failure that is a
+// platform integrity fault rather than an absence, and S13.1 makes a minted
+// revision's pin a promise the platform kept a copy.
+type treePinMissing interface{ TreePinMissing() bool }
+
+// pinDrift maps a seam error about a lost pin to ErrContentDrift, which the
+// transport answers 500 content_drift — the objects-route precedent. The
+// platform states it in its OWN sentence naming the pin; git's stderr is not a
+// thing a requester is ever shown (§30/§38), and the pin is the one fact that
+// makes the failure actionable. Any other seam error passes through unchanged.
+func pinDrift(deliverableID, pin string, err error) error {
+	var missing treePinMissing
+	if errors.As(err, &missing) && missing.TreePinMissing() {
+		return fmt.Errorf("%w: the project store no longer holds the saved files that %s pins at %s",
+			ErrContentDrift, deliverableID, pin)
+	}
+	return err
+}
+
+// safeTreePath is the exec-boundary rule for a path that reaches git as an
+// argument: non-empty, repo-relative, no parent-directory step, no control byte
+// and no surrounding whitespace.
+//
+// This is the BACKSTOP, not the validation: the comment and file reads refuse a
+// malformed path at the transport with a 400 a caller can act on. It exists
+// because one ingress is not a caller at all — a finding's anchor is MODEL
+// output (Spec S07.5 emits opaque "file:line" strings), and a NUL inside one
+// reached fork/exec and failed the whole findings record. A path that does not
+// pass here is simply not in the anchor map, so the S13.3 ladder degrades the
+// anchor to file-level or orphan and the finding still lands (P-T12-2:
+// delivery is never conditional on anchoring).
+func safeTreePath(p string) bool {
+	if p == "" || p != strings.TrimSpace(p) || strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 // Change computes the change inventory between two revisions of a repo-backed
 // deliverable — oldN 0 is the pre-task base (Spec S13.1) — without reading any
 // file body. A revision with no snapshot pin, or a nil TreeSource, answers a
@@ -171,7 +223,7 @@ func (s *Store) Change(ctx context.Context, deliverableID string, oldN, newN int
 	if oldN == 0 {
 		base, ok, err := s.Tree.TreeBase(ctx, deliverableID)
 		if err != nil {
-			return Change{}, err
+			return Change{}, pinDrift(deliverableID, ch.NewPin, err)
 		}
 		if !ok || base == "" {
 			ch.AbsentReason = "no record of how the project stood before this task started, so there is nothing to compare this version against"
@@ -191,7 +243,7 @@ func (s *Store) Change(ctx context.Context, deliverableID string, oldN, newN int
 	}
 	files, err := s.Tree.TreeChanges(ctx, deliverableID, ch.OldPin, ch.NewPin)
 	if err != nil {
-		return Change{}, err
+		return Change{}, pinDrift(deliverableID, ch.NewPin, err)
 	}
 	if files != nil {
 		ch.Files = files
@@ -263,11 +315,11 @@ func (s *Store) changeDiff(ctx context.Context, deliverableID string, ch Change)
 		if row.Binary {
 			continue
 		}
-		oldText, oldWhole, err := s.side(ctx, deliverableID, ch.OldPin, oldPathOf(row), row.Kind != KindAdded, TreeDiffBytesCap)
+		oldText, oldWhole, err := s.side(ctx, deliverableID, ch.OldPin, oldPathOf(row), row.Kind != KindAdded)
 		if err != nil {
 			return "", false, "", err
 		}
-		newText, newWhole, err := s.side(ctx, deliverableID, ch.NewPin, row.Path, row.Kind != KindDeleted, TreeDiffBytesCap)
+		newText, newWhole, err := s.side(ctx, deliverableID, ch.NewPin, row.Path, row.Kind != KindDeleted)
 		if err != nil {
 			return "", false, "", err
 		}
@@ -295,60 +347,79 @@ func partialChangeReason(shown, total int) string {
 		shown, total)
 }
 
-// fileDiff renders ONE file's unified diff, bounded by TreeFileDiffBytesCap.
+// fileDiff renders ONE file's unified diff.
+//
+// THE DIFF IS CUT, NEVER THE INPUT. A diff computed from two truncated prefixes
+// is an artefact of where the read stopped, not a description of the change: two
+// 600 KB files differing only at the end read to a common prefix diff to
+// NOTHING, and a body saying "no changes here" about a file that changed is
+// worse than saying nothing at all. So each side is read whole up to
+// TreeFileBytesCap — the largest cap the package serves under, so no blob is
+// ever read past it — and a file bigger than that gets an inventory row, a
+// truncation reason naming its size, and no diff text. Everything that fits is
+// diffed in FULL and the resulting text is cut at the last hunk boundary under
+// TreeFileDiffBytesCap, so every hunk served is a whole hunk and the reason
+// names how big the real diff was.
 func (s *Store) fileDiff(ctx context.Context, deliverableID string, ch Change, row ChangedFile) (string, bool, string, error) {
 	if row.Binary {
 		return "", false, "", nil
 	}
-	oldText, oldWhole, err := s.side(ctx, deliverableID, ch.OldPin, oldPathOf(row), row.Kind != KindAdded, TreeFileDiffBytesCap)
+	oldText, oldWhole, err := s.side(ctx, deliverableID, ch.OldPin, oldPathOf(row), row.Kind != KindAdded)
 	if err != nil {
 		return "", false, "", err
 	}
-	newText, newWhole, err := s.side(ctx, deliverableID, ch.NewPin, row.Path, row.Kind != KindDeleted, TreeFileDiffBytesCap)
+	newText, newWhole, err := s.side(ctx, deliverableID, ch.NewPin, row.Path, row.Kind != KindDeleted)
 	if err != nil {
 		return "", false, "", err
 	}
-	// A side read short stops at the end of a line, so the diff below is over
-	// whole lines and ends cleanly rather than with a spurious no-newline mark.
-	partial := !oldWhole || !newWhole
-	if partial {
-		oldText, newText = trimToLine(oldText), trimToLine(newText)
+	if !oldWhole || !newWhole {
+		// Both sides present and one of them unreadable in full means any diff
+		// would be that artefact, so none is served. A one-sided change (a file
+		// added or deleted whole) has nothing to pair against, so its first part
+		// is a truthful prefix of the addition or the removal and IS served —
+		// the acceptance battery's over-cap added file is exactly that shape.
+		oneSided := row.Kind == KindAdded || row.Kind == KindDeleted
+		size := byteSize(largerOf(row.OldSize, row.NewSize))
+		if !oneSided {
+			return "", true, fmt.Sprintf("%s is %s, which is too large to compare here — open the file to read it", row.Path, size), nil
+		}
+		text, err := gitDiff(row.Path, trimToLine(oldText), trimToLine(newText))
+		if err != nil {
+			return "", false, "", err
+		}
+		return cutDiff(text, TreeFileDiffBytesCap), true,
+			fmt.Sprintf("%s is %s, which is more than can be shown in one view — the text below covers only the start of it", row.Path, size), nil
 	}
 	text, err := gitDiff(row.Path, oldText, newText)
 	if err != nil {
 		return "", false, "", err
 	}
 	full := len(text)
-	if full > TreeFileDiffBytesCap {
-		text = cutDiff(text, TreeFileDiffBytesCap)
+	if full <= TreeFileDiffBytesCap {
+		return text, false, "", nil
 	}
-	switch {
-	case partial:
-		return text, true, fmt.Sprintf("%s is %s, which is more than can be compared in one view — the changes below cover only the start of it",
-			row.Path, byteSize(largerOf(row.OldSize, row.NewSize))), nil
-	case full > len(text):
-		return text, true, fmt.Sprintf("the changes to %s run to %s; the text below stops after %s, at the end of a line",
-			row.Path, byteSize(int64(full)), byteSize(int64(len(text)))), nil
-	}
-	return text, false, "", nil
+	text = cutDiff(text, TreeFileDiffBytesCap)
+	return text, true, fmt.Sprintf("the changes to %s run to %s; the text below stops after %s, at the end of a hunk",
+		row.Path, byteSize(int64(full)), byteSize(int64(len(text)))), nil
 }
 
 // side reads one end of a file's diff. present=false is the added/deleted end
 // (the empty side); a path the tree does not hold reads empty too. The returned
-// flag is false when the blob is LARGER than the limit, which means the text is
-// a prefix and no honest diff can be computed from it.
-func (s *Store) side(ctx context.Context, deliverableID, pin, path string, present bool, limit int64) (string, bool, error) {
+// flag is false when the blob is LARGER than TreeFileBytesCap, which means the
+// text is a prefix and the caller must decide what can honestly be said about
+// it rather than diffing it.
+func (s *Store) side(ctx context.Context, deliverableID, pin, path string, present bool) (string, bool, error) {
 	if !present || pin == "" || path == "" {
 		return "", true, nil
 	}
-	data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, pin, path, limit)
+	data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, pin, path, TreeFileBytesCap)
 	if err != nil {
-		return "", false, err
+		return "", false, pinDrift(deliverableID, pin, err)
 	}
 	if !ok {
 		return "", true, nil
 	}
-	return string(data), size <= limit, nil
+	return string(data), size <= TreeFileBytesCap, nil
 }
 
 func oldPathOf(row ChangedFile) string {
@@ -381,9 +452,14 @@ func (s *Store) CompareFile(ctx context.Context, deliverableID string, oldN, new
 	if err != nil {
 		return Comparison{}, err
 	}
-	if newRev.SnapshotSHA == "" || s.Tree == nil {
+	// A content-pinned version has no file tree to narrow, and that IS the
+	// caller's mistake to fix: a bad request, not an absence.
+	if newRev.SnapshotSHA == "" {
 		return Comparison{}, fmt.Errorf("%w: this version is not stored as a snapshot of the project's files, so a comparison cannot be narrowed to one file", ErrBadInput)
 	}
+	// A missing tree source is the PLATFORM's absence, not the caller's, and
+	// treeCompare already states it the way the detail's change does. Answering
+	// 400 here told a requester to fix a request that was correct.
 	return s.treeCompare(ctx, d, oldN, newN, path)
 }
 
@@ -403,9 +479,15 @@ func (s *Store) RevisionFile(ctx context.Context, deliverableID string, n int, p
 		out.Pin = rev.SnapshotSHA
 	}
 	if rev.SnapshotSHA != "" && s.Tree != nil {
+		if !safeTreePath(path) {
+			return FileContent{}, fmt.Errorf("%w: %q is not a file path inside the project", ErrBadInput, path)
+		}
 		data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, rev.SnapshotSHA, path, TreeFileBytesCap)
 		if err != nil {
-			return FileContent{}, err
+			// A lost pin is drift, and it must NOT fall through to the round
+			// report below: serving the companion object for a request about a
+			// code file would answer a different question than the one asked.
+			return FileContent{}, pinDrift(deliverableID, rev.SnapshotSHA, err)
 		}
 		if ok {
 			out.Size = size
@@ -481,13 +563,17 @@ func (s *Store) anchorFiles(ctx context.Context, deliverableID string, n int, pa
 	}
 	seen := map[string]bool{}
 	for _, p := range paths {
-		if p == "" || seen[p] {
+		// safeTreePath is the exec boundary: a model-emitted anchor carrying a
+		// NUL reached fork/exec and failed the whole findings record. A path
+		// that cannot be one is simply absent from the map, and the ladder
+		// degrades the anchor rather than losing the point.
+		if seen[p] || !safeTreePath(p) {
 			continue
 		}
 		seen[p] = true
 		data, size, ok, err := s.Tree.TreeBlob(ctx, deliverableID, rev.SnapshotSHA, p, TreeFileBytesCap)
 		if err != nil {
-			return nil, err
+			return nil, pinDrift(deliverableID, rev.SnapshotSHA, err)
 		}
 		// A path that is absent, binary or past the read cap simply is not in
 		// the map, and the ladder degrades it the way it degrades any anchor

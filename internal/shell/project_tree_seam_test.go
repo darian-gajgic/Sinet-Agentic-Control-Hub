@@ -15,6 +15,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
@@ -186,18 +187,111 @@ func TestTreeSeamPassesTheProjectStoresOwnFacts(t *testing.T) {
 	}
 }
 
-// TestShellWiresTheReviewStoresTreeSeam: *projectSeams IS a review.TreeSource.
-// The composition root assigns it to review.Store.Tree, and a type that stopped
-// satisfying the interface would fail the build there — this states the
-// requirement where the reason for it is written down.
+// TestShellWiresTheReviewStoresTreeSeam drives the REAL composition — the
+// function Run() calls, over a real project, a real workspace, a real snapshot
+// commit and a real minted revision — and asserts a repo-backed comparison comes
+// back with its file inventory.
+//
+// It is built this way because the obvious version does not work: a test that
+// assigns store.Tree itself proves only that the FIELD exists, and stays green
+// with the composition-root wiring deleted. Nothing then fails until a person
+// opens a deliverable in a running platform and is told the files are not
+// available. So the test calls wireReviewStore and nothing else, and both of its
+// lines are load-bearing here: delete `rs.Tree = ps` and the comparison below
+// serves no inventory; delete `ps.review = rs` and the pin resolution the seams
+// owe the verification workspace goes with it.
 func TestShellWiresTheReviewStoresTreeSeam(t *testing.T) {
-	var seam review.TreeSource = &projectSeams{}
-	if seam == nil {
-		t.Fatal("the composition-root adapter does not satisfy review.TreeSource")
+	db, log, reg := seamDB(t)
+	ctx := context.Background()
+	proj, err := project.New(project.Config{DB: db, Log: log, Root: filepath.Join(t.TempDir(), "projects")})
+	if err != nil {
+		t.Fatalf("project.New: %v", err)
 	}
-	store := &review.Store{}
-	store.Tree = seam
-	if store.Tree == nil {
-		t.Fatal("review.Store.Tree does not hold the shell's adapter")
+	src := t.TempDir()
+	rw14Git(t, src, "init", "-q", "-b", "main", ".")
+	if err := os.WriteFile(filepath.Join(src, "app.go"), []byte("package app\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rw14Git(t, src, "add", "-A")
+	rw14Git(t, src, "commit", "-qm", "seed")
+	if _, _, err := proj.Onboard(ctx, project.OnboardInput{ProjectID: "shop", Owner: "alice", Name: "shop", Source: src}); err != nil {
+		t.Fatalf("Onboard: %v", err)
+	}
+	if _, err := proj.Approve(ctx, "shop", "alice", nil); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	runs := run.NewStore(db, log)
+	pipe := &intake.Pipeline{
+		DB: db, Log: log, Runs: runs, Ledger: ledger.NewStore(db, log), Settings: reg,
+		ArtifactRoot: filepath.Join(t.TempDir(), "artifacts"),
+		Registry:     registrySeam{proj: proj},
+	}
+	if _, err := pipe.Start(ctx, intake.Request{
+		TaskID: "t-shop", UserID: "alice", Title: "shop work", Text: "add the cart", Project: "shop",
+	}); err != nil {
+		t.Fatalf("intake Start: %v", err)
+	}
+	ps := &projectSeams{proj: proj, runs: runs, db: db, pipe: pipe}
+
+	// The composition root's own line, and the only wiring this test performs.
+	reviewStore := &review.Store{DB: db, Log: log, Settings: reg, Root: filepath.Join(t.TempDir(), "review")}
+	wireReviewStore(reviewStore, ps)
+
+	if _, err := runs.Create(ctx, run.NewRun{ID: "t-shop.verify", UserID: "alice", TaskID: "t-shop"}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	ws, err := proj.EnsureWorkspace(ctx, "shop", "t-shop")
+	if err != nil {
+		t.Fatalf("EnsureWorkspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws.Path, "cart.go"), []byte("package app\n\nfunc Cart() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := proj.Snapshot(ctx, ws.Path)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if _, err := reviewStore.EnsureDeliverable(ctx, review.EnsureInput{
+		ID: "dlv-t-shop", Owner: "alice", TaskID: "t-shop", ProjectID: "shop", Type: "code",
+	}); err != nil {
+		t.Fatalf("EnsureDeliverable: %v", err)
+	}
+	if _, err := reviewStore.MintRevision(ctx, review.MintInput{
+		DeliverableID: "dlv-t-shop", N: 1, RunID: "t-shop.verify", AttemptRef: "t-shop.verify#round-1",
+		Files: map[string]string{"deliverable.md": "# report\n"}, SnapshotSHA: pin,
+	}); err != nil {
+		t.Fatalf("MintRevision: %v", err)
+	}
+
+	// The pre-task base is revision 1's old side, and it comes back through the
+	// wiring rather than from this test.
+	cmp, err := reviewStore.Compare(ctx, "dlv-t-shop", 0, 1)
+	if err != nil {
+		t.Fatalf("Compare(0,1): %v", err)
+	}
+	if cmp.Change == nil {
+		t.Fatalf("the composed review store served no file inventory — the tree seam is not wired (label %q)", cmp.Label)
+	}
+	if cmp.Change.AbsentReason != "" {
+		t.Fatalf("the composed store could not read the tree: %s", cmp.Change.AbsentReason)
+	}
+	if !cmp.Change.OldIsBase || cmp.Change.OldPin != ws.Base || cmp.Change.NewPin != pin {
+		t.Fatalf("change pins = %q → %q (base %v), want the recorded base %q → the snapshot %q",
+			cmp.Change.OldPin, cmp.Change.NewPin, cmp.Change.OldIsBase, ws.Base, pin)
+	}
+	kinds := map[string]string{}
+	for _, f := range cmp.Change.Files {
+		kinds[f.Path] = f.Kind
+	}
+	if kinds["cart.go"] != review.KindAdded || len(kinds) != 1 {
+		t.Fatalf("inventory = %v, want cart.go added and nothing else (app.go is unchanged from the base)", kinds)
+	}
+	if !strings.Contains(cmp.Unified, "+func Cart() {}") {
+		t.Fatalf("the composed store served no diff text:\n%s", cmp.Unified)
+	}
+	// The other direction of the same wiring: the seams resolve the revision's
+	// pin through the store they were handed.
+	if ps.review != reviewStore {
+		t.Fatal("the project seams do not hold the review store — the pin resolution the verification workspace needs is unwired")
 	}
 }

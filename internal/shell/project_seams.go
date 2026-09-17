@@ -688,6 +688,26 @@ func (s *projectSeams) BaseContent(ctx context.Context, deliverableID string) (m
 	return files, true, nil
 }
 
+// wireReviewStore binds the review store and the project seams to each other,
+// which is the whole of what the composition root has to get right for a
+// repo-backed deliverable to be readable.
+//
+// The two directions are separate facts and both are load-bearing: the SEAMS
+// resolve a revision's snapshot pin through the store (the R6 verification
+// workspace), and the STORE reads that revision's files through the seams (the
+// S13.1/S13.2 tree lane). It is a named function rather than two assignments in
+// the middle of Run so the wiring can be exercised by a test that fails when
+// either line is deleted — a composition nothing can check is a composition that
+// silently stops happening.
+//
+// The tree seam is wired HERE, on the store that consumes it, and not through
+// stage.Config: the review store is the reader, and the pipeline has no use for
+// it (CONVENTIONS §23 — stage/intake/review never import internal/project).
+func wireReviewStore(rs *review.Store, ps *projectSeams) {
+	ps.review = rs
+	rs.Tree = ps
+}
+
 // ── review.TreeSource: a repo-backed revision's tree at its pin (SIT-1) ──────
 //
 // The three verbs below are the composition root's whole answer to "what is in

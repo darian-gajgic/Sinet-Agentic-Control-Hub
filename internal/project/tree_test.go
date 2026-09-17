@@ -227,6 +227,12 @@ func TestSITTreeBlobIsByteExactAndBounded(t *testing.T) {
 		"nonewline.txt": "no trailing newline",
 		"empty.txt":     "",
 		"blanks.txt":    "\n\n  indented\n\n",
+		// A file inside a REAL directory, so the "a directory is no blob" probe
+		// below names a path this tree actually contains. It named `src` while
+		// the world had no such directory, which made it pass for the wrong
+		// reason — git said "no such path" and the tree-vs-blob distinction it
+		// was written to check went untested (drain r1 F2).
+		"src/nested.txt": "nested\n",
 	}
 	f.writeFiles(ws.Path, bodies)
 	sha, err := f.store.Snapshot(ctx, ws.Path)
@@ -261,8 +267,16 @@ func TestSITTreeBlobIsByteExactAndBounded(t *testing.T) {
 	if _, _, ok, err := f.store.TreeBlob(ctx, "shop", sha, "nope.txt", 0); ok || err != nil {
 		t.Errorf("a path the tree does not hold = ok %v, err %v; want an absence", ok, err)
 	}
-	if _, _, ok, err := f.store.TreeBlob(ctx, "shop", sha, "src", 0); ok || err != nil {
-		t.Errorf("a directory is no blob: ok %v, err %v", ok, err)
+	// A DIRECTORY that really is in this tree. It resolves as an object and has a
+	// size, so a read that only asked "does this resolve" served git's own "bad
+	// file" text at 500; a folder is simply not a file, which is an absence.
+	for _, dir := range []string{"src", "src/"} {
+		if _, _, ok, err := f.store.TreeBlob(ctx, "shop", sha, dir, 0); ok || err != nil {
+			t.Errorf("TreeBlob(%q) = ok %v, err %v; a directory is no file and no error", dir, ok, err)
+		}
+	}
+	if _, _, ok, _ := f.store.TreeBlob(ctx, "shop", sha, "src/nested.txt", 0); !ok {
+		t.Error("the directory probe is vacuous — src/nested.txt is not in this tree either")
 	}
 }
 

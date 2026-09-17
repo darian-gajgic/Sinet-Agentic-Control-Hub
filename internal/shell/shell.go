@@ -574,13 +574,8 @@ func Run(ctx context.Context, opts Options) error {
 		// revision's content pin comes from the review store, and the
 		// materializations live under a platform-owned scratch root — never
 		// system temp (the §25 preview-clones precedent).
-		pseams.review = reviewStore
+		wireReviewStore(reviewStore, pseams)
 		pseams.scratch = filepath.Join(stateDir, "verify-workspaces")
-		// The S13.1/S13.2 tree seam (SIT-1): a repo-backed revision's files at
-		// its snapshot pin. Wired HERE, on the store that consumes it, rather
-		// than through stage.Config — the review store is the reader, and the
-		// pipeline has no use for it.
-		reviewStore.Tree = pseams
 
 		// The S12 local-tier surface (B4-5): the duty-alias client, the class-(b)
 		// intake/tie-break seams, the effective DutyMap (with the utility seat)
