@@ -117,9 +117,9 @@ func isPostureDisclosure(f Finding) bool { return f.Key() == bootstrapPostureKey
 // UNVERIFIABLE-HERE. Nothing is fabricated — no evidence ref, no exit status,
 // no invented executable check — and nothing is skipped silently.
 //
-// Every PLAN step's "Done when" contract is then DECIDED from tree, the files
-// the work produced, as far as those files can decide it — write-set globs,
-// named files, structural facts [A16, 2026-09-17]. Only a contract no such
+// Every PLAN step's "Done when" contract is then DECIDED from the tree — the
+// files the work produced — as far as those files can decide it: write-set
+// globs, named files, structural facts [A16, 2026-09-17]. Only a contract no such
 // fact reaches keeps the absent-pack attribution, now with the reason
 // recorded. A refuted contract raises one blocker so it reaches a person
 // (Spec S07.7); coverage is the approved plan's AC map, which decides the

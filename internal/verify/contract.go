@@ -28,8 +28,10 @@ package verify
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,11 +62,18 @@ const (
 	attrPlanDoneWhen = "plan:done-when"
 )
 
-// removalWords make a "Done when" line undecidable by presence: absence is
-// that line's success condition, so a missing path proves the step done
-// rather than undone. A false FAIL costs a rework round; a false
-// UNVERIFIABLE-HERE costs nothing the round did not already have.
-var removalWords = []string{"remov", "delet", "no longer", "gone", "drop", "unused"}
+// removalPattern matches the wordings that make a "Done when" line
+// undecidable by presence: absence is that line's success condition, so a
+// missing path proves the step done rather than undone. A false FAIL costs a
+// rework round; a false UNVERIFIABLE-HERE costs nothing the round did not
+// already have.
+//
+// Whole words only. On a substring test a "dropdown" or a "backdrop" reads as
+// a removal, and the step is then handed back with a reason about removing
+// things it never mentioned — a wrong explanation misleads a person as surely
+// as a wrong verdict.
+var removalPattern = regexp.MustCompile(
+	`(?i)\b(?:remov(?:e|es|ed|ing|al)|delet(?:e|es|ed|ing|ion)|drop(?:s|ped|ping)?|gone|unused|no longer)\b`)
 
 // treeIndex is a read-only listing of the verification workspace: every
 // regular file with its size, plus the set of directories. Reading a fact
@@ -75,22 +84,58 @@ type treeIndex struct {
 	order []string // file paths, sorted, so examples are deterministic
 }
 
-// indexTree lists root. Symlinks are neither followed nor listed (the S13
-// stripped revision drops them anyway) and any .git directory is skipped:
-// answer-bearing history is not part of what the work produced. A walk
-// failure is returned rather than swallowed — an unreadable tree decides
+// treeReadError reports a verification workspace the platform could not read.
+// Its message names no host path: it is rendered into a contract's Detail,
+// which a requester reads (§38), and an absolute path on this machine tells
+// them nothing while saying more about the host than it should.
+type treeReadError struct {
+	// Rel is the path inside the workspace that failed, relative to its
+	// root. Empty when the root itself could not be opened.
+	Rel string
+	Err error
+}
+
+func (e *treeReadError) Error() string {
+	if e.Rel == "" {
+		return "the folder holding them could not be opened"
+	}
+	return fmt.Sprintf("%s inside them could not be read", e.Rel)
+}
+
+func (e *treeReadError) Unwrap() error { return e.Err }
+
+// indexTree lists root. Symlinks inside the tree are neither followed nor
+// listed (the S13 stripped revision drops them anyway) and any .git directory
+// is skipped: answer-bearing history is not part of what the work produced. A
+// read failure is returned rather than swallowed — an unreadable tree decides
 // nothing.
 func indexTree(root string) (*treeIndex, error) {
+	// The ROOT's own symlinks are resolved first, because WalkDir does not
+	// follow a symlinked root: it would visit the link itself, list nothing,
+	// and hand back an EMPTY tree that refutes every contract in the plan
+	// from files nobody ever read. A root that is not a readable directory
+	// decides nothing at all rather than deciding everything wrongly.
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, &treeReadError{Err: err}
+	}
+	st, err := os.Stat(resolved)
+	if err != nil {
+		return nil, &treeReadError{Err: err}
+	}
+	if !st.IsDir() {
+		return nil, &treeReadError{Err: fmt.Errorf("%w: the verification workspace is not a directory", ErrBadInput)}
+	}
 	idx := &treeIndex{files: map[string]int64{}, dirs: map[string]bool{}}
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return err
+	walkErr := filepath.WalkDir(resolved, func(p string, d fs.DirEntry, err error) error {
+		rel, relErr := filepath.Rel(resolved, p)
+		if relErr != nil {
+			rel = filepath.Base(p)
 		}
 		rel = filepath.ToSlash(rel)
+		if err != nil {
+			return &treeReadError{Rel: rel, Err: err}
+		}
 		if rel == "." {
 			return nil
 		}
@@ -106,14 +151,14 @@ func indexTree(root string) (*treeIndex, error) {
 		}
 		info, err := d.Info()
 		if err != nil {
-			return err
+			return &treeReadError{Rel: rel, Err: err}
 		}
 		idx.files[rel] = info.Size()
 		idx.order = append(idx.order, rel)
 		return nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("verify: read the produced files at %s: %w", root, err)
+	if walkErr != nil {
+		return nil, walkErr
 	}
 	sort.Strings(idx.order)
 	return idx, nil
@@ -185,12 +230,13 @@ func (idx *treeIndex) emptyNamedFile(pattern string) bool {
 }
 
 // normalizePattern puts a declared glob or a named path into the index's own
-// shape: relative to the root, slash-separated, with a trailing slash read as
-// "everything under here".
+// shape: slash-separated, with a leading "./" dropped and a trailing slash
+// read as "everything under here". A leading "/" is NOT stripped — an
+// absolute pattern names somewhere other than this workspace, and quietly
+// rebasing it onto the workspace would invent a claim the plan never made.
 func normalizePattern(p string) string {
 	p = strings.TrimSpace(p)
 	p = strings.TrimPrefix(p, "./")
-	p = strings.TrimPrefix(p, "/")
 	if strings.HasSuffix(p, "/") {
 		if p = strings.TrimRight(p, "/"); p == "" {
 			return ""
@@ -226,11 +272,8 @@ func writeSetPatterns(step intake.Step) []string {
 // path, a bare filename, a stack name or a version is prose that the judge
 // weighs, not a fact these files decide.
 func namedPaths(doneWhen string) (paths []string, removal bool) {
-	lower := strings.ToLower(doneWhen)
-	for _, w := range removalWords {
-		if strings.Contains(lower, w) {
-			return nil, true
-		}
+	if removalPattern.MatchString(doneWhen) {
+		return nil, true
 	}
 	seen := map[string]bool{}
 	rest := doneWhen
@@ -259,27 +302,33 @@ func namedPaths(doneWhen string) (paths []string, removal bool) {
 }
 
 // pathShaped reports whether a backtick span is conservatively a path or a
-// glob rather than prose. Commands, URLs, versions and identifiers are left
-// undecided here on purpose: what cannot be decided from the files is
-// recorded as such, never guessed (Spec S07.3).
+// glob rather than prose (Spec S07.3 — what cannot be decided from the files
+// is recorded as such, never guessed).
+//
+// The bar is deliberately high, because a span wrongly read as a path FAILs
+// work that is finished. A slash alone proves nothing: a route (`/cart`,
+// `/api/products`), an import specifier (`next/image`, `node:fs/promises`), a
+// version (`v1.2/3`) and ordinary slashed prose (`and/or`, `24/7`, `on/off`)
+// all carry one and none of them names a file. So a span qualifies only when
+// it holds no whitespace and none of the characters that mark a URL, a
+// command or an expression; does not begin with "/", since a route is not a
+// file and an absolute path is not this workspace's; holds at least one "/";
+// and finally looks like a file or a folder — a glob metacharacter anywhere,
+// a dot in its LAST segment (an extension), or a trailing slash.
 func pathShaped(span string) bool {
 	if span == "" || strings.ContainsAny(span, " \t\r\n\v\f") {
 		return false
 	}
-	if strings.Contains(span, "://") || strings.ContainsAny(span, "(){}$=") {
+	if strings.ContainsAny(span, ":(){}$=") {
 		return false
 	}
-	if !strings.ContainsAny(span, "/*?[") {
+	if strings.HasPrefix(span, "/") || !strings.Contains(span, "/") {
 		return false
 	}
-	switch c := span[0]; {
-	case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+	if strings.ContainsAny(span, "*?[") || strings.HasSuffix(span, "/") {
 		return true
-	case c == '.' || c == '/' || c == '*' || c == '_':
-		return true
-	default:
-		return false
 	}
+	return strings.Contains(span[strings.LastIndexByte(span, '/')+1:], ".")
 }
 
 // refutation is one pattern the produced files did not satisfy, carrying the
@@ -324,33 +373,65 @@ func decideFromTree(step intake.Step, idx *treeIndex, walkErr error) StepContrac
 	var malformed []string
 	var facts []string
 	badPatternAttribution := ""
+	// A pattern the write set and the line BOTH name is one outcome, said
+	// once: a person reading the reason should not meet the same path twice.
+	// The dedupe is per outcome, not per pattern, because the write set is
+	// judged as a union and may leave a pattern unspoken for that the line
+	// then decides on its own.
+	saidRefuted, saidFact, saidMalformed := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	addRefuted := func(pattern, phrase string) {
+		if saidRefuted[pattern] {
+			return
+		}
+		saidRefuted[pattern] = true
+		refuted = append(refuted, refutation{pattern: pattern, phrase: phrase})
+	}
+	addMalformed := func(pattern, attribution string) {
+		if badPatternAttribution == "" {
+			badPatternAttribution = attribution
+		}
+		if saidMalformed[pattern] {
+			return
+		}
+		saidMalformed[pattern] = true
+		malformed = append(malformed, pattern)
+	}
 
 	// Class W: the declared write set, judged as one union.
 	if len(writes) > 0 {
 		matched, bad := 0, false
-		var wFacts []string
+		type wFact struct {
+			pattern string
+			matches []string
+		}
+		var wFacts []wFact
 		for _, p := range writes {
+			// An absolute glob names somewhere other than the workspace the
+			// platform was handed, so these files can neither confirm nor
+			// refute it. Recorded as undecidable, never refuted — a claim
+			// about another place is not a claim this tree can disprove.
 			m, err := idx.match(p)
-			if err != nil {
+			if strings.HasPrefix(p, "/") || err != nil {
 				bad = true
-				malformed = append(malformed, p)
-				if badPatternAttribution == "" {
-					badPatternAttribution = attrPlanWriteSet
-				}
+				addMalformed(p, attrPlanWriteSet)
 				continue
 			}
 			if len(m) > 0 {
 				matched += len(m)
-				wFacts = append(wFacts, factPhrase(p, m))
+				wFacts = append(wFacts, wFact{pattern: p, matches: m})
 			}
 		}
 		switch {
 		case matched > 0:
-			facts = append(facts, wFacts...)
+			for _, f := range wFacts {
+				if !saidFact[f.pattern] {
+					saidFact[f.pattern] = true
+					facts = append(facts, factPhrase(f.pattern, f.matches))
+				}
+			}
 		case !bad:
 			for _, p := range writes {
-				refuted = append(refuted, refutation{pattern: p,
-					phrase: fmt.Sprintf("the step said it would write %s and no file it produced matches that", p)})
+				addRefuted(p, fmt.Sprintf("the step said it would write %s and no file it produced matches that", p))
 			}
 		}
 	}
@@ -360,18 +441,16 @@ func decideFromTree(step intake.Step, idx *treeIndex, walkErr error) StepContrac
 		m, err := idx.match(p)
 		switch {
 		case err != nil:
-			malformed = append(malformed, p)
-			if badPatternAttribution == "" {
-				badPatternAttribution = attrPlanDoneWhen
-			}
+			addMalformed(p, attrPlanDoneWhen)
 		case len(m) == 0:
-			refuted = append(refuted, refutation{pattern: p,
-				phrase: fmt.Sprintf("the line names %s and no file it produced matches that", p)})
+			addRefuted(p, fmt.Sprintf("the line names %s and no file it produced matches that", p))
 		case idx.emptyNamedFile(p):
-			refuted = append(refuted, refutation{pattern: p,
-				phrase: fmt.Sprintf("the line names %s and that file is there but empty", p)})
+			addRefuted(p, fmt.Sprintf("the line names %s and that file is there but empty", p))
 		default:
-			facts = append(facts, factPhrase(p, m))
+			if !saidFact[p] {
+				saidFact[p] = true
+				facts = append(facts, factPhrase(p, m))
+			}
 		}
 	}
 
@@ -428,14 +507,14 @@ func passDetail(facts []string) string {
 		". Anything this step's line asks for beyond those files is left to the reviewing judge and to you."
 }
 
-// malformedDetail records a plan pattern that cannot be read as a pattern —
-// said plainly, and never as a verdict on the work.
+// malformedDetail records a plan pattern these files cannot be measured
+// against — said plainly, and never as a verdict on the work.
 func malformedDetail(patterns []string) string {
 	noun := "pattern"
 	if len(patterns) > 1 {
 		noun = "patterns"
 	}
-	return fmt.Sprintf("Nothing here decides this step: the plan's own file %s %s cannot be read as a file pattern, so the files were not measured against it.",
+	return fmt.Sprintf("Nothing here decides this step: the plan's own file %s %s could not be matched against the files this work produced, so they were not measured against it.",
 		noun, joinList(patterns))
 }
 
