@@ -369,7 +369,7 @@ func TestTQ8SliceIsBoundedAtAFileBoundaryAndSaysSo(t *testing.T) {
 		t.Fatalf("recorded sizes %+v vs artifact %d / report %d", saw, len(in.Artifact), len(tq8Report))
 	}
 	// The verify.round row carries the same record (S07.11 keep-forever).
-	rows := f.events("verify.round")
+	rows := f.events(verify.EventRound)
 	if len(rows) != 1 {
 		t.Fatalf("verify.round rows %d, want 1", len(rows))
 	}
