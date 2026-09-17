@@ -133,6 +133,10 @@ type VerifyInput struct {
 	// Steps are the approved PLAN steps (per-step Done-when contracts,
 	// Spec S07.3).
 	Steps []intake.Step
+	// Coverage is the approved PLAN's AC coverage map (AC key → owning step
+	// ids, Spec S06.6): the frozen criterion a step's contract FAIL cites
+	// (Spec S07.5 blocker rule; P3-TQ-3).
+	Coverage map[string][]string
 	// ResearchNodes are the PLAN's declared research nodes (1.9).
 	ResearchNodes []intake.ResearchNode
 	// Tier is the stakes tier (axis-2 gating outside launch domains, Spec
