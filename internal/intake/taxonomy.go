@@ -302,12 +302,13 @@ const rw12Provenance = "drafted P3-RW-12 with claude-opus-5 on 2026-08-13 per Sp
 // operator's W2 taxonomy rebuild, driven by three real transcripts and a live
 // benchmark walk rather than by a benchmark table.
 //
-// Ratification is stated as PENDING for the same reason the v3 record states it:
-// the content ships and is governed under its own supersession from the first
-// boot (S09.8), with the record saying plainly that the operator has not seen it
-// yet. The alternative would leave the governed file at v3 while the runtime
-// serves v4 — the live-pointer drift the snapshot doctrine closed. A refusal at
-// the gate is executed as its own supersession back to v3.
+// The content shipped and was governed under its own supersession from the
+// first boot (S09.8) while the record said plainly that the operator had not
+// seen it yet. The operator saw it at the 2026-09-17 rework sitting and ratified
+// it as shipped (gate item A1), so the closing sentence now states that, in the
+// operator's own words. Everything before it is the v4 record verbatim: the
+// chain reads as history, which is why the "quality_bar 8, because …" reasoning
+// stays even though P3-V41 moves that weight (v41Provenance explains the move).
 const gf7Provenance = "W2 taxonomy rebuild drafted P3-GF7 with claude-opus-5[1m] on 2026-08-27 per Spec S06.5 " +
 	"(\"drafted at implementation time with the strongest available frontier model\") — the same model line the P3-RW-12 and " +
 	"P3-GF3-BE1 taxonomy records name, so the drafting chain is one model line across all three versions. From the operator records " +
@@ -323,7 +324,28 @@ const gf7Provenance = "W2 taxonomy rebuild drafted P3-GF7 with claude-opus-5[1m]
 	"above the delivery-shape and finishing-bar slots and below the technology choice everything else is built on; quality_bar 8, " +
 	"because it decides what verification gates on rather than what gets built, which is consequential but narrower — level with " +
 	"output_format, whose delivery shape it judges. Slot ids and weights of every surviving slot are VERBATIM from v3 (the " +
-	"measured thing, untouched). Operator ratification PENDING at the planning-rework exit gate."
+	"measured thing, untouched). RATIFIED by the operator on 2026-09-17 at the rework sitting, gate record " +
+	"P3/gates/rework-sitting-gate.md item A1, in the operator's own words: \"ok for now, will need some refinement later\" — " +
+	"the refinement is deferred to a later v4.x revision, to be opened when the operator names what it is."
+
+// v41Provenance is the record the software set carries at v4.1 (Spec S06.5:
+// slot weights ship in the taxonomy file and are operator-editable; S09.10 row
+// 1 governs the edit as a new version).
+//
+// It makes no drafting claim, because nothing was drafted: v4.1 is a DATA change
+// to one weight that the operator ruled. What it records is the ruling, the
+// evidence behind it, and the model that applied it.
+const v41Provenance = "v4.1 revision applied P3-V41 on 2026-09-17 on the operator's ruling in " +
+	"P3/gates/rework-sitting-gate.md item A2 — the operator's words: \"ok do it\". ONE weight moves: quality_bar 8 to 12. " +
+	"The evidence is the sitting's own webshop task, which failed on the one axis nobody was asked about: look_feel was " +
+	"answered and quality_bar was never asked, so placeholder photos shipped as finished work. At the standard tier the " +
+	"interview stopped before output_format, quality_bar and units, and all three rode into the planner's assumptions " +
+	"instead of being asked; at 12 the slot reaches the first card at every tier. The v4 record's own rule is kept: 12 " +
+	"equals the measured 12s (collection semantics, comparison rules, ordering & atomicity) and never outranks them, " +
+	"because reasoning does not outrank measurement. Slot weights are taxonomy DATA the spec makes operator-editable " +
+	"(S06.5), so this moves no tunable setting — the clearance floors stay 60/75/90 — and needs no S18 sweep and no " +
+	"S00.9 amendment. The slot's name, must-know, question, why-line, recommended default and options are VERBATIM from " +
+	"v4: only the weight moves. Applied with claude-opus-5[1m], the model identity the applying runtime reported."
 
 const gf3Provenance = "Requester-facing v3 revision drafted P3-GF3-BE1 with claude-opus-5 on 2026-08-23 per Spec S06.5: " +
 	"every slot asks a question a person who is not a programmer can answer, offers 2 to 4 concrete labeled options, and " +
@@ -331,7 +353,7 @@ const gf3Provenance = "Requester-facing v3 revision drafted P3-GF3-BE1 with clau
 	"the planner and never shown as the asked question. Slot ids, weights, count and order are VERBATIM from v2 (the measured " +
 	"thing, untouched). Operator ratification PENDING at the resumed B6 gate."
 
-// softwareSeed is the software family's question set (v4).
+// softwareSeed is the software family's question set (v4.1).
 //
 // The ten ClarifyCodeBench clarity types (arXiv:2607.00711 Table 2) are kept
 // verbatim from the B2-2 seed, ids and weights intact — they are the one
@@ -374,11 +396,21 @@ const gf3Provenance = "Requester-facing v3 revision drafted P3-GF3-BE1 with clau
 // to ask about. A requester with no answer still has the free-text box and the
 // per-slot skip, which converts the slot to a disclosed assumption on the
 // approval card rather than to a silent guess.
+//
+// P3-V41 is v4.1: the operator ratified v4 as shipped and, in the same sitting,
+// moved quality_bar from 8 to 12 — a DATA change to one weight, nothing else.
+// At 12 it ties the three measured slots and, under the S06.5 delivery rule
+// (highest weight first, up to four per card), lands on the FIRST card at every
+// tier instead of falling past the standard floor into the planner's
+// assumptions. It ties them and never outranks them. The arithmetic that
+// follows is not free: any 12 on the first card pushes the lowest-weighted asked
+// slot off the second, so at the standard tier language_locale (9) becomes a
+// listed assumption and is asked at the high tier only.
 func softwareSeed() *Taxonomy {
 	return &Taxonomy{
 		ID:      "software",
 		Family:  FamilySoftware,
-		Version: "v4",
+		Version: "v4.1",
 		Source: "ClarifyCodeBench 10-type taxonomy (arXiv:2607.00711, Table 2) for the ten clarity slots, seeded P3-B2-2 — " +
 			"weights EVIDENCE-INFORMED from that benchmark: the types every model measurably fails (collection semantics, " +
 			"comparison rules, ordering & atomicity) weigh 12, ordinary clarity types 10/8, the types models natively handle " +
@@ -386,7 +418,7 @@ func softwareSeed() *Taxonomy {
 			"are REASONED, not measured: for a requester who is not a programmer they shape the deliverable more than output " +
 			"format or units do, so they sit above the natively-handled types — and strictly below the benchmark-failed 12, " +
 			"because reasoning does not outrank measurement. Deep-Plan revision " + rw12Provenance + ". " + gf3Provenance +
-			" " + gf7Provenance,
+			" " + gf7Provenance + " " + v41Provenance,
 		Slots: []Slot{
 			{
 				ID: "behavior", Name: "What it should do", Weight: 10, Ask: AskNever,
@@ -684,7 +716,7 @@ func softwareSeed() *Taxonomy {
 				},
 			},
 			{
-				ID: "quality_bar", Name: "What finished has to pass", Weight: 8,
+				ID: "quality_bar", Name: "What finished has to pass", Weight: 12,
 				MustKnow: "What the finished work must pass to count as done — feature-correctness alone, or a stated polish, performance or " +
 					"accessibility bar — is unstated. It decides what verification gates on: write the acceptance criteria against this " +
 					"answer. Precise form: name the checks the deliverable must pass and whether any of them are measured rather than judged.",

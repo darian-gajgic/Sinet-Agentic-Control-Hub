@@ -29,3 +29,10 @@ func RW12SoftwareContentHashForTest() string {
 func GF3SoftwareTaxonomyForTest() *intake.Taxonomy {
 	return gf3TaxonomySnapshot()[intake.FamilySoftware]
 }
+
+// GF7SoftwareTaxonomyForTest returns the frozen P3-GF7 software question set —
+// what EnsureGF7TaxonomyGovernance writes, which since P3-V41 is no longer what
+// the runtime seed says.
+func GF7SoftwareTaxonomyForTest() *intake.Taxonomy {
+	return gf7TaxonomySnapshot()[intake.FamilySoftware]
+}

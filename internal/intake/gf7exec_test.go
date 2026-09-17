@@ -45,7 +45,7 @@ var gf7AskedSoftware = map[string]int{
 	"edge_cases": 10, "collection_semantics": 12, "comparison_rules": 12,
 	"ordering_atomicity": 12, "output_format": 8, "units": 6,
 	"technology_stack": 11, "assets_media": 10, "look_feel": 10,
-	"language_locale": 9, "quality_bar": 8,
+	"language_locale": 9, "quality_bar": 12,
 }
 
 // ---- the v4 vocabulary, read the way a surface reads it ----
@@ -99,8 +99,8 @@ func gf7View(t *testing.T, fam intake.Family) gf7TaxView {
 // instruction and ships no question at all.
 func TestGF7SoftwareV4MeetsThePerSlotMatrix(t *testing.T) {
 	soft := gf7View(t, intake.FamilySoftware)
-	if soft.Version != "v4" {
-		t.Fatalf("software seed version = %q, want v4 (the W2 revision, r5 §D)", soft.Version)
+	if soft.Version != "v4.1" {
+		t.Fatalf("software seed version = %q, want v4.1 (the W2 revision, r5 §D)", soft.Version)
 	}
 	seen := map[string]bool{}
 	for _, s := range soft.Slots {
@@ -210,6 +210,11 @@ func TestGF7ComparisonRulesOptionsNameTheirReferent(t *testing.T) {
 // TestGF7NewSlotsRecordTheirReasonedWeights (brief R8): the two H23 additions
 // enter with weights that are REASONED and say so — reasoning never outranks
 // the measured 12s.
+//
+// The bar is strictly greater-than, not greater-or-equal: the operator's ruling
+// of 2026-09-17 (P3/gates/rework-sitting-gate.md item A2, shipped as P3-V41)
+// reads "12 equals, it does not outrank", so quality_bar at 12 ties
+// collection_semantics and that tie is allowed.
 func TestGF7NewSlotsRecordTheirReasonedWeights(t *testing.T) {
 	soft := gf7View(t, intake.FamilySoftware)
 	byID := map[string]gf7SlotView{}
@@ -222,7 +227,7 @@ func TestGF7NewSlotsRecordTheirReasonedWeights(t *testing.T) {
 			t.Errorf("the v4 software set has no %q slot (W1 H23 + §D.1)", id)
 			continue
 		}
-		if s.Weight >= byID["collection_semantics"].Weight {
+		if s.Weight > byID["collection_semantics"].Weight {
 			t.Errorf("%s (%d) outweighs the measured collection_semantics (%d) — reasoning does not outrank measurement",
 				id, s.Weight, byID["collection_semantics"].Weight)
 		}
@@ -261,8 +266,8 @@ func TestGF7VocabularyRoundTripsAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the v4 software set does not survive its own strict decode: %v", err)
 	}
-	if loaded.Version != "v4" {
-		t.Errorf("round-tripped version = %q, want v4", loaded.Version)
+	if loaded.Version != "v4.1" {
+		t.Errorf("round-tripped version = %q, want v4.1", loaded.Version)
 	}
 	var back gf7TaxView
 	if err := json.Unmarshal(raw, &back); err != nil {
