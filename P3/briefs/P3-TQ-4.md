@@ -1,3 +1,5 @@
+> **EXPIRED 2026-09-18 (TQ-4a half) — merged into main (grounding `84b5ee9`, impl `d3a58c5`, drain r1 `59303a8`, coordinator inline `7035f8b`; evaluation FAIL → drained, re-check FAIL on one LOW → inline pin; CONVENTIONS §79). Single-use artifact: never read as truth; code + spec are the truth. Superseded at drain: `packFromCapture` composes PER SLOT from `EffectiveCommands` with per-check `Origin` (R8 as written dropped detected rungs beside one owner slot); F5's rule applies to an INSPECTABLE tree only; R17 (rubric v4) is NOT landed — it is the RUBRIC-V4 packet with the B13 re-run. §TQ-4b remains the gate's (item B14).**
+
 # P3-TQ-4 — the execution rung at bootstrap (amendment A16; findings TQ-F3 + TQ-F7's platform half)
 
 Grounded 2026-09-17. Binding contract: `Spec/core-architecture-v1.md`; canonical text `Spec/drafts/`.
