@@ -73,8 +73,8 @@ func TestGF7KilledSlotsAreNeverAsked(t *testing.T) {
 // non-IT requester (r5 §A round 1). RED at v3 on both counts.
 func TestGF7SoftwareV4ShapeAndSystemDecidesDefault(t *testing.T) {
 	soft := intake.SeedTaxonomies()[intake.FamilySoftware]
-	if soft.Version != "v4" {
-		t.Errorf("software seed version = %q, want %q (the W2 revision, r5 §D)", soft.Version, "v4")
+	if soft.Version != "v4.1" {
+		t.Errorf("software seed version = %q, want %q (the W2 revision, r5 §D)", soft.Version, "v4.1")
 	}
 	oa := soft.Slot("ordering_atomicity")
 	if oa == nil {

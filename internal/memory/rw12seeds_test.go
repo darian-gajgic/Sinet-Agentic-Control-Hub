@@ -130,6 +130,13 @@ func TestTaxonomyGovernanceCreatesAndSupersedes(t *testing.T) {
 	if _, err := f.gate.EnsureGF7TaxonomyGovernance(ctx); err != nil {
 		t.Fatalf("EnsureGF7TaxonomyGovernance: %v", err)
 	}
+	// P3-V41 repeats the move once more: GF7's Ensure now writes ITS own frozen
+	// v4 snapshot, so the software set reaches the runtime v4.1 content through
+	// this packet's supersession. Same reason, same place — a boot runs all four
+	// in order, and the file check below keeps meaning what it meant.
+	if _, err := f.gate.EnsureV41TaxonomyGovernance(ctx); err != nil {
+		t.Fatalf("EnsureV41TaxonomyGovernance: %v", err)
+	}
 
 	// Every governed active file IS the operator-editable override input, and
 	// it says exactly what the runtime seed says (the §17 proven-by-test rule).

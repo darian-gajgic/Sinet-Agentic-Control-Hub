@@ -62,8 +62,8 @@ func TestSeedTaxonomiesCoverSixFamilies(t *testing.T) {
 	// P3-GF7: the version pin moves to v4 (the operator's W2 rebuild — four
 	// slots settled instead of asked, every surviving question redrafted, two
 	// added; surviving ids and weights still verbatim).
-	if soft.Version != "v4" {
-		t.Errorf("software seed version = %q, want v4 (the W2 taxonomy rebuild)", soft.Version)
+	if soft.Version != "v4.1" {
+		t.Errorf("software seed version = %q, want v4.1 (the W2 taxonomy rebuild, then the P3-V41 weight ruling)", soft.Version)
 	}
 	for _, id := range append(append([]string{}, ccbSlotIDs...), rw12SoftwareSlotIDs...) {
 		if soft.Slot(id) == nil {

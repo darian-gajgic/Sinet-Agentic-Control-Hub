@@ -519,6 +519,37 @@ func Run(ctx context.Context, opts Options) error {
 					"(operator ratification PENDING at the planning-rework exit gate)", "superseded", res.Superseded)
 			}
 		}
+		// The v4.1 software question set (P3-V41): one weight, quality_bar 8 to
+		// 12, ruled by the operator at the 2026-09-17 rework sitting — moves to
+		// v4.1 by SUPERSESSION under its own record, which is RATIFIED rather
+		// than pending. It runs AFTER the v4 governance above, which is what
+		// puts the version it supersedes there. The generic set is untouched and
+		// stays on GF3's record. Same D10 deferral.
+		v41Gate := newWriteGate(memStore, committer, nil)
+		switch res, err := v41Gate.EnsureV41TaxonomyGovernance(ctx); {
+		case errors.Is(err, memory.ErrNoOperator):
+			logger.Info("memory: v4.1 taxonomy governance deferred — no operator account yet (Spec S09.10, D10)")
+		case errors.Is(err, memory.ErrSeedDiverged):
+			logger.Warn("memory: v4.1 taxonomy governance SKIPPED — the in-code question set no longer matches the content this "+
+				"packet's record covers; a question-set edit needs its own governance function and provenance record (Spec S09.10)", "err", err)
+		case err != nil:
+			return fmt.Errorf("shell: v4.1 taxonomy governance: %w", err)
+		default:
+			if res.Repaired > 0 {
+				logger.Warn("memory: governed taxonomy file diverged from the committed row — "+
+					"crash-torn write or out-of-band edit; repaired from the row (Spec S09.8)",
+					"repaired", res.Repaired)
+			}
+			if res.Unverifiable > 0 {
+				logger.Warn("memory: governed taxonomy provenance hash unavailable — compacted or pruned; "+
+					"supersession not attempted; divergence check limited this boot (Spec S14.9)",
+					"unverifiable", res.Unverifiable)
+			}
+			if res.Superseded > 0 {
+				logger.Info("memory: software interview taxonomy superseded to v4.1 under S09.10 governance "+
+					"(operator-ratified 2026-09-17, gate item A2)", "superseded", res.Superseded)
+			}
+		}
 		// The composer playbook as a governed S09.10 house object (B3-5;
 		// seed-content ratification is a B3 gate item — the recorded
 		// provenance says so). Same D10 deferral as the B2 seeds.

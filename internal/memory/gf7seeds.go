@@ -88,10 +88,18 @@ var gf7TaxonomyTitles = map[intake.Family]string{
 	intake.FamilySoftware: "Interview must-know taxonomy — software family (v4)",
 }
 
-// gf7TaxonomyContent renders the v4 content: the LIVE in-code seed, which is
-// what this packet ships and what its digest pins.
+// gf7TaxonomyContent renders the GF7-covered content of one family — the
+// frozen snapshot, never the live seed (gf7taxonomy_v4.go).
+//
+// This function used to read intake.SeedTaxonomies(), which made this packet's
+// governed entry a pointer at whatever the code says today; P3-V41 moves the
+// software set to v4.1, so the pointer would now write v4.1 content under this
+// packet's record. The v4.1 content enters as its own supersession instead
+// (v41seeds.go). It is the same move this packet made to GF3's
+// gf3TaxonomyContent, one packet later and for the same reason — the ONE edit a
+// later packet makes to an earlier packet's governance file.
 func gf7TaxonomyContent(fam intake.Family) (string, error) {
-	return taxonomyContentOf(fam, intake.SeedTaxonomies()[fam])
+	return taxonomyContentOf(fam, gf7TaxonomySnapshot()[fam])
 }
 
 // verifyGF7Snapshot checks the revised family against the ratified digest,

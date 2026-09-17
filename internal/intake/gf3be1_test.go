@@ -83,8 +83,8 @@ func gf7NeverAskedCount(fam intake.Family) int {
 func TestGF3TaxonomyV3EverySlotCarriesOptionsAndWhy(t *testing.T) {
 	seeds := intake.SeedTaxonomies()
 	wantVersion := map[intake.Family]string{
-		intake.FamilySoftware: "v4", // the W2 rebuild
-		intake.FamilyGeneric:  "v3", // untouched by P3-GF7: no operator finding names it
+		intake.FamilySoftware: "v4.1", // the W2 rebuild, then the P3-V41 weight ruling
+		intake.FamilyGeneric:  "v3",   // untouched by P3-GF7: no operator finding names it
 	}
 	for _, fam := range []intake.Family{intake.FamilySoftware, intake.FamilyGeneric} {
 		tax := seeds[fam]
@@ -121,6 +121,8 @@ func TestGF3TaxonomyV3EverySlotCarriesOptionsAndWhy(t *testing.T) {
 // two new slots are APPENDED, which is what leaves the v3 prefix verbatim and
 // readable as such. The v3 pin itself now lives on the frozen memory snapshot
 // (internal/memory/gf3taxonomy_v3.go, guarded by the GF3 digest tripwire).
+// P3-V41 moved quality_bar to 12 by operator ruling, which is the one weight in
+// this wall that is no longer its v3/GF7 value.
 func TestGF3WeightsAndIDsStayVerbatim(t *testing.T) {
 	want := map[intake.Family][]struct {
 		id string
@@ -133,7 +135,7 @@ func TestGF3WeightsAndIDsStayVerbatim(t *testing.T) {
 			{"indices_ranges", 8}, {"output_format", 8}, {"units", 6}, {"numerical_precision", 6},
 			{"technology_stack", 11}, {"assets_media", 10}, {"look_feel", 10},
 			// ---- appended at P3-GF7, weights REASONED (recorded in Source) ----
-			{"language_locale", 9}, {"quality_bar", 8},
+			{"language_locale", 9}, {"quality_bar", 12},
 		},
 		intake.FamilyGeneric: {
 			{"goal", 12}, {"deliverable", 10}, {"scope", 10}, {"inputs", 8},

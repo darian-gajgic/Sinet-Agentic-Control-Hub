@@ -111,8 +111,8 @@ func TestGF7GovernanceWritesTheV4ChainUnderAPendingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("governed software taxonomy fails LoadTaxonomy: %v", err)
 	}
-	if !reflect.DeepEqual(got, intake.SeedTaxonomies()[intake.FamilySoftware]) {
-		t.Error("the governed software file diverges from the in-code v4 seed")
+	if !reflect.DeepEqual(got, memory.GF7SoftwareTaxonomyForTest()) {
+		t.Error("GF7's Ensure no longer writes the v4 content its record attests to")
 	}
 	if got.Version != "v4" {
 		t.Errorf("governed software file is %q, want v4", got.Version)
