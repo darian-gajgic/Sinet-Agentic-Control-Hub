@@ -182,9 +182,15 @@ func (s *Store) Snapshot(ctx context.Context, worktree string) (string, error) {
 			addErr = nil
 			break
 		}
-		addErr = fmt.Errorf("project: git add -A (exit %d): %s", code, strings.TrimSpace(stderr))
+		detail := strings.TrimSpace(stderr)
+		if detail != "" {
+			detail = ": " + detail
+		}
+		addErr = fmt.Errorf("git add -A (exit %d)%s", code, detail)
 		if code != 128 {
-			break
+			// Not git's die: no bound applies to a class that is never
+			// retried, so the failure is reported exactly as it happened.
+			return "", fmt.Errorf("project: snapshot staging failed: %w", addErr)
 		}
 	}
 	if addErr != nil {
