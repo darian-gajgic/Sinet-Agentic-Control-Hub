@@ -8,6 +8,7 @@ package memory
 // ever has to.
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
@@ -54,4 +55,31 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+// tq4Seed1Digest is the sha256 of the composer playbook AS THE B3 RECORD
+// COVERS IT — the bytes ComposerPlaybookSeed() rendered at main 3a5e706,
+// immediately before this packet revised it. tq4playbook_seed1.go must hold
+// exactly those bytes, or EnsureComposerPlaybook writes content the B3 gate
+// never approved and this packet's supersession has no predecessor to move.
+const tq4Seed1Digest = "f8714e78c02bdf033948b977cba032f8034261252c21c71bc9b8b8b52dcb8dd2"
+
+// TestTQ4FrozenSeed1IsTheB3RatifiedBytes pins the freeze against a constant,
+// which is the only thing that can watch it once the live seed has moved on.
+func TestTQ4FrozenSeed1IsTheB3RatifiedBytes(t *testing.T) {
+	if got := contentHash(tq4PlaybookSeed1()); got != tq4Seed1Digest {
+		t.Fatalf("the frozen seed-1 snapshot hashes %s, want the B3-ratified %s — it must be byte-identical to what ComposerPlaybookSeed() rendered before this packet", got, tq4Seed1Digest)
+	}
+}
+
+// TestTQ4SeedDriftIsRefused: divergence between the shipped playbook and this
+// packet's digest is ErrSeedDiverged — a loud skip, never a boot failure, and
+// the forcing function that sends the next editor to write its own Ensure.
+func TestTQ4SeedDriftIsRefused(t *testing.T) {
+	saved := tq4PlaybookDigest
+	tq4PlaybookDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+	defer func() { tq4PlaybookDigest = saved }()
+	if err := verifyTQ4Snapshot(); !errors.Is(err, ErrSeedDiverged) {
+		t.Fatalf("drifted seed: %v, want ErrSeedDiverged", err)
+	}
 }

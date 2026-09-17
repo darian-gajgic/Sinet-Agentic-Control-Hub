@@ -14,6 +14,7 @@ package verify_test
 // Committed RED at grounding: WalkPlanFor returns nothing today.
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
@@ -104,16 +105,15 @@ func TestTQ4WalkPlanIsPureOverTheSpec(t *testing.T) {
 	s := webshopSpec()
 	a := verify.WalkPlanFor(s)
 	b := verify.WalkPlanFor(s)
-	if len(a) != len(b) {
-		t.Fatalf("two calls produced %d and %d entries", len(a), len(b))
-	}
-	for i := range a {
-		if a[i].ACKey != b[i].ACKey || a[i].Walkable != b[i].Walkable || len(a[i].Steps) != len(b[i].Steps) {
-			t.Fatalf("entry %d differs between calls: %+v vs %+v", i, a[i], b[i])
-		}
-	}
 	if len(a) == 0 {
 		t.Fatal("WalkPlanFor produced no plan")
+	}
+	// The WHOLE plan, not its shape: clauses, targets, expectations and
+	// reasons are what a second call has to reproduce. Comparing only keys and
+	// step counts would let the clause text vary between identical calls
+	// (drain r1 F6).
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("two calls over the same spec produced different plans:\n%+v\nvs\n%+v", a, b)
 	}
 }
 
@@ -127,6 +127,20 @@ func TestTQ4UncomposableStepIsNeverAPass(t *testing.T) {
 	w := walkFor(t, plan, "AC-5")
 	if !w.Walkable {
 		t.Fatalf("AC-5 not walkable: %+v", w)
+	}
+	// NON-VACUITY (drain r1 F6): the loop below says what an uncomposable step
+	// may not carry, and a plan in which every step happened to be composable
+	// would satisfy it by having nothing to check. With no browser adopted
+	// nothing can be composed, so at least one uncomposable step must exist
+	// for this test to be testing anything.
+	uncomposable := 0
+	for _, s := range w.Steps {
+		if !s.Composable {
+			uncomposable++
+		}
+	}
+	if uncomposable == 0 {
+		t.Fatalf("AC-5's steps are all composable: %+v — no browser is adopted, so nothing can be composed, and this test would assert nothing", w.Steps)
 	}
 	for i, s := range w.Steps {
 		if s.Composable {

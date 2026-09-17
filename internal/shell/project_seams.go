@@ -337,9 +337,11 @@ func (s *projectSeams) CheckPackFor(ctx context.Context, domain, taskID string) 
 // the work itself declared, and the entry comes back carrying them (Spec
 // S13.7 [A16, 2026-09-17]).
 //
-// It runs ONLY on the bootstrap path, because that is the only place a
-// detected command is ever consulted — a project whose owner captured commands
-// resolves from those and nothing here changes it. The subject is the task's
+// It is skipped ONLY when the owner's own commands already fill every ladder
+// slot, because that is the only case where a detected command could add no
+// rung [A16 per-slot precedence]: a project whose owner captured a lint command
+// and nothing else still wants the build and test rungs the platform can find.
+// The subject is the task's
 // EXISTING worktree, resolved without creating one: the verification
 // workspace is materialized later in the round, and the pack must be resolved
 // before it exists.
@@ -349,7 +351,7 @@ func (s *projectSeams) CheckPackFor(ctx context.Context, domain, taskID string) 
 // the placeholder rungs is exactly that landing, so the reason is logged and
 // the unchanged entry is returned.
 func (s *projectSeams) rescanDetected(ctx context.Context, e project.Entry, taskID string) project.Entry {
-	if len(packChecks(e.Capture.Commands)) > 0 {
+	if ownerCoversEveryRung(e.Capture.Commands) {
 		return e
 	}
 	tree, ok, err := s.proj.ExistingWorkspace(ctx, e.ProjectID, taskID)
@@ -504,38 +506,44 @@ func (s *projectSeams) RepoFacts(ctx context.Context, taskID string) (snapshot, 
 }
 
 // packFromCapture is the capture→pack projection, pure over one registry entry.
+//
+// PER SLOT, never per set [A16, 2026-09-17]. S13.7 says a hand-captured command
+// always outranks a detected one — per COMMAND, not per command set — so the
+// pack is composed from project.EffectiveCommands, which is the one place that
+// rule lives. An owner who captured only a lint command gets their lint rung
+// AND the build and test rungs the platform detected, in one pack. Deciding
+// from Commands alone and then from Detected alone would have dropped the
+// detected rungs the moment any single slot was filled.
+//
+// GRADUATION is unchanged and reads the OWNER's commands alone: one
+// hand-captured rung means the project has a bar of its own, so the posture
+// clears, V2 is authoritative and V3 follows the band rule. Detected rungs
+// never move it. In a graduated MIXED pack they stay evidence — Check.Origin
+// says which is which, and no consumer may read a detected rung as an owner
+// check.
 func packFromCapture(domain string, e project.Entry) (*verify.CheckPack, error) {
-	checks := packChecks(e.Capture.Commands)
-	if len(checks) == 0 {
+	checks := packChecksFor(e.Capture)
+	if len(packChecks(e.Capture.Commands)) == 0 {
 		// The fresh-scaffold case: a REGISTERED project holding no build, test
-		// or lint command has no executable rung, and Spec S07.8's bootstrap
-		// posture (A14, 2026-08-27) is its landing. The drain runs, records
-		// every rung UNVERIFIABLE-HERE and marks its verdict advisory;
-		// capturing the project's commands restores the full ladder on the
-		// next revision.
+		// or lint command of its OWN has no bar to graduate on, and Spec
+		// S07.8's bootstrap posture (A14, 2026-08-27) is its landing. The
+		// drain runs, marks its verdict advisory, and capturing the project's
+		// commands restores the full ladder on the next revision.
 		//
 		// The capture date is deliberately not required here: it stamps a
-		// suite's freshness (rule 7) and there is no suite to stamp.
+		// suite's freshness (rule 7), and a pack with no owner rung is not the
+		// project's suite.
 		pack := verify.BootstrapPack(domain, e.Capture.Version)
-		// A16: the posture is no longer execution-less. Commands the platform
-		// DETECTED in the produced tree ride the bootstrap pack as evidence
-		// rungs — ids prefixed so the record says what kind of rung it is.
-		// GRADUATION IS DECIDED FROM Capture.Commands ALONE, one branch up:
-		// detected commands never move the posture, so a detected pack is
-		// still a bootstrap pack in every way that decides anything.
-		if e.Capture.Detected != nil {
-			if detected := packChecks(*e.Capture.Detected); len(detected) > 0 {
-				for i := range detected {
-					detected[i].ID = "detected:" + detected[i].ID
-				}
-				pack.Checks = detected
-				pack.Provenance = verify.ProvenanceDetected
-				// Rule 7: a suite is exactly as fresh as the scan it came
-				// from. An unreadable capture date leaves the stamp zero,
-				// which is honest — a bootstrap pack is never Validate()d.
-				if capturedAt, err := time.Parse(time.RFC3339Nano, e.Capture.CapturedTS); err == nil {
-					pack.VerifiedOn = capturedAt
-				}
+		if len(checks) > 0 {
+			// A16: the posture is no longer execution-less. Every rung here is
+			// detected (there is no owner rung, by the branch), so the pack
+			// carries the provenance as a whole.
+			pack.Checks = checks
+			pack.Provenance = verify.ProvenanceDetected
+			// Rule 7: a suite is exactly as fresh as the scan it came from. An
+			// unreadable capture date leaves the stamp zero, which is honest.
+			if capturedAt, err := time.Parse(time.RFC3339Nano, e.Capture.CapturedTS); err == nil {
+				pack.VerifiedOn = capturedAt
 			}
 		}
 		return pack, nil
@@ -551,47 +559,102 @@ func packFromCapture(domain string, e project.Entry) (*verify.CheckPack, error) 
 		VerifiedOn: capturedAt,
 		Checks:     checks,
 	}
+	// A MIXED pack carries no pack-level provenance: it has no single answer,
+	// and Check.Origin is the per-rung fact every consumer reads instead.
 	if err := pack.Validate(); err != nil {
 		return nil, err // ErrBadPack — the card names it; nothing runs half-checked
 	}
 	return pack, nil
 }
 
-// packChecks maps the captured commands onto the S07.3 ladder rungs. Each
-// check runs as one shell line inside the network-off verification sandbox
-// (the SandboxCheckRunner, class C2 — P-T06-2), and the verdict is the exit
-// status read platform-side, never anything the command says about itself
-// (S07.3 rule 3).
+// packSlot is one capture command slot that becomes a ladder rung.
+type packSlot struct {
+	id    string
+	stage verify.LadderStage
+	get   func(project.Commands) string
+}
+
+// packSlots are the rungs a capture can fill, in pack order (cheap-first within
+// a stage). `run` and `preview` are deliberately not checks: serving a project
+// is not a verdict about it. `dev` is the walk's, not the ladder's.
+var packSlots = []packSlot{
+	{"lint", verify.StageStatic, func(c project.Commands) string { return c.Lint }},
+	{"build", verify.StageStatic, func(c project.Commands) string { return c.Build }},
+	{"test", verify.StageUnit, func(c project.Commands) string { return c.Test }},
+}
+
+// ladderCheck builds one rung. Each runs as one shell line inside the
+// network-off verification sandbox (the SandboxCheckRunner, class C2 —
+// P-T06-2), and the verdict is the exit status read platform-side, never
+// anything the command says about itself (S07.3 rule 3).
 //
 // None of them is an ACCEPTANCE check: they originate from the project's own
-// conventions, not from the frozen ACs, so they carry no AC key and claim no
-// separate-context provenance (S07.3 rule 4 — a doer-written test never passes
-// by construction here, because these are not passed off as AC evidence).
+// conventions or from the tree, not from the frozen ACs, so they carry no AC
+// key and claim no separate-context provenance (S07.3 rule 4 — a doer-written
+// test never passes by construction here, because these are not passed off as
+// AC evidence).
+func ladderCheck(s packSlot, cmd string) verify.Check {
+	return verify.Check{
+		ID:    s.id,
+		Stage: s.stage,
+		Argv:  []string{"/bin/sh", "-lc", cmd},
+		// A failing project check says the work does not meet the bar the
+		// project itself set: an AC-blocker's route (rework round, then a
+		// requester decision card at cap — Spec S07.7).
+		FindingCategory: verify.CatACBlocker,
+	}
+}
+
+// packChecks maps a HAND-CAPTURED command set onto the S07.3 ladder rungs. It
+// is the graduation predicate's input — the owner's own bar, and nothing the
+// platform noticed on their behalf.
 func packChecks(c project.Commands) []verify.Check {
 	var checks []verify.Check
-	for _, r := range []struct {
-		id    string
-		stage verify.LadderStage
-		cmd   string
-	}{
-		{"lint", verify.StageStatic, c.Lint},
-		{"build", verify.StageStatic, c.Build},
-		{"test", verify.StageUnit, c.Test},
-	} {
-		if strings.TrimSpace(r.cmd) == "" {
+	for _, s := range packSlots {
+		cmd := strings.TrimSpace(s.get(c))
+		if cmd == "" {
 			continue
 		}
-		checks = append(checks, verify.Check{
-			ID:    r.id,
-			Stage: r.stage,
-			Argv:  []string{"/bin/sh", "-lc", r.cmd},
-			// A failing project check says the work does not meet the bar the
-			// project itself set: an AC-blocker's route (rework round, then a
-			// requester decision card at cap — Spec S07.7).
-			FindingCategory: verify.CatACBlocker,
-		})
+		checks = append(checks, ladderCheck(s, cmd))
 	}
 	return checks
+}
+
+// packChecksFor composes the rungs of one capture, per slot, from the effective
+// commands [A16]: the owner's where they captured one, the platform's detected
+// command otherwise.
+//
+// A detected rung is marked as one twice over — its id is prefixed, so the
+// durable record says what kind of rung it is on sight, and Check.Origin is the
+// field consumers branch on. It carries no ACKey and no StepID, which is what
+// makes it evidence by construction (S07.3 rule 4).
+func packChecksFor(c project.Capture) []verify.Check {
+	eff := project.EffectiveCommands(c)
+	var checks []verify.Check
+	for _, s := range packSlots {
+		cmd := strings.TrimSpace(s.get(eff))
+		if cmd == "" {
+			continue
+		}
+		chk := ladderCheck(s, cmd)
+		if strings.TrimSpace(s.get(c.Commands)) == "" {
+			chk.ID = "detected:" + s.id
+			chk.Origin = verify.ProvenanceDetected
+		}
+		checks = append(checks, chk)
+	}
+	return checks
+}
+
+// ownerCoversEveryRung reports whether the owner's own commands already fill
+// every ladder slot, which is the only case where a re-scan can add no rung.
+func ownerCoversEveryRung(c project.Commands) bool {
+	for _, s := range packSlots {
+		if strings.TrimSpace(s.get(c)) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // projectForTask resolves a task's registered project via the durable intake-

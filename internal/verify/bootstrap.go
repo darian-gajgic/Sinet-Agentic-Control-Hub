@@ -3,7 +3,9 @@ package verify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,10 +54,15 @@ const BootstrapAttribution = "check-pack:absent"
 const BootstrapPostureNote = "This project has no build, test or lint command captured yet, so the checks that would prove this work correct could not run. Nothing was passed off as checked: every check rung is recorded as unverifiable here, the judge's verdict is advisory only, and your review is what decides this work. Capturing the project's commands restores the full ladder from the next revision on."
 
 // BootstrapPack is the check-pack resolution for a registered project whose
-// capture holds no executable rung [A14, 2026-08-27]. It carries no checks by
-// construction — bootstrap invents nothing on a project's behalf — and it is
-// deliberately NOT a valid pack: Validate still refuses a pack without checks,
-// and the drain branches on the posture instead of running it.
+// capture holds no OWNER-captured executable rung [A14, 2026-08-27].
+//
+// It is returned empty — bootstrap invents nothing on a project's behalf — but
+// it is no longer empty by construction [A16, 2026-09-17]: the resolver fills
+// Checks with the rungs the platform DETECTED in the produced tree, and
+// bootstrapV1 runs them as evidence. A bootstrap pack carrying those rungs is
+// a valid pack (Validate accepts it); what the posture decides is unchanged,
+// because the drain still branches on the posture rather than on whether
+// anything ran.
 func BootstrapPack(domain string, version int) *CheckPack {
 	return &CheckPack{Domain: domain, Version: version, Posture: PostureBootstrap}
 }
@@ -64,7 +71,14 @@ func BootstrapPack(domain string, version int) *CheckPack {
 func (p *CheckPack) bootstrap() bool { return p != nil && p.Posture == PostureBootstrap }
 
 // executes reports whether p has rungs to run — the condition a CheckRunner is
-// required for. A bootstrap resolution has none.
+// required for.
+//
+// It is TRUE on a bootstrap resolution carrying detected rungs [A16], which is
+// exactly why validateInput's runner guard excludes the bootstrap posture by
+// name: a missing runner must park a round the owner's own pack would have run,
+// and must never park one whose only rungs are detected. Those record
+// UNVERIFIABLE-HERE with that reason instead (Spec S07.8: never a verification
+// refusal and never parks the run).
 func (p *CheckPack) executes() bool { return p != nil && len(p.Checks) > 0 }
 
 // packPosture names the posture a round resolving to pack runs under.
@@ -331,11 +345,14 @@ func unrunnableReason(c Check, tree string, runner CheckRunner) string {
 	if !ok {
 		return ""
 	}
-	scripts := manifestScripts(tree)
+	scripts, reason := manifestScripts(tree)
+	if reason != "" {
+		return reason
+	}
 	if scripts == nil {
-		// No manifest to decide from: absence of evidence is not a reason to
-		// refuse to run. The exit status decides, as it does for every rung
-		// whose toolchain this path does not read.
+		// There is no tree to decide from. The platform can assert nothing
+		// about this command, so the exit status decides — as it does for
+		// every rung whose toolchain this path does not read.
 		return ""
 	}
 	body, declared := scripts[script]
@@ -373,25 +390,40 @@ func manifestScript(argv []string) (string, bool) {
 	return fields[1], true
 }
 
-// manifestScripts reads the scripts a tree's package.json declares. Nil means
-// there is no manifest to decide from — an absent, unreadable or malformed one
-// — which is distinct from a manifest that declares nothing.
-func manifestScripts(tree string) map[string]string {
+// manifestScripts reads the scripts a tree's package.json declares.
+//
+// The second result is a plain-words precondition failure: non-empty when the
+// tree IS there and its manifest is not usable, which makes every npm rung
+// unrunnable (a detected set that has gone stale against the work under
+// review — the manifest was renamed, deleted, or never landed). A nil map with
+// no reason is the different case where the tree itself cannot be inspected:
+// the platform has no basis to assert anything, so it asserts nothing.
+//
+// A manifest that parses but declares no scripts is an empty map, not nil —
+// "this project declares nothing" is a fact, and each rung's own script check
+// reports it per slot.
+func manifestScripts(tree string) (map[string]string, string) {
 	if tree == "" {
-		return nil
+		return nil, ""
+	}
+	if fi, err := os.Stat(tree); err != nil || !fi.IsDir() {
+		return nil, ""
 	}
 	raw, err := os.ReadFile(filepath.Join(tree, "package.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, "the project's package.json is not present in the checked-out work, so the command it declares could not be run here"
+	}
 	if err != nil {
-		return nil
+		return nil, "the project's package.json could not be read from the checked-out work, so the command it declares could not be run here"
 	}
 	var manifest struct {
 		Scripts map[string]string `json:"scripts"`
 	}
 	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return nil
+		return nil, "the project's package.json is not valid JSON, so the platform could not confirm that the command it declares would run"
 	}
 	if manifest.Scripts == nil {
-		return map[string]string{}
+		return map[string]string{}, ""
 	}
-	return manifest.Scripts
+	return manifest.Scripts, ""
 }

@@ -75,7 +75,9 @@ func tq4OriginRef() (string, error) {
 // do not extend this Ensure. Freeze this content as a snapshot the way
 // tq4playbook_seed1.go freezes B3's, mint your own Ensure with your own
 // provenance, and call it after this one.
-const tq4PlaybookDigest = "ce90c1cb3b8b5daed72cbacfda0a1492dd7746767a6c9add430bf0f4a2d08dd5"
+// A var, not a const, so the drift refusal itself is testable — the v41/GF7
+// precedent one file over.
+var tq4PlaybookDigest = "ce90c1cb3b8b5daed72cbacfda0a1492dd7746767a6c9add430bf0f4a2d08dd5"
 
 // verifyTQ4Snapshot checks the revised playbook against the ratified digest,
 // before anything is written. Divergence is ErrSeedDiverged — the same loud,
