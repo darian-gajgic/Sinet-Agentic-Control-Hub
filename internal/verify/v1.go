@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -349,6 +350,10 @@ type CheckResult struct {
 	ExitCode    int
 	EvidenceRef string
 	EvidenceSHA string
+	// OutputTail is the bounded tail of the check's combined output — what
+	// the finding a failed check mints carries to the requester and the
+	// rework executor (P3-TQ-7). Inert surface until that packet lands.
+	OutputTail string
 }
 
 // CheckRunner executes one check inside the network-off verification
@@ -434,7 +439,11 @@ func (r *SandboxCheckRunner) RunCheck(ctx context.Context, req CheckRequest) (Ch
 		return CheckResult{}, fmt.Errorf("verify: read evidence: %w", err)
 	}
 	sum := sha256.Sum256(raw)
-	return CheckResult{ExitCode: code, EvidenceRef: evidence, EvidenceSHA: hex.EncodeToString(sum[:])}, nil
+	// The tail comes off the bytes already read for the hash — the finding a
+	// failure mints carries it to the requester without the platform reading
+	// the evidence a second time, and interpreting the output is still
+	// nobody's job here (the verdict stays the wait status, rule 3).
+	return CheckResult{ExitCode: code, EvidenceRef: evidence, EvidenceSHA: hex.EncodeToString(sum[:]), OutputTail: boundedTail(raw)}, nil
 }
 
 // RunV1 executes the pack ladder cheap-first over the verification
@@ -526,6 +535,16 @@ func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRe
 					if firstFailure == "" {
 						firstFailure = c.ID
 					}
+					// A failed check of the OWNER's pack is a V1 KILL (Spec
+					// S07.1: V0/V1 kill broken output before any paid call).
+					// It mints one blocker here, at the decision, so the
+					// round cannot SHIP and the failure cannot die in a log
+					// (Spec S07.7). A DETECTED rung mints nothing — see
+					// Check.Origin: it is the platform's own guess about a
+					// command nobody captured, and it decides no round.
+					if c.Origin != ProvenanceDetected {
+						res.Findings = append(res.Findings, checkFinding(c, out))
+					}
 				}
 				res.Checks = append(res.Checks, CheckOutcome{
 					CheckID: c.ID, Stage: c.Stage, StepID: c.StepID, ACKey: c.ACKey,
@@ -616,6 +635,94 @@ func failedChecksDetail(ids []string) string {
 	}
 	return fmt.Sprintf("The automated checks %s and %s did not pass.",
 		strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1])
+}
+
+// checkCriterionPrefix marks a criterion that cites one executable check of
+// the project's own pack instead of a frozen criterion or a rubric item. The
+// pack is the project's own verified-on-stamped bar (Spec S07.3 rule 7), so
+// citing it fixes the goalposts exactly as citing a frozen criterion does —
+// but only the platform may cite it (validateFindings, Spec S07.5).
+const checkCriterionPrefix = "check:"
+
+// stageWords renders a ladder rung the way the requester reads it. The enum
+// token is platform vocabulary and never reaches a person (CONVENTIONS §38).
+var stageWords = map[LadderStage]string{
+	StageStatic: "lint, typecheck and build",
+	StageUnit:   "unit and integration tests",
+	StageSmoke:  "runtime smoke",
+	StageE2E:    "end-to-end",
+}
+
+// checkOutputTail bounds, in bytes, how much of a check's output a finding
+// carries. A numbered point is a bounded description of what went wrong, not
+// the log: the whole output stays retained behind the outcome row's evidence
+// ref (refs-not-blobs, P-T07-5), and round records are kept forever, so an
+// unbounded tail would grow them without limit. 2 KB is the last ~30 lines of
+// a build log — where a failure states itself.
+const checkOutputTail = 2048
+
+// boundedTail returns the last checkOutputTail bytes of b as a string, so a
+// point never opens on half a line: a cut landing MID-line advances to the
+// next line boundary, and a cut landing exactly ON one advances no further —
+// dropping a whole line that already fits would lose evidence for nothing.
+//
+// It takes bytes rather than a string so a caller holding a whole build log
+// hands it over without copying the log: slicing is free and only the tail is
+// copied out.
+func boundedTail(b []byte) string {
+	if len(b) <= checkOutputTail {
+		return string(b)
+	}
+	cut := len(b) - checkOutputTail
+	if b[cut-1] == '\n' {
+		return string(b[cut:])
+	}
+	if i := bytes.IndexByte(b[cut:], '\n'); i >= 0 {
+		return string(b[cut+i+1:])
+	}
+	return string(b[cut:])
+}
+
+// checkFinding is the blocker a failed OWNER check mints (Spec S07.1 kill;
+// Spec S07.7 — every verification finding terminates in a human-visible
+// sink). Called once per FAIL outcome, from the decision itself.
+//
+// It cites the CHECK: criterion and anchor are both check:<id>, under the
+// category the pack DECLARED for that check (Spec S07.3 — a stage contract is
+// incomplete unless it declares its finding categories and their escalation
+// routes), never a category chosen here. fromCheck marks it as the platform's
+// own, which is what lets validateFindings admit a citation no judge may
+// make.
+//
+// The key (criterion + anchor + category) names neither the exit status nor
+// the output, so it is round-stable: a check that keeps failing recurs
+// unresolved and trips the S07.6 convergence stop, and one that passes on the
+// reworked revision simply stops being raised.
+//
+// Distinct from the contract finding, which says which promise of the plan is
+// broken; this one says what failed. The two are never merged.
+func checkFinding(c Check, out CheckResult) Finding {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The project's own automated check %q did not pass. It covers %s, and it ended with exit status %d.",
+		c.ID, stageWords[c.Stage], out.ExitCode)
+	if c.ACKey != "" {
+		fmt.Fprintf(&b, " It decides criterion %s.", criterionNumber(c.ACKey))
+	}
+	// Re-bounded here, not trusted from the runner: CheckRunner is a seam, and
+	// a keep-forever round record takes its size from platform code.
+	if tail := strings.TrimRight(boundedTail([]byte(out.OutputTail)), " \t\r\n"); tail != "" {
+		fmt.Fprintf(&b, "\n\nThis is the end of what it printed:\n\n%s", tail)
+	} else {
+		b.WriteString(" It printed nothing.")
+	}
+	return Finding{
+		Severity:  SeverityBlocker,
+		Category:  c.FindingCategory,
+		Criterion: checkCriterionPrefix + c.ID,
+		Anchor:    checkCriterionPrefix + c.ID,
+		Text:      b.String(),
+		fromCheck: true,
+	}
 }
 
 func checkCategory(c CheckOutcome, cur Category) Category {

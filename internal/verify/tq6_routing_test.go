@@ -332,7 +332,8 @@ func TestTQ6DisagreementIsRaisedOnTheBootstrapPathToo(t *testing.T) {
 // coverage map (the pre-A16 seed worlds) cannot say which criterion a step
 // owns, so no disagreement can be computed and none is guessed; the contract
 // FAIL still reaches the requester as a demoted note, exactly the bootstrap
-// precedent (P3-TQ-3 T7).
+// precedent (P3-TQ-3 T7) — and what spins the round is not that note but the
+// failed check itself, which mints the undemoted blocker citing it (P3-TQ-7).
 func TestTQ6NoCoverageMapMeansNoDisagreementAndANote(t *testing.T) {
 	ctx := context.Background()
 	f := newFix(t)
@@ -364,11 +365,19 @@ func TestTQ6NoCoverageMapMeansNoDisagreementAndANote(t *testing.T) {
 	if len(out.IntegrityCards) != 0 {
 		t.Fatalf("integrity cards raised without a coverage map: %+v", out.IntegrityCards)
 	}
-	if out.Verdict != verify.VerdictShipWithNotes {
-		t.Fatalf("verdict %s, want SHIP-with-notes — a note never spins a round", out.Verdict)
+	// The demoted contract note spins no round, as it never did. The failed
+	// lint check does: it mints an undemoted blocker citing itself, so the
+	// round is REVISE and, with no retry seam wired, the terminal is the
+	// CAP-HIT card (P3-TQ-7; Spec S07.1 — a failed owner check is a V1 kill).
+	kill, ok := findingAt(r.Findings, "check:lint")
+	if !ok || kill.Severity != verify.SeverityBlocker || kill.Demoted || kill.Category != verify.CatACBlocker {
+		t.Fatalf("no undemoted AC-BLOCKER anchored check:lint drove the round: %+v", r.Findings)
 	}
-	if out.Card != nil {
-		t.Fatalf("a note raised a card: %+v", out.Card)
+	if r.Verdict != verify.VerdictRevise {
+		t.Fatalf("round verdict %s, want REVISE driven by the failed check", r.Verdict)
+	}
+	if out.Verdict != verify.VerdictEscalate || out.Card == nil || out.Card.Category != verify.CatCapHit {
+		t.Fatalf("terminal %s / card %+v, want ESCALATE on the CAP-HIT card", out.Verdict, out.Card)
 	}
 }
 
