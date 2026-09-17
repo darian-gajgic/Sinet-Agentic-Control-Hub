@@ -76,7 +76,14 @@ const (
 // be handed back with a reason about removing things its line never mentioned
 // — a wrong explanation misleads a person as surely as a wrong verdict.
 var removalPattern = regexp.MustCompile(
-	`(?i)(?:^|[^\pL\pN_-])(?:remov(?:e|es|ed|ing|al)|delet(?:e|es|ed|ing|ion)|drop(?:s|ped|ping)?|gone|unused)(?:$|[^\pL\pN_-])|no longer`)
+	// The boundary is ASYMMETRIC on purpose: a compound prefix still
+	// counts as a removal wording ("soft-deleted", "auto-removed",
+	// "hard_deleted"), so the LEFT boundary is any non-letter/digit; a
+	// compound SUFFIX names a thing, not an act ("deleted-items", "drop-shadow",
+	// "no-unused-vars"), so the RIGHT boundary treats `-` and `_` as word
+	// characters. A guard that misses a real removal wording fails a finished
+	// step; one that fires on a compound name only leaves a contract undecided.
+	`(?i)(?:^|[^\pL\pN])(?:remov(?:e|es|ed|ing|al)|delet(?:e|es|ed|ing|ion)|drop(?:s|ped|ping)?|gone|unused)(?:$|[^\pL\pN_-])|no longer`)
 
 // treeIndex is a read-only listing of the verification workspace: every
 // regular file with its size, plus the set of directories. Reading a fact
@@ -366,10 +373,39 @@ func pathShaped(span string) bool {
 	if strings.HasSuffix(span, ".") {
 		return false
 	}
-	for _, seg := range strings.Split(span, "/") {
+	segs := strings.Split(span, "/")
+	for i, seg := range segs {
 		if seg == ".." {
 			return false
 		}
+		// An empty segment ("a//b.ts") can never match a tree path.
+		if seg == "" && i < len(segs)-1 {
+			return false
+		}
+	}
+	// The first real segment (after an optional "./") must look like a
+	// repository directory or file: it starts with a lowercase letter, a
+	// digit, an underscore, a glob metacharacter or a dot-prefixed name
+	// (".github"), and it carries no interior dot. A capitalised or dotted
+	// first segment is the shape of prose and product names ("React/Next.js",
+	// "I/O.md", "TCP/IP.v4"), Go module paths ("gopkg.in/yaml.v3"), hosts
+	// ("example.com/index.html") and expressions ("process.env/FOO") far more
+	// often than of a folder; leaving such a span undecided costs nothing,
+	// deciding it against an absent path costs a rework round.
+	first := segs[0]
+	if first == "." && len(segs) > 1 {
+		first = segs[1]
+	}
+	if first == "" {
+		return false
+	}
+	switch c := first[0]; {
+	case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '_', c == '*', c == '?', c == '[', c == '.':
+	default:
+		return false
+	}
+	if strings.IndexByte(first[1:], '.') >= 0 {
+		return false
 	}
 	if strings.ContainsAny(span, "*?[") || strings.HasSuffix(span, "/") {
 		return true
