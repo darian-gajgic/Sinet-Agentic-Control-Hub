@@ -349,6 +349,10 @@ type CheckResult struct {
 	ExitCode    int
 	EvidenceRef string
 	EvidenceSHA string
+	// OutputTail is the bounded tail of the check's combined output — what
+	// the finding a failed check mints carries to the requester and the
+	// rework executor (P3-TQ-7). Inert surface until that packet lands.
+	OutputTail string
 }
 
 // CheckRunner executes one check inside the network-off verification
