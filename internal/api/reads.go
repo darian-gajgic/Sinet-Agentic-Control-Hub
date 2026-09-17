@@ -136,6 +136,19 @@ func redactStageProgress(steps []StageStep) {
 	}
 }
 
+// redactTaskRuns applies the same primitive to the one run member that is
+// payload-DERIVED: `ending` is a `run.state_changed.reason`, lifted by key out
+// of a run_events body exactly as the stage story's fields are, so it takes the
+// same serving edge for the same D10 reason. The run id, its parent and its
+// state are relational columns and are not payload content; the receipt is
+// S10.10 product, served verbatim by contract. The stored row is untouched —
+// store-raw / serve-redacted (R19).
+func redactTaskRuns(runs []TaskRunView) {
+	for i := range runs {
+		runs[i].Ending = redact.Redact(runs[i].Ending)
+	}
+}
+
 // redactTaskLineage applies the same primitive to the one lineage member that
 // is payload-DERIVED. Since migration 0022 the task→project edge resolves from
 // the registry pin on the task's latest `intake.state` payload when no claim
@@ -785,9 +798,20 @@ type TaskLineage struct {
 // VERBATIM from receipts.usage_json (S10.10). A run with no receipt yet is an
 // honest absence, not an error and not a zero.
 type TaskRunView struct {
-	RunID         string          `json:"run_id"`
-	State         string          `json:"state"`
-	CreatedTS     time.Time       `json:"created_ts"`
+	RunID     string    `json:"run_id"`
+	State     string    `json:"state"`
+	CreatedTS time.Time `json:"created_ts"`
+	// ParentRunID is the run this one superseded (Spec S02.5 step 3: the fork
+	// IS the supersession edge, migration 0002). Absent on a root run. Without
+	// it a crash and the run that carried the work on read as two unrelated
+	// sequences, which is exactly how they read on the live board.
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	// Ending is how this run last said it ended: the reason on its latest FSM
+	// transition (Spec S14.2 family 1 — every transition carries its cause).
+	// Absent when the run recorded none. The raw error line never rides here:
+	// it stays in the transition's own detail, for whoever is debugging the
+	// platform rather than reading about their task.
+	Ending        string          `json:"ending,omitempty"`
 	Receipt       json.RawMessage `json:"receipt,omitempty"`
 	ReceiptAbsent string          `json:"receipt_absent,omitempty"`
 }
@@ -943,6 +967,7 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	// the same property as "cannot carry a secret" (drain D10). They redact at
 	// this serving edge, per R20, before the unwrapped body goes out.
 	redactStageProgress(detail.StageProgress)
+	redactTaskRuns(detail.Runs)
 	redactTaskLineage(&detail.Lineage)
 	redactTaskDecisions(detail.Decisions)
 	redactTaskTriage(detail.Triage)
@@ -1005,12 +1030,23 @@ func (p *projector) taskRuns(ctx context.Context, taskID string) ([]TaskRunView,
 			absent = append(absent, len(out))
 		}
 		if parent.Valid && parent.String != "" {
+			v.ParentRunID = parent.String
 			successor[parent.String] = v.RunID
 		}
 		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	// One bounded read per served run for its ending. The page cap above
+	// already bounds how many runs that is, so the per-run read inherits the
+	// same liveness bound the list itself has.
+	for i := range out {
+		ending, err := p.runEnding(ctx, out[i].RunID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Ending = ending
 	}
 	// The absence is rendered with ITS OWN reason: the reason a run carries no
 	// receipt depends on how that run ended, and the future-tense line is true
@@ -1021,6 +1057,27 @@ func (p *projector) taskRuns(ctx context.Context, taskID string) ([]TaskRunView,
 		out[i].ReceiptAbsent = receiptAbsence(run.State(out[i].State), successor[out[i].RunID])
 	}
 	return out, nil
+}
+
+// runEnding reads a run's latest FSM transition reason — the run's own account
+// of how it ended (Spec S14.2 family 1). A run with no transition recorded gets
+// "", an honest absence that serves as an omitted field rather than an empty
+// one: a queued run has not ended, and a blank line claiming otherwise would be
+// a worse answer than no line.
+func (p *projector) runEnding(ctx context.Context, runID string) (string, error) {
+	var reason string
+	err := p.db.QueryRowContext(ctx, `
+		SELECT COALESCE(json_extract(payload, '$.reason'), '')
+		  FROM run_events
+		 WHERE run_id = ? AND type = ?
+		 ORDER BY event_seq DESC LIMIT 1`, runID, run.EventState).Scan(&reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("projection: run ending %q: %w", runID, err)
+	}
+	return reason, nil
 }
 
 // receiptAbsence says why a run carries no receipt, in the words of that run's

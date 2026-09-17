@@ -620,6 +620,23 @@ func (s *projectSeams) Snapshot(ctx context.Context, runID string) (string, erro
 	return s.proj.Snapshot(ctx, path)
 }
 
+// RestoreWorkspace is the fork-from-last-checkpoint worktree seam (Spec S02.5
+// step 2, S02.4 (d), S13.5): the run's task worktree is put back on the tree of
+// the named platform snapshot commit before a recovery successor drives its
+// first plan step, and the resulting HEAD is returned.
+//
+// It resolves an EXISTING worktree only — the Snapshot rule (F4), for the same
+// reason: the seam answers a question about a workspace, and a question must
+// not create its own subject. A run with no registered project or no worktree
+// yet gets an honest "" and the successor starts where a fresh run would.
+func (s *projectSeams) RestoreWorkspace(ctx context.Context, runID, snapshotSHA string) (string, error) {
+	path, err := s.existingWorkspacePath(ctx, runID)
+	if err != nil || path == "" {
+		return "", err
+	}
+	return s.proj.RestoreSnapshot(ctx, path, snapshotSHA)
+}
+
 // CreateRevisionRef creates the minted-revision platform ref in the run's
 // project store (R20); a workspace-less run has no project to ref.
 func (s *projectSeams) CreateRevisionRef(ctx context.Context, runID, ref, snapshotSHA string) error {

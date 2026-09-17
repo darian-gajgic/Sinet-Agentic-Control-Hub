@@ -2,7 +2,6 @@ package project
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -390,9 +389,44 @@ func (s *Store) SnapshotAndBase(ctx context.Context, projectID, pipelineID strin
 // --allow-empty commit). It is the fork-from-last-checkpoint worktree verb
 // (Spec S02.5 step 2, S02.4 (d)).
 //
-// Inert at P3-TQ-2 grounding: the behaviour lands with that packet.
+// The target is resolved FIRST, so a snapshot this repository does not hold
+// changes nothing at all: no index is written, no working-tree file is touched,
+// and no lock is left behind.
+//
+// `git reset --hard` would do the tree half in one verb and is deliberately not
+// used: it moves the checked-out branch, and the branch moving backwards is
+// exactly the property S13.5 forbids. read-tree is the index-level verb reset
+// is built on, and it leaves the ref alone.
 func (s *Store) RestoreSnapshot(ctx context.Context, worktree, snapshotSHA string) (string, error) {
-	return "", errors.New("project: RestoreSnapshot not implemented (P3-TQ-2)")
+	target, err := s.refSHA(ctx, worktree, snapshotSHA)
+	if err != nil {
+		return "", err
+	}
+	if target == "" {
+		return "", fmt.Errorf("%w: snapshot %q is not a commit in %s", ErrBadInput, snapshotSHA, worktree)
+	}
+	// Index and working tree to the target's tree: tracked files restored to
+	// their content there, and files the target does not hold removed.
+	if _, err := s.git(ctx, worktree, platformIdentity, "read-tree", "--reset", "-u", target); err != nil {
+		return "", err
+	}
+	// Untracked residue the target never held — the interrupted step's
+	// half-written files, and anything written after the last snapshot — is
+	// removed under the platform excludes, so ignored junk is left where it is:
+	// it was in no snapshot, so it is neither restored nor destroyed.
+	code, _, stderr, err := s.gitRaw(ctx, worktree, platformIdentity,
+		"-c", "core.excludesFile="+s.excludes, "clean", "-fd")
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", fmt.Errorf("project: git clean -fd (exit %d): %s", code, strings.TrimSpace(stderr))
+	}
+	// Forward: the restored tree becomes a NEW snapshot commit on the run
+	// branch, so the dead run's snapshots — including the discarded partial —
+	// stay reachable as ancestors of HEAD. A tree that already matches commits
+	// nothing and returns the existing tip.
+	return s.Snapshot(ctx, worktree)
 }
 
 // ExistingWorkspace returns a pipeline's attempt-1 run-branch worktree PATH

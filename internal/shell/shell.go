@@ -705,6 +705,7 @@ func Run(ctx context.Context, opts Options) error {
 			CreateRevisionRef:  pseams.CreateRevisionRef,
 			BaseContent:        pseams,
 			WorkspaceCwd:       pseams.WorkspaceCwd,
+			RestoreWorkspace:   pseams.RestoreWorkspace,
 			// V1 checks run against the revision with its VCS history
 			// stripped, and V0 gets the durable repo facts its wrote-nothing
 			// verdict rests on (P3-RW-14 R6/R7).
