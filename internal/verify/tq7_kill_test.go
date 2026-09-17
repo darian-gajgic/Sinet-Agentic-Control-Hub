@@ -36,12 +36,6 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
-// tq7Detected mirrors verify.ProvenanceDetected (P3-TQ-4a's evidence.go),
-// which is not on this branch yet; an untyped constant is assignable to the
-// typed field once TQ-4a lands. Swapping it for the exported constant is the
-// one edit to this file the brief sanctions by name.
-const tq7Detected = "detected"
-
 // tq7StageWords is the plain rendering of each ladder rung inside a finding
 // (brief R3): the requester never reads the enum token.
 var tq7StageWords = map[verify.LadderStage]string{
@@ -66,11 +60,16 @@ func tq7OwnerPack() *verify.CheckPack {
 }
 
 // tq7DetectedPack is the same commands as the platform would detect them at a
-// bootstrap round (P3-TQ-4a): posture stays bootstrap, provenance detected.
+// bootstrap round (P3-TQ-4a): posture stays bootstrap, and every rung carries
+// the detected origin that the kill guard reads (P3-TQ-4a made origin a
+// per-CHECK fact, because a pack can mix owner rungs with detected ones).
 func tq7DetectedPack() *verify.CheckPack {
 	p := tq7OwnerPack()
 	p.Posture = verify.PostureBootstrap
-	p.Provenance = tq7Detected
+	p.Provenance = verify.ProvenanceDetected
+	for i := range p.Checks {
+		p.Checks[i].Origin = verify.ProvenanceDetected
+	}
 	return p
 }
 
@@ -543,7 +542,10 @@ func TestTQ7PropCheckBlockersAreExactlyTheFailedOwnerOutcomes(t *testing.T) {
 				pack.Checks = append([]verify.Check(nil), base.Checks...)
 				if detected {
 					pack.Posture = verify.PostureBootstrap
-					pack.Provenance = tq7Detected
+					pack.Provenance = verify.ProvenanceDetected
+					for i := range pack.Checks {
+						pack.Checks[i].Origin = verify.ProvenanceDetected
+					}
 				}
 				res, err := verify.RunV1(ctx, &pack, runner, v1req(), ladderSteps()[:2], map[string][]string{"AC-1": {"S-1"}}, time.Now(), s)
 				if err != nil {
@@ -571,6 +573,17 @@ func TestTQ7PropCheckBlockersAreExactlyTheFailedOwnerOutcomes(t *testing.T) {
 						}
 					case verify.CheckRunnerFailed:
 						runnerFails++
+						// A DETECTED rung mints nothing at all — not the kill
+						// this packet adds and not the runner-failure blocker
+						// either (P3-TQ-4a, which landed after this battery
+						// was grounded: a command nobody captured raises no
+						// finding anywhere). Asserted as the stronger claim.
+						if detected {
+							if len(integrity) != 0 {
+								t.Fatalf("seed %d n=%d: a detected rung's runner failure minted %+v", seed, n, integrity)
+							}
+							break
+						}
 						if len(integrity) != 1 || integrity[0].Severity != verify.SeverityBlocker {
 							t.Fatalf("seed %d n=%d: runner failure on %s wants exactly one CHECK-INTEGRITY blocker, got %+v", seed, n, c.CheckID, integrity)
 						}

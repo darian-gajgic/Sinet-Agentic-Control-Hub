@@ -417,7 +417,7 @@ func validateFindings(round int, fs []Finding, acs []ledger.AcceptanceCriterion,
 	n := 0
 	for _, f := range fs {
 		f.Round = round
-		if f.Severity == SeverityBlocker && (f.Criterion == "" || !valid[f.Criterion]) {
+		if f.Severity == SeverityBlocker && !citesFixedGoalpost(f, valid) {
 			f.Severity = SeverityNote
 			f.Demoted = true
 		}
@@ -435,6 +435,22 @@ func validateFindings(round int, fs []Finding, acs []ledger.AcceptanceCriterion,
 		kept = append(kept, f)
 	}
 	return kept, suppressed
+}
+
+// citesFixedGoalpost reports whether f may keep blocker severity: it cites a
+// frozen criterion, an axis-2 rubric item, or — for the platform's own V1
+// finding alone — the executable check that failed (Spec S07.5 citation rule;
+// Spec S07.3 rule 7, the pack is the project's own stamped bar).
+//
+// The check citation is admitted BY ORIGIN, never by the criterion's shape: a
+// judge or requester blocker naming a check id, real or invented, is demoted
+// like any other uncited blocker, so no judge can move the goalposts onto a
+// bar it chose for itself.
+func citesFixedGoalpost(f Finding, valid map[string]bool) bool {
+	if strings.HasPrefix(f.Criterion, checkCriterionPrefix) {
+		return f.fromCheck
+	}
+	return f.Criterion != "" && valid[f.Criterion]
 }
 
 // ComputeVerdict combines the validated axis results into the round verdict
