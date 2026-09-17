@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -442,7 +443,7 @@ func (r *SandboxCheckRunner) RunCheck(ctx context.Context, req CheckRequest) (Ch
 	// failure mints carries it to the requester without the platform reading
 	// the evidence a second time, and interpreting the output is still
 	// nobody's job here (the verdict stays the wait status, rule 3).
-	return CheckResult{ExitCode: code, EvidenceRef: evidence, EvidenceSHA: hex.EncodeToString(sum[:]), OutputTail: boundedTail(string(raw))}, nil
+	return CheckResult{ExitCode: code, EvidenceRef: evidence, EvidenceSHA: hex.EncodeToString(sum[:]), OutputTail: boundedTail(raw)}, nil
 }
 
 // RunV1 executes the pack ladder cheap-first over the verification
@@ -660,18 +661,26 @@ var stageWords = map[LadderStage]string{
 // a build log — where a failure states itself.
 const checkOutputTail = 2048
 
-// boundedTail returns the last checkOutputTail bytes of s, advanced past the
-// first newline when the cut lands mid-line so a point never opens on half a
-// line.
-func boundedTail(s string) string {
-	if len(s) <= checkOutputTail {
-		return s
+// boundedTail returns the last checkOutputTail bytes of b as a string, so a
+// point never opens on half a line: a cut landing MID-line advances to the
+// next line boundary, and a cut landing exactly ON one advances no further —
+// dropping a whole line that already fits would lose evidence for nothing.
+//
+// It takes bytes rather than a string so a caller holding a whole build log
+// hands it over without copying the log: slicing is free and only the tail is
+// copied out.
+func boundedTail(b []byte) string {
+	if len(b) <= checkOutputTail {
+		return string(b)
 	}
-	cut := s[len(s)-checkOutputTail:]
-	if i := strings.IndexByte(cut, '\n'); i >= 0 {
-		cut = cut[i+1:]
+	cut := len(b) - checkOutputTail
+	if b[cut-1] == '\n' {
+		return string(b[cut:])
 	}
-	return cut
+	if i := bytes.IndexByte(b[cut:], '\n'); i >= 0 {
+		return string(b[cut+i+1:])
+	}
+	return string(b[cut:])
 }
 
 // checkFinding is the blocker a failed OWNER check mints (Spec S07.1 kill;
@@ -701,7 +710,7 @@ func checkFinding(c Check, out CheckResult) Finding {
 	}
 	// Re-bounded here, not trusted from the runner: CheckRunner is a seam, and
 	// a keep-forever round record takes its size from platform code.
-	if tail := strings.TrimRight(boundedTail(out.OutputTail), " \t\r\n"); tail != "" {
+	if tail := strings.TrimRight(boundedTail([]byte(out.OutputTail)), " \t\r\n"); tail != "" {
 		fmt.Fprintf(&b, "\n\nThis is the end of what it printed:\n\n%s", tail)
 	} else {
 		b.WriteString(" It printed nothing.")
