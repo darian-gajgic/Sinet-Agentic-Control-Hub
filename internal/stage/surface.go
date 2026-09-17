@@ -474,7 +474,11 @@ func (u *Surface) Receipt(ctx context.Context, runID string) (json.RawMessage, e
 	if err != nil {
 		return nil, err
 	}
-	if posture == "" {
+	judge, err := u.sk.judgeLine(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if posture == "" && judge == nil {
 		return json.RawMessage(usage), nil
 	}
 	var r metering.Receipt
@@ -482,6 +486,7 @@ func (u *Surface) Receipt(ctx context.Context, runID string) (json.RawMessage, e
 		return nil, fmt.Errorf("stage: decode receipt for %q: %w", runID, err)
 	}
 	r.Verification = posture
+	r.Judge = judge
 	out, err := json.Marshal(r)
 	if err != nil {
 		return nil, fmt.Errorf("stage: encode receipt for %q: %w", runID, err)
@@ -522,6 +527,60 @@ func (s *Skeleton) verificationPosture(ctx context.Context, runID string) (strin
 		}
 	}
 	return note, rows.Err()
+}
+
+// judgeLine composes the receipt's account of who checked the work from the
+// run's keep-forever verdict rows (Spec S07.5 / G1 Def.1 "self-family judging
+// is always flagged on the receipt"; S07.11), nil for a run that reached no
+// verdict. The LAST round wins: it is the judgment that stands, and the
+// receipt discloses the check the requester is actually being handed.
+//
+// Read here rather than at materialization for the same reason the posture is:
+// internal/metering never learns verification's vocabulary, and this layer
+// already holds both halves (P3-GF4 OQ5).
+func (s *Skeleton) judgeLine(ctx context.Context, runID string) (*metering.JudgeLine, error) {
+	rows, err := s.cfg.DB.QueryContext(ctx,
+		`SELECT payload FROM run_events WHERE run_id = ? AND type = ? ORDER BY event_seq`,
+		runID, verify.EventRound)
+	if err != nil {
+		return nil, fmt.Errorf("stage: read verdict rows for %q: %w", runID, err)
+	}
+	defer rows.Close()
+	var line *metering.JudgeLine
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, fmt.Errorf("stage: scan verdict row: %w", err)
+		}
+		var p struct {
+			JudgeModel string `json:"judge_model"`
+			SelfFamily bool   `json:"self_family_judge"`
+		}
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			continue // tolerant: a malformed historical payload discloses nothing
+		}
+		if p.JudgeModel == "" {
+			continue // an absent key is absent, never invented
+		}
+		line = &metering.JudgeLine{
+			Model:      p.JudgeModel,
+			SelfFamily: p.SelfFamily,
+			Note:       judgeNote(p.JudgeModel, p.SelfFamily),
+		}
+	}
+	return line, rows.Err()
+}
+
+// judgeNote is the requester's sentence about how independent the check was
+// (Spec S07.11). Plain words, no citations (CONVENTIONS §38): a person reading
+// a receipt is being told how much weight the check carries, not which clause
+// requires the disclosure.
+func judgeNote(model string, selfFamily bool) string {
+	if selfFamily {
+		return fmt.Sprintf("The work and the check of the work were both done by the same family of models "+
+			"(%s did the checking), so this check is less independent than usual.", model)
+	}
+	return fmt.Sprintf("The check was done by %s, a different model family from the one that did the work.", model)
 }
 
 // ---- the task view ----

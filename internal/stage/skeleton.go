@@ -131,10 +131,18 @@ func New(cfg Config) (*Skeleton, error) {
 		// They select only under coverage, and coverage grows only when a
 		// lane is actually COMMISSIONED — so with nothing commissioned this
 		// is the pre-LN-2 single-lane path exactly.
+		// LaneOrder is platform DATA like the duty-map default, not
+		// configuration: the order the household's lanes are preferred in is a
+		// ratified platform fact (gate record P3/gates/rework-sitting-gate.md
+		// B7), and a lane that is not commissioned is simply skipped with its
+		// name said out loud. No stage.Config field, no ⚙ key (CONVENTIONS
+		// §19 reading (4): the standing settings-tab directive is the
+		// resolution path for both maps together).
 		s.router = &worker.Router{
 			Store:      cfg.Workers,
 			DutyMap:    s.dutyMap,
 			Alternates: cfg.AlternateSeats,
+			LaneOrder:  worker.DefaultLaneOrder(),
 			// LocalAvailable flips true when the S12 local stack is configured
 			// (B4-5): the utility seat joins the effective DutyMap (built at
 			// the composition root) and a class-(a) dispatch onto it degrades
@@ -937,6 +945,18 @@ func (s *Skeleton) drainOrCard(ctx context.Context, r run.Run, in verify.VerifyI
 	return verify.Outcome{Verdict: verify.VerdictEscalate, Card: &card}, nil
 }
 
+// recordedExecutionModel is the model the task's recorded S08.8 selection ran
+// the work on, "" when nothing was recorded (Spec S10.1: the decision is the
+// record). Read exactly as the rework executor reads it (engineRevise), so
+// "which model did this work" has one answer in the pipeline and not two.
+func (s *Skeleton) recordedExecutionModel(ctx context.Context, taskID string) string {
+	st, err := s.pipe.LoadState(ctx, taskID)
+	if err != nil || st.Routing == nil {
+		return ""
+	}
+	return st.Routing.Model
+}
+
 // newVerifier assembles the S07 Verifier over the skeleton's seams for one
 // domain (shared by the dispatch leg and the S07.7 resume leg).
 //
@@ -957,7 +977,11 @@ func (s *Skeleton) newVerifier(ctx context.Context, domain, taskID string) (*ver
 		// The production path: the shell injects no Judge, so every real
 		// verification passes through the gate. An injected Judge is the
 		// composition root's own dev/test seam (the nil-Confiner precedent).
-		judge = &EngineJudge{s: s}
+		//
+		// The judge is built with the model this task's work actually ran on,
+		// so the S07.5 self-family flag is a fact about this task rather than
+		// a constant (Spec S07.5 / G1 Def.1).
+		judge = newEngineJudge(s, s.recordedExecutionModel(ctx, taskID))
 		if err := verify.UnsupervisedJudgingGate(rubric, judge.Meta().Model); err != nil {
 			// An unvalidated judge seat is a screen that cannot run — the same
 			// outage class as a missing check pack, and it terminates the same

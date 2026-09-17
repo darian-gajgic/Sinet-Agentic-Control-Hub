@@ -75,7 +75,28 @@ type Receipt struct {
 	// — the serving side (P3-GF4 OQ5).
 	Verification string `json:"verification,omitempty"`
 
+	// Judge is the self-family-judging disclosure (Spec S07.5 / G1 Def.1:
+	// "self-family judging is always flagged on the receipt"; S07.11 puts the
+	// judge model on every verdict row and the flag on the same receipt).
+	// Absent for a run that reached no verdict — most runs — and additive, so
+	// a receipt without one serves exactly the bytes it always did.
+	//
+	// Composed at the serving side for the same reason Verification is: this
+	// package materializes receipts from the metering ledger and never imports
+	// internal/verify (P3-GF4 OQ5), so the member is strings and a bool.
+	Judge *JudgeLine `json:"judge,omitempty"`
+
 	MaterializedTS time.Time `json:"materialized_ts"`
+}
+
+// JudgeLine is the receipt's account of who checked the work (Spec S07.11).
+// Note is the plain-words sentence a requester reads; the flag alone tells
+// somebody who already knows what "self-family" means, which is nobody the
+// receipt is written for.
+type JudgeLine struct {
+	Model      string `json:"model"`
+	SelfFamily bool   `json:"self_family"`
+	Note       string `json:"note,omitempty"`
 }
 
 // ParkEpisode is one park→resume span (Spec S10.10).

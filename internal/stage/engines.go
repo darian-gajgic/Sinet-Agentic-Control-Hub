@@ -9,6 +9,7 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/intake"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/ledger"
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
+	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/worker"
 )
 
 // Engine-session implementations of the pipeline model seams (Spec S06.10
@@ -730,10 +731,24 @@ func (c *EngineCritic) session(ctx context.Context, pair intake.Pair, recheck []
 // EngineJudge drives the V2 judge sessions on the task's verify run. The
 // input slice is EXACTLY JudgeInput — built by verify.BuildJudgeInput
 // through the ledger's clean-context assembly; there is no transcript
-// anywhere (Spec S07.5). Selection/pairing mechanics are Spec S08's (B3):
-// at B2-4 the judge is the configured dev model, honestly reported
-// self-family (executor and judge share the one wired lane).
-type EngineJudge struct{ s *Skeleton }
+// anywhere (Spec S07.5).
+//
+// It carries the executor's model because the S07.5 self-family flag is a
+// statement about THIS task: which model produced the work, and whether the
+// model checking it is a relative.
+type EngineJudge struct {
+	s *Skeleton
+	// executorModel is the model the task's recorded S08.8 selection ran the
+	// work on; "" when nothing was recorded.
+	executorModel string
+}
+
+// newEngineJudge is the one judge-construction seam (Spec S07.5). Every
+// production judge is built here with the executor that actually ran, so the
+// self-family flag cannot be a constant again.
+func newEngineJudge(s *Skeleton, executorModel string) *EngineJudge {
+	return &EngineJudge{s: s, executorModel: executorModel}
+}
 
 var _ verify.Judge = (*EngineJudge)(nil)
 
@@ -783,6 +798,12 @@ func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, kind, i
 	// session rides the brief's own run id — never a suffix-composed one,
 	// which would name the superseded parent on a recovery-fork verify run.
 	brief := in.Brief
+	// The session runs on the seat Meta() names, so the verdict row's
+	// judge_model and the engine that produced the verdict cannot drift apart
+	// (Spec S07.11). The lane rides along with the model: they are two halves
+	// of ONE seat, and taking the model without it dispatches that model to
+	// whichever engine the run row happens to carry (the LN-2B D4 lesson).
+	seat := j.s.seat(worker.DutyJudge)
 	err := j.s.jsonSession(ctx, SessionInput{
 		RunID:        in.Brief.RunID,
 		Stage:        "verify",
@@ -791,6 +812,9 @@ func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, kind, i
 		Instructions: in.BriefText + "\n" + instructions,
 		Kind:         kind,
 		Class:        "C1",
+		Model:        j.model(),
+		Lane:         seat.Lane,
+		WindowTokens: seat.WindowTokens,
 	}, out)
 	if err != nil {
 		return fmt.Errorf("judge output: %w", err)
@@ -798,11 +822,61 @@ func (j *EngineJudge) session(ctx context.Context, in verify.JudgeInput, kind, i
 	return nil
 }
 
-// Meta implements verify.Judge. SelfFamily is honestly TRUE at B2-4: the
-// one wired lane serves executor and judge alike, and the flag rides the
-// receipt (G1 Def.1); the dissimilar-lane swap is S08 selection (B3).
+// model is the seat this judge runs on: the composition root's dev/test
+// override when it set one, otherwise the JUDGE seat of the duty map (Spec
+// S07.5 "default judge = the requester's designated verification-review
+// engine"). It is deliberately NOT modelFor(""), which falls through to the
+// PLANNING seat — equal by data on the shipped map, and wrong the moment the
+// two rows differ.
+func (j *EngineJudge) model() string {
+	if j.s.cfg.Model != "" {
+		return j.s.cfg.Model
+	}
+	return j.s.seat(worker.DutyJudge).Model
+}
+
+// Meta implements verify.Judge: which seat judged, and whether it shares a
+// model family with the executor that produced the work — always flagged on
+// the verdict row and on the receipt (Spec S07.5 / G1 Def.1; S07.11).
+//
+// The flag was a constant `true` from B2-4, when one lane served executor and
+// judge alike. It is now computed, which is what makes it mean something once
+// the two can differ.
 func (j *EngineJudge) Meta() verify.JudgeMeta {
-	return verify.JudgeMeta{Model: j.s.modelFor(""), SelfFamily: true}
+	judge := j.model()
+	executor := j.executorModel
+	if executor == "" {
+		// Nothing recorded (a task that never routed, or a ceremony-only
+		// posture): the seat that WOULD have executed is the honest
+		// comparison — an absent fact never reads as independence.
+		executor = j.s.seat(worker.DutyExecution).Model
+	}
+	return verify.JudgeMeta{Model: judge, SelfFamily: sameFamily(executor, judge)}
+}
+
+// sameFamily reports whether two model ids belong to the same model family:
+// both named, and the vendor token before the first "-" equal. Two Anthropic
+// ids are relatives; a Kimi or Z.AI id and an Anthropic one are not. (The
+// concrete ids are not written here: model ids belong to the lane DOCUMENTS
+// with their verified-on dates, and the D5 source scan enforces it.)
+//
+// A RECORDED JUDGMENT CALL about what "family" means for the ids in play, not
+// a vendor table: a table is a second place to be wrong, and it would be wrong
+// SILENTLY about an id nobody added to it. An unnamed model is never called a
+// relative — the flag exists to warn, so an absent fact must not read as
+// independence.
+func sameFamily(executor, judge string) bool {
+	if executor == "" || judge == "" {
+		return false
+	}
+	return modelFamily(executor) == modelFamily(judge)
+}
+
+func modelFamily(model string) string {
+	if i := strings.Index(model, "-"); i >= 0 {
+		return model[:i]
+	}
+	return model
 }
 
 // ---- verify.Revise (Spec S07.6: fresh-session rework executor) ----

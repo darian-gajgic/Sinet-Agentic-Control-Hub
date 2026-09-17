@@ -17,9 +17,15 @@ import (
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/verify"
 )
 
-// rider1_golden_test.go — D3 rider 1 (P-T06-5, S07.9): the golden-set re-run on
-// the ratified opus-4-8 judge, gated by SINET_RIDER1=1 (a PAID leg — the
-// packet's pre-ratified obligation). It runs the 26-case golden seed
+// rider1_golden_test.go — rider 1 (P-T06-5, S07.9): the golden-set re-run on
+// the ratified judge seat, gated by SINET_RIDER1=1 (a PAID leg — the packet's
+// pre-registered obligation). RETARGETED at P3-TQ-5 to claude-opus-5, the
+// judge seat the 2026-09-17 gate record (P3/gates/rework-sitting-gate.md item
+// B7 + §Answers) ratified: a judge-model change is a rubric version bump, and
+// P-T06-5 gates unsupervised judging on this re-run. The DESIGN is repeated
+// byte for byte from the 2026-07-22 run
+// (P3/measurements/2026-07-22-rider1-golden-set-opus.md) — only the seat moved,
+// so the two results compare. It runs the 26-case golden seed
 // (verify.SeedGoldenSet) through SIMPLIFIED S07.5-shaped two-axis judge prompts
 // (Compliance + Sanity): the prompts are replicas that collapse the axis
 // taxonomy to a single `blocker` boolean, NOT the byte-identical
@@ -27,13 +33,14 @@ import (
 // judge-as-classifier signal P-T06-5 requires (does either axis flag a
 // blocker?) is preserved, so the TPR/TNR measurement stands as the S07.9 gate;
 // a byte-identical-schema re-run is at the gate's discretion. On
-// claude-opus-4-8 via the committed claudecli adapter, clean context (artifact +
+// claude-opus-5 via the committed claudecli adapter, clean context (artifact +
 // ACs only, no transcript): a case is flagged (REVISE) when either axis finds a
 // blocking issue; TPR/TNR vs the human labels. Projection $2.10, ratified STOP
-// LINE $5.00 — the harness aborts + records if cumulative cost reaches it.
+// LINE $5.00 — the harness aborts + records if cumulative cost reaches it. The
+// pre-registration is P3/measurements/2026-09-17-rider1-golden-set-opus5.md.
 
 const (
-	rider1Model    = "claude-opus-4-8"
+	rider1Model    = "claude-opus-5"
 	rider1StopLine = 5.00
 )
 
@@ -100,7 +107,7 @@ type rider1Case struct {
 
 func TestRider1GoldenSetOpus(t *testing.T) {
 	if os.Getenv("SINET_RIDER1") != "1" {
-		t.Skip("SANCTIONED SKIP (CONVENTIONS §10): rider 1 (P-T06-5 golden set on opus-4-8) is a PAID leg, runs only under SINET_RIDER1=1")
+		t.Skip("SANCTIONED SKIP (CONVENTIONS §10): rider 1 (P-T06-5 golden set on claude-opus-5) is a PAID leg, runs only under SINET_RIDER1=1")
 	}
 	if _, err := exec.LookPath(claudecli.DefaultBinary); err != nil {
 		t.Skip("SANCTIONED SKIP: no claude engine installed")

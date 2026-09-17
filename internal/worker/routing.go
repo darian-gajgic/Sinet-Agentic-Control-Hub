@@ -227,6 +227,45 @@ func AlternateSeatsFor(seats ...LaneSeat) AlternateSeats {
 	return out
 }
 
+// LaneOrder is the configured order of lane PREFERENCE per duty class (Spec
+// S08.8 step 3: selection "resolves against the requester's duty maps",
+// "subscription coverage binds every choice", and among flat-rate lanes the
+// gauge decides — the configured order is what settles the choice when it
+// cannot). Keyed by duty class; the values are lane names in preference order.
+//
+// It is lane NAMES and nothing else, deliberately: which model a lane fronts
+// is the lane DOCUMENT's dated fact (Spec S03.6) and reaches selection through
+// AlternateSeatsFor when the lane is commissioned. A model id here would go
+// stale invisibly, which is the whole reason no model id exists in this
+// package.
+//
+// It is a second map rather than a member of Seat or DutyMap because a duty
+// still resolves to exactly ONE seat: the order ranks the covered candidates,
+// it does not widen the answer.
+//
+// A duty with no entry resolves exactly as it did before this type existed —
+// the duty-map seat first, then its alternates in the order they were handed
+// in — and so does every duty when the whole map is nil.
+type LaneOrder map[string][]string
+
+// DefaultLaneOrder is the shipped lane preference (gate record
+// P3/gates/rework-sitting-gate.md item B7 + §Answers, 2026-09-17): work runs
+// on the Kimi Code CLI lane first, on the Kimi lane second, and on the
+// always-configured anthropic lane last. The last row is the seat of LAST
+// RESORT, not a demotion: until a Kimi credential is placed it is the only
+// covered lane, so it is where the work runs — with the skipped first choices
+// named on the requester's surface rather than parked as a subscription gap.
+//
+// Planning and judging carry no entry, matching AlternateSeatsFor's
+// EXECUTION-ONLY ratification: their anthropic seat is the only seat they
+// have, so there is nothing to order.
+//
+// Like the duty map this is code DATA under the standing settings-tab
+// directive (CONVENTIONS §19 reading (4)): no S18 key covers it.
+func DefaultLaneOrder() LaneOrder {
+	return LaneOrder{DutyExecution: {"kimi-cli", "kimi", "anthropic"}}
+}
+
 // Coverage is the subscription-coverage view binding every choice (Spec
 // S08.8 step 3; Operating reality; D5): which lanes the owner holds
 // flat-rate, and the metered-exception surface. The v0 shape is static
@@ -576,7 +615,11 @@ type Router struct {
 	// holds more than one flat-rate lane. Nil = the single-lane world, in
 	// which selection takes exactly its pre-LN-2 path.
 	Alternates AlternateSeats
-	Coverage   Coverage
+	// LaneOrder is the configured lane preference per duty class. Nil = the
+	// pre-TQ-5 order exactly: the duty-map seat first, then the alternates as
+	// they were handed in.
+	LaneOrder LaneOrder
+	Coverage  Coverage
 	// TieBreak is the S12 local-duty seam (nil = absent at v0, degraded
 	// deterministic order).
 	TieBreak TieBreaker
@@ -1086,14 +1129,21 @@ func (r *Router) resolveLanePin(pin, seatDuty string, seat Seat, p ExecutionProf
 // It returns the seat unchanged when nothing better applies, so the pre-LN-2
 // single-lane world takes exactly its old path: one covered candidate, no
 // gauge read, no note.
+//
+// With a LaneOrder for the duty the configured order becomes explicit DATA
+// instead of "whatever order the candidates arrived in", and a preferred lane
+// the household holds no plan for is NAMED rather than silently absent — which
+// is why the order is consulted even when no alternate seat exists at all.
 func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Seat) (Seat, string) {
 	alts := r.Alternates[duty]
-	if len(alts) == 0 {
+	order := r.LaneOrder[duty]
+	if len(alts) == 0 && len(order) == 0 {
 		return seat, ""
 	}
-	// Configured order: the duty-map seat first, then its alternates. This is
-	// the tie-break and the fallback, so the choice is deterministic when the
-	// gauge cannot separate two lanes.
+	// Configured order: the duty-map seat first, then its alternates — unless
+	// the duty declares one, in which case that is the configured order. This
+	// is the tie-break and the fallback, so the choice is deterministic when
+	// the gauge cannot separate two lanes.
 	covered := make([]Seat, 0, 1+len(alts))
 	if r.Coverage.laneCovered(seat.Lane) {
 		covered = append(covered, seat)
@@ -1103,6 +1153,103 @@ func (r *Router) chooseFlatLane(ctx context.Context, owner, duty string, seat Se
 			covered = append(covered, a)
 		}
 	}
+	orderCovered(covered, order)
+	chosen, note := r.weighCovered(ctx, owner, duty, seat, covered)
+	if len(covered) > 0 {
+		// Nothing covered is the 2.7 subscription-gap leg's story, and the
+		// caller tells it; here the seat resolved, so the skipped preferences
+		// are part of WHY it resolved where it did.
+		if skipped := r.skippedLaneNote(order, chosen.Lane); skipped != "" {
+			note = strings.TrimSpace(skipped + " " + note)
+		}
+	}
+	return chosen, note
+}
+
+// orderCovered reorders the covered candidates into the configured lane
+// preference: listed lanes in their listed order, unlisted lanes after them
+// keeping the relative order they arrived in (a lane the order does not name
+// keeps the place commissioning gave it). A nil or empty order changes
+// nothing.
+func orderCovered(covered []Seat, order []string) {
+	if len(order) == 0 {
+		return
+	}
+	rank := make(map[string]int, len(order))
+	for i, lane := range order {
+		rank[lane] = i
+	}
+	laneRank := func(lane string) int {
+		if i, ok := rank[lane]; ok {
+			return i
+		}
+		return len(order)
+	}
+	sort.SliceStable(covered, func(i, j int) bool {
+		return laneRank(covered[i].Lane) < laneRank(covered[j].Lane)
+	})
+}
+
+// skippedLaneNote names the preferred lanes ahead of the chosen one that the
+// household holds no plan for — the requester surface's honest half of "why
+// not the first choice" (Spec S08.8 accountability). Plain words, no lane
+// jargon beyond the lane names, no citations (CONVENTIONS §38).
+//
+// A preferred lane that IS covered and lost anyway did not get skipped: the
+// gauge chose between them and says so in its own sentence.
+func (r *Router) skippedLaneNote(order []string, chosen string) string {
+	var lanes, ordinals []string
+	for i, lane := range order {
+		if lane == chosen {
+			break
+		}
+		if r.Coverage.laneCovered(lane) {
+			continue
+		}
+		lanes = append(lanes, lane)
+		ordinals = append(ordinals, laneChoiceOrdinal(i))
+	}
+	if len(lanes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i := range lanes {
+		if i == 0 {
+			fmt.Fprintf(&b, "The %s for doing this work is the %s lane", ordinals[i], lanes[i])
+			continue
+		}
+		fmt.Fprintf(&b, " and the %s is the %s lane", ordinals[i], lanes[i])
+	}
+	switch len(lanes) {
+	case 1:
+		b.WriteString(", which is not set up on this platform yet")
+	case 2:
+		b.WriteString("; neither is set up on this platform yet")
+	default:
+		b.WriteString("; none of them is set up on this platform yet")
+	}
+	fmt.Fprintf(&b, ", so the work runs on the %s lane instead.", chosen)
+	return b.String()
+}
+
+// laneChoiceOrdinal names a lane's place in the configured order the way a
+// person says it.
+func laneChoiceOrdinal(i int) string {
+	switch i {
+	case 0:
+		return "first choice"
+	case 1:
+		return "second choice"
+	case 2:
+		return "third choice"
+	default:
+		return fmt.Sprintf("choice number %d", i+1)
+	}
+}
+
+// weighCovered picks among the covered candidates in the order they were put
+// in: the gauge decides when it can, the configured order when it cannot.
+func (r *Router) weighCovered(ctx context.Context, owner, duty string, seat Seat, covered []Seat) (Seat, string) {
 	switch len(covered) {
 	case 0:
 		// Nothing covered: hand back the duty-map seat so the caller's 2.7
