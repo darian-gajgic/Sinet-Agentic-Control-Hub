@@ -67,7 +67,7 @@ func v41OriginRef() (string, error) {
 			"amendment was owed. Item A1 of the same sitting ratified v4 AS SHIPPED, so the v4 record it supersedes states that " +
 			"in the operator's words rather than waiting on a gate. The generic set is unchanged and stays on the P3-GF3-BE1 " +
 			"record.",
-		Ratified: "RATIFIED by the operator on 2026-09-17 at the rework sitting recorded in P3/gates/rework-sitting-gate.md: " +
+		Ratified: "RATIFIED for P3-V41 by the operator on 2026-09-17 at the rework sitting recorded in P3/gates/rework-sitting-gate.md: " +
 			"item A2, quality_bar 8 to 12, in the operator's words \"ok do it\"; item A1, taxonomy v4 as shipped, in the " +
 			"operator's words \"ok for now, will need some refinement later\". The refinement A1 defers is a later v4.x " +
 			"revision, opened when the operator names what it is. Nothing here is owed to a later gate.",
