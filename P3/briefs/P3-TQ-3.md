@@ -1,3 +1,5 @@
+> **EXPIRED 2026-09-17 — landed on main as merge `9322167` (grounding `5731d0f`, impl `b8dd07a`, fixture `61bc53e`, drain r1 `ed449ce`, drain r2 `07fe192`, coordinator inline `989a6d7`; landing battery 48 pkgs `-p 1` 0 FAIL 0 SKIP; CONVENTIONS §74). Single-use artifact: never read as truth; code + spec are the truth. SUPERSEDED at drain: §3.2's span rule (the landed rule is CONVENTIONS §74's); the removal guard is word-bounded with an asymmetric boundary; a symlinked/non-directory root is `workspace:unreadable`; absolute/root write globs are `plan:write-set`; the one sanctioned fixture edit (`internal/stage/e2e_test.go`, the fake executor writes `note.md`).**
+
 # P3-TQ-3 — bootstrap stage contracts decided from the tree (TQ-F4)
 
 **Grounded 2026-09-17.** Single-use brief for the executor and the evaluator. Truth is the spec (`Spec/drafts/S07-verification-quality.md`, `S00-front-matter.md` row A16, `S06-intake-pipeline.md`, `S12-local-models-tier.md`) plus the code at `ea22f89`; every claim below carries its file:line. No prior brief was read.
