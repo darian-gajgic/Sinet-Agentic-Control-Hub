@@ -1,0 +1,30 @@
+2.1.274 (Claude Code)
+=== RUN   TestSpikeSingleGatedDefer
+    spike_test.go:129: E1 single-gated outcome=parked gate_fallback=false cost=$0.037220 num_turns=1 detail=""
+    spike_test.go:132: E1 ask: id=toolu_019AFGLUHcX6YWbp8ukNWBdH tool=Bash input={"command":"echo HELLO","description":"Print HELLO"}
+--- PASS: TestSpikeSingleGatedDefer (3.09s)
+=== RUN   TestSpikeParallelSerializeByDeny
+    spike_test.go:177: trial 0: outcome=parked gate_fallback=false fires(final-window)=2 num_turns=2 cost=$0.037399 ask=true
+    spike_test.go:186:   park ask: id=toolu_01SPoSr3PCeedr45PKBZPqQn tool=Read input=map[file_path:/tmp/TestSpikeParallelSerializeByDeny2212852715/001/a.txt]
+    spike_test.go:177: trial 1: outcome=parked gate_fallback=false fires(final-window)=2 num_turns=2 cost=$0.037399 ask=true
+    spike_test.go:186:   park ask: id=toolu_01UaGr4s3i3q3DnYtGZWMDU8 tool=Read input=map[file_path:/tmp/TestSpikeParallelSerializeByDeny2212852715/003/a.txt]
+    spike_test.go:177: trial 2: outcome=parked gate_fallback=false fires(final-window)=2 num_turns=2 cost=$0.037099 ask=true
+    spike_test.go:186:   park ask: id=toolu_01C5T7nRba3f7W335S4Ricsy tool=Read input=map[file_path:/tmp/TestSpikeParallelSerializeByDeny2212852715/005/a.txt]
+    spike_test.go:177: trial 3: outcome=parked gate_fallback=false fires(final-window)=2 num_turns=2 cost=$0.037399 ask=true
+    spike_test.go:186:   park ask: id=toolu_014Z8ZBDRKBXjK45MWV7uATx tool=Read input=map[file_path:/tmp/TestSpikeParallelSerializeByDeny2212852715/007/a.txt]
+    spike_test.go:177: trial 4: outcome=parked gate_fallback=false fires(final-window)=2 num_turns=2 cost=$0.037399 ask=true
+    spike_test.go:186:   park ask: id=toolu_01PqQ3tdauvZUWe4YYUHvMCJ tool=Read input=map[file_path:/tmp/TestSpikeParallelSerializeByDeny2212852715/009/a.txt]
+    spike_test.go:177: trial 5: outcome=parked gate_fallback=false fires(final-window)=2 num_turns=2 cost=$0.037099 ask=true
+    spike_test.go:186:   park ask: id=toolu_01Q8Te58jQQ3WkbRnj9vEFUx tool=Read input=map[file_path:/tmp/TestSpikeParallelSerializeByDeny2212852715/011/a.txt]
+    spike_test.go:195: SUMMARY: trials=6 parallel_fallback_detected=0 clean_park=6 completed=0 total_cost=$0.223794
+--- PASS: TestSpikeParallelSerializeByDeny (22.70s)
+=== RUN   TestSpikeDeferResumeRoundTrip
+    spike_test.go:234: park: ask=toolu_0116oiiwwMhhh4wR9GNGeNU1 cost=$0.037881
+2026/09/17 02:32:09 INFO claudecli: skipping unknown stream event type "command_lifecycle"
+2026/09/17 02:32:09 INFO claudecli: skipping unknown stream event type "attachment"
+2026/09/17 02:32:13 INFO claudecli: skipping unknown stream event type "command_lifecycle"
+    spike_test.go:248: resume outcome=completed cost=$0.008989 num_turns=1
+--- PASS: TestSpikeDeferResumeRoundTrip (8.31s)
+PASS
+ok  	github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli	34.110s
+rider2 exit=0
