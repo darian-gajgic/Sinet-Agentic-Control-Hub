@@ -114,11 +114,17 @@ func isPostureDisclosure(f Finding) bool { return f.Key() == bootstrapPostureKey
 
 // bootstrapV1 is the V1 result of a bootstrap round (Spec S07.8): every
 // executable-ladder rung the missing commands would have populated records
-// UNVERIFIABLE-HERE, and every PLAN step's "Done when" contract records the
-// same state attributed to the absent pack. Nothing is fabricated — no
-// evidence ref, no exit status, no invented executable check — and nothing is
-// skipped silently.
-func bootstrapV1(pack *CheckPack, steps []intake.Step) V1Result {
+// UNVERIFIABLE-HERE. Nothing is fabricated — no evidence ref, no exit status,
+// no invented executable check — and nothing is skipped silently.
+//
+// Every PLAN step's "Done when" contract is then DECIDED from tree, the files
+// the work produced, as far as those files can decide it — write-set globs,
+// named files, structural facts [A16, 2026-09-17]. Only a contract no such
+// fact reaches keeps the absent-pack attribution, now with the reason
+// recorded. A refuted contract raises one blocker so it reaches a person
+// (Spec S07.7); coverage is the approved plan's AC map, which decides the
+// criterion that blocker cites (Spec S06.6/S07.5).
+func bootstrapV1(pack *CheckPack, steps []intake.Step, coverage map[string][]string, tree string) V1Result {
 	res := V1Result{Findings: []Finding{bootstrapPostureFinding()}}
 	if pack != nil {
 		res.PackVersion = pack.Version
@@ -134,15 +140,13 @@ func bootstrapV1(pack *CheckPack, steps []intake.Step) V1Result {
 				stage),
 		})
 	}
+	idx, walkErr := indexTree(tree)
 	for _, s := range steps {
-		res.Steps = append(res.Steps, StepContract{
-			StepID:       s.ID,
-			DoneWhen:     s.DoneWhen,
-			State:        ContractUnverifiable,
-			AttributedTo: BootstrapAttribution,
-			Category:     CatACBlocker,
-			Route:        RouteTable[CatACBlocker].Sink,
-		})
+		sc := decideFromTree(s, idx, walkErr)
+		res.Steps = append(res.Steps, sc)
+		if sc.State == ContractFail {
+			res.Findings = append(res.Findings, contractFinding(sc, s, coverage))
+		}
 	}
 	return res
 }

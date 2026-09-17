@@ -465,10 +465,20 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 		switch {
 		case posture == PostureBootstrap:
 			// The ladder has nothing it could run, so V1 still RUNS and says
-			// so: every rung and every step contract records UNVERIFIABLE-HERE
-			// (Spec S07.8 [A14]). No workspace is materialized — there is
-			// nothing to materialize it for.
-			res := bootstrapV1(pack, in.Steps)
+			// so: every rung records UNVERIFIABLE-HERE (Spec S07.8 [A14]).
+			// The step contracts are another matter — the files the work
+			// produced are there to be read, and every contract they can
+			// decide is decided from them rather than from the executor's
+			// report (Spec S07.8 [A16]). The workspace resolves exactly as
+			// the pack branch's does: one behavior, no special case.
+			ws, cleanup, err := v.workspace(ctx, d, in.Workspace)
+			if err != nil {
+				return Outcome{}, err
+			}
+			res := bootstrapV1(pack, in.Steps, in.Coverage, ws)
+			if cleanup != nil {
+				cleanup()
+			}
 			v1res = &res
 			record.V1 = v1res
 			if _, err := rec.RecordV1(ctx, d.RunID, res); err != nil {

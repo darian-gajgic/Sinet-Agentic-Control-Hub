@@ -1121,6 +1121,7 @@ func (s *Skeleton) verifyInput(ctx context.Context, runID, taskID string, revisi
 		},
 		Spec:          pair.Spec,
 		Steps:         pair.Plan.Steps,
+		Coverage:      pair.Plan.Coverage,
 		ResearchNodes: pair.Plan.ResearchNodes,
 		Tier:          st.Tier,
 		Workspace:     execCwd,

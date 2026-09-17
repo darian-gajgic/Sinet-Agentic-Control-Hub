@@ -32,15 +32,16 @@ func genSteps(r *rand.Rand, n int) []intake.Step {
 }
 
 // TestGF4PropBootstrapV1IsUniversallyUnverifiable is P2 [R3]: over arbitrary
-// step lists, the bootstrap V1 result records every ladder rung and every
-// step contract as UNVERIFIABLE-HERE with the stable attribution — never PASS
-// and never absent, which are the two silent failures S07.8 forbids.
+// step lists declaring no write set and naming no path, the bootstrap V1
+// result records every ladder rung and every step contract as
+// UNVERIFIABLE-HERE with the stable attribution — never PASS and never
+// absent, which are the two silent failures S07.8 forbids.
 func TestGF4PropBootstrapV1IsUniversallyUnverifiable(t *testing.T) {
 	for seed := int64(1); seed <= 8; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		for n := 0; n <= 12; n++ {
 			steps := genSteps(r, n)
-			res := bootstrapV1(BootstrapPack(DomainSoftware, 1), steps)
+			res := bootstrapV1(BootstrapPack(DomainSoftware, 1), steps, nil, t.TempDir())
 
 			if len(res.Checks) == 0 {
 				t.Fatalf("seed %d n=%d: no rung recorded at all — a silent skip", seed, n)
@@ -88,7 +89,7 @@ func TestGF4PropBootstrapMintsOnlyNotes(t *testing.T) {
 	for seed := int64(1); seed <= 8; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		for n := 0; n <= 12; n++ {
-			res := bootstrapV1(BootstrapPack(DomainSoftware, 1), genSteps(r, n))
+			res := bootstrapV1(BootstrapPack(DomainSoftware, 1), genSteps(r, n), nil, t.TempDir())
 			notes := 0
 			for _, f := range res.Findings {
 				if f.Severity == SeverityBlocker {
