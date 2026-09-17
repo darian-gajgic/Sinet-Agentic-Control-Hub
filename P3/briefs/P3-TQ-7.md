@@ -1,3 +1,5 @@
+> **EXPIRED 2026-09-18 — merged into main (grounding `9ec357c`, impl `450121f`, drain r1 `c213c41`; evaluation FAIL on test gaps + a tail boundary bug → drained, re-check PASS; CONVENTIONS §80). Single-use artifact: never read as truth; code + spec are the truth. Superseded: R9's guard reads the per-CHECK `Check.Origin` (TQ-4a's per-slot composition), never the pack-level provenance; the property test's runner-failure arm is branched on `detected` (sanctioned); `boundedTail` advances only on a mid-line cut and takes `[]byte`.**
+
 # P3-TQ-7 — a failed captured check is a V1 kill: it mints a finding that cites the check, and the round cannot SHIP
 
 **Grounded 2026-09-18.** Single-use brief for the executor and the evaluator. Truth is the spec (`Spec/drafts/S07-verification-quality.md` S07.1/S07.3/S07.5/S07.6/S07.7/S07.8/S07.11; `Spec/drafts/S13-deliverables-review-git-backup.md` S13.4/S13.7) plus the code on `main` at `c3ad07e` (every `file:line` below is that commit; the two inert surfaces this grounding adds to `v1.go` shift its later lines by +10). No prior brief was read as truth.
