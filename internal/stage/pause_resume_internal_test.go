@@ -92,9 +92,11 @@ func TestTheExecuteLegChecksThePauseBetweenSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(src)
-	loop := strings.Index(body, "for i, step := range pair.Plan.Steps {")
+	// The DRIVE loop (P3-TQ-2 starts it at the fork's resume index); the seed
+	// loop above it ranges the plan and drives nothing.
+	loop := strings.Index(body, "for i := resume.Index; i <= last; i++ {")
 	check := strings.Index(body, "s.pauseParkPoint(ctx, r, step.ID)")
-	session := strings.Index(body, "s.runPlannedStage(ctx, r, er, step)")
+	session := strings.Index(body, "s.runPlannedStage(ctx, r, er, step, frame)")
 	if loop < 0 || check < 0 || session < 0 {
 		t.Fatalf("the scan cannot find what it is asserting about (loop %d, check %d, session %d) — it would pass vacuously",
 			loop, check, session)
