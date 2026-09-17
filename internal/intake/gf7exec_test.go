@@ -210,6 +210,11 @@ func TestGF7ComparisonRulesOptionsNameTheirReferent(t *testing.T) {
 // TestGF7NewSlotsRecordTheirReasonedWeights (brief R8): the two H23 additions
 // enter with weights that are REASONED and say so — reasoning never outranks
 // the measured 12s.
+//
+// The bar is strictly greater-than, not greater-or-equal: the operator's ruling
+// of 2026-09-17 (P3/gates/rework-sitting-gate.md item A2, shipped as P3-V41)
+// reads "12 equals, it does not outrank", so quality_bar at 12 ties
+// collection_semantics and that tie is allowed.
 func TestGF7NewSlotsRecordTheirReasonedWeights(t *testing.T) {
 	soft := gf7View(t, intake.FamilySoftware)
 	byID := map[string]gf7SlotView{}
@@ -222,7 +227,7 @@ func TestGF7NewSlotsRecordTheirReasonedWeights(t *testing.T) {
 			t.Errorf("the v4 software set has no %q slot (W1 H23 + §D.1)", id)
 			continue
 		}
-		if s.Weight >= byID["collection_semantics"].Weight {
+		if s.Weight > byID["collection_semantics"].Weight {
 			t.Errorf("%s (%d) outweighs the measured collection_semantics (%d) — reasoning does not outrank measurement",
 				id, s.Weight, byID["collection_semantics"].Weight)
 		}

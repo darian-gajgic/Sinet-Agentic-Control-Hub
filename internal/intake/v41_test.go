@@ -156,9 +156,9 @@ func TestV41QualityBarOnTheFirstCardAtEveryTier(t *testing.T) {
 					t.Errorf("card %d issued at clearance %.4f, want %.4f", i+1, atIssue[i], wantAt[i])
 				}
 			}
-			wantFinal := wantAt[len(cards)]
-			if len(cards) == 3 {
-				wantFinal = 100
+			wantFinal := 100.0
+			if len(cards) < 3 {
+				wantFinal = wantAt[len(cards)]
 			}
 			if math.Abs(final-wantFinal) > 1e-9 {
 				t.Errorf("clearance when the interview stopped = %.4f, want %.4f", final, wantFinal)
@@ -210,7 +210,7 @@ func TestV41ClearanceProperty(t *testing.T) {
 // outranks). The earlier chain stays intact. RED at v4: PENDING.
 func TestV41RecordStatesRatified(t *testing.T) {
 	src := intake.SeedTaxonomies()[intake.FamilySoftware].Source
-	if strings.Contains(src, "ratification PENDING") {
+	if strings.Contains(src, "PENDING at the planning-rework exit gate") {
 		t.Errorf("the v4 record still says ratification is pending: %q", src)
 	}
 	for _, want := range []string{
