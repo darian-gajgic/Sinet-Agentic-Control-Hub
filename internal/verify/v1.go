@@ -105,6 +105,30 @@ type Check struct {
 	// check (different session or model from the implementation — Spec
 	// S07.3 rule 4). Required when ACKey is set.
 	Provenance string `json:"provenance,omitempty"`
+	// Origin names who supplied this rung's command line: "" for the
+	// owner's own captured command, ProvenanceDetected for one the platform
+	// read out of the produced tree [A16, 2026-09-17].
+	//
+	// PER CHECK, because a pack can be MIXED. A16's precedence is per slot,
+	// so an owner who captured only a lint command still gets the build and
+	// test rungs the platform detected — in the SAME pack, which therefore
+	// cannot carry one provenance for all of them (CheckPack.Provenance is
+	// set only when every rung is detected).
+	//
+	// A detected rung is EVIDENCE wherever it appears: it carries no ACKey
+	// and no StepID, and it mints no finding. No consumer may treat it as an
+	// owner check — the graduation decision, the verdict a failing check
+	// forces, and any kill rule read this field first.
+	//
+	// FOR P3-TQ-7, which mints a blocker from a failed check so a broken
+	// build can no longer SHIP: guard that mint on THIS field, never on
+	// CheckPack.Posture. A mixed pack has no posture to read, and a detected
+	// rung failing is the platform's own guess about a command nobody
+	// captured — it must not force a person's round to REVISE.
+	//
+	// Distinct from Provenance above, which is a different axis entirely:
+	// that one records an acceptance check's separate AUTHORING context.
+	Origin Provenance `json:"origin,omitempty"`
 	// FindingCategory declares the route-table category a failure of this
 	// check escalates under — a stage contract is incomplete unless it
 	// declares its finding categories and their escalation routes (Spec
@@ -138,9 +162,24 @@ type CheckPack struct {
 	// flag lives on the pack because the resolver seam answers with a pack:
 	// it keeps "this project has nothing to run yet" distinguishable from the
 	// (nil, nil) "this domain has no pack machinery" absence without
-	// overloading either. A posture-carrying pack is deliberately not a valid
-	// one — Validate still refuses a pack without checks.
+	// overloading either.
+	//
+	// A posture-carrying pack MAY carry checks and Validate accepts it
+	// [A16, 2026-09-17]: since the bootstrap posture runs detected evidence
+	// rungs, "nothing the owner captured" no longer means "nothing to run".
+	// What the posture still decides is unchanged — the verdict stays
+	// advisory, review stays mandatory, and nothing is marked verified.
 	Posture Posture `json:"posture,omitempty"`
+	// Provenance names where these commands came from, for the pack as a
+	// whole: empty when the owner captured at least one of them,
+	// ProvenanceDetected when EVERY rung is one the platform scanned out of
+	// the produced tree [A16, 2026-09-17].
+	//
+	// A mixed pack carries no pack-level provenance, because it has no single
+	// answer — Check.Origin is the per-rung fact, and it is the one every
+	// consumer reads. Detected rungs are EVIDENCE and never graduate a
+	// project (Spec S07.8). See evidence.go.
+	Provenance Provenance `json:"provenance,omitempty"`
 }
 
 // Validate checks the pack contract (Spec S07.3): known ladder stages,
@@ -463,11 +502,19 @@ func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRe
 						CheckID: c.ID, Stage: c.Stage, StepID: c.StepID, ACKey: c.ACKey,
 						State: CheckRunnerFailed, Detail: err.Error(),
 					})
-					res.Findings = append(res.Findings, Finding{
-						Severity: SeverityBlocker, Category: CatCheckIntegrity,
-						Criterion: string(CatCheckIntegrity), Anchor: "check:" + c.ID,
-						Text: fmt.Sprintf("check %q runner failure (not a verdict): %v", c.ID, err),
-					})
+					// A DETECTED rung mints no finding, here or anywhere
+					// [A16]: it is evidence the platform noticed, not a bar
+					// the project set, and a blocker raised from one would let
+					// something nobody captured decide a person's round. The
+					// outcome is still recorded, so nothing is silently
+					// skipped.
+					if c.Origin != ProvenanceDetected {
+						res.Findings = append(res.Findings, Finding{
+							Severity: SeverityBlocker, Category: CatCheckIntegrity,
+							Criterion: string(CatCheckIntegrity), Anchor: "check:" + c.ID,
+							Text: fmt.Sprintf("check %q runner failure (not a verdict): %v", c.ID, err),
+						})
+					}
 					continue
 				}
 				state := CheckPassed

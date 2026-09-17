@@ -562,6 +562,34 @@ func Run(ctx context.Context, opts Options) error {
 		case created:
 			logger.Info("memory: composer playbook seeded under S09.10 governance (ratification = B3 gate item)")
 		}
+		// The seed-2 composer playbook (P3-TQ-4a): the web-deliverable feedback
+		// section [A16] enters by SUPERSESSION under its own record, which says
+		// plainly that operator ratification is due at the P3-TQ-4 packet gate.
+		// It runs AFTER the B3 seeding above, which is what puts the version it
+		// supersedes there. Same D10 deferral.
+		tq4Gate := newWriteGate(memStore, committer, nil)
+		switch res, err := tq4Gate.EnsureTQ4KnowledgeGovernance(ctx); {
+		case errors.Is(err, memory.ErrNoOperator):
+			logger.Info("memory: composer-playbook seed-2 governance deferred — no operator account yet (Spec S09.10, D10)")
+		case errors.Is(err, memory.ErrSeedDiverged):
+			logger.Warn("memory: composer-playbook seed-2 governance SKIPPED — the in-code playbook no longer matches the content "+
+				"this packet's record covers; a playbook edit needs its own governance function and provenance record (Spec S09.10)", "err", err)
+		case err != nil:
+			return fmt.Errorf("shell: composer playbook seed-2 governance: %w", err)
+		default:
+			if res.Repaired {
+				logger.Warn("memory: governed playbook file diverged from the committed row — " +
+					"crash-torn write or out-of-band edit; recorded with the supersession (Spec S09.8)")
+			}
+			if res.Unverifiable {
+				logger.Warn("memory: governed playbook provenance hash unavailable — compacted or pruned; " +
+					"supersession not attempted this boot (Spec S14.9)")
+			}
+			if res.Superseded {
+				logger.Info("memory: composer playbook superseded to seed-2 under S09.10 governance " +
+					"(operator ratification PENDING at the P3-TQ-4 packet gate)")
+			}
+		}
 
 		// The S08 worker store: registry rows + git-versioned template
 		// files under the guardrail split, with the overlay slice read

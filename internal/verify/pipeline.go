@@ -284,7 +284,11 @@ func (v *Verifier) validateInput(ctx context.Context, d Deliverable) (*RubricBun
 	if LaunchDomain(d.Domain) && pack == nil {
 		return nil, nil, NewPreambleRefusal(ErrNoCheckPack)
 	}
-	if pack.executes() && v.Runner == nil {
+	// A BOOTSTRAP resolution never parks for want of a runner [A16]: its rungs
+	// record UNVERIFIABLE-HERE with that reason, which is what Spec S07.8's
+	// "never a verification refusal and never parks the run" means now that
+	// the posture carries detected rungs of its own.
+	if pack.executes() && !pack.bootstrap() && v.Runner == nil {
 		return nil, nil, NewPreambleRefusal(fmt.Errorf("%w: a check pack requires a CheckRunner (Spec S07.3)", ErrSeamMissing))
 	}
 	return rubric, pack, nil
@@ -475,7 +479,9 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			if err != nil {
 				return Outcome{}, err
 			}
-			res := bootstrapV1(pack, in.Steps, in.Coverage, ws)
+			res := bootstrapV1(ctx, pack, v.Runner,
+				CheckRequest{RunID: d.RunID, Workspace: ws, EvidenceDir: in.EvidenceDir},
+				in.Steps, in.Coverage)
 			if cleanup != nil {
 				cleanup()
 			}
