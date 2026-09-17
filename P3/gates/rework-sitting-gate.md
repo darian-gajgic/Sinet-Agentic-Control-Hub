@@ -116,6 +116,12 @@ Options: **(a) promote now (RECOMMENDED)** — P3-SIT-3: two backend packets + o
 
 Confirmed at HEAD of the sitting world (read-only copy, 2026-09-17): deliverable `dlv-t-3120e8e3d14591d3`, type `markdown`, state **in-review**, revision 1, snapshot `083b174`, produced by `execute.g1`. The operator's verdict on the product was FAIL. Recommendation: **deny with a reason** through the platform (not by leaving it) — it exercises the deny path and the reason lands as walk data. Suggested reason text, in the operator's own words or this: "Placeholder photos instead of the representative product photos the plan promised; the shop reads thin and unfinished; nothing was actually run before it reached me."
 
+### B12. Engine pin drift (found 2026-09-17 by the TQ-1 grounding): lock pins claude CLI 2.1.218, installed is 2.1.274
+
+The claude CLI auto-updates on this host; `components.lock` and `claudecli.Pin` still say 2.1.218 (the B4-gate bump). The sitting's webshop ran on 2.1.273; today's binary is 2.1.274. Per CONVENTIONS §10 this is reported loudly, never silently retargeted; the standing rule from RW-16 is that the next S03.3 bump re-runs the RW-9 T1–T4 brace-short tripwire AND checks OQ-e (whether the engine bump changed the brace-short emission), plus the tier-R conformance check (installed matches pin). The two P3-TQ-5 measurement riders run on the installed binary either way and record its version.
+
+**Ask:** approve an S03.3 pin bump to the installed version (a light packet: lock + `claudecli.Pin` in lockstep, tier-R conformance run, the RW-9 T1–T4 tripwire, the OQ-e check, P-T14-1 worker-revalidation against the production worker set). Recommendation: yes, right after P3-TQ-5 lands — every packet since B4 has been tested against a pin the host no longer runs.
+
 ### B11. One open question for the operator
 
 Which browser produced the original dead-click experience on the webshop — **Brave or Chrome**? The coordinator reproduced a frame-starved tab in Chrome (TQ-F7); the host investigation (memory `chromium-frame-starvation`) needs to know whether both are affected.
@@ -138,6 +144,15 @@ Which browser produced the original dead-click experience on the webshop — **B
 | **SIT-F1** code deliverable shows only the report; **SIT-F2** no revision diff | S13.1/S13.2: a repo-backed deliverable is minted as `markdown` with ONE content object (the step report); the tree diff between snapshot pins (rev-1 vs pre-task base, N vs N−1) is never served | conformance defect, no amendment | **P3-SIT-1** backend (mint code work as `code` pinned to the snapshot; serve file inventory + per-file host-side unified diff from the platform store refs; the report becomes a companion) |
 | **SIT-F1/F2/F4** the surface; **SIT-F3** copy; **TQ-F8** copy | presentation | FRONTEND.md | **P3-SIT-2** frontend (file inventory, per-file diff, revision navigation, the report demoted to "what the worker says it did", honest preview-absence copy, crash→fork narrative) |
 | **SIT-F3** live preview deferred | S11.4 substrate + activation code | gate item B9 | **P3-SIT-3** backend ×2 + host session (if B9 = a) |
+
+### Deferred-ledger adds from the P3-TQ-1 grounding (§9, coordinator-triaged 2026-09-17)
+
+- **O1** a paid call's usage event is lost when the per-call checkpoint fails (`driver.go:339-355`: snapshot runs before the WriteTx; on error neither the D7 row nor the `engine.usage` event lands) — a metering-honesty gap; candidate follow-up with the stage-endings question below.
+- **Stage-endings reading (TQ-1 §2(4)):** S02.3/S02.5 imply a platform bookkeeping failure on a COMPLETED engine session is not a crash cause (FINISHED-DURING-OUTAGE harvests, never redoes); today it lands as `stage.finished outcome=error` → `crashed` → fork. TQ-1 removes the transient trigger; the residual redesign (engine outcome on `stage.finished` + a platform checkpoint-failure event) is a candidate packet, pairing with TQ-F8's run-surface honesty and P3-TQ-2.
+- **O2** the stage-close snapshot failure is swallowed into a Warn line (`skeleton.go:781-785`); the verify mint then reads a stale HEAD with no durable record — a silent degrade (§14-adjacent).
+- **O3** `commit`/`diff --cached` may meet `index.lock` contention from the engine's own git use (also exit 128); unevidenced, no retry specified.
+- **O5** every false crash consumed one of ⚙ `recovery.max_attempts` (lineage-cumulative); other platform-side persistence failures on a live session still do.
+- **Settings-tab ledger:** `snapshotAddAttempts = 3` (structural constant, TQ-1 R5).
 
 ## Part D — recommended order (and what needs no answer)
 
