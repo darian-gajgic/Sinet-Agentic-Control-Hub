@@ -166,6 +166,15 @@ func TestPathShapedRejectsImpostors(t *testing.T) {
 		"npm run build",      // a command (whitespace)
 		"https://x.test/a/b", // a URL
 		"process.env/FOO",    // an expression-ish span with a dot in the first segment
+		// [drain r2 R2] the extension arm's own impostors.
+		"e.g/i.e",               // an abbreviation: ".e" is not an extension
+		"a/b.",                  // nothing after the dot
+		"yes/no.",               // a sentence's full stop, not an extension
+		"docs/guide.md#install", // a link fragment: a place in a document
+		"api/v1.0",              // a version: ".0" has no letter in it
+		"0.5/1.0",               // two numbers, not a path
+		"../other/file.ts",      // climbs out of the workspace
+		`src\data/x.ts`,         // backslashes this index cannot address
 	}
 	for _, span := range impostors {
 		if pathShaped(span) {
@@ -230,10 +239,21 @@ func TestTreeMatchDoubleStarSpansZeroSegments(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("public/** matched %v, want both the immediate child and the nested one", got)
 	}
-	// The zero-segment case on its own: ** after a full path match.
-	flat := tree(t, map[string]string{"public/a.jpg": "x"})
-	if got, err := flat.match("public/**"); err != nil || len(got) != 1 {
-		t.Fatalf("public/** over a flat tree matched %v (err %v), want public/a.jpg", got, err)
+	// The zero-segment cases on their own [drain r2 R1]. The assertion above
+	// does NOT pin them: public/a.jpg has a segment left for "**" to eat, so a
+	// matcher that made "**" mean ONE or more still matches it. These two
+	// leave "**" nothing at all — src/**/a.txt spans nothing between two
+	// literal segments, **/*.json spans nothing before one — so a one-or-more
+	// matcher fails exactly here and nowhere else in this file.
+	flat := tree(t, map[string]string{"src/a.txt": "x", "root.json": "{}"})
+	for _, tc := range []struct{ pattern, want string }{
+		{"src/**/a.txt", "src/a.txt"},
+		{"**/*.json", "root.json"},
+	} {
+		got, err := flat.match(tc.pattern)
+		if err != nil || len(got) != 1 || got[0] != tc.want {
+			t.Fatalf("%s matched %v (err %v), want [%s] — ** spans ZERO or more segments", tc.pattern, got, err, tc.want)
+		}
 	}
 }
 
@@ -261,6 +281,11 @@ func TestRemovalGuardMatchesWholeWordsOnly(t *testing.T) {
 		"the `ui/backdrop.tsx` overlay dims the page",
 		"the `docs/gonegative.md` note is written",
 		"the `src/unusedish.ts` helper is wired up",
+		// [drain r2 R3] a hyphen is part of a word here, not a boundary:
+		// Go's \b would read all three of these as removals.
+		"the `src/deleted-items.ts` list renders",
+		"the card carries a drop-shadow",
+		"the `eslint.config.js` no-unused-vars rule is on",
 	}
 	for _, line := range notRemovals {
 		if _, removal := namedPaths(line); removal {
@@ -276,6 +301,11 @@ func TestRemovalGuardMatchesWholeWordsOnly(t *testing.T) {
 		"`src/old.ts` is no longer referenced",
 		"the deletion of the shim is complete",
 		"removal of the shim is complete",
+		// [drain r2 R3] and the real wordings still trip it, at a line's
+		// start and at its end as well as mid-sentence.
+		"removed the old folder",
+		"the placeholder is gone",
+		"the page no longer imports it",
 	}
 	for _, line := range removals {
 		if _, removal := namedPaths(line); !removal {
@@ -405,5 +435,65 @@ func TestCoveringCriterionTakesTheLowestNumber(t *testing.T) {
 	}
 	if got := coveringCriterion("S-9", cov); got != "" {
 		t.Fatalf("criterion %q for an uncovered step, want none", got)
+	}
+}
+
+// TestUnreadableRootDetailNamesTheFilesNotADot [drain r2 R4]: when the ROOT
+// itself cannot be listed, its relative path is ".", and rendering that into
+// the requester's sentence produced "…: . inside them could not be read." A
+// person is owed a sentence about their files, not a dot to decode.
+func TestUnreadableRootDetailNamesTheFilesNotADot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "note.md"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.Chmod(root, 0o000); err != nil {
+		t.Skipf("cannot make a folder unreadable here: %v", err)
+	}
+	// Restored before the temp dir is cleaned up, whatever this test does.
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	idx, err := indexTree(root)
+	if err == nil {
+		t.Skip("this user can list a 0000 folder, so there is no unreadable root to pin here")
+	}
+	sc := decideFromTree(intake.Step{ID: "S-1", DoneWhen: "the note is written", WriteSet: []string{"note.md"}}, idx, err)
+	if sc.State != ContractUnverifiable || sc.AttributedTo != attrWorkspaceUnreadable {
+		t.Fatalf("state %q attributed %q, want UNVERIFIABLE-HERE / %q", sc.State, sc.AttributedTo, attrWorkspaceUnreadable)
+	}
+	if strings.Contains(sc.Detail, "them: .") || strings.Contains(sc.Detail, "inside them") {
+		t.Fatalf("detail %q renders the root as \".\" — it must say the files themselves could not be read", sc.Detail)
+	}
+	if !strings.Contains(sc.Detail, "could not be listed") {
+		t.Fatalf("detail %q does not say what happened", sc.Detail)
+	}
+	// A deeper unreadable path still names itself, workspace-relative.
+	deep := &treeReadError{Rel: "public/images"}
+	if got := deep.Error(); got != "public/images inside them could not be read" {
+		t.Fatalf("a deeper failure reads %q — the workspace-relative rule is for paths below the root", got)
+	}
+}
+
+// TestRootWriteSetIsUndecidedNotNoWrites [drain r2 R5]: a write set of ["/"]
+// normalizes to nothing, and reading that as "this step declares no files to
+// write" tells the requester the plan said something it did not. It names a
+// root — which these files can neither confirm nor refute — so it takes the
+// absolute-pattern route, and the reason names the pattern.
+func TestRootWriteSetIsUndecidedNotNoWrites(t *testing.T) {
+	idx := tree(t, map[string]string{"src/app.ts": "export {}\n"})
+	for _, pattern := range []string{"/", "./"} {
+		step := intake.Step{ID: "S-1", DoneWhen: "the work is done", WriteSet: []string{pattern}}
+		sc := decideFromTree(step, idx, nil)
+		if sc.State != ContractUnverifiable {
+			t.Fatalf("write set [%q]: state %q, want UNVERIFIABLE-HERE", pattern, sc.State)
+		}
+		if sc.AttributedTo != attrPlanWriteSet {
+			t.Fatalf("write set [%q]: attributed to %q, want %q", pattern, sc.AttributedTo, attrPlanWriteSet)
+		}
+		if !strings.Contains(sc.Detail, pattern) {
+			t.Fatalf("write set [%q]: detail %q does not name the pattern", pattern, sc.Detail)
+		}
+		if strings.Contains(sc.Detail, "declares no files to write") {
+			t.Fatalf("write set [%q]: detail %q reports a claim the plan never made", pattern, sc.Detail)
+		}
 	}
 }

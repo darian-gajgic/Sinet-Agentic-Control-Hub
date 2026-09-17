@@ -68,12 +68,15 @@ const (
 // rework round; a false UNVERIFIABLE-HERE costs nothing the round did not
 // already have.
 //
-// Whole words only. On a substring test a "dropdown" or a "backdrop" reads as
-// a removal, and the step is then handed back with a reason about removing
-// things it never mentioned — a wrong explanation misleads a person as surely
-// as a wrong verdict.
+// Whole words only, and here a hyphen or an underscore is part of a word
+// rather than a boundary. On a substring test a "dropdown" or a "backdrop"
+// reads as a removal; on Go's own \b, so do `deleted-items.ts`, `drop-shadow`
+// and `unused-vars`, because \b treats "-" as a boundary and the file, class
+// and rule names people actually write are full of them. The step would then
+// be handed back with a reason about removing things its line never mentioned
+// — a wrong explanation misleads a person as surely as a wrong verdict.
 var removalPattern = regexp.MustCompile(
-	`(?i)\b(?:remov(?:e|es|ed|ing|al)|delet(?:e|es|ed|ing|ion)|drop(?:s|ped|ping)?|gone|unused|no longer)\b`)
+	`(?i)(?:^|[^\pL\pN_-])(?:remov(?:e|es|ed|ing|al)|delet(?:e|es|ed|ing|ion)|drop(?:s|ped|ping)?|gone|unused)(?:$|[^\pL\pN_-])|no longer`)
 
 // treeIndex is a read-only listing of the verification workspace: every
 // regular file with its size, plus the set of directories. Reading a fact
@@ -96,8 +99,15 @@ type treeReadError struct {
 }
 
 func (e *treeReadError) Error() string {
-	if e.Rel == "" {
+	switch e.Rel {
+	case "":
 		return "the folder holding them could not be opened"
+	case ".":
+		// The failure is on the ROOT itself, whose relative path is ".".
+		// Dropped into the sentence a requester reads, that dot says nothing
+		// and only asks to be puzzled over, so the files themselves are named
+		// instead. Deeper paths keep their workspace-relative name.
+		return "the files in that folder could not be listed"
 	}
 	return fmt.Sprintf("%s inside them could not be read", e.Rel)
 }
@@ -257,6 +267,13 @@ func writeSetPatterns(step intake.Step) []string {
 	seen := map[string]bool{}
 	for _, g := range step.WriteSet {
 		p := normalizePattern(g)
+		if p == "" {
+			// A pattern that normalizes away is NOT "this step declares no
+			// files to write": "/" and "./" name a root. Kept exactly as the
+			// plan wrote it, so the reason can name it and the undecidable
+			// arm — never a refutation — decides it.
+			p = strings.TrimSpace(g)
+		}
 		if p == "" || seen[p] {
 			continue
 		}
@@ -264,6 +281,16 @@ func writeSetPatterns(step intake.Step) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+// unmeasurablePattern reports a declared glob these files can neither confirm
+// nor refute. An absolute one names somewhere other than the workspace the
+// platform was handed; one made of nothing but "." and "/" ("/", "./") names a
+// whole root rather than any file the step promised. Both are recorded
+// undecidable and named in the reason, never refuted — a claim about another
+// place, or about no particular file, is not one this tree can disprove.
+func unmeasurablePattern(p string) bool {
+	return strings.HasPrefix(p, "/") || strings.Trim(p, "./") == ""
 }
 
 // namedPaths reads the paths a "Done when" line names in backticks, and
@@ -311,24 +338,76 @@ func namedPaths(doneWhen string) (paths []string, removal bool) {
 // version (`v1.2/3`) and ordinary slashed prose (`and/or`, `24/7`, `on/off`)
 // all carry one and none of them names a file. So a span qualifies only when
 // it holds no whitespace and none of the characters that mark a URL, a
-// command or an expression; does not begin with "/", since a route is not a
-// file and an absolute path is not this workspace's; holds at least one "/";
-// and finally looks like a file or a folder — a glob metacharacter anywhere,
-// a dot in its LAST segment (an extension), or a trailing slash.
+// command or an expression; carries no "#" (a link fragment: a place in a
+// document, not a file on disk) and no backslash (a Windows-shaped or escaped
+// span this slash-separated index cannot address); has
+// no ".." segment and no trailing "." (a path that climbs out of the workspace
+// decides nothing here, and a sentence-ending dot is punctuation); does not
+// begin with "/", since a route is not a file and an absolute path is not this
+// workspace's; holds at least one "/"; and finally looks like a file or a
+// folder — a glob metacharacter anywhere, a real extension on its LAST segment,
+// or a trailing slash.
+//
+// What it still admits, deliberately: `example.com/index.html` reads as a
+// path, because a first segment with a dot in it is exactly the shape of a
+// real folder (a site directory in a multi-site repo, a dotted package
+// directory), and rejecting the shape would lose true paths to catch a
+// hostname. A domain is the one impostor this rule does not claim to catch.
 func pathShaped(span string) bool {
 	if span == "" || strings.ContainsAny(span, " \t\r\n\v\f") {
 		return false
 	}
-	if strings.ContainsAny(span, ":(){}$=") {
+	if strings.ContainsAny(span, ":(){}$=#\\") {
 		return false
 	}
 	if strings.HasPrefix(span, "/") || !strings.Contains(span, "/") {
 		return false
 	}
+	if strings.HasSuffix(span, ".") {
+		return false
+	}
+	for _, seg := range strings.Split(span, "/") {
+		if seg == ".." {
+			return false
+		}
+	}
 	if strings.ContainsAny(span, "*?[") || strings.HasSuffix(span, "/") {
 		return true
 	}
-	return strings.Contains(span[strings.LastIndexByte(span, '/')+1:], ".")
+	return hasExtension(span[strings.LastIndexByte(span, '/')+1:])
+}
+
+// hasExtension reports whether a last path segment ends in something that
+// reads as a file extension: a non-empty name, then a dot, then two or more
+// letters-and-digits holding at least one LETTER.
+//
+// Each clause buys a rejection the plain "there is a dot in it" test made:
+// the letter kills a version (`api/v1.0`, `0.5/1.0` — ".0" ends nothing), the
+// two-character minimum kills an abbreviation (`e.g/i.e`), the non-empty name
+// and non-empty extension kill `a/b.` and a bare dotfile. The price is a
+// one-letter extension (`src/main.c`) read as prose and left undecided, which
+// is the safe direction: an undecided contract costs a reading, a wrong one
+// FAILs finished work.
+func hasExtension(last string) bool {
+	dot := strings.LastIndexByte(last, '.')
+	if dot <= 0 || dot == len(last)-1 {
+		return false
+	}
+	ext := last[dot+1:]
+	if len(ext) < 2 {
+		return false
+	}
+	letter := false
+	for _, r := range ext {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+			letter = true
+		case r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return letter
 }
 
 // refutation is one pattern the produced files did not satisfy, carrying the
@@ -406,12 +485,8 @@ func decideFromTree(step intake.Step, idx *treeIndex, walkErr error) StepContrac
 		}
 		var wFacts []wFact
 		for _, p := range writes {
-			// An absolute glob names somewhere other than the workspace the
-			// platform was handed, so these files can neither confirm nor
-			// refute it. Recorded as undecidable, never refuted — a claim
-			// about another place is not a claim this tree can disprove.
 			m, err := idx.match(p)
-			if strings.HasPrefix(p, "/") || err != nil {
+			if unmeasurablePattern(p) || err != nil {
 				bad = true
 				addMalformed(p, attrPlanWriteSet)
 				continue
