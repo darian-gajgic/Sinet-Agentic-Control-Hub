@@ -141,6 +141,12 @@ type CheckPack struct {
 	// overloading either. A posture-carrying pack is deliberately not a valid
 	// one — Validate still refuses a pack without checks.
 	Posture Posture `json:"posture,omitempty"`
+	// Provenance names where these commands came from: empty for the owner's
+	// own captured pack, ProvenanceDetected for one the platform scanned out
+	// of the produced tree at a bootstrap round [A16, 2026-09-17]. A detected
+	// pack's rungs are EVIDENCE and its posture stays bootstrap — detected
+	// commands do not graduate a project (Spec S07.8). See evidence.go.
+	Provenance Provenance `json:"provenance,omitempty"`
 }
 
 // Validate checks the pack contract (Spec S07.3): known ladder stages,

@@ -49,10 +49,14 @@ type DangerZone struct {
 // S13.7). The preview slot's consumer is S13.8's (B4-4); data + read surface
 // only here.
 type Commands struct {
-	Build   string `json:"build,omitempty"`
-	Test    string `json:"test,omitempty"`
-	Lint    string `json:"lint,omitempty"`
-	Run     string `json:"run,omitempty"`
+	Build string `json:"build,omitempty"`
+	Test  string `json:"test,omitempty"`
+	Lint  string `json:"lint,omitempty"`
+	Run   string `json:"run,omitempty"`
+	// Dev serves the project from SOURCE, which is what the S07.3 acceptance
+	// walk drives [A16, 2026-09-17] — distinct from Preview, which serves a
+	// built artifact. No consumer until the walk has a driver (P3-TQ-4b).
+	Dev     string `json:"dev,omitempty"`
 	Preview string `json:"preview,omitempty"`
 }
 
@@ -73,9 +77,17 @@ type Capture struct {
 	// of the generic one. Owner-declared, never scanned — nothing in a
 	// repository states what KIND of work its tasks are. "" = none declared,
 	// which is what every capture written before migration 0024 reads back.
-	Family     string `json:"family,omitempty"`
-	CapturedBy string `json:"captured_by"`
-	CapturedTS string `json:"captured_ts"`
+	Family string `json:"family,omitempty"`
+	// Detected holds the commands the platform read out of a produced tree
+	// with the same S13.7 onboarding-scan heuristics, at the execute→verify
+	// boundary of a bootstrap-posture round [A16, 2026-09-17]. Nil means no
+	// scan has ever proposed commands for this project — an honest absence,
+	// distinct from "scanned and found nothing". A hand-captured command in
+	// Commands ALWAYS outranks the detected one in the same slot
+	// (EffectiveCommands); detected commands never graduate the project.
+	Detected   *Commands `json:"detected,omitempty"`
+	CapturedBy string    `json:"captured_by"`
+	CapturedTS string    `json:"captured_ts"`
 }
 
 // Entry is one repo_registry row plus its current captured content.
