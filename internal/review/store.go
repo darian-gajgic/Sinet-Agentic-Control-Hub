@@ -43,6 +43,12 @@ type Store struct {
 	// package; review's import set stays storage+eventlog only (the PixelDiff
 	// seam precedent, R25).
 	BaseContent BaseContentSource
+	// Tree reaches the platform-owned project store for a repo-backed
+	// revision's tree at its snapshot pin (Spec S13.1/S13.2; tree.go). Nil
+	// keeps the companion-object comparison, labeled as such. Wired by the
+	// composition root like BaseContent; review's import set stays
+	// storage+eventlog only.
+	Tree TreeSource
 	// Now is the test clock seam.
 	Now func() time.Time
 }

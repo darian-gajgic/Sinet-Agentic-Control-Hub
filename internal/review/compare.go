@@ -46,6 +46,15 @@ type Comparison struct {
 	// PixelDiff is the optional server-side aid for images (nil seam at
 	// v0; Spec S13.2).
 	PixelDiff *PixelDiffResult `json:"pixel_diff,omitempty"`
+	// Change is the tree lane's inventory (repo-backed revisions only, tree.go):
+	// nil — and absent from the wire — on every content-pinned lane, so those
+	// bodies are byte-unchanged. Unified then holds the per-file diffs of the
+	// inventory in path order, bounded by TreeDiffBytesCap.
+	Change *Change `json:"change,omitempty"`
+	// Truncated + TruncationReason mark a bounded Unified honestly (tree lane
+	// only; never silently cut).
+	Truncated        bool   `json:"truncated,omitempty"`
+	TruncationReason string `json:"truncation_reason,omitempty"`
 }
 
 // PixelDiffAid is the optional S13.2 image pixel-diff seam. v0 wires nil —
