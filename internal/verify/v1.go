@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters"
@@ -270,7 +271,7 @@ type V1Result struct {
 	// verdict card renders stale.
 	StaleAudit bool `json:"stale_audit,omitempty"`
 	// Findings carries the platform-raised V1 findings (quarantine skips,
-	// runner failures) into the round record.
+	// runner failures, contract FAILs) into the round record.
 	Findings []Finding `json:"findings,omitempty"`
 	// PackVersion/PackVerifiedOn identify the suite that ran (recording,
 	// Spec S07.11).
@@ -401,8 +402,10 @@ func (r *SandboxCheckRunner) RunCheck(ctx context.Context, req CheckRequest) (Ch
 // workspace: quarantined checks are skipped (rule 6), the first failing
 // stage stops later stages (their checks and contracts become
 // UNVERIFIABLE-HERE with first-upstream-failure attribution), and every
-// verdict derivation happens here, platform-side (rule 3).
-func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, steps []intake.Step, now time.Time, settings Settings) (V1Result, error) {
+// verdict derivation happens here, platform-side (rule 3). coverage is the
+// approved PLAN's AC coverage map (Spec S06.6): the frozen criterion a step's
+// contract FAIL cites (Spec S07.5 blocker rule; P3-TQ-6).
+func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, steps []intake.Step, coverage map[string][]string, now time.Time, settings Settings) (V1Result, error) {
 	if err := pack.Validate(); err != nil {
 		// An invalid pack is a SCREEN THAT CANNOT RUN, wherever it is caught:
 		// re-running it produces the identical refusal, so the ladder could only
@@ -487,6 +490,20 @@ func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRe
 	}
 
 	res.Steps = stepContracts(res.Checks, steps, firstFailure)
+	// A refuted contract raises one blocker so it reaches a person: the
+	// ladder path mints it exactly as the bootstrap path does (Spec S07.7 —
+	// every verification finding terminates in a human-visible sink; P3-TQ-6).
+	// The step is looked up by id because a contract's position carries no
+	// promise about the plan's order.
+	byID := make(map[string]intake.Step, len(steps))
+	for _, s := range steps {
+		byID[s.ID] = s
+	}
+	for _, sc := range res.Steps {
+		if sc.State == ContractFail {
+			res.Findings = append(res.Findings, contractFinding(sc, byID[sc.StepID], coverage))
+		}
+	}
 	return res, nil
 }
 
@@ -505,6 +522,7 @@ func stepContracts(checks []CheckOutcome, steps []intake.Step, firstFailure stri
 	for _, s := range steps {
 		sc := StepContract{StepID: s.ID, DoneWhen: s.DoneWhen, State: ContractNA}
 		outcomes := byStep[s.ID]
+		var failed []string
 		if len(outcomes) > 0 {
 			sc.State = ContractPass
 			for _, c := range outcomes {
@@ -513,6 +531,7 @@ func stepContracts(checks []CheckOutcome, steps []intake.Step, firstFailure stri
 				case CheckFailed:
 					sc.State = ContractFail
 					sc.AttributedTo = c.CheckID
+					failed = append(failed, c.CheckID)
 				case CheckUnverifiable, CheckQuarantined, CheckRunnerFailed:
 					if sc.State != ContractFail {
 						sc.State = ContractUnverifiable
@@ -524,6 +543,9 @@ func stepContracts(checks []CheckOutcome, steps []intake.Step, firstFailure stri
 				}
 			}
 		}
+		if sc.State == ContractFail {
+			sc.Detail = failedChecksDetail(failed)
+		}
 		if sc.Category == "" {
 			sc.Category = CatACBlocker
 		}
@@ -531,6 +553,22 @@ func stepContracts(checks []CheckOutcome, steps []intake.Step, firstFailure stri
 		out = append(out, sc)
 	}
 	return out
+}
+
+// failedChecksDetail says, in the requester's words, which of the step's
+// checks refused it — the reason that rides the contract's finding text
+// (Spec S07.11 recorded with reasons; CONVENTIONS §38 plain words). Called
+// only for a FAIL contract, which has at least one failed check.
+func failedChecksDetail(ids []string) string {
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = fmt.Sprintf("%q", id)
+	}
+	if len(quoted) == 1 {
+		return fmt.Sprintf("The automated check %s did not pass.", quoted[0])
+	}
+	return fmt.Sprintf("The automated checks %s and %s did not pass.",
+		strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1])
 }
 
 func checkCategory(c CheckOutcome, cur Category) Category {

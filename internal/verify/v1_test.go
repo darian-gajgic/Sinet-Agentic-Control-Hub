@@ -77,7 +77,7 @@ func TestPackValidate(t *testing.T) {
 func TestLadderFirstUpstreamFailure(t *testing.T) {
 	s := regSettings(t)
 	r := &scriptRunner{exits: map[string]int{"unit": 1}}
-	res, err := verify.RunV1(context.Background(), ladderPack(), r, v1req(), ladderSteps(), time.Now(), s)
+	res, err := verify.RunV1(context.Background(), ladderPack(), r, v1req(), ladderSteps(), nil, time.Now(), s)
 	if err != nil {
 		t.Fatalf("RunV1: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestQuarantineSkippedNeverRetried(t *testing.T) {
 		t.Fatalf("QuarantineCheck: %v", err)
 	}
 	r := &scriptRunner{}
-	res, err := verify.RunV1(context.Background(), p, r, v1req(), ladderSteps(), time.Now(), s)
+	res, err := verify.RunV1(context.Background(), p, r, v1req(), ladderSteps(), nil, time.Now(), s)
 	if err != nil {
 		t.Fatalf("RunV1: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestAuditStaleFlagsVerdict(t *testing.T) {
 	s := regSettings(t) // ⚙ verification.check_audit_interval_days = 90
 	p := ladderPack()
 	p.VerifiedOn = time.Now().Add(-91 * 24 * time.Hour)
-	res, err := verify.RunV1(context.Background(), p, &scriptRunner{}, v1req(), nil, time.Now(), s)
+	res, err := verify.RunV1(context.Background(), p, &scriptRunner{}, v1req(), nil, nil, time.Now(), s)
 	if err != nil {
 		t.Fatalf("RunV1: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestAuditStaleFlagsVerdict(t *testing.T) {
 		t.Fatal("suite past ⚙ audit interval not flagged stale (P-T06-1)")
 	}
 	p.VerifiedOn = time.Now().Add(-24 * time.Hour)
-	res, err = verify.RunV1(context.Background(), p, &scriptRunner{}, v1req(), nil, time.Now(), s)
+	res, err = verify.RunV1(context.Background(), p, &scriptRunner{}, v1req(), nil, nil, time.Now(), s)
 	if err != nil {
 		t.Fatalf("RunV1: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestSandboxCheckRunnerPlatformSideVerdict(t *testing.T) {
 func TestRunnerFailureIsNotAVerdict(t *testing.T) {
 	s := regSettings(t)
 	r := &scriptRunner{errs: map[string]error{"lint": errors.New("sandbox compose failed")}}
-	res, err := verify.RunV1(context.Background(), ladderPack(), r, v1req(), nil, time.Now(), s)
+	res, err := verify.RunV1(context.Background(), ladderPack(), r, v1req(), nil, nil, time.Now(), s)
 	if err != nil {
 		t.Fatalf("RunV1: %v", err)
 	}

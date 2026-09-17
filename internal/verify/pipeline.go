@@ -491,7 +491,7 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			}
 			res, err := RunV1(ctx, pack, v.Runner,
 				CheckRequest{RunID: d.RunID, Workspace: ws, EvidenceDir: in.EvidenceDir},
-				in.Steps, v.now(), v.Settings)
+				in.Steps, in.Coverage, v.now(), v.Settings)
 			if cleanup != nil {
 				cleanup()
 			}
@@ -521,6 +521,15 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			v1Facts = v1res.ACOutcomes()
 		}
 		verdicts, integrity := ValidateAxis1(ax1, input.ACs, v1Facts, d.Content)
+		// The same disagreement sentence over the PLAN's step contracts,
+		// which both V1 branches populate: a judge PASS on a criterion whose
+		// covering step the checks refuted is CHECK-INTEGRITY, never an
+		// override (Spec S07.5; P3-TQ-6).
+		var v1Steps []StepContract
+		if v1res != nil {
+			v1Steps = v1res.Steps
+		}
+		verdicts, contractIntegrity := ContractDisagreements(verdicts, v1Steps, in.Coverage)
 		record.Axis1 = verdicts
 
 		var ax2 *Axis2Result
@@ -545,6 +554,7 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 		raw = append(raw, ax1.Findings...)
 		raw = append(raw, UnknownEscapes(verdicts)...)
 		raw = append(raw, integrity...)
+		raw = append(raw, contractIntegrity...)
 		if ax2 != nil {
 			raw = append(raw, ax2.Findings...)
 		}
