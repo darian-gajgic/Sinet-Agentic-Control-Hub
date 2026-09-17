@@ -341,7 +341,11 @@ func ContractDisagreements(verdicts []ACVerdict, contracts []StepContract, cover
 				Category:  CatCheckIntegrity,
 				Criterion: string(CatCheckIntegrity),
 				Anchor:    anchor,
-				Text: fmt.Sprintf("The automated check found step %s's promise unmet, but the review marked criterion %s as met. %s The checks and the review disagree, so a person has to look.",
+				// "Verification", not "the check": on the bootstrap path no
+				// check ran at all — the contract was decided from the files
+				// the work produced (Spec S07.8 [A16]). The contract's own
+				// Detail names whichever of the two said so.
+				Text: fmt.Sprintf("Verification found step %s's promise unmet, but the review marked criterion %s as met. %s The checks and the review disagree, so a person has to look.",
 					stepID, criterionNumber(v.Key), sc.Detail),
 			})
 		}
