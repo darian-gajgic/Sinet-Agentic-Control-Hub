@@ -1,3 +1,5 @@
+> **EXPIRED 2026-09-17 — landed on main as merge `b0bc3bf` (grounding `cb5eff2`, impl `93f7470`, drain r1 `fadee73`; evaluation PASS, re-check PASS). Single-use artifact: never read as truth; code + spec are the truth. Drain r1 SUPERSEDED R3(b): a non-128 exit fails on the FIRST attempt with no attempt count; only the exhausted path says `after N of M attempts`.**
+
 # P3-TQ-1 — the artifact-snapshot race (TQ-F1): grounded brief
 
 Single-use grounding artifact (SKILL.md Stage 1; stamped EXPIRED at landing). Binding sections: **S02.4 (d)**, **S02.3**, **S02.5**, **S13.5**, S02.10; CONVENTIONS §2, §3, §5, §8, §10, §14, §23. Finding: `P3/design/taskquality-webshop-findings-2026-09-16.md` TQ-F1; ratified as a packet 2026-09-17 in `P3/gates/rework-sitting-gate.md` Part C ("conformance defect, no amendment; P3-TQ-1 backend, small"). Grounding branch: `worktree-agent-a1d594b76e5908bc5` (worktree of `main` at `cc8fd85`).
