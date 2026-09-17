@@ -1,0 +1,32 @@
+=== RUN   TestRider1GoldenSetOpus
+    rider1_golden_test.go:160: case g-01  class=clean            defective=false flagged=false (a1=false a2=false) cost=$0.0929 cum=$0.0929
+    rider1_golden_test.go:160: case g-02  class=clean            defective=false flagged=false (a1=false a2=false) cost=$0.0903 cum=$0.1832
+    rider1_golden_test.go:160: case g-03  class=clean            defective=false flagged=true (a1=false a2=true) cost=$0.1058 cum=$0.2890
+    rider1_golden_test.go:160: case g-04  class=clean            defective=false flagged=false (a1=false a2=false) cost=$0.0878 cum=$0.3768
+    rider1_golden_test.go:160: case g-05  class=clean            defective=false flagged=true (a1=false a2=true) cost=$0.0987 cum=$0.4755
+    rider1_golden_test.go:160: case g-06  class=clean            defective=false flagged=true (a1=false a2=true) cost=$0.1060 cum=$0.5815
+    rider1_golden_test.go:160: case g-07  class=AC-BLOCKER       defective=true flagged=true (a1=true a2=true) cost=$0.0811 cum=$0.6626
+    rider1_golden_test.go:160: case g-08  class=AC-BLOCKER       defective=true flagged=true (a1=true a2=true) cost=$0.1007 cum=$0.7633
+    rider1_golden_test.go:160: case g-09  class=AC-BLOCKER       defective=true flagged=true (a1=true a2=true) cost=$0.0867 cum=$0.8500
+    rider1_golden_test.go:160: case g-10  class=AC-BLOCKER       defective=true flagged=true (a1=true a2=true) cost=$0.0844 cum=$0.9344
+    rider1_golden_test.go:160: case g-11  class=AC-BLOCKER       defective=true flagged=true (a1=true a2=true) cost=$0.0887 cum=$1.0231
+    rider1_golden_test.go:160: case g-12  class=AC-BLOCKER       defective=true flagged=true (a1=true a2=true) cost=$0.0843 cum=$1.1074
+    rider1_golden_test.go:160: case g-13  class=SANITY-BLOCKER   defective=true flagged=true (a1=false a2=true) cost=$0.0950 cum=$1.2024
+    rider1_golden_test.go:160: case g-14  class=SANITY-BLOCKER   defective=true flagged=true (a1=true a2=true) cost=$0.0918 cum=$1.2942
+    rider1_golden_test.go:160: case g-15  class=SANITY-BLOCKER   defective=true flagged=true (a1=true a2=true) cost=$0.0974 cum=$1.3916
+    rider1_golden_test.go:160: case g-16  class=SANITY-BLOCKER   defective=true flagged=true (a1=false a2=true) cost=$0.0926 cum=$1.4842
+    rider1_golden_test.go:160: case g-17  class=SANITY-BLOCKER   defective=true flagged=true (a1=false a2=true) cost=$0.0863 cum=$1.5705
+    rider1_golden_test.go:160: case g-18  class=SANITY-BLOCKER   defective=true flagged=true (a1=false a2=true) cost=$0.0930 cum=$1.6635
+    rider1_golden_test.go:160: case g-19  class=CHECK-INTEGRITY  defective=true flagged=true (a1=true a2=true) cost=$0.0855 cum=$1.7491
+    rider1_golden_test.go:160: case g-20  class=CHECK-INTEGRITY  defective=true flagged=true (a1=true a2=true) cost=$0.0856 cum=$1.8346
+    rider1_golden_test.go:160: case g-21  class=RESEARCH-NOT-RUN defective=true flagged=true (a1=true a2=true) cost=$0.0801 cum=$1.9147
+    rider1_golden_test.go:160: case g-22  class=RESEARCH-NOT-RUN defective=true flagged=true (a1=true a2=true) cost=$0.0849 cum=$1.9997
+    rider1_golden_test.go:160: case g-23  class=REOPEN-SPEC      defective=true flagged=true (a1=false a2=true) cost=$0.1043 cum=$2.1040
+    rider1_golden_test.go:160: case g-24  class=REOPEN-SPEC      defective=true flagged=true (a1=true a2=true) cost=$0.0932 cum=$2.1972
+    rider1_golden_test.go:160: case g-25  class=V0-MALFORMED     defective=true flagged=true (a1=true a2=true) cost=$0.0803 cum=$2.2774
+    rider1_golden_test.go:160: case g-26  class=V0-MALFORMED     defective=true flagged=true (a1=true a2=true) cost=$0.0939 cum=$2.3714
+    rider1_golden_test.go:173: RIDER1_RESULT judge=claude-opus-5 cases=26 TPR=1.000[0.84,1.00] (20/20) TNR=0.500[0.19,0.81] (3/6) length_bias_r=-0.167 total_cost=$2.3714 stop=$5.00
+--- PASS: TestRider1GoldenSetOpus (414.80s)
+PASS
+ok  	github.com/darian-gajgic/Sinet-Agentic-Control-Hub/internal/adapters/claudecli	414.811s
+rider1 exit=0
