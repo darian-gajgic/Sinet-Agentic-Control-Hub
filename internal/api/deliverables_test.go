@@ -994,6 +994,7 @@ var deliverablesRoutes = []struct{ method, path, body string }{
 	{"GET", "/api/deliverables", ""},
 	{"GET", "/api/deliverables/d-x", ""},
 	{"GET", "/api/deliverables/d-x/compare", ""},
+	{"GET", "/api/deliverables/d-x/files?revision=1&path=a", ""},
 	{"GET", "/api/deliverables/d-x/comments", ""},
 	{"POST", "/api/deliverables/d-x/comments", `{"body":"x"}`},
 	{"GET", "/api/deliverables/d-x/objects/" + strings.Repeat("ab", 32), ""},
@@ -1117,6 +1118,28 @@ func TestDeliverablesShapesNeverPercent(t *testing.T) {
 		t.Fatal(err)
 	}
 	collectKeys(launched, keys)
+	// The TREE shapes (P3-SIT-1): the change inventory on the detail, the same
+	// inventory on a comparison, one file's narrowed diff and one file's bytes.
+	// A repo-backed world is needed to reach them at all, so the scan takes a
+	// second world rather than a second render of this one.
+	w := newSIT1World(t)
+	for _, path := range []string{
+		"/api/deliverables/dlv-t-shop",
+		"/api/deliverables/dlv-t-shop/compare",
+		"/api/deliverables/dlv-t-shop/compare?path=src%2Fapp.go",
+		sit1FilesPath("dlv-t-shop", 2, "src/app.go"),
+	} {
+		var v any
+		if err := json.Unmarshal([]byte(w.e.mustDo(t, "alice", "GET", path, "")), &v); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		collectKeys(v, keys)
+	}
+	for _, need := range []string{"change", "files", "old_pin", "additions", "truncated"} {
+		if !keys[need] {
+			t.Fatalf("the scan did not reach the tree shapes — %q is absent, so it proves nothing about them", need)
+		}
+	}
 	if len(keys) == 0 {
 		t.Fatal("collected no keys — the scan proves nothing")
 	}

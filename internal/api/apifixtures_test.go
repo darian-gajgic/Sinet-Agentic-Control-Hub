@@ -35,7 +35,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -763,7 +765,135 @@ const (
 const (
 	fxSiteSnap1 = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
 	fxSiteSnap2 = "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c"
+	// The PRE-TASK base: the project as it stood before t-ship started. It holds
+	// the README and the legacy module and NOT site/release.tsx, because writing
+	// that page is what the task did — which is what makes the old=0 body a real
+	// answer ("this file is new, these two were already here and are untouched")
+	// rather than the everything-was-added shape an empty base produces.
+	fxSiteBase = "0b1c2d3e4f5061728394a5b6c7d8e9f00b1c2d3e"
 )
+
+// fxSitePinnedTrees is what the release-notes project holds at each of the three
+// pins. A repo-backed revision IS its tree (Spec S13.1), so this is the
+// fixture's statement of what d-site's two versions actually consist of; the
+// revision rows' own content objects carry the same bodies, which is what keeps
+// the anchored comments below anchoring at the same lines.
+func fxSitePinnedTrees() map[string]map[string]string {
+	return map[string]map[string]string{
+		fxSiteBase:  {"site/README.md": fxSiteReadme, "site/legacy.tsx": fxSiteLegacy},
+		fxSiteSnap1: {"site/release.tsx": fxSiteRev1, "site/README.md": fxSiteReadme, "site/legacy.tsx": fxSiteLegacy},
+		fxSiteSnap2: {"site/release.tsx": fxSiteRev2, "site/README.md": fxSiteReadme},
+	}
+}
+
+// fxTrees is the fixture's review.TreeSource: the S13.1 tree lane over the
+// literal pins above.
+//
+// It stands in for the project store and NOT for git — the line counts it
+// reports are the host git's own, computed from the same two bodies the served
+// diff is computed from, so the committed inventory cannot claim a change the
+// committed diff does not show (§42's producer fidelity). What it replaces is
+// only the repository, and for the reason the pins are literals: real commits
+// would carry the wall clock into every committed body through their shas.
+type fxTrees struct{ t *testing.T }
+
+func (fxTrees) TreeBase(_ context.Context, deliverableID string) (string, bool, error) {
+	if deliverableID != "d-site" {
+		return "", false, nil
+	}
+	return fxSiteBase, true, nil
+}
+
+func (f fxTrees) TreeChanges(_ context.Context, _, oldSHA, newSHA string) ([]review.ChangedFile, error) {
+	trees := fxSitePinnedTrees()
+	old, okOld := trees[oldSHA]
+	next, okNew := trees[newSHA]
+	if !okOld || !okNew {
+		return nil, fmt.Errorf("fixture tree source: unknown pin %q → %q", oldSHA, newSHA)
+	}
+	paths := map[string]bool{}
+	for p := range old {
+		paths[p] = true
+	}
+	for p := range next {
+		paths[p] = true
+	}
+	var out []review.ChangedFile
+	for p := range paths {
+		before, inOld := old[p]
+		after, inNew := next[p]
+		if inOld && inNew && before == after {
+			continue
+		}
+		row := review.ChangedFile{Path: p, OldSize: int64(len(before)), NewSize: int64(len(after))}
+		switch {
+		case !inOld:
+			row.Kind = review.KindAdded
+		case !inNew:
+			row.Kind = review.KindDeleted
+		default:
+			row.Kind = review.KindModified
+		}
+		row.Additions, row.Deletions = fxLineCounts(f.t, before, after)
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
+}
+
+func (fxTrees) TreeBlob(_ context.Context, _, sha, path string, limit int64) ([]byte, int64, bool, error) {
+	tree, ok := fxSitePinnedTrees()[sha]
+	if !ok {
+		return nil, 0, false, fmt.Errorf("fixture tree source: unknown pin %q", sha)
+	}
+	body, ok := tree[path]
+	if !ok {
+		return nil, 0, false, nil
+	}
+	data := []byte(body)
+	size := int64(len(data))
+	if limit > 0 && size > limit {
+		data = data[:limit]
+	}
+	return data, size, true, nil
+}
+
+// fxLineCounts asks the host git for the two numstat figures, exactly as the
+// project store does. Counts are a property of the two bodies, so they carry no
+// clock and the committed inventory stays stable.
+func fxLineCounts(t *testing.T, oldContent, newContent string) (int, int) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{"old": oldContent, "new": newContent} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := osexec.Command("git", "-c", "core.quotepath=false", "diff",
+		"--no-index", "--numstat", "--", "old", "new")
+	cmd.Dir, cmd.Env = dir, dlvGitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		// Exit 1 means "the files differ", which is the whole point of asking.
+		var exit *osexec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			t.Fatalf("fixture numstat: %v", err)
+		}
+	}
+	cols := strings.SplitN(strings.TrimSpace(string(out)), "\t", 3)
+	if len(cols) < 3 {
+		t.Fatalf("fixture numstat output %q is not two counts and a path", out)
+	}
+	add, err := strconv.Atoi(cols[0])
+	if err != nil {
+		t.Fatalf("fixture numstat additions %q: %v", cols[0], err)
+	}
+	del, err := strconv.Atoi(cols[1])
+	if err != nil {
+		t.Fatalf("fixture numstat deletions %q: %v", cols[1], err)
+	}
+	return add, del
+}
 
 // seedFixtureReviewSurface builds the world the S15.8 review surface renders,
 // entirely through S13's own verbs (§42's producer-fidelity rule: a fixture is
@@ -786,6 +916,12 @@ func seedFixtureReviewSurface(t *testing.T, b *backend) {
 	t.Helper()
 	ctx := context.Background()
 	rev := fixtureReview(t, b)
+	// d-site's revisions carry snapshot pins, so they are repo-backed and their
+	// reviewable change is the FILES that moved (Spec S13.1). Wiring the tree
+	// lane here is what makes the committed compare bodies the real served
+	// shapes rather than a diff of the round reports. Every other deliverable
+	// below is content-pinned and never reaches it.
+	rev.Tree = fxTrees{t: t}
 
 	// The OPEN REWORK CARD behind the request-revision door's live limb. The door
 	// is doors-as-data: with no rework card open it names NO route and carries the
@@ -2304,6 +2440,12 @@ var webAPIFixtures = []struct{ name, path, who string }{
 	// old=0 is the PRE-TASK BASE (S13.1) — the one navigation target that is not a
 	// revision, and the reason the revision picker offers a zero at all.
 	{"compare-base", "/api/deliverables/d-site/compare?old=0&new=2", "alice"},
+	// The SAME comparison narrowed to one file, and one file's bytes at a pin —
+	// the two reads the code view is built from (S15.3: the inventory rides the
+	// compare, the bodies are one read away). Both are committed because they
+	// are different answers: one is a diff, the other is the file.
+	{"compare-file", "/api/deliverables/d-site/compare?path=" + url.QueryEscape("site/release.tsx"), "alice"},
+	{"deliverable-file", "/api/deliverables/d-site/files?revision=2&path=" + url.QueryEscape("site/release.tsx"), "alice"},
 	// The three non-diff surfaces, each a defined answer for its type: per-side
 	// object refs and the by-hash verdict for images and binaries, and the PDF's
 	// extraction-failure DEGRADE with its reason on the label.

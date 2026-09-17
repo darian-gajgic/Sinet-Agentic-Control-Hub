@@ -544,6 +544,12 @@ const exceptions: { method: string; path: string; why: string; gap?: boolean }[]
     gap: true,
     why: 'REPORTED GAP (P3-LN-6, 2026-08-25): the 13.4 BACKEND half is served — declaring an automation budget for a lane whose plan meters in its OWN units, at the (person, lane, window) grain those units need — and no surface exists for it. The S15.9 settings tab is its named consumer and lands with 13.4; the token budget verb sat here the same way in B6-2B until its editor arrived. This is an absence with a date, not a route no client may ever call.',
   },
+  {
+    method: 'GET',
+    path: '/api/deliverables/{}/files',
+    gap: true,
+    why: 'REPORTED GAP (P3-SIT-1, 2026-09-17): the backend half of "the code has to be in the deliverables" is served — one file of one version, read byte-for-byte from the snapshot that version pins — and no surface reads it yet. Its named consumer is the very next packet, P3-SIT-2: the code view that renders a repo-backed deliverable file by file, beside the per-file compare this same packet added as a parameter on a route the SPA already calls. An absence with a date, not a route no client may call.',
+  },
 ]
 
 describe('the SPA consumes every API built above (S19.5)', () => {
@@ -656,8 +662,15 @@ describe('the SPA consumes every API built above (S19.5)', () => {
     // forcing it the moment the editor called the route. One route over one
     // shape remains: the plan-budget verb, still waiting on the S15.9
     // settings tab.
-    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(1)
-    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(1)
+    // MOVED 2026-09-17 (P3-SIT-1), 1 → 2 routes over 1 → 2 shapes:
+    // GET /api/deliverables/{}/files is the read a code view is made of — one
+    // file of one version at the commit that version pins — and it is served
+    // before its surface exists, exactly like the two entries above it. Its
+    // consumer is the next packet, P3-SIT-2, which is what makes this a dated
+    // absence rather than a dead route. One route over one new shape; §46
+    // carries the count and the date.
+    expect(gaps.length, 'the reported-gap ROUTE count moved; update CONVENTIONS §46 with it').toBe(2)
+    expect(new Set(gaps).size, 'the reported-gap SHAPE count moved').toBe(2)
     // A reported gap names a route the server DOES serve — that is what makes
     // it a gap rather than a phantom, and the phantom check above already bars
     // an exception naming an unserved route. This assertion read `toBe(0)`

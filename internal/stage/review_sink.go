@@ -79,7 +79,18 @@ func (rs reviewSink) store() *review.Store { return rs.s.cfg.Review }
 
 // ensure resolves (and on the first mint creates) the task deliverable for
 // a verify-side handle.
-func (rs reviewSink) ensure(ctx context.Context, d verify.Deliverable) (review.Deliverable, error) {
+//
+// snapshotSHA decides what KIND of thing this deliverable is, which is why it
+// has to be known before the row is written: for a launch-domain software task
+// whose run is repo-backed, the deliverable is the TREE at that snapshot (Spec
+// S13.1 "repo-backed types pin a snapshot-commit sha"; S13.2's type table has a
+// code row and no markdown-for-an-application row), and the round's written
+// report is a companion object beside it. d.Type is the V0 SHAPE type of that
+// report — correct for the shape check it was computed for, and a false
+// statement about a 23-file application when it is copied onto the row. The
+// row's type is identity-immutable once written (migration 0007), so the
+// distinction cannot be repaired later; it is made here or never.
+func (rs reviewSink) ensure(ctx context.Context, d verify.Deliverable, snapshotSHA string) (review.Deliverable, error) {
 	r, err := rs.s.cfg.Runs.Get(ctx, d.RunID)
 	if err != nil {
 		return review.Deliverable{}, fmt.Errorf("stage: review sink: %w", err)
@@ -87,6 +98,9 @@ func (rs reviewSink) ensure(ctx context.Context, d verify.Deliverable) (review.D
 	dtype := d.Type
 	if dtype == "" {
 		dtype = "text"
+	}
+	if snapshotSHA != "" && d.Domain == verify.DomainSoftware {
+		dtype = "code"
 	}
 	return rs.store().EnsureDeliverable(ctx, review.EnsureInput{
 		ID:     TaskDeliverableID(d.TaskID),
@@ -97,10 +111,6 @@ func (rs reviewSink) ensure(ctx context.Context, d verify.Deliverable) (review.D
 }
 
 func (rs reviewSink) MintCandidate(ctx context.Context, d verify.Deliverable, round int) error {
-	dl, err := rs.ensure(ctx, d)
-	if err != nil {
-		return err
-	}
 	// The round boundary is revision raw material (Spec S13.5, R19): a
 	// project-backed run's workspace snapshot sha pins the minted revision;
 	// a workspace-less run (the content-pin lane — the walking-skeleton
@@ -115,6 +125,13 @@ func (rs reviewSink) MintCandidate(ctx context.Context, d verify.Deliverable, ro
 			return fmt.Errorf("stage: round-boundary snapshot for %s: %w", d.RunID, serr)
 		}
 		snapshotSHA = sha
+	}
+	// The snapshot is taken BEFORE the row is ensured, because whether this run
+	// is repo-backed is what decides the deliverable's type and that type is
+	// immutable from the insert (see ensure).
+	dl, err := rs.ensure(ctx, d, snapshotSHA)
+	if err != nil {
+		return err
 	}
 	// The MINTING run is the verify leg (d.RunID) and stays that way — the
 	// drain's events, checkpoints, judge assemblies and verification tax ride it

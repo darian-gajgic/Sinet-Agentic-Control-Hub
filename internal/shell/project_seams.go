@@ -704,3 +704,92 @@ func (s *projectSeams) BaseContent(ctx context.Context, deliverableID string) (m
 	}
 	return files, true, nil
 }
+
+// wireReviewStore binds the review store and the project seams to each other,
+// which is the whole of what the composition root has to get right for a
+// repo-backed deliverable to be readable.
+//
+// The two directions are separate facts and both are load-bearing: the SEAMS
+// resolve a revision's snapshot pin through the store (the R6 verification
+// workspace), and the STORE reads that revision's files through the seams (the
+// S13.1/S13.2 tree lane). It is a named function rather than two assignments in
+// the middle of Run so the wiring can be exercised by a test that fails when
+// either line is deleted — a composition nothing can check is a composition that
+// silently stops happening.
+//
+// The tree seam is wired HERE, on the store that consumes it, and not through
+// stage.Config: the review store is the reader, and the pipeline has no use for
+// it (CONVENTIONS §23 — stage/intake/review never import internal/project).
+func wireReviewStore(rs *review.Store, ps *projectSeams) {
+	ps.review = rs
+	rs.Tree = ps
+}
+
+// ── review.TreeSource: a repo-backed revision's tree at its pin (SIT-1) ──────
+//
+// The three verbs below are the composition root's whole answer to "what is in
+// this deliverable": review asks by deliverable id, this adapter resolves the
+// id's task and its durably-matched project exactly as BaseContent does — so
+// the owner-scoping is the same scoping, and no name-based cross-user
+// resolution is possible (F3) — and internal/project answers with git
+// plumbing over the pinned commits. `internal/review` still imports no project
+// package (CONVENTIONS §23); this seam is the only place the two meet, and it
+// is wired beside the review store rather than through stage.Config because
+// the review store is the consumer, not the pipeline.
+
+// TreeBase resolves the deliverable's pre-task base commit — the recorded
+// refs/sinet/base/<pipeline> revision 1 is presented against (Spec S13.1/S13.5).
+func (s *projectSeams) TreeBase(ctx context.Context, deliverableID string) (string, bool, error) {
+	projectID, taskID, err := s.deliverableProject(ctx, deliverableID)
+	if err != nil || projectID == "" {
+		return "", false, err
+	}
+	sha, err := s.proj.BaseSHA(ctx, projectID, taskID)
+	if err != nil {
+		return "", false, err
+	}
+	return sha, sha != "", nil
+}
+
+// TreeChanges hands review the project store's own inventory of what differs
+// between two pinned trees. The change KINDS pass through verbatim: one
+// vocabulary with two readers, never two spellings.
+func (s *projectSeams) TreeChanges(ctx context.Context, deliverableID, oldSHA, newSHA string) ([]review.ChangedFile, error) {
+	projectID, _, err := s.deliverableProject(ctx, deliverableID)
+	if err != nil {
+		return nil, err
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("shell: %s belongs to no registered project, so its files cannot be listed", deliverableID)
+	}
+	rows, err := s.proj.TreeChanges(ctx, projectID, oldSHA, newSHA)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]review.ChangedFile, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, review.ChangedFile{
+			Path: r.Path, OldPath: r.OldPath, Kind: r.Kind,
+			OldSize: r.OldSize, NewSize: r.NewSize, Binary: r.Binary,
+			Additions: r.Additions, Deletions: r.Deletions,
+		})
+	}
+	return out, nil
+}
+
+// TreeBlob reads one file of a pinned tree, byte-exact and bounded by limit.
+func (s *projectSeams) TreeBlob(ctx context.Context, deliverableID, sha, path string, limit int64) ([]byte, int64, bool, error) {
+	projectID, _, err := s.deliverableProject(ctx, deliverableID)
+	if err != nil || projectID == "" {
+		return nil, 0, false, err
+	}
+	return s.proj.TreeBlob(ctx, projectID, sha, path, limit)
+}
+
+// deliverableProject resolves THE task deliverable's (project, pipeline) pair —
+// the one resolution the three tree verbs and BaseContent share.
+func (s *projectSeams) deliverableProject(ctx context.Context, deliverableID string) (projectID, taskID string, err error) {
+	taskID = deliverableTaskID(deliverableID)
+	projectID, err = s.projectForTask(ctx, taskID)
+	return projectID, taskID, err
+}

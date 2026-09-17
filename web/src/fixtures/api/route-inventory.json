@@ -288,6 +288,11 @@
     },
     {
       "method": "GET",
+      "path": "/api/deliverables/{deliverable}/files",
+      "session_required": true
+    },
+    {
+      "method": "GET",
       "path": "/api/deliverables/{deliverable}/comments",
       "session_required": true
     },

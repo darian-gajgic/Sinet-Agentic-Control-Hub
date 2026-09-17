@@ -233,7 +233,17 @@ type DeliverableDetail struct {
 	// apart from a posture it has never heard of, and absence is the answer
 	// (the GF4 drain-F3c lesson).
 	Verification *RevisionVerification `json:"verification,omitempty"`
-	Cursor       int64                 `json:"cursor"`
+	// Change is the CURRENT revision's default reviewable change — the file
+	// inventory between it and the version before it (the pre-task base for
+	// revision 1), so a surface can say what this work consists of without a
+	// second read (Spec S13.1 "everything arrives as a reviewable change";
+	// S15.3 splits the inventory from the bodies, which are one read away).
+	//
+	// A pointer, and ABSENT for a deliverable that is not stored as a project
+	// snapshot: there is no file list for a single written answer, and a
+	// zero-valued one would claim an empty change rather than no change.
+	Change *review.Change `json:"change,omitempty"`
+	Cursor int64          `json:"cursor"`
 }
 
 // RevisionVerification is the machine-readable half of what a round's verdict
@@ -281,14 +291,52 @@ func (s *Server) handleDeliverableDetail(w http.ResponseWriter, r *http.Request)
 		s.writeSurface(w, nil, err)
 		return
 	}
+	change, err := s.deliverableChange(r.Context(), d, revs)
+	if err != nil {
+		s.writeSurface(w, nil, s.reviewErr(err))
+		return
+	}
 	s.writeReadJSON(w, DeliverableDetail{
 		Deliverable:  d,
 		Revisions:    revs,
 		Lineage:      lineage,
 		Doors:        s.doorsFor(r.Context(), d, revs),
 		Verification: s.revisionVerification(r.Context(), currentRevision(revs, d.CurrentRevision)),
+		Change:       change,
 		Cursor:       cursor,
 	})
+}
+
+// deliverableChange is the current revision's default change inventory, or nil
+// when this deliverable is not stored as a project snapshot.
+//
+// AN ABSENCE IS RENDERED; A LOST PIN IS NOT AN ABSENCE. An ordinary read failure
+// does not fail the detail — the inventory is one member of a resource read, and
+// refusing the whole deliverable because a part of it could not be assembled
+// would hide the subject to report a problem with it (§38, the
+// `revisionVerification` posture). But a revision whose snapshot commit the
+// project store no longer holds is a platform integrity failure, and saying
+// "could not be read just now" about permanently lost work would be the
+// comfortable lie the drift error exists to prevent: that one propagates and the
+// read answers 500 content_drift.
+func (s *Server) deliverableChange(ctx context.Context, d review.Deliverable, revs []review.Revision) (*review.Change, error) {
+	rev := currentRevision(revs, d.CurrentRevision)
+	if rev.N < 1 || rev.SnapshotSHA == "" {
+		return nil, nil
+	}
+	ch, err := s.review.Change(ctx, d.ID, rev.N-1, rev.N)
+	if errors.Is(err, review.ErrContentDrift) {
+		return nil, err
+	}
+	if err != nil {
+		s.logger.Warn("deliverables: read the change inventory", "deliverable", d.ID, "revision", rev.N, "err", err)
+		return &review.Change{
+			DeliverableID: d.ID, OldN: rev.N - 1, NewN: rev.N, NewPin: rev.SnapshotSHA,
+			OldIsBase: rev.N == 1, Files: []review.ChangedFile{},
+			AbsentReason: "the files in this version could not be read just now",
+		}, nil
+	}
+	return &ch, nil
 }
 
 // revisionVerification reads the posture off the revision's OWN verdict row.
@@ -600,12 +648,125 @@ func (s *Server) handleDeliverableCompare(w http.ResponseWriter, r *http.Request
 			"comparing needs two different versions (old %d, new %d); old=0 means how things stood before the task started", oldN, newN)))
 		return
 	}
-	cmp, err := s.review.Compare(r.Context(), d.ID, oldN, newN)
+	// `?path=` narrows the SAME comparison to one file (Spec S15.3: the
+	// inventory rides the read, the bodies are one read away). It is a
+	// parameter rather than a second endpoint for the reason the revision pair
+	// is: one act, one door.
+	path, err := treePathParam(r, false)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	var cmp review.Comparison
+	if path != "" {
+		cmp, err = s.review.CompareFile(r.Context(), d.ID, oldN, newN, path)
+	} else {
+		cmp, err = s.review.Compare(r.Context(), d.ID, oldN, newN)
+	}
 	if err != nil {
 		s.writeSurface(w, nil, s.reviewErr(err))
 		return
 	}
 	s.writeReadJSON(w, cmp)
+}
+
+// ── GET /api/deliverables/{deliverable}/files ───────────────────────────────
+
+// handleDeliverableFile serves ONE file of one revision as JSON text — the code
+// view of a repo-backed deliverable (Spec S15.8; S13.2's code/text row), and the
+// companion report or a content-pinned deliverable's own object by the same
+// read.
+//
+// Escape-first, like every other content read here: the body is a JSON string,
+// and the objects route stays the one channel that serves raw bytes (Spec
+// S13.3's escape-first contract; the enforcement is S15's).
+func (s *Server) handleDeliverableFile(w http.ResponseWriter, r *http.Request) {
+	if !s.reviewReady(w) {
+		return
+	}
+	d, ok := s.deliverableScope(w, r)
+	if !ok {
+		return
+	}
+	if d.CurrentRevision < 1 {
+		s.writeSurface(w, nil, badRequest("no version of this work has been produced yet, so there are no files to read"))
+		return
+	}
+	n, err := revisionParam(r, "revision", d.CurrentRevision)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	if n < 1 {
+		s.writeSurface(w, nil, badRequest("reading a file needs a numbered version (1 is the first); 0 means the state before the task and holds no version of this work"))
+		return
+	}
+	path, err := treePathParam(r, true)
+	if err != nil {
+		s.writeSurface(w, nil, err)
+		return
+	}
+	fc, err := s.review.RevisionFile(r.Context(), d.ID, n, path)
+	if err != nil {
+		s.writeSurface(w, nil, s.reviewErr(err))
+		return
+	}
+	s.writeReadJSON(w, fc)
+}
+
+// treePathParam reads and validates the `path` query parameter at the transport
+// boundary (§30: anything a caller can fix answers 4xx).
+//
+// A deliverable's file path is repo-relative and names a file in a tree the
+// platform pinned — it is never resolved against a filesystem here, so this is
+// a shape check on an identity, not a traversal guard: a leading separator or a
+// `..` segment would make the served answer claim a path the deliverable does
+// not own, and the control characters would let a path forge a line in the
+// unified diff's own headers.
+func treePathParam(r *http.Request, required bool) (string, error) {
+	raw := r.URL.Query().Get("path")
+	if raw == "" {
+		if required {
+			return "", badRequest(`missing "path": reading a file needs the file's path inside the project, like "src/app.go"`)
+		}
+		return "", nil
+	}
+	if err := checkTreePath(raw); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+// anchorPath is an anchor's claimed file path, or "" when there is no anchor.
+func anchorPath(a *review.AnchorRecord) string {
+	if a == nil {
+		return ""
+	}
+	return a.FilePath
+}
+
+// checkTreePath is THE boundary rule for a project-relative file path, shared by
+// every ingress that can carry one — the files read, the compare's `?path=`, and
+// a comment's anchor. One rule in one place, because a path validated on one
+// route and not on another is the same hole with a different name.
+func checkTreePath(raw string) error {
+	if raw != strings.TrimSpace(raw) {
+		return badRequest(fmt.Sprintf("%q begins or ends with a space: name the file exactly as it is in the project", raw))
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return badRequest("that file path contains characters a path cannot hold")
+		}
+	}
+	if strings.HasPrefix(raw, "/") {
+		return badRequest(fmt.Sprintf("%q is an absolute path: a file is named relative to the project, like \"src/app.go\"", raw))
+	}
+	for _, seg := range strings.Split(raw, "/") {
+		if seg == ".." {
+			return badRequest(fmt.Sprintf("%q steps outside the project: a file is named relative to the project, like \"src/app.go\"", raw))
+		}
+	}
+	return nil
 }
 
 // revisionParam parses a revision query bound, defaulting when absent.
@@ -738,6 +899,20 @@ func (s *Server) handleCommentCreate(w http.ResponseWriter, r *http.Request) {
 			"unknown anchor side %q: an anchor is on the %q or the %q side of the diff (FC-v1 §2)",
 			body.Anchor.Side, review.SideOld, review.SideNew)))
 		return
+	}
+	// An anchor's file_path is a FILE PATH INSIDE THE PROJECT, and on a
+	// repo-backed revision it is handed to git to read that file — so it is
+	// validated by the same boundary rule the files read uses, and for the same
+	// reason: only the caller can fix it, and an unchecked one reached exec.
+	// file_level is the same field at a coarser grain, so it takes the same rule.
+	for _, p := range []string{anchorPath(body.Anchor), body.FileLevel} {
+		if p == "" {
+			continue
+		}
+		if err := checkTreePath(p); err != nil {
+			s.writeSurface(w, nil, err)
+			return
+		}
 	}
 	// The comment is attributed to the AUTHENTICATED identity (15.6): whoever
 	// says it owns having said it. RunID stays empty, which is what makes the

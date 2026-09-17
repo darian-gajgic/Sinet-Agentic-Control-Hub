@@ -64,7 +64,10 @@ func (s *Store) AddComment(ctx context.Context, in CommentInput) (Comment, error
 		body: in.Body, suggested: in.Suggested,
 	}
 	if in.Anchor != nil {
-		files, err := s.RevisionFiles(ctx, in.DeliverableID, revN)
+		// The anchored path is resolved against the revision's OWN file map
+		// (tree.go): the tree at its snapshot pin for repo-backed work, its
+		// content objects otherwise (Spec S13.3).
+		files, err := s.anchorFiles(ctx, in.DeliverableID, revN, []string{in.Anchor.FilePath})
 		if err != nil {
 			return Comment{}, err
 		}
@@ -122,7 +125,7 @@ func (s *Store) AddFindings(ctx context.Context, deliverableID string, revisionN
 	if _, err := s.Deliverable(ctx, deliverableID); err != nil {
 		return nil, err
 	}
-	files, err := s.RevisionFiles(ctx, deliverableID, revisionN)
+	files, err := s.anchorFiles(ctx, deliverableID, revisionN, findingAnchorPaths(findings))
 	if err != nil {
 		return nil, err
 	}
@@ -512,6 +515,9 @@ func (s *Store) placeAll(ctx context.Context, deliverableID string, n int, comme
 	if err != nil {
 		return nil, err
 	}
+	// The paths these comments name bound every tree read below: the anchor map
+	// is the size of the batch's anchors, never the size of the tree (tree.go).
+	paths := anchoredPaths(comments)
 	fileCache := map[int]map[string]string{}
 	filesAt := func(rev int) (map[string]string, error) {
 		if rev < 1 {
@@ -534,7 +540,7 @@ func (s *Store) placeAll(ctx context.Context, deliverableID string, n int, comme
 		if f, ok := fileCache[rev]; ok {
 			return f, nil
 		}
-		f, err := s.RevisionFiles(ctx, deliverableID, rev)
+		f, err := s.anchorFiles(ctx, deliverableID, rev, paths)
 		if err != nil {
 			return nil, err
 		}

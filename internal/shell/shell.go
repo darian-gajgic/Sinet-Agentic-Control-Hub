@@ -605,7 +605,7 @@ func Run(ctx context.Context, opts Options) error {
 		// revision's content pin comes from the review store, and the
 		// materializations live under a platform-owned scratch root — never
 		// system temp (the §25 preview-clones precedent).
-		pseams.review = reviewStore
+		wireReviewStore(reviewStore, pseams)
 		pseams.scratch = filepath.Join(stateDir, "verify-workspaces")
 
 		// The S12 local-tier surface (B4-5): the duty-alias client, the class-(b)

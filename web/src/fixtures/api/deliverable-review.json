@@ -115,5 +115,32 @@
       "reason": "a preview is built from a saved version of the work, and every kind of work gets a straight answer here — \"there is no preview for this\" is an answer, not a fault. With nothing accepted yet to compare against, this shows the one version there is rather than a pair"
     }
   ],
+  "change": {
+    "deliverable_id": "d-site",
+    "old_n": 1,
+    "new_n": 2,
+    "old_pin": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+    "new_pin": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
+    "old_is_base": false,
+    "files": [
+      {
+        "path": "site/legacy.tsx",
+        "kind": "deleted",
+        "old_size": 56,
+        "new_size": 0,
+        "binary": false,
+        "deletions": 2
+      },
+      {
+        "path": "site/release.tsx",
+        "kind": "modified",
+        "old_size": 312,
+        "new_size": 360,
+        "binary": false,
+        "additions": 3,
+        "deletions": 1
+      }
+    ]
+  },
   "cursor": 89
 }
