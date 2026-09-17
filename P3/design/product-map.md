@@ -160,3 +160,138 @@ Backend, `web/src/api.ts`, router and data hooks stay where sound; every view re
 ## 8. v3 amendment record (2026-08-06)
 
 Provenance: checkpoint-2 FAILED verdict + operator answers; analysis of record `P3/design/rework-checkpoint2-findings-2026-08-06.md`. Changes: Describe-a-goal tab → button (§2/§3, nav 15→14); Projects gains the create/onboard door + **packet P3-RW-2 queued** (§3/§5 — no projects HTTP family existed); Board fully specified (§3: Backlog, bounded scrolling columns, Done visible, no Cancelled column, D-A sub-items, honest filters); task detail → structured overlay card + never-raw-errors rule (§3); build order resequenced journey-first with checkpoint 3 defined (§7); process rules P1–P4 bound (fence banners, structure-as-pixels, journey-first checkpoints, seed hygiene — the seeded "moonshot" unknown-status task leaves the operator-facing demo world, golden fixtures untouched). Deferred set (§6 v2 table) unchanged.
+
+---
+
+# Sinet product map v4 — the code-review journey (DRAFT for operator checkpoint 1, 2026-09-17)
+
+**Status: DRAFT, presented for checkpoint 1 under `FRONTEND.md` rule 3 (the map before any component). v3 above is untouched and stays binding for everything it covers; v4 adds one journey.** Packet: P3-SIT-2 (frontend half of "the code has to be in the deliverables"). Grounding: the landed backend contract `web/src/api.ts` + CONVENTIONS §78 (P3-SIT-1), §73 (the receipt's judge line), §76 (`parent_run_id` + `ending`), the six regenerated goldens, and the LIVE served answers of the real webshop deliverable `dlv-t-3120e8e3d14591d3` in a copy of the sitting world (`~/.sinet-sit2-builder`, :8489). Spec wins on behavior: S13.1–S13.3, S13.8, S15.5, S15.8, FC-v1 §2, S02.5, S07.11/S10.10. Reference for the look: the Nexus review v2 source (`app/static/style.css` "Result review" block + `app.js` `renderReviewModal`/`renderReviewFilePane`) on the ratified violet-glass language; it is not running on :8790 and has no venv installed, so the source is the reference.
+
+## 9. The jobs, from the reviewer's chair
+
+You asked for a webshop. A day later the platform says the work is finished and waiting for you. You want to:
+
+1. **See what was built.** The code, all of it: which files exist, what kind of change each one is, how big it is, and the full text of any file you open. Not the worker's essay about the code: the code.
+2. **See what changed since last time.** Version 2 against version 1 by default; the first version against the project as it stood before the task; any two versions when you ask.
+3. **Try it.** Run the thing. When the platform cannot do that yet, it must say so in words that make clear the work is fine, the gap is the platform's, and what you can do instead today.
+4. **Decide.** Accept it, or send it back with a reason, without hunting for the button. And know what the checker found before you decide.
+
+Two riders from this week's backend packets ride the same journey because the same person reads them: **why a run stopped and who carried on** (a crash followed by a successor must read as one story on the task page), and **who checked the work** (the receipt's judge line).
+
+## 10. Navigation, in plain names
+
+| From | Click | You land on |
+|---|---|---|
+| Sidebar → **Reviews** (`/reviews`) | a row | the work's **review page** (`/deliverables/:id`) |
+| Home → "What needs me" | a review-ready row | the review page |
+| Board → a task card → the task's card | **Review this work** (its Deliverables section) | the review page |
+| the review page | **Back to the task** | the task's card, where the run story and receipts live |
+| a push notification about work waiting | its link | the review page |
+
+`/reviews` is a placeholder room today ("build step 4"); this packet fills it with the **index**: every piece of work you may open, grouped *Waiting for you* · *Waiting for someone else* · *Accepted* · *Superseded*, each row = the task's title · what kind of work · version N · whose · when it last moved · **Open review**. It is one small surface over two reads the SPA already makes (`GET /api/deliverables` + `GET /api/tasks` for the titles) and it is the answer to "no idea where I have to click" at the root. **Operator call (Q1 below): include it in this packet, or leave the placeholder.**
+
+## 11. Surfaces — what you see / what you can do
+
+### 11.1 The review page for code (the page that showed only the report)
+
+The page is **one screen with a fixed reading order**, the Nexus review anatomy carried onto a full page (not a modal): a decision strip on top, the file list as the table of contents on the left, the reading pane on the right; on a phone the file list folds into a picker above the pane.
+
+**Top: the decision strip.** *See:* the task's title ("Create a webshop for car replacement parts and tuning parts"), whose work it is, **version N of M**, the state in one sentence ("This finished work is waiting for you. Nobody else reviews it."), and the checker's one-line verdict for this round taken from the served facts (the verification posture banner when the round ran in bootstrap mode, and how the checking round ended, verbatim from the verify run). *Do:* **Accept this work…** (opens the accept card, unchanged), **Ask for changes** (jumps to the comment composer; see 11.1 "What the checker found / your comments" for what a comment does at v0), **Start a follow-up task**, **Try it** (jumps to the try-it section). Every button is a served door; a closed door renders as its reason, never as a dead control.
+
+**Left: the files — the table of contents.** *See:* every file of the served inventory (`change.files`, never truncated): path, the kind as a coloured mark and a word (**new** · **changed** · **deleted** · **renamed from …**), size, `+added −removed` line counts, a **binary** mark where git says so, and a comment badge where a comment or finding anchors in that file. A totals line ("23 files, all new · 42 KB · +1,301 lines"). Base-side comparisons say so in the list's head: "everything below is new: version 1 is compared with the project before the task". *Do:* click a file to read it in the pane; the list scrolls independently on desktop; on a phone it is a select.
+
+**Right: the reading pane.** *See:* the selected file's name, kind and sizes, then one of two views with a toggle: **Changes** (the widget's diff of this file only, side-by-side on desktop, inline on a phone, with word-level edit marks) or **Whole file** (the file at this version, read through the new `files` route, as escaped text with line numbers). Defaults by kind: a **new** file opens as **Whole file** (a wall of green is not how a person reads a new file), a **changed** file opens as **Changes**, a **deleted** file shows the deletion diff and its **Whole file** reads the older version's text where that version is a numbered revision (the pre-task base is not a revision the files route serves; the diff already shows every line), a **binary** file shows its sizes and "no text to show; the bytes are in the record below". Every cut is a sentence: a per-file diff cut at a hunk boundary says so with the served reason and points to Whole file; a whole-file cut at a line boundary says how much of the file is shown and why, verbatim from the wire. *Do:* click a gutter line to comment on it (the anchored-comment loop, unchanged behaviour); switch views; open the next/previous file.
+
+**Below the pane: what changed since last time.** *See:* the version strip (v1 · v2 · … newest selected) and "compared with: **the previous version**" (the platform's own default, the client sends no bounds) with a picker: the previous version · the project before the task · any specific version. The label of the pair always comes from the served answer. *Do:* pick a pair; the file list and the pane follow the new pair's inventory.
+
+**What the worker says it did.** *See:* the step report (`deliverable.md`), rendered as it is today (escape-first markdown in the sandboxed document frame), **demoted**: a collapsed panel under a plain heading with the lead sentence "This is the worker's own account of the work. It is a claim, not a check: the files above are the fact and the checker's findings are below." Open by default only when the deliverable is not repo-backed (then the document IS the work, exactly as today). *Do:* expand/collapse, download the exact bytes.
+
+**What the checker found, and your comments.** *See:* the verification posture banner (bootstrap: "your review is what decides here", with the Commands door), then every finding and comment of this version in one list under the same schema as today, each with its category as served (sanity-blocker · CHECK-INTEGRITY · RESEARCH-NOT-RUN …), its severity, its placement status, and a **jump** into the file where it anchors; findings without a live anchor stay on the always-visible strip. *Do:* comment on the whole work or on a line. Honest at v0: a comment is what the next round works from; the "request a revision" door opens only when the platform asks (a rework card) and is otherwise rendered closed with its served reason; a finished (accepted) work's "ask for changes" starts a follow-up, as the served door says.
+
+**Try it.** *See:* the honest state, in the operator's words (11.4). *Do:* Launch (answers with the platform's served disposition, rendered verbatim), or follow the "what to do instead" line.
+
+**Accept.** Unchanged card and flow, reached from the strip; a closed accept door leads with its reason.
+
+**The record (folded).** Every revision with its pin, minting run, verdict reference and time; lineage; every door with its technical detail; downloads. This is the today's "Revisions" + "What you can do" content, moved out of the reading path.
+
+### 11.2 The task's card — the run story (TQ-F8)
+
+*See:* the stage rail grouped **per attempt**: a header row per run ("Attempt 1 · `t-….execute` · stopped at step S-4: «the served ending, verbatim»"), the steps that attempt drove beneath it, and, where a run carries `parent_run_id`, a joining line into the next header ("→ Attempt 2 · `t-….execute.g1` picked the work up here; its receipt carries what it used, nothing from attempt 1 counts twice") and the successor's own ending ("finished: execution complete: deliverable produced"). On a fresh crash the served ending already says whose fault it was ("Step S-4: the platform could not run the work session for this step. Steps finished earlier stay finished; this attempt stops here." or its "the work session stopped before the step was finished" twin); on the sitting's older world it reads "stage dispatch failed" and renders exactly that. The run-standing nodes at the rail's end fold into these headers so the two sequences stop reading as unconnected. *Do:* nothing new; the cancel and inbox doors stay where they are.
+
+### 11.3 The receipt's judge line (§73)
+
+*See:* on every receipt that carries `judge`: **Checked by** «model» followed by the served note verbatim ("both done by the same family of models (X did the checking), so this check is less independent than usual" / "a different model family from the one that did the work"), with a yellow **same model family** chip when `self_family` is true. It sits directly under the totals line and above Parks, because it answers the reader's next question after "what did this cost": "who checked it". A verification receipt with no judge line says "no judge line is recorded on this receipt" (older receipts); other receipts say nothing, since most runs never reach a verdict.
+
+### 11.4 The preview absence, in the operator's words (SIT-F3)
+
+Today the section offers "Launch a preview" and only after the click answers, in spec dialect, that nothing can be served. Proposed copy, rendered before any click:
+
+> **Try it live: not available on this platform yet.** The work is complete and can be run; what is missing is the platform's own live-preview feature (the host part that would let a preview be reached, and the code that starts and routes one, are not built yet). That is a gap in the platform, not a fault in this work, and it does not block accepting.
+> **To try the app now:** on the host, run `P3/gates/try-deliverable.sh dlv-t-3120e8e3d14591d3`. It checks this exact version out beside the platform (read-only, the platform is not touched), installs its packages, runs its tests, starts its dev server and prints the address to open.
+
+The first paragraph is a v0 build fact written into the SPA and dated, removed by P3-SIT-3 when the substrate lands; **Launch** stays and renders the served disposition verbatim beneath ("a dev-server preview can be prepared, but it cannot be served live yet: …"). The script line names the deliverable id the page is showing. **Operator call (Q2): keep the script line on the page for every household member, or show it to the operator only.**
+
+## 12. The revision-navigation rule
+
+- The **default pair is the platform's**: the client sends no bounds; the answer says which two it compared (existing behaviour test, kept). That is N vs N−1, and for version 1 the pre-task base (`old_n = 0`, `old_is_base = true`).
+- The **first version's only comparison is the base**, said in plain words ("version 1 is compared with the project before the task, so everything in it is new").
+- **Any pair on demand**: the picker offers the previous version, the base, and every numbered version; the inventory and the pane always follow the served `change` of the pair shown.
+- **Whole-file reads** are keyed on the pair's newer side (`files?revision=<new_n>`); a deleted file's whole-file read uses the older side when it is a numbered revision.
+- The **inventory is the authority for the kind** of every file (gitdiff-parser types everything "modify"); the widget renders with the inventory's kind.
+- A leading `./` is stripped before any `compare?path=` (and `files?path=`) call: the inventory keys by tree path, and the two ingresses normalise differently.
+
+## 13. Carry / adapt / drop, reconciled against the CURRENT contract
+
+| Reference pattern | Verdict | Why, against `api.ts` + §78 |
+|---|---|---|
+| Nexus: file list rail with status mark · path · comment badge · `+a −d` | **CARRY** | `change.files[]` serves path, kind, sizes, additions/deletions, binary; comments carry `file_path`; emoji marks become tone dots |
+| Nexus: file pane renders the selected file only | **CARRY** | 23 files at once is the wall the operator hit; the widget renders the selected file's hunks from the one served diff |
+| Nexus: Unified / Side-by-side toggle, remembered in localStorage | **ADAPT** | toggle kept (already "Side by side / Inline"); no web storage (§41-B) so it is per visit; phone defaults to inline |
+| Nexus: pair selector (`round \| base`, `vN → current`) | **CARRY** | S13.1 + `compare?old=&new=` serve exactly that; base = `old=0` |
+| Nexus: "New file (preview it under the task's Files section)" | **ADAPT → the Whole-file view** | the new `files` route serves one file of one version; this closes the declared sweep gap |
+| Nexus: hunk header · add/del tints · mono 11.5px · faint line numbers · hover "+" | **CARRY (through the widget's own variables/selectors)** | adopt-don't-fork: react-diff-view's DOM is styled through its CSS variables and our frame, never patched |
+| Nexus: Pygments syntax colours | **DROP** | FC-v1 §2: client-side tokenizer, no server highlighter; a grammar package is a new adoption and not this packet's; word-level edit marks stay |
+| Nexus: Findings panel (open / addressed batches by `consumed_at`, jump to the line) | **CARRY** | the comments block + the synthetic strip already render this; jump-to-file added; consumed batches already show their attempt |
+| Nexus: Critic panel with SHIP/REVISE/REWRITE chip | **ADAPT** | no verdict document is served on the deliverable; the verify run's `ending` on the task read is the served sentence and renders verbatim in the strip |
+| Nexus: "Retry with this feedback" | **ADAPT → served doors only** | v0 has no retry verb; comments drain at the S13.4 point when the platform asks; the request-revision door renders its served state |
+| Nexus: edit / delete a comment | **DROP** | comments are immutable (S13.3; pinned by a landed test) |
+| Nexus: modal review | **ADAPT → full page** | `/deliverables/:id` is a published deep link (push targets it) |
+| Nexus: image pane inside the file pane | **CARRY (existing)** | the image-pair surface and its trio stay as landed |
+| Nexus: "Binary file — status, KB → KB" | **CARRY** | `binary`, `old_size`, `new_size` are served |
+| Current page: "The work" (rendered report first) | **ADAPT → demoted for repo-backed work** | for a repo-backed revision the tree is the work; for content-pinned documents the rendered document stays first exactly as today |
+| Current page: doors list with open/closed chips | **ADAPT** | doors feed the decision strip; the list moves into the folded record |
+| Current page: verification posture banner | **CARRY (moved)** | sits with the checker's findings |
+| Current page: revisions list + lineage | **ADAPT** | the version strip + the folded record |
+| Current page: try-it copy | **ADAPT** | 11.4 |
+| Current page: accept card, comment loop, follow-up spawn | **CARRY** | behaviour contracts, unchanged |
+| Task card: undifferentiated rail + "run stands at crashed" nodes | **ADAPT** | 11.2, from `parent_run_id` + `ending` (§76) |
+| Receipt: no judge line | **ADD** | 11.3, from `receipt.judge` (§73) |
+
+## 14. Honesty invariants this journey keeps (and how each absence reads)
+
+- **Escape-first, no raw HTML**: the widget renders text; the whole-file view is escaped text in a `<pre>`; the report keeps its sandboxed frame; nothing else may render markup.
+- **Nothing invented**: every count, size, kind and pin on the page is a served field; totals are sums of served rows and say so.
+- `change.absent_reason` → "The file list could not be built: «reason»" (the page still shows the report and the record).
+- `500 content_drift` on any read → "The platform can no longer find the saved version this work pins («served detail»). That is a platform fault, not the work's; nothing here is invented to cover it." The rest of the page renders what it has.
+- A `404` on a file → the served detail ("holds no file … at version …").
+- Truncation on the three caps → the served `truncation_reason` verbatim, plus where to read the rest.
+- A comment with no live anchor → the strip (no comment without a render location).
+- A door closed → its served reason; a launch → the served disposition; a state the build does not know → rendered as itself.
+
+## 15. The contract consumed, and what the SPA's mirror gains (additive, `api.ts`)
+
+`DeliverableDetail.change?`, `Comparison.change?` (`Change` + `ChangedFile`), `api.compare(id, {old, new, path})`, `api.revisionFile(id, revision, path)` → `FileContent` (`truncated`, `truncation_reason`), `TaskRunView.parent_run_id?`/`ending?`, `Receipt.judge?` (`model`, `self_family`, `note`). The fixtures are backend-owned and untouched; renders the goldens do not carry (judge line, a fresh crash's ending, truncation, `content_drift`) are proven with hand-scripted bodies citing their Go producers, the landed precedent. `GET /api/deliverables/{}/files` leaves the sweep's gap list (counts 2 → 1).
+
+## 16. Build order inside the packet, and the checkpoints
+
+1. `api.ts` mirror → the review page's shell on the real webshop: decision strip, file rail, reading pane (Changes / Whole file), version strip. **Checkpoint 2 = rendered screenshots (desktop + 390px) of this page over the builder world.**
+2. The report demoted, the checker's findings with jumps, the try-it copy, the folded record; phone layout.
+3. The task card's attempt-grouped rail, the receipt's judge line, the Reviews index (if Q1 = yes), the task card's "Review this work" door.
+4. Tests (behaviour contracts kept; presentation-coupled ones rewritten after the design settles), the sweep gap closed, the web battery; then the coordinator's live design review + cold walks + machine battery.
+
+## 17. Questions for the operator (checkpoint 1)
+
+- **Q1** The Reviews index at `/reviews` as the front door: build it in this packet (recommended, small) or keep the placeholder?
+- **Q2** The "try it now" script line (11.4): on the page for everyone, or operator-only?
+- **Q3** New files open as **Whole file** by default, changed files as **Changes**: agree?
+- **Q4** The word for the send-back action on the strip: "Ask for changes" (proposed) or another phrase you use?
