@@ -206,8 +206,19 @@ func TestSIT1RevisionOneAgainstThePreTaskBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compare(0,1): %v", err)
 	}
-	if !strings.Contains(cmp.Unified, "+\tserve()") || strings.Contains(cmp.Unified, "+package app") || strings.Contains(cmp.Unified, "# shop") {
-		t.Fatalf("Compare(0,1) is not base → rev 1 (an unchanged base line rendered as added, or the change is missing):\n%s", cmp.Unified)
+	// The old side really is the BASE, stated positively: the base's own line is
+	// shown being replaced. That line is absent exactly when the old side was
+	// empty, which is the failure this guards. It is asserted this way because
+	// the negative form cannot be: `src/cart.go` is genuinely added here and its
+	// first line is "package app", so forbidding "+package app" fires on a
+	// correct answer (P3-SIT-1, sanctioned).
+	if !strings.Contains(cmp.Unified, "+\tserve()") || !strings.Contains(cmp.Unified, "-func Run() {}") {
+		t.Fatalf("Compare(0,1) is not base → rev 1 — the base line being replaced is missing, so the old side was not the base:\n%s", cmp.Unified)
+	}
+	// And an UNCHANGED base file is not a change: README.md is byte-identical in
+	// s0 and s1, so it appears in no header and on no line.
+	if strings.Contains(cmp.Unified, "README.md") || strings.Contains(cmp.Unified, "# shop") {
+		t.Fatalf("a base file unchanged by the task rendered in the change:\n%s", cmp.Unified)
 	}
 }
 
