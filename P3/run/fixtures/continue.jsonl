@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":212,"result":"Wound down. status.json written.","api_error_status":null,"terminal_reason":"completed","total_cost_usd":0}
