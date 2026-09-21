@@ -39,6 +39,10 @@ The spec still wins on behavior (S-refs, honesty invariants, FC-v1 component pic
 - Prescriptive R-numbered briefs for design work.
 - "Looks good" without an attached screenshot.
 
+## Checkpoints are gate files (amendment F, 2026-09-22)
+
+Operator checkpoint 1 (the product map), checkpoint 2 (rendered screenshots), and the operator-eyes exit gate are each a committed `P3/gates/<journey>-checkpoint-<n>.md` under the runbook's gate-file contract (`Status:` line, `answered: no`, `## Answers`), pushed before the builder waits on it. The file names the exact URL, sign-in, and click path of the demo world (hand-steps rule) and embeds or links the screenshots. A headless sitting writes the file and moves to unblocked work; the loop notifies the operator. The builder's context does not survive a sitting: a fresh author resumes from the committed map + screenshots + findings files as canon (never re-derived), the GF2/GF9 precedent. Builder, reviewer, and walker chat reports are capped at 1,200 chars with the full findings file under `P3/design/` as before.
+
 ## What carries over from the backend pipeline
 
 STATE.md discipline (update before/after every step), the landing hygiene (coordinator re-runs the battery, spot-diff, commit, push after milestones), the spec-conflict amendment path, adopt-don't-fork + lockgate, ⚙-through-registry, the failure ladder, and the hard boundaries — all unchanged. Only the shape of design work changes: one author, real references, screens judged as screens.
