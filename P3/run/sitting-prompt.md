@@ -13,6 +13,7 @@ You are ONE budgeted sitting of the Sinet P3 build, launched headless by `P3/run
 - Before starting work, check every open gate file for `answered: yes` (or a filled `## Answers` section): record the answers in STATE, execute them, set the file's status line to ANSWERED.
 
 ## Stop and over-budget signals
+- Never run `git clean`, `git reset --hard`, or `git checkout -- .` on `main`, and never delete or rewrite anything under `P3/run/` — those are the harness's control files, not yours.
 - Before launching any stage, check for `P3/run/STOP`: if it exists, wind down now (outcome `CONTINUE`; the loop exits).
 - If your context is auto-compacted during a sitting, you are over budget: finish the running stage, then wind down. (The `PreCompact` hook logs it to `P3/run/log/compactions.log`; that count decides whether the packet cap moves.)
 

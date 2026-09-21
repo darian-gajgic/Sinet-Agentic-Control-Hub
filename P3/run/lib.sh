@@ -18,6 +18,10 @@ LOOP_LOG="$LOG_DIR/loop.log"
 : "${P3_NOTIFY_URL:=}"                            # optional ntfy.sh topic URL for phone push (curl -d)
 : "${P3_SITTING_MAX_BUDGET_USD:=}"                # optional nominal-cost rail (--max-budget-usd); empty = none (subscription lane)
 : "${P3_PROBE_INTERVAL:=900}"                     # seconds between canary probes while a limit is active
+: "${P3_PAUSE_MIN:=120}"                          # pause after a productive sitting
+: "${P3_PAUSE_MAX:=1800}"                         # idle backoff cap while sittings make no progress (120 → 600 → cap)
+: "${P3_CRASH_PAUSE:=300}"                        # pause after a crash-class sitting
+: "${P3_SWITCH_PAUSE:=60}"                        # pause after switching models on a Fable limit
 
 LIMIT_RE='hit your (usage |session |weekly )?limit|reached your [a-z ]*limit|usage limit|rate[ _-]?limit|limit reached|limit will reset|out of (usage|credits)|quota (exceeded|reached)'
 
@@ -116,6 +120,12 @@ probe_model() { # probe_model <model>  — 0 when a one-turn canary completes on
   local out; out="$(cd "$P3_ROOT" && timeout 120 claude -p "Reply with exactly the single word OK." --model "$1" --max-turns 1 \
       --permission-mode auto --permission-prompts none --output-format json --no-session-persistence 2>/dev/null)"
   [ "$(printf '%s' "$out" | jq -r '.terminal_reason // ""' 2>/dev/null)" = completed ] && [ "$(printf '%s' "$out" | jq -r '.is_error' 2>/dev/null)" = false ]
+}
+
+progress_since() { # progress_since <head_before> <head_after>  — 0 when the sitting committed anything beyond bookkeeping
+  # STATE/HANDOFF/history commits happen every sitting, so they are not progress (research §5 gap 5).
+  [ "$1" = "$2" ] && return 1
+  git -C "$P3_ROOT" diff --name-only "$1" "$2" 2>/dev/null | /usr/bin/grep -vqE '^P3/(STATE|STATE-HISTORY|HANDOFF)\.md$'
 }
 
 gate_answered() { # gate_answered <gate file>  — 0 when the operator marked it answered (yes|partial)

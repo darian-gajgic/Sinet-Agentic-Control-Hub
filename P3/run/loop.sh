@@ -12,8 +12,8 @@ cd "$P3_ROOT"
 decide() { # decide <classification> → prints the action line the loop takes (pure; used by --dry-run and tests)
   local c="$1"
   case "$c" in
-    CONTINUE)  echo "NEXT after 120s";;
-    CAPPED:*)  echo "NEXT after 120s (budget rail: ${c#CAPPED:}; the next sitting recovers from git)";;
+    CONTINUE)  echo "NEXT after the pause (${P3_PAUSE_MIN}s, growing to ${P3_PAUSE_MAX}s while sittings make no progress)";;
+    CAPPED:*)  echo "NEXT after the pause (budget rail: ${c#CAPPED:}; the next sitting recovers from git)";;
     DONE)      echo "EXIT 0 (queue empty)";;
     GATE:*)    echo "WAIT for answered:yes|partial in ${c#GATE:} (poll 600s), notify";;
     BLOCKED:*) echo "WAIT for RESUME file (poll 600s), notify: ${c#BLOCKED:}";;
@@ -25,7 +25,7 @@ decide() { # decide <classification> → prints the action line the loop takes (
   esac
 }
 
-MODEL="$P3_MODEL_PRIMARY"; CRASHES=0; STALLS=0; BACKOFF=900; FABLE_LIMITED_UNTIL=0; ONCE=0
+MODEL="$P3_MODEL_PRIMARY"; CRASHES=0; STALLS=0; BACKOFF=900; PAUSE="$P3_PAUSE_MIN"; PROGRESS=0; FABLE_LIMITED_UNTIL=0; ONCE=0
 
 if [ "${1:-}" = "--dry-run" ]; then
   shift; LOGF="${1:-/dev/null}"; STF="${2:-/nonexistent}"; HB="${3:-a}"; HA="${4:-b}"
@@ -65,14 +65,17 @@ while :; do
   HEAD_AFTER="$(git rev-parse HEAD)"
   CLASS="$(classify "$LOGF" "$STATUS_FILE" "$HEAD_BEFORE" "$HEAD_AFTER" "$MODEL")"
   ACTION="$(decide "$CLASS")"
-  log "CLASS $CLASS | commits $( [ "$HEAD_BEFORE" != "$HEAD_AFTER" ] && echo new || echo none ) | ACTION $ACTION"
-  # stall breaker: three consecutive working sittings without a new commit on main
-  case "$CLASS" in CONTINUE|CAPPED:*|GATE:*|BLOCKED:*|CRASH:*)
-    if [ "$HEAD_BEFORE" = "$HEAD_AFTER" ]; then STALLS=$((STALLS+1)); else STALLS=0; fi
-    [ "$STALLS" -ge 3 ] && { notify "P3 loop stopped: stall" "3 sittings without a new commit on main"; exit 1; };;
+  if progress_since "$HEAD_BEFORE" "$HEAD_AFTER"; then PROGRESS=1; else PROGRESS=0; fi
+  log "CLASS $CLASS | progress $( [ "$PROGRESS" = 1 ] && echo yes || echo "none (bookkeeping-only or no commit)" ) | ACTION $ACTION"
+  # stall breaker: three consecutive COMPLETED sittings without progress beyond STATE/HANDOFF bookkeeping
+  # (crashes have their own breaker; limits count toward neither); idle backoff: the pause between
+  # unproductive sittings grows P3_PAUSE_MIN ×5 per step up to P3_PAUSE_MAX (diminishing returns)
+  case "$CLASS" in CONTINUE|CAPPED:*|GATE:*|BLOCKED:*)
+    if [ "$PROGRESS" = 1 ]; then STALLS=0; PAUSE="$P3_PAUSE_MIN"; else STALLS=$((STALLS+1)); PAUSE=$(( PAUSE*5 > P3_PAUSE_MAX ? P3_PAUSE_MAX : PAUSE*5 )); fi
+    [ "$STALLS" -ge 3 ] && { notify "P3 loop stopped: stall" "3 sittings without progress beyond bookkeeping — see $LOG_DIR"; exit 1; };;
   esac
   case "$CLASS" in
-    CONTINUE|CAPPED:*) CRASHES=0; BACKOFF=900; [ "$ONCE" = 1 ] && { log "--once: done"; exit 0; }; sleep 120;;
+    CONTINUE|CAPPED:*) CRASHES=0; BACKOFF=900; [ "$ONCE" = 1 ] && { log "--once: done"; exit 0; }; log "next sitting in ${PAUSE}s"; sleep "$PAUSE";;
     DONE)     notify "P3 loop finished" "Queue empty — DONE"; exit 0;;
     GATE:*)   CRASHES=0; GATEF="${CLASS#GATE:}"; notify "P3 needs a decision" "Gate file: $GATEF — answer in the file (answered: yes) or in a session"
               [ "$ONCE" = 1 ] && exit 0
@@ -82,7 +85,7 @@ while :; do
     LIMIT:*)  CRASHES=0; FAM="${CLASS#LIMIT:}"; RESET="${FAM#*:}"; FAM="${FAM%%:*}"
               if [ "$FAM" = fable ] && [ "$MODEL" = "$P3_MODEL_PRIMARY" ]; then
                 FABLE_LIMITED_UNTIL=$(( RESET > 0 ? RESET : $(date +%s) + 3600 )); MODEL="$P3_MODEL_FALLBACK"
-                log "Fable limit — switching sittings to $MODEL until $(date -u -d "@$FABLE_LIMITED_UNTIL" +%FT%TZ)"; [ "$ONCE" = 1 ] && exit 0; sleep 60
+                log "Fable limit — switching sittings to $MODEL until $(date -u -d "@$FABLE_LIMITED_UNTIL" +%FT%TZ)"; [ "$ONCE" = 1 ] && exit 0; sleep "$P3_SWITCH_PAUSE"
               else
                 SLEEP=$(( RESET > 0 ? RESET - $(date +%s) + 60 : BACKOFF )); [ "$SLEEP" -lt 60 ] && SLEEP=60
                 log "limit on $FAM — sleeping ${SLEEP}s, then canary probes every ${P3_PROBE_INTERVAL}s"; BACKOFF=$(( BACKOFF < 3600 ? BACKOFF*2 : 3600 )); [ "$BACKOFF" -gt 3600 ] && BACKOFF=3600
@@ -92,7 +95,7 @@ while :; do
               fi;;
     CRASH:*)  CRASHES=$((CRASHES+1)); log "crash #$CRASHES: ${CLASS#CRASH:}"
               [ "$CRASHES" -ge 3 ] && { notify "P3 loop stopped: crashes" "3 consecutive sittings without a status file — see $LOG_DIR"; exit 1; }
-              [ "$ONCE" = 1 ] && exit 1; sleep 300;;
+              [ "$ONCE" = 1 ] && exit 1; sleep "$P3_CRASH_PAUSE";;
     *)        notify "P3 loop stopped" "unclassifiable: $CLASS"; exit 1;;
   esac
 done

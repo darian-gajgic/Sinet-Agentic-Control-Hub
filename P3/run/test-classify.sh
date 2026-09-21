@@ -30,12 +30,15 @@ if [ "$e" -gt "$now" ] && [ "$e" -le $((now+86400)) ]; then echo "ok   reset-3pm
 t=$(mktemp); printf 'Status: OPEN\nanswered: no\n' > "$t"; n=$((n+1)); gate_answered "$t" && { echo "FAIL gate-no"; fail=1; } || echo "ok   gate-no"
 printf 'Status: ANSWERED\nanswered: yes\n' > "$t"; n=$((n+1)); gate_answered "$t" && echo "ok   gate-yes" || { echo "FAIL gate-yes"; fail=1; }
 printf 'answered: partial\n' > "$t"; n=$((n+1)); gate_answered "$t" && echo "ok   gate-partial" || { echo "FAIL gate-partial"; fail=1; }; rm -f "$t"
+# progress predicate: bookkeeping-only commits are not progress
+B=$(git -C "$P3_ROOT" rev-parse HEAD); n=$((n+1)); progress_since "$B" "$B" && { echo "FAIL progress-same-head"; fail=1; } || echo "ok   progress-same-head → none"
+P=$(git -C "$P3_ROOT" log --format=%H -1 --diff-filter=A -- P3/run/loop.sh); n=$((n+1)); progress_since "$P~1" "$P" && echo "ok   progress-real-commit → yes" || { echo "FAIL progress-real-commit"; fail=1; }
 # loop --dry-run decisions
-expect dry-continue 'ACTION NEXT after 120s'                     "$("$RUN_DIR/loop.sh" --dry-run $F/continue.jsonl $F/continue.status.json a b | tail -1)"
+expect dry-continue 'ACTION NEXT after the pause'                     "$("$RUN_DIR/loop.sh" --dry-run $F/continue.jsonl $F/continue.status.json a b | tail -1)"
 expect dry-gate     'ACTION WAIT for answered'                   "$("$RUN_DIR/loop.sh" --dry-run $F/gate.jsonl $F/gate.status.json a b | tail -1)"
 expect dry-limit    "ACTION SWITCH to $P3_MODEL_FALLBACK"        "$("$RUN_DIR/loop.sh" --dry-run $F/limit-fable-text.jsonl /nonexistent a a | tail -1)"
 expect dry-opus     'ACTION SLEEP until'                         "$("$RUN_DIR/loop.sh" --dry-run $F/limit-opus-in.jsonl /nonexistent a a | tail -1)"
 expect dry-crash    'ACTION CRASH #1'                            "$("$RUN_DIR/loop.sh" --dry-run $F/crash-noresult.jsonl /nonexistent a a | tail -1)"
 expect dry-done     'ACTION EXIT 0'                              "$("$RUN_DIR/loop.sh" --dry-run $F/done.jsonl $F/done.status.json a b | tail -1)"
-expect dry-capped   'ACTION NEXT after 120s \(budget rail'      "$("$RUN_DIR/loop.sh" --dry-run $F/crash-maxturns.jsonl /nonexistent a a | tail -1)"
+expect dry-capped   'ACTION NEXT after the pause \(budget rail'      "$("$RUN_DIR/loop.sh" --dry-run $F/crash-maxturns.jsonl /nonexistent a a | tail -1)"
 echo "---- $n checks, $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"; exit $fail

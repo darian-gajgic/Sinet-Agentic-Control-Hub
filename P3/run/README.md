@@ -16,7 +16,8 @@ Design: `P3/design/continuous-run-harness-proposal-2026-09-22.md` (ratified 2026
 ## Run it
 
 ```bash
-P3/run/test-classify.sh                     # 28 checks, no API calls
+P3/run/test-classify.sh                     # 30 checks, no API calls
+P3/run/test-loop.sh                         # breaker tests with a stub claude: crash breaker, stall breaker, LIMIT resets the crash count
 P3/run/sitting.sh --smoke                   # one 1-turn call: proves auth, flags, model string, log capture
 tmux new -s p3loop 'P3/run/loop.sh --once'  # H-2(a): ONE supervised sitting, then exit
 tmux new -s p3loop 'P3/run/loop.sh'         # H-2(b): unattended chain
@@ -28,12 +29,12 @@ touch P3/run/RESUME                         # end a gate/blocked wait without ed
 
 **After a limit:** the loop sleeps until the parsed reset (or backoff 15 min → 1 h), then sends a one-turn canary (`probe_model`) every 15 min until the limited model answers; the Fable→Opus switch reverses only after a Fable probe completes. Budget rails cut a sitting before its wind-down → `CAPPED` (treated as CONTINUE; the next sitting recovers from git). A non-limit API failure (auth wall, overload) → crash class with backoff; three in a row stop the loop. Note `--system-prompt-snapshot` defaults to on: editing `sitting-prompt.md` mid-sitting has no effect until the next sitting.
 
-Environment knobs (defaults in `lib.sh`): `P3_MODEL_PRIMARY` (`claude-fable-5-1[1m]`), `P3_MODEL_FALLBACK` (`claude-opus-5`), `P3_SITTING_WALL` (`4h`), `P3_SITTING_MAX_TURNS` (`600`), `P3_SITTING_MAX_BUDGET_USD` (empty = no nominal-cost rail on the subscription lane), `P3_PROBE_INTERVAL` (`900`), `P3_NOTIFY_URL` (optional ntfy.sh topic for phone push).
+Environment knobs (defaults in `lib.sh`): `P3_MODEL_PRIMARY` (`claude-fable-5-1[1m]`), `P3_MODEL_FALLBACK` (`claude-opus-5`), `P3_SITTING_WALL` (`4h`), `P3_SITTING_MAX_TURNS` (`600`), `P3_SITTING_MAX_BUDGET_USD` (empty = no nominal-cost rail on the subscription lane), `P3_PROBE_INTERVAL` (`900`), `P3_PAUSE_MIN`/`P3_PAUSE_MAX` (`120`/`1800`, idle backoff), `P3_CRASH_PAUSE` (`300`), `P3_SWITCH_PAUSE` (`60`), `P3_NOTIFY_URL` (optional ntfy.sh topic for phone push).
 
 ## How a sitting is classified (never by exit code)
 
 1. A usage-limit signature in the final `{"type":"result"}` line (`api_error_status` 429, or the limit regex in `result`/`error`) → `LIMIT:<family>:<reset epoch>`. Fable limit while on the primary model → the next sittings run on the fallback until the parsed reset (or 1 h); any other limit → sleep until the reset, else backoff 15 min → 1 h.
 2. Else the sitting's own `status.json` (its last act): `CONTINUE` → next after 2 min; `GATE:<file>` → desktop notification, poll the file for `answered: yes|partial` every 10 min; `BLOCKED` → notification, wait for `RESUME`; `DONE` → exit 0.
-3. Else `CRASH` (no signature): 3 consecutive → stop + notify. Stall breaker: 3 consecutive sittings without a new commit on `main` → stop + notify.
+3. Else `CRASH` (no signature): 3 consecutive → stop + notify. Stall breaker: 3 consecutive sittings without progress beyond STATE/HANDOFF bookkeeping commits → stop + notify; the pause between unproductive sittings grows 2 min → 10 min → 30 min. A LIMIT never counts as a crash or a stall.
 
 Never run an interactive `continue implementation` session while the loop is up: touch `STOP` first, wait for the sitting to end (`tmux attach -t p3loop`), then work interactively.
