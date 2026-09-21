@@ -12,6 +12,10 @@ You are ONE budgeted sitting of the Sinet P3 build, launched headless by `P3/run
 - Then continue with work the gate does not block. Only when no unblocked work remains do you wind down with outcome `GATE`.
 - Before starting work, check every open gate file for `answered: yes` (or a filled `## Answers` section): record the answers in STATE, execute them, set the file's status line to ANSWERED.
 
+## Stop and over-budget signals
+- Before launching any stage, check for `P3/run/STOP`: if it exists, wind down now (outcome `CONTINUE`; the loop exits).
+- If your context is auto-compacted during a sitting, you are over budget: finish the running stage, then wind down. (The `PreCompact` hook logs it to `P3/run/log/compactions.log`; that count decides whether the packet cap moves.)
+
 ## Usage limits and dead agents
 - If a stage agent or your own turn reports a usage limit ("hit your limit", "usage limit", "reached your … limit", `rate_limit`), do not relaunch. Record the resumable state in STATE and wind down with outcome `LIMIT` and `family` = `fable` or `opus` (whichever model was limited; `unknown` if unclear). The loop sleeps or switches models; the next sitting relaunches.
 - An agent that dies for any other reason: relaunch that stage once with the failure noted; twice → the failure ladder in the runbook.

@@ -16,6 +16,8 @@ LOOP_LOG="$LOG_DIR/loop.log"
 : "${P3_SITTING_WALL:=4h}"                        # SIGINT after this (rule R1); +15 min grace then SIGKILL
 : "${P3_SITTING_MAX_TURNS:=600}"                  # secondary rail (runaway guard); the wall clock is the hard rail
 : "${P3_NOTIFY_URL:=}"                            # optional ntfy.sh topic URL for phone push (curl -d)
+: "${P3_SITTING_MAX_BUDGET_USD:=}"                # optional nominal-cost rail (--max-budget-usd); empty = none (subscription lane)
+: "${P3_PROBE_INTERVAL:=900}"                     # seconds between canary probes while a limit is active
 
 LIMIT_RE='hit your (usage |session |weekly )?limit|reached your [a-z ]*limit|usage limit|rate[ _-]?limit|limit reached|limit will reset|out of (usage|credits)|quota (exceeded|reached)'
 
@@ -79,25 +81,41 @@ classify() { # classify <stream log> <status file> <head_before> <head_after> <s
   local logf="$1" statusf="$2" before="$3" after="$4" model="$5"
   local rj text
   rj="$(last_result_json "$logf")"; text="$(result_text "$rj")"
-  # 1. a limit hit anywhere in the result beats everything (a sitting cannot write a status after it)
-  local status429; status429="$(printf '%s' "$rj" | jq -r '.api_error_status // empty' 2>/dev/null)"
+  # Field semantics verified on 2.1.278 (P3/design/harness-sota-research-2026-09-22.md §1.3): decide on
+  # terminal_reason + is_error + text, never on subtype (an API failure reports subtype "success" with is_error true).
+  local status429 treason iserr; status429="$(printf '%s' "$rj" | jq -r '.api_error_status // empty' 2>/dev/null)"
+  treason="$(printf '%s' "$rj" | jq -r '.terminal_reason // empty' 2>/dev/null)"; iserr="$(printf '%s' "$rj" | jq -r '.is_error // false' 2>/dev/null)"
+  # 1. a limit hit anywhere in the result beats everything (a sitting cannot wind down after it)
   if [ -n "$rj" ] && { [ "$status429" = "429" ] || printf '%s' "$text" | /usr/bin/grep -qiE "$LIMIT_RE"; }; then
     echo "LIMIT:$(limit_family "$text" "$model"):$(parse_reset_epoch "$text")"; return; fi
-  # 2. the sitting's own signature
+  # 2. the sitting's own signature (its last act) — or the StopFailure hook's LIMIT record
   if [ -f "$statusf" ] && jq -e . "$statusf" >/dev/null 2>&1; then
     local oc; oc="$(jq -r '.outcome // empty' "$statusf")"
     case "$oc" in
       CONTINUE|DONE) echo "$oc"; return;;
       BLOCKED) echo "BLOCKED:$(jq -r '.note // ""' "$statusf" | tr '\n' ' ')"; return;;
       GATE) echo "GATE:$(jq -r '.gate // ""' "$statusf")"; return;;
-      LIMIT) echo "LIMIT:$(jq -r '.family // "unknown"' "$statusf"):0"; return;;
+      LIMIT) local fam note; fam="$(jq -r '.family // "unknown"' "$statusf")"; note="$(jq -r '.note // ""' "$statusf")"
+             [ "$fam" = unknown ] || [ -z "$fam" ] && fam="$(limit_family "$note" "$model")"
+             echo "LIMIT:$fam:$(parse_reset_epoch "$note")"; return;;
       *) echo "CRASH:bad status outcome '$oc'"; return;;
     esac
   fi
-  # 3. no signature: crash class, with the best reason we have
+  # 3. no signature: a budget rail cut the sitting before its wind-down → CAPPED (the next sitting recovers from git)
+  case "$treason" in max_turns|budget_exhausted) echo "CAPPED:$treason (turns=$(printf '%s' "$rj" | jq -r '.num_turns // "?"'))"; return;; esac
+  # 4. an API failure that is not a limit (auth wall, overloaded, server error): crash class, backoff applies
+  if [ "$treason" = api_error ] || { [ "$iserr" = true ] && [ "$(printf '%s' "$rj" | jq -r '.duration_api_ms // 1')" = 0 ]; }; then
+    echo "CRASH:api_error $(printf '%s' "$text" | tr '\n' ' ' | cut -c1-160)"; return; fi
+  # 5. anything else without a signature
   local sub; sub="$(printf '%s' "$rj" | jq -r '.subtype // empty' 2>/dev/null)"
   [ -z "$rj" ] && { echo "CRASH:no result line (killed, or claude never started)"; return; }
-  echo "CRASH:no status.json (subtype=${sub:-?} is_error=$(printf '%s' "$rj" | jq -r '.is_error // "?"') turns=$(printf '%s' "$rj" | jq -r '.num_turns // "?"'))"
+  echo "CRASH:no status.json (terminal_reason=${treason:-?} subtype=${sub:-?} is_error=$iserr turns=$(printf '%s' "$rj" | jq -r '.num_turns // "?"'))"
+}
+
+probe_model() { # probe_model <model>  — 0 when a one-turn canary completes on that model (used before resuming after a limit)
+  local out; out="$(cd "$P3_ROOT" && timeout 120 claude -p "Reply with exactly the single word OK." --model "$1" --max-turns 1 \
+      --permission-mode auto --permission-prompts none --output-format json --no-session-persistence 2>/dev/null)"
+  [ "$(printf '%s' "$out" | jq -r '.terminal_reason // ""' 2>/dev/null)" = completed ] && [ "$(printf '%s' "$out" | jq -r '.is_error' 2>/dev/null)" = false ]
 }
 
 gate_answered() { # gate_answered <gate file>  — 0 when the operator marked it answered (yes|partial)

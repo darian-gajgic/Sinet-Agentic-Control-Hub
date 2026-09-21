@@ -1,0 +1,36 @@
+{
+  "StopFailure": [
+    {
+      "matcher": "rate_limit|usage_limit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "[ -n \"$P3_SITTING\" ] && jq -c '{outcome:\"LIMIT\",family:\"unknown\",note:((.error // \"\")+\" \"+((.error_details // \"\")|tostring)),hook:\"StopFailure\",ended:(now|todate)}' > \"$CLAUDE_PROJECT_DIR/P3/run/status.json\" || true",
+          "statusMessage": "Recording usage limit for the P3 loop"
+        }
+      ]
+    }
+  ],
+  "PreCompact": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "mkdir -p \"$CLAUDE_PROJECT_DIR/P3/run/log\" && jq -c '{at:(now|todate),session:.session_id,reason:.reason,sitting:(env.P3_SITTING // \"interactive\")}' >> \"$CLAUDE_PROJECT_DIR/P3/run/log/compactions.log\" || true",
+          "statusMessage": "Logging compaction (budget signal)"
+        }
+      ]
+    }
+  ],
+  "PermissionDenied": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "[ -n \"$P3_SITTING\" ] && mkdir -p \"$CLAUDE_PROJECT_DIR/P3/run/log\" && jq -c '{at:(now|todate),tool:.tool_name,input:(.tool_input|tostring|.[0:300])}' >> \"$CLAUDE_PROJECT_DIR/P3/run/log/denials.log\" || true",
+          "statusMessage": "Logging an auto-mode denial for the P3 loop"
+        }
+      ]
+    }
+  ]
+}

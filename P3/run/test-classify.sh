@@ -16,7 +16,9 @@ expect limit-429       '^LIMIT:fable:0$'                         "$(classify $F/
 expect limit-opus-in   '^LIMIT:opus:[1-9][0-9]+$'                "$(classify $F/limit-opus-in.jsonl /nonexistent a a "$M")"
 expect limit-beats-status '^LIMIT:fable:'                         "$(classify $F/limit-fable-text.jsonl $F/continue.status.json a b "$M")"
 expect crash-noresult  '^CRASH:no result line'                   "$(classify $F/crash-noresult.jsonl /nonexistent a a "$M")"
-expect crash-maxturns  '^CRASH:no status.json \(subtype=error_max_turns' "$(classify $F/crash-maxturns.jsonl /nonexistent a a "$M")"
+expect capped-maxturns '^CAPPED:max_turns'                      "$(classify $F/crash-maxturns.jsonl /nonexistent a a "$M")"
+expect api-error       '^CRASH:api_error Not logged in'          "$(classify $F/api-error.jsonl /nonexistent a a "$M")"
+expect limit-hook      '^LIMIT:fable:[1-9][0-9]+$'               "$(classify $F/continue.jsonl $F/limit-hook.status.json a a "$M")"
 expect crash-nostatus  '^CRASH:no status.json'                   "$(classify $F/continue.jsonl /nonexistent a b "$M")"
 expect reset-3pm       '^[1-9][0-9]+$'                           "$(parse_reset_epoch 'hit your limit · resets 3pm (Europe/Berlin)')"
 expect reset-in        '^[1-9][0-9]+$'                           "$(parse_reset_epoch 'resets in 2h 15m')"
@@ -35,4 +37,5 @@ expect dry-limit    "ACTION SWITCH to $P3_MODEL_FALLBACK"        "$("$RUN_DIR/lo
 expect dry-opus     'ACTION SLEEP until'                         "$("$RUN_DIR/loop.sh" --dry-run $F/limit-opus-in.jsonl /nonexistent a a | tail -1)"
 expect dry-crash    'ACTION CRASH #1'                            "$("$RUN_DIR/loop.sh" --dry-run $F/crash-noresult.jsonl /nonexistent a a | tail -1)"
 expect dry-done     'ACTION EXIT 0'                              "$("$RUN_DIR/loop.sh" --dry-run $F/done.jsonl $F/done.status.json a b | tail -1)"
+expect dry-capped   'ACTION NEXT after 120s \(budget rail'      "$("$RUN_DIR/loop.sh" --dry-run $F/crash-maxturns.jsonl /nonexistent a a | tail -1)"
 echo "---- $n checks, $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"; exit $fail

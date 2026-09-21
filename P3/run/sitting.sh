@@ -21,12 +21,13 @@ else
 fi
 printf 'model=%s\nstart=%s\nhard_stop=%s\nlog=%s\nsmoke=%s\n' "$MODEL" "$START" "$HARD" "$LOGF" "$SMOKE" > "$META"
 log "SITTING $TS start model=$MODEL wall=$WALL turns=$TURNS smoke=$SMOKE"
-CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
+BUDGET=(); [ -n "$P3_SITTING_MAX_BUDGET_USD" ] && BUDGET=(--max-budget-usd "$P3_SITTING_MAX_BUDGET_USD")
+P3_SITTING=1 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
 timeout --signal=INT --kill-after=15m "$WALL" \
 claude -p "$PROMPT" \
   --model "$MODEL" --effort max --max-turns "$TURNS" \
   --permission-mode auto --permission-prompts none \
-  --name "p3-sitting-$TS" \
+  --name "p3-sitting-$TS" "${BUDGET[@]}" \
   "${SP[@]}" \
   --output-format stream-json --verbose \
   > "$LOGF" 2> "$ERRF"

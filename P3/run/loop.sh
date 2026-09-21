@@ -13,6 +13,7 @@ decide() { # decide <classification> → prints the action line the loop takes (
   local c="$1"
   case "$c" in
     CONTINUE)  echo "NEXT after 120s";;
+    CAPPED:*)  echo "NEXT after 120s (budget rail: ${c#CAPPED:}; the next sitting recovers from git)";;
     DONE)      echo "EXIT 0 (queue empty)";;
     GATE:*)    echo "WAIT for answered:yes|partial in ${c#GATE:} (poll 600s), notify";;
     BLOCKED:*) echo "WAIT for RESUME file (poll 600s), notify: ${c#BLOCKED:}";;
@@ -53,7 +54,10 @@ while :; do
   rm -f "$RESUME_FILE"
   reap_orphans
   # model choice: back to primary once the Fable window has passed
-  if [ "$MODEL" != "$P3_MODEL_PRIMARY" ] && [ "$(date +%s)" -ge "$FABLE_LIMITED_UNTIL" ]; then MODEL="$P3_MODEL_PRIMARY"; log "Fable window passed — back to $MODEL"; fi
+  if [ "$MODEL" != "$P3_MODEL_PRIMARY" ] && [ "$(date +%s)" -ge "$FABLE_LIMITED_UNTIL" ]; then
+    if probe_model "$P3_MODEL_PRIMARY"; then MODEL="$P3_MODEL_PRIMARY"; log "Fable window passed (probe OK) — back to $MODEL"
+    else FABLE_LIMITED_UNTIL=$(( $(date +%s) + P3_PROBE_INTERVAL )); log "Fable probe still limited — staying on $MODEL for ${P3_PROBE_INTERVAL}s"; fi
+  fi
   HEAD_BEFORE="$(git rev-parse HEAD)"
   "$RUN_DIR/sitting.sh" --model "$MODEL" > "$LOG_DIR/.last-sitting-path" 2>&1 & CHILD=$!
   wait "$CHILD"; CHILD=""
@@ -63,12 +67,12 @@ while :; do
   ACTION="$(decide "$CLASS")"
   log "CLASS $CLASS | commits $( [ "$HEAD_BEFORE" != "$HEAD_AFTER" ] && echo new || echo none ) | ACTION $ACTION"
   # stall breaker: three consecutive working sittings without a new commit on main
-  case "$CLASS" in CONTINUE|GATE:*|BLOCKED:*|CRASH:*)
+  case "$CLASS" in CONTINUE|CAPPED:*|GATE:*|BLOCKED:*|CRASH:*)
     if [ "$HEAD_BEFORE" = "$HEAD_AFTER" ]; then STALLS=$((STALLS+1)); else STALLS=0; fi
     [ "$STALLS" -ge 3 ] && { notify "P3 loop stopped: stall" "3 sittings without a new commit on main"; exit 1; };;
   esac
   case "$CLASS" in
-    CONTINUE) CRASHES=0; BACKOFF=900; [ "$ONCE" = 1 ] && { log "--once: done"; exit 0; }; sleep 120;;
+    CONTINUE|CAPPED:*) CRASHES=0; BACKOFF=900; [ "$ONCE" = 1 ] && { log "--once: done"; exit 0; }; sleep 120;;
     DONE)     notify "P3 loop finished" "Queue empty — DONE"; exit 0;;
     GATE:*)   CRASHES=0; GATEF="${CLASS#GATE:}"; notify "P3 needs a decision" "Gate file: $GATEF — answer in the file (answered: yes) or in a session"
               [ "$ONCE" = 1 ] && exit 0
@@ -81,8 +85,10 @@ while :; do
                 log "Fable limit — switching sittings to $MODEL until $(date -u -d "@$FABLE_LIMITED_UNTIL" +%FT%TZ)"; [ "$ONCE" = 1 ] && exit 0; sleep 60
               else
                 SLEEP=$(( RESET > 0 ? RESET - $(date +%s) + 60 : BACKOFF )); [ "$SLEEP" -lt 60 ] && SLEEP=60
-                log "limit on $FAM — sleeping ${SLEEP}s"; BACKOFF=$(( BACKOFF < 3600 ? BACKOFF*2 : 3600 )); [ "$BACKOFF" -gt 3600 ] && BACKOFF=3600
+                log "limit on $FAM — sleeping ${SLEEP}s, then canary probes every ${P3_PROBE_INTERVAL}s"; BACKOFF=$(( BACKOFF < 3600 ? BACKOFF*2 : 3600 )); [ "$BACKOFF" -gt 3600 ] && BACKOFF=3600
                 [ "$ONCE" = 1 ] && exit 0; sleep "$SLEEP"
+                until probe_model "$MODEL"; do [ -f "$STOP_FILE" ] && { log "STOP while limited"; exit 0; }; log "probe on $MODEL still limited"; sleep "$P3_PROBE_INTERVAL"; done
+                log "probe on $MODEL completed — resuming"
               fi;;
     CRASH:*)  CRASHES=$((CRASHES+1)); log "crash #$CRASHES: ${CLASS#CRASH:}"
               [ "$CRASHES" -ge 3 ] && { notify "P3 loop stopped: crashes" "3 consecutive sittings without a status file — see $LOG_DIR"; exit 1; }

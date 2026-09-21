@@ -1,1 +1,1 @@
-{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":600,"result":"","api_error_status":null}
+{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":600,"result":"","api_error_status":null,"terminal_reason":"max_turns"}
