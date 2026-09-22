@@ -1,4 +1,7 @@
 # Interview-rework sitting — gate record (opened 2026-09-16, re-presented 2026-09-17)
+Status: PARTIALLY ANSWERED
+answered: no            ← set `answered: yes` (or `partial`) after filling the open items below; A3/A4/A6/B9 explained in §Explanations (2026-09-22); B12/B13/B14 await their asks
+
 
 **Status: PARTIALLY ANSWERED 2026-09-17 (A1/A2/A5/B7/B8/B10/B11 closed; A3/A4/A6/B9 open pending the coordinator's explanations — see §Answers).** Operator free-text answers are authoritative (standing convention); the coordinator records them under §Answers + in `P3/STATE.md`, executes, and closes. The sitting of 2026-09-16 was interrupted by a host reboot after the six standing items were presented in chat and before any answer landed; this file is the durable re-presentation plus the sitting's own findings, triaged.
 
@@ -195,3 +198,47 @@ Two candidates, costed in the brief §TQ-4b: **(1) a pinned `chrome-headless-she
 | B11 browser | Firefox | **RECORDED**: the original dead-click experience was in Firefox, not Chromium. TQ-F7's host half widens: the Chrome frame-starvation repro stands on its own, and whether Firefox froze the same way is untested — the host investigation must measure Firefox first (memory `chromium-frame-starvation` updated). Not a Sinet packet. |
 
 Order confirmed as Part D: the LN key ceremony remains the operator's next hands-on act (not scheduled by the operator yet); P3-TQ-5 starts now; the gate-independent TQ-1/2/3 + SIT-1 follow; v4.1 rides beside them; TQ-4 after TQ-5; SIT-2 after SIT-1; SIT-3 after B9.
+
+---
+
+## Explanations owed — written 2026-09-22 by the first headless sitting (answers to "what do you mean / more details")
+
+Answer each item by writing a line under it here, or in free text to any session. Nothing in this section changes what runs today: A14 and A15 stay applied, SIT-3 stays waiting.
+
+### A3 and A4 — what a "veto window" is, and what A14 and A15 actually do
+
+**The mechanism.** The spec is frozen. It changes only through numbered amendments (A1, A2, …) and every amendment needs your approval (S00.9). A14 and A15 were applied on 2026-08-27 on your own chat orders during the planning rework ("fix it for good"; "I don't see HOW he wants to build the detail view"), so the approval already existed in spirit, but you never saw the final spec wording. The "veto window" is simply your chance to look at what was written into the spec and say **let it stand** (nothing happens, it is already live) or **veto** (the spec text goes back to the pre-amendment wording and one small packet unwinds the behavior). There is no ongoing cost either way; a veto costs one packet each.
+
+**What A14 does, in the product.** Before A14: giving a software task to a project that had no captured build/test/lint commands was refused outright with a card. After A14: the task runs. The verification steps that would need the missing commands are recorded as "cannot be verified here" (never silently skipped, never marked as passed), the judge's opinion is shown but labelled advisory, you or the requester must review by hand at every stakes tier, and the task card and receipt say all of this in plain words. As soon as commands are captured for the project, full verification comes back with nothing left over. A16, which you approved on 2026-09-17, builds on top of A14: at bootstrap the platform now looks at the project tree itself, detects build/test commands, and runs them as evidence. **Effect of a veto:** software tasks on projects without captured commands would be refused again, and A16 would lose its footing (it only makes sense if such tasks are allowed to run). **Recommendation: let A14 stand.**
+
+**What A15 does, in the product.** Every plan step now carries an "approach" paragraph in plain words: the method, the decisions that matter with the alternatives considered and why the winner won, and the ordering rationale where it matters. The plan view shows it under each step. Verification ignores it (it still checks only the frozen acceptance criteria and done-when contracts); it exists so a human can judge whether the worker's intended way of building something is sensible before approving. **Effect of a veto:** plans go back to "what" without "how". **Recommendation: let A15 stand.**
+
+### A6 — the recorded readings, each in plain words
+
+A "reading" is an interpretation the coordinator made where the spec's own wording clearly implied one answer. Readings are not spec changes; they are written down so they can be checked. Ratifying en bloc means "these interpretations are fine as recorded"; pulling one out means "re-examine this one, it may need a real amendment".
+
+1. **GF4 OQ1** — A14 covers a project with no captured commands. A task with *no project at all* is still refused, with a card that offers to register or attach one. (A14's own words say "whose project has no captured pack".) **GF4 OQ2** — the plan's required structure (S06.9) does not need an enumerated list of sections beyond A15's approach paragraph.
+2. **GF10** — the rule "never sign a delivery as nobody" (S13.6) is satisfied by writing the truth: the minted revision carries the substrate, lane and model of the run that actually executed. No bypass exists.
+3. **GF11 S-6** — for a project store that has no remote, the local commit *is* the official landing; pushing to a remote is only transport. Vocabulary recorded: `landing: local`, `remote-push` / `local-store` / `decision-record`, derive-from-log; attach/detach stays out of scope.
+4. **GF12** — the auto-approve band (S06.4) bounds ceremony, not honesty. When the model's output is refused because it breaks the contract, there is nothing to auto-approve, so even band tasks get the decision card.
+5. **GF14 §8a** — (1) the running drive outlives the viewer's request: closing the page never kills the work. (2) The "is this plan still current" backstop before acting on an approval reuses the existing marker mechanism; no new states were added to the S06.7 spine. (3) When the abstain path cannot settle, it fails closed (the safe direction), floors clamp, the band is never re-entered, one shot only.
+6. **GF15** — two small deviations accepted (four files instead of one; the comment placed at the same site). One disclosure: an approval that gets re-driven at boot while the broker is down now fails terminally, loudly and on record, instead of hanging.
+7. **GF13** — the ledger of seven families of UI strings kept with a stated reason (`P3/briefs/P3-GF13-keep-ledger.md`) stays live.
+8. **W1** — the 23 verdicts on what to carry from the old UI (12 fit, 8 with modification, 3 reject) were confirmed by triage; nothing was contested.
+
+**Recommendation: ratify en bloc.** None of them widens what the platform may do; each narrows an ambiguity in the direction the spec already leans.
+
+### B9 — what "promote the preview substrate" means, what you get, what it costs
+
+**Today.** When a worker builds a web deliverable, the review page cannot show it running. You start it by hand with `P3/gates/try-deliverable.sh` and look at it in your browser. The page's "Launch" area says honestly that a live preview cannot be served yet.
+
+**What the spec already describes (S13.8).** The platform starts the deliverable's dev server inside a sandbox, gives it a private URL through Caddy, and shows it on the review page (the side-by-side compare surface is already built). Pressing "Launch" would open the running deliverable, so you can try it before accepting.
+
+**What is missing, concretely.** (1) Two host units: a network default-drop unit for the sandbox (S11.4) and one privileged unit (S11.8). (2) The on-demand start and idle stop of `socket-proxyd` for the sandboxed process. (3) Caddy routes created per preview through its admin API. (4) The code in `internal/preview` that spawns the server, probes it until it answers, and wires the route.
+
+**Option (a), promote now — packet P3-SIT-3.** Two backend packets (normal pipeline, no host risk) plus one hands-on session: the coordinator writes the exact host changes into a gate file, you approve, and they are applied in an interactive session under your safety gates. Nothing touches the NVIDIA driver, kernel, CUDA or boot path. Cost: roughly two packet cycles and about half an hour of your time; host state gained: two user-level systemd units and Caddy routes; runtime cost: some RAM per running preview, released on idle. The A16 in-sandbox dev server (landed with P3-TQ-4a) shares the launch and probe code, so the two are cheaper together.
+
+**Option (b), keep it deferred.** Only the copy improves (rides P3-SIT-2); the script remains the door.
+
+**Recommendation: (a).** Your own finding was that not being able to try web work before approving blocks acceptance in practice.
+
