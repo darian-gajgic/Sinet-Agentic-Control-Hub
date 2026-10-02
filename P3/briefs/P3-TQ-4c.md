@@ -1,3 +1,5 @@
+> **EXPIRED 2026-10-02 — merged into main (grounding `497b7c2`, impl `19595de`, merge `05d9922`; evaluation PASS with 7 nits, none drained; CONVENTIONS §82; §79/§80 amended). Single-use artifact: never read as truth; code + spec are the only truth.**
+
 # P3-TQ-4c — detected rungs in a graduated mixed pack: attribution never crosses origins, and a failed detected rung is a visible note, never silence
 
 **Grounded 2026-09-18.** Single-use brief for the executor and the evaluator. Truth is the spec (`Spec/drafts/S07-verification-quality.md` S07.1/S07.3/S07.5/S07.6/S07.7/S07.8/S07.11; `Spec/drafts/S13-deliverables-review-git-backup.md` S13.4) plus the code on `main` at `b0a45b4` (every `file:line` below is that commit, read in this grounding). No prior brief was read as truth; CONVENTIONS §79 (P3-TQ-4a) and §80 (P3-TQ-7) were read as the landed rulings they are.
