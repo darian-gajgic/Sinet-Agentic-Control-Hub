@@ -34,7 +34,9 @@ type ChangeSource interface {
 	// budget is not served and costs the budget nothing — its row carries
 	// BodySkipped (its diff) or ContentSkipped (its content), since the judge
 	// is shown whole files or none of a file. Every modified/renamed text row
-	// whose content is not served carries ContentSkipped. The bodies are
+	// whose content is not served carries ContentSkipped. A diff the store
+	// could compare only in part is never served and costs nothing: its row
+	// carries DiffTruncated with no Diff, and it is not a cut. The bodies are
 	// served in the order RenderChangeSlice shows them, so a body the judge
 	// is shown is never priced against one it is not. The inventory is
 	// always whole. A pin the store no longer holds is an ERROR (content
@@ -417,7 +419,7 @@ func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFil
 	}
 	if len(saw.DiffsOmitted) > 0 {
 		if bound {
-			fmt.Fprintf(&sb, "A file is shown whole or not at all — part of a file's changes would describe a change this version does not make — so what did not fit the %d KB of file text this judge reads under was left out whole, and so was everything after it.\n",
+			fmt.Fprintf(&sb, "A file is shown whole or not at all — part of a file's changes would describe a change this version does not make — so what did not fit the %d KB of file text this judge reads under was left out whole, and so were the changes of every file after it.\n",
 				JudgeArtifactBytesCap>>10)
 		}
 		fmt.Fprintf(&sb, "Changes NOT shown, by file: %s\n", strings.Join(saw.DiffsOmitted, ", "))

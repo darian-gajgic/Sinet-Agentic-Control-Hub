@@ -341,6 +341,13 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 	// would buy the slice nothing and take the remaining room away from every
 	// later file. One 100 KB file in the middle of a change must not cost a
 	// 40-byte fix at the end its place on the wire.
+	//
+	// A diff review could serve only in part (Truncated: its prefix stops at
+	// a hunk boundary under review's own cap) is never served and never
+	// charged, in any pass: the judge is never shown part of a file's diff,
+	// so its row is named "too large to be compared" and is NOT a bound cut
+	// — the reads go on past it, and "it did not fit" is said only of a body
+	// that really did not fit what was left.
 	cutAt := len(out.Files)
 	for i := range out.Files {
 		row := &out.Files[i]
@@ -354,6 +361,9 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 		cmp, err := rs.store().CompareFile(ctx, id, ch.OldN, ch.NewN, row.Path)
 		if err != nil {
 			return verify.RevisionChange{}, fmt.Errorf("stage: the changes to %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		if tooLargeToCompare(row, cmp) {
+			continue
 		}
 		if len(cmp.Unified) > bodyBudget-read {
 			row.BodySkipped, cutAt = true, i
@@ -406,6 +416,9 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 		if err != nil {
 			return verify.RevisionChange{}, fmt.Errorf("stage: the changes to %s at %s version %d: %w", row.Path, id, d.Revision, err)
 		}
+		if tooLargeToCompare(row, cmp) {
+			continue
+		}
 		if len(cmp.Unified) > bodyBudget-read {
 			row.BodySkipped = true
 			continue
@@ -414,4 +427,16 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 		read += len(cmp.Unified)
 	}
 	return out, nil
+}
+
+// tooLargeToCompare marks row as a diff review could serve only in part and
+// reports whether it did: such a row carries DiffTruncated and review's
+// reason with no Diff body, costs the judge's budget nothing and never cuts
+// the diff section (the renderer names it "too large to be compared").
+func tooLargeToCompare(row *verify.ChangedFile, cmp review.Comparison) bool {
+	if !cmp.Truncated {
+		return false
+	}
+	row.DiffTruncated, row.DiffReason = true, cmp.TruncationReason
+	return true
 }
