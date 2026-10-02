@@ -30,9 +30,12 @@ type ChangeSource interface {
 	// is chosen by the PIN, never by the type (§78): a revision that pins no
 	// snapshot answers a RevisionChange whose AbsentReason says so, and the
 	// slice keeps today's shape. bodyBudget bounds the bytes of diff/content
-	// bodies the seam reads (rows past it keep their inventory data and carry
-	// BodySkipped); the inventory is always whole. A pin the store no longer
-	// holds is an ERROR (content drift), never a fall-through to the report.
+	// bodies the seam serves: a body that does not fit what is LEFT of the
+	// budget is not served and costs the budget nothing — that row alone
+	// carries BodySkipped (a diff) or ContentSkipped (a content) and the rows
+	// after it are still read, since the judge is shown whole files or none
+	// of a file. The inventory is always whole. A pin the store no longer holds is an ERROR (content drift),
+	// never a fall-through to the report.
 	RevisionChange(ctx context.Context, d Deliverable, bodyBudget int) (RevisionChange, error)
 }
 
@@ -62,7 +65,11 @@ type ChangedFile struct {
 
 	// Diff is the file's unified diff between the two pins by the one diff
 	// authority (review.gitDiff), bounded by review's per-file cap and
-	// honest about it. An added file's diff IS its content.
+	// honest about it. An added file's diff IS its content. DiffReason is the
+	// SOURCE's own sentence for a body it could not serve whole; it is a
+	// review-page sentence written for a person who can open the file, so the
+	// renderer states the cause to the judge in its own words and this text
+	// never reaches the wire (CONVENTIONS §38).
 	Diff          string `json:"diff,omitempty"`
 	DiffTruncated bool   `json:"diff_truncated,omitempty"`
 	DiffReason    string `json:"diff_reason,omitempty"`
@@ -73,10 +80,14 @@ type ChangedFile struct {
 	Content          string `json:"content,omitempty"`
 	ContentTruncated bool   `json:"content_truncated,omitempty"`
 	ContentReason    string `json:"content_reason,omitempty"`
-	// BodySkipped marks a row whose bodies the seam did not read because its
-	// body budget was already spent: the inventory row stands, the judge sees
-	// the file NAMED among the omitted.
-	BodySkipped bool `json:"body_skipped,omitempty"`
+	// BodySkipped marks a row whose diff body (and so every body of it) the
+	// seam did not serve because it did not fit what was left of its body
+	// budget: the inventory row stands, and the judge sees the file NAMED
+	// among the omitted. ContentSkipped marks a row whose diff WAS served but
+	// whose new-side content did not fit: only its content is omitted, so a
+	// diff the judge can be shown is never dropped for a content it cannot.
+	BodySkipped    bool `json:"body_skipped,omitempty"`
+	ContentSkipped bool `json:"content_skipped,omitempty"`
 }
 
 // RevisionChange is the reviewable change of one revision pair, as the seam
@@ -210,6 +221,13 @@ func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
 		OldIsBase: rc.OldIsBase,
 		Files:     len(rc.Files),
 	}
+	notes := map[string]rowNotes{}
+	note := func(path string, set func(*rowNotes)) {
+		n := notes[path]
+		set(&n)
+		notes[path] = n
+	}
+	bound := false // the judge's own bound cut the DIFF section (the content section says its own)
 	var diff strings.Builder
 	cut := false
 	for _, row := range rc.Files {
@@ -218,58 +236,126 @@ func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
 		if row.Binary {
 			continue
 		}
-		if row.Diff == "" {
-			// No diff text was read for this row because the seam's body
-			// budget was already spent: the file is named among the omitted
-			// rather than passing as a file with no changes.
-			if row.BodySkipped {
-				cut = true
-				saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
-			}
-			continue
-		}
-		if cut || saw.DiffBytes+len(row.Diff) > JudgeArtifactBytesCap {
-			cut = true
+		// EVERY file with text is accounted for: shown whole, or named among
+		// the omitted WITH the reason it is missing. A row whose diff body
+		// came back empty — review could not compare two over-cap sides, or
+		// nothing but the file's mode or path changed — is a file the judge
+		// did not see, and letting it pass silently made the wire say the
+		// rest were "all there in full" (Spec S07.5; §78 honest about the
+		// bound). Only the BOUND cuts the rest of the section: a file with no
+		// text to serve says so and the files after it are still shown.
+		switch {
+		case row.Diff == "" && !row.BodySkipped:
+			// Nothing was served for this row, so the bound is not why it is
+			// missing — even past the cut, the true reason is the one said here.
 			saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
-			continue
+			note(row.Path, func(n *rowNotes) { n.diff = noDiffNote(row) })
+		case cut || row.BodySkipped:
+			past := cut
+			cut, bound = true, true
+			saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
+			note(row.Path, func(n *rowNotes) { n.diff = boundNote(false, past) })
+		case saw.DiffBytes+len(row.Diff) > JudgeArtifactBytesCap:
+			cut, bound = true, true
+			saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
+			note(row.Path, func(n *rowNotes) { n.diff = boundNote(false, false) })
+		default:
+			diff.WriteString(row.Diff)
+			saw.DiffBytes += len(row.Diff)
+			saw.DiffsShown++
+			if row.DiffTruncated {
+				note(row.Path, func(n *rowNotes) { n.diff = partialDiffNote })
+			}
 		}
-		diff.WriteString(row.Diff)
-		saw.DiffBytes += len(row.Diff)
-		saw.DiffsShown++
 	}
 	// The contents come out of what the diffs left, in the same order under
 	// the same rule. A modified file's content is what lets the judge quote
 	// outside the hunks, so it is carried — and it is the first thing the
-	// bound drops.
+	// bound drops. A file emptied in place has no text at this version, which
+	// is an ANSWER the judge needs: it is shown, as the empty file it is.
 	contents := make([]ChangedFile, 0, len(rc.Files))
 	cut = false
 	for _, row := range rc.Files {
-		if row.Content == "" {
-			if row.BodySkipped && (row.Kind == KindModified || row.Kind == KindRenamed) {
-				saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
-			}
+		if row.Binary || (row.Kind != KindModified && row.Kind != KindRenamed) {
 			continue
 		}
-		if cut || saw.DiffBytes+saw.ContentBytes+len(row.Content) > JudgeArtifactBytesCap {
+		switch {
+		case row.BodySkipped || row.ContentSkipped:
+			past := cut
 			cut = true
 			saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
-			continue
+			note(row.Path, func(n *rowNotes) { n.content = boundNote(true, past) })
+		case row.Content == "" && row.ContentTruncated:
+			saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
+			note(row.Path, func(n *rowNotes) { n.content = noWholeContentNote })
+		case row.Content == "":
+			// No text came back for this file: it is shown as what it is,
+			// which costs the bound nothing and is an answer the judge needs.
+			contents = append(contents, row)
+			saw.ContentShown++
+		case cut || saw.DiffBytes+saw.ContentBytes+len(row.Content) > JudgeArtifactBytesCap:
+			past := cut
+			cut = true
+			saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
+			note(row.Path, func(n *rowNotes) { n.content = boundNote(true, past) })
+		default:
+			contents = append(contents, row)
+			saw.ContentBytes += len(row.Content)
+			saw.ContentShown++
 		}
-		contents = append(contents, row)
-		saw.ContentBytes += len(row.Content)
-		saw.ContentShown++
 	}
 	saw.Truncated = len(saw.DiffsOmitted)+len(saw.ContentOmitted) > 0
-	artifact := renderChangeArtifact(rc, saw, contents)
+	artifact := renderChangeArtifact(rc, saw, contents, notes, bound)
 	saw.ArtifactBytes = len(artifact)
 	return artifact, diff.String(), saw
+}
+
+// rowNotes are the judge-facing sentences that ride an inventory row: why
+// this file's changes, or its content, are not in the slice (or are in it
+// only in part).
+type rowNotes struct{ diff, content string }
+
+// The renderer says WHY in its own words. Review's per-file truncation
+// reasons are review-PAGE sentences written for a person who can click the
+// file open ("open the file to read it"); the judge can open nothing, so
+// those sentences never enter the slice — only the fact they carry does
+// (CONVENTIONS §38: say it in words the reader can act on).
+const (
+	partialDiffNote    = "only the START of its changes is shown: the comparison is larger than this slice serves in one piece"
+	noDiffTooLarge     = "its changes are NOT shown: the file is too large to be compared in one piece here"
+	noDiffSameText     = "its changes are NOT shown: both versions hold the same text — what changed is the file's mode or its path"
+	noWholeContentNote = "its content is NOT shown: no whole copy of its text was available here"
+	emptyContentLine   = "(no text: the platform's copy served none for this file at this version — the sizes on its row above say whether the file is now empty)"
+)
+
+// boundNote is the judge's OWN bound speaking. A body that did not fit what
+// was left says so; a body PAST the cut says that instead, because it may
+// well have fitted and "it did not fit" would be untrue of it.
+func boundNote(content, past bool) string {
+	what := "its changes are"
+	if content {
+		what = "its whole content is"
+	}
+	if past {
+		return what + " NOT shown: the slice was already cut at an earlier file in this list, and nothing after that point is shown"
+	}
+	return fmt.Sprintf("%s NOT shown: it did not fit the %d KB of file text this judge reads under",
+		what, JudgeArtifactBytesCap>>10)
+}
+
+// noDiffNote says why a file WITH text has no diff body in the slice.
+func noDiffNote(row ChangedFile) string {
+	if row.DiffTruncated {
+		return noDiffTooLarge
+	}
+	return noDiffSameText
 }
 
 // renderChangeArtifact writes the quotable artifact item: what this is, the
 // whole inventory, then — in plain words — how much of the change the judge
 // is being shown, which files were left out, and the contents that fit
 // (CONVENTIONS §38: the bound is said, never silent).
-func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFile) string {
+func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFile, notes map[string]rowNotes, bound bool) string {
 	var sb strings.Builder
 	sb.WriteString("The work under judgment is the change this version makes to the project's files, read from the platform's own copy of the project at the recorded commits.\n\n")
 	fmt.Fprintf(&sb, "Version %d (commit %s) compared with %s.\n\n", rc.NewN, rc.NewPin, oldSideOf(rc))
@@ -280,9 +366,12 @@ func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFil
 	fmt.Fprintf(&sb, "%d %s changed. Every one of them is listed here; this list is never shortened.\n\n",
 		len(rc.Files), filesWord(len(rc.Files)))
 	for _, row := range rc.Files {
-		writeInventoryRow(&sb, row)
+		writeInventoryRow(&sb, row, notes[row.Path])
 	}
 
+	// Every file with text is either in the diff item whole or named here as
+	// missing, with the reason on its own line above: the judge is never left
+	// to infer from silence what it was not shown.
 	diffable := saw.DiffsShown + len(saw.DiffsOmitted)
 	sb.WriteByte('\n')
 	switch {
@@ -291,31 +380,48 @@ func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFil
 	case len(saw.DiffsOmitted) == 0:
 		fmt.Fprintf(&sb, "The file-by-file changes are in the verify/diff item: all %d %s with text are there in full, in the order listed above.\n",
 			diffable, filesWord(diffable))
+	case saw.DiffsShown == 0:
+		fmt.Fprintf(&sb, "The verify/diff item is EMPTY: not one of the %d %s with text is shown. Each one says why on its own line above.\n",
+			diffable, filesWord(diffable))
 	default:
-		fmt.Fprintf(&sb, "The file-by-file changes are in the verify/diff item: the first %d of %d %s with text are there in full, in the order listed above.\n",
+		fmt.Fprintf(&sb, "The file-by-file changes are in the verify/diff item: %d of %d %s with text are there in full, in the order listed above. Each file left out says why on its own line above.\n",
 			saw.DiffsShown, diffable, filesWord(diffable))
-		fmt.Fprintf(&sb, "The rest did not fit the %d KB of file text this judge reads under. A file is shown whole or not at all: part of a file's changes would describe a change this version does not make.\n",
-			JudgeArtifactBytesCap>>10)
+	}
+	if len(saw.DiffsOmitted) > 0 {
+		if bound {
+			fmt.Fprintf(&sb, "A file is shown whole or not at all — part of a file's changes would describe a change this version does not make — so what did not fit the %d KB of file text this judge reads under was left out whole, and so was everything after it.\n",
+				JudgeArtifactBytesCap>>10)
+		}
 		fmt.Fprintf(&sb, "Changes NOT shown, by file: %s\n", strings.Join(saw.DiffsOmitted, ", "))
 	}
 
-	shownContent := saw.ContentShown + len(saw.ContentOmitted)
-	if shownContent == 0 {
+	contentRows := saw.ContentShown + len(saw.ContentOmitted)
+	if contentRows == 0 {
 		return sb.String()
 	}
 	sb.WriteByte('\n')
-	if len(saw.ContentOmitted) == 0 {
-		fmt.Fprintf(&sb, "The whole new content of every file changed in place follows (%d of %d).\n", saw.ContentShown, shownContent)
-	} else {
-		fmt.Fprintf(&sb, "The whole new content of %d of the %d files changed in place follows; the rest did not fit the same bound.\n",
-			saw.ContentShown, shownContent)
+	switch {
+	case len(saw.ContentOmitted) == 0:
+		fmt.Fprintf(&sb, "The whole new content of every file changed in place follows (%d of %d).\n", saw.ContentShown, contentRows)
+	case saw.ContentShown == 0:
+		fmt.Fprintf(&sb, "The whole content of none of the %d %s changed in place is here; each one says why on its own line above.\n",
+			contentRows, filesWord(contentRows))
+	default:
+		fmt.Fprintf(&sb, "The whole new content of %d of the %d files changed in place follows; each one left out says why on its own line above.\n",
+			saw.ContentShown, contentRows)
+	}
+	if len(saw.ContentOmitted) > 0 {
 		fmt.Fprintf(&sb, "Content NOT shown, by file: %s\n", strings.Join(saw.ContentOmitted, ", "))
 	}
 	for _, row := range contents {
 		fmt.Fprintf(&sb, "\n----- %s, the whole file at version %d -----\n", row.Path, rc.NewN)
-		sb.WriteString(row.Content)
-		if !strings.HasSuffix(row.Content, "\n") {
-			sb.WriteByte('\n')
+		if row.Content == "" {
+			sb.WriteString(emptyContentLine + "\n")
+		} else {
+			sb.WriteString(row.Content)
+			if !strings.HasSuffix(row.Content, "\n") {
+				sb.WriteByte('\n')
+			}
 		}
 		fmt.Fprintf(&sb, "----- end %s -----\n", row.Path)
 	}
@@ -323,9 +429,9 @@ func renderChangeArtifact(rc RevisionChange, saw JudgeSaw, contents []ChangedFil
 }
 
 // writeInventoryRow writes one inventory line: what happened to the file, its
-// sizes, and — when review's own per-file caps cut a body it did serve — the
-// reason it gives for that cut.
-func writeInventoryRow(sb *strings.Builder, f ChangedFile) {
+// sizes, and — when a body of it is missing from the slice or is in it only
+// in part — the renderer's own sentence saying so.
+func writeInventoryRow(sb *strings.Builder, f ChangedFile, n rowNotes) {
 	fmt.Fprintf(sb, "  %-9s %s", f.Kind, f.Path)
 	if f.OldPath != "" {
 		fmt.Fprintf(sb, " (it was %s)", f.OldPath)
@@ -342,11 +448,11 @@ func writeInventoryRow(sb *strings.Builder, f ChangedFile) {
 			f.OldSize, f.NewSize, f.Additions, linesWord(f.Additions), f.Deletions, linesWord(f.Deletions))
 	}
 	sb.WriteByte('\n')
-	if f.DiffTruncated && f.DiffReason != "" {
-		fmt.Fprintf(sb, "            its changes are shown only in part: %s\n", f.DiffReason)
+	if n.diff != "" {
+		fmt.Fprintf(sb, "            %s\n", n.diff)
 	}
-	if f.ContentTruncated && f.ContentReason != "" {
-		fmt.Fprintf(sb, "            its content is shown only in part: %s\n", f.ContentReason)
+	if n.content != "" {
+		fmt.Fprintf(sb, "            %s\n", n.content)
 	}
 }
 

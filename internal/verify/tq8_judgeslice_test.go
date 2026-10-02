@@ -447,7 +447,7 @@ func TestTQ8ALostPinFailsTheRoundLoudly(t *testing.T) {
 	if j.complianceCalls != 0 || j.sanityCalls != 0 {
 		t.Fatalf("judge called %d/%d times on a lost pin — the paid call must not happen", j.complianceCalls, j.sanityCalls)
 	}
-	if n := len(f.events("verify.round")); n != 0 {
+	if n := len(f.events(verify.EventRound)); n != 0 {
 		t.Fatalf("%d verify.round rows written for a round that did not judge", n)
 	}
 }

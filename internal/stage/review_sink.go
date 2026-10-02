@@ -329,6 +329,13 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 	read := 0
 	// Diffs first: they are what a judge reads to see WHAT changed, so they
 	// get the budget before any whole file does.
+	//
+	// A body is kept only if it fits what is LEFT of the budget, and a body
+	// that does not fit costs the budget NOTHING: the judge is shown whole
+	// files or none of a file, so bytes spent on a body no one can be shown
+	// would buy the slice nothing and take the remaining room away from every
+	// later file. One 100 KB file in the middle of a change must not cost a
+	// 40-byte fix at the end its place on the wire.
 	for i := range out.Files {
 		row := &out.Files[i]
 		if row.Binary {
@@ -341,6 +348,10 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 		cmp, err := rs.store().CompareFile(ctx, id, ch.OldN, ch.NewN, row.Path)
 		if err != nil {
 			return verify.RevisionChange{}, fmt.Errorf("stage: the changes to %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		if len(cmp.Unified) > bodyBudget-read {
+			row.BodySkipped = true
+			continue
 		}
 		row.Diff, row.DiffTruncated, row.DiffReason = cmp.Unified, cmp.Truncated, cmp.TruncationReason
 		read += len(cmp.Unified)
@@ -358,12 +369,18 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 			continue
 		}
 		if read >= bodyBudget {
-			row.BodySkipped = true
+			row.ContentSkipped = true
 			continue
 		}
 		fc, err := rs.store().RevisionFile(ctx, id, ch.NewN, row.Path)
 		if err != nil {
 			return verify.RevisionChange{}, fmt.Errorf("stage: %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		if len(fc.Content) > bodyBudget-read {
+			// Only the CONTENT is not served: the row's diff, already read
+			// and paid for, still stands.
+			row.ContentSkipped = true
+			continue
 		}
 		row.Content, row.ContentTruncated, row.ContentReason = fc.Content, fc.Truncated, fc.TruncationReason
 		read += len(fc.Content)
