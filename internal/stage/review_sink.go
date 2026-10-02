@@ -327,8 +327,13 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 		})
 	}
 	read := 0
-	// Diffs first: they are what a judge reads to see WHAT changed, so they
-	// get the budget before any whole file does.
+	// The bodies are read in the order the judge is SHOWN them (Spec S07.5;
+	// R3), so every body the judge sees is priced against exactly the bytes
+	// shown before it, and a reason the wire gives ("it did not fit") is true
+	// of what the judge reads: first the diffs in path order up to the first
+	// one that does not fit — the contiguous prefix the renderer shows — then
+	// the contents of the files changed in place, then, from what is left,
+	// the diffs past that cut, which the renderer names but never shows.
 	//
 	// A body is kept only if it fits what is LEFT of the budget, and a body
 	// that does not fit costs the budget NOTHING: the judge is shown whole
@@ -336,13 +341,65 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 	// would buy the slice nothing and take the remaining room away from every
 	// later file. One 100 KB file in the middle of a change must not cost a
 	// 40-byte fix at the end its place on the wire.
+	cutAt := len(out.Files)
 	for i := range out.Files {
 		row := &out.Files[i]
 		if row.Binary {
 			continue
 		}
 		if read >= bodyBudget {
-			row.BodySkipped = true
+			row.BodySkipped, cutAt = true, i
+			break
+		}
+		cmp, err := rs.store().CompareFile(ctx, id, ch.OldN, ch.NewN, row.Path)
+		if err != nil {
+			return verify.RevisionChange{}, fmt.Errorf("stage: the changes to %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		if len(cmp.Unified) > bodyBudget-read {
+			row.BodySkipped, cutAt = true, i
+			break
+		}
+		row.Diff, row.DiffTruncated, row.DiffReason = cmp.Unified, cmp.Truncated, cmp.TruncationReason
+		read += len(cmp.Unified)
+	}
+	// Then the new-side content of the files changed in place: the diff shows
+	// hunks, and a judge that may only quote hunks cannot say what the file
+	// around them now does. An added file's diff IS its content, so it is
+	// never read twice; a deleted file has no new side; a binary has no text.
+	// A file whose diff is not shown still has its content read: the content
+	// is what the judge can quote of it. The renderer shows the contents as a
+	// contiguous path-order prefix too, so the first content that does not
+	// fit ends the reads here — every one after it is marked, not read.
+	contentCut := false
+	for i := range out.Files {
+		row := &out.Files[i]
+		if row.Binary || (row.Kind != verify.KindModified && row.Kind != verify.KindRenamed) {
+			continue
+		}
+		if contentCut || read >= bodyBudget {
+			row.ContentSkipped, contentCut = true, true
+			continue
+		}
+		fc, err := rs.store().RevisionFile(ctx, id, ch.NewN, row.Path)
+		if err != nil {
+			return verify.RevisionChange{}, fmt.Errorf("stage: %s at %s version %d: %w", row.Path, id, d.Revision, err)
+		}
+		if len(fc.Content) > bodyBudget-read {
+			// Only the CONTENT is not served: the row's diff, if it was
+			// served, still stands.
+			row.ContentSkipped, contentCut = true, true
+			continue
+		}
+		row.Content, row.ContentTruncated, row.ContentReason = fc.Content, fc.Truncated, fc.TruncationReason
+		read += len(fc.Content)
+	}
+	// Last, the diffs past the cut, from what the shown bodies left. The
+	// renderer names them as past the cut and shows none of them; reading
+	// them still tells it which carry no text at all (a mode or path change),
+	// whose true reason it states instead.
+	for i := cutAt + 1; i < len(out.Files); i++ {
+		row := &out.Files[i]
+		if row.Binary {
 			continue
 		}
 		cmp, err := rs.store().CompareFile(ctx, id, ch.OldN, ch.NewN, row.Path)
@@ -355,35 +412,6 @@ func (rs reviewSink) RevisionChange(ctx context.Context, d verify.Deliverable, b
 		}
 		row.Diff, row.DiffTruncated, row.DiffReason = cmp.Unified, cmp.Truncated, cmp.TruncationReason
 		read += len(cmp.Unified)
-	}
-	// Then the new-side content of the files changed in place: the diff shows
-	// hunks, and a judge that may only quote hunks cannot say what the file
-	// around them now does. An added file's diff IS its content, so it is
-	// never read twice; a deleted file has no new side; a binary has no text.
-	for i := range out.Files {
-		row := &out.Files[i]
-		if row.Binary || row.BodySkipped {
-			continue
-		}
-		if row.Kind != verify.KindModified && row.Kind != verify.KindRenamed {
-			continue
-		}
-		if read >= bodyBudget {
-			row.ContentSkipped = true
-			continue
-		}
-		fc, err := rs.store().RevisionFile(ctx, id, ch.NewN, row.Path)
-		if err != nil {
-			return verify.RevisionChange{}, fmt.Errorf("stage: %s at %s version %d: %w", row.Path, id, d.Revision, err)
-		}
-		if len(fc.Content) > bodyBudget-read {
-			// Only the CONTENT is not served: the row's diff, already read
-			// and paid for, still stands.
-			row.ContentSkipped = true
-			continue
-		}
-		row.Content, row.ContentTruncated, row.ContentReason = fc.Content, fc.Truncated, fc.TruncationReason
-		read += len(fc.Content)
 	}
 	return out, nil
 }

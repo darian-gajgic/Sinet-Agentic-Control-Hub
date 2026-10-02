@@ -31,11 +31,14 @@ type ChangeSource interface {
 	// snapshot answers a RevisionChange whose AbsentReason says so, and the
 	// slice keeps today's shape. bodyBudget bounds the bytes of diff/content
 	// bodies the seam serves: a body that does not fit what is LEFT of the
-	// budget is not served and costs the budget nothing — that row alone
-	// carries BodySkipped (a diff) or ContentSkipped (a content) and the rows
-	// after it are still read, since the judge is shown whole files or none
-	// of a file. The inventory is always whole. A pin the store no longer holds is an ERROR (content drift),
-	// never a fall-through to the report.
+	// budget is not served and costs the budget nothing — its row carries
+	// BodySkipped (its diff) or ContentSkipped (its content), since the judge
+	// is shown whole files or none of a file. Every modified/renamed text row
+	// whose content is not served carries ContentSkipped. The bodies are
+	// served in the order RenderChangeSlice shows them, so a body the judge
+	// is shown is never priced against one it is not. The inventory is
+	// always whole. A pin the store no longer holds is an ERROR (content
+	// drift), never a fall-through to the report.
 	RevisionChange(ctx context.Context, d Deliverable, bodyBudget int) (RevisionChange, error)
 }
 
@@ -80,12 +83,13 @@ type ChangedFile struct {
 	Content          string `json:"content,omitempty"`
 	ContentTruncated bool   `json:"content_truncated,omitempty"`
 	ContentReason    string `json:"content_reason,omitempty"`
-	// BodySkipped marks a row whose diff body (and so every body of it) the
-	// seam did not serve because it did not fit what was left of its body
-	// budget: the inventory row stands, and the judge sees the file NAMED
-	// among the omitted. ContentSkipped marks a row whose diff WAS served but
-	// whose new-side content did not fit: only its content is omitted, so a
-	// diff the judge can be shown is never dropped for a content it cannot.
+	// BodySkipped marks a row whose diff body the seam did not serve because
+	// it did not fit what was left of its body budget: the inventory row
+	// stands, and the judge sees the file NAMED among the omitted.
+	// ContentSkipped marks a modified/renamed row whose new-side content the
+	// seam did not serve: only its content is omitted, so a diff the judge
+	// can be shown is never dropped for a content it cannot, and a content
+	// that fits is never dropped for a diff that did not.
 	BodySkipped    bool `json:"body_skipped,omitempty"`
 	ContentSkipped bool `json:"content_skipped,omitempty"`
 }
@@ -148,12 +152,16 @@ type JudgeSaw struct {
 
 	// Files is the inventory size (every row is always shown).
 	Files int `json:"files"`
-	// DiffsShown / DiffsOmitted: diffable (non-binary) rows whose diff the
-	// judge saw whole, and — by path — those omitted at the bound.
+	// DiffsShown / DiffsOmitted: rows with text whose diff the judge saw
+	// whole, and — by path — those it did not see, each named on the wire
+	// with its reason: cut at the bound, too large to be compared, or no
+	// text changed (only the file's mode or path). A file added or removed
+	// EMPTY has no text and is in neither list.
 	DiffsShown   int      `json:"diffs_shown"`
 	DiffsOmitted []string `json:"diffs_omitted,omitempty"`
 	// ContentShown / ContentOmitted: modified/renamed text rows whose full
-	// content the judge saw, and those omitted at the bound.
+	// content the judge saw, and those it did not (cut at the bound, or no
+	// whole copy available).
 	ContentShown   int      `json:"content_shown"`
 	ContentOmitted []string `json:"content_omitted,omitempty"`
 
@@ -162,7 +170,9 @@ type JudgeSaw struct {
 	ArtifactBytes int `json:"artifact_bytes"`
 	// ReportBytes is the size of the executor's report shown as claims.
 	ReportBytes int `json:"report_bytes,omitempty"`
-	// Truncated is true when any diff or content body was omitted.
+	// Truncated is true when any file is named in DiffsOmitted or
+	// ContentOmitted (Spec S07.11; R9) — a mode-only or pure-rename row
+	// included, since it is named there.
 	Truncated bool `json:"truncated"`
 }
 
@@ -207,10 +217,11 @@ func (in JudgeInput) Quotable() string {
 //
 // The bound falls on a FILE boundary, twice: the diffs are shown in path
 // order until one does not fit and everything from there on is omitted (a
-// contiguous prefix, so "the first N of M" is literally true), then the
-// contents are shown under what is left. Part of a file's diff would describe
-// a change the change does not make, which is worse than naming the file and
-// showing nothing (the review.changeDiff reason, CONVENTIONS §78).
+// contiguous path-order prefix, R3), then the contents are shown under what
+// is left, by the same rule. Part of a file's diff would describe a change
+// the change does not make, which is worse than naming the file and showing
+// nothing (the review.changeDiff reason, CONVENTIONS §78) — so a diff the
+// source could serve only in part is never shown either.
 func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
 	saw := JudgeSaw{
 		Kind:      sawTree,
@@ -245,9 +256,14 @@ func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
 		// bound). Only the BOUND cuts the rest of the section: a file with no
 		// text to serve says so and the files after it are still shown.
 		switch {
-		case row.Diff == "" && !row.BodySkipped:
-			// Nothing was served for this row, so the bound is not why it is
-			// missing — even past the cut, the true reason is the one said here.
+		case emptyFile(row):
+			// A file added or removed EMPTY has no text: there is no change
+			// to show, nothing is missing, and the row says so.
+			note(row.Path, func(n *rowNotes) { n.diff = emptyFileNote(row) })
+		case !row.BodySkipped && (row.Diff == "" || row.DiffTruncated):
+			// No whole diff was served for this row, so the bound is not why
+			// it is missing — even past the cut, the true reason is the one
+			// said here.
 			saw.DiffsOmitted = append(saw.DiffsOmitted, row.Path)
 			note(row.Path, func(n *rowNotes) { n.diff = noDiffNote(row) })
 		case cut || row.BodySkipped:
@@ -263,9 +279,6 @@ func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
 			diff.WriteString(row.Diff)
 			saw.DiffBytes += len(row.Diff)
 			saw.DiffsShown++
-			if row.DiffTruncated {
-				note(row.Path, func(n *rowNotes) { n.diff = partialDiffNote })
-			}
 		}
 	}
 	// The contents come out of what the diffs left, in the same order under
@@ -280,7 +293,7 @@ func RenderChangeSlice(rc RevisionChange) (string, string, JudgeSaw) {
 			continue
 		}
 		switch {
-		case row.BodySkipped || row.ContentSkipped:
+		case row.ContentSkipped:
 			past := cut
 			cut = true
 			saw.ContentOmitted = append(saw.ContentOmitted, row.Path)
@@ -321,7 +334,6 @@ type rowNotes struct{ diff, content string }
 // those sentences never enter the slice — only the fact they carry does
 // (CONVENTIONS §38: say it in words the reader can act on).
 const (
-	partialDiffNote    = "only the START of its changes is shown: the comparison is larger than this slice serves in one piece"
 	noDiffTooLarge     = "its changes are NOT shown: the file is too large to be compared in one piece here"
 	noDiffSameText     = "its changes are NOT shown: both versions hold the same text — what changed is the file's mode or its path"
 	noWholeContentNote = "its content is NOT shown: no whole copy of its text was available here"
@@ -341,6 +353,22 @@ func boundNote(content, past bool) string {
 	}
 	return fmt.Sprintf("%s NOT shown: it did not fit the %d KB of file text this judge reads under",
 		what, JudgeArtifactBytesCap>>10)
+}
+
+// emptyFile is a file added or removed with no text at all: git's diff of an
+// empty blob against nothing is empty, and that is the whole change.
+func emptyFile(row ChangedFile) bool {
+	if row.Diff != "" || row.BodySkipped || row.DiffTruncated {
+		return false
+	}
+	return (row.Kind == KindAdded && row.NewSize == 0) || (row.Kind == KindDeleted && row.OldSize == 0)
+}
+
+func emptyFileNote(row ChangedFile) string {
+	if row.Kind == KindAdded {
+		return "it has no changes to show: the file was added empty"
+	}
+	return "it has no changes to show: the file was empty when it was removed"
 }
 
 // noDiffNote says why a file WITH text has no diff body in the slice.
