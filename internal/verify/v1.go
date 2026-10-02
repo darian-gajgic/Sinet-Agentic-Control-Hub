@@ -117,15 +117,17 @@ type Check struct {
 	// set only when every rung is detected).
 	//
 	// A detected rung is EVIDENCE wherever it appears: it carries no ACKey
-	// and no StepID, and it mints no finding. No consumer may treat it as an
+	// and no StepID, and it mints no BLOCKER. No consumer may treat it as an
 	// owner check — the graduation decision, the verdict a failing check
 	// forces, and any kill rule read this field first.
 	//
-	// FOR P3-TQ-7, which mints a blocker from a failed check so a broken
-	// build can no longer SHIP: guard that mint on THIS field, never on
-	// CheckPack.Posture. A mixed pack has no posture to read, and a detected
+	// The owner kill (checkFinding) is guarded on THIS field, never on
+	// CheckPack.Posture: a mixed pack has no posture to read, and a detected
 	// rung failing is the platform's own guess about a command nobody
-	// captured — it must not force a person's round to REVISE.
+	// captured — it must not force a person's round to REVISE. A detected
+	// FAIL mints a NOTE instead (detectedNote), so it is visible without
+	// deciding anything (Spec S07.5, S07.7), and it never blocks an owner
+	// rung's attribution (RunV1's owner lane).
 	//
 	// Distinct from Provenance above, which is a different axis entirely:
 	// that one records an acceptance check's separate AUTHORING context.
@@ -179,7 +181,8 @@ type CheckPack struct {
 	// A mixed pack carries no pack-level provenance, because it has no single
 	// answer — Check.Origin is the per-rung fact, and it is the one every
 	// consumer reads. Detected rungs are EVIDENCE and never graduate a
-	// project (Spec S07.8). See evidence.go.
+	// project (Spec S07.8); a failed one is a note, never a kill. See
+	// evidence.go.
 	Provenance Provenance `json:"provenance,omitempty"`
 }
 
@@ -311,7 +314,8 @@ type V1Result struct {
 	// verdict card renders stale.
 	StaleAudit bool `json:"stale_audit,omitempty"`
 	// Findings carries the platform-raised V1 findings (quarantine skips,
-	// runner failures, contract FAILs) into the round record.
+	// runner failures, failed owner checks, failed detected-rung notes,
+	// contract FAILs) into the round record.
 	Findings []Finding `json:"findings,omitempty"`
 	// PackVersion/PackVerifiedOn identify the suite that ran (recording,
 	// Spec S07.11).
@@ -447,9 +451,12 @@ func (r *SandboxCheckRunner) RunCheck(ctx context.Context, req CheckRequest) (Ch
 }
 
 // RunV1 executes the pack ladder cheap-first over the verification
-// workspace: quarantined checks are skipped (rule 6), the first failing
-// stage stops later stages (their checks and contracts become
-// UNVERIFIABLE-HERE with first-upstream-failure attribution), and every
+// workspace: quarantined checks are skipped (rule 6), a failing stage stops
+// later stages (their checks and contracts become UNVERIFIABLE-HERE with
+// first-upstream-failure attribution) per origin lane — an owner rung is
+// stopped only by an earlier OWNER failure, a detected rung by the earliest
+// failure of either origin, so a platform guess never silences a check the
+// project captured (Spec S07.3, S07.8 [A16]) — and every
 // verdict derivation happens here, platform-side (rule 3). coverage is the
 // approved PLAN's AC coverage map (Spec S06.6): the frozen criterion a step's
 // contract FAIL cites (Spec S07.5 blocker rule; P3-TQ-6).
@@ -473,20 +480,26 @@ func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRe
 	}
 	res := V1Result{StaleAudit: stale, PackVersion: pack.Version, PackVerifiedOn: pack.VerifiedOn}
 
-	// Execute in ladder order; within a stage, pack order.
-	firstFailure := ""
-	failedStage := -1
+	// Execute in ladder order; within a stage, pack order. Two attribution
+	// lanes: the ANY lane records the earliest failure of either origin, the
+	// OWNER lane only failures of rungs the project captured.
+	firstFailure, failedStage := "", -1
+	ownerFirstFailure, ownerFailedStage := "", -1
 	for _, stage := range ladderOrder {
 		rank, _ := stageRank(stage)
 		for _, c := range pack.Checks {
 			if c.Stage != stage {
 				continue
 			}
+			laneStage, laneFailure := ownerFailedStage, ownerFirstFailure
+			if c.Origin == ProvenanceDetected {
+				laneStage, laneFailure = failedStage, firstFailure
+			}
 			switch {
-			case failedStage >= 0 && rank > failedStage:
+			case laneStage >= 0 && rank > laneStage:
 				res.Checks = append(res.Checks, CheckOutcome{
 					CheckID: c.ID, Stage: c.Stage, StepID: c.StepID, ACKey: c.ACKey,
-					State: CheckUnverifiable, AttributedTo: firstFailure,
+					State: CheckUnverifiable, AttributedTo: laneFailure,
 				})
 			case pack.Quarantines[c.ID].CheckID != "":
 				q := pack.Quarantines[c.ID]
@@ -539,11 +552,19 @@ func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRe
 					// S07.1: V0/V1 kill broken output before any paid call).
 					// It mints one blocker here, at the decision, so the
 					// round cannot SHIP and the failure cannot die in a log
-					// (Spec S07.7). A DETECTED rung mints nothing — see
-					// Check.Origin: it is the platform's own guess about a
-					// command nobody captured, and it decides no round.
+					// (Spec S07.7). A DETECTED rung is the platform's own
+					// guess about a command nobody captured: it decides no
+					// round, so it mints a note — visible, never a kill.
 					if c.Origin != ProvenanceDetected {
+						if ownerFailedStage < 0 || rank < ownerFailedStage {
+							ownerFailedStage = rank
+						}
+						if ownerFirstFailure == "" {
+							ownerFirstFailure = c.ID
+						}
 						res.Findings = append(res.Findings, checkFinding(c, out))
+					} else {
+						res.Findings = append(res.Findings, detectedNote(c, out))
 					}
 				}
 				res.Checks = append(res.Checks, CheckOutcome{
@@ -555,7 +576,7 @@ func RunV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRe
 		}
 	}
 
-	res.Steps = stepContracts(res.Checks, steps, firstFailure)
+	res.Steps = stepContracts(res.Checks, steps, ownerFirstFailure)
 	// A refuted contract raises one blocker so it reaches a person: the
 	// ladder path mints it exactly as the bootstrap path does (Spec S07.7 —
 	// every verification finding terminates in a human-visible sink; P3-TQ-6).
@@ -700,7 +721,9 @@ func boundedTail(b []byte) string {
 // reworked revision simply stops being raised.
 //
 // Distinct from the contract finding, which says which promise of the plan is
-// broken; this one says what failed. The two are never merged.
+// broken; this one says what failed. The two are never merged. Distinct also
+// from detectedNote, which a failed DETECTED rung mints: that one cites
+// nothing and so can only be a note.
 func checkFinding(c Check, out CheckResult) Finding {
 	var b strings.Builder
 	fmt.Fprintf(&b, "The project's own automated check %q did not pass. It covers %s, and it ended with exit status %d.",
@@ -719,6 +742,38 @@ func checkFinding(c Check, out CheckResult) Finding {
 		Severity:  SeverityBlocker,
 		Category:  c.FindingCategory,
 		Criterion: checkCriterionPrefix + c.ID,
+		Anchor:    checkCriterionPrefix + c.ID,
+		Text:      b.String(),
+		fromCheck: true,
+	}
+}
+
+// detectedNote is the note a failed DETECTED rung mints, in a graduated pack
+// and at bootstrap alike (Spec S07.7 — every verification finding terminates
+// in a human-visible sink). The rung is evidence, not the project's bar
+// (Spec S07.8 [A16]), so the finding cites no criterion and is therefore a
+// note (Spec S07.5): it rides to the requester as a review comment and never
+// forces a rework round (Spec S07.6, S13.4).
+//
+// Category is the check's DECLARED one (Spec S07.3). The anchor names the
+// check; the key (criterion "" + anchor + category) carries neither the exit
+// status nor the output, so a rung that keeps failing is the same note every
+// round. fromCheck marks it as the platform's own, which keeps a note first
+// raised at a later round from being suppressed as a drifting goalpost.
+func detectedNote(c Check, out CheckResult) Finding {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The platform noticed a command in the project's files and ran it as evidence: %q, covering %s, ended with exit status %d. "+
+		"It is not a check the project captured, so it decides nothing on its own. "+
+		"Capturing it under the project's commands makes it an authoritative check.",
+		c.ID, stageWords[c.Stage], out.ExitCode)
+	if tail := strings.TrimRight(boundedTail([]byte(out.OutputTail)), " \t\r\n"); tail != "" {
+		fmt.Fprintf(&b, "\n\nThis is the end of what it printed:\n\n%s", tail)
+	} else {
+		b.WriteString(" It printed nothing.")
+	}
+	return Finding{
+		Severity:  SeverityNote,
+		Category:  c.FindingCategory,
 		Anchor:    checkCriterionPrefix + c.ID,
 		Text:      b.String(),
 		fromCheck: true,

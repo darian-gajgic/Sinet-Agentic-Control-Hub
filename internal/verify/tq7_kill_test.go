@@ -99,11 +99,13 @@ func (r *tq7Runner) RunCheck(_ context.Context, req verify.CheckRequest) (verify
 	return verify.CheckResult{ExitCode: code, EvidenceRef: "evidence/" + id + ".log", OutputTail: r.tails[id]}, nil
 }
 
-// checkBlockers returns the AC-BLOCKER findings anchored check:*, by anchor.
+// checkBlockers returns the AC-BLOCKER blockers anchored check:*, by anchor.
+// A failed detected rung's NOTE shares the anchor shape and is not one
+// (P3-TQ-4c).
 func checkBlockers(fs []verify.Finding) map[string]verify.Finding {
 	out := map[string]verify.Finding{}
 	for _, f := range fs {
-		if strings.HasPrefix(f.Anchor, "check:") && f.Category == verify.CatACBlocker {
+		if strings.HasPrefix(f.Anchor, "check:") && f.Category == verify.CatACBlocker && f.Severity == verify.SeverityBlocker {
 			out[f.Anchor] = f
 		}
 	}

@@ -93,17 +93,19 @@ type Finding struct {
 	// (Spec S07.6).
 	Requester bool `json:"requester,omitempty"`
 
-	// fromCheck marks the platform's own V1 finding for a failed owner check
-	// — the only finding whose criterion may cite an executable check rather
-	// than a frozen criterion or a rubric item (Spec S07.5 citation rule;
-	// validateFindings enforces it).
+	// fromCheck marks the platform's own V1 finding for a failed check: the
+	// owner kill (checkFinding) — the only finding whose criterion may cite an
+	// executable check rather than a frozen criterion or a rubric item (Spec
+	// S07.5 citation rule; validateFindings enforces it) — and the detected
+	// rung's note (detectedNote), which the mark exempts from the round>1
+	// new-note suppression.
 	//
 	// UNEXPORTED so the mark cannot be forged. encoding/json neither writes
 	// nor reads it, so it cannot arrive on a judge's decoded findings, on a
 	// requester comment, on a finding drained back from the S13 review sink,
 	// or on a card read out of a snapshot — the goalposts stay fixed because
-	// only code inside this package can set it, at the single mint site in
-	// RunV1. It needs to survive none of those round trips: validation runs
+	// only code inside this package can set it, at the V1 check mint sites in
+	// RunV1 and bootstrapV1. It needs to survive none of those round trips: validation runs
 	// once per judged round, over that round's freshly raised findings.
 	fromCheck bool
 }

@@ -460,7 +460,7 @@ func validateFindings(round int, fs []Finding, acs []ledger.AcceptanceCriterion,
 		// that regresses mid-drain (or a resume whose carried history is all
 		// full-posture) would otherwise mint it at a later round and have it
 		// swallowed — the requester would never learn nothing was checked.
-		if round > 1 && f.Severity == SeverityNote && !priorKeys[f.Key()] && !isPostureDisclosure(f) {
+		if round > 1 && f.Severity == SeverityNote && !priorKeys[f.Key()] && !isPostureDisclosure(f) && !f.fromCheck {
 			suppressed++
 			continue
 		}
