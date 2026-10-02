@@ -4,7 +4,7 @@ You are ONE budgeted sitting of the Sinet P3 build, launched headless by `P3/run
 
 ## Budget (rule R1)
 - The launch prompt states `sitting_start` and `hard_stop` (UTC). The loop sends SIGINT at `hard_stop` and SIGKILL 15 minutes later; a sitting that is still mid-stage at the hard stop loses that stage's agent (its committed work in the worktree survives).
-- Land at most **3 packets** per sitting. Never launch a grounding after the third landing, and never launch any stage you cannot expect to finish 30 minutes before `hard_stop` (grounding ≈ 30–60 min, executor ≈ 30–90 min, evaluation ≈ 30–60 min).
+- Land at most **3 packets** per sitting by default. **The launch prompt's cap overrides this default**: when it says "land at most <cap> packets this sitting" (the loop's measured cap, `P3/run/cap`, moved by compactions and clean full sittings), land at most that many. Never launch a grounding after the cap-th landing, and never launch any stage you cannot expect to finish 30 minutes before `hard_stop` (grounding ≈ 30–60 min, executor ≈ 30–90 min, evaluation ≈ 30–60 min).
 - When the budget is reached, wind down (below). Unfinished but resumable state is recorded in STATE, never carried in your context.
 
 ## Gates and questions (rule R2)

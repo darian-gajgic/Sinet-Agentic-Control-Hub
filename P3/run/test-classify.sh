@@ -41,4 +41,35 @@ expect dry-opus     'ACTION SLEEP until'                         "$("$RUN_DIR/lo
 expect dry-crash    'ACTION CRASH #1'                            "$("$RUN_DIR/loop.sh" --dry-run $F/crash-noresult.jsonl /nonexistent a a | tail -1)"
 expect dry-done     'ACTION EXIT 0'                              "$("$RUN_DIR/loop.sh" --dry-run $F/done.jsonl $F/done.status.json a b | tail -1)"
 expect dry-capped   'ACTION NEXT after the pause \(budget rail'      "$("$RUN_DIR/loop.sh" --dry-run $F/crash-maxturns.jsonl /nonexistent a a | tail -1)"
+# ---- H-3a deterministic limits: system/api_retry events (research §4.3)
+MT=$(stat -c %Y "$F/limit-retry.jsonl")
+expect retry-live-killed   "^LIMIT:fable:$((MT+5400))$"               "$(classify $F/limit-retry.jsonl /nonexistent a a "$M")"
+expect retry-opus-model    "^LIMIT:opus:$((MT+5400))$"                "$(classify $F/limit-retry.jsonl /nonexistent a a claude-opus-5)"
+expect retry-429-noprose   "^LIMIT:fable:$(( $(date -d 2026-09-22T03:00:00Z +%s) + 7200 ))$" "$(classify $F/limit-429-retry.jsonl /nonexistent a a "$M")"
+expect retry-hook-notime   "^LIMIT:fable:$((MT+5400))$"               "$(classify $F/limit-retry.jsonl $F/limit-hook-notime.status.json a a "$M")"
+expect retry-prose-wins    '^LIMIT:fable:[1-9][0-9]+$'                "$(classify $F/limit-retry.jsonl $F/limit-hook.status.json a a "$M")"
+e=$(classify $F/limit-retry.jsonl $F/limit-hook.status.json a a "$M"); n=$((n+1))
+[ "${e##*:}" != "$((MT+5400))" ] && echo "ok   retry-prose-wins-epoch → prose reset kept" || { echo "FAIL retry-prose-wins-epoch → $e"; fail=1; }
+expect retry-recovered-ok  '^CONTINUE$'                               "$(classify $F/limit-retry-recovered.jsonl $F/continue.status.json a b "$M")"
+expect retry-recovered-nosig '^CRASH:no status.json'                 "$(classify $F/limit-retry-recovered.jsonl /nonexistent a a "$M")"
+expect dry-retry           "ACTION SWITCH to $P3_MODEL_FALLBACK"      "$("$RUN_DIR/loop.sh" --dry-run $F/limit-retry.jsonl /nonexistent a a | tail -1)"
+# ---- H-3a the StopFailure hook COMMAND from hooks.proposed.json, run in isolation
+H="$(mktemp -d)"; mkdir -p "$H/P3/run"
+HC="$(jq -r '.StopFailure[0].hooks[0].command' "$RUN_DIR/hooks.proposed.json")"
+HIN='{"hook_event_name":"StopFailure","session_id":"s1","error":"usage_limit","error_details":"You have hit your Claude Fable limit · resets 9am (Europe/Berlin)"}'
+printf '%s' "$HIN" | CLAUDE_PROJECT_DIR="$H" P3_SITTING=1 sh -c "$HC"
+expect hook-writes-json    '^ok$'                                     "$(jq -e . "$H/P3/run/status.json" >/dev/null 2>&1 && echo ok || echo 'no valid status.json')"
+expect hook-outcome        '^LIMIT$'                                  "$(jq -r .outcome "$H/P3/run/status.json" 2>/dev/null)"
+expect hook-source         '^StopFailure$'                            "$(jq -r .hook "$H/P3/run/status.json" 2>/dev/null)"
+expect hook-note           '^usage_limit You have hit your Claude Fable limit · resets 9am' "$(jq -r .note "$H/P3/run/status.json" 2>/dev/null)"
+expect hook-ended          '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T'           "$(jq -r .ended "$H/P3/run/status.json" 2>/dev/null)"
+expect hook-then-classify  '^LIMIT:fable:[1-9][0-9]+$'                "$(classify $F/continue.jsonl "$H/P3/run/status.json" a a "$M")"
+rm -f "$H/P3/run/status.json"; printf '%s' "$HIN" | env -u P3_SITTING CLAUDE_PROJECT_DIR="$H" sh -c "$HC"; n=$((n+1))
+[ -f "$H/P3/run/status.json" ] && { echo "FAIL hook-interactive-noop → wrote status.json outside a sitting"; fail=1; } || echo "ok   hook-interactive-noop → nothing written without P3_SITTING"
+rm -rf "$H"
+HM="$(jq -r '.StopFailure[0].matcher' "$RUN_DIR/hooks.proposed.json")"
+for t in rate_limit usage_limit weekly_limit session_limit_reached; do n=$((n+1))
+  printf '%s' "$t" | /usr/bin/grep -qE "^($HM)$" && echo "ok   hook-matcher $t → match" || { echo "FAIL hook-matcher $t → no match"; fail=1; }; done
+for t in overloaded server_error authentication_failed; do n=$((n+1))
+  printf '%s' "$t" | /usr/bin/grep -qE "^($HM)$" && { echo "FAIL hook-matcher $t → matched"; fail=1; } || echo "ok   hook-matcher $t → no match"; done
 echo "---- $n checks, $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"; exit $fail

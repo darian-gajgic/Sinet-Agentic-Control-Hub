@@ -22,6 +22,11 @@ LOOP_LOG="$LOG_DIR/loop.log"
 : "${P3_PAUSE_MAX:=1800}"                         # idle backoff cap while sittings make no progress (120 → 600 → cap)
 : "${P3_CRASH_PAUSE:=300}"                        # pause after a crash-class sitting
 : "${P3_SWITCH_PAUSE:=60}"                        # pause after switching models on a Fable limit
+: "${P3_CAP_FILE:=$RUN_DIR/cap}"                  # measured packet cap (H-3c), committed; default 3, range 1..5
+: "${P3_SITTINGS_TSV:=$LOG_DIR/sittings.tsv}"     # one row per sitting: the measured-cap ledger
+: "${P3_COMPACTIONS_LOG:=$LOG_DIR/compactions.log}" # written by the PreCompact hook
+: "${P3_CLI_PIN:=$RUN_DIR/cli-version.pinned}"    # Claude Code version the harness last passed a probe on (H-3b)
+: "${P3_OBSERVED_DIR:=$RUN_DIR/fixtures/observed}" # raw evidence of every LIMIT-classified sitting (H-3a)
 
 LIMIT_RE='hit your (usage |session |weekly )?limit|reached your [a-z ]*limit|usage limit|rate[ _-]?limit|limit reached|limit will reset|out of (usage|credits)|quota (exceeded|reached)'
 
@@ -79,6 +84,40 @@ parse_reset_epoch() { # parse_reset_epoch <text>  — epoch seconds of the state
   echo "${e:-0}"
 }
 
+limit_retry_json() { # limit_retry_json <stream log> [live]  — the last system/api_retry event whose error kind names a limit, or empty
+  # Kinds: rate_limit, usage_limit, any *limit* (fields per research §4.3: error, retry_delay_ms, error_status).
+  # With "live": only when that retry is the last assistant/retry event, i.e. the sitting was still retrying when it
+  # ended (a retry the CLI recovered from is not a limit).
+  [ -f "$1" ] || return 0
+  local last
+  if [ "${2:-}" = live ]; then
+    last="$(jq -cR 'fromjson? | select(.type=="assistant" or (.type=="system" and .subtype=="api_retry"))' "$1" 2>/dev/null | tail -n 1)"
+  else
+    last="$(jq -cR 'fromjson? | select(.type=="system" and .subtype=="api_retry" and ((.error // "")|tostring|test("limit";"i")))' "$1" 2>/dev/null | tail -n 1)"
+  fi
+  [ -n "$last" ] && printf '%s' "$last" | jq -e '.type=="system" and ((.error // "")|tostring|test("limit";"i"))' >/dev/null 2>&1 && printf '%s' "$last"
+  return 0
+}
+
+retry_reset_epoch() { # retry_reset_epoch <stream log> <api_retry json>  — event time + retry_delay_ms, or 0
+  # Event time = the event's own timestamp when it carries one, else the transcript's mtime (the sitting ended retrying).
+  local ms ts base=""
+  ms="$(printf '%s' "$2" | jq -r '.retry_delay_ms // empty | floor' 2>/dev/null)"
+  [ -n "$ms" ] && [ "$ms" -gt 0 ] 2>/dev/null || { echo 0; return; }
+  ts="$(printf '%s' "$2" | jq -r '.timestamp // empty' 2>/dev/null)"
+  [ -n "$ts" ] && base="$(date -d "$ts" +%s 2>/dev/null)"
+  [ -z "$base" ] && base="$(stat -c %Y "$1" 2>/dev/null || date +%s)"
+  echo $(( base + (ms + 999) / 1000 ))
+}
+
+limit_epoch() { # limit_epoch <prose> <stream log>  — the prose reset time; else from the last limit retry_delay_ms; else 0
+  local e rl; e="$(parse_reset_epoch "$1")"
+  [ "$e" -gt 0 ] && { echo "$e"; return; }
+  rl="$(limit_retry_json "$2")"
+  [ -n "$rl" ] && { retry_reset_epoch "$2" "$rl"; return; }
+  echo 0
+}
+
 classify() { # classify <stream log> <status file> <head_before> <head_after> <sitting model>
   # Prints exactly one line: OUTCOME[:detail...]  where OUTCOME ∈ CONTINUE GATE BLOCKED LIMIT DONE CRASH
   #   GATE:<gate file>   LIMIT:<family>:<reset epoch or 0>   CRASH:<reason>
@@ -91,7 +130,7 @@ classify() { # classify <stream log> <status file> <head_before> <head_after> <s
   treason="$(printf '%s' "$rj" | jq -r '.terminal_reason // empty' 2>/dev/null)"; iserr="$(printf '%s' "$rj" | jq -r '.is_error // false' 2>/dev/null)"
   # 1. a limit hit anywhere in the result beats everything (a sitting cannot wind down after it)
   if [ -n "$rj" ] && { [ "$status429" = "429" ] || printf '%s' "$text" | /usr/bin/grep -qiE "$LIMIT_RE"; }; then
-    echo "LIMIT:$(limit_family "$text" "$model"):$(parse_reset_epoch "$text")"; return; fi
+    echo "LIMIT:$(limit_family "$text" "$model"):$(limit_epoch "$text" "$logf")"; return; fi
   # 2. the sitting's own signature (its last act) — or the StopFailure hook's LIMIT record
   if [ -f "$statusf" ] && jq -e . "$statusf" >/dev/null 2>&1; then
     local oc; oc="$(jq -r '.outcome // empty' "$statusf")"
@@ -101,10 +140,15 @@ classify() { # classify <stream log> <status file> <head_before> <head_after> <s
       GATE) echo "GATE:$(jq -r '.gate // ""' "$statusf")"; return;;
       LIMIT) local fam note; fam="$(jq -r '.family // "unknown"' "$statusf")"; note="$(jq -r '.note // ""' "$statusf")"
              [ "$fam" = unknown ] || [ -z "$fam" ] && fam="$(limit_family "$note" "$model")"
-             echo "LIMIT:$fam:$(parse_reset_epoch "$note")"; return;;
+             echo "LIMIT:$fam:$(limit_epoch "$note" "$logf")"; return;;
       *) echo "CRASH:bad status outcome '$oc'"; return;;
     esac
   fi
+  # 2b. no signature, and the sitting ended while the CLI was still retrying a limit (system/api_retry, research §4.3):
+  #     a deterministic LIMIT even when no result line was written (the wall clock cut it mid-retry)
+  local rl; rl="$(limit_retry_json "$logf" live)"
+  if [ -n "$rl" ]; then
+    echo "LIMIT:$(limit_family "$text $(printf '%s' "$rl" | jq -r '.error // "" | tostring')" "$model"):$(limit_epoch "$text" "$logf")"; return; fi
   # 3. no signature: a budget rail cut the sitting before its wind-down → CAPPED (the next sitting recovers from git)
   case "$treason" in max_turns|budget_exhausted) echo "CAPPED:$treason (turns=$(printf '%s' "$rj" | jq -r '.num_turns // "?"'))"; return;; esac
   # 4. an API failure that is not a limit (auth wall, overloaded, server error): crash class, backoff applies
@@ -138,5 +182,62 @@ reap_orphans() { # kill test runners no sitting is running (called between sitti
   local pids p keep=" $$ $PPID ${LOOP_PID:-} "
   pids="$(pgrep -f '[g]o test |[.]test -test[.]|[v]itest' 2>/dev/null || true)"; [ -z "$pids" ] && return 0
   for p in $pids; do case "$keep" in *" $p "*) ;; *) log "reaping orphan $p: $(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | cut -c1-120)"; kill "$p" 2>/dev/null || true;; esac; done
+  return 0
+}
+
+archive_limit() { # archive_limit <stream log> <status file> <classification>  — keep a LIMIT sitting's raw evidence (H-3a)
+  # → $P3_OBSERVED_DIR/<sitting ts>/{result.json,status.json,api_retry.jsonl,class.txt}: real observations to promote into tests.
+  local ts d; ts="$(basename "$1" .jsonl)"; ts="${ts#sitting-}"
+  [ -f "$1" ] || ts="$(date -u +%Y%m%d-%H%M%S)"
+  d="$P3_OBSERVED_DIR/$ts"; mkdir -p "$d" 2>/dev/null || return 0
+  last_result_json "$1" > "$d/result.json"
+  [ -f "$2" ] && cp -f "$2" "$d/status.json"
+  [ -f "$1" ] && jq -cR 'fromjson? | select(.type=="system" and .subtype=="api_retry")' "$1" > "$d/api_retry.jsonl" 2>/dev/null
+  [ -s "$d/api_retry.jsonl" ] || rm -f "$d/api_retry.jsonl"
+  printf '%s\n' "$3" > "$d/class.txt"
+  log "archived LIMIT evidence → $d"
+}
+
+read_cap() { # read_cap  — the measured packet cap (1..5); 3 when the file is missing or malformed
+  local c; c="$(tr -dc '0-9' < "$P3_CAP_FILE" 2>/dev/null)"
+  case "$c" in [1-5]) echo "$c";; *) echo 3;; esac
+}
+
+record_sitting() { # record_sitting <stream log> <status file> <classification> <model>  — append one ledger row (H-3c)
+  # columns: ts model duration_s turns landed compactions transcript_bytes outcome cap   (cap = the cap that sitting ran under)
+  [ -f "$1" ] || return 0   # no transcript = no sitting ran (e.g. a preflight BLOCKED)
+  local meta="${1%.jsonl}.meta" ts start end dur turns landed comp bytes cap
+  ts="$(basename "$1" .jsonl)"; ts="${ts#sitting-}"
+  start="$(sed -n 's/^start=//p' "$meta" 2>/dev/null | head -n 1)"; end="$(sed -n 's/^end=//p' "$meta" 2>/dev/null | tail -n 1)"
+  [ -z "$end" ] && end="$(date -u +%FT%TZ)"
+  dur=0; [ -n "$start" ] && dur=$(( $(date -d "$end" +%s) - $(date -d "$start" +%s) ))
+  turns="$(last_result_json "$1" | jq -r '.num_turns // 0' 2>/dev/null)"; [ -n "$turns" ] || turns=0
+  landed=0; [ -f "$2" ] && landed="$(jq -r '(.landed // []) | length' "$2" 2>/dev/null)"; [ -n "$landed" ] || landed=0
+  comp=0   # compactions logged by the PreCompact hook inside the sitting's [start, end] window (interactive ones excluded)
+  [ -n "$start" ] && [ -f "$P3_COMPACTIONS_LOG" ] && comp="$(jq -rR --arg s "$start" --arg e "$end" \
+    'fromjson? | select((.at // "") >= $s and (.at // "") <= $e and (.sitting // "") != "interactive") | 1' "$P3_COMPACTIONS_LOG" 2>/dev/null | wc -l)"
+  bytes="$(stat -c %s "$1")"
+  cap="$(sed -n 's/^cap=//p' "$meta" 2>/dev/null | head -n 1)"; [ -n "$cap" ] || cap="$(read_cap)"
+  mkdir -p "$(dirname "$P3_SITTINGS_TSV")"
+  [ -s "$P3_SITTINGS_TSV" ] || printf 'ts\tmodel\tduration_s\tturns\tlanded\tcompactions\ttranscript_bytes\toutcome\tcap\n' > "$P3_SITTINGS_TSV"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$ts" "$4" "$dur" "$turns" "$landed" "$comp" "$bytes" "${3%%:*}" "$cap" >> "$P3_SITTINGS_TSV"
+}
+
+update_cap() { # update_cap  — apply the measured-cap rule to the ledger row of the sitting that just ended (H-3c)
+  # any compaction in it → cap−1 (min 1); the last five rows all ran at the current cap, landed it, and compacted
+  # zero times → cap+1 (max 5). The ledger is the memory, so the rule survives loop restarts and --once runs.
+  [ -s "$P3_SITTINGS_TSV" ] || return 0
+  local cap new last comp streak; cap="$(read_cap)"; new="$cap"
+  last="$(tail -n 1 "$P3_SITTINGS_TSV")"; [ "$(printf '%s' "$last" | cut -f1)" = ts ] && return 0
+  comp="$(printf '%s' "$last" | cut -f6)"
+  if [ "${comp:-0}" -gt 0 ] 2>/dev/null; then new=$(( cap > 1 ? cap - 1 : 1 ))
+  else
+    streak="$(tail -n 5 "$P3_SITTINGS_TSV" | awk -F'\t' -v c="$cap" '$1!="ts" && $9==c && $5>=c && $6==0' | wc -l)"
+    [ "$streak" -ge 5 ] && new=$(( cap < 5 ? cap + 1 : 5 ))
+  fi
+  if [ "$new" != "$cap" ]; then
+    echo "$new" > "$P3_CAP_FILE"
+    log "CAP $cap → $new ($( [ "$new" -lt "$cap" ] && echo 'compaction in the last sitting' || echo "5 consecutive sittings landed $cap with zero compactions"))"
+  fi
   return 0
 }

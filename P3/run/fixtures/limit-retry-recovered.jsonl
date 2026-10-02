@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init"}
+{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":30000,"error_status":429,"error":"rate_limit"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"retry succeeded, working"}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":212,"result":"Wound down. status.json written.","api_error_status":null,"terminal_reason":"completed","total_cost_usd":0}
