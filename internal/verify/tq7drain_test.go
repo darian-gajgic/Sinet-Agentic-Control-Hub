@@ -68,8 +68,8 @@ func TestTQ7MixedPackKillsOnTheOwnersRungOnly(t *testing.T) {
 		if got := checkBlockers(rd.Findings); len(got) != 0 {
 			t.Fatalf("a detected rung of a graduated pack minted the kill: %+v", got)
 		}
-		if _, ok := findingAt(rd.Findings, "check:build"); ok {
-			t.Fatalf("the detected build minted a finding: %+v", rd.Findings)
+		if fd, ok := findingAt(rd.Findings, "check:build"); ok && fd.Severity == verify.SeverityBlocker {
+			t.Fatalf("the detected build minted a BLOCKER: %+v", rd.Findings)
 		}
 		if rd.Verdict == verify.VerdictRevise {
 			t.Fatalf("a detected rung's failure drove the round to REVISE: %+v", rd.Findings)
@@ -84,10 +84,11 @@ func TestTQ7MixedPackKillsOnTheOwnersRungOnly(t *testing.T) {
 		if !recorded {
 			t.Fatalf("the detected build's failure was not recorded as evidence: %+v", rd.V1.Checks)
 		}
-		// What this round then does with its clean verdict is NOT this test's
-		// subject: a graduated pack whose only failure is detected ships
-		// today, and whether that is right is a TQ-4a follow-up. Asserted
-		// here: the kill did not fire, and nothing above depends on it.
+		// What this round then does with its verdict is NOT this test's
+		// subject: since P3-TQ-4c a graduated pack whose only failure is
+		// detected ships with that failure as a NOTE (tq4c_mixed_test.go).
+		// Asserted here: the kill did not fire, and nothing above depends on
+		// it.
 	})
 
 	t.Run("the owner rung fails", func(t *testing.T) {

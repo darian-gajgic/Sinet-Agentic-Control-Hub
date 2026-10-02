@@ -140,8 +140,9 @@ func isPostureDisclosure(f Finding) bool { return f.Key() == bootstrapPostureKey
 // their verdicts are derived platform-side from the exit status, never from
 // anything the command says about itself (Spec S07.3 rule 3). They are
 // EVIDENCE and nothing more: they carry no frozen-criterion key and no PLAN
-// step id (rule 4), they raise no finding of their own (Spec S07.5: a finding
-// citing no criterion can only be a note), and they never graduate the
+// step id (rule 4), a FAILED one raises a note and never a blocker (Spec
+// S07.5: a finding citing no criterion can only be a note; Spec S07.7: it is
+// still visible beside the posture disclosure), and they never graduate the
 // project — the posture, the mandatory review and the advisory verdict are
 // unchanged by every one of them passing.
 //
@@ -163,7 +164,9 @@ func bootstrapV1(ctx context.Context, pack *CheckPack, runner CheckRunner, req C
 		res.PackVersion = pack.Version
 		res.PackVerifiedOn = pack.VerifiedOn
 	}
-	res.Checks = detectedRungs(ctx, pack, runner, req, tree)
+	var notes []Finding
+	res.Checks, notes = detectedRungs(ctx, pack, runner, req, tree)
+	res.Findings = append(res.Findings, notes...)
 	idx, walkErr := indexTree(tree)
 	for _, s := range steps {
 		sc := decideFromTree(s, idx, walkErr)
@@ -207,9 +210,11 @@ var hostResidentInterpreters = map[string]bool{
 const detectedDepsDir = "node_modules"
 
 // detectedRungs runs the pack's detected commands over the ladder, cheap-first,
-// and fills every stage they do not cover with its honest placeholder.
-func detectedRungs(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, tree string) []CheckOutcome {
+// and fills every stage they do not cover with its honest placeholder. Each
+// rung that FAILED yields its detectedNote.
+func detectedRungs(ctx context.Context, pack *CheckPack, runner CheckRunner, req CheckRequest, tree string) ([]CheckOutcome, []Finding) {
 	var out []CheckOutcome
+	var notes []Finding
 	web := webShapedTree(tree)
 	firstFailure, failedStage := "", -1
 	for _, stage := range ladderOrder {
@@ -226,8 +231,10 @@ func detectedRungs(ctx context.Context, pack *CheckPack, runner CheckRunner, req
 					Detail: "an earlier rung failed, so this one could not say anything about the work",
 				}
 			} else {
-				o = detectedOutcome(ctx, c, runner, req, tree)
+				var res CheckResult
+				o, res = detectedOutcome(ctx, c, runner, req, tree)
 				if o.State == CheckFailed {
+					notes = append(notes, detectedNote(c, res))
 					if failedStage < 0 || rank < failedStage {
 						failedStage = rank
 					}
@@ -242,7 +249,7 @@ func detectedRungs(ctx context.Context, pack *CheckPack, runner CheckRunner, req
 			out = append(out, placeholderRung(stage, web))
 		}
 	}
-	return out
+	return out, notes
 }
 
 // packChecksAt returns a pack's checks at one ladder stage, in pack order.
@@ -265,8 +272,9 @@ func packChecksAt(pack *CheckPack, stage LadderStage) []Check {
 // and no StepID, so ValidateAxis1 can never bind it as a mechanical AC fact and
 // stepContracts can never let it decide a PLAN contract. The guarantee is
 // structural — the fields are simply never filled on this path — rather than a
-// property of whatever pack arrives here.
-func detectedOutcome(ctx context.Context, c Check, runner CheckRunner, req CheckRequest, tree string) CheckOutcome {
+// property of whatever pack arrives here. The runner's result is handed back
+// so a FAIL's note can carry the end of the output.
+func detectedOutcome(ctx context.Context, c Check, runner CheckRunner, req CheckRequest, tree string) (CheckOutcome, CheckResult) {
 	o := CheckOutcome{CheckID: c.ID, Stage: c.Stage}
 	if reason := unrunnableReason(c, tree, runner); reason != "" {
 		// Decided BEFORE execution, from the tree (Spec S07.3 rule 1): a rung
@@ -274,7 +282,7 @@ func detectedOutcome(ctx context.Context, c Check, runner CheckRunner, req Check
 		// so it can never become a FAIL that blames the work for a platform
 		// condition — and never the occasion for an egress exception.
 		o.State, o.AttributedTo, o.Detail = CheckUnverifiable, DetectedUnrunnable, reason
-		return o
+		return o, CheckResult{}
 	}
 	r := req
 	r.Check = c
@@ -284,7 +292,7 @@ func detectedOutcome(ctx context.Context, c Check, runner CheckRunner, req Check
 		// finding: a blocker here would drive REVISE to the cap and park the
 		// run, which is the wall Spec S07.8 abolishes.
 		o.State, o.Detail = CheckRunnerFailed, err.Error()
-		return o
+		return o, CheckResult{}
 	}
 	// The verdict is the exit status, read platform-side (Spec S07.3 rule 3).
 	o.State, o.ExitCode = CheckPassed, res.ExitCode
@@ -292,7 +300,7 @@ func detectedOutcome(ctx context.Context, c Check, runner CheckRunner, req Check
 	if res.ExitCode != 0 {
 		o.State = CheckFailed
 	}
-	return o
+	return o, res
 }
 
 // placeholderRung is the outcome for a ladder stage no detected command covers:
