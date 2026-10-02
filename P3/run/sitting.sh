@@ -5,6 +5,7 @@
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 cd "$P3_ROOT"
+export DISABLE_AUTOUPDATER=1   # H-3b: the CLI must not update itself under a running sitting
 MODEL="$P3_MODEL_PRIMARY"; SMOKE=0
 while [ $# -gt 0 ]; do case "$1" in --model) MODEL="$2"; shift 2;; --smoke) SMOKE=1; shift;; *) echo "unknown arg $1" >&2; exit 2;; esac; done
 # harness self-integrity check (research §2.11: control files have been deleted by agents in other harnesses)
@@ -13,6 +14,20 @@ for f in "$RUN_DIR/lib.sh" "$RUN_DIR/loop.sh" "$RUN_DIR/sitting-prompt.md" "$P3_
 for c in claude jq git timeout; do command -v "$c" >/dev/null || { echo "PREFLIGHT FAIL: no $c on PATH" >&2; exit 3; }; done
 git -C "$P3_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "PREFLIGHT FAIL: not a git work tree" >&2; exit 3; }
 mkdir -p "$LOG_DIR"; rm -f "$STATUS_FILE"
+# update guard (H-3b): a CLI version other than the pinned one must first pass the one-turn probe on the sitting model
+CLI_NOW="$(claude --version 2>/dev/null | awk 'NR==1{print $1}')"; CLI_NOW="${CLI_NOW:-unknown}"
+CLI_PIN="$(awk 'NR==1{print $1}' "$P3_CLI_PIN" 2>/dev/null)"; CLI_PIN="${CLI_PIN:-none}"
+if [ "$CLI_NOW" != "$CLI_PIN" ]; then
+  if [ "$CLI_NOW" != unknown ] && probe_model "$MODEL"; then
+    log "CLI drift $CLI_PIN→$CLI_NOW: one-turn probe on $MODEL passed — pin updated, continuing"
+    notify "P3 CLI updated" "Claude Code $CLI_PIN→$CLI_NOW passed the one-turn probe on $MODEL; pin updated"
+    printf '%s\n' "$CLI_NOW" > "$P3_CLI_PIN"
+  else
+    jq -n --arg n "CLI drift $CLI_PIN→$CLI_NOW: smoke failed" '{outcome:"BLOCKED",note:$n}' > "$STATUS_FILE"
+    log "PREFLIGHT BLOCKED: CLI drift $CLI_PIN→$CLI_NOW: smoke failed on $MODEL"; exit 3
+  fi
+fi
+CAP="$(read_cap)"
 TS="$(date -u +%Y%m%d-%H%M%S)"; LOGF="$LOG_DIR/sitting-$TS.jsonl"; ERRF="$LOG_DIR/sitting-$TS.err"; META="$LOG_DIR/sitting-$TS.meta"
 START="$(date -u +%FT%TZ)"
 WALL_S="$(wall_seconds "$P3_SITTING_WALL")"
@@ -23,6 +38,7 @@ if [ "$SMOKE" = 1 ]; then
 else
   GITCTX="$(git -C "$P3_ROOT" log --oneline -10 2>/dev/null | cut -c1-110)"; GITST="$(git -C "$P3_ROOT" status --short 2>/dev/null | head -20)"
   PROMPT="continue implementation — headless sitting. sitting_start=$START hard_stop=$HARD model=$MODEL. Obey the sitting contract in your system prompt (budget, gate files, status.json last).
+Packet cap (measured, P3/run/cap; overrides the contract's default): land at most $CAP packets this sitting.
 Repository truth at launch (distrust any handoff sentence that disagrees with it):
 git log --oneline -10:
 $GITCTX
@@ -30,8 +46,8 @@ git status --short (head -20):
 ${GITST:-(clean)}"
   WALL="$P3_SITTING_WALL"; TURNS="$P3_SITTING_MAX_TURNS"; SP=(--append-system-prompt-file "$RUN_DIR/sitting-prompt.md")
 fi
-printf 'model=%s\nstart=%s\nhard_stop=%s\nlog=%s\nsmoke=%s\n' "$MODEL" "$START" "$HARD" "$LOGF" "$SMOKE" > "$META"
-log "SITTING $TS start model=$MODEL wall=$WALL turns=$TURNS smoke=$SMOKE"
+printf 'model=%s\nstart=%s\nhard_stop=%s\nlog=%s\nsmoke=%s\ncap=%s\ncli=%s\n' "$MODEL" "$START" "$HARD" "$LOGF" "$SMOKE" "$CAP" "$CLI_NOW" > "$META"
+log "SITTING $TS start model=$MODEL wall=$WALL turns=$TURNS smoke=$SMOKE cap=$CAP cli=$CLI_NOW"
 BUDGET=(); [ -n "$P3_SITTING_MAX_BUDGET_USD" ] && BUDGET=(--max-budget-usd "$P3_SITTING_MAX_BUDGET_USD")
 env -u CLAUDECODE TERM=dumb P3_SITTING=1 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
 timeout --signal=INT --kill-after=15m "$WALL" \

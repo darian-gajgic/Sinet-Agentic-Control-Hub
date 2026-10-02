@@ -67,6 +67,9 @@ while :; do
   ACTION="$(decide "$CLASS")"
   if progress_since "$HEAD_BEFORE" "$HEAD_AFTER"; then PROGRESS=1; else PROGRESS=0; fi
   log "CLASS $CLASS | progress $( [ "$PROGRESS" = 1 ] && echo yes || echo "none (bookkeeping-only or no commit)" ) | ACTION $ACTION"
+  # H-3c measured cap: one ledger row per sitting, then the cap rule; H-3a: every LIMIT's raw evidence is archived
+  record_sitting "$LOGF" "$STATUS_FILE" "$CLASS" "$MODEL"; update_cap
+  case "$CLASS" in LIMIT:*) archive_limit "$LOGF" "$STATUS_FILE" "$CLASS";; esac
   # stall breaker: three consecutive COMPLETED sittings without progress beyond STATE/HANDOFF bookkeeping
   # (crashes have their own breaker; limits count toward neither); idle backoff: the pause between
   # unproductive sittings grows P3_PAUSE_MIN ×5 per step up to P3_PAUSE_MAX (diminishing returns)

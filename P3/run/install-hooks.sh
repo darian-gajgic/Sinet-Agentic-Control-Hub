@@ -3,7 +3,7 @@
 # Why a script: the coordinator's own edit of settings.json is denied by the auto-mode classifier (self-modification),
 # so the hooks are installed by the operator with ONE command:  P3/run/install-hooks.sh
 # Hooks (verified against Claude Code 2.1.278, see P3/design/harness-sota-research-2026-09-22.md §1.8/§4.3):
-#   StopFailure(rate_limit|usage_limit) → writes P3/run/status.json {"outcome":"LIMIT"} so the loop never guesses from prose
+#   StopFailure(rate_limit|usage_limit|.*limit.*) → writes P3/run/status.json {"outcome":"LIMIT"} so the loop never guesses from prose
 #   PreCompact                          → appends P3/run/log/compactions.log (a sitting that compacts is over budget)
 #   PermissionDenied                    → appends P3/run/log/denials.log (the only record of what auto mode blocked)
 set -euo pipefail
