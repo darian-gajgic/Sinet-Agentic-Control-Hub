@@ -37,7 +37,7 @@ func TestJudgeInputSliceCleanContext(t *testing.T) {
 	v1 := &verify.V1Result{PackVersion: 1, Checks: []verify.CheckOutcome{{CheckID: "ac2", ACKey: "AC-2", State: verify.CheckPassed}}}
 	prior := []verify.Finding{{N: 1, Severity: verify.SeverityBlocker, Category: verify.CatACBlocker, Criterion: "AC-1", Anchor: "main.go:1", Text: "prior", Round: 1}}
 
-	in, err := verify.BuildJudgeInput(ctx, f.ledger, d, verify.SeedSoftwareRubric(), v1, prior, 2)
+	in, err := verify.BuildJudgeInput(ctx, f.ledger, d, verify.JudgeSlice{Artifact: d.Content, Diff: d.Diff}, verify.SeedSoftwareRubric(), v1, prior, 2)
 	if err != nil {
 		t.Fatalf("BuildJudgeInput: %v", err)
 	}

@@ -757,7 +757,9 @@ const axis1Schema = `Output EXACTLY one JSON object:
  "findings":[{"severity":"blocker"|"note","category":"ac-blocker","criterion":"AC-n","anchor":string,"text":string}...],
  "escalate":string}  // non-empty ONLY to escalate instead of another round
 Rules: one verdict per numbered AC; evidence MUST be an EXACT substring of the
-artifact (extractive quote) — a PASS without one is forced Unknown; every
+verify/artifact or verify/diff item above (extractive quote) — a PASS without
+one is forced Unknown; the verify/executor-report item is the executor's own
+account of its work, so nothing quoted from it counts as evidence; every
 blocker cites the frozen criterion it violates.`
 
 const axis2Schema = `Output EXACTLY one JSON object:

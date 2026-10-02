@@ -97,6 +97,11 @@ type Verifier struct {
 	// handoff, findings-as-comments, guidance ingress, and THE S13.4
 	// drain. Nil = the pre-S13 in-memory channel (see ReviewSink).
 	Review ReviewSink
+	// Change is the S13 tree seam of the judge's input slice (Spec S07.5;
+	// judgeslice.go): the reviewable change of a repo-backed revision from
+	// the platform-owned store at the pinned refs. Nil = today's slice (the
+	// artifact-of-record text).
+	Change ChangeSource
 
 	// PreGates overrides the V0 gate set (nil = DefaultPreGates) — the
 	// extension point per-deployment shape checks ride.
@@ -511,9 +516,33 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 			}
 		}
 
+		// ---- The judge's input slice (Spec S07.5: the artifact + its diff
+		// against the previous revision). For a repo-backed revision the
+		// artifact is the tree's CHANGE at the pinned refs and the step
+		// report is demoted to claims; every other revision keeps the
+		// artifact of record (judgeslice.go). The seam is asked once per
+		// judged round, AFTER the mint — from there the round's revision and
+		// its pin are in the review store — and before the paid call, so a
+		// seam error (a lost pin included) fails the round with no verdict
+		// row rather than falling through to the report (CONVENTIONS §78).
+		slice := contentSlice(d, "")
+		if v.Change != nil {
+			rc, cerr := v.Change.RevisionChange(ctx, d, JudgeArtifactBytesCap)
+			if cerr != nil {
+				return Outcome{}, fmt.Errorf("verify: read the change of revision %d: %w", d.Revision, cerr)
+			}
+			if rc.AbsentReason != "" {
+				slice = contentSlice(d, rc.AbsentReason)
+			} else {
+				slice = changeSlice(rc, d.Content)
+			}
+		}
+		saw := slice.Saw
+		record.JudgeSaw = &saw
+
 		// ---- V2 (Spec S07.5): one compliance call, at most one sanity
 		// call. ----
-		input, err := BuildJudgeInput(ctx, v.Ledger, d, rubric, v1res,
+		input, err := BuildJudgeInput(ctx, v.Ledger, d, slice, rubric, v1res,
 			append(priorFindings(out.Rounds), seed.guidance...), round)
 		if err != nil {
 			return Outcome{}, err
@@ -526,7 +555,11 @@ func (v *Verifier) drain(ctx context.Context, in VerifyInput, d Deliverable, see
 		if v1res != nil {
 			v1Facts = v1res.ACOutcomes()
 		}
-		verdicts, integrity := ValidateAxis1(ax1, input.ACs, v1Facts, d.Content)
+		// The extractive quote is measured against what the judge may quote —
+		// the artifact item plus the diff item — so a PASS resting on the
+		// executor's report alone is non-extractive and forced Unknown
+		// (Spec S07.5/S07.10; S07.9 P-T06-3).
+		verdicts, integrity := ValidateAxis1(ax1, input.ACs, v1Facts, input.Quotable())
 		// The same disagreement sentence over the PLAN's step contracts,
 		// which both V1 branches populate: a judge PASS on a criterion whose
 		// covering step the checks refuted is CHECK-INTEGRITY, never an

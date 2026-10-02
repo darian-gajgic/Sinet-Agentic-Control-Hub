@@ -74,6 +74,11 @@ type roundPayload struct {
 	Failed  []string `json:"failed,omitempty"`
 	Unknown []string `json:"unknown,omitempty"`
 
+	// JudgeSaw is what the judge's artifact slice held this round — the
+	// tree's pins and how much of the change was shown, or the content lane
+	// and why (Spec S07.11: a verdict is kept with what was checked).
+	JudgeSaw *JudgeSaw `json:"judge_saw,omitempty"`
+
 	// Findings with their note-vs-blocker flags, verbatim.
 	Findings        []Finding `json:"findings,omitempty"`
 	SuppressedNotes int       `json:"suppressed_notes,omitempty"`
@@ -169,6 +174,7 @@ func (r *Recorder) RecordRound(ctx context.Context, runID string, d Deliverable,
 		JudgeModel:      meta.Model,
 		SelfFamilyJudge: meta.SelfFamily,
 		GoldenSet:       rates,
+		JudgeSaw:        rec.JudgeSaw,
 		Findings:        rec.Findings,
 		SuppressedNotes: rec.SuppressedNotes,
 		Axis2Skipped:    rec.Axis2Skipped,
