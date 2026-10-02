@@ -187,3 +187,90 @@ Three of my Bash calls were terminated by the harness (exit 144) while running i
 ### Draft STATE landing line (R6)
 
 P3-TQ-8 re-check r1 (83e071b): VERDICT FAIL. F1–F10 RESOLVED (F3 as sanctioned); tamper clean (:450 token only); finalizer's two self-fixes correct and pinned. 12 mutations (M4-all/M4a/M4b/M5–M13) all caught; 7 renderer + 4 real-seam probes. Full ./... 48 ok / 5 no tests / 0 fail. New: N1 [med] after the first skipped diff the sink keeps charging diffs the renderer omits, so a later modified file's content is ContentSkipped with 92 KB of room and the wire says "did not fit" (F3 residual, R3 content clause); N2 [low] added/deleted empty file named "same text: mode or path changed"; N3–N5 nits.
+
+## Re-check r2
+
+Re-checked 2026-10-02 on worktree branch `worktree-agent-a0253ce364edb86af` at `071ff02` (drain r2, range `ddc4351..071ff02`). Inputs read in full: the brief (R1–R9), the two sections above, the finalizer report `P3/reports/P3-TQ-8-finalize-r2.md` (not trusted; every claim re-derived), the drain diff, the two new test files, `review/tree.go` (`fileDiff` :363-404, `cutDiff` :670-685), `review/diff.go` (`gitDiff`), the r1 pinning tests (`tq8_slicehonesty_test.go`, `tq8_sinkbudget_test.go`, `tq8_judgeslice_test.go:470-569`). Fresh context.
+
+### VERDICT: FAIL
+
+N1, N2 and N4 are RESOLVED in the code and at the real seam. The verdict is FAIL because one new finding sits above nit: N6, the N1 mechanism re-entering through the N4 fix — review serves a two-sided over-cap diff as a hunk-boundary PREFIX smaller than the judge's bound (`Truncated=true`), the sink's first pass serves and CHARGES it, and the r2 renderer never shows a truncated diff, so the sink's `read` and the renderer's shown bytes diverge again and "did not fit the 192 KB" is false for the rows after it. Executed at the real seam (PR5): the judge receives zero bodies for a two-file change in which either body alone fits.
+
+### Per-finding verification
+
+| N | Status | How verified (independently) |
+|---|---|---|
+| N1 | RESOLVED | Real seam PR1 (the r1 shape: rev 3 `src/app.go` 25,601 B; rev 4 adds README.md, a.txt 100 KiB, b.txt 100 KiB, c.txt 70 KiB, appends one line). Sink rows: README 119, a.txt 104,155, b.txt `BodySkipped`, c.txt `BodySkipped` (past-cut pass: 72,947 > 66,726 left), `src/app.go` diff 383 served, content 25,608 served. Renderer: `DiffsShown=2 DiffsOmitted=[b.txt c.txt src/app.go] ContentShown=1 DiffBytes=104,274 ContentBytes=25,608`; app.go's content is on the wire. "did not fit" appears for b.txt only (+ the bound paragraph); b.txt's real diff 104,155 B against 92,334 B of room before it — true. PR8: the CUT row's own content is read and shown (app.go rewritten 25 KiB → 10 KiB behind a 160 KiB add: diff `BodySkipped`, content 10,241 B on the wire). Mutation M16 (revert the reorder: `break` → `continue`, pass 3 inert) fails `TestTQ8ADiffPastTheCutNeverCostsAShownContentItsPlace`. |
+| N2 | RESOLVED | Real seam PR2: rev 3 adds `empty.txt` "" → `added new=0 diff=0 bskip=F` → "it has no changes to show: the file was added empty", `DiffsOmitted=[]`, `Truncated=false`, "No file in this change has text to compare"; rev 4 removes it → `deleted old=0 diff=0` → "…was empty when it was removed", not omitted, not truncated; beside a real modification → "all 1 file with text are there in full". The finalizer tested only the added case at the real seam; the deleted case holds too. M17 (`case emptyFile(row)` disabled) fails `TestTQ8AnEmptyFileAddedOrRemovedIsNotACut`. |
+| N4 | RESOLVED | `partialDiffNote` gone (`grep` finds no "only the START"); `RenderChangeSlice` doc rewritten (:218-224). Renderer: a `DiffTruncated` row with a non-empty diff is never written to the diff item and is named `noDiffTooLarge` without cutting the section (PR5: `a/big.go` → "too large to be compared in one piece"; `TestTQ8ADiffServedOnlyInPartIsNeverShown`). M18 (arm reduced to `row.Diff == ""`) fails that test. Real seam PR6 (one-sided 300 KiB add): review serves 262,128 B `Truncated`; sink `BodySkipped`; wire "did not fit" (true), never "only the START". The SINK side of the same shape is N6/N8 below. |
+| N3 | DECLINED — consistent, with one tension | See the N3 note below. |
+| N5 | ledger | Not assessed (coordinator's ledger). For the record, P-J confirms the exact-equality arm still marks a 0-byte row "did not fit". |
+
+### N3: is the declined state internally consistent?
+
+Yes for mode-only / pure-rename rows. Tests: `tq8_slicehonesty_test.go:98` asserts `saw.Truncated` for the mode-only case and `:92` pins the row in `DiffsOmitted`; `tq8_judgeslice_test.go:562` pins `Truncated ⇔ len(DiffsOmitted)+len(ContentOmitted) > 0`. Docs: `JudgeSaw.DiffsOmitted` (:155-159) now says the list holds rows "cut at the bound, too large to be compared, or no text changed (only the file's mode or path)" and `Truncated` (:173-176) says "a mode-only or pure-rename row included, since it is named there". Wire (P-I, real seam PR4 in r1): the row is named "its changes are NOT shown: both versions hold the same text — what changed is the file's mode or its path", counted among "files with text" not shown, its content shown, record `Truncated=true`. Code, tests, docs and wire agree.
+
+The brief agrees with the tests: R9 "every diffable row is either shown whole in the diff item or named as omitted" (diffable = non-binary, R9's own parenthetical) and "`Truncated` ⇔ something was omitted" — a mode-only row has no diff to show whole, so under R9 it MUST be named omitted and `Truncated` follows. R6 and the pre-r2 doc ("true when any diff or content body was omitted") say the same.
+
+The tension: the N2 fix carves out exactly the semantics N3 asked for, but for a different no-text row — an added/removed EMPTY file is in neither list and leaves `Truncated=false` (`judgeslice.go:259-262, :360-365`; doc :158-159). R9's letter allows no third state for a non-binary row, and the same R9 clause is the finalizer's ground for declining N3. The property test cannot adjudicate either way: `strings.Contains(diff, row.Diff)` at `:522` is vacuously true for an empty diff, so an empty-diff row would be counted "shown whole" under both semantics; its generator never produces one (`:486-490`), which is why it stays green. Coordinator's call: either R9 gains the "no text to show" state (then N3's mode-only rows can join it), or the empty-file row returns to the omitted lists. The declined state is consistent as shipped; the brief and the N2 carve-out are not.
+
+### Test-file tamper check (duty 4b)
+
+`git diff --name-status ddc4351..071ff02`: `A internal/stage/tq8_sinkorder_test.go`, `A internal/verify/tq8_sliceempty_test.go`, `M internal/stage/review_sink.go`, `M internal/verify/judgeslice.go`, `A P3/reports/P3-TQ-8-finalize-r2.md`. No pre-existing test file touched; no skip added; no assertion weakened. The two new files hold FOUR test functions (`TestTQ8ADiffPastTheCutNeverCostsAShownContentItsPlace`, `TestTQ8AFileAddedEmptyIsSaidToBeEmpty`, `TestTQ8AnEmptyFileAddedOrRemovedIsNotACut`, `TestTQ8ADiffServedOnlyInPartIsNeverShown`), not the "3 new tests" the finalizer counts (N10). "Red before / green after" verified by equivalence: M16, M17, M18 each restore the pre-fix behaviour and each fails its new test.
+
+### Probe log
+
+Scratch files `internal/stage/zz_probe_r2_test.go`, `internal/verify/zz_probe_r2_test.go` were written, run, and deleted (`git status` clean afterwards). Logs: session scratchpad `tq8r2/{probes-stage,probes-verify,full}.log`, `mut-*.{diff,log}`.
+
+Real seam (`newTQ8World`, git-backed project store, `stage.ChangeSourceOf`):
+
+- PR1 (N1): as in the table. Renderer room after the shown bodies 66,726 B.
+- PR2 (N2): added-empty, deleted-empty, empty beside a real change — as in the table.
+- PR5 (N6, NEW): rev 3 adds `a/big.go` = 163,900 B (800 "p" lines, 10 unchanged separator lines, 1,600 "q" lines); rev 4 rewrites both regions (same sizes) and adds `b.txt` 100 KiB. `review.CompareFile(a/big.go)`: `Unified=110,726 B, Truncated=true`, reason "the changes to a/big.go run to 324 KB; the text below stops after 108 KB, at the end of a hunk" (`tree.go:401-403`, `cutDiff` keeps the last hunk boundary under 256 KiB). Sink rows: `a/big.go diff=110,726 dtr=T bskip=F content=0 cskip=T`; `b.txt bskip=T` (104,155 > 196,608−110,726 = 85,882). Renderer: `DiffsShown=0 DiffsOmitted=[a/big.go b.txt] ContentShown=0 ContentOmitted=[a/big.go] DiffBytes=0 ContentBytes=0`. Wire: a/big.go "too large to be compared in one piece" (correct); b.txt "its changes are NOT shown: it did not fit the 192 KB" — FALSE (104,155 B against 196,608 B of room); a/big.go "its whole content is NOT shown: it did not fit the 192 KB" — FALSE (163,900 B against 196,608 B); bound paragraph printed. Sink served 110,726 B; the renderer shows 0 B; the judge gets no body for the one change.
+- PR6 (N4/N8): rev 3 adds `huge.txt` 300 KiB and `z.txt` 4 B. Review serves huge.txt as 262,128 B `Truncated`; sink `BodySkipped` (cut); `z.txt` diff 100 B served in the past-cut pass but the renderer omits it ("already cut at an earlier file"). `DiffsShown=0`, diff item empty. Honest wire; the 4-byte file is lost to a file that could never have fitted in any order.
+- PR8 (N1 half 2): as in the table — the cut row's content is served.
+
+Renderer (fake rows):
+
+- P-I: renamed empty file and modified 0→0 → "mode or its path" note, `Truncated=true`, content shown as the empty file. True statements (N3 state).
+- P-J: an empty added file PAST the cut → "added empty", not omitted (correct); an empty file AT the cut (`BodySkipped` by the exact-equality pre-check) → "did not fit" for 0 bytes (N5 class, ledger).
+- P-K (N9): a.txt shown, b.txt `BodySkipped`, `src/app.go` content shown → the bound paragraph reads "…was left out whole, and so was everything after it" while the content section says "The whole new content of every file changed in place follows (1 of 1)".
+
+### Mutations (scratch copy of the tree at 071ff02 in the session scratchpad; each applied with sed/perl, diffed, run with `go test -p 1 -count=1 -run TestTQ8 <pkg>`, restored and verified byte-identical; the worktree never carried a mutation)
+
+| M | Edit | Result |
+|---|---|---|
+| M4 | `review_sink.go`: both `read >= bodyBudget` pre-checks and all three fit checks disabled | FAIL ×3 (caught: sinkbudget ×2, sinkorder) |
+| M5 | `judgeslice.go:309` drop `cut \|\|` | FAIL ×2 (caught) |
+| M6 | `v2.go:182-188` report item before the diff item | FAIL (caught: `TestTQ8TheReportItemIsLabelledClaimsAndSitsAfterTheDiff`) |
+| M7 | `judgeslice.go:274` `>` → `>=` | FAIL (caught: `TestTQ8TheBoundIsInclusiveAtTheCap`) |
+| M8 | `v2.go:258` `executorClaims` returns the raw report | FAIL (caught) |
+| M11 | `judgeslice.go:263` F1/N4 arm → `case false:` | FAIL ×3 (caught) |
+| M12 | content loop: pre-fix `Content == ""` skip re-inserted | FAIL (caught: `TestTQ8AFileEmptiedInPlaceIsNamedOnTheWire`) |
+| M14 (new) | `review_sink.go:376` content pass skips `BodySkipped` rows (the cut row's content no longer read) | **PASS (uncaught)** → N7; PR8 trips it |
+| M15 (new) | pass 3 (past-cut diffs) made a no-op | FAIL (caught: `tq8_sinkbudget_test.go:93`) |
+| M16 (new) | pass 1 `break` → `continue` (the r1 order) | FAIL (caught: the new sinkorder test — N1's test is load-bearing) |
+| M17 (new) | `case emptyFile(row)` → `case false` | FAIL (caught: `TestTQ8AnEmptyFileAddedOrRemovedIsNotACut`) |
+| M18 (new) | N4 arm reduced to `row.Diff == ""` | FAIL (caught: `TestTQ8ADiffServedOnlyInPartIsNeverShown`) |
+
+12/13 caught; the seven r1 spot-checks (M4–M8, M11, M12) all still caught — no F1–F10 regression.
+
+### Batteries (worktree, serial)
+
+`go build ./...` exit 0; `gofmt -l internal/ cmd/` empty; `go vet ./...` exit 0; `go run ./tools/lockgate` OK (40 entries). Package runs: verify ok (4.2s), stage ok (13.6s, with the two live skips), review ok (2.1s). Full `go test -p 1 -count=1 -skip 'TestLivePhraseAndSummarize|TestLiveIntakeTriageClassifiesWebshop' ./...` in the foreground after the probe files were deleted: exit 0, **48 ok, 5 no test files, 0 FAIL**. Orphan sweep after: none.
+
+### New findings
+
+**N6 [med / high] `internal/stage/review_sink.go:354-363` (and `:405-414`) with `internal/verify/judgeslice.go:263-268`; `review/tree.go:397-403, 670-685`** — The N1 mechanism re-enters through the N4 fix. Review serves a two-sided diff whose full text exceeds `TreeFileDiffBytesCap` as its longest whole-hunk PREFIX under 256 KiB, `Truncated=true` — which is as small as the first hunk, i.e. routinely under the judge's 192 KiB bound. The sink's first pass sees `len(cmp.Unified) ≤ bodyBudget-read`, serves it and charges `read += len(cmp.Unified)`; the r2 renderer never shows a `DiffTruncated` diff (correct, N4). So a body the judge is NOT shown is priced against every row after it, exactly what the r2 `ChangeSource` doc now promises cannot happen ("a body the judge is shown is never priced against one it is not", `judgeslice.go:37-39`). PR5 at the real seam: 110,726 B charged, 0 B shown; `b.txt` (104 KiB) and `a/big.go`'s 163,900 B content both say "it did not fit the 192 KB" with 196,608 B of room; the judge receives no body at all. Contradicts R3's content clause, §78 "honest about the bound", and the brief's R2 refinement as sanctioned in r1. In r1 the renderer SHOWED the partial diff (and counted it), so sink and renderer agreed; r2 changed one side only. Fix shape: a `cmp.Truncated` comparison is never served and never charged in any pass — the row carries `DiffTruncated` + `DiffReason` with `Diff == ""` and does not set the cut; the renderer already names it "too large to be compared in one piece" and continues the section. Regression test: PR5's shape (b.txt shown, big.go's content then truly "did not fit").
+
+**N7 [low / high] `internal/stage/review_sink.go:374-395`** — The second half of the N1 fix — the cut row's OWN content is read and served ("contents … including rows whose diff is cut") — is pinned by no test: M14 makes the content pass skip `BodySkipped` rows and the whole TQ8 stage battery stays green (both real-seam budget tests cut at an ADDED file, which has no content). PR8 (a modified file rewritten smaller behind a 160 KiB add: diff cut, content 10,241 B) trips it. A load-bearing rule no test can trip (amendment C).
+
+**N8 [low / high] `internal/stage/review_sink.go:358-360`; `review/tree.go:381-391`** — A one-sided over-cap added/deleted file is served by review as a ≥ 256 KiB `Truncated` prefix that can never fit the 192 KiB bound in any order, yet the sink marks it `BodySkipped` — a BOUND cut — so every later diff is omitted as "already cut at an earlier file" (PR6: a 4-byte `z.txt` lost). The renderer's "too large to be compared" arm does not cut the section, but the sink never routes a review-truncated body to it. Honest wire, so low; the same fix shape as N6 resolves it (a truncated comparison is a "too large" row, not a cut).
+
+**N9 [nit / high] `internal/verify/judgeslice.go:420-421`** — The bound paragraph still says "what did not fit … was left out whole, and so was everything after it", written when nothing after the diff cut was shown. Since the N1 fix a content after the cut IS shown (PR1: app.go's content; P-K), and the content section two lines later says so. Scope it to the diffs ("and so were the changes of every file after it").
+
+**N10 [nit / high] `P3/reports/P3-TQ-8-finalize-r2.md`** — Counts "3 new tests"; the two new files hold four test functions. All are additions (not tamper); the finalizer's "No existing test file modified" is correct. Also: R9's letter versus the N2 carve-out — see the N3 note; the property test's `Contains(diff, "")` vacuity (`tq8_judgeslice_test.go:522`) means it can pin neither reading.
+
+### Draft STATE landing line (R6)
+
+P3-TQ-8 re-check r2 (071ff02): VERDICT FAIL. N1, N2, N4 RESOLVED at the real seam (PR1 shape re-run); N3 declined state consistent, R9 vs N2 carve-out noted. Tamper clean (2 new files, 4 tests). 13 mutations: 12 caught (M4-M8, M11, M12, M15-M18), M14 uncaught. Full ./... 48 ok/5 no tests/0 fail. New: N6 [med] a review-truncated hunk-prefix diff is charged by the sink but never shown, so later rows say "did not fit" falsely and the judge gets 0 bodies (real seam); N7 [low] cut row content unpinned; N8 [low] one-sided over-cap cuts later diffs; N9, N10 nits.
