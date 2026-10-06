@@ -194,6 +194,22 @@ func (unavailableSandbox) EgressPolicyFor(sandbox.Class, []string) (sandbox.Egre
 	return sandbox.EgressPolicy{}, nil
 }
 
+// composableSandbox reports a host that CAN compose the boundary, independent
+// of the machine running the test. Use it for paths that must be decided after
+// the capability gate but before any real composition (for example an absent
+// runner tool). A real sandbox.Composer probes the host, and a CI runner
+// without bwrap or unprivileged user namespaces would stop at the unavailable
+// state and never reach the path under test.
+type composableSandbox struct{}
+
+func (composableSandbox) Caps() sandbox.Capabilities {
+	return sandbox.Capabilities{Bwrap: true, Userns: true, Seccomp: true}
+}
+
+func (composableSandbox) EgressPolicyFor(sandbox.Class, []string) (sandbox.EgressPolicy, error) {
+	return sandbox.EgressPolicy{}, nil
+}
+
 // --- git fixtures (hermetic; the project-harness posture) ---
 
 func gitEnv() []string {

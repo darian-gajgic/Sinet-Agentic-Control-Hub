@@ -273,8 +273,11 @@ func TestDevServerUnavailableWithoutCaps(t *testing.T) {
 // state — NEVER an install (Spec S13.8; R2).
 func TestDevServerRunnerToolAbsent(t *testing.T) {
 	fx := newMgrFix(t, map[string]string{"package.json": "{}", "pnpm-lock.yaml": ""}, "code")
-	// Composable host, but the pnpm tool is absent (empty lookup).
-	m, _ := fx.manager(withSandbox(sandbox.NewComposer(fx.reg, nil)), withLookup(stubLookup(nil)))
+	// Composable host, but the pnpm tool is absent (empty lookup). The host is
+	// faked so the result does not depend on whether the test machine has bwrap
+	// and unprivileged user namespaces. On the GitHub ubuntu-24.04 runner the real
+	// composer reports the host as not composable, so this case never ran there.
+	m, _ := fx.manager(withSandbox(composableSandbox{}), withLookup(stubLookup(nil)))
 	s, err := m.Launch(context.Background(), LaunchRequest{DeliverableID: "dlv1", User: "u"})
 	if err != nil {
 		t.Fatal(err)
