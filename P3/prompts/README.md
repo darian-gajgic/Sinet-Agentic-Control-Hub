@@ -5,10 +5,12 @@ One file per pipeline stage. The coordinator never pastes these into a launch pr
 | Template | Stage | Model |
 |---|---|---|
 | `grounding.md` | 1 — brief + red acceptance tests | inherit (Fable); `opus` when the read-first sections are S10/S11-dense |
-| `spotcheck.md` | 1b — brief-vs-spec spot-check (rule R3) | inherit (Fable) |
+| `spotcheck.md` | 1b — brief-vs-spec spot-check (rule R3); on PASS it signs the acceptance contract into the brief (amendment G1) | inherit (Fable) |
 | `execute.md` | 2 — executor | `opus` always |
-| `evaluate.md` | 3 — adversarial evaluation | inherit (Fable); `opus` on S10/S11-dense packets or any classifier trip |
+| `evaluate.md` | 3 — adversarial evaluation against the signed contract; a PASS needs green `battery.sh` evidence (amendment G2) | inherit (Fable); `opus` on S10/S11-dense packets or any classifier trip |
 | `finalize.md` | 4 — drain round 2 / dead-executor finalizer | `opus` |
+
+Amendment G (2026-10-07, gate C1a): the spot-check signs the contract, the verdict-gate hook refuses an evaluator's PASS without green battery evidence for the worktree's HEAD, and every triage DROP records its falsification command and output. Mechanics: `P3/run/README.md`, "Evidence-gated evaluation".
 
 Launch-prompt shape (the only thing the coordinator writes per stage):
 

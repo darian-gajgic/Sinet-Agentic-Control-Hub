@@ -20,6 +20,14 @@ The build runs as a chain of budgeted FRESH coordinator sittings driven by an ex
 - **R7 HANDOFF rewritten, never appended.** ≤8,000 chars, one current orientation; retired snapshots go to STATE-HISTORY verbatim. STATE log entries ≤600 chars.
 - **R8 Bounded reads.** `P3/STATE.md` holds only current state (directives, open queues, hands-on items); `P3/STATE-HISTORY.md` holds closed queues + the log and is grepped, never read whole. `P3/CONVENTIONS.md` is read by section: `grep -n '^## '` for the index, then the §§ a brief names plus §1–§5; a new § is ≤6,000 chars (longer material → `P3/design/` with a pointer). Sitting-entry reading is HANDOFF + STATE + the runbook, nothing else in full.
 
+## Amendment G (2026-10-07, operator-ratified, gate C1a) — evidence-gated evaluation
+
+Gate record: `P3/gates/harness-hardening-gate.md` item 1 (all three parts). Mechanics: `P3/run/README.md`, "Evidence-gated evaluation".
+
+- **G1 Signed contract.** On PASS the spot-check (1b) appends `## Acceptance contract (signed <YYYY-MM-DD>)` to the brief, the checklist copied verbatim, and commits it on the packet branch before the executor starts. The evaluator grades against that section; any change to it after the signing commit is a finding.
+- **G2 PASS is evidence-gated.** `P3/run/battery.sh <worktree>` runs the CI legs serially on the worktree's HEAD and writes `P3/run/log/evidence/<branch>-<sha>.json` in the main checkout. A PreToolUse hook (`P3/run/hooks/verdict-gate.sh`, installed by the operator through `install-hooks.sh`) refuses any Write, Edit or Bash call that puts `VERDICT: PASS` into `P3/reports/*-evaluate.md` unless that file is green for the report worktree's HEAD. The hook sees only what a tool call carries, so the coordinator checks as well: it lands a PASS only when the report's `Evidence:` line names a green file (`jq -e .ok <file>`) whose `head` differs from the branch tip only under `P3/reports/` (`git diff --quiet <head> <tip> -- . ':(exclude)P3/reports'`).
+- **G3 Falsified drops.** Every triage DROP records, in the evaluate report's `## Triage` section, the exact falsification command and its verbatim output, trimmed to the decisive lines. A drop without them does not count: the finding stands.
+
 ## Session entry (one sitting)
 
 0. **Effort:** coordinator sittings run at max (`/effort` interactive; `--effort max` headless). Packet subagents inherit it.
@@ -58,7 +66,7 @@ FRONTEND.md checkpoints (product map approval, screenshot checkpoint, operator-e
 
 **Frontend-shaped work — anything whose primary output is presentation or interaction (`web/` views, styling, UX flows, navigation, copy) — does NOT run the four-stage pipeline. It runs `FRONTEND.md` in this directory** (single-author Fable builder, reference-over-prose, product map first, screenshot-in-the-loop, live design review + cold walks, operator-eyes final gate). Mixed packets are split so each half runs under its own pipeline. Backend work runs the pipeline below. Process/tooling packets (harness, runbooks) take the light path.
 
-## Work packets — four-stage pipeline (operator-ratified 2026-07-22; amendments A–E 2026-08-05; F 2026-09-22)
+## Work packets — four-stage pipeline (operator-ratified 2026-07-22; amendments A–E 2026-08-05; F 2026-09-22; G 2026-10-07)
 
 STATE.md holds the open packet queues. At phase entry the coordinator derives packets from S19.5 plus the phase's spec sections (a packet = one worker's worth: readable section set, implementable in one sitting, testable acceptance). TBD-P3 spikes and TBD-BRINGUP measurements attach to their phase per S19.5–S19.6; results go to `P3/measurements/`.
 
@@ -69,26 +77,26 @@ Every packet runs four fresh-context stages, each launched by the coordinator as
 | Stage | Template | Model | Notes |
 |---|---|---|---|
 | 1 Grounding | `P3/prompts/grounding.md` | inherit (Fable) | `model: opus` when the read-first sections are S10/S11-dense (memory `fable5-safeguard-false-positive`) |
-| 1b Spot-check | `P3/prompts/spotcheck.md` | inherit (Fable) | fresh agent, ≤600-char verdict; FAIL → grounding relaunched with the findings |
+| 1b Spot-check | `P3/prompts/spotcheck.md` | inherit (Fable) | fresh agent, ≤600-char verdict; FAIL → grounding relaunched with the findings; PASS → it signs the acceptance contract into the brief (G1) |
 | 2 Executor | `P3/prompts/execute.md` | **`model: opus` — always, never Fable** | judge-independence + classifier immunity mid-run |
 | 3 Evaluation | `P3/prompts/evaluate.md` | inherit (Fable) | `model: opus` from the start on S10/S11-dense packets; lossless Opus relaunch on any classifier trip |
 | 4 Finalizing | `P3/prompts/finalize.md` | `model: opus` | round 1 = the executor continued via SendMessage; round 2 or a dead executor = a fresh finalizer |
 
 All stages inherit session effort (max). Fable-facing prompts (grounding, evaluation) state goal + constraints — never step lists (over-prescription degrades Fable output); the templates already respect this. Every template carries the scope guardrail and "audit each claim against a tool result; never claim done with failing tests".
 
-**Stage 1 — grounding → `P3/briefs/P3-<phase>-<n>.md`** (the handoff artifact and the evaluation rubric), with the acceptance tests committed red where the code surface allows (amendment A). Grounding never reads prior briefs as truth — they are EXPIRED (amendment D). **Stage 1b** — the delegated spot-check (R3) before any executor launch: every requirement traceable, checklist testable, no invented behavior.
+**Stage 1 — grounding → `P3/briefs/P3-<phase>-<n>.md`** (the handoff artifact and the evaluation rubric), with the acceptance tests committed red where the code surface allows (amendment A). Grounding never reads prior briefs as truth — they are EXPIRED (amendment D). **Stage 1b** — the delegated spot-check (R3) before any executor launch: every requirement traceable, checklist testable, no invented behavior; on PASS it signs the checklist into the brief as `## Acceptance contract (signed <date>)` (G1).
 
 **Stage 2 — executor:** tests-first red, implement to green, brief-specified and pre-existing tests immutable (deviations declared, never edited; sanctioned edits named in the launch prompt), scope guardrail, registry-routed ⚙, adoption rail, serial battery, report per R5/R6.
 
-**Stage 3 — evaluation** (never the coordinator inline; never the executor): every checklist item, contradiction hunt, ≥3 novel held-out probes, test-tamper diff (amendment C), report EVERY finding, verdict line PASS/FAIL.
+**Stage 3 — evaluation** (never the coordinator inline; never the executor): every item of the signed acceptance contract (a later change to it is a finding), contradiction hunt, ≥3 novel held-out probes, test-tamper diff (amendment C), report EVERY finding, verdict line PASS/FAIL; a PASS only on green `battery.sh` evidence for the worktree's HEAD (G2).
 
-**Stage 4 — triage + finalizing (the drain).** The coordinator triages: false positives dropped with a logged reason, the rest numbered [F1..Fn]; **triage prefers executable falsification** — run the claimed-broken case before dropping or accepting. No survivors → land. Round 1: SendMessage the numbered list to the executor (apply, full battery, report per finding) → the evaluator re-checks (SendMessage, appends `## Re-check r1` to its report). Round 2 (findings survive, or the executor context is gone): a fresh `model: opus` finalizer on `finalize.md`. Hard cap two rounds; after that the coordinator implements the remainder inline and records it in STATE. Never silently accept, never loop endlessly.
+**Stage 4 — triage + finalizing (the drain).** The coordinator triages: false positives dropped with the falsification command and its output recorded in the evaluate report (G3), the rest numbered [F1..Fn]; **triage prefers executable falsification** — run the claimed-broken case before dropping or accepting. No survivors → land. Round 1: SendMessage the numbered list to the executor (apply, full battery, report per finding) → the evaluator re-checks (SendMessage, appends `## Re-check r1` to its report). Round 2 (findings survive, or the executor context is gone): a fresh `model: opus` finalizer on `finalize.md`. Hard cap two rounds; after that the coordinator implements the remainder inline and records it in STATE. Never silently accept, never loop endlessly.
 
 - **Parallelism:** stages are strictly sequential within a packet. Independent packets may overlap only with worktree isolation; never two writers on one path; **one full battery at a time on `main`** (the coordinator's, at merge) — agents run package-scoped or `-run`-filtered in their worktrees. While a stage runs, the coordinator lands finished work or prepares the next packet/gate — never idle-polls. Read a battery's summary BEFORE chaining the next merge.
 
 ## Landing checklist (coordinator, every packet before `done`)
 
-- Evaluation verdict PASS (or every surviving finding drained and re-checked).
+- Evaluation verdict PASS on green battery evidence (G2), or every surviving finding drained and re-checked; every triage DROP carries its falsification command + output (G3).
 - Merge `--no-ff` into `main`; coordinator re-runs build + full test suite serial on `main` — green, no skips introduced; `components.lock` gate passes; a packet that moved `web/src` fixtures also owes vitest + tsc.
 - Spot diff review: nothing contradicts the spec text; XREF'd behavior lands behind the named seam (stub if its phase hasn't come), never invented inline; ⚙ values registry-routed.
 - STATE queue row → done; STATE-HISTORY entry (paste the agent's draft landing line, ≤600 chars); CONVENTIONS § pasted from the executor's draft; brief stamped **EXPIRED** (amendment D); worktree + branch removed; commit; push after each landing.

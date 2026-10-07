@@ -6,6 +6,8 @@
 #   StopFailure(rate_limit|usage_limit|.*limit.*) → writes P3/run/status.json {"outcome":"LIMIT"} so the loop never guesses from prose
 #   PreCompact                          → appends P3/run/log/compactions.log (a sitting that compacts is over budget)
 #   PermissionDenied                    → appends P3/run/log/denials.log (the only record of what auto mode blocked)
+#   PreToolUse(Write|Edit|Bash)         → P3/run/hooks/verdict-gate.sh: a PASS verdict in P3/reports/*-evaluate.md needs green
+#                                         battery evidence (H-4b; contract checked against the 2.1.292 hooks reference)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 S=.claude/settings.json; P=P3/run/hooks.proposed.json

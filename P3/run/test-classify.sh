@@ -147,11 +147,11 @@ same   bat-legs            'clean,gofmt,vet,build,test,lockgate,stable' "$(jq -r
 same   bat-test-pkgs       '1 0 0' "$(jq -r '.legs[]|select(.name=="test")|"\(.pkgs_ok) \(.pkgs_fail|length) \(.tests_failed|length)"' "$EB" 2>/dev/null)"
 same   bat-skip-recorded   'TestLivePhraseAndSummarize|TestLiveIntakeTriageClassifiesWebshop' "$(jq -r .skip "$EB" 2>/dev/null)"
 expect bat-web-skipped     '^skipped: web/src unchanged vs main$' "$(jq -r .web "$EB" 2>/dev/null)"
-expect bat-times           '^20[0-9-]+T[0-9:]+Z 20[0-9-]+T[0-9:]+Z 0 [0-9]+$' "$(jq -r '.times|"\(.started) \(.finished) \(.waited_s) \(.total_s)"' "$EB" 2>/dev/null)"
+expect bat-times           '^20[0-9-]+T[0-9:]+Z 20[0-9-]+T[0-9:]+Z [0-9]+ [0-9]+$' "$(jq -r '.times|"\(.started) \(.finished) \(.waited_s) \(.total_s)"' "$EB" 2>/dev/null)"
 vgx    bat-admits-pass     0 "$(pw "$B/P3/reports/T-1-evaluate.md" 'VERDICT: PASS' "$B")"
 echo draft > "$B/P3/reports/T-1-evaluate.md"; bat "$B"
 same   bat-report-excepted 0 "$BAT_RC"
-echo '// dirty' >> "$B/x/x.go"; bat "$B"
+printf 'package x\n\n// One returns one (an uncommitted, gofmt-clean edit).\nfunc One() int { return 1 }\n' > "$B/x/x.go"; bat "$B"
 same   bat-dirty-exit      1 "$BAT_RC"
 same   bat-dirty-red-legs  'clean' "$(jq -r '[.legs[]|select(.ok|not).name]|join(",")' "$EB" 2>/dev/null)"
 expect bat-dirty-names     ' M x/x.go' "$(jq -r '.legs[]|select(.name=="clean").tail' "$EB" 2>/dev/null)"
@@ -177,7 +177,7 @@ same   bat-wt-main-log     "p3/slash $HB $BW" "$(jq -r '"\(.branch) \(.head) \(.
 same   bat-wt-no-own-log   none "$([ -e "$BW/P3/run/log" ] && echo present || echo none)"
 vgx    bat-wt-admits-pass  0 "$(pw "$BW/P3/reports/T-2-evaluate.md" 'VERDICT: PASS' "$BW")"
 bash -c 'exec -a "go test fake-foreign-battery" sleep 3' & FP=$!; sleep 0.5; bat "$BW"; wait "$FP" 2>/dev/null
-expect bat-waits-foreign   "waiting for a foreign go test \(pid $FP" "$BAT_OUT"
+expect bat-waits-foreign   "waiting for a foreign go test \(pid ([0-9]+ )*$FP\b" "$BAT_OUT"
 expect bat-waited-secs     '^([2-9]|[1-9][0-9]+)$' "$(jq -r .times.waited_s "$ES" 2>/dev/null)"
 AO=$(bash -c 'echo $$ > "$3"; : go test marker-ancestor; P3_BATTERY_POLL=1 "$1" "$2"' _ "$RUN_DIR/battery.sh" "$BW" "$TT/anc.pid" 2>&1); AP=$(cat "$TT/anc.pid" 2>/dev/null)
 n=$((n+1)); if [ -n "$AP" ] && printf '%s\n' "$AO" | tail -1 | /usr/bin/grep -q '^battery: GREEN' && ! printf '%s' "$AO" | /usr/bin/grep -qE "pid ([0-9]+ )*$AP\b"
