@@ -3,7 +3,7 @@ Status: PARTIALLY ANSWERED
 answered: yes
 
 
-**Status: PARTIALLY ANSWERED 2026-09-17 (A1/A2/A5/B7/B8/B10/B11 closed; A3/A4/A6/B9 open pending the coordinator's explanations — see §Answers).** Operator free-text answers are authoritative (standing convention); the coordinator records them under §Answers + in `P3/STATE.md`, executes, and closes. The sitting of 2026-09-16 was interrupted by a host reboot after the six standing items were presented in chat and before any answer landed; this file is the durable re-presentation plus the sitting's own findings, triaged.
+**Status: ANSWERED 2026-10-07 — every remaining recommendation accepted (operator free text, chat: "I aprove everything"); the 2026-09-17 answers stand; see §Answers (2026-10-07) at the end.**
 
 **What the operator sees when reading this:** Part A = six decisions that were already due at the planning-rework exit gate. Part B = five new decisions produced by the sitting's webshop probe. Part C = every finding from the sitting mapped to a packet (nothing is dropped). Part D = the order the coordinator recommends, and which packets need no answer to start.
 
