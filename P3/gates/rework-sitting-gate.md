@@ -1,5 +1,5 @@
 # Interview-rework sitting — gate record (opened 2026-09-16, re-presented 2026-09-17)
-Status: PARTIALLY ANSWERED
+Status: ANSWERED 2026-10-07 — every remaining recommendation accepted (the 2026-09-17 answers stand)
 answered: yes
 
 
