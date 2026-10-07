@@ -72,4 +72,118 @@ for t in rate_limit usage_limit weekly_limit session_limit_reached; do n=$((n+1)
   printf '%s' "$t" | /usr/bin/grep -qE "^($HM)$" && echo "ok   hook-matcher $t → match" || { echo "FAIL hook-matcher $t → no match"; fail=1; }; done
 for t in overloaded server_error authentication_failed; do n=$((n+1))
   printf '%s' "$t" | /usr/bin/grep -qE "^($HM)$" && { echo "FAIL hook-matcher $t → matched"; fail=1; } || echo "ok   hook-matcher $t → no match"; done
+# ---- H-4b evidence-gated evaluation (gate C1a): the verdict gate = the PreToolUse command from hooks.proposed.json, run in
+# isolation on the stdin documented for Claude Code 2.1.292 (cwd, tool_name, tool_input), against temp git repos
+VG="$(jq -r '.PreToolUse[0].hooks[0].command' "$RUN_DIR/hooks.proposed.json" 2>/dev/null)"
+VM="$(jq -r '.PreToolUse[0].matcher' "$RUN_DIR/hooks.proposed.json" 2>/dev/null)"
+TT="$(mktemp -d)"; R="$TT/repo"
+same() { n=$((n+1)); if [ "$3" = "$2" ]; then echo "ok   $1 → $3"; else echo "FAIL $1 → '$3' (want '$2')"; fail=1; fi; }
+newrepo() { git init -q -b main "$1" && git -C "$1" config user.email t@example.invalid && git -C "$1" config user.name t \
+  && git -C "$1" config commit.gpgsign false && mkdir -p "$1/P3/reports" && : > "$1/P3/reports/.keep" && printf 'P3/run/log/\n' > "$1/.gitignore"; }
+mkev() { mkdir -p "$1/P3/run/log/evidence"; jq -nc --arg b "$2" --arg h "$3" --argjson ok "$4" '{branch:$b,head:$h,ok:$ok,legs:[{name:"test",ok:$ok}]}' \
+  > "$1/P3/run/log/evidence/${2//\//_}-$3.json"; } # mkev <main checkout> <branch> <sha> <true|false> — a synthetic evidence file
+pw() { jq -nc --arg p "$1" --arg c "$2" --arg d "${3:-$R}" '{session_id:"s",transcript_path:"/t",cwd:$d,permission_mode:"auto",hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$p,content:$c},tool_use_id:"t1"}'; }
+pe() { jq -nc --arg p "$1" --arg s "$2" --arg d "${3:-$R}" '{session_id:"s",transcript_path:"/t",cwd:$d,permission_mode:"auto",hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$p,old_string:"VERDICT: FAIL",new_string:$s,replace_all:false},tool_use_id:"t2"}'; }
+pb() { jq -nc --arg c "$1" --arg d "${2:-$R}" '{session_id:"s",transcript_path:"/t",cwd:$d,permission_mode:"auto",hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c,description:"d"},tool_use_id:"t3"}'; }
+vgx() { # vgx <name> <want exit> <payload> [stderr regex]  — exit code, empty stdout, and the reason Claude would see
+  n=$((n+1)); local out rc err; out=$(printf '%s' "$3" | CLAUDE_PROJECT_DIR="$P3_ROOT" sh -c "$VG" 2>"$TT/vg.err"); rc=$?; err=$(cat "$TT/vg.err")
+  if [ "$rc" = "$2" ] && [ -z "$out" ] && { [ -z "${4:-}" ] || printf '%s' "$err" | /usr/bin/grep -qE -- "$4"; }; then echo "ok   $1 → exit $rc"
+  else echo "FAIL $1 → exit $rc (want $2), stdout '${out:0:80}', stderr '${err:0:200}'"; fail=1; fi; }
+newrepo "$R"; echo a > "$R/a.txt"; git -C "$R" add -A && git -C "$R" commit -qm c1; H1=$(git -C "$R" rev-parse HEAD)
+RP="$R/P3/reports/P3-X-1-evaluate.md"
+vgx vg-no-evidence-blocked   2 "$(pw "$RP" $'# P3-X-1 evaluation\n\nVERDICT: PASS\n')" "no battery evidence for main@${H1:0:7}"
+vgx vg-remedy-names-battery  2 "$(pw "$RP" 'VERDICT: PASS')" "battery\.sh $R "
+vgx vg-fail-verdict-allowed  0 "$(pw "$RP" $'VERDICT: FAIL\n\nF1 [HIGH/high] x.go:1 — y')"
+vgx vg-other-report-allowed  0 "$(pw "$R/P3/reports/P3-X-1-execute.md" 'VERDICT: PASS')"
+vgx vg-other-dir-allowed     0 "$(pw "$R/notes/P3-X-1-evaluate.md" 'VERDICT: PASS')"
+vgx vg-suffix-allowed        0 "$(pw "$RP.bak" 'VERDICT: PASS')"
+vgx vg-variant-blocked       2 "$(pw "$RP" $'**Verdict:** PASS — nothing above nit')"
+mkev "$R" main "$H1" false
+vgx vg-red-evidence-blocked  2 "$(pw "$RP" 'VERDICT: PASS')" "evidence for main@${H1:0:7} is red"
+mkev "$R" main "$H1" true
+vgx vg-green-head-allowed    0 "$(pw "$RP" $'# P3-X-1 evaluation\n\nVERDICT: PASS\n')"
+vgx vg-edit-green-allowed    0 "$(pe "$RP" 'VERDICT: PASS')"
+echo b > "$R/a.txt"; git -C "$R" commit -qam c2; H2=$(git -C "$R" rev-parse HEAD)
+vgx vg-stale-sha-blocked     2 "$(pw "$RP" 'VERDICT: PASS')" "no battery evidence for main@${H2:0:7}"
+vgx vg-edit-blocked          2 "$(pe "$RP" $'## Re-check r1\n\nVERDICT: PASS')" "main@${H2:0:7}"
+vgx vg-edit-nopass-allowed   0 "$(pe "$RP" 'VERDICT: FAIL (F2 open)')"
+vgx vg-bash-heredoc-blocked  2 "$(pb $'cat > P3/reports/P3-X-1-evaluate.md <<\'EOF\'\n# P3-X-1\n\nVERDICT: PASS\nEOF')"
+vgx vg-bash-noreport-allowed 0 "$(pb "echo 'VERDICT: PASS'")"
+vgx vg-bash-read-allowed     0 "$(pb 'grep -n VERDICT P3/reports/P3-X-1-evaluate.md')"
+mkev "$R" main "$H2" true
+vgx vg-edit-allowed          0 "$(pe "$RP" $'## Re-check r1\n\nVERDICT: PASS')"
+vgx vg-bash-heredoc-allowed  0 "$(pb $'cat > P3/reports/P3-X-1-evaluate.md <<\'EOF\'\n# P3-X-1\n\nVERDICT: PASS\nEOF')"
+vgx vg-bash-cd-allowed       0 "$(pb "cd $R && cat >> P3/reports/P3-X-1-evaluate.md <<'EOF'
+VERDICT: PASS
+EOF" /tmp)"
+vgx vg-bash-abs-allowed      0 "$(pb "python3 - <<'PY'
+open('$RP','a').write('VERDICT: PASS\n')
+PY" /tmp)"
+vgx vg-bash-wrongcwd-blocked 2 "$(pb $'cat > P3/reports/P3-X-1-evaluate.md <<\'EOF\'\nVERDICT: PASS\nEOF' "$TT")" 'not inside a git worktree'
+W="$TT/wt"; git -C "$R" worktree add -q "$W" -b p3/wt1 2>/dev/null; HW=$(git -C "$W" rev-parse HEAD); WP="$W/P3/reports/P3-X-2-evaluate.md"
+mkev "$W" p3/wt1 "$HW" true
+vgx vg-wt-own-log-blocked    2 "$(pw "$WP" 'VERDICT: PASS' "$W")" "no battery evidence for p3/wt1@${HW:0:7} \($R/P3/run/log/evidence/p3_wt1-$HW\.json\)"
+mkev "$R" p3/wt1 "$HW" true
+vgx vg-wt-main-log-allowed   0 "$(pw "$WP" 'VERDICT: PASS' "$W")"
+mkdir -p "$TT/nogit/P3/reports"
+vgx vg-nogit-blocked         2 "$(pw "$TT/nogit/P3/reports/a-evaluate.md" 'VERDICT: PASS' "$TT")" 'not inside a git worktree'
+for t in Write Edit Bash; do n=$((n+1))
+  printf '%s' "$t" | /usr/bin/grep -qE "^($VM)$" && echo "ok   vg-matcher $t → match" || { echo "FAIL vg-matcher $t → no match"; fail=1; }; done
+for t in Read NotebookEdit WebFetch Agent; do n=$((n+1))
+  printf '%s' "$t" | /usr/bin/grep -qE "^($VM)$" && { echo "FAIL vg-matcher $t → matched"; fail=1; } || echo "ok   vg-matcher $t → no match"; done
+same vg-timeout '30' "$(jq -r '.PreToolUse[0].hooks[0].timeout' "$RUN_DIR/hooks.proposed.json" 2>/dev/null)"
+# ---- H-4b battery.sh on a temp Go module (stub lockgate): legs, evidence location + fields, red legs, web decision, worktrees, the wait
+B="$TT/bat"; newrepo "$B"; printf 'module example.com/bat\n\n%s\n' "$(/usr/bin/grep -m1 '^go ' "$P3_ROOT/go.mod")" > "$B/go.mod"; mkdir -p "$B/x" "$B/tools/lockgate"
+printf 'package x\n\n// One returns 1.\nfunc One() int { return 1 }\n' > "$B/x/x.go"
+printf 'package x\n\nimport "testing"\n\nfunc TestOne(t *testing.T) {\n\tif One() != 1 {\n\t\tt.Fatal("One")\n\t}\n}\n' > "$B/x/x_test.go"
+printf 'package main\n\nimport "os"\n\nfunc main() {\n\tif _, err := os.Stat("LOCKGATE_RED"); err == nil {\n\t\tos.Exit(1)\n\t}\n}\n' > "$B/tools/lockgate/main.go"
+git -C "$B" add -A && git -C "$B" commit -qm b1; HB=$(git -C "$B" rev-parse HEAD); EB="$B/P3/run/log/evidence/main-$HB.json"
+bat() { BAT_OUT=$(P3_BATTERY_POLL=1 "$RUN_DIR/battery.sh" "$1" 2>&1); BAT_RC=$?; }
+bat "$B"
+same   bat-green-exit      0 "$BAT_RC"
+same   bat-green-summary   "battery: GREEN main@${HB:0:7} → $EB" "$(printf '%s\n' "$BAT_OUT" | tail -1)"
+same   bat-fields          "main true $HB $B" "$(jq -r '"\(.branch) \(.ok) \(.head) \(.worktree)"' "$EB" 2>/dev/null)"
+same   bat-legs            'clean,gofmt,vet,build,test,lockgate,stable' "$(jq -r '.legs|map(.name)|join(",")' "$EB" 2>/dev/null)"
+same   bat-test-pkgs       '1 0 0' "$(jq -r '.legs[]|select(.name=="test")|"\(.pkgs_ok) \(.pkgs_fail|length) \(.tests_failed|length)"' "$EB" 2>/dev/null)"
+same   bat-skip-recorded   'TestLivePhraseAndSummarize|TestLiveIntakeTriageClassifiesWebshop' "$(jq -r .skip "$EB" 2>/dev/null)"
+expect bat-web-skipped     '^skipped: web/src unchanged vs main$' "$(jq -r .web "$EB" 2>/dev/null)"
+expect bat-times           '^20[0-9-]+T[0-9:]+Z 20[0-9-]+T[0-9:]+Z 0 [0-9]+$' "$(jq -r '.times|"\(.started) \(.finished) \(.waited_s) \(.total_s)"' "$EB" 2>/dev/null)"
+vgx    bat-admits-pass     0 "$(pw "$B/P3/reports/T-1-evaluate.md" 'VERDICT: PASS' "$B")"
+echo draft > "$B/P3/reports/T-1-evaluate.md"; bat "$B"
+same   bat-report-excepted 0 "$BAT_RC"
+echo '// dirty' >> "$B/x/x.go"; bat "$B"
+same   bat-dirty-exit      1 "$BAT_RC"
+same   bat-dirty-red-legs  'clean' "$(jq -r '[.legs[]|select(.ok|not).name]|join(",")' "$EB" 2>/dev/null)"
+expect bat-dirty-names     ' M x/x.go' "$(jq -r '.legs[]|select(.name=="clean").tail' "$EB" 2>/dev/null)"
+vgx    bat-dirty-blocks    2 "$(pw "$B/P3/reports/T-1-evaluate.md" 'VERDICT: PASS' "$B")" 'is red'
+git -C "$B" checkout -q -- x/x.go; rm -f "$B/P3/reports/T-1-evaluate.md"
+: > "$B/LOCKGATE_RED"; printf 'package x\nfunc  Two( ) int { return 2 }\n' > "$B/x/two.go"
+printf 'package x\n\nimport "testing"\n\nfunc TestBad(t *testing.T) { t.Fatal("bad") }\n' > "$B/x/bad_test.go"
+git -C "$B" add -A && git -C "$B" commit -qm b2; HB2=$(git -C "$B" rev-parse HEAD); EB2="$B/P3/run/log/evidence/main-$HB2.json"; bat "$B"
+same   bat-red-exit        1 "$BAT_RC"
+same   bat-red-legs        'gofmt,test,lockgate' "$(jq -r '[.legs[]|select(.ok|not).name]|join(",")' "$EB2" 2>/dev/null)"
+same   bat-red-pkgs        'example.com/bat/x TestBad' "$(jq -r '.legs[]|select(.name=="test")|"\(.pkgs_fail|join(",")) \(.tests_failed|join(","))"' "$EB2" 2>/dev/null)"
+expect bat-red-gofmt-names 'x/two\.go' "$(jq -r '.legs[]|select(.name=="gofmt").tail' "$EB2" 2>/dev/null)"
+same   bat-red-summary     "battery: RED main@${HB2:0:7} → $EB2" "$(printf '%s\n' "$BAT_OUT" | tail -1)"
+git -C "$B" checkout -q -b webby "$HB"; mkdir -p "$B/web/src"; echo 'export {}' > "$B/web/src/a.ts"
+git -C "$B" add -A && git -C "$B" commit -qm w1; HBW=$(git -C "$B" rev-parse HEAD); bat "$B"; EW="$B/P3/run/log/evidence/webby-$HBW.json"
+expect bat-web-ran         '^ran: web/src changed vs main$' "$(jq -r .web "$EW" 2>/dev/null)"
+same   bat-web-legs        'clean,web-install,web-typecheck,web-test,web-build,gofmt,vet,build,test,lockgate,stable' "$(jq -r '.legs|map(.name)|join(",")' "$EW" 2>/dev/null)"
+same   bat-web-red         1 "$BAT_RC"
+git -C "$B" checkout -q main
+BW="$TT/batwt"; git -C "$B" worktree add -q "$BW" -b p3/slash "$HB" 2>/dev/null; ES="$B/P3/run/log/evidence/p3_slash-$HB.json"; bat "$BW"
+same   bat-wt-exit         0 "$BAT_RC"
+same   bat-wt-main-log     "p3/slash $HB $BW" "$(jq -r '"\(.branch) \(.head) \(.worktree)"' "$ES" 2>/dev/null)"
+same   bat-wt-no-own-log   none "$([ -e "$BW/P3/run/log" ] && echo present || echo none)"
+vgx    bat-wt-admits-pass  0 "$(pw "$BW/P3/reports/T-2-evaluate.md" 'VERDICT: PASS' "$BW")"
+bash -c 'exec -a "go test fake-foreign-battery" sleep 3' & FP=$!; sleep 0.5; bat "$BW"; wait "$FP" 2>/dev/null
+expect bat-waits-foreign   "waiting for a foreign go test \(pid $FP" "$BAT_OUT"
+expect bat-waited-secs     '^([2-9]|[1-9][0-9]+)$' "$(jq -r .times.waited_s "$ES" 2>/dev/null)"
+AO=$(bash -c 'echo $$ > "$3"; : go test marker-ancestor; P3_BATTERY_POLL=1 "$1" "$2"' _ "$RUN_DIR/battery.sh" "$BW" "$TT/anc.pid" 2>&1); AP=$(cat "$TT/anc.pid" 2>/dev/null)
+n=$((n+1)); if [ -n "$AP" ] && printf '%s\n' "$AO" | tail -1 | /usr/bin/grep -q '^battery: GREEN' && ! printf '%s' "$AO" | /usr/bin/grep -qE "pid ([0-9]+ )*$AP\b"
+then echo "ok   bat-ignores-own-ancestor → pid $AP not waited for, GREEN"
+else echo "FAIL bat-ignores-own-ancestor → ancestor $AP: $(printf '%s' "$AO" | head -2 | tr '\n' ' ') … $(printf '%s\n' "$AO" | tail -1)"; fail=1; fi
+same   bat-usage           2 "$("$RUN_DIR/battery.sh" >/dev/null 2>&1; echo $?)"
+same   bat-not-a-worktree  2 "$("$RUN_DIR/battery.sh" "$TT/nogit" >/dev/null 2>&1; echo $?)"
+git -C "$B" worktree remove --force "$BW" 2>/dev/null; git -C "$R" worktree remove --force "$W" 2>/dev/null; rm -rf "$TT"
 echo "---- $n checks, $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"; exit $fail
