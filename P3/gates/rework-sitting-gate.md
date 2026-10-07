@@ -1,6 +1,6 @@
 # Interview-rework sitting — gate record (opened 2026-09-16, re-presented 2026-09-17)
 Status: PARTIALLY ANSWERED
-answered: no            ← set `answered: yes` (or `partial`) after filling the open items below; A3/A4/A6/B9 explained in §Explanations (2026-09-22); B12/B13/B14 await their asks
+answered: yes
 
 
 **Status: PARTIALLY ANSWERED 2026-09-17 (A1/A2/A5/B7/B8/B10/B11 closed; A3/A4/A6/B9 open pending the coordinator's explanations — see §Answers).** Operator free-text answers are authoritative (standing convention); the coordinator records them under §Answers + in `P3/STATE.md`, executes, and closes. The sitting of 2026-09-16 was interrupted by a host reboot after the six standing items were presented in chat and before any answer landed; this file is the durable re-presentation plus the sitting's own findings, triaged.
@@ -242,3 +242,18 @@ A "reading" is an interpretation the coordinator made where the spec's own wordi
 
 **Recommendation: (a).** Your own finding was that not being able to try web work before approving blocks acceptance in practice.
 
+## Answers (operator, chat, 2026-10-07 — verbatim, authoritative)
+
+> "I aprove everything. What else do you need from me in order to continue?"
+
+Coordinator reading: a blanket acceptance of every recommendation in this file (the gate-presentation convention: free text is authoritative, nothing is re-asked).
+
+| Item | Answer | Reading + execution |
+|---|---|---|
+| A3 A14 veto | let stand | **A14 STANDS** as written in the spec (changelog row unchanged). |
+| A4 A15 veto | let stand | **A15 STANDS** as written. |
+| A6 readings | ratify en bloc | **RATIFIED EN BLOC** (the eight readings in §Explanations); none re-examined. |
+| B9 preview substrate | (a) promote | **PROMOTE**: P3-SIT-3 unblocked — two backend packets (normal pipeline) + ONE hands-on host session (two user-level units, socket-proxyd lifecycle, Caddy admin routes) proposed as a gate file before it is applied. |
+| B12 engine pin | yes | **PIN BUMP APPROVED** → packet P3-PIN-1: bump `claudecli.Pin` + lock in lockstep to the version installed at packet time (2.1.292 today), tier-R conformance, RW-9 T1–T4 brace-short tripwire, OQ-e check, P-T14-1 worker revalidation against the production worker set; measurements to `P3/measurements/`. |
+| B13 rubric-v4 rider | yes | **RIDER APPROVED** → RUBRIC-V4 unblocked (26 cases, same pre-registration shape, $0 cash on the subscription lane). |
+| B14 sandbox browser | as recommended | **CANDIDATE (1)**: a pinned `chrome-headless-shell` bind-mounted read-only into the verification sandbox, driven by platform code over CDP (lock entry via the S16.4 walk); the two technical rulings in §B14 go as the brief proposes (loopback brought up inside the empty netns; the second ruling per the brief §TQ-4b) → P3-TQ-4b unblocked. B10 stays "later" (operator); B11 recorded. |

@@ -1,6 +1,6 @@
 # Harness hardening — gate record (opened 2026-10-02)
-Status: OPEN
-answered: no
+Status: ANSWERED 2026-10-07 — every recommendation accepted
+answered: yes
 
 ## What this decides (plain language)
 
@@ -32,3 +32,15 @@ FRONTEND.md requires one long-lived author for visual coherence; a sitting kills
 ## Answers
 
 (operator, free text, dated — "ok" or "as recommended" accepts every recommendation; then set `answered: yes` above)
+
+## Answers (operator, chat, 2026-10-07 — verbatim, authoritative)
+
+> "I aprove everything. What else do you need from me in order to continue?"
+
+Coordinator reading: a blanket acceptance of every recommendation in this file (the gate-presentation convention: free text is authoritative, nothing is re-asked).
+
+| Item | Answer | Reading + execution |
+|---|---|---|
+| C1 evidence-gated evaluation | yes, all three parts | **H-4b**: battery wrapper → machine result per worktree commit; a PreToolUse hook refuses a PASS verdict without a green result for that HEAD (operator installs via `install-hooks.sh`); the spot-check signs the acceptance checklist into the brief and later changes are findings; every triage DROP records its falsification command + output. |
+| C2 landings → main | (a) | **H-4a (FIRST)**: the loop refuses to start a sitting while the last push's CI run on `main` is red or in progress; every landing is tagged `sitting/<ts>`; direct pushes stay. Unattended nights may start once H-4a is in. |
+| C3 frontend across sittings | (a) | **H-4c**: FRONTEND.md amendment — the builder keeps `P3/design/<journey>-ledger.md`; a frontend sitting is one journey slice ending at a screenshotted checkpoint; a continuation sitting starts by diffing its render against the previous screenshots. Cold walks + operator eyes stay the final guard. |

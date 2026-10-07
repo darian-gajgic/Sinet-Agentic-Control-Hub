@@ -1,6 +1,6 @@
 # P3-SIT-2 checkpoint 1: approve the product map for the code review page — gate record (opened 2026-09-22)
-Status: OPEN
-answered: no
+Status: ANSWERED 2026-10-07 — every recommendation accepted
+answered: yes
 
 ## What this decides
 
@@ -74,3 +74,17 @@ The record adds that this script stops at the local-tier wiring, so the builder 
 ## Answers
 
 Answer here (next to an item or below, dated) or in free text to any session; either is authoritative. A partial answer (set `answered: partial`) lets the build proceed on the approved parts while the rest waits.
+
+## Answers (operator, chat, 2026-10-07 — verbatim, authoritative)
+
+> "I aprove everything. What else do you need from me in order to continue?"
+
+Coordinator reading: a blanket acceptance of every recommendation in this file (the gate-presentation convention: free text is authoritative, nothing is re-asked).
+
+| Item | Answer | Reading + execution |
+|---|---|---|
+| 0 the map | approve | **APPROVED**: `P3/design/product-map.md` §9–§17 (v4, `1861ef8`) is canon; a FRESH author builds from it once H-4c (design ledger + checkpoint-bounded frontend sittings) is in FRONTEND.md; stops at checkpoint 2 (screenshots) as a gate file. |
+| 1 Q1 Reviews index | yes | **BUILD IT** in this packet: `/reviews` grouped Waiting for you / Waiting for someone else / Accepted / Superseded. |
+| 2 Q2 try-it line | everyone | **EVERYONE** sees the host command under the honest "not available yet" notice; the section retires when SIT-3 lands the live preview. |
+| 3 Q3 defaults | agree | **AGREED**: new file → Whole file; changed file → Changes. |
+| 4 Q4 label | "Ask for changes" | **RECORDED** as the send-back label. |
