@@ -138,7 +138,7 @@ printf 'package x\n\n// One returns 1.\nfunc One() int { return 1 }\n' > "$B/x/x
 printf 'package x\n\nimport "testing"\n\nfunc TestOne(t *testing.T) {\n\tif One() != 1 {\n\t\tt.Fatal("One")\n\t}\n}\n' > "$B/x/x_test.go"
 printf 'package main\n\nimport "os"\n\nfunc main() {\n\tif _, err := os.Stat("LOCKGATE_RED"); err == nil {\n\t\tos.Exit(1)\n\t}\n}\n' > "$B/tools/lockgate/main.go"
 git -C "$B" add -A && git -C "$B" commit -qm b1; HB=$(git -C "$B" rev-parse HEAD); EB="$B/P3/run/log/evidence/main-$HB.json"
-bat() { BAT_OUT=$(P3_BATTERY_POLL=1 "$RUN_DIR/battery.sh" "$1" 2>&1); BAT_RC=$?; }
+bat() { BAT_OUT=$(TMPDIR="$TT" P3_BATTERY_POLL=1 "$RUN_DIR/battery.sh" "$1" 2>&1); BAT_RC=$?; } # leg logs stay inside $TT
 bat "$B"
 same   bat-green-exit      0 "$BAT_RC"
 same   bat-green-summary   "battery: GREEN main@${HB:0:7} → $EB" "$(printf '%s\n' "$BAT_OUT" | tail -1)"
@@ -148,6 +148,7 @@ same   bat-test-pkgs       '1 0 0' "$(jq -r '.legs[]|select(.name=="test")|"\(.p
 same   bat-skip-recorded   'TestLivePhraseAndSummarize|TestLiveIntakeTriageClassifiesWebshop' "$(jq -r .skip "$EB" 2>/dev/null)"
 expect bat-web-skipped     '^skipped: web/src unchanged vs main$' "$(jq -r .web "$EB" 2>/dev/null)"
 expect bat-times           '^20[0-9-]+T[0-9:]+Z 20[0-9-]+T[0-9:]+Z [0-9]+ [0-9]+$' "$(jq -r '.times|"\(.started) \(.finished) \(.waited_s) \(.total_s)"' "$EB" 2>/dev/null)"
+same   bat-logs-in-tmpdir  "$TT" "$(dirname "$(jq -r .logs "$EB" 2>/dev/null)")"
 vgx    bat-admits-pass     0 "$(pw "$B/P3/reports/T-1-evaluate.md" 'VERDICT: PASS' "$B")"
 echo draft > "$B/P3/reports/T-1-evaluate.md"; bat "$B"
 same   bat-report-excepted 0 "$BAT_RC"
@@ -179,7 +180,7 @@ vgx    bat-wt-admits-pass  0 "$(pw "$BW/P3/reports/T-2-evaluate.md" 'VERDICT: PA
 bash -c 'exec -a "go test fake-foreign-battery" sleep 3' & FP=$!; sleep 0.5; bat "$BW"; wait "$FP" 2>/dev/null
 expect bat-waits-foreign   "waiting for a foreign go test \(pid ([0-9]+ )*$FP\b" "$BAT_OUT"
 expect bat-waited-secs     '^([2-9]|[1-9][0-9]+)$' "$(jq -r .times.waited_s "$ES" 2>/dev/null)"
-AO=$(bash -c 'echo $$ > "$3"; : go test marker-ancestor; P3_BATTERY_POLL=1 "$1" "$2"' _ "$RUN_DIR/battery.sh" "$BW" "$TT/anc.pid" 2>&1); AP=$(cat "$TT/anc.pid" 2>/dev/null)
+AO=$(TMPDIR="$TT" bash -c 'echo $$ > "$3"; : go test marker-ancestor; P3_BATTERY_POLL=1 "$1" "$2"' _ "$RUN_DIR/battery.sh" "$BW" "$TT/anc.pid" 2>&1); AP=$(cat "$TT/anc.pid" 2>/dev/null)
 n=$((n+1)); if [ -n "$AP" ] && printf '%s\n' "$AO" | tail -1 | /usr/bin/grep -q '^battery: GREEN' && ! printf '%s' "$AO" | /usr/bin/grep -qE "pid ([0-9]+ )*$AP\b"
 then echo "ok   bat-ignores-own-ancestor → pid $AP not waited for, GREEN"
 else echo "FAIL bat-ignores-own-ancestor → ancestor $AP: $(printf '%s' "$AO" | head -2 | tr '\n' ' ') … $(printf '%s\n' "$AO" | tail -1)"; fail=1; fi

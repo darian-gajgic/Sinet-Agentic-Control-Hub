@@ -22,7 +22,7 @@ Design: `P3/design/continuous-run-harness-proposal-2026-09-22.md` (ratified 2026
 ## Run it
 
 ```bash
-P3/run/test-classify.sh                     # 116 checks, no API calls (its battery.sh cases build tiny temp Go modules: run it while no battery runs)
+P3/run/test-classify.sh                     # 117 checks, no API calls (its battery.sh cases build tiny temp Go modules: run it while no battery runs)
 P3/run/battery.sh <worktree>                # the evidence battery on that worktree's HEAD, foreground (waits out any other go test on the host)
 P3/run/test-loop.sh                         # 120 checks with a stub claude + stub gh (breakers, LIMIT archive, update guard, measured cap, main guard, landing tags, gate wait)
 P3/run/sitting.sh --smoke                   # one 1-turn call: proves auth, flags, model string, log capture
@@ -56,7 +56,7 @@ git tag -n1 -l 'sitting/*'                  # the landing tags with their landed
   - `gofmt` over the tracked Go files, `vet`, `build`, `test` (`go test -p 1 -count=1 -skip "$P3_BATTERY_SKIP" ./...`), `lockgate` (`go run ./tools/lockgate`).
   - `stable`: HEAD did not move during the run.
 
-  It writes `<main checkout>/P3/run/log/evidence/<branch>-<sha>.json`. The main checkout is the parent of `git rev-parse --git-common-dir`, so a worktree's evidence lands in the main checkout's gitignored `log/`. A `/` in the branch name becomes `_`, and a detached HEAD is `detached`. Fields: `branch`, `head`, `ok` (every leg green), `worktree`, `web` (`skipped: …` or `ran: …`), `skip`, `legs[]` (`name`, `ok`, `rc`, `secs`; a red leg adds its last 20 output lines as `tail`; the test leg adds `pkgs_ok`, `pkgs_notest`, `pkgs_fail`, `tests_failed`), `logs` (the full leg output, a `/tmp/p3-battery.*` dir), and `times` (`started`, `finished`, `waited_s`, `total_s`). A rerun on the same commit overwrites the file, so the latest result counts. Exit 0 iff `ok`; usage error or not a worktree: 2. A full run on this repo takes minutes; an agent runs it in the foreground, or in the background and reads the result before writing a verdict.
+  It writes `<main checkout>/P3/run/log/evidence/<branch>-<sha>.json`. The main checkout is the parent of `git rev-parse --git-common-dir`, so a worktree's evidence lands in the main checkout's gitignored `log/`. A `/` in the branch name becomes `_`, and a detached HEAD is `detached`. Fields: `branch`, `head`, `ok` (every leg green), `worktree`, `web` (`skipped: …` or `ran: …`), `skip`, `legs[]` (`name`, `ok`, `rc`, `secs`; a red leg adds its last 20 output lines as `tail`; the test leg adds `pkgs_ok`, `pkgs_notest`, `pkgs_fail`, `tests_failed`), `logs` (the full leg output, a `${TMPDIR:-/tmp}/p3-battery.*` dir), and `times` (`started`, `finished`, `waited_s`, `total_s`). A rerun on the same commit overwrites the file, so the latest result counts. Exit 0 iff `ok`; usage error or not a worktree: 2. A full run on this repo takes minutes; an agent runs it in the foreground, or in the background and reads the result before writing a verdict.
 - *Gate.* `hooks/verdict-gate.sh` is a PreToolUse hook with matcher `Write|Edit|Bash` and a 30 s timeout. It acts only when two things hold:
   - the target is a `P3/reports/*-evaluate.md` file: the Write/Edit `file_path`, or for Bash any such path in the command (a relative path resolves against the hook input's `cwd`, or against a leading `cd <dir> &&`);
   - the text matches `VERDICT: PASS` (case-insensitive, `*`/`_`/backtick emphasis allowed): Write `content`, Edit `new_string`, or the Bash `command`.

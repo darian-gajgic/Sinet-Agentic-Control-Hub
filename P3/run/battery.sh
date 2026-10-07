@@ -13,7 +13,7 @@ HEAD_SHA=$(git -C "$WT" rev-parse HEAD) || exit 2
 BRANCH=$(git -C "$WT" symbolic-ref --short -q HEAD || echo detached)
 MAIN=$(dirname "$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)")
 EVFILE="$MAIN/P3/run/log/evidence/${BRANCH//\//_}-$HEAD_SHA.json" # the verdict gate derives the same name
-LOGS=$(mktemp -d /tmp/p3-battery.XXXXXX); LEGS="$LOGS/legs.jsonl"; : > "$LEGS"
+LOGS=$(mktemp -d "${TMPDIR:-/tmp}/p3-battery.XXXXXX"); LEGS="$LOGS/legs.jsonl"; : > "$LEGS"
 
 foreign_go_tests() { # PIDs running `go test`, minus this script's ancestors (a caller's own shell may name go test too)
   local mine=" " p=$$
