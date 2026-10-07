@@ -2,7 +2,7 @@
   "hooks": {
     "StopFailure": [
       {
-        "matcher": "rate_limit|usage_limit",
+        "matcher": "rate_limit|usage_limit|.*limit.*",
         "hooks": [
           {
             "type": "command",
