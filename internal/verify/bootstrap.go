@@ -51,7 +51,7 @@ const BootstrapAttribution = "check-pack:absent"
 // the bootstrap posture in plain words, including that capturing the project's
 // commands restores the full ladder"). Plain words for a person, never an
 // error chain, and it promises no door it does not have.
-const BootstrapPostureNote = "This project has no build, test or lint command captured yet, so the checks that would prove this work correct could not run. Nothing was passed off as checked: every check rung is recorded as unverifiable here, the judge's verdict is advisory only, and your review is what decides this work. Capturing the project's commands restores the full ladder from the next revision on."
+const BootstrapPostureNote = "This project has no build, test or lint command captured yet, so the checks that would prove this work correct could not run. Nothing was passed off as checked: the project's own checks are recorded as unverifiable here, anything the platform ran from the project's files is evidence only, the judge's verdict is advisory only, and your review is what decides this work. Capturing the project's commands restores the full ladder from the next revision on."
 
 // BootstrapPack is the check-pack resolution for a registered project whose
 // capture holds no OWNER-captured executable rung [A14, 2026-08-27].
