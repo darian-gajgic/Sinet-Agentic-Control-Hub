@@ -4,4 +4,6 @@ One file per packet (`P3-<phase>-<n>.md`), written and committed by the groundin
 
 Contents: numbered requirements with S-refs; seams to respect + stubs for seams whose phase hasn't come; ⚙ settings to consume by registry name; files expected to change; adopted components touched; the acceptance headline decomposed into a concretely checkable checklist (this checklist is the evaluation agent's rubric); the CONVENTIONS constraints that bind the packet.
 
+After the spot-check passes, the brief ends with `## Acceptance contract (signed <date>)`: the checklist frozen verbatim (amendment G1). The evaluation grades against that section, and any later change to it is a finding.
+
 The brief is the packet's structured handoff artifact: the executor and the evaluation agent work from it plus the cited spec sections — never from chat history. Directive: `P3/STATE.md` standing directives, 2026-07-22.
