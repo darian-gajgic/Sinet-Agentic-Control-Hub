@@ -110,3 +110,27 @@ Changes: file table; `Run it` counts (117 / 53) plus `git tag -n1 -l 'sitting/*'
 ## Draft STATE landing line (≤600 chars)
 
 H-4a LANDED (<merge>; tests 70527ab, impl 914a2ec; light path): loop.sh reads gh run list --branch main --limit 1 before every sitting incl. --once. Queued/in progress → re-check P3_CI_POLL 120 s; not success → notify once per run, re-check P3_WAIT_POLL 600 s; STOP/RESUME; no gh/error/no runs → log+proceed; P3_CI_GUARD=0 off. Landings tagged sitting/<ts> (annotated, landed list), pushed, never fatal. README rollback: first-parent -m 1 revert. 117/0 + 53/0. Restart the loop to arm. F1 open: gate-file wait.
+
+## Drain r1
+
+Finding: **F1** (mine, pre-existing): `wait_for "gate_answered $GATEF"` never ended on an answered gate file.
+
+- **Fix** (`a388d56`, `P3/run/loop.sh`). `wait_for <predicate-fn> <label> [predicate arg...]` now runs `"$1" "${@:3}"`. The predicate and its args evaluate as one command, each arg exactly one word: nothing is word-split or eval'd, so a gate path with spaces or glob characters stays intact.
+  - The GATE wait now reads `wait_for gate_answered "gate $GATEF" "$GATEF"`.
+  - The other two waits take no args and are unchanged: `wait_for false "blocked"`, `wait_for ci_clear "CI on main"`.
+  - This is the robust form of the proposed fix: the arg travels as its own word instead of being split out of a string.
+- **Regression** (`test-loop.sh`: one case, `gate-file-answered`, 3 checks).
+  - The claude stub's new `gate` sitting writes a GATE `status.json` pointing at a temp gate file that says `answered: no`.
+  - A background writer appends `answered: yes` after 2 s, with `P3_WAIT_POLL=1` (stub_env).
+  - The loop must then start the next sitting (`stop`) and exit 0.
+  - `ci_run` takes an optional `CI_TIMEOUT` (default 120), so this case gives up after 30 s.
+- **Unfixed-code evidence.** The test was added before the fix and run against the unfixed `loop.sh`: `---- 120 checks, FAILURES`, 117 ok, 3 FAIL.
+  - `gate-file-answered → exit 124 (want 0)`: the wait never ended, so the 30 s cap killed the run.
+  - `gate-file-next → '1' (want /^2$/)`: the next sitting never started.
+  - `gate-file-resumed → ''`: no `gate answered/resumed` line.
+- **Fixed** (foreground, serial): `P3/run/test-classify.sh` → `---- 53 checks, ALL PASS`; `P3/run/test-loop.sh` → `---- 120 checks, ALL PASS`, 0 FAIL (`gate-file-resumed → … gate answered/resumed: /tmp/…/gate-f1.md`). README count 117 → 120.
+- **Not changed** (cosmetic, outside the finding): `decide()`'s action text still says "poll 600s" for GATE/BLOCKED. It is only the ACTION line in `loop.log`/`--dry-run`, but with `P3_WAIT_POLL` set to anything else it misstates the interval.
+
+### Draft STATE landing line (≤600 chars, supersedes the one above)
+
+H-4a LANDED (<merge>; tests 70527ab, impl 914a2ec, drain r1 a388d56; light path): loop.sh reads gh run list --branch main --limit 1 before every sitting incl. --once. Queued/in progress → re-check P3_CI_POLL 120 s; not success → notify once per run, re-check P3_WAIT_POLL 600 s; STOP/RESUME; no gh/error/no runs → log+proceed; P3_CI_GUARD=0 off. Landings tagged sitting/<ts>, pushed, never fatal. README rollback: first-parent -m 1 revert. F1 fixed: an answered gate file ends the wait. 120/0 + 53/0. Restart the loop to arm.
