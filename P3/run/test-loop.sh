@@ -36,6 +36,7 @@ case "$next" in
   bookkeeping) work P3/STATE.md "P3: STATE"; signed '[]';;
   progress)    work work.txt "P3-X-3: work"; signed '[]';;
   crashwork)   work work.txt "P3-X-4: half done"; cat "$STUB_FIX/crash-noresult.jsonl";;
+  gate)        cat "$STUB_FIX/gate.jsonl"; echo "{\"outcome\":\"GATE\",\"landed\":[],\"next\":\"x\",\"gate\":\"$STUB_GATE\",\"family\":null,\"note\":\"\"}" > "$STUB_STATUS";;
   crash)      cat "$STUB_FIX/crash-noresult.jsonl";;
   continue)   cat "$STUB_FIX/continue.jsonl"; cp "$STUB_FIX/continue.status.json" "$STUB_STATUS";;
   limit)      cat "$STUB_FIX/limit-fable-text.jsonl";;
@@ -175,12 +176,12 @@ check cap-default        '^3$'                              "$( ( stub_env; read
 
 # ---- H-4a: the main guard (stub gh). Every loop above already ran under the default stub (green).
 [ "$(git -C "$P3_ROOT" remote get-url origin)" = "$O" ] || { echo "FAIL setup: origin of $P3_ROOT is not the temp bare repo — refusing to run the tag tests"; exit 1; }
-ci_run() { # ci_run <name> <gh states> <claude sequence> <expected exit> [--once] [VAR=value ...]
+ci_run() { # ci_run <name> <gh states> <claude sequence> <expected exit> [--once] [VAR=value ...]   (CI_TIMEOUT=<s> caps the run, default 120)
   # one loop run under the stubs with a fresh loop log, gh call log and prompt log; VAR=value pairs are exported after stub_env
   local name="$1" want="$4" a args=() envs=(); printf '%s' "$2" > "$T/ghseq"; printf '%s' "$3" > "$T/seq"; shift 4
   for a in "$@"; do case "$a" in *=*) envs+=("$a");; *) args+=("$a");; esac; done
   mkdir -p "$LOG_DIR"; : > "$LOOP_LOG"; : > "$T/ghcalls"; rm -f "$T/prompts" "$STOP_FILE" "$STATUS_FILE" "$RESUME_FILE"
-  ( stub_env; [ ${#envs[@]} -eq 0 ] || export "${envs[@]}"; timeout 120 "$RUN_DIR/loop.sh" "${args[@]}" >/dev/null 2>&1 ); local rc=$?
+  ( stub_env; [ ${#envs[@]} -eq 0 ] || export "${envs[@]}"; timeout "${CI_TIMEOUT:-120}" "$RUN_DIR/loop.sh" "${args[@]}" >/dev/null 2>&1 ); local rc=$?
   rm -f "$STOP_FILE" "$STATUS_FILE" "$RESUME_FILE"
   if [ "$rc" = "$want" ]; then ok "$name → exit $rc"; else bad "$name → exit $rc (want $want)"; fi
 }
@@ -286,5 +287,14 @@ git -C "$P3_ROOT" remote set-url origin "$O"; TN="$(fresh "$TB")"
 check tag-pushfail-local  '^1$'                                              "$(printf '%s' "$TN" | /usr/bin/grep -c .)"
 check tag-pushfail-log    "TAG $TN created, push failed"                     "$(/usr/bin/grep 'TAG ' "$LOOP_LOG")"
 check tag-pushfail-origin '^absent$'                                         "$([ "$(peel "$O" "refs/tags/$TN")" = missing ] && echo absent || echo present)"
+
+# ---- H-4a drain r1 (F1): a gate answered in its file ends the GATE wait by itself, no RESUME. Unfixed, the wait never ends
+# (the predicate ran as one command name, "gate_answered <file>"): the run hits CI_TIMEOUT and the next sitting never starts.
+G="$T/gate-f1.md"; printf 'Status: OPEN\nanswered: no\n' > "$G"
+( sleep 2; echo 'answered: yes' >> "$G" ) & GW=$!
+CI_TIMEOUT=30 ci_run gate-file-answered "green"         "gate stop"     0 "STUB_GATE=$G"
+wait "$GW"
+check gate-file-next     '^2$'                                               "$(sat)"
+check gate-file-resumed  "gate answered/resumed: $G$"                        "$(/usr/bin/grep 'gate answered/resumed' "$LOOP_LOG")"
 
 rm -f "$STOP_FILE" "$STATUS_FILE"; rm -rf "$T"; echo "---- $n checks, $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"; exit $fail

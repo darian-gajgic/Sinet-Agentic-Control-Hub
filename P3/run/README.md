@@ -8,7 +8,7 @@ Design: `P3/design/continuous-run-harness-proposal-2026-09-22.md` (ratified 2026
 | `sitting.sh` | one budgeted headless sitting: `claude -p "continue implementation" …` with the wall clock (`timeout --signal=INT`) and `--max-turns` rails, `DISABLE_AUTOUPDATER=1`, the CLI update guard, and the measured cap in the launch prompt; `--smoke` = one-turn launch-line check |
 | `lib.sh` | shared library: `classify`, `parse_reset_epoch`, `limit_retry_json`/`retry_reset_epoch`/`limit_epoch`, `notify`, `gate_answered`, `reap_orphans`, `sitting_ts`, `archive_limit`, `read_cap`/`record_sitting`/`update_cap`, `ci_state`, `tag_landing` |
 | `test-classify.sh` + `fixtures/` | unit tests on canned results (limit text, 429, StopFailure status, status outcomes, crash, api_error, max-turns→CAPPED, reset parsing, gate marker, `--dry-run` decisions, `system/api_retry` limits, the StopFailure hook command run in isolation + its matcher) |
-| `test-loop.sh` | loop/sitting tests with a stub `claude` and a stub `gh`, every loop in a temp repo with a temp bare origin: breakers, LIMIT archive, update guard (drift → probe fail/pass), measured cap (down, up, broken streak, clamps, prompt injection), main guard (red, queued/in progress, RESUME, STOP, notify once per run, gh absent/erroring/no runs, `P3_CI_GUARD=0`), landing tags (landed, progress-only, crash, bookkeeping-only, push failure) |
+| `test-loop.sh` | loop/sitting tests with a stub `claude` and a stub `gh`, every loop in a temp repo with a temp bare origin: breakers, LIMIT archive, update guard (drift → probe fail/pass), measured cap (down, up, broken streak, clamps, prompt injection), main guard (red, queued/in progress, RESUME, STOP, notify once per run, gh absent/erroring/no runs, `P3_CI_GUARD=0`), landing tags (landed, progress-only, crash, bookkeeping-only, push failure), a gate answered in its file ending the GATE wait |
 | `fixtures/observed/` (committed dir) | raw evidence of every LIMIT-classified sitting, `<sitting ts>/{result.json,status.json,api_retry.jsonl,class.txt}` — real observations to promote into tests |
 | `cap` (committed) | the measured packet cap, default `3`, range 1..5; the loop rewrites it (shows as a working-tree change) |
 | `cli-version.pinned` (committed) | the Claude Code version the harness last passed a probe on; the update guard rewrites it after a passed drift probe |
@@ -21,7 +21,7 @@ Design: `P3/design/continuous-run-harness-proposal-2026-09-22.md` (ratified 2026
 
 ```bash
 P3/run/test-classify.sh                     # 53 checks, no API calls
-P3/run/test-loop.sh                         # 117 checks with a stub claude + stub gh (breakers, LIMIT archive, update guard, measured cap, main guard, landing tags)
+P3/run/test-loop.sh                         # 120 checks with a stub claude + stub gh (breakers, LIMIT archive, update guard, measured cap, main guard, landing tags, gate wait)
 P3/run/sitting.sh --smoke                   # one 1-turn call: proves auth, flags, model string, log capture
 tmux new -s p3loop 'P3/run/loop.sh --once'  # H-2(a): ONE supervised sitting, then exit
 tmux new -s p3loop 'P3/run/loop.sh'         # H-2(b): unattended chain

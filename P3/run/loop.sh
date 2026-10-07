@@ -41,8 +41,8 @@ echo $$ > "$RUN_DIR/loop.pid"; LOOP_PID=$$
 CHILD=""
 trap 'log "signal: forwarding SIGINT to the sitting"; [ -n "$CHILD" ] && kill -INT "$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; log "loop exiting on signal"; exit 130' INT TERM
 
-wait_for() { # wait_for <predicate-fn> <label> — re-check every P3_WAIT_POLL s (a predicate may set a shorter WAIT_S); STOP file ends the loop
-  while WAIT_S="$P3_WAIT_POLL"; ! "$1"; do
+wait_for() { # wait_for <predicate-fn> <label> [predicate arg...] — re-check every P3_WAIT_POLL s (a predicate may set a shorter WAIT_S); STOP file ends the loop
+  while WAIT_S="$P3_WAIT_POLL"; ! "$1" "${@:3}"; do
     [ -f "$STOP_FILE" ] && { log "STOP file seen while waiting ($2)"; exit 0; }
     [ -f "$RESUME_FILE" ] && { rm -f "$RESUME_FILE"; log "RESUME touched ($2)"; return 0; }
     sleep "$WAIT_S"
@@ -98,7 +98,7 @@ while :; do
     DONE)     notify "P3 loop finished" "Queue empty — DONE"; exit 0;;
     GATE:*)   CRASHES=0; GATEF="${CLASS#GATE:}"; notify "P3 needs a decision" "Gate file: $GATEF — answer in the file (answered: yes) or in a session"
               [ "$ONCE" = 1 ] && exit 0
-              wait_for "gate_answered $GATEF" "gate $GATEF"; log "gate answered/resumed: $GATEF";;
+              wait_for gate_answered "gate $GATEF" "$GATEF"; log "gate answered/resumed: $GATEF";;
     BLOCKED:*) CRASHES=0; notify "P3 loop blocked" "${CLASS#BLOCKED:}"; [ "$ONCE" = 1 ] && exit 0
               wait_for false "blocked";;
     LIMIT:*)  CRASHES=0; FAM="${CLASS#LIMIT:}"; RESET="${FAM#*:}"; FAM="${FAM%%:*}"
