@@ -27,6 +27,9 @@ LOOP_LOG="$LOG_DIR/loop.log"
 : "${P3_COMPACTIONS_LOG:=$LOG_DIR/compactions.log}" # written by the PreCompact hook
 : "${P3_CLI_PIN:=$RUN_DIR/cli-version.pinned}"    # Claude Code version the harness last passed a probe on (H-3b)
 : "${P3_OBSERVED_DIR:=$RUN_DIR/fixtures/observed}" # raw evidence of every LIMIT-classified sitting (H-3a)
+: "${P3_CI_GUARD:=1}"                             # main guard (H-4a): 0 = start sittings without reading CI on main
+: "${P3_CI_POLL:=120}"                            # re-check interval while the latest CI run on main is queued/in progress
+: "${P3_WAIT_POLL:=600}"                          # re-check interval of every other wait: gate, blocked, CI on main not green
 
 LIMIT_RE='hit your (usage |session |weekly )?limit|reached your [a-z ]*limit|usage limit|rate[ _-]?limit|limit reached|limit will reset|out of (usage|credits)|quota (exceeded|reached)'
 
@@ -185,11 +188,15 @@ reap_orphans() { # kill test runners no sitting is running (called between sitti
   return 0
 }
 
+sitting_ts() { # sitting_ts <stream log>  — the sitting's <ts> from its transcript name (sitting-<ts>.jsonl); now (UTC) without one
+  local ts; ts="$(basename "$1" .jsonl)"; ts="${ts#sitting-}"
+  [ -f "$1" ] || ts="$(date -u +%Y%m%d-%H%M%S)"
+  echo "$ts"
+}
+
 archive_limit() { # archive_limit <stream log> <status file> <classification>  — keep a LIMIT sitting's raw evidence (H-3a)
   # → $P3_OBSERVED_DIR/<sitting ts>/{result.json,status.json,api_retry.jsonl,class.txt}: real observations to promote into tests.
-  local ts d; ts="$(basename "$1" .jsonl)"; ts="${ts#sitting-}"
-  [ -f "$1" ] || ts="$(date -u +%Y%m%d-%H%M%S)"
-  d="$P3_OBSERVED_DIR/$ts"; mkdir -p "$d" 2>/dev/null || return 0
+  local d; d="$P3_OBSERVED_DIR/$(sitting_ts "$1")"; mkdir -p "$d" 2>/dev/null || return 0
   last_result_json "$1" > "$d/result.json"
   [ -f "$2" ] && cp -f "$2" "$d/status.json"
   [ -f "$1" ] && jq -cR 'fromjson? | select(.type=="system" and .subtype=="api_retry")' "$1" > "$d/api_retry.jsonl" 2>/dev/null
@@ -240,4 +247,34 @@ update_cap() { # update_cap  — apply the measured-cap rule to the ledger row o
     log "CAP $cap → $new ($( [ "$new" -lt "$cap" ] && echo 'compaction in the last sitting' || echo "5 consecutive sittings landed $cap with zero compactions"))"
   fi
   return 0
+}
+
+ci_state() { # ci_state  — the latest CI run on main, one line (H-4a):
+  #   GREEN <sha> <url> | RUNNING <status> <sha> <url> | RED <conclusion> <sha> <url> | UNKNOWN <reason>
+  # Every status other than completed is a run still in progress. UNKNOWN (no gh, an auth or API error, no runs) never holds a sitting.
+  command -v gh >/dev/null 2>&1 || { echo "UNKNOWN no gh on PATH"; return; }
+  local out rc ef; ef="$(mktemp)"
+  out="$(cd "$P3_ROOT" && GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1 timeout 60 gh run list --branch main --limit 1 --json status,conclusion,headSha,url 2>"$ef")"; rc=$?
+  [ "$rc" = 0 ] || { echo "UNKNOWN gh run list failed (exit $rc): $(tr '\n' ' ' < "$ef" | cut -c1-160 | sed 's/ *$//')"; rm -f "$ef"; return; }
+  rm -f "$ef"
+  printf '%s' "$out" | jq -r 'if length == 0 then "UNKNOWN no CI runs on main" else .[0] |
+      if .status != "completed" then "RUNNING \(.status) \(.headSha) \(.url)"
+      elif .conclusion == "success" then "GREEN \(.headSha) \(.url)"
+      else "RED \(.conclusion) \(.headSha) \(.url)" end end' 2>/dev/null \
+    || echo "UNKNOWN unreadable gh output: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-120)"
+}
+
+tag_landing() { # tag_landing <stream log> <status file> <head_before> <head_after>  — tag a landing sitting (H-4a)
+  # A landing: status.json .landed is non-empty, or the sitting committed beyond bookkeeping (progress_since). Its post-sitting
+  # HEAD gets the annotated tag sitting/<ts> (ts as in archive_limit; message = the landed list), pushed to origin.
+  # Failures are logged, never fatal.
+  local landed tag out
+  landed="$(jq -r '(.landed // []) | map(tostring) | join(", ")' "$2" 2>/dev/null)"
+  [ -n "$landed" ] || progress_since "$3" "$4" || return 0
+  tag="sitting/$(sitting_ts "$1")"
+  out="$(git -C "$P3_ROOT" tag -a "$tag" -m "${landed:-no landed list; commits beyond bookkeeping ${3:0:7}..${4:0:7}}" "$4" 2>&1)" \
+    || { log "TAG $tag failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"; return 0; }
+  out="$(GIT_TERMINAL_PROMPT=0 timeout 120 git -C "$P3_ROOT" push -q origin "refs/tags/$tag" 2>&1)" \
+    || { log "TAG $tag created, push failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"; return 0; }
+  log "TAG $tag → ${4:0:7} pushed (${landed:-progress beyond bookkeeping})"
 }

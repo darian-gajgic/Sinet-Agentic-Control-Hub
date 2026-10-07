@@ -4,7 +4,9 @@
 #   --once     run exactly one sitting, classify, act on notifications, then exit (H-2(a) supervised run)
 #   --dry-run  classify canned inputs and print the decision; nothing is launched
 # Stop:  touch P3/run/STOP  (takes effect before the next sitting; Ctrl-C forwards SIGINT to the running sitting)
-# Resume after a gate/blocked wait without editing the gate file:  touch P3/run/RESUME
+# Resume after a gate/blocked/CI wait without editing the gate file or fixing main:  touch P3/run/RESUME
+# Main guard (H-4a): no sitting starts while the latest CI run on main is queued/in progress or did not succeed;
+# every landing sitting's post-sitting HEAD is tagged sitting/<ts> and the tag pushed.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 cd "$P3_ROOT"
@@ -25,7 +27,7 @@ decide() { # decide <classification> → prints the action line the loop takes (
   esac
 }
 
-MODEL="$P3_MODEL_PRIMARY"; CRASHES=0; STALLS=0; BACKOFF=900; PAUSE="$P3_PAUSE_MIN"; PROGRESS=0; FABLE_LIMITED_UNTIL=0; ONCE=0
+MODEL="$P3_MODEL_PRIMARY"; CRASHES=0; STALLS=0; BACKOFF=900; PAUSE="$P3_PAUSE_MIN"; PROGRESS=0; FABLE_LIMITED_UNTIL=0; ONCE=0; CI_NOTIFIED=""
 
 if [ "${1:-}" = "--dry-run" ]; then
   shift; LOGF="${1:-/dev/null}"; STF="${2:-/nonexistent}"; HB="${3:-a}"; HA="${4:-b}"
@@ -39,20 +41,33 @@ echo $$ > "$RUN_DIR/loop.pid"; LOOP_PID=$$
 CHILD=""
 trap 'log "signal: forwarding SIGINT to the sitting"; [ -n "$CHILD" ] && kill -INT "$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; log "loop exiting on signal"; exit 130' INT TERM
 
-wait_for() { # wait_for <predicate-fn> <label> — poll every 600 s; STOP file ends the loop
-  while ! "$1"; do
+wait_for() { # wait_for <predicate-fn> <label> — re-check every P3_WAIT_POLL s (a predicate may set a shorter WAIT_S); STOP file ends the loop
+  while WAIT_S="$P3_WAIT_POLL"; ! "$1"; do
     [ -f "$STOP_FILE" ] && { log "STOP file seen while waiting ($2)"; exit 0; }
     [ -f "$RESUME_FILE" ] && { rm -f "$RESUME_FILE"; log "RESUME touched ($2)"; return 0; }
-    sleep 600
+    sleep "$WAIT_S"
   done
 }
 
-log "LOOP start pid=$$ primary=$P3_MODEL_PRIMARY fallback=$P3_MODEL_FALLBACK once=$ONCE"
+ci_clear() { # wait_for predicate (H-4a): 0 when the latest CI run on main succeeded or cannot be read (logged, never holds a sitting)
+  # queued/in progress → re-check every P3_CI_POLL s; completed without success → notify once per run, re-check every P3_WAIT_POLL s
+  local s kind a b c; s="$(ci_state)"; read -r kind a b c <<< "$s"
+  case "$kind" in
+    GREEN)   log "CI on main: success $a"; return 0;;
+    RUNNING) WAIT_S="$P3_CI_POLL"; log "CI on main: $a $b — waiting, re-check in ${WAIT_S}s"; return 1;;
+    RED)     [ "$c" = "$CI_NOTIFIED" ] || { notify "P3 loop waiting: CI on main $a" "$c"; CI_NOTIFIED="$c"; }
+             log "CI on main: $a $b — waiting, re-check in ${WAIT_S}s (touch $RESUME_FILE to start the sitting anyway)"; return 1;;
+    *)       log "CI guard: ${s#UNKNOWN } — proceeding"; return 0;;
+  esac
+}
+
+log "LOOP start pid=$$ primary=$P3_MODEL_PRIMARY fallback=$P3_MODEL_FALLBACK once=$ONCE ci_guard=$P3_CI_GUARD"
 while :; do
   rotate_log
   [ -f "$STOP_FILE" ] && { log "STOP file present — exiting"; exit 0; }
   rm -f "$RESUME_FILE"
   reap_orphans
+  [ "$P3_CI_GUARD" = 0 ] || wait_for ci_clear "CI on main"   # H-4a: every sitting, --once included
   # model choice: back to primary once the Fable window has passed
   if [ "$MODEL" != "$P3_MODEL_PRIMARY" ] && [ "$(date +%s)" -ge "$FABLE_LIMITED_UNTIL" ]; then
     if probe_model "$P3_MODEL_PRIMARY"; then MODEL="$P3_MODEL_PRIMARY"; log "Fable window passed (probe OK) — back to $MODEL"
@@ -70,6 +85,7 @@ while :; do
   # H-3c measured cap: one ledger row per sitting, then the cap rule; H-3a: every LIMIT's raw evidence is archived
   record_sitting "$LOGF" "$STATUS_FILE" "$CLASS" "$MODEL"; update_cap
   case "$CLASS" in LIMIT:*) archive_limit "$LOGF" "$STATUS_FILE" "$CLASS";; esac
+  tag_landing "$LOGF" "$STATUS_FILE" "$HEAD_BEFORE" "$HEAD_AFTER"   # H-4a: before any exit below, --once included
   # stall breaker: three consecutive COMPLETED sittings without progress beyond STATE/HANDOFF bookkeeping
   # (crashes have their own breaker; limits count toward neither); idle backoff: the pause between
   # unproductive sittings grows P3_PAUSE_MIN ×5 per step up to P3_PAUSE_MAX (diminishing returns)

@@ -238,7 +238,8 @@ ci_run ci-notify-new-run "resume red2 green"    "continue stop" 0
 check ci-newrun-twice    '^2$'                                               "$(logn 'NOTIFY: P3 loop waiting')"
 check ci-newrun-text     'NOTIFY: P3 loop waiting: CI on main timed_out — https://github.com/o/r/actions/runs/1003$' "$(/usr/bin/grep 'NOTIFY: P3 loop waiting' "$LOOP_LOG" | tail -n 1)"
 
-# ---- H-4a: landing tags, in the temp repo with its temp bare origin
+# ---- H-4a: landing tags, in the temp repo with its temp bare origin. The tag name has second resolution (as real sittings,
+# hours apart, do) and a --once stub sitting takes milliseconds, so each case below starts its sitting ≥1 s after the last one.
 tags() { git -C "$P3_ROOT" tag -l 'sitting/*' | LC_ALL=C sort; }
 fresh() { LC_ALL=C comm -13 <(printf '%s\n' "$1") <(tags) | /usr/bin/grep .; }          # fresh <tags before>  — tags created since
 want_tag() { /usr/bin/grep -oE 'SITTING [0-9]{8}-[0-9]{6} start' "$LOOP_LOG" | tail -n 1 | sed -E 's#SITTING (.*) start#sitting/\1#'; }
@@ -246,7 +247,7 @@ msg() { git -C "$P3_ROOT" tag -l --format='%(contents)' "$1" | sed '/^$/d'; }
 peel() { git -C "$1" rev-parse -q --verify "$2" 2>/dev/null || echo missing; }
 pushed() { local a b; a="$(peel "$P3_ROOT" "refs/tags/$1")"; b="$(peel "$O" "refs/tags/$1")"
   [ "$a" = "$b" ] && [ "$a" != missing ] && echo pushed || echo "not pushed (local $a, origin $b)"; }
-TB="$(tags)"; HB="$(git -C "$P3_ROOT" rev-parse HEAD)"
+sleep 1; TB="$(tags)"; HB="$(git -C "$P3_ROOT" rev-parse HEAD)"
 ci_run tag-landing       "green"                "landcommit"    0 --once
 TN="$(fresh "$TB")"
 check tag-landing-one    '^1$'                                               "$(printf '%s' "$TN" | /usr/bin/grep -c .)"
@@ -258,28 +259,28 @@ check tag-landing-moved  '^moved$'                                           "$(
 check tag-landing-msg    '^P3-X-1, P3-X-2$'                                  "$(msg "$TN")"
 check tag-landing-pushed '^pushed$'                                          "$(pushed "$TN")"
 check tag-landing-log    "TAG $TN → [0-9a-f]{7} pushed"                      "$(/usr/bin/grep 'TAG ' "$LOOP_LOG")"
-TB="$(tags)"; OB="$(git -C "$O" tag -l 'sitting/*')"
+sleep 1; TB="$(tags)"; OB="$(git -C "$O" tag -l 'sitting/*')"
 ci_run tag-bookkeeping   "green"                "bookkeeping"   0 --once
 check tag-bookkeeping-commit '^P3: STATE$'                                   "$(git -C "$P3_ROOT" log -1 --format=%s)"
 check tag-bookkeeping-none   '^0$'                                           "$(fresh "$TB" | /usr/bin/grep -c .)"
 check tag-bookkeeping-origin '^same$'                                        "$([ "$(git -C "$O" tag -l 'sitting/*')" = "$OB" ] && echo same || echo changed)"
-TB="$(tags)"
+sleep 1; TB="$(tags)"
 ci_run tag-progress      "green"                "progress"      0 --once
 TN="$(fresh "$TB")"
 check tag-progress-one   '^1$'                                               "$(printf '%s' "$TN" | /usr/bin/grep -c .)"
 check tag-progress-msg   '^no landed list; commits beyond bookkeeping [0-9a-f]{7}\.\.[0-9a-f]{7}$' "$(msg "$TN")"
 check tag-progress-pushed '^pushed$'                                         "$(pushed "$TN")"
-TB="$(tags)"
+sleep 1; TB="$(tags)"
 ci_run tag-landed-only   "green"                "continue"      0 --once
 TN="$(fresh "$TB")"
 check tag-landed-only-msg  '^P3-TQ-8$'                                       "$(msg "$TN")"
 check tag-landed-only-head "^$(git -C "$P3_ROOT" rev-parse HEAD)$"           "$(peel "$P3_ROOT" "$TN^{commit}")"
-TB="$(tags)"
+sleep 1; TB="$(tags)"
 ci_run tag-crash         "green"                "crashwork"     1 --once
 TN="$(fresh "$TB")"
 check tag-crash-class    '^CLASS CRASH:'                                     "$(/usr/bin/grep -oE 'CLASS CRASH:.*' "$LOOP_LOG" | head -n 1)"
 check tag-crash-pushed   '^pushed$'                                          "$(pushed "$TN")"
-TB="$(tags)"; git -C "$P3_ROOT" remote set-url origin "$T/missing.git"
+sleep 1; TB="$(tags)"; git -C "$P3_ROOT" remote set-url origin "$T/missing.git"
 ci_run tag-push-fails    "green"                "landcommit"    0 --once
 git -C "$P3_ROOT" remote set-url origin "$O"; TN="$(fresh "$TB")"
 check tag-pushfail-local  '^1$'                                              "$(printf '%s' "$TN" | /usr/bin/grep -c .)"
