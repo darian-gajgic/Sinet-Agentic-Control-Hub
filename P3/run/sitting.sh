@@ -6,6 +6,23 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 cd "$P3_ROOT"
 export DISABLE_AUTOUPDATER=1   # H-3b: the CLI must not update itself under a running sitting
+# H-5: loop.sh starts this script as its own process group with default SIGINT and signals that group on Ctrl-C. timeout(1) puts
+# itself and claude into a process group of their own (pgid = timeout's pid), out of that signal's reach, so it is forwarded here.
+# Measured on this host's timeout (uutils coreutils 0.8.0), 2026-10-08:
+#   INT  → the timeout process only: it passes the signal once to claude and claude's group (a signal to the whole group would
+#          reach claude twice, directly and again from timeout); claude ends its turn, the documented clean stop.
+#   TERM → timeout's whole group: once timeout has passed on one signal it passes on no other until --kill-after's SIGKILL, so the
+#          escalation must reach claude and its children directly.
+# A signal before the launch ends this script; no sitting starts. Logged to loop.log only: stdout's last line is the transcript path.
+TPID=""; FWD=""
+fwd() { # fwd <INT|TERM>
+  FWD=1
+  [ -n "$TPID" ] || TPID="${!:-}"   # a signal between the fork and TPID=$! (this script starts no other background job)
+  [ -n "$TPID" ] || { log "sitting.sh: SIG$1 before launch — no sitting started" >/dev/null; exit 130; }
+  if [ "$1" = INT ]; then log "sitting.sh: forwarding SIGINT to timeout $TPID" >/dev/null; kill -INT "$TPID" 2>/dev/null
+  else log "sitting.sh: forwarding SIGTERM to timeout's process group $TPID" >/dev/null; kill -TERM -- "-$TPID" 2>/dev/null || kill -TERM "$TPID" 2>/dev/null; fi
+}
+trap 'fwd INT' INT; trap 'fwd TERM' TERM
 MODEL="$P3_MODEL_PRIMARY"; SMOKE=0
 while [ $# -gt 0 ]; do case "$1" in --model) MODEL="$2"; shift 2;; --smoke) SMOKE=1; shift;; *) echo "unknown arg $1" >&2; exit 2;; esac; done
 # harness self-integrity check (research §2.11: control files have been deleted by agents in other harnesses)
@@ -57,8 +74,13 @@ claude -p "$PROMPT" \
   --name "p3-sitting-$TS" "${BUDGET[@]}" \
   "${SP[@]}" \
   --output-format stream-json --verbose \
-  > "$LOGF" 2> "$ERRF"
-EXIT=$?
+  > "$LOGF" 2> "$ERRF" & TPID=$!
+# Started as a background job so a trap runs at once (bash defers traps until a foreground command ends). A forwarded signal
+# interrupts wait (status >128); wait again for timeout's own status. The background start hands timeout an ignored SIGINT and
+# stdin /dev/null, as before; timeout installs its own SIGINT handler, and its exec resets claude's SIGINT to the default
+# (measured 2026-10-08: claude's SigIgn is 0), so timeout's wall-clock INT and a forwarded INT both reach claude.
+while FWD=""; wait "$TPID"; EXIT=$?; [ -n "$FWD" ] && [ "$EXIT" -gt 128 ]; do :; done
+trap '' INT TERM   # timeout has exited: nothing left to forward to; finish the bookkeeping below (milliseconds)
 printf 'exit=%s\nend=%s\n' "$EXIT" "$(date -u +%FT%TZ)" >> "$META"
 RJ="$(last_result_json "$LOGF")"
 log "SITTING $TS end exit=$EXIT (informational only) subtype=$(printf '%s' "$RJ" | jq -r '.subtype // "-"' 2>/dev/null) turns=$(printf '%s' "$RJ" | jq -r '.num_turns // "-"' 2>/dev/null) cost=$(printf '%s' "$RJ" | jq -r '.total_cost_usd // "-"' 2>/dev/null) log=$LOGF"

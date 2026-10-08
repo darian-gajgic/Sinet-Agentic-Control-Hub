@@ -3,7 +3,9 @@
 # Usage: P3/run/loop.sh [--once] [--dry-run <stream.jsonl> [<status.json>] [<head_before> <head_after>]]
 #   --once     run exactly one sitting, classify, act on notifications, then exit (H-2(a) supervised run)
 #   --dry-run  classify canned inputs and print the decision; nothing is launched
-# Stop:  touch P3/run/STOP  (takes effect before the next sitting; Ctrl-C forwards SIGINT to the running sitting)
+# Stop:  touch P3/run/STOP  (takes effect before the next sitting; the running sitting finishes normally)
+# Ctrl-C / SIGTERM on the loop (H-5): SIGINT to the running sitting (claude ends its turn), up to P3_INT_GRACE s (90) for it
+#   to end, then SIGTERM; the loop exits 130 either way
 # Resume after a gate/blocked/CI wait without editing the gate file or fixing main:  touch P3/run/RESUME
 # Main guard (H-4a): no sitting starts while the latest CI run on main is queued/in progress or did not succeed;
 # every landing sitting's post-sitting HEAD is tagged sitting/<ts> and the tag pushed.
@@ -38,8 +40,28 @@ fi
 exec 9>"$RUN_DIR/loop.lock"
 flock -n 9 || { echo "another loop holds $RUN_DIR/loop.lock" >&2; exit 1; }
 echo $$ > "$RUN_DIR/loop.pid"; LOOP_PID=$$
-CHILD=""
-trap 'log "signal: forwarding SIGINT to the sitting"; [ -n "$CHILD" ] && kill -INT "$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; log "loop exiting on signal"; exit 130' INT TERM
+CHILD=""; LAUNCHING=0
+on_signal() { # on_signal <INT|TERM> (H-5) — the sitting runs in its own process group (job control at launch, below), so neither
+  # the terminal's Ctrl-C nor a signal to the loop reaches it by itself. SIGINT to that group (sitting.sh forwards it to timeout,
+  # which passes it to claude and claude's group: claude ends its turn, the documented clean stop), up to P3_INT_GRACE s for the
+  # sitting to end, then SIGTERM to the group (sitting.sh sends it on to timeout's whole group) and up to 10 s more; exit 130
+  # either way. A second Ctrl-C during the grace is logged and changes nothing.
+  trap 'log "signal: already stopping — ignored"' INT TERM
+  [ -n "$CHILD" ] || [ "$LAUNCHING" != 1 ] || CHILD="${!:-}"   # a signal between the fork and CHILD=$!
+  if [ -z "$CHILD" ] || ! proc_alive "$CHILD"; then log "signal $1: no sitting running — loop exiting"; exit 130; fi
+  log "signal $1: SIGINT to the sitting's process group $CHILD — up to ${P3_INT_GRACE}s for it to end its turn"
+  kill -INT -- "-$CHILD" 2>/dev/null
+  local i=0 rc; while proc_alive "$CHILD" && [ "$i" -lt "$P3_INT_GRACE" ]; do sleep 1; i=$((i+1)); done
+  if proc_alive "$CHILD"; then
+    log "signal: sitting still running after ${P3_INT_GRACE}s — SIGTERM to its process group $CHILD"
+    kill -TERM -- "-$CHILD" 2>/dev/null
+    i=0; while proc_alive "$CHILD" && [ "$i" -lt 10 ]; do sleep 1; i=$((i+1)); done
+  fi
+  if proc_alive "$CHILD"; then log "signal: sitting $CHILD still running 10s after SIGTERM — timeout's --kill-after rail ends it; loop exiting"
+  else wait "$CHILD" 2>/dev/null; rc=$?; log "signal: sitting ended (sitting.sh exit=$rc) — loop exiting"; fi
+  exit 130
+}
+trap 'on_signal INT' INT; trap 'on_signal TERM' TERM
 
 wait_for() { # wait_for <predicate-fn> <label> [predicate arg...] — re-check every P3_WAIT_POLL s (a predicate may set a shorter WAIT_S); STOP file ends the loop
   while WAIT_S="$P3_WAIT_POLL"; ! "$1" "${@:3}"; do
@@ -74,8 +96,12 @@ while :; do
     else FABLE_LIMITED_UNTIL=$(( $(date +%s) + P3_PROBE_INTERVAL )); log "Fable probe still limited — staying on $MODEL for ${P3_PROBE_INTERVAL}s"; fi
   fi
   HEAD_BEFORE="$(git rev-parse HEAD)"
-  "$RUN_DIR/sitting.sh" --model "$MODEL" > "$LOG_DIR/.last-sitting-path" 2>&1 & CHILD=$!
-  wait "$CHILD"; CHILD=""
+  # H-5: job control for this one launch only. Without it a background job has SIGINT/SIGQUIT ignored, which sitting.sh cannot
+  # undo, and it shares the loop's process group. With it the sitting leads its own group with default SIGINT, so on_signal can
+  # signal that group and sitting.sh can trap and forward. stdin stays /dev/null, as it was without job control.
+  LAUNCHING=1; set -m; "$RUN_DIR/sitting.sh" --model "$MODEL" < /dev/null > "$LOG_DIR/.last-sitting-path" 2>&1 & CHILD=$!; set +m; LAUNCHING=0
+  wait "$CHILD"; SITTING_RC=$?; CHILD=""
+  log "sitting.sh exit=$SITTING_RC (informational only)"
   LOGF="$(tail -n 1 "$LOG_DIR/.last-sitting-path")"
   HEAD_AFTER="$(git rev-parse HEAD)"
   CLASS="$(classify "$LOGF" "$STATUS_FILE" "$HEAD_BEFORE" "$HEAD_AFTER" "$MODEL")"
