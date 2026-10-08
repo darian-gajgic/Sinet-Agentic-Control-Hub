@@ -77,8 +77,9 @@ python3 qa/overflow.py Sinet-Research-Presentation.html                # expect 
 Grep-count notes for v4: `class="st …"` counts are higher than v3 because each evidence summary repeats its status
 labels (13 summaries); `data-el` stays 13 × 5; `class="beats reveal"` 13; `class="evb reveal"` 13; `<details` 13.
 
-Deployment: see the bottom of this section / the session that made v4 — the GitHub Pages copy is in
-`darian-gajgic/agentic-control-hub-research` (single file at the repo root, no local clone).
+Deployment: **v4 is live** since 2026-10-08 — `darian-gajgic/agentic-control-hub-research` commit `703463c`
+(single file at the repo root, no local clone; Pages rebuilds in ~1 min). To redeploy: clone that repo, copy
+`Sinet-Research-Presentation.html` over the root file, commit, push, then confirm the live URL's sha256 matches.
 
 ## v3.5 (2026-07-28) — operator logo in the nav
 
