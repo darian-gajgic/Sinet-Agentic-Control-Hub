@@ -75,6 +75,7 @@ func (e *driverEnv) rendered(t *testing.T, pairID, taskID, owner string) benchma
 	p := e.seedPair(t, pairID, taskID, owner)
 	e.pass(t)
 	e.claim(t)
+	e.captured(t, p.PairID)
 	e.pass(t)
 	got := e.pair(t, p.PairID)
 	if got.State != benchmark.StateRendered {
