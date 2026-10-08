@@ -1,0 +1,4 @@
+<script>/* apply saved reading preferences before first paint */
+try{var d=document.documentElement,t=localStorage.getItem('aipo-theme'),m=localStorage.getItem('aipo-motion');
+if(t==='light'||t==='dark')d.setAttribute('data-theme',t);
+if(m==='off'||(m===null&&matchMedia('(prefers-reduced-motion: reduce)').matches))d.classList.add('calm');}catch(e){}</script>
