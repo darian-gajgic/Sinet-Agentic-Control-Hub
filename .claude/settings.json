@@ -33,6 +33,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/P3/run/hooks/verdict-gate.sh",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }
