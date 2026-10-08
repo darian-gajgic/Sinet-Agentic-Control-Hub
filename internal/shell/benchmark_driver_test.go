@@ -257,10 +257,11 @@ func (e *driverEnv) pass(t *testing.T) {
 }
 
 // claim runs one scheduler pass, which is what carries a queued direct arm into
-// the dispatcher, and waits for the dispatch to finish. It is called explicitly
+// the dispatcher, and waits for the claimed run to end. It is called explicitly
 // so each phase of the walk is visible; dispatch itself is asynchronous in
 // production, so the wait is how a test observes a phase boundary the scheduler
-// does not announce.
+// does not announce. The run ending is a RUN-level boundary only: a walk that
+// relies on the arm's text waits for the pair's capture with captured.
 func (e *driverEnv) claim(t *testing.T) int {
 	t.Helper()
 	n, err := e.sched.Tick(context.Background())
@@ -290,6 +291,29 @@ func (e *driverEnv) waitIdle(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatal("a dispatched run never ended — the leg is wedged")
+}
+
+// captured blocks until the pair's direct arm has landed its capture. The run
+// ending is not that moment: the direct leg drives the session to its terminal
+// FSM state FIRST and writes the capture after (stage.dispatchDirect), so
+// waitIdle can return while the text is still on its way, and a driver pass in
+// that window correctly leaves the pair where it is. A step that relies on the
+// arm's text therefore waits on the PAIR, polling the store the practice reads.
+func (e *driverEnv) captured(t *testing.T, pairID string) {
+	t.Helper()
+	runID := benchmark.DirectRunID(pairID)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		_, err := e.bs.Store.CapturedDirectText(context.Background(), runID)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, benchmark.ErrNoDirectCapture) {
+			t.Fatalf("read the direct-arm capture of %s: %v", pairID, err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("the direct arm of %s ended but its capture never landed", pairID)
 }
 
 func (e *driverEnv) pair(t *testing.T, pairID string) benchmark.Pair {
@@ -347,6 +371,7 @@ func TestDriverWalksASampledPairToRendered(t *testing.T) {
 		t.Fatalf("the engine ran %d times — §2 is single-shot", e.engine.started())
 	}
 	// The capture is real and readable through the seam the practice uses.
+	e.captured(t, pair.PairID)
 	body, err := e.bs.Store.CapturedDirectText(ctx, armRun.ID)
 	if err != nil || body != driverArmAnswer {
 		t.Fatalf("CapturedDirectText = %q, %v — want the arm's own text", body, err)
@@ -417,6 +442,7 @@ func TestDriverRetriesAFailedRenderWithoutCorruption(t *testing.T) {
 
 	e.pass(t)
 	e.claim(t)
+	e.captured(t, pair.PairID)
 	e.pass(t) // the render fails
 
 	got := e.pair(t, pair.PairID)
@@ -459,6 +485,7 @@ func TestTruncatedArmYieldsTheParityNote(t *testing.T) {
 	if armRun.State != run.StateDiedAtGate {
 		t.Fatalf("the fixture arm ended %s, want the ceiling-preempted state", armRun.State)
 	}
+	e.captured(t, pair.PairID)
 	e.pass(t)
 	if got := e.pair(t, pair.PairID); got.State != benchmark.StateRendered {
 		t.Fatalf("a truncated arm did not render: %s — a pair that cannot complete cannot report its own parity gap", got.State)
@@ -504,6 +531,7 @@ func TestDriverAdvancesNothingSynthetically(t *testing.T) {
 	// DirectText seam's absence is honest and the pair waits rather than being
 	// rendered against a body that does not exist.
 	e.claim(t)
+	e.captured(t, pair.PairID)
 	if err := e.db.WriteTx(context.Background(), func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(context.Background(),
 			`UPDATE benchmark_pairs SET direct_text = NULL WHERE pair_id = ?`, pair.PairID)
@@ -682,6 +710,7 @@ func TestDispatchIsSingleShotEvenWhenStateIsFlippedBack(t *testing.T) {
 
 	e.pass(t)
 	e.claim(t)
+	e.captured(t, pair.PairID) // the first walk is whole before it is tampered with
 
 	// The hostile fixture: the pair's state is put back by hand.
 	if err := e.db.WriteTx(ctx, func(tx *sql.Tx) error {
