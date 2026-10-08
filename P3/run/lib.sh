@@ -30,6 +30,7 @@ LOOP_LOG="$LOG_DIR/loop.log"
 : "${P3_CI_GUARD:=1}"                             # main guard (H-4a): 0 = start sittings without reading CI on main
 : "${P3_CI_POLL:=120}"                            # re-check interval while the latest CI run on main is queued/in progress
 : "${P3_WAIT_POLL:=600}"                          # re-check interval of every other wait: gate, blocked, CI on main not green
+: "${P3_INT_GRACE:=90}"                           # Ctrl-C/SIGTERM on the loop (H-5): seconds the sitting gets to end its turn after SIGINT, then SIGTERM
 
 LIMIT_RE='hit your (usage |session |weekly )?limit|reached your [a-z ]*limit|usage limit|rate[ _-]?limit|limit reached|limit will reset|out of (usage|credits)|quota (exceeded|reached)'
 
@@ -173,6 +174,11 @@ progress_since() { # progress_since <head_before> <head_after>  — 0 when the s
   # STATE/HANDOFF/history commits happen every sitting, so they are not progress (research §5 gap 5).
   [ "$1" = "$2" ] && return 1
   git -C "$P3_ROOT" diff --name-only "$1" "$2" 2>/dev/null | /usr/bin/grep -vqE '^P3/(STATE|STATE-HISTORY|HANDOFF)\.md$'
+}
+
+proc_alive() { # proc_alive <pid>  — 0 while that process exists and is not a zombie (kill -0 also succeeds on an unreaped zombie)
+  local s; s="$(ps -o stat= -p "$1" 2>/dev/null)"; s="${s// /}"
+  [ -n "$s" ] && [ "${s:0:1}" != Z ]
 }
 
 gate_answered() { # gate_answered <gate file>  — 0 when the operator marked it answered (yes|partial)

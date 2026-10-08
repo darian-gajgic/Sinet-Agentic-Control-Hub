@@ -31,7 +31,15 @@ printf '%s' "$rest" > "$STUB_SEQ_FILE"
 land3() { cat "$STUB_FIX/continue.jsonl"; echo '{"outcome":"CONTINUE","landed":["A","B","C"],"next":"x","gate":null,"family":null,"note":""}' > "$STUB_STATUS"; }
 work() { echo "$RANDOM" >> "$P3_ROOT/$1"; git -C "$P3_ROOT" add "$1" && git -C "$P3_ROOT" commit -qm "$2"; }   # one commit in the temp repo
 signed() { cat "$STUB_FIX/continue.jsonl"; echo "{\"outcome\":\"CONTINUE\",\"landed\":$1,\"next\":\"x\",\"gate\":null,\"family\":null,\"note\":\"\"}" > "$STUB_STATUS"; }
+sigrec() { # H-5: "<stub pid> <stub pgid> <stub SigIgn> <sitting.sh pid> <sitting.sh pgid>" → $STUB_SIG_OUT (claude ← timeout ← sitting.sh)
+  local tp sp; tp="$(ps -o ppid= -p $$ | tr -d ' ')"; sp="$(ps -o ppid= -p "$tp" | tr -d ' ')"
+  printf '%s %s %s %s %s\n' "$$" "$(ps -o pgid= -p $$ | tr -d ' ')" "$(awk '/^SigIgn/{print $2}' /proc/$$/status)" "$sp" "$(ps -o pgid= -p "$sp" | tr -d ' ')" > "$STUB_SIG_OUT.tmp"
+  mv -f "$STUB_SIG_OUT.tmp" "$STUB_SIG_OUT"; }
 case "$next" in
+  sleep60)     sigrec; sleep 60;;                  # H-5: default signal handling, never writes a result
+  ignint)      trap '' INT; sigrec; sleep 60;;     # H-5: ignores SIGINT (its sleep inherits that): only the SIGTERM path ends it
+  cleanint)    trap 'echo INT >> "$STUB_SIG_OUT.int"; sleep 0.5; cat "$STUB_FIX/continue.jsonl"; exit 0' INT   # H-5: claude's clean stop:
+               sigrec; for i in $(seq 600); do sleep 0.1; done;;   # ends its turn on SIGINT, exit 0; a second INT would add a line
   landcommit)  work work.txt "P3-X-1: work"; signed '["P3-X-1","P3-X-2"]';;
   bookkeeping) work P3/STATE.md "P3: STATE"; signed '[]';;
   progress)    work work.txt "P3-X-3: work"; signed '[]';;
@@ -86,7 +94,7 @@ reset_state() { # fresh temp cap/ledger/pin/observed for each test (the real P3/
 }
 stub_env() { # exported into the subshell that runs loop.sh / sitting.sh
   export PATH="$T:$T/ghstub:$PATH" STUB_FIX="$F" STUB_STATUS="$STATUS_FILE" STUB_STOP="$STOP_FILE" STUB_SEQ_FILE="$T/seq"
-  export STUB_PROMPTS="$T/prompts" STUB_ENV_OUT="$T/env"
+  export STUB_PROMPTS="$T/prompts" STUB_ENV_OUT="$T/env" STUB_SIG_OUT="$T/sig"
   export STUB_RESUME="$RESUME_FILE" STUB_GH_SEQ_FILE="$T/ghseq" STUB_GH_CALLS="$T/ghcalls" P3_CI_POLL=1 P3_WAIT_POLL=1
   export P3_CRASH_PAUSE=1 P3_PAUSE_MIN=1 P3_PAUSE_MAX=2 P3_SWITCH_PAUSE=1
   export P3_CAP_FILE="$T/cap" P3_SITTINGS_TSV="$T/sittings.tsv" P3_COMPACTIONS_LOG="$T/compactions.log"
@@ -133,6 +141,7 @@ reset_state
 ( stub_env; export STUB_VERSION=9.9.9 STUB_PROBE=fail; printf '' > "$T/seq"; timeout 60 "$RUN_DIR/loop.sh" --once >/dev/null 2>&1 ); rc=$?
 check drift-fail-loop    '^0$'                              "$rc"
 check drift-fail-loopcls 'CLASS BLOCKED:CLI drift .*smoke failed' "$(/usr/bin/grep 'CLASS ' "$LOOP_LOG" | tail -n 1)"
+check drift-fail-waitrc  'sitting\.sh exit=3 \(informational only\)$' "$(/usr/bin/grep 'sitting.sh exit=' "$LOOP_LOG" | tail -n 1)"   # H-5: wait under job control
 check drift-fail-norow   '^0$'                              "$(rows)"
 rm -f "$STATUS_FILE"
 reset_state; NB="$(/usr/bin/grep -c 'NOTIFY: P3 CLI updated' "$LOOP_LOG" 2>/dev/null)"; NB=${NB:-0}
@@ -196,6 +205,7 @@ ci_run ci-green          "green"                "stop"          0 --once
 check ci-gh-command      '^run list --branch main --limit 1 --json status,conclusion,headSha,url$' "$(head -n 1 "$T/ghcalls")"
 check ci-green-trail     '^success>SITTING$'                                "$(trail)"
 check ci-green-sha       '^CI on main: success 5ca1ab1e0{32}$'               "$(/usr/bin/grep -oE 'CI on main: success [0-9a-f]+' "$LOOP_LOG")"
+check ci-green-waitrc    '^sitting\.sh exit=0 \(informational only\)$'      "$(/usr/bin/grep -oE 'sitting\.sh exit=.*' "$LOOP_LOG")"
 check ci-defaults        '^1 120 600$'                                       "$( ( unset P3_CI_GUARD P3_CI_POLL P3_WAIT_POLL; source "$RUN_DIR/lib.sh"; echo "$P3_CI_GUARD $P3_CI_POLL $P3_WAIT_POLL" ) 2>&1 )"
 ci_run ci-red-green      "red red green"        "stop"          0 --once P3_CI_POLL=7
 check ci-red-trail       '^failure>failure>success>SITTING$'                "$(trail)"
@@ -296,5 +306,75 @@ CI_TIMEOUT=30 ci_run gate-file-answered "green"         "gate stop"     0 "STUB_
 wait "$GW"
 check gate-file-next     '^2$'                                               "$(sat)"
 check gate-file-resumed  "gate answered/resumed: $G$"                        "$(/usr/bin/grep 'gate answered/resumed' "$LOOP_LOG")"
+
+# ---- H-5: Ctrl-C / SIGTERM on the loop reaches the sitting. Defect 2026-10-08: the sitting was started as a background job of a
+# shell without job control (SIGINT ignored, the loop's process group) and timeout(1) moves itself and claude into a group of their
+# own, so neither the terminal's Ctrl-C nor the loop's `kill -INT <sitting.sh>` reached claude. Each case starts loop.sh as its
+# own process group, as a terminal would, and signals it once the stub sitting has recorded itself.
+sig_run() { # sig_run <name> <claude sequence> <INT|TERM> <pid|group> <max s> [VAR=value ...] — the loop must exit 130 within <max s>
+  # of the signal. Sets SIG_MS (signal → loop gone, ms), SIG_REC (the stub's sigrec line, empty when no sitting started), SIG_LP.
+  local name="$1" sq="$2" sig="$3" target="$4" max="$5" i t0 rc; shift 5
+  printf '%s' "$sq" > "$T/seq"; printf 'green' > "$T/ghseq"; mkdir -p "$LOG_DIR"; : > "$LOOP_LOG"
+  rm -f "$T/sig" "$T/sig.int" "$STOP_FILE" "$STATUS_FILE" "$RESUME_FILE"
+  set -m; ( stub_env; [ $# -eq 0 ] || export "$@"; exec "$RUN_DIR/loop.sh" >/dev/null 2>&1 ) & SIG_LP=$!; set +m
+  i=0; until [ -s "$T/sig" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i+1)); done
+  SIG_REC="$(cat "$T/sig" 2>/dev/null)"; t0="$(date +%s%N)"
+  if [ "$target" = group ]; then kill "-$sig" -- "-$SIG_LP"; else kill "-$sig" "$SIG_LP"; fi
+  i=0; while proc_alive "$SIG_LP" && [ "$i" -lt $(( max * 10 )) ]; do sleep 0.1; i=$((i+1)); done
+  SIG_MS=$(( ($(date +%s%N) - t0) / 1000000 ))
+  proc_alive "$SIG_LP" && kill -KILL -- "-$SIG_LP" 2>/dev/null   # a hung loop must not hang the suite
+  wait "$SIG_LP"; rc=$?
+  rm -f "$STOP_FILE" "$STATUS_FILE" "$RESUME_FILE"
+  if [ "$rc" = 130 ] && [ "$SIG_MS" -lt $(( max * 1000 )) ]; then ok "$name → exit $rc after ${SIG_MS} ms"
+  else bad "$name → exit $rc after ${SIG_MS} ms (want 130 within ${max} s)"; fi
+}
+sig_gone() { # "gone" once no process is left in the stub's group (timeout, stub claude, its sleep) or the sitting's group (≤3 s)
+  local spg shpg i=0; read -r _ spg _ _ shpg <<< "$SIG_REC"
+  [ -n "$spg" ] && [ -n "$shpg" ] || { echo "no stub record"; return; }
+  while pgrep -g "$spg,$shpg" >/dev/null && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+  if pgrep -g "$spg,$shpg" >/dev/null; then echo "left: $(pgrep -a -g "$spg,$shpg" | tr '\n' ';' | cut -c1-160)"; pkill -KILL -g "$spg,$shpg"
+  else echo gone; fi
+}
+sig_groups() { # "sitting:<own|shared> claude:<own|shared>" — sitting.sh leads its own group (not the loop's); timeout/claude a third
+  local sp spg shp shpg; read -r sp spg _ shp shpg <<< "$SIG_REC"
+  echo "sitting:$([ -n "$shp" ] && [ "$shpg" = "$shp" ] && [ "$shpg" != "$SIG_LP" ] && echo own || echo "shared($shp/$shpg vs loop $SIG_LP)") claude:$([ -n "$spg" ] && [ "$spg" != "$shpg" ] && [ "$spg" != "$SIG_LP" ] && echo own || echo shared)"
+}
+sig_int() { local ign; read -r _ _ ign _ _ <<< "$SIG_REC"; [ -n "$ign" ] || { echo "no stub record"; return; }   # the stub's SIGINT disposition
+  [ $(( 0x$ign & 2 )) = 0 ] && echo default || echo ignored; }
+sig_trail() { # the stop path in loop.log, in order
+  /usr/bin/grep -oE 'signal (INT|TERM): SIGINT to the sitting|forwarding SIG(INT|TERM) to timeout|SIGTERM to its process group|sitting ended \(sitting\.sh exit=[0-9]+\)|already stopping' "$LOOP_LOG" \
+    | sed -E 's/^signal (INT|TERM): SIGINT to the sitting/\1→group/; s/^forwarding SIG(INT|TERM) to timeout/fwd \1/; s/^SIGTERM to its process group/TERM→group/; s/^sitting ended \(sitting\.sh exit=([0-9]+)\)/ended \1/' | paste -sd'>'
+}
+meta_exit() { sed -n 's/^exit=//p' "$(ls -t "$LOG_DIR"/sitting-*.meta | head -n 1)"; }   # timeout's status in the newest sitting's .meta
+# (uutils timeout 0.8.0, this host: 124 after every stop it signalled; GNU: the child's status, 130/143 for a stub killed by INT/TERM)
+reset_state
+sig_run sigint-pid         "sleep60" INT  pid   10
+check sigint-pid-gone      '^gone$'                                         "$(sig_gone)"
+check sigint-pid-groups    '^sitting:own claude:own$'                       "$(sig_groups)"
+check sigint-pid-claudeint '^default$'                                      "$(sig_int)"
+check sigint-pid-trail     '^INT→group>fwd INT>ended 0$'                    "$(sig_trail)"
+check sigint-pid-meta      '^(124|130)$'                                    "$(meta_exit)"
+sig_run sigint-ignored     "ignint"  INT  pid   13 P3_INT_GRACE=3
+check sigint-ignored-grace '^graced$'                                       "$([ "$SIG_MS" -ge 3000 ] && echo graced || echo "early (${SIG_MS} ms)")"
+check sigint-ignored-gone  '^gone$'                                         "$(sig_gone)"
+check sigint-ignored-trail '^INT→group>fwd INT>TERM→group>fwd TERM>ended 0$' "$(sig_trail)"
+check sigint-ignored-meta  '^(124|143)$'                                    "$(meta_exit)"
+sig_run ctrl-c-terminal    "cleanint" INT group 10                          # the incident's shape: Ctrl-C hits the loop's whole group
+check ctrl-c-terminal-gone '^gone$'                                         "$(sig_gone)"
+check ctrl-c-terminal-trail '^INT→group>fwd INT>ended 0$'                   "$(sig_trail)"
+check ctrl-c-terminal-once '^1$'                                            "$(/usr/bin/grep -c INT "$T/sig.int" 2>/dev/null)"   # one SIGINT reached claude
+check ctrl-c-terminal-turn '^"result"$'                                     "$(last_result_json "$(ls -t "$LOG_DIR"/sitting-*.jsonl | head -n 1)" | jq '.type')"
+check ctrl-c-terminal-meta '^(124|0)$'                                      "$(meta_exit)"
+sig_run sigterm-loop       "sleep60" TERM pid   10
+check sigterm-loop-gone    '^gone$'                                         "$(sig_gone)"
+check sigterm-loop-trail   '^TERM→group>fwd INT>ended 0$'                   "$(sig_trail)"
+# the wall-clock rail (timeout --signal=INT) still reaches claude now that sitting.sh starts timeout as a background job
+rm -f "$T/sig"; W0=$(date +%s)
+ci_run wall-rail           "green"   "sleep60" 1 --once P3_SITTING_WALL=2s
+SIG_REC="$(cat "$T/sig" 2>/dev/null)"
+check wall-rail-fast      '^fast$'                                         "$([ $(( $(date +%s) - W0 )) -lt 30 ] && echo fast || echo "slow ($(( $(date +%s) - W0 )) s)")"
+check wall-rail-meta       '^124$'                                          "$(meta_exit)"
+check wall-rail-class      '^CLASS CRASH:no result line'                    "$(/usr/bin/grep -oE 'CLASS CRASH:.*' "$LOOP_LOG" | head -n 1)"
+check wall-rail-gone       '^gone$'                                         "$(sig_gone)"
 
 rm -f "$STOP_FILE" "$STATUS_FILE"; rm -rf "$T"; echo "---- $n checks, $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"; exit $fail
